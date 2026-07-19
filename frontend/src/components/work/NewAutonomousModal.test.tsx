@@ -498,4 +498,23 @@ describe('NewAutonomousModal', () => {
       expect(mutateAsyncMock).toHaveBeenCalledWith(expect.objectContaining({ auto_merge: false }));
     });
   });
+
+  describe('other boolean toggles render as switches', () => {
+    // Style parity with autoMerge / requireFullReviewRounds: the modal's other
+    // two boolean options (isNewProject, isPrivate) must also use the
+    // form-switch variant, not plain checkboxes.
+    it('renders isNewProject as a switch', () => {
+      render(<NewAutonomousModal {...defaultProps} />);
+
+      expect(screen.getByLabelText('autoNewProject').closest('.form-switch')).not.toBeNull();
+    });
+
+    it('renders isPrivate as a switch once new-project mode is enabled', () => {
+      render(<NewAutonomousModal {...defaultProps} />);
+
+      fireEvent.click(screen.getByLabelText('autoNewProject'));
+
+      expect(screen.getByLabelText('autoPrivateRepo').closest('.form-switch')).not.toBeNull();
+    });
+  });
 });
