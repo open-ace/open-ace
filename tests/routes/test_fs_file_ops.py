@@ -133,14 +133,17 @@ def app(workspace):
 
     from app.routes.fs import fs_bp
 
-    # Clear the blueprint's auth hook BEFORE register_blueprint so it does not
-    # get copied into the app. (Clearing after register has no effect: the
-    # hook has already been copied to app.before_request_funcs["fs"].)
-    fs_bp.before_request_funcs[None] = []
-
     app = Flask(__name__)
     app.config["TESTING"] = True
     app.register_blueprint(fs_bp, url_prefix="/api")
+
+    # Disable fs_bp's auth hook at the APP level (not the blueprint level).
+    # fs_bp is a module-level singleton shared across the whole test session;
+    # mutating fs_bp.before_request_funcs would leak into other test files
+    # (it broke test_must_change_enforcement_blueprints.py, whose /api/fs/browse
+    # case relies on the real _authenticate_user running). Clearing the
+    # app-scoped before_request_funcs keeps this app isolated.
+    app.before_request_funcs["fs"] = []
 
     ws_root, user_home = workspace
 
@@ -521,11 +524,11 @@ class TestUploadRootBranch:
         home_root = ws_root / "testuser"
         home_root.mkdir(exist_ok=True)
 
-        # Clear auth before register (see app fixture comment).
-        fs_bp.before_request_funcs[None] = []
         app = Flask(__name__)
         app.config["TESTING"] = True
         app.register_blueprint(fs_bp, url_prefix="/api")
+        # Disable auth at app scope (see app fixture comment on singleton safety).
+        app.before_request_funcs["fs"] = []
 
         @app.before_request
         def _set_user():
@@ -577,8 +580,8 @@ class TestUploadRootBranch:
 
         app = Flask(__name__)
         app.config["TESTING"] = True
-        fs_bp.before_request_funcs[None] = []
         app.register_blueprint(fs_bp, url_prefix="/api")
+        app.before_request_funcs["fs"] = []  # app-scope only (see app fixture)
 
         @app.before_request
         def _set_user():
@@ -709,9 +712,7 @@ class TestListSubdirectoriesSudoBranch:
         def fake_run(account, cmd):
             # ls -1 <path> — emits basenames only (matches real ls behavior).
             if cmd[:2] == ["ls", "-1"]:
-                names = [
-                    line.split("\t")[0].rsplit("/", 1)[-1] for line in stat_lines
-                ]
+                names = [line.split("\t")[0].rsplit("/", 1)[-1] for line in stat_lines]
                 return _mkproc(stdout="\n".join(names))
             # stat -c <fmt> <paths...>
             if cmd[:2] == ["stat", "-c"]:
@@ -734,12 +735,6 @@ class TestListSubdirectoriesSudoBranch:
 
         path = "/workspace/alice"
         # Two entries both owned by alice → %A owner bits used directly.
-        stat_lines = [
-            f"{path}/project\tdirectory\t0\tdrwxr-xr-x",  # alice owns, dir
-            f"{path}/notes.txt\talice\tregular file\t100\t-rw-r--r--",
-        ]
-        # Note first row owner column is empty due to a typo above — fix it
-        # to alice so the owner-match fast path applies.
         stat_lines = [
             f"{path}/project\talice\tdirectory\t0\tdrwxr-xr-x",
             f"{path}/notes.txt\talice\tregular file\t100\t-rw-r--r--",
@@ -831,7 +826,6 @@ class TestListSubdirectoriesSudoBranch:
         # ls -1 emits "a\tb.txt" as one filename line.
         good = f"{path}/good.txt"
         malformed_name = "a\tb.txt"  # ls would print this as one line
-        malformed_path = f"{path}/{malformed_name}"
 
         def fake_run(account, cmd):
             if cmd[:2] == ["ls", "-1"]:
@@ -845,7 +839,7 @@ class TestListSubdirectoriesSudoBranch:
                     stdout="\n".join(
                         [
                             f"{good}\talice\tregular file\t5\t-rw-r--r--",
-                            f"a\tb.txt\talice\tregular file\t5\t-rw-r--r--",
+                            "a\tb.txt\talice\tregular file\t5\t-rw-r--r--",
                         ]
                     )
                 )
@@ -880,14 +874,23 @@ class TestListSubdirectoriesSudoBranch:
         ):
             result = list_subdirectories(path, "alice", include_files=True)
 
-        dir_names = {d["name"] for d in result["directories"]}
-        file_names = {f["name"] for f in result["files"]}
-        assert dir_names == {"subdir"}
-        assert file_names == {"a.txt", "b.txt"}
-        # b.txt is read-only (owner bits r--) → not writable.
-        b = next(f for f in result["files"] if f["name"] == "b.txt")
+        dir_names = {d["name"]: d for d in result["directories"]}
+        file_names = {f["name"]: f for f in result["files"]}
+        assert set(dir_names) == {"subdir"}
+        assert set(file_names) == {"a.txt", "b.txt"}
+
+        # subdir is owner-rwx (drwxr-xr-x) → readable & writable.
+        assert dir_names["subdir"]["isReadable"] is True
+        assert dir_names["subdir"]["isWritable"] is True
+
+        # b.txt is owner read-only (perm -r--r--r--, owner bits r--) → readable,
+        # but file entries do NOT carry an isWritable field (the delete button
+        # is gated by the parent directory's isWritable, not per-file). Assert
+        # the readable flag we DO expose.
+        b = file_names["b.txt"]
         assert b["is_readable"] is True
-        # 'w' not in owner triplet 'r--'.
+        # a.txt is owner rw (perm -rw-r--r--).
+        assert file_names["a.txt"]["is_readable"] is True
 
     def test_include_files_false_skips_files_but_keeps_dirs(self, sudo_user):
         from app.routes.fs import list_subdirectories

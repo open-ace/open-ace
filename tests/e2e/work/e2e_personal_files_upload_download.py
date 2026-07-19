@@ -179,9 +179,9 @@ def main():
         shutil.rmtree(workspace_root, ignore_errors=True)
     workspace_root.mkdir(parents=True)
 
-    # Two users to verify isolation between home subtrees.
+    # Two users to verify isolation between home subtrees. alice is the
+    # authenticated user; bob's home is the sibling that must be unreachable.
     alice = {"id": 1, "username": "alice"}
-    bob = {"id": 2, "username": "bob"}
     (workspace_root / "alice").mkdir()
     (workspace_root / "bob").mkdir()
 
@@ -239,12 +239,13 @@ def main():
             "async () => await upload(new Uint8Array([104,105]), 'hi.txt', '%s')" % alice_home
         )
         check(res["status"] == 200, f"upload returns 200 (got {res['status']})")
-        check((workspace_root / "alice" / "hi.txt").read_bytes() == b"hi", "file landed with correct bytes")
+        check(
+            (workspace_root / "alice" / "hi.txt").read_bytes() == b"hi",
+            "file landed with correct bytes",
+        )
 
         print("\n=== E2E 2: browse with include_files shows uploaded file ===")
-        res = page.evaluate(
-            "async () => await browse('%s', true)" % alice_home
-        )
+        res = page.evaluate("async () => await browse('%s', true)" % alice_home)
         names = [f["name"] for f in res["body"].get("files", [])]
         check(res["status"] == 200, "browse 200")
         check("hi.txt" in names, f"hi.txt in files list: {names}")
@@ -255,18 +256,14 @@ def main():
         check(res["body"].get("files") == [], "files[] empty by default")
 
         print("\n=== E2E 4: download streams the bytes back ===")
-        res = page.evaluate(
-            "async () => await download('%s/hi.txt')" % alice_home
-        )
+        res = page.evaluate("async () => await download('%s/hi.txt')" % alice_home)
         check(res["status"] == 200, "download 200")
         check(res["body"] == "hi", f"download body == 'hi' (got {res['body']!r})")
         check("hi.txt" in (res["disposition"] or ""), "Content-Disposition has filename")
         check(res["length"] == "2", "Content-Length == 2")
 
         print("\n=== E2E 5: upload outside home rejected ===")
-        res = page.evaluate(
-            "async () => await upload(new Uint8Array([120]), 'x.txt', '/etc')"
-        )
+        res = page.evaluate("async () => await upload(new Uint8Array([120]), 'x.txt', '/etc')")
         check(res["status"] in (400, 403), f"outside-home upload rejected (got {res['status']})")
 
         print("\n=== E2E 6: download outside home rejected ===")
@@ -275,15 +272,11 @@ def main():
 
         print("\n=== E2E 7: oversized upload rejected (413) ===")
         big = "new Uint8Array(new Array(%d).fill(65))" % (fs.MAX_UPLOAD_SIZE_MB * 1024 * 1024 + 10)
-        res = page.evaluate(
-            "async () => await upload(%s, 'big.bin', '%s')" % (big, alice_home)
-        )
+        res = page.evaluate("async () => await upload(%s, 'big.bin', '%s')" % (big, alice_home))
         check(res["status"] == 413, f"oversized rejected 413 (got {res['status']})")
 
         print("\n=== E2E 8: empty filename rejected ===")
-        res = page.evaluate(
-            "async () => await upload(new Uint8Array([1]), '', '%s')" % alice_home
-        )
+        res = page.evaluate("async () => await upload(new Uint8Array([1]), '', '%s')" % alice_home)
         check(res["status"] == 400, f"empty filename 400 (got {res['status']})")
 
         print("\n=== E2E 9: filename traversal neutralized (basename only) ===")
@@ -291,7 +284,10 @@ def main():
             "async () => await upload(new Uint8Array([1]), '../../etc/hosts', '%s')" % alice_home
         )
         check(res["status"] == 200, f"traversal upload neutralized (got {res['status']})")
-        check((workspace_root / "alice" / "hosts").exists(), "file written as basename 'hosts' in home")
+        check(
+            (workspace_root / "alice" / "hosts").exists(),
+            "file written as basename 'hosts' in home",
+        )
         check(not Path("/etc/hosts_uploaded_e2e").exists(), "no escape to /etc")
 
         print("\n=== E2E 10: HOME ISOLATION — cannot reach sibling user's dir ===")
