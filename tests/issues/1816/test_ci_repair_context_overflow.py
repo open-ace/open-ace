@@ -279,3 +279,44 @@ def test_normal_ci_failure_does_not_trigger_fresh_retry():
     final_updates = mock_repo.update_workflow.call_args.args[1]
     assert final_updates["status"] == "failed"
     assert "no code changes" in final_updates["error_message"]
+
+
+def test_double_overflow_falls_through_to_failed_and_preserves_signal():
+    """When BOTH main and fresh sessions overflow, the workflow must fail
+    (no infinite retry loop), and the milestone error_message must preserve
+    the overflow signature so the next round's _collect_prior_ci_repair_failures
+    filters it out (instead of misclassifying it as 'no code changes' and
+    injecting it as actionable). #1816 review suggestions #1 + #2."""
+    wf = _make_workflow()
+    orch, mock_repo = _make_orchestrator(wf)
+    gh = _make_gh(commit_before="sha-old", commit_after="sha-old")  # no new commit
+    orch._get_gh = MagicMock(return_value=gh)
+    orch._accumulate_tokens = MagicMock()
+    orch._post_github_comment = MagicMock()
+
+    overflow_err = (
+        "API Error: 400 <400> InternalError.Algo.InvalidParameter: "
+        "Range of input length should be [1, 202752]"
+    )
+    overflow = AgentTaskResult(success=False, error=overflow_err)
+    # Both main and fresh overflow — no infinite retry.
+    orch._run_agent = MagicMock(side_effect=[overflow, overflow])
+
+    orch._run_merge_ci_repair(wf, gh, 1849, _FAILED_CHECKS)
+
+    # Exactly 2 calls (main + fresh), no third attempt.
+    assert orch._run_agent.call_count == 2
+    assert orch._run_agent.call_args_list[0].kwargs["session_line"] == "main"
+    assert orch._run_agent.call_args_list[1].kwargs["session_line"] == "fresh"
+    # Workflow failed, not stuck retrying.
+    final_updates = mock_repo.update_workflow.call_args.args[1]
+    assert final_updates["status"] == "failed"
+    # Overflow signal preserved in error_message so the next round filters it
+    # (NOT the generic "no code changes" message).
+    assert "context overflow" in final_updates["error_message"]
+    assert "Range of input length" in final_updates["error_message"]
+    # Verify the stored error_message would be matched by the overflow regex,
+    # so _collect_prior_ci_repair_failures filters it on the next round.
+    from app.modules.workspace.autonomous.orchestrator import _CONTEXT_OVERFLOW_RE
+
+    assert _CONTEXT_OVERFLOW_RE.search(final_updates["error_message"])

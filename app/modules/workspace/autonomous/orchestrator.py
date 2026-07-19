@@ -1350,7 +1350,7 @@ class AutonomousOrchestrator:
             lines.append("")
         return "\n".join(lines)
 
-    def _build_ci_repair_prompt(
+    def _build_merge_ci_repair_agent_prompt(
         self,
         wf: dict,
         pr_number: int,
@@ -1467,7 +1467,7 @@ class AutonomousOrchestrator:
             title=f"CI repair attempt {attempt} for PR #{pr_number}",
         )
 
-        repair_prompt = self._build_ci_repair_prompt(wf, pr_number, failed_checks)
+        repair_prompt = self._build_merge_ci_repair_agent_prompt(wf, pr_number, failed_checks)
 
         # Capture the PR's remote head SHA (not the local worktree HEAD) as the
         # baseline. If a prior repair round committed locally but didn't push
@@ -1530,7 +1530,7 @@ class AutonomousOrchestrator:
             except Exception as e:
                 logger.warning("Failed to reset worktree before fresh CI repair: %s", e)
 
-            fresh_prompt = self._build_ci_repair_prompt(
+            fresh_prompt = self._build_merge_ci_repair_agent_prompt(
                 wf, pr_number, failed_checks, include_prior_failures=True
             )
             repair_result = self._run_agent(
@@ -1614,7 +1614,16 @@ class AutonomousOrchestrator:
             return
 
         if not sha_changed:
-            message = "CI repair failed: agent produced no code changes"
+            # Preserve the context-overflow signal in the error message so the
+            # next round's _collect_prior_ci_repair_failures filters it out
+            # (an overflow failure has no actionable signal — the agent never
+            # produced output). Without this, a double-overflow round would
+            # be misclassified as "no code changes" and wrongly injected into
+            # the next fresh prompt. (#1816 review suggestion)
+            if self._is_context_overflow(repair_result):
+                message = f"CI repair failed: context overflow - {repair_result.error}"
+            else:
+                message = "CI repair failed: agent produced no code changes"
             milestone_updates["status"] = "failed"
             milestone_updates["error_message"] = message
             self.repo.update_milestone(repair_ms.get("milestone_id", ""), milestone_updates)
