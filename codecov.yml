@@ -1,0 +1,39 @@
+# Codecov configuration for Open ACE
+# https://docs.codecov.com/docs/codecov-yml
+
+coverage:
+  status:
+    # Project coverage - tracks overall repository coverage
+    project:
+      default:
+        target: 50%          # Initial target, increase gradually
+        threshold: 1%        # Allow small drops without failing
+        if_ci_failed: success
+        only_pulls: true
+
+    # Patch coverage - tracks coverage of changed files
+    patch:
+      default:
+        target: 80%          # New code should have high coverage
+        threshold: 5%
+        only_pulls: true
+
+# Comment on PRs
+comment:
+  layout: "diff, flags, files"
+  behavior: once
+  require_base: no
+  require_head: yes
+  require_changes: no
+
+# Ignore paths
+ignore:
+  - "tests/**/*"
+  - "scripts/hooks/**/*"
+  - "**/__pycache__/**"
+  - "**/migrations/**"
+  - ".qwen/**"
+
+# GitHub integration
+github_checks:
+  annotations: true

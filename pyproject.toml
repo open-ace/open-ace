@@ -198,7 +198,16 @@ filterwarnings = [
 # Coverage Configuration
 # =============================================================================
 [tool.coverage.run]
-source = ["scripts/shared", "server.py", "cli.py"]
+# Phase 1: Include P0 security modules (Issue #1856)
+# Gradually expand: P0 → P1 → P2
+source = [
+    "scripts/shared",
+    "server.py",
+    "cli.py",
+    "app/auth",
+    "app/remote_ws_handler",
+    "app/modules/sso",
+]
 omit = [
     "tests/*",
     "*/__pycache__/*",

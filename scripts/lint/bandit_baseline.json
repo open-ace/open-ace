@@ -1,0 +1,6 @@
+{
+  "generated_at": "2026-07-19",
+  "version": "1.0.0",
+  "description": "Bandit baseline for known low-severity findings. See docs/security/bandit_baseline.md for maintenance guidelines.",
+  "findings": []
+}

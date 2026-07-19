@@ -4,6 +4,8 @@ name: Security Audit
 # Runs on a weekly schedule and on manual dispatch. Audit steps use
 # continue-on-error so the workflow surfaces findings in its logs without
 # blocking PRs; Dependabot handles the actual dependency bumps.
+#
+# Issue #1856: Added automatic issue creation for CVE findings with deduplication.
 
 on:
   schedule:
@@ -12,11 +14,14 @@ on:
 
 permissions:
   contents: read
+  issues: write
 
 jobs:
   python:
     name: pip-audit
     runs-on: ubuntu-latest
+    outputs:
+      has_vulnerabilities: ${{ steps.audit.outputs.has_vulnerabilities }}
     steps:
       - uses: actions/checkout@v6
 
@@ -29,12 +34,39 @@ jobs:
         run: pip install pip-audit
 
       - name: Audit Python dependencies
+        id: audit
         continue-on-error: true
-        run: pip-audit -r requirements.txt
+        run: |
+          # Run pip-audit and capture output
+          set +e
+          pip-audit -r requirements.txt -f json > pip-audit-report.json 2>/dev/null
+          exit_code=$?
+
+          # Check if vulnerabilities were found
+          if [ $exit_code -ne 0 ] && [ -s pip-audit-report.json ]; then
+            echo "has_vulnerabilities=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_vulnerabilities=false" >> $GITHUB_OUTPUT
+          fi
+
+          # Re-run for human-readable output
+          pip-audit -r requirements.txt || true
+
+          exit $exit_code
+
+      - name: Upload pip-audit report
+        if: steps.audit.outputs.has_vulnerabilities == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: pip-audit-report
+          path: pip-audit-report.json
+          retention-days: 30
 
   npm:
     name: npm audit
     runs-on: ubuntu-latest
+    outputs:
+      has_vulnerabilities: ${{ steps.audit.outputs.has_vulnerabilities }}
     defaults:
       run:
         working-directory: frontend
@@ -52,5 +84,74 @@ jobs:
         run: npm ci
 
       - name: Audit npm dependencies
+        id: audit
         continue-on-error: true
-        run: npm audit --omit=dev
+        run: |
+          # Run npm audit and capture output
+          set +e
+          npm audit --omit=dev --json > ../npm-audit-report.json 2>/dev/null || true
+
+          # Check if vulnerabilities were found
+          if grep -q '"advisories"' ../npm-audit-report.json 2>/dev/null; then
+            echo "has_vulnerabilities=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_vulnerabilities=false" >> $GITHUB_OUTPUT
+          fi
+
+          # Re-run for human-readable output
+          npm audit --omit=dev || true
+
+      - name: Upload npm audit report
+        if: steps.audit.outputs.has_vulnerabilities == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: npm-audit-report
+          path: npm-audit-report.json
+          retention-days: 30
+
+  create-issues:
+    name: Create Security Issues
+    needs: [python, npm]
+    if: needs.python.outputs.has_vulnerabilities == 'true' || needs.npm.outputs.has_vulnerabilities == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Download pip-audit report
+        if: needs.python.outputs.has_vulnerabilities == 'true'
+        uses: actions/download-artifact@v5
+        with:
+          name: pip-audit-report
+          path: .
+
+      - name: Download npm audit report
+        if: needs.npm.outputs.has_vulnerabilities == 'true'
+        uses: actions/download-artifact@v5
+        with:
+          name: npm-audit-report
+          path: .
+
+      - name: Create issues for pip-audit findings
+        if: needs.python.outputs.has_vulnerabilities == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          if [ -f pip-audit-report.json ]; then
+            python scripts/ci/create_audit_issue.py --tool pip-audit --report-file pip-audit-report.json || true
+          fi
+
+      - name: Create issues for npm audit findings
+        if: needs.npm.outputs.has_vulnerabilities == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          if [ -f npm-audit-report.json ]; then
+            python scripts/ci/create_audit_issue.py --tool npm-audit --report-file npm-audit-report.json || true
+          fi
