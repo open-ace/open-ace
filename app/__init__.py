@@ -452,4 +452,12 @@ def start_background_services():
     except Exception as e:
         logger.warning(f"Failed to start scheduler health monitor: {e}")
 
+    # Issue #1815 Finding 2: Start SSO auth state cleanup task
+    try:
+        from app.modules.sso.manager import init_sso_cleanup
+
+        init_sso_cleanup()
+    except Exception as e:
+        logger.warning(f"Failed to start SSO auth state cleanup: {e}")
+
     logger.info("Background services started")

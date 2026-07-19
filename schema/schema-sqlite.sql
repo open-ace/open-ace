@@ -799,7 +799,8 @@ CREATE TABLE sso_auth_states (
  code_verifier text NOT NULL,
  provider_name text NOT NULL,
  nonce text,
- created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+ expires_at TIMESTAMP DEFAULT (datetime('now', '+600 seconds')) NOT NULL
 );
 
 CREATE TABLE sso_identities (
@@ -1462,6 +1463,8 @@ CREATE INDEX idx_sessions_user_id ON sessions (user_id);
 CREATE INDEX idx_shared_sessions_session ON shared_sessions (session_id);
 
 CREATE INDEX idx_shared_sessions_target ON shared_sessions (target_id);
+
+CREATE INDEX idx_sso_auth_states_expires ON sso_auth_states (expires_at);
 
 CREATE INDEX idx_sso_identities_provider ON sso_identities (provider_name, provider_user_id);
 
