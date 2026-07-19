@@ -234,13 +234,70 @@ find /var/log/sudo-openace.log -mtime +7 -delete
 **风险评估**: 低
 **覆盖率**: 100%
 
+## 九、Issue #1855 安全加固更新 (2026-07-19)
+
+### 9.1 加固内容
+
+针对 multi-user/root 模式的 sudoers 白名单进行了安全加固：
+
+1. **`gh pr merge --admin` opt-in 机制**
+   - 从默认 GH_SAFE 白名单移除 `--admin` 参数
+   - 通过环境变量 `OPENACE_ALLOW_ADMIN_MERGE=1` 单独启用
+   - 在 `github_ops.py` 中添加 opt-in 检查，未启用时抛出 `PermissionError`
+
+2. **移除高风险通配命令**
+   - 从 `OPENACE_UTILS` 移除 `/usr/bin/cat *`、`/usr/bin/chown *`、`/usr/bin/useradd *`
+   - 创建安全 wrapper 脚本替代：
+     - `/usr/local/bin/openace-chown` - UID/GID >= 1000 校验，路径白名单
+     - `/usr/local/bin/openace-useradd` - 用户名格式校验，保留用户名检查
+     - `/usr/local/bin/openace-cat` - 用户存在性校验，敏感文件黑名单
+     - `/usr/local/bin/openace-mkdir` - 路径白名单校验
+
+3. **安全 Wrapper 设计**
+   - 参数白名单校验（路径前缀、UID/GID 范围、用户名格式）
+   - 文件锁防止竞态条件（`flock`）
+   - 审计日志记录（降级到 stderr 若写入失败）
+   - 敏感文件黑名单（`/etc/shadow`、`/etc/passwd`、`*/.ssh/id_*`）
+
+### 9.2 修改文件
+
+| 文件 | 修改内容 |
+|------|----------|
+| `docker-entrypoint.sh` | 添加 opt-in 逻辑，wrapper sudoers 规则，审计日志 |
+| `Dockerfile` | COPY wrapper 脚本，设置权限 |
+| `github_ops.py` | `merge_pr` 添加 opt-in 检查 |
+| `workspace.py` | 使用 wrapper 替代通配命令 |
+| `agent_runner.py` | 使用 openace-cat/mkdir wrapper |
+
+### 9.3 新增文件
+
+| 文件 | 说明 |
+|------|------|
+| `scripts/openace-chown.sh` | 安全 chown wrapper |
+| `scripts/openace-useradd.sh` | 安全 useradd wrapper |
+| `scripts/openace-cat.sh` | 安全 cat wrapper（跨用户读取） |
+| `scripts/openace-mkdir.sh` | 安全 mkdir wrapper |
+| `scripts/openace-restore-sudoers.sh` | sudoers 回滚脚本 |
+| `tests/integration/test_sudoers_security.sh` | sudoers 安全集成测试 |
+| `tests/security/test_wrapper_security.py` | wrapper 安全单元测试 |
+
+### 9.4 环境变量
+
+| 环境变量 | 功能 | 默认值 |
+|----------|------|--------|
+| `OPENACE_ALLOW_ADMIN_MERGE` | 允许 `gh pr merge --admin` | 未设置（禁用） |
+| `OPENACE_SECURITY_PHASE` | 安全阶段控制 | 未设置 |
+
+---
+
 **下一步**:
-1. 将白名单配置应用到docker-entrypoint.sh
-2. 删除Dockerfile中的sudoers生成（单一配置源）
+1. 将白名单配置应用到docker-entrypoint.sh ✅ (Issue #1855)
+2. 删除Dockerfile中的sudoers生成（单一配置源） ✅ (已完成)
 3. 运行autonomous工作流测试套件验证
-4. 执行参数绕过攻击测试
+4. 执行参数绕过攻击测试 ✅ (Issue #1855)
 
 ---
 
 **审计人**: 自动化审计脚本
 **审计完成时间**: 2026-07-08
+**安全加固时间**: 2026-07-19 (Issue #1855)

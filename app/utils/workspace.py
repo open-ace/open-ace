@@ -26,6 +26,16 @@ __all__ = [
     "ensure_user_workspace",
 ]
 
+# Wrapper script paths (Issue #1855)
+OPENACE_USERADD_WRAPPER = "/usr/local/bin/openace-useradd"
+OPENACE_CHOWN_WRAPPER = "/usr/local/bin/openace-chown"
+OPENACE_MKDIR_WRAPPER = "/usr/local/bin/openace-mkdir"
+
+
+def _is_wrapper_available(wrapper_path: str) -> bool:
+    """Check if a security wrapper script is available and executable."""
+    return os.path.isfile(wrapper_path) and os.access(wrapper_path, os.X_OK)
+
 
 def get_workspace_base_dir() -> str:
     """Get the workspace base directory. Configurable via WORKSPACE_BASE_DIR env var.
@@ -139,14 +149,22 @@ def ensure_system_user(system_account: str, uid: Optional[int] = None) -> bool:
         _ensure_workspace_dirs(system_account, base_dir)
         return True
 
-    # 创建用户（通过 sudo，因为 useradd 需要 root 权限）
-    cmd = ["useradd", "-m", "-s", "/bin/bash"]
-    if uid is not None:
-        cmd.extend(["-u", str(uid)])
-    cmd.append(system_account)
-
-    logger.info(f"Creating system user: {system_account}" + (f" (UID: {uid})" if uid else ""))
-    result = run_as_root_if_needed(cmd)
+    # 创建用户（通过 wrapper 或 sudo）
+    # Issue #1855: 优先使用安全 wrapper，wrapper 内部做参数校验和审计日志
+    if _is_wrapper_available(OPENACE_USERADD_WRAPPER):
+        cmd = [OPENACE_USERADD_WRAPPER, system_account]
+        if uid is not None:
+            cmd.extend(["-u", str(uid)])
+        logger.info(f"Creating system user via wrapper: {system_account}" + (f" (UID: {uid})" if uid else ""))
+        result = subprocess.run(cmd, capture_output=True, text=True)
+    else:
+        # Fallback: 使用传统 useradd 命令（需要 sudo）
+        cmd = ["useradd", "-m", "-s", "/bin/bash"]
+        if uid is not None:
+            cmd.extend(["-u", str(uid)])
+        cmd.append(system_account)
+        logger.info(f"Creating system user: {system_account}" + (f" (UID: {uid})" if uid else ""))
+        result = run_as_root_if_needed(cmd)
 
     if result.returncode != 0:
         logger.error(f"Failed to create system user {system_account}: {result.stderr}")
@@ -162,17 +180,27 @@ def _ensure_workspace_dirs(system_account: str, base_dir: str):
     workspace_dir = f"{base_dir}/{system_account}"
     qwen_dir = f"{workspace_dir}/.qwen"
 
-    # 创建目录（必要时通过 sudo）
+    # 创建目录（必要时通过 wrapper 或 sudo）
     for directory in [workspace_dir, qwen_dir]:
         if not os.path.exists(directory):
             try:
                 os.makedirs(directory, mode=0o755, exist_ok=True)
             except PermissionError:
-                # 尝试通过 sudo 创建
-                result = run_as_root_if_needed(["mkdir", "-p", "-m", "755", directory])
-                if result.returncode != 0:
-                    logger.warning(f"Cannot create {directory}: {result.stderr}")
-                    continue
+                # Issue #1855: 优先使用安全 wrapper
+                if _is_wrapper_available(OPENACE_MKDIR_WRAPPER):
+                    result = subprocess.run(
+                        [OPENACE_MKDIR_WRAPPER, system_account, directory],
+                        capture_output=True, text=True
+                    )
+                    if result.returncode != 0:
+                        logger.warning(f"Cannot create {directory} via wrapper: {result.stderr}")
+                        continue
+                else:
+                    # Fallback: 使用传统 mkdir 命令
+                    result = run_as_root_if_needed(["mkdir", "-p", "-m", "755", directory])
+                    if result.returncode != 0:
+                        logger.warning(f"Cannot create {directory}: {result.stderr}")
+                        continue
 
     # 获取 UID/GID（id 命令不需要 sudo，任何用户都可以执行）
     uid_result = subprocess.run(["id", "-u", system_account], capture_output=True, text=True)
@@ -182,11 +210,21 @@ def _ensure_workspace_dirs(system_account: str, base_dir: str):
         uid = int(uid_result.stdout.strip())
         gid = int(gid_result.stdout.strip())
 
-        # 设置所有权（通过 sudo，因为 chown 需要 root 权限）
+        # 设置所有权（通过 wrapper 或 sudo）
+        # Issue #1855: 优先使用安全 wrapper，wrapper 内部做路径校验和审计日志
         for directory in [workspace_dir, qwen_dir]:
-            result = run_as_root_if_needed(["chown", f"{uid}:{gid}", directory])
-            if result.returncode != 0:
-                logger.warning(f"Cannot chown {directory} to {uid}:{gid}: {result.stderr}")
+            if _is_wrapper_available(OPENACE_CHOWN_WRAPPER):
+                result = subprocess.run(
+                    [OPENACE_CHOWN_WRAPPER, f"{uid}:{gid}", directory],
+                    capture_output=True, text=True
+                )
+                if result.returncode != 0:
+                    logger.warning(f"Cannot chown {directory} via wrapper: {result.stderr}")
+            else:
+                # Fallback: 使用传统 chown 命令
+                result = run_as_root_if_needed(["chown", f"{uid}:{gid}", directory])
+                if result.returncode != 0:
+                    logger.warning(f"Cannot chown {directory} to {uid}:{gid}: {result.stderr}")
 
 
 def ensure_user_workspace(system_account: str) -> bool:

@@ -168,6 +168,22 @@ RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 COPY scripts/openace-run-as.sh /usr/local/bin/openace-run-as
 RUN chmod 755 /usr/local/bin/openace-run-as && chown root:root /usr/local/bin/openace-run-as
 
+# Install security wrappers for multi-user mode (Issue #1855)
+# These wrappers enforce path validation, UID range checks, and audit logging
+# for privileged operations like chown, useradd, cat, mkdir.
+COPY scripts/openace-chown.sh /usr/local/bin/openace-chown
+COPY scripts/openace-useradd.sh /usr/local/bin/openace-useradd
+COPY scripts/openace-cat.sh /usr/local/bin/openace-cat
+COPY scripts/openace-mkdir.sh /usr/local/bin/openace-mkdir
+COPY scripts/openace-restore-sudoers.sh /usr/local/bin/openace-restore-sudoers
+RUN chmod 755 /usr/local/bin/openace-chown /usr/local/bin/openace-useradd \
+             /usr/local/bin/openace-cat /usr/local/bin/openace-mkdir \
+             /usr/local/bin/openace-restore-sudoers && \
+    chown root:root /usr/local/bin/openace-chown /usr/local/bin/openace-useradd \
+                    /usr/local/bin/openace-cat /usr/local/bin/openace-mkdir \
+                    /usr/local/bin/openace-restore-sudoers && \
+    mkdir -p /var/lock && chmod 1777 /var/lock
+
 # NOTE: The image defaults to the non-root open-ace user (uid 1000) so that
 # `docker run`, docker-compose, and Kubernetes all execute the entrypoint as
 # uid 1000 without relying solely on the K8s manifest's securityContext.
