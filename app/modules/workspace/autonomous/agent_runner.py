@@ -833,7 +833,9 @@ class AutonomousAgentRunner:
                 same_user = False
         if system_account and not same_user:
             # Issue #1855: 优先使用安全 wrapper
-            if os.path.isfile(_OPENACE_MKDIR_WRAPPER) and os.access(_OPENACE_MKDIR_WRAPPER, os.X_OK):
+            if os.path.isfile(_OPENACE_MKDIR_WRAPPER) and os.access(
+                _OPENACE_MKDIR_WRAPPER, os.X_OK
+            ):
                 result = subprocess.run(
                     ["sudo", _OPENACE_MKDIR_WRAPPER, system_account, project_path],
                     capture_output=True,

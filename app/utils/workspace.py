@@ -155,7 +155,10 @@ def ensure_system_user(system_account: str, uid: Optional[int] = None) -> bool:
         cmd = [OPENACE_USERADD_WRAPPER, system_account]
         if uid is not None:
             cmd.extend(["-u", str(uid)])
-        logger.info(f"Creating system user via wrapper: {system_account}" + (f" (UID: {uid})" if uid else ""))
+        logger.info(
+            f"Creating system user via wrapper: {system_account}"
+            + (f" (UID: {uid})" if uid else "")
+        )
         result = subprocess.run(cmd, capture_output=True, text=True)
     else:
         # Fallback: 使用传统 useradd 命令（需要 sudo）
@@ -190,7 +193,8 @@ def _ensure_workspace_dirs(system_account: str, base_dir: str):
                 if _is_wrapper_available(OPENACE_MKDIR_WRAPPER):
                     result = subprocess.run(
                         [OPENACE_MKDIR_WRAPPER, system_account, directory],
-                        capture_output=True, text=True
+                        capture_output=True,
+                        text=True,
                     )
                     if result.returncode != 0:
                         logger.warning(f"Cannot create {directory} via wrapper: {result.stderr}")
@@ -216,7 +220,8 @@ def _ensure_workspace_dirs(system_account: str, base_dir: str):
             if _is_wrapper_available(OPENACE_CHOWN_WRAPPER):
                 result = subprocess.run(
                     [OPENACE_CHOWN_WRAPPER, f"{uid}:{gid}", directory],
-                    capture_output=True, text=True
+                    capture_output=True,
+                    text=True,
                 )
                 if result.returncode != 0:
                     logger.warning(f"Cannot chown {directory} via wrapper: {result.stderr}")
