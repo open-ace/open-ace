@@ -753,7 +753,7 @@ Cmnd_Alias GH_SAFE = \
     ${GH_PATH} pr merge * --squash, \
     ${GH_PATH} pr merge * --rebase, \
     ${GH_PATH} pr merge * --auto, \
-    ${GHADMIN_RULE}${GH_PATH} pr view * --json commits, \
+    ${GH_ADMIN_RULE}${GH_PATH} pr view * --json commits, \
     ${GH_PATH} pr checks * --json *, \
     ${GH_PATH} pr diff *, \
     ${GH_PATH} api user, \
