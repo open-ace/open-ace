@@ -149,6 +149,8 @@ docker compose up -d --build
 | DaoCloud | `docker.m.daocloud.io` |
 | 1Panel | `docker.1panel.live` |
 
+> 镜像源可用性会随时间变化，表中任选一个能 pull 通即可；也可换用其他公开的 Docker Hub 镜像。
+
 > 也可在 Docker daemon 配置 `registry-mirrors`（Docker Desktop / OrbStack 的镜像加速设置），效果相同但作用于全局。
 
 ### 方式二：源码安装
