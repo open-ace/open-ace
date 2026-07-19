@@ -51,6 +51,7 @@ class AnalysisService:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         host_name: Optional[str] = None,
+        tenant_id: Optional[int] = None,
     ) -> dict:
         """
         Get all analysis data in a single optimized call.
@@ -59,10 +60,13 @@ class AnalysisService:
         for fast queries, falling back to daily_messages only for
         hourly data which cannot be pre-aggregated.
 
+        Issue #1852: Added tenant_id for tenant isolation.
+
         Args:
             start_date: Optional start date filter.
             end_date: Optional end date filter.
             host_name: Optional host name filter.
+            tenant_id: Optional tenant filter (None for admin/global scope).
 
         Returns:
             Dict: Combined analysis data.
@@ -75,29 +79,38 @@ class AnalysisService:
 
         # Use pre-aggregated data from daily_stats for fast queries
         # Only hourly data needs to query daily_messages directly
+        # Issue #1852: Pass tenant_id to all repository methods
         futures: dict[Future, str] = {
             _executor.submit(
-                self.daily_stats_repo.get_batch_aggregates, start_date, end_date, host_name
+                self.daily_stats_repo.get_batch_aggregates,
+                start_date,
+                end_date,
+                host_name,
+                tenant_id,
             ): "aggregates",
             _executor.submit(
-                self.daily_stats_repo.get_user_totals, start_date, end_date, host_name
+                self.daily_stats_repo.get_user_totals, start_date, end_date, host_name, tenant_id
             ): "user_tokens",
             _executor.submit(
-                self.daily_stats_repo.get_tool_totals, start_date, end_date, host_name
+                self.daily_stats_repo.get_tool_totals, start_date, end_date, host_name, tenant_id
             ): "tool_stats",
             _executor.submit(
-                self.daily_stats_repo.get_daily_totals, start_date, end_date, host_name
+                self.daily_stats_repo.get_daily_totals, start_date, end_date, host_name, tenant_id
             ): "daily_data",
             _executor.submit(
-                self.daily_stats_repo.get_hourly_totals, start_date, end_date, host_name
+                self.daily_stats_repo.get_hourly_totals, start_date, end_date, host_name, tenant_id
             ): "hourly_data",
             _executor.submit(
-                self.message_repo.get_conversation_stats_summary, start_date, end_date, host_name
+                self.message_repo.get_conversation_stats_summary,
+                start_date,
+                end_date,
+                host_name,
+                tenant_id,
             ): "session_summary",
             _executor.submit(
-                self.usage_repo.get_request_count_total, start_date, end_date, host_name
+                self.usage_repo.get_request_count_total, start_date, end_date, host_name, tenant_id
             ): "total_requests",
-            _executor.submit(self.daily_stats_repo.get_data_range): "data_range",
+            _executor.submit(self.daily_stats_repo.get_data_range, tenant_id): "data_range",
         }
 
         # Collect results
@@ -332,7 +345,7 @@ class AnalysisService:
         }
 
     @cached(ttl=300, key_prefix="analysis", skip_args=[0])
-    def get_data_range(self) -> Optional[dict]:
+    def get_data_range(self, tenant_id: Optional[int] = None) -> Optional[dict]:
         """
         Get the global data range (min and max dates) from daily_stats.
 
@@ -340,10 +353,15 @@ class AnalysisService:
         actual data span rather than a hardcoded window. The range is always
         global (not host-filtered) by design.
 
+        Issue #1852: Added tenant_id for tenant isolation.
+
+        Args:
+            tenant_id: Optional tenant filter (None for admin/global scope).
+
         Returns:
             Optional[Dict]: {"min_date", "max_date"} or None when no data.
         """
-        return self.daily_stats_repo.get_data_range()
+        return self.daily_stats_repo.get_data_range(tenant_id)
 
     @cached(ttl=60, key_prefix="analysis", skip_args=[0])
     @cached(ttl=120, key_prefix="analysis")
@@ -352,14 +370,18 @@ class AnalysisService:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         host_name: Optional[str] = None,
+        tenant_id: Optional[int] = None,
     ) -> dict:
         """
         Get key metrics for the dashboard.
+
+        Issue #1852: Added tenant_id for tenant isolation.
 
         Args:
             start_date: Optional start date filter.
             end_date: Optional end date filter.
             host_name: Optional host name filter.
+            tenant_id: Optional tenant filter (None for admin/global scope).
 
         Returns:
             Dict: Key metrics data.
@@ -369,11 +391,13 @@ class AnalysisService:
         if not end_date:
             end_date = get_today()
 
-        usage_data = self.usage_repo.get_daily_range(start_date, end_date, host_name=host_name)
+        usage_data = self.usage_repo.get_daily_range(
+            start_date, end_date, host_name=host_name, tenant_id=tenant_id
+        )
 
         # Also get message data for tokens (since daily_usage may have 0 tokens)
         user_tokens = self.message_repo.get_user_token_totals(
-            start_date=start_date, end_date=end_date, host_name=host_name
+            start_date=start_date, end_date=end_date, host_name=host_name, tenant_id=tenant_id
         )
 
         total_tokens = sum(u.get("tokens_used", 0) for u in usage_data)
@@ -398,7 +422,7 @@ class AnalysisService:
 
         # Get top tools by token usage from messages (has real token data)
         tool_stats = self.message_repo.get_tool_token_totals(
-            start_date=start_date, end_date=end_date, host_name=host_name
+            start_date=start_date, end_date=end_date, host_name=host_name, tenant_id=tenant_id
         )
 
         top_tools = []
@@ -437,7 +461,7 @@ class AnalysisService:
         # legacy len({(date, tool)}) approximation and stays consistent with
         # get_batch_analysis via the same method.
         session_summary = self.message_repo.get_conversation_stats_summary(
-            start_date=start_date, end_date=end_date, host_name=host_name
+            start_date=start_date, end_date=end_date, host_name=host_name, tenant_id=tenant_id
         )
         total_sessions = session_summary.get("total_conversations", 0) or 0
         session_messages = session_summary.get("total_messages", 0) or 0
@@ -473,9 +497,21 @@ class AnalysisService:
         date: Optional[str] = None,
         tool_name: Optional[str] = None,
         host_name: Optional[str] = None,
+        tenant_id: Optional[int] = None,
     ) -> list[dict]:
         """
         Get hourly usage breakdown from hourly_stats table.
+
+        Issue #1852: Added tenant_id for tenant isolation.
+
+        Args:
+            date: Optional date filter.
+            tool_name: Optional tool name filter.
+            host_name: Optional host name filter.
+            tenant_id: Optional tenant filter (None for admin/global scope).
+
+        Returns:
+            List[Dict]: Hourly usage data.
         """
         if not date:
             date = datetime.now().strftime("%Y-%m-%d")
@@ -507,11 +543,20 @@ class AnalysisService:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         host_name: Optional[str] = None,
+        tenant_id: Optional[int] = None,
     ) -> dict:
         """
         Get daily and hourly usage patterns.
 
         Optimized to use parallel queries and aggregated data.
+
+        Issue #1852: Added tenant_id for tenant isolation.
+
+        Args:
+            start_date: Optional start date filter.
+            end_date: Optional end date filter.
+            host_name: Optional host name filter.
+            tenant_id: Optional tenant filter (None for admin/global scope).
 
         Returns:
             Dict: Daily and hourly usage patterns.
@@ -524,10 +569,10 @@ class AnalysisService:
         # Use parallel queries for better performance
         futures: dict[Future, str] = {
             _executor.submit(
-                self.message_repo.get_daily_token_totals, start_date, end_date, host_name
+                self.message_repo.get_daily_token_totals, start_date, end_date, host_name, tenant_id
             ): "daily_data",
             _executor.submit(
-                self.message_repo.get_hourly_usage, start_date, end_date, host_name
+                self.message_repo.get_hourly_usage, start_date, end_date, host_name, tenant_id
             ): "hourly_data",
         }
 
@@ -568,9 +613,18 @@ class AnalysisService:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         host_name: Optional[str] = None,
+        tenant_id: Optional[int] = None,
     ) -> dict:
         """
         Get peak usage periods.
+
+        Issue #1852: Added tenant_id for tenant isolation.
+
+        Args:
+            start_date: Optional start date filter.
+            end_date: Optional end date filter.
+            host_name: Optional host name filter.
+            tenant_id: Optional tenant filter (None for admin/global scope).
 
         Returns:
             Dict: Peak usage information with peak_days array.
@@ -581,7 +635,9 @@ class AnalysisService:
             end_date = get_today()
 
         # Get daily token totals from messages (has real token data)
-        daily_data = self.message_repo.get_daily_token_totals(start_date, end_date, host_name)
+        daily_data = self.message_repo.get_daily_token_totals(
+            start_date, end_date, host_name, tenant_id
+        )
 
         if not daily_data:
             return {"peak_days": [], "peak_hours": []}
@@ -602,7 +658,7 @@ class AnalysisService:
         peak_days = [{"date": d, "tokens": t} for d, t in sorted_days[:5]]
 
         # Get hourly usage for peak hours
-        hourly_data = self.message_repo.get_hourly_usage(start_date, end_date, host_name)
+        hourly_data = self.message_repo.get_hourly_usage(start_date, end_date, host_name, tenant_id)
         hourly_totals = {}
         for h in hourly_data:
             hour = int(h.get("hour", 0))
@@ -629,12 +685,22 @@ class AnalysisService:
         end_date: Optional[str] = None,
         host_name: Optional[str] = None,
         limit: int = 10,
+        tenant_id: Optional[int] = None,
     ) -> dict:
         """
         Get user ranking by token usage.
 
         Uses unified_username from get_user_token_totals which merges users by user_id.
         This ensures users with multiple sender_name aliases appear as a single entry.
+
+        Issue #1852: Added tenant_id for tenant isolation.
+
+        Args:
+            start_date: Optional start date filter.
+            end_date: Optional end date filter.
+            host_name: Optional host name filter.
+            limit: Maximum number of users to return.
+            tenant_id: Optional tenant filter (None for admin/global scope).
 
         Returns:
             Dict: User rankings with users array.
@@ -646,7 +712,7 @@ class AnalysisService:
 
         # Get user token usage from messages (already merged by user_id)
         user_tokens = self.message_repo.get_user_token_totals(
-            start_date=start_date, end_date=end_date, host_name=host_name
+            start_date=start_date, end_date=end_date, host_name=host_name, tenant_id=tenant_id
         )
 
         # Build user ranking using unified_username
@@ -670,6 +736,7 @@ class AnalysisService:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         host_name: Optional[str] = None,
+        tenant_id: Optional[int] = None,
     ) -> dict:
         """
         Single source of truth for session/conversation statistics.
@@ -684,6 +751,14 @@ class AnalysisService:
         ``avg_conversation_length`` is preserved in the result for backward
         compatibility with calculateHealthScore, insights and exports.
 
+        Issue #1852: Added tenant_id for tenant isolation.
+
+        Args:
+            start_date: Optional start date filter.
+            end_date: Optional end date filter.
+            host_name: Optional host name filter.
+            tenant_id: Optional tenant filter (None for admin/global scope).
+
         Returns:
             Dict: Conversation statistics summary.
         """
@@ -691,7 +766,7 @@ class AnalysisService:
         # mypy sees its return as ``Any``; bind it to ``dict`` before returning to
         # keep ``warn_return_any`` happy (mirrors the standalone caller's pattern).
         summary: dict = self.message_repo.get_conversation_stats_summary(
-            start_date=start_date, end_date=end_date, host_name=host_name
+            start_date=start_date, end_date=end_date, host_name=host_name, tenant_id=tenant_id
         )
         return summary
 
@@ -701,6 +776,7 @@ class AnalysisService:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         host_name: Optional[str] = None,
+        tenant_id: Optional[int] = None,
     ) -> dict:
         """
         Get conversation statistics (standalone endpoint).
@@ -719,6 +795,14 @@ class AnalysisService:
         Behavior change: returned values are no longer capped at 1000
         conversations / 7 days; they now reflect the full requested range.
 
+        Issue #1852: Added tenant_id for tenant isolation.
+
+        Args:
+            start_date: Optional start date filter.
+            end_date: Optional end date filter.
+            host_name: Optional host name filter.
+            tenant_id: Optional tenant filter (None for admin/global scope).
+
         Returns:
             Dict: Conversation statistics.
         """
@@ -731,7 +815,9 @@ class AnalysisService:
         if not end_date:
             end_date = get_today()
 
-        return self.get_session_stats(start_date=start_date, end_date=end_date, host_name=host_name)
+        return self.get_session_stats(
+            start_date=start_date, end_date=end_date, host_name=host_name, tenant_id=tenant_id
+        )
 
     @cached(ttl=60, key_prefix="analysis", skip_args=[0])
     def get_tool_comparison(
@@ -739,9 +825,18 @@ class AnalysisService:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         host_name: Optional[str] = None,
+        tenant_id: Optional[int] = None,
     ) -> dict:
         """
         Get tool comparison data.
+
+        Issue #1852: Added tenant_id for tenant isolation.
+
+        Args:
+            start_date: Optional start date filter.
+            end_date: Optional end date filter.
+            host_name: Optional host name filter.
+            tenant_id: Optional tenant filter (None for admin/global scope).
 
         Returns:
             Dict: Tool comparison data with tools array.
@@ -753,7 +848,7 @@ class AnalysisService:
 
         # Get tool stats from messages (has real token data)
         tool_stats = self.message_repo.get_tool_token_totals(
-            start_date=start_date, end_date=end_date, host_name=host_name
+            start_date=start_date, end_date=end_date, host_name=host_name, tenant_id=tenant_id
         )
 
         # Convert to array format expected by frontend (normalize and merge)
@@ -793,9 +888,17 @@ class AnalysisService:
         return {"tools": tools}
 
     @cached(ttl=300, key_prefix="analysis", skip_args=[0])
-    def get_recommendations(self, host_name: Optional[str] = None) -> list[dict]:
+    def get_recommendations(
+        self, host_name: Optional[str] = None, tenant_id: Optional[int] = None
+    ) -> list[dict]:
         """
         Get usage optimization recommendations.
+
+        Issue #1852: Added tenant_id for tenant isolation.
+
+        Args:
+            host_name: Optional host name filter.
+            tenant_id: Optional tenant filter (None for admin/global scope).
 
         Returns:
             List[Dict]: List of recommendations.
@@ -806,7 +909,9 @@ class AnalysisService:
         end_date = datetime.now().strftime("%Y-%m-%d")
         start_date = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
 
-        usage_data = self.usage_repo.get_daily_range(start_date, end_date, host_name=host_name)
+        usage_data = self.usage_repo.get_daily_range(
+            start_date, end_date, host_name=host_name, tenant_id=tenant_id
+        )
 
         if not usage_data:
             return [{"type": "info", "message": "No usage data available for analysis"}]
@@ -857,6 +962,7 @@ class AnalysisService:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         host_name: Optional[str] = None,
+        tenant_id: Optional[int] = None,
     ) -> dict:
         """
         Get user segmentation based on token usage.
@@ -866,6 +972,14 @@ class AnalysisService:
         - Medium: 1K-10K tokens
         - Low: <1K tokens
         - Dormant: No activity in the period
+
+        Issue #1852: Added tenant_id for tenant isolation.
+
+        Args:
+            start_date: Optional start date filter.
+            end_date: Optional end date filter.
+            host_name: Optional host name filter.
+            tenant_id: Optional tenant filter (None for admin/global scope).
 
         Returns:
             Dict: User segmentation data.
@@ -877,7 +991,7 @@ class AnalysisService:
 
         # Get user token usage from messages
         user_tokens = self.message_repo.get_user_token_totals(
-            start_date=start_date, end_date=end_date, host_name=host_name
+            start_date=start_date, end_date=end_date, host_name=host_name, tenant_id=tenant_id
         )
 
         # Segment users
@@ -907,6 +1021,7 @@ class AnalysisService:
         host_name: Optional[str] = None,
         anomaly_type: Optional[str] = None,
         severity: Optional[str] = None,
+        tenant_id: Optional[int] = None,
     ) -> dict:
         """
         Detect usage anomalies.
@@ -918,12 +1033,15 @@ class AnalysisService:
         Note: Days with zero tokens (no activity) are not considered anomalies.
         They indicate inactivity (e.g., maintenance, downtime, holidays).
 
+        Issue #1852: Added tenant_id for tenant isolation.
+
         Args:
             start_date: Optional start date filter.
             end_date: Optional end date filter.
             host_name: Optional host name filter.
             anomaly_type: Optional filter by anomaly type ('spike', 'drop').
             severity: Optional filter by severity ('high', 'medium', 'low').
+            tenant_id: Optional tenant filter (None for admin/global scope).
 
         Returns:
             Dict: Anomaly detection results with anomalies list.
@@ -934,7 +1052,9 @@ class AnalysisService:
             end_date = get_today()
 
         # Get daily token totals from messages
-        daily_data = self.message_repo.get_daily_token_totals(start_date, end_date, host_name)
+        daily_data = self.message_repo.get_daily_token_totals(
+            start_date, end_date, host_name, tenant_id
+        )
 
         if not daily_data or len(daily_data) < 3:
             return {"anomalies": [], "summary": {"total": 0, "high": 0, "medium": 0, "low": 0}}
@@ -957,7 +1077,7 @@ class AnalysisService:
         daily_tool_map: dict[str, dict] = {}
         try:
             daily_tool_rows = self.message_repo.get_daily_tool_totals(
-                start_date, end_date, host_name
+                start_date, end_date, host_name, tenant_id
             )
         except Exception as e:
             logger.warning(f"get_daily_tool_totals failed, skipping top_contributor: {e}")
@@ -1079,9 +1199,12 @@ class AnalysisService:
         host_name: Optional[str] = None,
         anomaly_type: Optional[str] = None,
         severity: Optional[str] = None,
+        tenant_id: Optional[int] = None,
     ) -> dict:
         """
         Get anomaly trend over time.
+
+        Issue #1852: Added tenant_id for tenant isolation.
 
         Args:
             start_date: Optional start date filter.
@@ -1089,12 +1212,13 @@ class AnalysisService:
             host_name: Optional host name filter.
             anomaly_type: Optional filter by anomaly type ('spike', 'drop').
             severity: Optional filter by severity ('high', 'medium', 'low').
+            tenant_id: Optional tenant filter (None for admin/global scope).
 
         Returns:
             Dict: Anomaly trend data grouped by date.
         """
         anomaly_data = self.detect_anomalies(
-            start_date, end_date, host_name, anomaly_type, severity
+            start_date, end_date, host_name, anomaly_type, severity, tenant_id
         )
         anomalies = anomaly_data.get("anomalies", [])
 

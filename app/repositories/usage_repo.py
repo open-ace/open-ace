@@ -176,9 +176,13 @@ class UsageRepository:
             date: Date string (YYYY-MM-DD).
             tool_name: Optional tool name filter.
             host_name: Optional host name filter.
+            tenant_id: Optional tenant ID filter. If None, returns all tenants (admin).
 
         Returns:
             List[Dict]: Raw rows from daily_usage with token and host/model details.
+
+        Note:
+            Issue #1852: Added tenant_id parameter for tenant filtering.
         """
         conditions = ["date = ?"]
         params: list = [date]
@@ -218,6 +222,18 @@ class UsageRepository:
     ) -> list[dict]:
         """
         Get usage data for a specific date from daily_messages joined with daily_usage.
+
+        Args:
+            date: Date string (YYYY-MM-DD).
+            tool_name: Optional tool name filter.
+            host_name: Optional host name filter.
+            tenant_id: Optional tenant ID filter. If None, returns all tenants (admin).
+
+        Returns:
+            List[Dict]: List of usage records.
+
+        Note:
+            Issue #1852: Added tenant_id parameter for tenant filtering.
         """
         conditions = ["dm.date = ?"]
         params: list = [date]
@@ -287,9 +303,13 @@ class UsageRepository:
             days: Number of days to look back.
             end_date: Optional end date (defaults to today).
             host_name: Optional host name filter.
+            tenant_id: Optional tenant ID filter. If None, returns all tenants (admin).
 
         Returns:
             List[Dict]: List of usage records.
+
+        Note:
+            Issue #1852: Added tenant_id parameter for tenant filtering.
         """
         if end_date is None:
             end_date = datetime.now().strftime("%Y-%m-%d")
@@ -342,9 +362,13 @@ class UsageRepository:
             end_date: End date string (YYYY-MM-DD).
             tool_name: Optional tool name filter.
             host_name: Optional host name filter.
+            tenant_id: Optional tenant ID filter. If None, returns all tenants (admin).
 
         Returns:
             List[Dict]: List of usage records.
+
+        Note:
+            Issue #1852: Added tenant_id parameter for tenant filtering.
         """
         conditions = ["date >= ?", "date <= ?"]
         params: list[Any] = [start_date, end_date]
@@ -390,9 +414,15 @@ class UsageRepository:
 
         Args:
             host_name: Optional host name filter.
+            start_date: Optional start date filter.
+            end_date: Optional end date filter.
+            tenant_id: Optional tenant ID filter. If None, returns all tenants (admin).
 
         Returns:
             Dict[str, Dict]: Summary data keyed by tool name.
+
+        Note:
+            Issue #1852: Added tenant_id parameter for tenant filtering.
         """
         conditions = []
         params: list[Any] = []
@@ -462,8 +492,14 @@ class UsageRepository:
         """
         Get list of all tools.
 
+        Args:
+            tenant_id: Optional tenant ID filter. If None, returns all tenants (admin).
+
         Returns:
             List[str]: List of tool names.
+
+        Note:
+            Issue #1852: Added tenant_id parameter for tenant filtering.
         """
         normalized_tenant_id = self._normalize_tenant_id(tenant_id)
         params: list = []
@@ -487,8 +523,14 @@ class UsageRepository:
         """
         Get list of all hosts.
 
+        Args:
+            tenant_id: Optional tenant ID filter. If None, returns all tenants (admin).
+
         Returns:
             List[str]: List of host names.
+
+        Note:
+            Issue #1852: Added tenant_id parameter for tenant filtering.
         """
         # Get SQL filter clause
         sql_filter = get_hostname_filter_sql()
@@ -537,9 +579,13 @@ class UsageRepository:
             start_date: Start date string (YYYY-MM-DD).
             end_date: End date string (YYYY-MM-DD).
             host_name: Optional host name filter.
+            tenant_id: Optional tenant ID filter. If None, returns all tenants (admin).
 
         Returns:
             List[Dict]: List of aggregated usage records by date.
+
+        Note:
+            Issue #1852: Added tenant_id parameter for tenant filtering.
         """
         conditions = ["date >= ?", "date <= ?"]
         params: list[Any] = [start_date, end_date]
@@ -599,9 +645,13 @@ class UsageRepository:
             start_date: Start date string (YYYY-MM-DD).
             end_date: End date string (YYYY-MM-DD).
             host_name: Optional host name filter.
+            tenant_id: Optional tenant ID filter. If None, returns all tenants (admin).
 
         Returns:
             List[Dict]: List of usage records by date and tool.
+
+        Note:
+            Issue #1852: Added tenant_id parameter for tenant filtering.
         """
         conditions = ["date >= ?", "date <= ?"]
         params: list[Any] = [start_date, end_date]
@@ -661,9 +711,13 @@ class UsageRepository:
             start_date: Start date string (YYYY-MM-DD).
             end_date: End date string (YYYY-MM-DD).
             host_name: Optional host name filter.
+            tenant_id: Optional tenant ID filter. If None, returns all tenants (admin).
 
         Returns:
             int: Total request count.
+
+        Note:
+            Issue #1852: Added tenant_id parameter for tenant filtering.
         """
         conditions = ["date >= ?", "date <= ?"]
         params: list[Any] = [start_date, end_date]
@@ -700,9 +754,13 @@ class UsageRepository:
             start_date: Start date string (YYYY-MM-DD).
             end_date: End date string (YYYY-MM-DD).
             host_name: Optional host name filter.
+            tenant_id: Optional tenant ID filter. If None, returns all tenants (admin).
 
         Returns:
             List[Dict]: List of request counts by date.
+
+        Note:
+            Issue #1852: Added tenant_id parameter for tenant filtering.
         """
         conditions = ["date >= ?", "date <= ?"]
         params: list[Any] = [start_date, end_date]
@@ -760,9 +818,13 @@ class UsageRepository:
             start_date: Start date string (YYYY-MM-DD).
             end_date: End date string (YYYY-MM-DD).
             host_name: Optional host name filter.
+            tenant_id: Optional tenant ID filter. If None, returns all tenants (admin).
 
         Returns:
             List[Dict]: List of request counts by date and tool.
+
+        Note:
+            Issue #1852: Added tenant_id parameter for tenant filtering.
         """
         conditions = ["date >= ?", "date <= ?"]
         params: list[Any] = [start_date, end_date]
@@ -819,9 +881,13 @@ class UsageRepository:
 
         Args:
             host_name: Optional host name filter.
+            tenant_id: Optional tenant ID filter. If None, returns all tenants (admin).
 
         Returns:
             Dict: Today's request stats with total and by-tool breakdown.
+
+        Note:
+            Issue #1852: Added tenant_id parameter for tenant filtering.
         """
         today = datetime.now().strftime("%Y-%m-%d")
 
@@ -890,9 +956,13 @@ class UsageRepository:
             date: Optional date filter (YYYY-MM-DD). If None, uses today.
             host_name: Optional host name filter.
             user_name: Optional user name filter (matches sender_name prefix).
+            tenant_id: Optional tenant ID filter. If None, returns all tenants (admin).
 
         Returns:
             List[Dict]: Request stats by user with unified username.
+
+        Note:
+            Issue #1852: Added tenant_id parameter for tenant filtering.
         """
         from app.repositories.database import is_postgresql
 
@@ -1010,9 +1080,13 @@ class UsageRepository:
             start_date: Start date string (YYYY-MM-DD).
             end_date: End date string (YYYY-MM-DD).
             host_name: Optional host name filter (not used with user_daily_stats).
+            tenant_id: Optional tenant ID filter. If None, returns all tenants (admin).
 
         Returns:
             List[Dict]: Request trend by date for the user.
+
+        Note:
+            Issue #1852: Added tenant_id parameter for tenant filtering.
         """
         # First, try to get user_id from username
         normalized_tenant_id = self._normalize_tenant_id(tenant_id)
@@ -1178,9 +1252,13 @@ class UsageRepository:
             month: Month (1-12).
             host_name: Optional host name filter.
             user_name: Optional user name filter (matches sender_name prefix).
+            tenant_id: Optional tenant ID filter. If None, returns all tenants (admin).
 
         Returns:
             List[Dict]: Monthly request stats by user.
+
+        Note:
+            Issue #1852: Added tenant_id parameter for tenant filtering.
         """
         start_date = f"{year}-{month:02d}-01"
         if month == 12:

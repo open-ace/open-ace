@@ -366,6 +366,7 @@ CREATE TABLE daily_messages (
  deleted_at TIMESTAMP,
  user_id integer,
  project_path text,
+ tenant_id integer,
     CONSTRAINT chk_daily_messages_input_tokens_positive CHECK ((input_tokens >= 0)),
     CONSTRAINT chk_daily_messages_output_tokens_positive CHECK ((output_tokens >= 0)),
     CONSTRAINT chk_daily_messages_tokens_positive CHECK ((tokens_used >= 0))
@@ -383,7 +384,8 @@ CREATE TABLE daily_stats (
  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
  project_id integer,
  project_path TEXT,
- user_id integer
+ user_id integer,
+ tenant_id integer
 );
 
 CREATE TABLE daily_usage (
@@ -429,7 +431,8 @@ CREATE TABLE hourly_stats (
  total_input_tokens INTEGER NOT NULL,
  total_output_tokens INTEGER NOT NULL,
  message_count integer NOT NULL,
- updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+ updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+ tenant_id integer
 );
 
 CREATE TABLE insights_reports (
@@ -1282,6 +1285,10 @@ CREATE INDEX idx_consistency_violations_status ON consistency_violations (status
 
 CREATE INDEX idx_consistency_violations_tenant ON consistency_violations (tenant_id);
 
+CREATE INDEX idx_daily_messages_orphan ON daily_messages (date) WHERE (tenant_id IS NULL);
+
+CREATE INDEX idx_daily_messages_tenant_date ON daily_messages (tenant_id, date);
+
 CREATE INDEX idx_daily_stats_date ON daily_stats (date);
 
 CREATE INDEX idx_daily_stats_date_tool ON daily_stats (date, tool_name);
@@ -1290,9 +1297,13 @@ CREATE INDEX idx_daily_stats_date_tool_host ON daily_stats (date, tool_name, hos
 
 CREATE INDEX idx_daily_stats_host ON daily_stats (host_name);
 
+CREATE INDEX idx_daily_stats_orphan ON daily_stats (date) WHERE (tenant_id IS NULL);
+
 CREATE INDEX idx_daily_stats_project ON daily_stats (project_id);
 
 CREATE INDEX idx_daily_stats_sender ON daily_stats (sender_name);
+
+CREATE INDEX idx_daily_stats_tenant_date ON daily_stats (tenant_id, date);
 
 CREATE INDEX idx_daily_stats_tool ON daily_stats (tool_name);
 
@@ -1317,6 +1328,10 @@ CREATE INDEX idx_hourly_stats_date ON hourly_stats (date);
 CREATE INDEX idx_hourly_stats_date_hour ON hourly_stats (date, hour);
 
 CREATE INDEX idx_hourly_stats_hour ON hourly_stats (hour);
+
+CREATE INDEX idx_hourly_stats_orphan ON hourly_stats (date) WHERE (tenant_id IS NULL);
+
+CREATE INDEX idx_hourly_stats_tenant_date ON hourly_stats (tenant_id, date);
 
 CREATE INDEX idx_insights_reports_user_date ON insights_reports (user_id, start_date, end_date);
 
