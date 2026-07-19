@@ -60,35 +60,35 @@ class TestGitPushForceWithLease:
         mock_run.assert_not_called()
 
     @patch("app.modules.workspace.autonomous.github_ops.subprocess.run")
-    def test_force_with_lease_resolves_current_branch_when_not_passed(self, mock_run):
+    @patch.object(GitHubOps, "get_current_branch", return_value="auto-dev/def67890")
+    def test_force_with_lease_resolves_current_branch_when_not_passed(self, mock_branch, mock_run):
         """No branch arg → resolve via get_current_branch; auto-dev → allowed."""
-        # First call: get_current_branch (branch --show-current)
-        # Second call: the actual push
-        mock_run.side_effect = [
-            MagicMock(returncode=0, stdout="auto-dev/def67890\n"),
-            MagicMock(returncode=0, stdout=""),
-        ]
+        mock_run.return_value = MagicMock(returncode=0, stdout="")
         self.gh.git_push(force_with_lease=True)
-        # The push cmd (second call) must carry --force-with-lease.
-        push_cmd = mock_run.call_args_list[1][0][0]
+        mock_branch.assert_called_once()
+        # The push cmd must carry --force-with-lease.
+        push_cmd = mock_run.call_args[0][0]
         assert "--force-with-lease" in push_cmd
 
     @patch("app.modules.workspace.autonomous.github_ops.subprocess.run")
-    def test_force_with_lease_refused_when_current_branch_not_auto_dev(self, mock_run):
+    @patch.object(GitHubOps, "get_current_branch", return_value="main")
+    def test_force_with_lease_refused_when_current_branch_not_auto_dev(self, mock_branch, mock_run):
         """No branch arg + current branch is main → refused."""
-        mock_run.return_value = MagicMock(returncode=0, stdout="main\n")
+        mock_run.return_value = MagicMock(returncode=0, stdout="")
         with pytest.raises(GitHubOpsError, match="non-auto-dev branch 'main'"):
             self.gh.git_push(force_with_lease=True)
-        # Only the get_current_branch call should have run; no push.
-        assert mock_run.call_count == 1
+        # The guard runs before _run_git, so no git push command should execute.
+        mock_run.assert_not_called()
 
     @patch("app.modules.workspace.autonomous.github_ops.subprocess.run")
-    def test_force_with_lease_refused_when_branch_unresolvable(self, mock_run):
+    @patch.object(
+        GitHubOps,
+        "get_current_branch",
+        side_effect=GitHubOpsError("branch --show-current failed"),
+    )
+    def test_force_with_lease_refused_when_branch_unresolvable(self, mock_branch, mock_run):
         """No branch arg + get_current_branch fails → GitHubOpsError."""
-        mock_run.side_effect = subprocess_DeniedError()
+        mock_run.return_value = MagicMock(returncode=0, stdout="")
         with pytest.raises(GitHubOpsError, match="current branch could not be resolved"):
             self.gh.git_push(force_with_lease=True)
-
-
-class subprocess_DeniedError(Exception):
-    """Stand-in for a subprocess failure inside get_current_branch."""
+        mock_run.assert_not_called()

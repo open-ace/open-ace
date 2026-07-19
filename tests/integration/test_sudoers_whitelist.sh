@@ -55,6 +55,10 @@ test_command "git branch --show-current" "git branch --show-current" "success"
 test_command "git rev-parse HEAD" "git rev-parse HEAD" "success"
 test_command "git rev-list --count HEAD" "git rev-list --count HEAD" "success"
 test_command "git remote get-url origin" "git remote get-url origin" "success"
+# --force-with-lease is explicitly whitelisted for auto-dev branches (Issue #1854).
+# Branch name can't be pattern-matched in sudoers; the Python git_push() guard
+# enforces the auto-dev/* restriction. Here we only verify the command form is allowed.
+test_command "git push origin auto-dev/test --force-with-lease --dry-run" "git push origin auto-dev/test --force-with-lease --dry-run" "success"
 
 echo "二、gh安全命令测试（期望执行成功）"
 echo "============================================================================"

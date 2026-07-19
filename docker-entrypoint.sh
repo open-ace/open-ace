@@ -676,6 +676,7 @@ Cmnd_Alias GIT_SAFE = \
     ${GIT_PATH} push -u *, \
     ${GIT_PATH} push origin *, \
     ${GIT_PATH} push origin --delete *, \
+    ${GIT_PATH} push origin * --force-with-lease, \
     ${GIT_PATH} branch *, \
     ${GIT_PATH} branch --show-current, \
     ${GIT_PATH} branch -D *, \
