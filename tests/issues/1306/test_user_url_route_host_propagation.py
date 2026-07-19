@@ -69,8 +69,9 @@ def _authed_get(client, path, host):
     Patches _extract_token / _load_user_from_token (module-level imports in
     workspace.py) so the real auth chain runs end-to-end and sets g.user.
     """
-    with patch("app.routes.workspace._extract_token", return_value="test-token"), patch(
-        "app.routes.workspace._load_user_from_token", return_value=MOCK_USER
+    with (
+        patch("app.routes.workspace._extract_token", return_value="test-token"),
+        patch("app.routes.workspace._load_user_from_token", return_value=MOCK_USER),
     ):
         return client.get(path, headers={"Host": host})
 
