@@ -128,8 +128,25 @@ class TestCiFailureFingerprint:
         gh.get_check_failure_excerpt.return_value = ""
         checks = [{"name": "lint", "state": "failure", "bucket": "fail"}]
         fp = orch._ci_failure_fingerprint(gh, checks)
-        # Still has the check name, just with an empty-content hash.
-        assert "lint" in fp
+        # Still has the check name, but with an explicit sentinel (NOT the
+        # sha256("") constant) so the give-up guard can detect the fingerprint
+        # is name-only and skip the "unchanged signature" misfire (#1855).
+        assert fp == "lint::<no-excerpt>"
+
+    def test_empty_excerpt_does_not_match_real_hash(self):
+        """The <no-excerpt> sentinel must never collide with a real excerpt's
+        sha256[:12], and must differ from the old buggy empty-string hash
+        (e3b0c44298fc) so pre-fix fingerprints in the DB don't match either."""
+        import hashlib
+
+        orch = _make_orchestrator()
+        gh = MagicMock()
+        gh.get_check_failure_excerpt.return_value = ""
+        checks = [{"name": "lint", "state": "failure", "bucket": "fail"}]
+        fp = orch._ci_failure_fingerprint(gh, checks)
+        empty_string_hash = hashlib.sha256(b"").hexdigest()[:12]
+        assert empty_string_hash not in fp
+        assert "<no-excerpt>" in fp
 
     def test_path_normalization_in_fingerprint(self):
         """The fingerprint should ignore line-number/path noise so the same
