@@ -1462,6 +1462,7 @@ class AutonomousOrchestrator:
         repair_ms = self._create_milestone(
             phase="merge",
             dev_round=dev_round,
+            round_number=attempt,
             milestone_type="ci_repair_applied",
             status="in_progress",
             title=f"CI repair attempt {attempt} for PR #{pr_number}",
@@ -2314,6 +2315,7 @@ class AutonomousOrchestrator:
             self._create_milestone(
                 phase="merge",
                 dev_round=dev_round,
+                round_number=next_attempt,
                 milestone_type="ci_repair_exhausted",
                 status="failed",
                 title="CI automatic repair limit reached",
@@ -2343,6 +2345,7 @@ class AutonomousOrchestrator:
             self._create_milestone(
                 phase="merge",
                 dev_round=dev_round,
+                round_number=next_attempt,
                 milestone_type="ci_repair_exhausted",
                 status="failed",
                 title="CI failures unchanged after automatic repair",
@@ -2355,6 +2358,7 @@ class AutonomousOrchestrator:
         self._create_milestone(
             phase="merge",
             dev_round=dev_round,
+            round_number=next_attempt,
             milestone_type="ci_repair_started",
             status="completed",
             title=f"CI failed for PR #{pr_number}, starting merge repair attempt {next_attempt}",
