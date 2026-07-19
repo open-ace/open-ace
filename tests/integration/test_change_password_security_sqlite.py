@@ -55,9 +55,7 @@ class TestChangePasswordLockoutIntegration:
             assert is_locked is False
 
             # Verify database state
-            row = tmp_db.fetch_one(
-                "SELECT * FROM login_attempts WHERE username = ?", (key,)
-            )
+            row = tmp_db.fetch_one("SELECT * FROM login_attempts WHERE username = ?", (key,))
             assert row is not None
             assert row["attempt_count"] == 1
 
@@ -65,9 +63,7 @@ class TestChangePasswordLockoutIntegration:
             count, is_locked = _record_change_password_failure(123)
             assert count == 2
 
-            row = tmp_db.fetch_one(
-                "SELECT * FROM login_attempts WHERE username = ?", (key,)
-            )
+            row = tmp_db.fetch_one("SELECT * FROM login_attempts WHERE username = ?", (key,))
             assert row["attempt_count"] == 2
 
     def test_lockout_after_max_attempts(self, tmp_db):
@@ -111,9 +107,7 @@ class TestChangePasswordLockoutIntegration:
             _record_change_password_failure(789)
 
             # Verify record exists
-            row = tmp_db.fetch_one(
-                "SELECT * FROM login_attempts WHERE username = ?", (key,)
-            )
+            row = tmp_db.fetch_one("SELECT * FROM login_attempts WHERE username = ?", (key,))
             assert row is not None
 
             # Clear
@@ -121,9 +115,7 @@ class TestChangePasswordLockoutIntegration:
             assert result is True
 
             # Record should be gone
-            row = tmp_db.fetch_one(
-                "SELECT * FROM login_attempts WHERE username = ?", (key,)
-            )
+            row = tmp_db.fetch_one("SELECT * FROM login_attempts WHERE username = ?", (key,))
             assert row is None
 
     def test_expired_lockout_allows_operation(self, tmp_db):
@@ -144,9 +136,7 @@ class TestChangePasswordLockoutIntegration:
             assert is_locked is False
 
             # Record should have been cleaned up
-            row = tmp_db.fetch_one(
-                "SELECT * FROM login_attempts WHERE username = ?", (key,)
-            )
+            row = tmp_db.fetch_one("SELECT * FROM login_attempts WHERE username = ?", (key,))
             assert row is None
 
 
@@ -233,7 +223,6 @@ class TestChangePasswordLoginIndependence:
         """Change-password lockout should not affect login lockout."""
         auth_service._security_settings_cache.clear()
 
-        cp_key = _get_change_password_lockout_key(123)
         login_key = "testuser"
 
         with self._patch_db(tmp_db):
@@ -248,9 +237,7 @@ class TestChangePasswordLoginIndependence:
 
             # Login lockout for same user should NOT be affected
             # (login uses username, change-password uses user_id with cp: prefix)
-            row = tmp_db.fetch_one(
-                "SELECT * FROM login_attempts WHERE username = ?", (login_key,)
-            )
+            row = tmp_db.fetch_one("SELECT * FROM login_attempts WHERE username = ?", (login_key,))
             assert row is None  # No login lockout record
 
     def test_login_lockout_does_not_affect_change_password(self, tmp_db):
@@ -276,9 +263,7 @@ class TestChangePasswordLoginIndependence:
             assert is_locked is True
 
             # Change-password lockout should NOT be affected
-            row = tmp_db.fetch_one(
-                "SELECT * FROM login_attempts WHERE username = ?", (cp_key,)
-            )
+            row = tmp_db.fetch_one("SELECT * FROM login_attempts WHERE username = ?", (cp_key,))
             assert row is None  # No change-password lockout record
 
     def test_different_users_independent(self, tmp_db):

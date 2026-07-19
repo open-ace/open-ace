@@ -90,9 +90,7 @@ class TestFailureRecordingDegradation:
         mock_db = MagicMock()
 
         def execute_side_effect(sql, params=None):
-            if "BEGIN" in sql:
-                return None
-            elif "SELECT" in sql or "fetch" in sql.lower():
+            if "BEGIN" in sql or "SELECT" in sql or "fetch" in sql.lower():
                 return None
             else:
                 raise Exception("Update failed")

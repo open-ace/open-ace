@@ -305,7 +305,9 @@ class TestChangePasswordError:
         assert ChangePasswordError.USER_NOT_FOUND.value == "user_not_found"
         assert ChangePasswordError.CURRENT_PASSWORD_INCORRECT.value == "current_password_incorrect"
         assert ChangePasswordError.NEW_PASSWORD_INVALID.value == "new_password_invalid"
-        assert ChangePasswordError.NEW_PASSWORD_SAME_AS_CURRENT.value == "new_password_same_as_current"
+        assert (
+            ChangePasswordError.NEW_PASSWORD_SAME_AS_CURRENT.value == "new_password_same_as_current"
+        )
         assert ChangePasswordError.UPDATE_FAILED.value == "update_failed"
 
 
