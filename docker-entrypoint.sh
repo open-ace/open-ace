@@ -193,23 +193,77 @@ echo "=========================================="
 # Lets `docker compose up` work with zero configuration: the entrypoint fills
 # SECRET_KEY / OPENACE_ENCRYPTION_KEY / UPLOAD_AUTH_KEY so the Python app
 # (which runs as FLASK_ENV=production and strictly validates these) starts.
-# Generated values are exported into the environment the app inherits. Setting
-# any of them explicitly (e.g. via .env) is always honored.
+#
+# Persistence: generated values are written to $OPENACE_CONFIG_DIR/generated-
+# secrets.env (the config-data named volume) and re-sourced on subsequent
+# starts. This is critical because OPENACE_ENCRYPTION_KEY encrypts data that is
+# itself persisted (SMTP passwords, API keys in postgres) — a fresh random key
+# on every restart would silently make that ciphertext undecryptable. Setting
+# any secret explicitly via env (e.g. .env) always takes precedence and is
+# never overwritten.
 ensure_secret_env() {
-    if [ -z "$SECRET_KEY" ]; then
-        SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))")
-        export SECRET_KEY
-        echo "Generated SECRET_KEY (set SECRET_KEY to override)."
+    local secrets_file="${OPENACE_CONFIG_DIR}/generated-secrets.env"
+
+    # 1. Reload previously generated secrets (persisted across restarts), but
+    #    ONLY for variables not already set in the environment — explicit env
+    #    values (e.g. from .env) always take precedence. We avoid `set -a; source`
+    #    because that would clobber operator-provided values. Python parses the
+    #    file (NAME='value' lines we wrote) and prints assignments only for
+    #    still-unset names.
+    if [ -f "$secrets_file" ]; then
+        local reloaded
+        reloaded=$(python3 -c "
+import os
+for line in open('$secrets_file'):
+    line = line.strip()
+    if not line or line.startswith('#') or '=' not in line:
+        continue
+    name = line.split('=', 1)[0]
+    if name.isidentifier() and not os.environ.get(name):
+        print(line)
+")
+        if [ -n "$reloaded" ]; then
+            eval "$reloaded"
+            export SECRET_KEY OPENACE_ENCRYPTION_KEY UPLOAD_AUTH_KEY
+        fi
     fi
-    if [ -z "$OPENACE_ENCRYPTION_KEY" ]; then
-        OPENACE_ENCRYPTION_KEY=$(python3 -c "import secrets; print(secrets.token_hex(16))")
-        export OPENACE_ENCRYPTION_KEY
-        echo "Generated OPENACE_ENCRYPTION_KEY (set OPENACE_ENCRYPTION_KEY to override)."
-    fi
-    if [ -z "$UPLOAD_AUTH_KEY" ]; then
-        UPLOAD_AUTH_KEY=$(python3 -c "import secrets; print(secrets.token_hex(16))")
-        export UPLOAD_AUTH_KEY
-        echo "Generated UPLOAD_AUTH_KEY (set UPLOAD_AUTH_KEY to override)."
+
+    # 2. Generate any still-unset secret. Single python invocation generates
+    #    only the missing ones and prints NAME='value' lines for eval.
+    local generated
+    generated=$(python3 -c "
+import os, secrets
+if not os.environ.get('SECRET_KEY'):
+    print(\"SECRET_KEY='\" + secrets.token_hex(32) + \"'\")
+if not os.environ.get('OPENACE_ENCRYPTION_KEY'):
+    print(\"OPENACE_ENCRYPTION_KEY='\" + secrets.token_hex(16) + \"'\")
+if not os.environ.get('UPLOAD_AUTH_KEY'):
+    print(\"UPLOAD_AUTH_KEY='\" + secrets.token_hex(16) + \"'\")
+")
+    if [ -n "$generated" ]; then
+        eval "$generated"
+        export SECRET_KEY OPENACE_ENCRYPTION_KEY UPLOAD_AUTH_KEY
+        # Log which keys were generated (name only, never the value).
+        local line name
+        while IFS= read -r line; do
+            name="${line%%=*}"
+            echo "Generated $name (set $name env to override)."
+        done <<< "$generated"
+
+        # 3. Persist ONLY the secrets we generated this run (not values the
+        #    operator set explicitly via env — those belong in .env, not here).
+        #    Idempotent: drop any prior assignment for these names, append new.
+        local names=""
+        while IFS= read -r line; do
+            name="${line%%=*}"
+            names="${names:+$names|}$name"
+        done <<< "$generated"
+        mkdir -p "$OPENACE_CONFIG_DIR"
+        grep -vE "^($names)=" "$secrets_file" 2>/dev/null > "${secrets_file}.tmp" || true
+        printf '%s\n' "$generated" >> "${secrets_file}.tmp"
+        mv "${secrets_file}.tmp" "$secrets_file"
+        chmod 600 "$secrets_file"
+        echo "Persisted generated secrets to $secrets_file (survives restart)."
     fi
 }
 
@@ -271,9 +325,11 @@ generate_default_config() {
     # Get hostname dynamically (matches install.sh behavior)
     HOST_NAME=$(hostname -f 2>/dev/null || hostname 2>/dev/null || echo "docker-container")
 
-    # Generate random token secret and upload auth key (32 chars hex)
+    # Generate random token secret (32 chars hex). UPLOAD_AUTH_KEY is sourced
+    # from ensure_secret_env above (env or persisted file) so the value stays
+    # stable across restarts; only generate here as a last-resort fallback.
     TOKEN_SECRET=$(python3 -c "import secrets; print(secrets.token_hex(16))")
-    UPLOAD_AUTH_KEY=$(python3 -c "import secrets; print(secrets.token_hex(16))")
+    UPLOAD_AUTH_KEY="${UPLOAD_AUTH_KEY:-$(python3 -c "import secrets; print(secrets.token_hex(16))")}"
 
     # Generate default config (matches install.sh defaults)
     # Note: DATABASE_URL env var takes precedence over config file for database connection
@@ -354,8 +410,9 @@ CONFIG_EOF
 }
 
 # Ensure security secrets exist before the app starts. Must run before
-# generate_default_config (which embeds UPLOAD_AUTH_KEY into config.json) and
-# before gunicorn (which needs SECRET_KEY / OPENACE_ENCRYPTION_KEY in env).
+# generate_default_config (which reuses UPLOAD_AUTH_KEY from env when present,
+# falling back to generation only if still unset) and before gunicorn (which
+# needs SECRET_KEY / OPENACE_ENCRYPTION_KEY in env).
 ensure_secret_env
 generate_default_config
 
