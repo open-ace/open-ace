@@ -358,8 +358,16 @@ def save_usage(
     request_count: int = 0,
     models_used: Optional[list[str]] = None,
     host_name: str = "localhost",
+    tenant_id: int = 1,
 ) -> bool:
-    """Save or update usage data for a specific date and tool."""
+    """Save or update usage data for a specific date and tool.
+
+    tenant_id defaults to 1: daily_usage is a host-level aggregate (one row
+    per date+tool+host, summed across all system_accounts on that host), so it
+    cannot be split to a specific tenant without first adding a user dimension.
+    The unique constraint is (tenant_id, date, tool_name, host_name); the
+    default keeps single-tenant behavior identical to pre-multitenant.
+    """
     conn = get_connection()
     cursor = conn.cursor()
 
@@ -370,9 +378,9 @@ def save_usage(
             cursor,
             """
             INSERT INTO daily_usage
-            (date, tool_name, host_name, tokens_used, input_tokens, output_tokens, cache_tokens, request_count, models_used)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-            ON CONFLICT (date, tool_name, host_name) DO UPDATE SET
+            (date, tool_name, host_name, tokens_used, input_tokens, output_tokens, cache_tokens, request_count, models_used, tenant_id)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (tenant_id, date, tool_name, host_name) DO UPDATE SET
                 tokens_used = EXCLUDED.tokens_used,
                 input_tokens = EXCLUDED.input_tokens,
                 output_tokens = EXCLUDED.output_tokens,
@@ -390,6 +398,7 @@ def save_usage(
                 cache_tokens,
                 request_count,
                 models_json,
+                tenant_id,
             ),
         )
     else:

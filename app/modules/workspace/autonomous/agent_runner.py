@@ -1480,6 +1480,27 @@ class AutonomousAgentRunner:
                 except Exception as e:
                     logger.warning("Failed to update session record: %s", e)
 
+            # Close the eagerly-created workflow wrapper row when the agent never
+            # produced a real CLI session id (sidebar source + executable not
+            # found / spawn failed → result.session_id=""). Without this the
+            # wrapper stays status='active' forever — a zombie row. The wrapper
+            # is keyed by `session_id` (the tracking uuid), not the empty CLI id.
+            if uses_sidebar_session and not persisted_session_id and self.session_manager:
+                try:
+                    self.session_manager.update_session_fields(
+                        session_id,
+                        {
+                            "status": "error",
+                            "error_message": result.error or "agent failed to start",
+                        },
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "Failed to close orphan workflow wrapper %s: %s",
+                        session_id[:8],
+                        e,
+                    )
+
             return result
 
         except Exception as e:

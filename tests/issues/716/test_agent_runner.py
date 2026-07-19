@@ -85,6 +85,53 @@ class TestAgentRunnerRunTask:
         assert "not found" in result.error
         assert result.tracking_session_id
 
+    def test_sidebar_missing_executable_closes_orphan_wrapper(self):
+        """When claude-code (sidebar source) fails to start, the eagerly-created
+        workflow wrapper row must be closed to status='error' — otherwise it
+        stays 'active' forever as a zombie row that leaks into the session list.
+        (#1816 orphan wrapper)"""
+        mock_adapter = MagicMock()
+        mock_adapter.get_executable_name.return_value = "claude"
+        mock_adapter.supports_stdin_input.return_value = True
+        mock_adapter.provides_full_command.return_value = False
+        mock_adapter.build_start_args.return_value = ["claude"]
+        mock_cli_adapters = MagicMock()
+        mock_cli_adapters.get_adapter.return_value = mock_adapter
+
+        sm = MagicMock()
+        runner = AutonomousAgentRunner(session_manager=sm)
+
+        with patch.dict("sys.modules", {"cli_adapters": mock_cli_adapters}):
+            with patch("shutil.which", return_value=None):
+                result = runner.run_agent_task(
+                    workflow_id="wf-orphan",
+                    cli_tool="claude-code",
+                    model="test-model",
+                    project_path="/tmp/test",
+                    prompt="Do something",
+                    workspace_type="local",
+                )
+
+        assert result.success is False
+        # sidebar source + missing executable → empty session_id (no real CLI
+        # session was established)
+        assert result.session_id == ""
+        assert result.tracking_session_id  # the tracking uuid still present
+        # The wrapper row must be closed to status='error' with the failure
+        # reason, so it doesn't linger as 'active'.
+        status_updates = [
+            call
+            for call in sm.update_session_fields.call_args_list
+            if call.args and len(call.args) >= 2 and call.args[1].get("status") == "error"
+        ]
+        assert status_updates, "orphan wrapper not closed to status='error'"
+        # The closed row is keyed by the tracking uuid, with the error message.
+        closed_call = status_updates[0]
+        assert (
+            closed_call.args[1].get("error_message")
+            and "not found" in closed_call.args[1]["error_message"]
+        )
+
     def test_run_local_success(self):
         """Test successful local agent execution — verify return value fields."""
         mock_adapter = MagicMock()

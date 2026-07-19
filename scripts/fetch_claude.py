@@ -723,6 +723,66 @@ def find_claude_project_dir() -> Optional[Path]:
     return None
 
 
+def _extract_workflow_id_from_project_path(project_path: str) -> str:
+    """Extract a workflow_id from a Claude-encoded project path.
+
+    Claude encodes the worktree cwd as the realpath with ``/``→``-`` and stores
+    the session jsonl under ``~/.claude/projects/<encoded>/``. Autonomous
+    workflows run in ``{project_path}/.worktrees/{workflow_id}``, so the
+    encoded form contains a ``-worktrees-<uuid>`` segment. This extracts that
+    UUID so a fetched CLI session can be linked back to its workflow.
+
+    Returns "" if the path doesn't match the worktree pattern (regular CLI
+    sessions, not from an autonomous workflow).
+    """
+    if not project_path:
+        return ""
+    # Match worktrees[-/]<uuid> in either encoded (-worktrees-) or raw
+    # (.worktrees/) form.
+    m = re.search(
+        r"worktrees[-/]([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})",
+        project_path,
+        re.IGNORECASE,
+    )
+    return m.group(1) if m else ""
+
+
+def _resolve_workflow_session_annotation(cursor, project_path: str) -> tuple[str, dict]:
+    """Return (title, context) for a fetched CLI session.
+
+    If the session's project_path maps to an autonomous workflow worktree,
+    look up the workflow's title and produce a rich annotation:
+    - title: ``[Auto] {workflow title}`` (readable, e.g. "[Auto] gh issue 1851")
+    - context: ``{"workflow_id": "...", "workflow_imported": true}`` so the
+      frontend can show a robot badge and jump to the workflow timeline.
+
+    Falls back to ("", {}) for non-workflow sessions (regular CLI use).
+    """
+    workflow_id = _extract_workflow_id_from_project_path(project_path)
+    if not workflow_id:
+        return "", {}
+
+    placeholder = db._placeholder()
+    try:
+        db._execute(
+            cursor,
+            f"SELECT title FROM autonomous_workflows WHERE workflow_id = {placeholder}",
+            (workflow_id,),
+        )
+        row = cursor.fetchone()
+    except Exception as e:
+        print(f"  Warning: failed to look up workflow {workflow_id[:8]}: {e}")
+        row = None
+
+    if not row:
+        # Workflow row gone (deleted) — still annotate the link so it's traceable.
+        wf_title = f"[Auto] workflow {workflow_id[:8]}"
+    else:
+        wf_title = f"[Auto] {row['title'] or workflow_id[:8]}"
+
+    return wf_title, {"workflow_id": workflow_id, "workflow_imported": True}
+
+
 def update_agent_sessions_stats(messages: list) -> int:
     """
     Update agent_sessions table statistics from collected messages.
@@ -840,21 +900,59 @@ def update_agent_sessions_stats(messages: list) -> int:
                     user_row = cursor.fetchone()
                     user_id = user_row["id"] if user_row else None
 
-                    title = f"claude - {session_id[:8]}"
+                    # Rich annotation: if this CLI session came from an autonomous
+                    # workflow worktree, link it back to the workflow with a
+                    # readable title and context for the frontend badge/jump.
+                    # Falls back to the plain "claude - xxxxxxxx" title for
+                    # regular (non-workflow) CLI sessions.
+                    wf_title, wf_context = _resolve_workflow_session_annotation(
+                        cursor, project_path
+                    )
+                    title = wf_title or f"claude - {session_id[:8]}"
 
-                    insert_sql = f"""
-                        INSERT INTO agent_sessions
-                        (session_id, session_type, title, tool_name, host_name, user_id, status, project_path,
-                         message_count, total_tokens, request_count, model, created_at, updated_at)
-                        VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder},
-                                {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder},
-                                {placeholder}, {placeholder}, {placeholder}, {placeholder})
-                    """
+                    # Model on the message with the strictly-greatest timestamp
+                    # (most-recently-used); see update_session_last_seen. NOT
+                    # list[-1], and NOT the loop residual `model` variable —
+                    # each session must read its own stats["last_model"].
                     model = stats["last_model"]
-                    _execute(
-                        cursor,
-                        insert_sql,
-                        (
+
+                    has_context_column = _column_exists(cursor, "agent_sessions", "context")
+                    if wf_context and has_context_column:
+                        insert_sql = f"""
+                            INSERT INTO agent_sessions
+                            (session_id, session_type, title, tool_name, host_name, user_id, status, project_path,
+                             message_count, total_tokens, request_count, model, context, created_at, updated_at)
+                            VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder},
+                                    {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder},
+                                    {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder})
+                        """
+                        insert_params = (
+                            session_id,
+                            "chat",
+                            title,
+                            tool_name,
+                            host_name,
+                            user_id,
+                            "completed",
+                            project_path,
+                            stats["message_count"],
+                            stats["total_tokens"],
+                            stats["request_count"],
+                            model,
+                            json.dumps(wf_context),
+                            now,
+                            now,
+                        )
+                    else:
+                        insert_sql = f"""
+                            INSERT INTO agent_sessions
+                            (session_id, session_type, title, tool_name, host_name, user_id, status, project_path,
+                             message_count, total_tokens, request_count, model, created_at, updated_at)
+                            VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder},
+                                    {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder},
+                                    {placeholder}, {placeholder}, {placeholder}, {placeholder})
+                        """
+                        insert_params = (
                             session_id,
                             "chat",
                             title,
@@ -869,8 +967,8 @@ def update_agent_sessions_stats(messages: list) -> int:
                             model,
                             now,
                             now,
-                        ),
-                    )
+                        )
+                    _execute(cursor, insert_sql, insert_params)
                     updated += 1
                 else:
                     # Update existing session

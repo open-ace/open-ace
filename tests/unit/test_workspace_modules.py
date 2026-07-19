@@ -340,6 +340,34 @@ class TestSessionManager:
         result = session_manager.list_sessions(user_id=1)
         assert [session.session_id for session in result["sessions"]] == ["actual-123"]
 
+    def test_list_sessions_hides_workflow_wrapper_with_empty_cli_session_id(self, session_manager):
+        """A workflow wrapper whose cli_session_id was never backfilled (e.g. the
+        agent failed to start) must still be hidden — visible_session_clause
+        must not depend on cli_session_id being populated."""
+        orphan = session_manager.create_session(
+            tool_name="claude",
+            user_id=1,
+            session_type=SessionType.WORKFLOW.value,
+            title="Autonomous: wf-1",
+            # No cli_session_id backfill — simulates an agent that never produced
+            # a real CLI session id (executable not found / spawn failed).
+            context={"workflow_id": "wf-1"},
+        )
+        # Sanity: cli_session_id is indeed empty.
+        assert orphan.cli_session_id == ""
+
+        visible = session_manager.create_session(
+            tool_name="claude",
+            user_id=1,
+            session_id="visible-regular",
+            title="Regular chat",
+        )
+
+        result = session_manager.list_sessions(user_id=1)
+        session_ids = [s.session_id for s in result["sessions"]]
+        assert visible.session_id in session_ids
+        assert orphan.session_id not in session_ids
+
     def test_session_expiration(self, session_manager):
         """Test session expiration."""
         session = session_manager.create_session(tool_name="claude", expires_in_hours=1)
