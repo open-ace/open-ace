@@ -682,6 +682,25 @@ _TRANSIENT_API_ERROR_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Context-window / input-length overflow signatures. A PERMANENT client
+# error (NOT transient — must not trigger the transient-retry backoff loop).
+# Used by CI repair to detect a resumed-session-too-large failure and switch
+# to a fresh minimal-context session on the next in-round retry. Kept broad
+# enough to catch provider-specific phrasings:
+#   GLM:      "Range of input length should be [1, 202752]"
+#   OpenAI:   "maximum context length" / "too many input tokens"
+#   Anthropic:"prompt is too long" / "context window"
+_CONTEXT_OVERFLOW_RE = re.compile(
+    r"range\s+of\s+input\s+length"
+    r"|maximum\s+context\s+length"
+    r"|context[_ ]?length\s*.{0,12}exceed"
+    r"|prompt\s+is\s+too\s+long"
+    r"|input\s+length\s+should\s+be"
+    r"|context[_ ]?window\s+.{0,12}exceed"
+    r"|too\s+many\s+input\s+tokens",
+    re.IGNORECASE,
+)
+
 # Test failure retry configuration.
 MAX_TEST_RETRIES = 2  # max retries when test agent itself fails
 MAX_DEV_RETRIES_ON_TEST_FAIL = 2  # max dev round retries for unfixable test failures
@@ -1284,6 +1303,101 @@ class AutonomousOrchestrator:
             f"{context}\n\n"
         )
 
+    def _collect_prior_ci_repair_failures(self) -> list[dict]:
+        """Return prior failed ``ci_repair_applied`` milestones.
+
+        Used to inject "what was already tried and failed" into a fresh
+        CI repair prompt so the agent doesn't repeat the same fix.
+        Context-overflow failures are excluded — the agent never produced
+        output in those rounds, so there's nothing actionable to avoid.
+        """
+        out: list[dict] = []
+        for ms in self.repo.list_milestones(self._workflow_id, phase="merge"):
+            if ms.get("milestone_type") != "ci_repair_applied":
+                continue
+            if ms.get("status") != "failed":
+                continue
+            body = f"{ms.get('error_message') or ''}\n{ms.get('result_summary') or ''}"
+            if _CONTEXT_OVERFLOW_RE.search(body):
+                continue
+            out.append(ms)
+        return out
+
+    def _build_prior_repair_failures_prompt(self) -> str:
+        """Inject full text of prior CI repair failures.
+
+        Returns empty on the first attempt (no history). Full error_message +
+        result_summary are injected verbatim (not summarized): a fresh session
+        starts with minimal context, so prior-failure text won't risk overflow.
+        """
+        prior = self._collect_prior_ci_repair_failures()
+        if not prior:
+            return ""
+        lines = [
+            "\n\n## ⚠️ 历史 CI 修复失败记录（请勿重复同样的修法）",
+            "以下是此前已经尝试过但失败的修复。当前会话是全新开始的，",
+            "请基于这些失败信息采用不同的修复思路，不要重复同样的改动。\n",
+        ]
+        for i, ms in enumerate(prior, 1):
+            title = ms.get("title") or ""
+            err = ms.get("error_message") or ""
+            summary = ms.get("result_summary") or ""
+            lines.append(f"### 失败记录 {i}: {title}")
+            if err:
+                lines.append(f"- 失败原因：\n```\n{err}\n```")
+            if summary:
+                lines.append(f"- 当时的修复摘要 / 报错：\n```\n{summary}\n```")
+            lines.append("")
+        return "\n".join(lines)
+
+    def _build_merge_ci_repair_agent_prompt(
+        self,
+        wf: dict,
+        pr_number: int,
+        failed_checks: list[dict],
+        *,
+        include_prior_failures: bool = False,
+    ) -> str:
+        """Assemble the CI repair agent prompt.
+
+        When ``include_prior_failures`` is set (used by the fresh-session
+        retry after a context overflow), appends full text of prior failed
+        CI repair attempts so the agent avoids repeating them.
+        """
+        issue_number = wf.get("github_issue_number") or self.workflow.get("github_issue_number")
+        prompt = (
+            AUTONOMOUS_CONTEXT
+            + "当前任务是在已有 PR 上修复 merge 阶段失败的 CI，不是开始新一轮完整开发。\n\n"
+        )
+        if issue_number:
+            prompt += (
+                f"## 关联 Issue\n"
+                f"本任务关联 GitHub Issue #{issue_number}。\n"
+                f"修复时请确保修改继续满足 Issue #{issue_number} 的所有需求。\n\n"
+            )
+        prompt += (
+            "## 重要约束\n"
+            "1. 保持在当前工作分支上修复，不要创建新的 PR，不要切换到其他分支。\n"
+            "2. 不要进入新的代码审查、进度汇报或等待流程；当前唯一目标是让现有 PR 的 CI 通过。\n"
+            "3. 必须优先根据 CI 工作流、失败日志摘录和仓库脚本定位问题，复现 CI 真实执行的命令。\n"
+            "4. 修复后重新运行对应命令，以及你改动涉及到的必要相关测试。\n"
+            "5. 只有在确实产生代码或配置修改后，才能提交 git commit 并推送到当前 PR 分支。\n"
+            "6. 结束时请明确说明：你复现了哪些命令、修复了什么、还剩什么风险。\n"
+        )
+        prompt += self._get_ci_repair_prompt(wf)
+        if failed_checks:
+            failure_list = "\n".join(
+                f"- **{check.get('name') or 'unknown'}**: {check.get('state') or 'unknown'}"
+                for check in failed_checks
+                if check.get("bucket") == "fail"
+            )
+            if failure_list:
+                prompt += f"## 当前失败检查\n{failure_list}\n\n"
+        prompt += self._get_user_feedback_prompt(wf)
+        if include_prior_failures:
+            prompt += self._build_prior_repair_failures_prompt()
+        return prompt
+
     @staticmethod
     def _detect_and_push_ci_repair_changes(
         gh: GitHubOps,
@@ -1344,7 +1458,6 @@ class AutonomousOrchestrator:
         dev_round = int(wf.get("dev_round", 1) or 1)
         attempt = int(wf.get("ci_repair_attempts", 0) or 0)
         branch_name = wf.get("branch_name", "")
-        issue_number = wf.get("github_issue_number") or self.workflow.get("github_issue_number")
 
         repair_ms = self._create_milestone(
             phase="merge",
@@ -1354,35 +1467,7 @@ class AutonomousOrchestrator:
             title=f"CI repair attempt {attempt} for PR #{pr_number}",
         )
 
-        repair_prompt = (
-            AUTONOMOUS_CONTEXT
-            + "当前任务是在已有 PR 上修复 merge 阶段失败的 CI，不是开始新一轮完整开发。\n\n"
-        )
-        if issue_number:
-            repair_prompt += (
-                f"## 关联 Issue\n"
-                f"本任务关联 GitHub Issue #{issue_number}。\n"
-                f"修复时请确保修改继续满足 Issue #{issue_number} 的所有需求。\n\n"
-            )
-        repair_prompt += (
-            "## 重要约束\n"
-            "1. 保持在当前工作分支上修复，不要创建新的 PR，不要切换到其他分支。\n"
-            "2. 不要进入新的代码审查、进度汇报或等待流程；当前唯一目标是让现有 PR 的 CI 通过。\n"
-            "3. 必须优先根据 CI 工作流、失败日志摘录和仓库脚本定位问题，复现 CI 真实执行的命令。\n"
-            "4. 修复后重新运行对应命令，以及你改动涉及到的必要相关测试。\n"
-            "5. 只有在确实产生代码或配置修改后，才能提交 git commit 并推送到当前 PR 分支。\n"
-            "6. 结束时请明确说明：你复现了哪些命令、修复了什么、还剩什么风险。\n"
-        )
-        repair_prompt += self._get_ci_repair_prompt(wf)
-        if failed_checks:
-            failure_list = "\n".join(
-                f"- **{check.get('name') or 'unknown'}**: {check.get('state') or 'unknown'}"
-                for check in failed_checks
-                if check.get("bucket") == "fail"
-            )
-            if failure_list:
-                repair_prompt += f"## 当前失败检查\n{failure_list}\n\n"
-        repair_prompt += self._get_user_feedback_prompt(wf)
+        repair_prompt = self._build_merge_ci_repair_agent_prompt(wf, pr_number, failed_checks)
 
         # Capture the PR's remote head SHA (not the local worktree HEAD) as the
         # baseline. If a prior repair round committed locally but didn't push
@@ -1423,6 +1508,48 @@ class AutonomousOrchestrator:
             timeout=int(wf.get("task_timeout") or DEFAULT_TASK_TIMEOUT),
             milestone_id=repair_ms.get("milestone_id", ""),
         )
+
+        # Context-overflow recovery: the resumed main session can exceed the
+        # model's input-token limit by merge time (plan + every dev/review
+        # round accumulate on `main`). The agent then produces nothing (400
+        # on the first API call). Retry the SAME repair attempt on a fresh
+        # minimal-context session (no --resume), injecting prior CI repair
+        # failures so the agent doesn't repeat failed approaches. Does NOT
+        # increment ci_repair_attempts — this is in-round recovery for the
+        # current attempt, not a new attempt. (#1816)
+        if self._is_context_overflow(repair_result):
+            logger.warning(
+                "CI repair attempt %d hit context overflow on main session; "
+                "retrying on fresh session with prior-failure context",
+                attempt,
+            )
+            # Discard any half-applied changes from the aborted main run so the
+            # fresh agent starts from a clean worktree.
+            try:
+                gh.reset_hard_to_head()
+            except Exception as e:
+                logger.warning("Failed to reset worktree before fresh CI repair: %s", e)
+
+            fresh_prompt = self._build_merge_ci_repair_agent_prompt(
+                wf, pr_number, failed_checks, include_prior_failures=True
+            )
+            repair_result = self._run_agent(
+                wf=wf,
+                workflow_id=self._workflow_id,
+                cli_tool=wf.get("cli_tool", "claude-code"),
+                model=wf.get("model", ""),
+                project_path=wf.get("worktree_path") or wf.get("project_path", ""),
+                prompt=fresh_prompt,
+                workspace_type=wf.get("workspace_type", "local"),
+                remote_machine_id=wf.get("remote_machine_id"),
+                permission_mode=wf.get("permission_mode", "auto-edit"),
+                allowed_tools=AUTONOMOUS_DEV_ALLOWED_TOOLS.get(
+                    wf.get("cli_tool", "claude-code"), []
+                ),
+                session_line="fresh",
+                timeout=int(wf.get("task_timeout") or DEFAULT_TASK_TIMEOUT),
+                milestone_id=repair_ms.get("milestone_id", ""),
+            )
 
         self._gh = None
         gh = self._get_gh()
@@ -1487,7 +1614,16 @@ class AutonomousOrchestrator:
             return
 
         if not sha_changed:
-            message = "CI repair failed: agent produced no code changes"
+            # Preserve the context-overflow signal in the error message so the
+            # next round's _collect_prior_ci_repair_failures filters it out
+            # (an overflow failure has no actionable signal — the agent never
+            # produced output). Without this, a double-overflow round would
+            # be misclassified as "no code changes" and wrongly injected into
+            # the next fresh prompt. (#1816 review suggestion)
+            if self._is_context_overflow(repair_result):
+                message = f"CI repair failed: context overflow - {repair_result.error}"
+            else:
+                message = "CI repair failed: agent produced no code changes"
             milestone_updates["status"] = "failed"
             milestone_updates["error_message"] = message
             self.repo.update_milestone(repair_ms.get("milestone_id", ""), milestone_updates)
@@ -2452,6 +2588,23 @@ class AutonomousOrchestrator:
         if not response:
             return False
         return bool(_TRANSIENT_API_ERROR_RE.search(response))
+
+    @staticmethod
+    def _is_context_overflow(result: AgentTaskResult) -> bool:
+        """True if the agent call failed because the resumed session context
+        exceeded the model's input-token limit (e.g. GLM ``400
+        InvalidParameter: Range of input length``).
+
+        Such failures are recoverable: the agent produced nothing because the
+        very first API call was rejected, so retrying on a fresh
+        minimal-context session (no ``--resume``) can succeed. This is a
+        permanent client error (NOT transient), so it deliberately does not
+        match ``_TRANSIENT_API_ERROR_RE`` and won't trigger the backoff loop.
+        """
+        if result.success:
+            return False
+        body = f"{result.error or ''}\n{result.response_text or ''}"
+        return bool(_CONTEXT_OVERFLOW_RE.search(body))
 
     def _run_agent(
         self, wf: dict = None, *, session_line: str = "fresh", milestone_id: str = "", **kwargs
