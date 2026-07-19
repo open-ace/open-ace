@@ -8,6 +8,11 @@ Issue: #1852
 
 Add tenant_id column to daily_messages, daily_stats, and hourly_stats tables
 for proper tenant isolation in Analysis functionality.
+
+On PostgreSQL, indexes are created with ``CONCURRENTLY`` to avoid locking the
+table. This requires running outside a transaction, so we wrap the
+``op.create_index`` calls in ``autocommit_block()`` and pass
+``postgresql_concurrently=True`` (ignored by SQLite).
 """
 
 from __future__ import annotations
@@ -46,12 +51,14 @@ def upgrade() -> None:
     dm_indexes = _index_names(inspector, "daily_messages")
     if "idx_daily_messages_tenant_date" not in dm_indexes:
         if is_postgres:
-            op.create_index(
-                "idx_daily_messages_tenant_date",
-                "daily_messages",
-                ["tenant_id", "date"],
-                postgresql_concurrently=True,
-            )
+            # MIG002: wrap postgresql_concurrently in autocommit_block
+            with op.get_context().autocommit_block():
+                op.create_index(
+                    "idx_daily_messages_tenant_date",
+                    "daily_messages",
+                    ["tenant_id", "date"],
+                    postgresql_concurrently=True,
+                )
         else:
             op.create_index(
                 "idx_daily_messages_tenant_date",
@@ -82,12 +89,14 @@ def upgrade() -> None:
     ds_indexes = _index_names(inspector, "daily_stats")
     if "idx_daily_stats_tenant_date" not in ds_indexes:
         if is_postgres:
-            op.create_index(
-                "idx_daily_stats_tenant_date",
-                "daily_stats",
-                ["tenant_id", "date"],
-                postgresql_concurrently=True,
-            )
+            # MIG002: wrap postgresql_concurrently in autocommit_block
+            with op.get_context().autocommit_block():
+                op.create_index(
+                    "idx_daily_stats_tenant_date",
+                    "daily_stats",
+                    ["tenant_id", "date"],
+                    postgresql_concurrently=True,
+                )
         else:
             op.create_index(
                 "idx_daily_stats_tenant_date",
@@ -118,12 +127,14 @@ def upgrade() -> None:
     hs_indexes = _index_names(inspector, "hourly_stats")
     if "idx_hourly_stats_tenant_date" not in hs_indexes:
         if is_postgres:
-            op.create_index(
-                "idx_hourly_stats_tenant_date",
-                "hourly_stats",
-                ["tenant_id", "date"],
-                postgresql_concurrently=True,
-            )
+            # MIG002: wrap postgresql_concurrently in autocommit_block
+            with op.get_context().autocommit_block():
+                op.create_index(
+                    "idx_hourly_stats_tenant_date",
+                    "hourly_stats",
+                    ["tenant_id", "date"],
+                    postgresql_concurrently=True,
+                )
         else:
             op.create_index(
                 "idx_hourly_stats_tenant_date",
@@ -178,13 +189,23 @@ def downgrade() -> None:
     """Remove tenant_id columns and indexes."""
     conn = op.get_bind()
     inspector = sa.inspect(conn)
+    is_postgres = conn.dialect.name == "postgresql"
 
     # hourly_stats
     hs_indexes = _index_names(inspector, "hourly_stats")
     if "idx_hourly_stats_orphan" in hs_indexes:
         op.drop_index("idx_hourly_stats_orphan", table_name="hourly_stats")
     if "idx_hourly_stats_tenant_date" in hs_indexes:
-        op.drop_index("idx_hourly_stats_tenant_date", table_name="hourly_stats")
+        if is_postgres:
+            # MIG002: wrap postgresql_concurrently in autocommit_block
+            with op.get_context().autocommit_block():
+                op.drop_index(
+                    "idx_hourly_stats_tenant_date",
+                    table_name="hourly_stats",
+                    postgresql_concurrently=True,
+                )
+        else:
+            op.drop_index("idx_hourly_stats_tenant_date", table_name="hourly_stats")
     hs_columns = _column_names(inspector, "hourly_stats")
     if "tenant_id" in hs_columns:
         op.drop_column("hourly_stats", "tenant_id")
@@ -194,7 +215,16 @@ def downgrade() -> None:
     if "idx_daily_stats_orphan" in ds_indexes:
         op.drop_index("idx_daily_stats_orphan", table_name="daily_stats")
     if "idx_daily_stats_tenant_date" in ds_indexes:
-        op.drop_index("idx_daily_stats_tenant_date", table_name="daily_stats")
+        if is_postgres:
+            # MIG002: wrap postgresql_concurrently in autocommit_block
+            with op.get_context().autocommit_block():
+                op.drop_index(
+                    "idx_daily_stats_tenant_date",
+                    table_name="daily_stats",
+                    postgresql_concurrently=True,
+                )
+        else:
+            op.drop_index("idx_daily_stats_tenant_date", table_name="daily_stats")
     ds_columns = _column_names(inspector, "daily_stats")
     if "tenant_id" in ds_columns:
         op.drop_column("daily_stats", "tenant_id")
@@ -204,7 +234,16 @@ def downgrade() -> None:
     if "idx_daily_messages_orphan" in dm_indexes:
         op.drop_index("idx_daily_messages_orphan", table_name="daily_messages")
     if "idx_daily_messages_tenant_date" in dm_indexes:
-        op.drop_index("idx_daily_messages_tenant_date", table_name="daily_messages")
+        if is_postgres:
+            # MIG002: wrap postgresql_concurrently in autocommit_block
+            with op.get_context().autocommit_block():
+                op.drop_index(
+                    "idx_daily_messages_tenant_date",
+                    table_name="daily_messages",
+                    postgresql_concurrently=True,
+                )
+        else:
+            op.drop_index("idx_daily_messages_tenant_date", table_name="daily_messages")
     dm_columns = _column_names(inspector, "daily_messages")
     if "tenant_id" in dm_columns:
         op.drop_column("daily_messages", "tenant_id")
