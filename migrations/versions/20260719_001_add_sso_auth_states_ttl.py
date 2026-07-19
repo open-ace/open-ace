@@ -78,7 +78,12 @@ def _index_exists(conn, table_name: str, index_name: str) -> bool:
 
 
 def upgrade() -> None:
-    """Add expires_at column and index to sso_auth_states table."""
+    """Add expires_at column and index to sso_auth_states table.
+
+    For fresh DBs the column is already created in the baseline migration
+    (20260703_002). This migration handles existing DBs that predate the
+    expires_at column.
+    """
     conn = op.get_bind()
 
     # Check if table exists first
@@ -100,6 +105,15 @@ def upgrade() -> None:
 
     if not table_exists:
         log.info("sso_auth_states table does not exist, skipping")
+        return
+
+    # If column already exists (fresh DB where baseline CREATE TABLE includes it),
+    # just ensure the index exists and return.
+    if _column_exists(conn, "sso_auth_states", "expires_at"):
+        log.info("expires_at column already exists, ensuring index")
+        index_name = "idx_sso_auth_states_expires"
+        if not _index_exists(conn, "sso_auth_states", index_name):
+            op.execute(f"CREATE INDEX {index_name} ON sso_auth_states(expires_at)")
         return
 
     # Add expires_at column if not exists

@@ -59,6 +59,10 @@ def upgrade() -> None:
     log.info("Creating sso_auth_states table")
     # The DDL is dialect-neutral (plain TEXT columns + TIMESTAMP default), so a
     # single statement works for both PostgreSQL and SQLite.
+    # Note: expires_at and its index are defined here (not in a later ALTER) so
+    # that schema-sync's column-dict comparison matches schema-sqlite.sql on all
+    # SQLite versions. ALTER ADD COLUMN can produce a different internal default
+    # representation depending on the SQLite library version (#1815 CI drift).
     op.execute(
         """
         CREATE TABLE sso_auth_states (
@@ -66,9 +70,13 @@ def upgrade() -> None:
             code_verifier TEXT NOT NULL,
             provider_name TEXT NOT NULL,
             nonce TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            expires_at TIMESTAMP NOT NULL DEFAULT (datetime('now', '+600 seconds'))
         )
         """
+    )
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS idx_sso_auth_states_expires ON sso_auth_states(expires_at)"
     )
 
 
