@@ -706,6 +706,16 @@ MAX_TEST_RETRIES = 2  # max retries when test agent itself fails
 MAX_DEV_RETRIES_ON_TEST_FAIL = 2  # max dev round retries for unfixable test failures
 MAX_CI_REPAIR_ATTEMPTS = 3  # max automatic dev-round retries for merge-phase CI failures
 
+# Sentinel digest used by _ci_failure_fingerprint when get_check_failure_excerpt
+# returns empty (old gh CLI / token / REST-API URL-format issues). Deliberately
+# contains non-hex chars so it can never collide with a real sha256[:12].
+# The give-up guard in _start_ci_repair_round checks for this sentinel to skip
+# the "unchanged signature" misfire — a name-only fingerprint has no
+# discriminative power, so firing the guard would wrongly kill workflows whose
+# real failure did change (#1855, #1856). Shared constant so producer
+# (_ci_failure_fingerprint) and consumer (_start_ci_repair_round) can't drift.
+NO_EXCERPT_SENTINEL = "<no-excerpt>"
+
 
 def _next_phase(current_phase: str) -> str:
     """Return the phase that follows current_phase."""
@@ -1196,7 +1206,18 @@ class AutonomousOrchestrator:
             # run/job ids) so the hash is stable across re-runs of the same
             # error but differs when the error set changes.
             normalized = self._normalize_failure_excerpt(excerpt)
-            digest = hashlib.sha256(normalized.encode()).hexdigest()[:12]
+            if normalized:
+                digest = hashlib.sha256(normalized.encode()).hexdigest()[:12]
+            else:
+                # Excerpt unavailable (old gh CLI / token / URL-format issue).
+                # Use a sentinel distinct from any real hash so the caller
+                # knows the fingerprint is name-only and should NOT trigger the
+                # "unchanged signature" give-up guard — that guard requires the
+                # fingerprint to reflect actual error lines, and a name-only
+                # fingerprint can't tell whether the agent's fix changed the
+                # error set. Misfiring it would kill workflows (e.g. #1855)
+                # whose real failure did change.
+                digest = NO_EXCERPT_SENTINEL
             parts.append(f"{name}::{digest}")
         return "\n".join(sorted(parts))
 
@@ -2333,8 +2354,18 @@ class AutonomousOrchestrator:
         previous_signature = (wf.get("last_ci_failure_signature") or "").strip()
         previous_head_sha = (wf.get("last_ci_failure_head_sha") or "").strip()
 
+        # The "signature unchanged → give up" guard only fires when the
+        # fingerprint reflects actual CI error lines. When the excerpt was
+        # unavailable (old gh CLI / token / URL-format issues), the fingerprint
+        # degrades to a name-only "<no-excerpt>" sentinel that can't tell
+        # whether the agent's fix changed the error set — applying the guard
+        # here would misfire and kill workflows whose real failure did change
+        # (#1855). Skip the guard in that case; the MAX_CI_REPAIR_ATTEMPTS
+        # cap still bounds retries.
+        fingerprint_is_meaningful = NO_EXCERPT_SENTINEL not in signature
         if (
-            previous_signature
+            fingerprint_is_meaningful
+            and previous_signature
             and signature
             and previous_signature == signature
             and previous_head_sha

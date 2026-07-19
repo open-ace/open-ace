@@ -321,15 +321,34 @@ class TestDoMergeDeferredRetry:
         )
 
     def test_start_ci_repair_round_fails_when_signature_repeats(self):
-        """A repeated failed-check signature should stop the auto-repair loop."""
+        """A repeated failed-check signature should stop the auto-repair loop.
+
+        Uses a real fine-grained fingerprint (name::sha256[:12] of the normalized
+        excerpt) so the give-up guard's signature comparison is meaningful. The
+        excerpt is mocked to be deterministic. Previously this test used the
+        pre-#1811 pipe format ("test (3.9)|failure|fail") which never matched
+        the new name::hash signature, so the guard never fired and the test
+        fell through to _build_ci_repair_context hitting an unmocked MagicMock.
+        """
+        import hashlib
+
+        from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+        excerpt = "FAILED tests/test_x.py::test_y - AssertionError\n"
+        expected_digest = hashlib.sha256(
+            AutonomousOrchestrator._normalize_failure_excerpt(excerpt).encode()
+        ).hexdigest()[:12]
+        expected_fingerprint = f"test (3.9)::{expected_digest}"
+
         wf = _make_workflow(
             ci_repair_attempts=1,
-            last_ci_failure_signature="test (3.9)|failure|fail",
+            last_ci_failure_signature=expected_fingerprint,
             last_ci_failure_head_sha="sha-old",
         )
         o, _ = _make_orchestrator(wf)
         mock_gh = MagicMock()
         mock_gh.get_pr_head_sha.return_value = "sha-new"
+        mock_gh.get_check_failure_excerpt.return_value = excerpt
         o._get_gh = MagicMock(return_value=mock_gh)
 
         o._start_ci_repair_round(

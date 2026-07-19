@@ -901,6 +901,10 @@ class GitHubOps:
                     "state": state or "unknown",
                     "bucket": self._bucket_from_status_state(state),
                     "link": status.get("target_url") or "",
+                    # Attach head_sha so get_check_failure_excerpt can fall back
+                    # to `gh run list --commit` when the link isn't a parseable
+                    # Actions job URL (REST API returns /runs/<id>).
+                    "head_sha": head_sha,
                 }
             )
 
@@ -913,6 +917,7 @@ class GitHubOps:
                     "state": conclusion or status or "unknown",
                     "bucket": self._bucket_from_check_run(status, conclusion),
                     "link": check_run.get("html_url") or "",
+                    "head_sha": head_sha,
                 }
             )
 
@@ -982,13 +987,100 @@ class GitHubOps:
         """Remove ANSI escape sequences from GitHub Actions logs."""
         return _ANSI_ESCAPE_RE.sub("", text or "")
 
+    def _clean_log_to_excerpt(self, raw_log: str, max_lines: int, max_chars: int) -> str:
+        """Strip ANSI, keep failure-marker lines, truncate to max_chars."""
+        cleaned = self._strip_ansi(raw_log or "").strip()
+        if not cleaned:
+            return ""
+        lines = [line.rstrip() for line in cleaned.splitlines() if line.strip()]
+        if not lines:
+            return ""
+        excerpt = "\n".join(_extract_failure_lines(lines, max_lines)).strip()
+        if len(excerpt) > max_chars:
+            excerpt = excerpt[-max_chars:].lstrip()
+        return excerpt
+
+    def _fetch_log_excerpt_via_run_list(self, check: dict, max_lines: int, max_chars: int) -> str:
+        """Fallback when the check link isn't a parseable Actions job URL.
+
+        The REST API path (`_get_pr_checks_via_api`) populates `link` with the
+        check-run `html_url` (`/runs/<check_run_id>`), which does NOT carry the
+        workflow run/job ids that `gh run view --job` needs. Locate the workflow
+        run by the PR head sha + check name, then pull `--log-failed` for the
+        whole run. `gh run list/view` are core commands available on older gh
+        versions that lack `gh pr checks --json`.
+
+        Known limitation: `gh run list --json name` returns the WORKFLOW run
+        name (the workflow YAML's top-level `name:`, defaulting to the repo
+        name), while `check.name` is the JOB name inside the workflow (e.g.
+        "lint", "test (3.9)"). For an umbrella workflow (run name "CI",
+        jobs "lint"/"test") the name match fails and we fall back to runs[0].
+        If a commit triggers multiple workflows, runs[0] may belong to a
+        different workflow and its failure log gets attributed to this check.
+        This does NOT affect the give-up guard (the fingerprint stays stable
+        across rounds — same wrong log each time), but the repair context
+        fed to the agent may be off-topic in multi-workflow repos. Single-
+        workflow repos (the common case) are unaffected. Could be tightened
+        with `--workflow` filtering if this becomes a real problem.
+        """
+        head_sha = (check.get("head_sha") or "").strip()
+        if not head_sha:
+            return ""
+        name = str(check.get("name") or "").strip()
+
+        # Find workflow runs for this commit.
+        list_result = self._run_gh(
+            ["run", "list", "--commit", head_sha, "--json", "databaseId,name", "--limit", "30"],
+            check=False,
+        )
+        if list_result.returncode != 0:
+            logger.warning(
+                "gh run list --commit failed for check '%s' (sha=%s): %s",
+                name,
+                head_sha[:8],
+                (list_result.stderr or list_result.stdout or "").strip()[:200],
+            )
+            return ""
+        try:
+            runs = json.loads((list_result.stdout or "").strip() or "[]")
+        except json.JSONDecodeError:
+            runs = []
+        # Prefer the run whose name matches the check (Actions "lint" check ↔
+        # workflow run named "lint"); fall back to the first run if no match.
+        run_id = ""
+        for run in runs:
+            if str(run.get("name") or "").strip() == name:
+                run_id = str(run.get("databaseId") or "").strip()
+                break
+        if not run_id and runs:
+            run_id = str(runs[0].get("databaseId") or "").strip()
+        if not run_id:
+            return ""
+
+        view_result = self._run_gh(
+            ["run", "view", run_id, "--log-failed"],
+            check=False,
+        )
+        if view_result.returncode != 0:
+            logger.warning(
+                "gh run view --log-failed failed for check '%s' (run=%s): %s",
+                name,
+                run_id,
+                (view_result.stderr or view_result.stdout or "").strip()[:200],
+            )
+            return ""
+        return self._clean_log_to_excerpt(view_result.stdout or "", max_lines, max_chars)
+
     def get_check_failure_excerpt(
         self, check: dict, max_lines: int = 80, max_chars: int = 4000
     ) -> str:
         """Fetch a concise failed-log excerpt for a CI check when available.
 
-        Currently supports GitHub Actions job URLs. Non-Actions URLs return an
-        empty string so callers can degrade gracefully for other CI providers.
+        Supports GitHub Actions job URLs (`gh pr checks --json` link format).
+        When the link is a REST-API check-run URL without run/job ids, falls
+        back to locating the workflow run via `gh run list --commit <sha>`
+        (requires the check dict to carry `head_sha`). Non-Actions URLs with
+        no head_sha return an empty string so callers degrade gracefully.
 
         pre-commit / pytest / mypy output interleaves many passing hooks with a
         few failing ones; taking the last N lines can drop the actual error
@@ -997,36 +1089,27 @@ class GitHubOps:
         little context), falling back to the tail when no markers match.
         """
         parsed = self._parse_github_actions_job_url(str(check.get("link") or ""))
-        if not parsed:
-            return ""
-
-        run_id, job_id = parsed
-        result = self._run_gh(
-            ["run", "view", run_id, "--job", job_id, "--log-failed"],
-            check=False,
-        )
-        if result.returncode != 0:
-            logger.warning(
-                "Failed to fetch failed log excerpt for check '%s' (run=%s job=%s): %s",
-                check.get("name") or "unknown",
-                run_id,
-                job_id,
-                (result.stderr or result.stdout or "").strip()[:200],
+        if parsed:
+            run_id, job_id = parsed
+            result = self._run_gh(
+                ["run", "view", run_id, "--job", job_id, "--log-failed"],
+                check=False,
             )
-            return ""
+            if result.returncode != 0:
+                logger.warning(
+                    "Failed to fetch failed log excerpt for check '%s' (run=%s job=%s): %s",
+                    check.get("name") or "unknown",
+                    run_id,
+                    job_id,
+                    (result.stderr or result.stdout or "").strip()[:200],
+                )
+                return ""
+            return self._clean_log_to_excerpt(result.stdout or "", max_lines, max_chars)
 
-        cleaned = self._strip_ansi(result.stdout or "").strip()
-        if not cleaned:
-            return ""
-
-        lines = [line.rstrip() for line in cleaned.splitlines() if line.strip()]
-        if not lines:
-            return ""
-
-        excerpt = "\n".join(_extract_failure_lines(lines, max_lines)).strip()
-        if len(excerpt) > max_chars:
-            excerpt = excerpt[-max_chars:].lstrip()
-        return excerpt
+        # Fallback: link is not a parseable Actions job URL (e.g. REST-API
+        # check-run html_url "/runs/<id>"). Try to find the workflow run by
+        # the PR head sha and pull --log-failed for the whole run.
+        return self._fetch_log_excerpt_via_run_list(check, max_lines, max_chars)
 
     def get_pr_diff(self, number: int) -> str:
         """Get the full diff of a PR (head vs base) via `gh pr diff`.

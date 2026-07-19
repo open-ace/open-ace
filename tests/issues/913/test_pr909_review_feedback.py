@@ -86,12 +86,14 @@ class TestGetPRChecks:
                 "state": "success",
                 "bucket": "pass",
                 "link": "https://example.com/lint",
+                "head_sha": "abc123",
             },
             {
                 "name": "test",
                 "state": "failure",
                 "bucket": "fail",
                 "link": "https://example.com/test",
+                "head_sha": "abc123",
             },
         ]
 
