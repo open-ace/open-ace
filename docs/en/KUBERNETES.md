@@ -61,6 +61,21 @@ Creates the `open-ace` namespace with standard Kubernetes labels.
 
 **Sticky routing:** The Service uses `sessionAffinity: ClientIP`, and the nginx Ingress uses cookie affinity. Remote session HTTP control state is persisted and can cross pods, but live terminal relay WebSocket bridges still belong to one web process; sticky routing remains the safest default for active terminal sessions.
 
+**HA Support (Issue #1851):**
+
+Live terminal and VSCode WebSocket connections use a "reconnection recovery" HA model:
+
+- Relay state is registered in Redis for cross-Pod awareness
+- When a browser connects to a non-owner Pod, it receives a redirect close frame (code 3010) and reconnects to the owner Pod
+- Terminal history is not persisted; reconnection shows "Connection recovered" without restoring previous output
+- Redis failure triggers automatic fallback to in-memory mode (local Pod only)
+- `preStop` hook (30s) provides graceful shutdown during rolling updates
+
+Recommended configuration:
+- Maintain sticky routing for best experience
+- Monitor Redis health and circuit breaker state
+- Use `preStop` hook to allow active connections to drain
+
 **Multi-user workspace note:** The Docker image itself defaults to the non-root `open-ace` user (uid 1000) via a `USER 1000` directive, and the default Kubernetes manifest reinforces this with `runAsNonRoot: true` / `runAsUser: 1000`. If you enable `workspace.multi_user_mode` and need dynamic Linux user creation inside the container, deploy a dedicated overlay that intentionally runs the web pod as root (`runAsUser: 0`) **and** sets `OPENACE_ALLOW_ROOT_MULTI_USER=1`; the entrypoint fail-fasts without both, and you should document that exception in your cluster change process.
 
 ### Service & Ingress

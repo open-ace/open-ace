@@ -160,6 +160,9 @@ class TestRunApplication:
             "PATH_INFO": "/api/remote/terminal/12345678-1234-1234-1234-123456789abc/ws",
             "HTTP_UPGRADE": "websocket",
         }
+        handler._is_agent_relay_ws_request.return_value = False
+        handler._is_terminal_ws_request.return_value = True
+        handler._is_vscode_ws_request.return_value = False
         handler._handle_terminal_ws = MagicMock()
 
         RemoteWSHandler.run_application(handler)
@@ -169,6 +172,7 @@ class TestRunApplication:
     def test_non_terminal_delegates_to_super(self):
         """Non-terminal and non-vscode requests should fall through to the parent WSGIHandler."""
         handler = MagicMock(spec=RemoteWSHandler)
+        handler._is_agent_relay_ws_request.return_value = False
         handler._is_terminal_ws_request.return_value = False
         handler._is_vscode_ws_request.return_value = False
         handler._handle_terminal_ws = MagicMock()
@@ -180,6 +184,7 @@ class TestRunApplication:
 
     def test_vscode_ws_intercepted(self):
         handler = MagicMock(spec=RemoteWSHandler)
+        handler._is_agent_relay_ws_request.return_value = False
         handler._is_terminal_ws_request.return_value = False
         handler._is_vscode_ws_request.return_value = True
         handler._handle_vscode_ws = MagicMock()
@@ -215,6 +220,8 @@ class TestHandleTerminalWs:
     def test_unknown_terminal_closes(self, mock_store, mock_handshake, mock_send_close):
         handler = self._make_handler()
         mock_store.find_by_terminal_id.return_value = None
+        # Mock _check_relay_redirect to return None (no redirect)
+        handler._check_relay_redirect = lambda *args: None
 
         RemoteWSHandler._handle_terminal_ws(handler)
 
@@ -230,6 +237,7 @@ class TestHandleTerminalWs:
             "machine-123",
             {"token": "correct-token"},
         )
+        handler._check_relay_redirect = lambda *args: None
 
         RemoteWSHandler._handle_terminal_ws(handler)
 
@@ -250,6 +258,7 @@ class TestHandleTerminalWs:
                 "original_token": "",
             },
         )
+        handler._check_relay_redirect = lambda *args: None
 
         RemoteWSHandler._handle_terminal_ws(handler)
 
@@ -270,6 +279,7 @@ class TestHandleTerminalWs:
                 "original_token": "remote-token",
             },
         )
+        handler._check_relay_redirect = lambda *args: None
 
         RemoteWSHandler._handle_terminal_ws(handler)
 
@@ -308,6 +318,7 @@ class TestHandleTerminalWs:
                 "original_token": "rt",
             },
         )
+        handler._check_relay_redirect = lambda *args: None
 
         RemoteWSHandler._handle_terminal_ws(handler)
 
@@ -345,6 +356,8 @@ class TestHandleVSCodeWs:
                 "original_http_url": "http://remote:45678",
             },
         )
+        # Mock _check_relay_redirect to return None (no redirect)
+        handler._check_relay_redirect = lambda *args: None
 
         RemoteWSHandler._handle_vscode_ws(handler)
 
@@ -376,9 +389,11 @@ class TestHandleVSCodeWs:
                 "original_http_url": "http://remote:45678",
             },
         )
+        handler._check_relay_redirect = lambda *args: None
 
         RemoteWSHandler._handle_vscode_ws(handler)
 
+        mock_handshake.assert_called_once_with(handler.environ, handler.socket)
         mock_bridge.assert_called_once_with(
             self.UUID,
             handler.socket,
