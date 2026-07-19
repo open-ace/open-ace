@@ -26,7 +26,11 @@ class SMTPPasswordManager:
         self._encryption_key = self._get_encryption_key()
 
     def _get_encryption_key(self) -> bytes:
-        """Get the AES encryption key from environment variable."""
+        """Derive the Fernet encryption key from OPENACE_ENCRYPTION_KEY.
+
+        The environment variable is hashed with SHA-256 to produce a 32-byte
+        key, which is then base64-encoded for Fernet compatibility.
+        """
         key_env = get_encryption_key_material(purpose="SMTP password encryption")
         # Derive a 32-byte key using SHA-256
         return hashlib.sha256(key_env.encode()).digest()

@@ -119,9 +119,14 @@ class APIKeyProxyService:
     """
     Manages encrypted API key storage and proxy token generation.
 
-    API keys are encrypted with AES-256-GCM using a key derived from
-    the OPENACE_ENCRYPTION_KEY environment variable. Short-lived JWT-like
-    proxy tokens are issued to remote agents for authenticating LLM proxy calls.
+    API keys are encrypted using Fernet (AES-128-CBC with HMAC-SHA256) with a
+    key derived from the OPENACE_ENCRYPTION_KEY environment variable via SHA-256.
+    The same key derivation is shared with smtp_crypto and model_gateway for
+    consistent secret management.
+
+    Short-lived proxy tokens are issued to remote agents for authenticating LLM
+    proxy calls. Tokens use HMAC-SHA256 signatures (not Fernet) for payload
+    flexibility and custom expiry semantics.
     """
 
     DEFAULT_PROXY_TOKEN_TTL_MINUTES = 240

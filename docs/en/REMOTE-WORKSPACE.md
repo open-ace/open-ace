@@ -284,7 +284,7 @@ The system has **two independent API-key mechanisms** serving different scenario
 | | Environment-Variable Keys (e.g. `auth.env.OPENAI_API_KEY`) | Admin-Page API Keys |
 |---|---|---|
 | **Used by** | Local workspaces (qwen-code-webui in the iframe) | Remote workspaces (Agent on the remote machine) |
-| **Storage** | Server config file / environment variables | `api_key_store` table (AES-256-GCM encrypted) |
+| **Storage** | Server config file / environment variables | `api_key_store` table (Fernet encrypted) |
 | **Who gets the real key** | The local CLI uses it directly | Only the server knows it; the remote Agent only gets a short-lived, revocable proxy token |
 | **How to manage** | Edit config file, restart service | UI operations in the admin page, no restart needed |
 | **Who manages it** | Server ops | System administrator (web admin UI) |
