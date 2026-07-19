@@ -659,8 +659,12 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
     return branches;
   }, [workflow.branch_name, milestones]);
 
-  // Group milestones by dev_round
+  // Group milestones by dev_round (display layer only — hide cancelled so the
+  // timeline stays clean after a user cancels a round. Downstream derivations
+  // like latestPlanFinalized / latestFailedMilestone still use the full
+  // `milestones` array for correctness.)
   const groupedMilestones = milestones.reduce<Record<number, WorkflowMilestone[]>>((acc, ms) => {
+    if (ms.status === 'cancelled') return acc;
     const round = ms.dev_round || 1;
     if (!acc[round]) acc[round] = [];
     acc[round].push(ms);

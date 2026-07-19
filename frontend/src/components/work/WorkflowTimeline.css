@@ -405,6 +405,11 @@
   font-size: var(--font-size-note);
   line-height: 1.55;
   word-break: break-word;
+  max-height: 4.65rem;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
 }
 
 .timeline-state-banner__actions {
