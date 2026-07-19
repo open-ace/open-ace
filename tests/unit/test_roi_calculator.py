@@ -647,3 +647,187 @@ class TestEfficiencyScore:
         d = metrics.to_dict()
         assert "efficiency_score" in d
         assert d["efficiency_score"] == 85.5
+
+
+class TestROIMetricsEstimationFields:
+    """Test ROIMetrics estimation labeling fields (Issue #1854)."""
+
+    def test_roi_metrics_defaults_is_estimated_true(self):
+        """ROIMetrics should default is_estimated to True."""
+        metrics = ROIMetrics(
+            period="2026-01-01 to 2026-01-31",
+            start_date="2026-01-01",
+            end_date="2026-01-31",
+        )
+        assert metrics.is_estimated is True
+
+    def test_roi_metrics_defaults_estimation_type(self):
+        """ROIMetrics should default estimation_type to 'assumptions_based'."""
+        metrics = ROIMetrics(
+            period="2026-01-01 to 2026-01-31",
+            start_date="2026-01-01",
+            end_date="2026-01-31",
+        )
+        assert metrics.estimation_type == "assumptions_based"
+
+    def test_roi_metrics_defaults_assumption_source(self):
+        """ROIMetrics should default assumption_source to 'defaults'."""
+        metrics = ROIMetrics(
+            period="2026-01-01 to 2026-01-31",
+            start_date="2026-01-01",
+            end_date="2026-01-31",
+        )
+        assert metrics.assumption_source == "defaults"
+
+    def test_roi_metrics_defaults_disclaimer(self):
+        """ROIMetrics should have a non-empty disclaimer."""
+        metrics = ROIMetrics(
+            period="2026-01-01 to 2026-01-31",
+            start_date="2026-01-01",
+            end_date="2026-01-31",
+        )
+        assert metrics.disclaimer
+        assert "does not support real-time measurement" in metrics.disclaimer
+
+    def test_roi_metrics_to_dict_includes_estimation_fields(self):
+        """ROIMetrics.to_dict() should include all estimation fields."""
+        metrics = ROIMetrics(
+            period="2026-01-01 to 2026-01-31",
+            start_date="2026-01-01",
+            end_date="2026-01-31",
+            assumption_source="tenant_config",
+        )
+        d = metrics.to_dict()
+        assert "is_estimated" in d
+        assert d["is_estimated"] is True
+        assert "estimation_type" in d
+        assert d["estimation_type"] == "assumptions_based"
+        assert "assumption_source" in d
+        assert d["assumption_source"] == "tenant_config"
+        assert "disclaimer" in d
+
+    def test_roi_metrics_can_override_assumption_source(self):
+        """ROIMetrics should accept custom assumption_source."""
+        metrics = ROIMetrics(
+            period="2026-01-01 to 2026-01-31",
+            start_date="2026-01-01",
+            end_date="2026-01-31",
+            assumption_source="request_params",
+        )
+        assert metrics.assumption_source == "request_params"
+
+
+class TestROIAssumptionsFromTenantOrEnv:
+    """Test ROIAssumptions.from_tenant_or_env method (Issue #1854)."""
+
+    def setup_method(self):
+        get_cache().clear()
+
+    def test_from_tenant_or_env_defaults_when_no_tenant(self):
+        """Should return defaults when tenant is None."""
+        assumptions, source = ROIAssumptions.from_tenant_or_env(None)
+        assert source == "defaults"
+        assert assumptions.hourly_labor_cost == ROIAssumptions.DEFAULT_HOURLY_LABOR_COST
+
+    def test_from_tenant_or_env_defaults_when_tenant_has_no_roi_config(self):
+        """Should return defaults when tenant has no roi_assumptions."""
+        from app.models.tenant import Tenant, TenantSettings
+
+        tenant = Tenant(settings=TenantSettings(roi_assumptions=None))
+        assumptions, source = ROIAssumptions.from_tenant_or_env(tenant)
+        assert source == "defaults"
+
+    def test_from_tenant_or_env_uses_tenant_config(self):
+        """Should use tenant config when roi_assumptions is set."""
+        from app.models.tenant import Tenant, TenantSettings
+
+        tenant = Tenant(
+            id=1,
+            settings=TenantSettings(
+                roi_assumptions={
+                    "hourly_labor_cost": 80.0,
+                    "productivity_multiplier": 8.0,
+                    "avg_time_saved_per_request": 10.0,
+                    "currency": "CNY",
+                }
+            ),
+        )
+        assumptions, source = ROIAssumptions.from_tenant_or_env(tenant)
+        assert source == "tenant_config"
+        assert assumptions.hourly_labor_cost == 80.0
+        assert assumptions.currency == "CNY"
+
+    def test_from_tenant_or_env_fills_missing_fields_with_defaults(self):
+        """Should fill missing fields in tenant config with defaults."""
+        from app.models.tenant import Tenant, TenantSettings
+
+        tenant = Tenant(
+            id=1,
+            settings=TenantSettings(
+                roi_assumptions={
+                    "hourly_labor_cost": 75.0,
+                }
+            ),
+        )
+        assumptions, source = ROIAssumptions.from_tenant_or_env(tenant)
+        assert source == "tenant_config"
+        assert assumptions.hourly_labor_cost == 75.0
+        assert assumptions.productivity_multiplier == ROIAssumptions.DEFAULT_PRODUCTIVITY_MULTIPLIER
+        assert assumptions.avg_time_saved_per_request == ROIAssumptions.DEFAULT_AVG_TIME_SAVED_PER_REQUEST
+
+    def test_from_tenant_or_env_ignores_empty_dict(self):
+        """Should fall back to defaults when tenant config is empty dict."""
+        from app.models.tenant import Tenant, TenantSettings
+
+        tenant = Tenant(id=1, settings=TenantSettings(roi_assumptions={}))
+        assumptions, source = ROIAssumptions.from_tenant_or_env(tenant)
+        # Empty dict should fall back to defaults (not use tenant_config)
+        assert source == "defaults"
+
+
+class TestCalculatorWithAssumptionSource:
+    """Test ROICalculator with assumption_source parameter (Issue #1854)."""
+
+    def setup_method(self):
+        get_cache().clear()
+
+    def test_calculator_accepts_assumption_source(self):
+        """ROICalculator should accept assumption_source parameter."""
+        mock_db = MagicMock()
+        calc = ROICalculator(
+            db=mock_db,
+            assumptions=ROIAssumptions(
+                hourly_labor_cost=100.0,
+                productivity_multiplier=5.0,
+                avg_time_saved_per_request=10.0,
+            ),
+            assumption_source="tenant_config",
+        )
+        assert calc.assumption_source == "tenant_config"
+
+    def test_calculate_roi_includes_assumption_source(self):
+        """calculate_roi should include assumption_source in metrics."""
+        mock_db = MagicMock()
+        calc = ROICalculator(
+            db=mock_db,
+            assumptions=ROIAssumptions(
+                hourly_labor_cost=100.0,
+                productivity_multiplier=5.0,
+                avg_time_saved_per_request=10.0,
+            ),
+            assumption_source="tenant_config",
+        )
+        mock_db.fetch_one.return_value = {
+            "request_count": 10,
+            "total_input_tokens": 1000,
+            "total_output_tokens": 500,
+            "total_tokens": 1500,
+        }
+        mock_db.fetch_all.return_value = [
+            {"tool_name": "test", "model": "claude-3-haiku", "input_tokens": 1000, "output_tokens": 500}
+        ]
+
+        roi = calc.calculate_roi("2026-01-01", "2026-01-31")
+
+        assert roi is not None
+        assert roi.assumption_source == "tenant_config"

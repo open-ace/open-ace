@@ -4,10 +4,13 @@ Open ACE - Tenant Models
 Data models for multi-tenant support.
 """
 
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
+
+logger = logging.getLogger(__name__)
 
 
 class TenantStatus(Enum):
@@ -71,6 +74,8 @@ class TenantSettings:
     custom_branding: bool = False
     branding_name: Optional[str] = None
     branding_logo_url: Optional[str] = None
+    # P1: Tenant-level ROI assumptions configuration
+    roi_assumptions: Optional[dict[str, Any]] = None
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""
@@ -86,11 +91,24 @@ class TenantSettings:
             "custom_branding": self.custom_branding,
             "branding_name": self.branding_name,
             "branding_logo_url": self.branding_logo_url,
+            "roi_assumptions": self.roi_assumptions,
         }
 
     @classmethod
     def from_dict(cls, data: dict) -> "TenantSettings":
-        """Create from dictionary."""
+        """Create from dictionary with validation."""
+        # Validate roi_assumptions field
+        roi_assumptions_raw = data.get("roi_assumptions")
+        roi_assumptions = None
+        if roi_assumptions_raw is not None:
+            if not isinstance(roi_assumptions_raw, dict):
+                logger.warning(
+                    "Invalid roi_assumptions format: expected dict, got %s",
+                    type(roi_assumptions_raw).__name__,
+                )
+            else:
+                roi_assumptions = roi_assumptions_raw
+
         return cls(
             allowed_tools=data.get(
                 "allowed_tools", ["claude", "qwen", "openclaw", "codex", "zcode"]
@@ -105,6 +123,7 @@ class TenantSettings:
             custom_branding=data.get("custom_branding", False),
             branding_name=data.get("branding_name"),
             branding_logo_url=data.get("branding_logo_url"),
+            roi_assumptions=roi_assumptions,
         )
 
 

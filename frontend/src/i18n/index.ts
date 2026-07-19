@@ -1027,6 +1027,13 @@ export const translations: Record<Language, Translations> = {
       'Review and adjust the planning assumptions behind ROI before sharing the result.',
     roiEstimateDisclaimer:
       'ROI is a configurable planning estimate, not verified realized savings or universal productivity truth.',
+    // P0: ROI estimation labeling (Issue #1854)
+    roiEstimatedBadge: 'Estimated',
+    roiEstimatedBadgeTitle: 'Estimate based on assumptions',
+    roiEstimatedBadgeTooltip:
+      'ROI is calculated based on configurable assumptions, not actual savings. This version does not support real-time ROI measurement.',
+    roiDisclaimerFull:
+      'ROI metrics are estimates based on configurable assumptions. This version does not support real-time measurement.',
     roiCurrencyNotice:
       'Changing the currency label updates the labor-cost assumption only; provider costs are not FX-converted.',
     roiAssumptionValidation:
@@ -2684,6 +2691,12 @@ export const translations: Record<Language, Translations> = {
     roiAssumptionsHelp: '在分享 ROI 结果前，请先审阅并调整背后的估算假设。',
     roiEstimateDisclaimer:
       'ROI 是可配置的规划估算值，并不代表已验证的真实收益，也不是通用生产力事实。',
+    // P0: ROI estimation labeling (Issue #1854)
+    roiEstimatedBadge: '估算值',
+    roiEstimatedBadgeTitle: '基于假设的估算',
+    roiEstimatedBadgeTooltip:
+      'ROI 基于可配置的假设参数计算，不代表真实收益。当前版本不支持真实 ROI 度量。',
+    roiDisclaimerFull: 'ROI 基于可配置假设估算。当前版本不支持实时 ROI 度量。',
     roiCurrencyNotice: '修改货币标签只会更新人工成本假设，不会对模型成本做汇率换算。',
     roiAssumptionValidation:
       '请输入正数的人工成本、生产力倍数、单次请求节省时间，以及 1-8 个字符的货币标签。',
@@ -4259,6 +4272,12 @@ export const translations: Record<Language, Translations> = {
       'ROI を共有する前に、前提となる見積もり条件を確認し、必要に応じて調整してください。',
     roiEstimateDisclaimer:
       'ROI は設定可能な計画用の見積もりであり、実現済みの節約や普遍的な生産性の事実を示すものではありません。',
+    // P0: ROI estimation labeling (Issue #1854)
+    roiEstimatedBadge: '推定値',
+    roiEstimatedBadgeTitle: '前提に基づく推定',
+    roiEstimatedBadgeTooltip:
+      'ROI は設定可能な前提に基づいて計算されており、実際の節約を示すものではありません。このバージョンではリアルタイム ROI 測定はサポートされていません。',
+    roiDisclaimerFull: 'ROI は設定可能な前提に基づく推定値です。このバージョンではリアルタイム測定はサポートされていません。',
     roiCurrencyNotice:
       '通貨ラベルを変更しても人件費前提だけが更新され、プロバイダー費用の為替換算は行われません。',
     roiAssumptionValidation:
@@ -5767,6 +5786,12 @@ export const translations: Record<Language, Translations> = {
       'ROI 결과를 공유하기 전에, 계산에 사용된 계획 가정을 검토하고 필요하면 조정하세요.',
     roiEstimateDisclaimer:
       'ROI는 설정 가능한 계획 추정치이며, 검증된 실제 절감액이나 보편적인 생산성 사실을 의미하지 않습니다.',
+    // P0: ROI estimation labeling (Issue #1854)
+    roiEstimatedBadge: '추정값',
+    roiEstimatedBadgeTitle: '가정에 기반한 추정',
+    roiEstimatedBadgeTooltip:
+      'ROI는 구성 가능한 가정을 기반으로 계산되며 실제 절감을 나타내지 않습니다. 이 버전은 실시간 ROI 측정을 지원하지 않습니다.',
+    roiDisclaimerFull: 'ROI는 구성 가능한 가정을 기반으로 한 추정값입니다. 이 버전은 실시간 측정을 지원하지 않습니다.',
     roiCurrencyNotice:
       '통화 라벨을 바꿔도 인건비 가정만 바뀌며, 제공자 비용에는 환율 변환이 적용되지 않습니다.',
     roiAssumptionValidation:

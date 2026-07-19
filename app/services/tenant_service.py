@@ -231,10 +231,85 @@ class TenantService:
         if not tenant:
             return False
 
+        # Detect concurrent updates (5-second window)
+        last_update = getattr(tenant, "_last_settings_update", None)
+        if last_update and (datetime.now(timezone.utc).replace(tzinfo=None) - last_update).seconds < 5:
+            logger.warning(
+                "Concurrent tenant settings update detected for tenant_id=%s", tenant_id
+            )
+
+        tenant._last_settings_update = datetime.now(timezone.utc).replace(tzinfo=None)
+
         current_settings = tenant.settings.to_dict()
         current_settings.update(settings_updates)
 
-        return self.tenant_repo.update(tenant_id, {"settings": current_settings})
+        result = self.tenant_repo.update(tenant_id, {"settings": current_settings})
+
+        # Clear ROI cache if roi_assumptions was updated
+        if result and "roi_assumptions" in settings_updates:
+            self._clear_roi_cache_for_tenant(tenant_id)
+
+        return result
+
+    def _clear_roi_cache_for_tenant(self, tenant_id: int) -> None:
+        """Clear ROI cache entries for a specific tenant.
+
+        Uses iterative approach since the cache system doesn't support
+        pattern-based deletion.
+
+        Args:
+            tenant_id: Tenant ID whose cache should be cleared.
+        """
+        from datetime import timedelta
+
+        from app.utils.cache import get_cache
+
+        cache = get_cache()
+        today = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
+
+        # Common date range combinations
+        date_ranges = [
+            (today, today),  # Today
+            (
+                (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=7)).strftime(
+                    "%Y-%m-%d"
+                ),
+                today,
+            ),  # 7 days
+            (
+                (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)).strftime(
+                    "%Y-%m-%d"
+                ),
+                today,
+            ),  # 30 days
+            (
+                (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=90)).strftime(
+                    "%Y-%m-%d"
+                ),
+                today,
+            ),  # 90 days
+        ]
+
+        # Main ROI endpoints
+        endpoints = [
+            "calculate_roi",
+            "get_roi_trend",
+            "get_roi_by_tool",
+            "get_roi_by_user",
+            "get_cost_breakdown",
+            "get_daily_costs",
+            "get_summary_stats",
+        ]
+
+        cleared_count = 0
+        for endpoint in endpoints:
+            for start_date, end_date in date_ranges:
+                # Cache key format matches @cached decorator in roi_calculator.py
+                key = f"roi:{endpoint}:{start_date}:{end_date}::tenant_id={tenant_id}"
+                if cache.delete(key):
+                    cleared_count += 1
+
+        logger.info("Cleared %d ROI cache entries for tenant_id=%s", cleared_count, tenant_id)
 
     def suspend_tenant(self, tenant_id: int, reason: Optional[str] = None) -> bool:
         """

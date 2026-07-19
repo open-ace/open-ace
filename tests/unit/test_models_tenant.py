@@ -171,6 +171,64 @@ class TestTenantSettings:
         assert ts.audit_log_enabled is True
         assert ts.sso_enabled is False
 
+    def test_roi_assumptions_default_none(self):
+        """TenantSettings should default roi_assumptions to None."""
+        ts = TenantSettings()
+        assert ts.roi_assumptions is None
+
+    def test_roi_assumptions_can_be_set(self):
+        """TenantSettings should accept roi_assumptions dict."""
+        ts = TenantSettings(
+            roi_assumptions={
+                "hourly_labor_cost": 80.0,
+                "productivity_multiplier": 8.0,
+                "avg_time_saved_per_request": 10.0,
+                "currency": "CNY",
+            }
+        )
+        assert ts.roi_assumptions is not None
+        assert ts.roi_assumptions["hourly_labor_cost"] == 80.0
+
+    def test_to_dict_includes_roi_assumptions(self):
+        """TenantSettings.to_dict() should include roi_assumptions."""
+        ts = TenantSettings(
+            roi_assumptions={"hourly_labor_cost": 100.0, "currency": "EUR"}
+        )
+        d = ts.to_dict()
+        assert "roi_assumptions" in d
+        assert d["roi_assumptions"]["hourly_labor_cost"] == 100.0
+
+    def test_to_dict_roi_assumptions_none(self):
+        """TenantSettings.to_dict() should include roi_assumptions as None when unset."""
+        ts = TenantSettings()
+        d = ts.to_dict()
+        assert "roi_assumptions" in d
+        assert d["roi_assumptions"] is None
+
+    def test_from_dict_with_roi_assumptions(self):
+        """TenantSettings.from_dict() should parse roi_assumptions."""
+        data = {
+            "roi_assumptions": {
+                "hourly_labor_cost": 75.0,
+                "productivity_multiplier": 6.0,
+            }
+        }
+        ts = TenantSettings.from_dict(data)
+        assert ts.roi_assumptions is not None
+        assert ts.roi_assumptions["hourly_labor_cost"] == 75.0
+
+    def test_from_dict_ignores_invalid_roi_assumptions_type(self):
+        """TenantSettings.from_dict() should ignore invalid roi_assumptions type."""
+        data = {"roi_assumptions": "invalid_string"}
+        ts = TenantSettings.from_dict(data)
+        assert ts.roi_assumptions is None
+
+    def test_from_dict_accepts_null_roi_assumptions(self):
+        """TenantSettings.from_dict() should accept null roi_assumptions."""
+        data = {"roi_assumptions": None}
+        ts = TenantSettings.from_dict(data)
+        assert ts.roi_assumptions is None
+
 
 class TestTenant:
     """Test Tenant dataclass."""

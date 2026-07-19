@@ -12,13 +12,16 @@ import os
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional, cast
+from typing import Any, Literal, Optional, cast
 
 from app.repositories.database import Database
 from app.utils.cache import cached
 from app.utils.tool_names import normalize_tool_name
 
 logger = logging.getLogger(__name__)
+
+# Type definition for assumption source
+AssumptionSource = Literal["tenant_config", "environment_vars", "request_params", "defaults"]
 
 # Thread pool for parallel queries
 _executor = ThreadPoolExecutor(max_workers=4)
@@ -126,6 +129,73 @@ class ROIAssumptions:
             "currency": self.currency,
         }
 
+    @classmethod
+    def _get_defaults(cls) -> "ROIAssumptions":
+        """Get default assumptions without environment variable overrides."""
+        return cls(
+            hourly_labor_cost=cls.DEFAULT_HOURLY_LABOR_COST,
+            productivity_multiplier=cls.DEFAULT_PRODUCTIVITY_MULTIPLIER,
+            avg_time_saved_per_request=cls.DEFAULT_AVG_TIME_SAVED_PER_REQUEST,
+            currency=cls.DEFAULT_CURRENCY,
+        )
+
+    @classmethod
+    def _from_dict_with_defaults(cls, data: dict) -> "ROIAssumptions":
+        """Create ROIAssumptions from dict, using defaults for missing fields.
+
+        Args:
+            data: Dictionary with assumption values (may be partial).
+
+        Returns:
+            ROIAssumptions with defaults filled in for missing fields.
+        """
+        return cls(
+            hourly_labor_cost=data.get("hourly_labor_cost", cls.DEFAULT_HOURLY_LABOR_COST),
+            productivity_multiplier=data.get(
+                "productivity_multiplier", cls.DEFAULT_PRODUCTIVITY_MULTIPLIER
+            ),
+            avg_time_saved_per_request=data.get(
+                "avg_time_saved_per_request", cls.DEFAULT_AVG_TIME_SAVED_PER_REQUEST
+            ),
+            currency=data.get("currency", cls.DEFAULT_CURRENCY),
+        )
+
+    @classmethod
+    def from_tenant_or_env(cls, tenant: Optional["Tenant"]) -> tuple["ROIAssumptions", AssumptionSource]:
+        """Build ROI assumptions from tenant config or environment variables.
+
+        Priority: tenant config > environment vars > defaults.
+
+        Args:
+            tenant: Optional Tenant object with settings.
+
+        Returns:
+            tuple: (ROIAssumptions, assumption_source)
+        """
+        # Import here to avoid circular dependency
+        from app.models.tenant import Tenant
+
+        # 1. Check tenant configuration
+        if tenant and hasattr(tenant, "settings") and tenant.settings:
+            roi_assumptions = getattr(tenant.settings, "roi_assumptions", None)
+            if roi_assumptions and isinstance(roi_assumptions, dict) and roi_assumptions:
+                logger.info(
+                    "Using tenant ROI config for tenant_id=%s",
+                    getattr(tenant, "id", "unknown"),
+                )
+                return cls._from_dict_with_defaults(roi_assumptions), "tenant_config"
+
+        # 2. Check environment variables
+        env_assumptions = cls.from_env()
+        defaults = cls._get_defaults()
+        if env_assumptions != defaults:
+            logger.info("Using environment ROI config")
+            return env_assumptions, "environment_vars"
+
+        # 3. Use defaults
+        logger.info("Using default ROI assumptions")
+        return defaults, "defaults"
+
 
 @dataclass
 class ROIMetrics:
@@ -149,6 +219,20 @@ class ROIMetrics:
     output_cost: float = 0.0
     efficiency_score: float = 0.0
     assumptions: Optional[ROIAssumptions] = None
+    # P0: Estimation labeling fields
+    is_estimated: bool = True
+    estimation_type: str = "assumptions_based"
+    assumption_source: AssumptionSource = "defaults"
+    disclaimer: str = ""
+
+    def __post_init__(self):
+        """Set default disclaimer after initialization."""
+        if not self.disclaimer:
+            self.disclaimer = (
+                "ROI metrics are estimates based on configurable assumptions. "
+                "This version does not support real-time measurement. "
+                "Update tenant ROI assumptions in Settings → Tenant Config."
+            )
 
     def to_dict(self) -> dict:
         return {
@@ -170,6 +254,10 @@ class ROIMetrics:
             "cost_per_token": round(self.cost_per_token, 8),
             "efficiency_score": round(self.efficiency_score, 1),
             "assumptions": self.assumptions.to_dict() if self.assumptions else None,
+            "is_estimated": self.is_estimated,
+            "estimation_type": self.estimation_type,
+            "assumption_source": self.assumption_source,
+            "disclaimer": self.disclaimer,
         }
 
 
@@ -250,16 +338,23 @@ class ROICalculator:
     # Default pricing for unknown models
     DEFAULT_PRICING = ModelPricing(input_price=0.01, output_price=0.03)
 
-    def __init__(self, db: Optional[Database] = None, assumptions: Optional[ROIAssumptions] = None):
+    def __init__(
+        self,
+        db: Optional[Database] = None,
+        assumptions: Optional[ROIAssumptions] = None,
+        assumption_source: AssumptionSource = "defaults",
+    ):
         """
         Initialize ROI Calculator.
 
         Args:
             db: Optional Database instance.
             assumptions: Optional ROI assumptions override.
+            assumption_source: Source of ROI assumptions (for metrics labeling).
         """
         self.db = db or Database()
         self.assumptions = assumptions or ROIAssumptions.from_env()
+        self.assumption_source = assumption_source
 
     def __repr__(self) -> str:
         """Stable cache-key representation that includes ROI assumptions."""
@@ -278,8 +373,26 @@ class ROICalculator:
         input_cost: float,
         output_cost: float,
         requests_made: int,
+        assumption_source: AssumptionSource = "defaults",
     ) -> ROIMetrics:
-        """Build ROI metrics using the calculator's current assumptions."""
+        """Build ROI metrics using the calculator's current assumptions.
+
+        Args:
+            period: Period description.
+            start_date: Start date string.
+            end_date: End date string.
+            total_cost: Total cost.
+            tokens_used: Total tokens used.
+            input_tokens: Input tokens.
+            output_tokens: Output tokens.
+            input_cost: Input cost.
+            output_cost: Output cost.
+            requests_made: Number of requests.
+            assumption_source: Source of ROI assumptions.
+
+        Returns:
+            ROIMetrics object with calculated values.
+        """
         estimated_hours_saved = requests_made * self.assumptions.avg_time_saved_per_request / 60
         estimated_savings = estimated_hours_saved * self.assumptions.hourly_labor_cost
 
@@ -319,6 +432,7 @@ class ROICalculator:
             cost_per_token=cost_per_token,
             efficiency_score=efficiency_score,
             assumptions=self.assumptions,
+            assumption_source=assumption_source,
         )
 
     def get_model_pricing(self, model: str) -> ModelPricing:
@@ -560,6 +674,7 @@ class ROICalculator:
             input_cost=total_input_cost,
             output_cost=total_output_cost,
             requests_made=requests,
+            assumption_source=self.assumption_source,
         )
 
     @cached(ttl=60, key_prefix="roi")
@@ -707,6 +822,7 @@ class ROICalculator:
                     input_cost=total_input_cost,
                     output_cost=total_output_cost,
                     requests_made=requests,
+                    assumption_source=self.assumption_source,
                 )
             )
 
@@ -816,6 +932,7 @@ class ROICalculator:
                 input_cost=total_input_cost,
                 output_cost=total_output_cost,
                 requests_made=requests,
+                assumption_source=self.assumption_source,
             )
 
         return result
@@ -918,6 +1035,7 @@ class ROICalculator:
                 input_cost=total_input_cost,
                 output_cost=total_output_cost,
                 requests_made=requests,
+                assumption_source=self.assumption_source,
             )
 
         return result
