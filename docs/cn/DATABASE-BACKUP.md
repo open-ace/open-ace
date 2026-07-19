@@ -229,12 +229,12 @@ kubectl logs -f deployment/open-ace -n open-ace
 
 ```sql
 -- 检查租户 schema
-SELECT schema_name FROM information_schema.schemata 
+SELECT schema_name FROM information_schema.schemata
 WHERE schema_name LIKE 'tenant_%';
 
 -- 检查权限
-SELECT grantee, table_schema, privilege_type 
-FROM information_schema.table_privileges 
+SELECT grantee, table_schema, privilege_type
+FROM information_schema.table_privileges
 WHERE table_schema LIKE 'tenant_%';
 ```
 

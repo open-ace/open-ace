@@ -229,12 +229,12 @@ After restore, verify:
 
 ```sql
 -- Check tenant schemas
-SELECT schema_name FROM information_schema.schemata 
+SELECT schema_name FROM information_schema.schemata
 WHERE schema_name LIKE 'tenant_%';
 
 -- Check permissions
-SELECT grantee, table_schema, privilege_type 
-FROM information_schema.table_privileges 
+SELECT grantee, table_schema, privilege_type
+FROM information_schema.table_privileges
 WHERE table_schema LIKE 'tenant_%';
 ```
 
