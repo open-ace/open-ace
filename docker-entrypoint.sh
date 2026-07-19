@@ -204,22 +204,32 @@ echo "=========================================="
 ensure_secret_env() {
     local secrets_file="${OPENACE_CONFIG_DIR}/generated-secrets.env"
 
+    # NOTE on persistence location: secrets_file lives under OPENACE_CONFIG_DIR,
+    # which is also where config.json lives, so both persist together on the
+    # config-data volume. In the default (uid 1000) compose deployment that dir
+    # is /home/open-ace/.open-ace and the volume is mounted there — matches. If
+    # an operator switches to root/multi-user mode they must ensure the volume
+    # is mounted at the matching path (/root/.open-ace for root), otherwise
+    # neither config.json nor these secrets persist. See .env.example.
+
     # 1. Reload previously generated secrets (persisted across restarts), but
     #    ONLY for variables not already set in the environment — explicit env
     #    values (e.g. from .env) always take precedence. We avoid `set -a; source`
     #    because that would clobber operator-provided values. Python parses the
-    #    file (NAME='value' lines we wrote) and prints assignments only for
-    #    still-unset names.
+    #    file (NAME='value' lines we wrote), validates NAME is an identifier and
+    #    VALUE is hex (the only format we ever write), and prints assignments
+    #    only for still-unset names.
     if [ -f "$secrets_file" ]; then
         local reloaded
         reloaded=$(python3 -c "
-import os
+import os, re
 for line in open('$secrets_file'):
     line = line.strip()
     if not line or line.startswith('#') or '=' not in line:
         continue
-    name = line.split('=', 1)[0]
-    if name.isidentifier() and not os.environ.get(name):
+    name, value = line.split('=', 1)
+    # We only ever write NAME='hex' — reject anything else to avoid eval risk.
+    if name.isidentifier() and re.fullmatch(r\"'[0-9a-f]+'\", value) and not os.environ.get(name):
         print(line)
 ")
         if [ -n "$reloaded" ]; then
