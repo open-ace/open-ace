@@ -356,6 +356,8 @@ class TestHandleVSCodeWs:
                 "original_http_url": "http://remote:45678",
             },
         )
+        # Mock _check_relay_redirect to return None (no redirect)
+        handler._check_relay_redirect = lambda *args: None
 
         RemoteWSHandler._handle_vscode_ws(handler)
 
@@ -387,9 +389,11 @@ class TestHandleVSCodeWs:
                 "original_http_url": "http://remote:45678",
             },
         )
+        handler._check_relay_redirect = lambda *args: None
 
         RemoteWSHandler._handle_vscode_ws(handler)
 
+        mock_handshake.assert_called_once_with(handler.environ, handler.socket)
         mock_bridge.assert_called_once_with(
             self.UUID,
             handler.socket,

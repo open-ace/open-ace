@@ -123,7 +123,7 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
       if (!terminalUrl.searchParams.has('rows')) terminalUrl.searchParams.set('rows', '24');
       const wsUrlWithToken = terminalUrl.toString();
 
-      createWebSocket(wsUrlWithToken);
+      createWebSocket(wsUrlWithToken, connectWithUrl);
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Unknown error';
       setConnectionState('error');
@@ -132,168 +132,174 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
       }
       onErrorRef.current?.(errorMsg);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wsUrl, token]);
 
   // HA: Connect with a specific URL (for redirect support)
-  const connectWithUrl = useCallback((targetUrl: string) => {
-    console.log('[TerminalTab] connectWithUrl called:', targetUrl.substring(0, 50) + '...');
-    if (!xtermRef.current) {
-      console.log('[TerminalTab] Skipping connectWithUrl - no xterm');
-      return;
-    }
-
-    if (wsRef.current) {
-      wsRef.current.close();
-      wsRef.current = null;
-    }
-
-    setConnectionState('connecting');
-
-    // Ensure token is in the URL
-    try {
-      const url = new URL(targetUrl);
-      if (!url.searchParams.has('token') && token) {
-        url.searchParams.set('token', token);
+  const connectWithUrl = useCallback(
+    (targetUrl: string) => {
+      console.log('[TerminalTab] connectWithUrl called:', targetUrl.substring(0, 50) + '...');
+      if (!xtermRef.current) {
+        console.log('[TerminalTab] Skipping connectWithUrl - no xterm');
+        return;
       }
-      if (!url.searchParams.has('cols')) url.searchParams.set('cols', '80');
-      if (!url.searchParams.has('rows')) url.searchParams.set('rows', '24');
-      createWebSocket(url.toString());
-    } catch (err) {
-      console.error('[TerminalTab] Invalid redirect URL:', err);
-      // Fallback to original URL
-      connect();
-    }
-  }, [token, connect]);
+
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
+
+      setConnectionState('connecting');
+
+      // Ensure token is in the URL
+      try {
+        const url = new URL(targetUrl);
+        if (!url.searchParams.has('token') && token) {
+          url.searchParams.set('token', token);
+        }
+        if (!url.searchParams.has('cols')) url.searchParams.set('cols', '80');
+        if (!url.searchParams.has('rows')) url.searchParams.set('rows', '24');
+        createWebSocket(url.toString(), connectWithUrl);
+      } catch (err) {
+        console.error('[TerminalTab] Invalid redirect URL:', err);
+        // Fallback to original URL
+        connect();
+      }
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    },
+    [token]
+  );
 
   // Create WebSocket with the given URL
-  const createWebSocket = useCallback((wsUrlWithToken: string) => {
-    try {
-      const ws = new WebSocket(wsUrlWithToken, ['binary']);
-      console.log('[TerminalTab] WebSocket created, URL length:', wsUrlWithToken.length);
-      ws.binaryType = 'arraybuffer';
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const createWebSocket = useCallback((wsUrlWithToken: string, reconnectFn: (url: string) => void) => {
+      try {
+        const ws = new WebSocket(wsUrlWithToken, ['binary']);
+        console.log('[TerminalTab] WebSocket created, URL length:', wsUrlWithToken.length);
+        ws.binaryType = 'arraybuffer';
 
-      ws.onopen = () => {
-        console.log('[TerminalTab] WebSocket OPENED');
-        setConnectionState('connected');
-        reconnectCountRef.current = 0;
-        if (xtermRef.current) {
-          xtermRef.current.writeln('\r\n\x1b[32mConnected to remote terminal.\x1b[0m\r\n');
-        }
-        if (fitAddonRef.current && xtermRef.current) {
-          const dims = fitAddonRef.current.proposeDimensions();
-          if (dims) {
-            ws.send(
-              JSON.stringify({
-                type: 'resize',
-                cols: dims.cols ?? 80,
-                rows: dims.rows ?? 24,
-              })
-            );
-          }
-        }
-        if (isActiveRef.current) {
-          try {
-            xtermRef.current?.focus();
-          } catch {
-            // Ignore focus errors
-          }
-        }
-      };
-
-      ws.onmessage = (event) => {
-        if (!xtermRef.current) return;
-        if (event.data instanceof ArrayBuffer) {
-          const text = new TextDecoder().decode(event.data);
-          xtermRef.current.write(text);
-        } else if (typeof event.data === 'string') {
-          xtermRef.current.write(event.data);
-        }
-      };
-
-      ws.onclose = (event) => {
-        console.log('[TerminalTab] WebSocket CLOSED:', event.code, event.reason);
-        setConnectionState('disconnected');
-
-        // HA: Handle redirect from another Pod (Issue #1851)
-        if (event.code === REDIRECT_CLOSE_CODE && event.reason) {
-          const redirectUrl = event.reason;
+        ws.onopen = () => {
+          console.log('[TerminalTab] WebSocket OPENED');
+          setConnectionState('connected');
+          reconnectCountRef.current = 0;
           if (xtermRef.current) {
-            xtermRef.current.writeln(
-              '\r\n\x1b[36mRedirecting to owner pod...\x1b[0m\r\n'
-            );
+            xtermRef.current.writeln('\r\n\x1b[32mConnected to remote terminal.\x1b[0m\r\n');
           }
-          console.log('[TerminalTab] Redirect to:', redirectUrl.substring(0, 50) + '...');
-          // Reconnect to redirect URL after short delay
-          setTimeout(() => {
-            if (isActiveRef.current) {
-              connectWithUrl(redirectUrl);
+          if (fitAddonRef.current && xtermRef.current) {
+            const dims = fitAddonRef.current.proposeDimensions();
+            if (dims) {
+              ws.send(
+                JSON.stringify({
+                  type: 'resize',
+                  cols: dims.cols ?? 80,
+                  rows: dims.rows ?? 24,
+                })
+              );
             }
-          }, 1000);
-          return;
-        }
+          }
+          if (isActiveRef.current) {
+            try {
+              xtermRef.current?.focus();
+            } catch {
+              // Ignore focus errors
+            }
+          }
+        };
 
-        // HA: Handle relay disconnected (Issue #1851)
-        if (event.code === RELAY_DISCONNECTED_CODE) {
+        ws.onmessage = (event) => {
+          if (!xtermRef.current) return;
+          if (event.data instanceof ArrayBuffer) {
+            const text = new TextDecoder().decode(event.data);
+            xtermRef.current.write(text);
+          } else if (typeof event.data === 'string') {
+            xtermRef.current.write(event.data);
+          }
+        };
+
+        ws.onclose = (event) => {
+          console.log('[TerminalTab] WebSocket CLOSED:', event.code, event.reason);
+          setConnectionState('disconnected');
+
+          // HA: Handle redirect from another Pod (Issue #1851)
+          if (event.code === REDIRECT_CLOSE_CODE && event.reason) {
+            const redirectUrl = event.reason;
+            if (xtermRef.current) {
+              xtermRef.current.writeln('\r\n\x1b[36mRedirecting to owner pod...\x1b[0m\r\n');
+            }
+            console.log('[TerminalTab] Redirect to:', redirectUrl.substring(0, 50) + '...');
+            // Reconnect to redirect URL after short delay
+            setTimeout(() => {
+              if (isActiveRef.current) {
+                reconnectFn(redirectUrl);
+              }
+            }, 1000);
+            return;
+          }
+
+          // HA: Handle relay disconnected (Issue #1851)
+          if (event.code === RELAY_DISCONNECTED_CODE) {
+            if (xtermRef.current) {
+              xtermRef.current.writeln(
+                '\r\n\x1b[33mRelay disconnected. Reconnecting...\x1b[0m\r\n'
+              );
+            }
+            reconnectCountRef.current += 1;
+            // Exponential backoff: 1s → 2s → 4s → 8s (max 30s)
+            const delay = Math.min(1000 * Math.pow(2, reconnectCountRef.current - 1), 30000);
+            reconnectTimerRef.current = setTimeout(connect, delay);
+            return;
+          }
+
+          if (event.code === 4001) {
+            if (xtermRef.current) {
+              xtermRef.current.writeln(
+                '\r\n\x1b[33mAuthentication failed. Reconnecting...\x1b[0m\r\n'
+              );
+            }
+            onAuthFailedRef.current?.();
+            return;
+          }
           if (xtermRef.current) {
-            xtermRef.current.writeln(
-              '\r\n\x1b[33mRelay disconnected. Reconnecting...\x1b[0m\r\n'
-            );
+            xtermRef.current.writeln('\r\n\x1b[33mConnection closed. Reconnecting...\x1b[0m\r\n');
           }
           reconnectCountRef.current += 1;
+          // After 5 failed reconnects, trigger reattach
+          if (reconnectCountRef.current >= 5 && onReattachNeededRef.current) {
+            console.log('[TerminalTab] Too many reconnect failures, triggering reattach');
+            if (xtermRef.current) {
+              xtermRef.current.writeln(
+                '\r\n\x1b[36mRequesting new terminal connection...\x1b[0m\r\n'
+              );
+            }
+            onReattachNeededRef.current();
+            return;
+          }
           // Exponential backoff: 1s → 2s → 4s → 8s (max 30s)
           const delay = Math.min(1000 * Math.pow(2, reconnectCountRef.current - 1), 30000);
           reconnectTimerRef.current = setTimeout(connect, delay);
-          return;
-        }
+        };
 
-        if (event.code === 4001) {
+        ws.onerror = (error) => {
+          console.log('[TerminalTab] WebSocket ERROR:', error);
+          setConnectionState('error');
           if (xtermRef.current) {
-            xtermRef.current.writeln(
-              '\r\n\x1b[33mAuthentication failed. Reconnecting...\x1b[0m\r\n'
-            );
+            xtermRef.current.writeln('\r\n\x1b[31mConnection error.\x1b[0m\r\n');
           }
-          onAuthFailedRef.current?.();
-          return;
-        }
-        if (xtermRef.current) {
-          xtermRef.current.writeln('\r\n\x1b[33mConnection closed. Reconnecting...\x1b[0m\r\n');
-        }
-        reconnectCountRef.current += 1;
-        // After 5 failed reconnects, trigger reattach
-        if (reconnectCountRef.current >= 5 && onReattachNeededRef.current) {
-          console.log('[TerminalTab] Too many reconnect failures, triggering reattach');
-          if (xtermRef.current) {
-            xtermRef.current.writeln(
-              '\r\n\x1b[36mRequesting new terminal connection...\x1b[0m\r\n'
-            );
-          }
-          onReattachNeededRef.current();
-          return;
-        }
-        // Exponential backoff: 1s → 2s → 4s → 8s (max 30s)
-        const delay = Math.min(1000 * Math.pow(2, reconnectCountRef.current - 1), 30000);
-        reconnectTimerRef.current = setTimeout(connect, delay);
-      };
+          onErrorRef.current?.('Failed to connect to terminal');
+        };
 
-      ws.onerror = (error) => {
-        console.log('[TerminalTab] WebSocket ERROR:', error);
+        wsRef.current = ws;
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : 'Unknown error';
         setConnectionState('error');
         if (xtermRef.current) {
-          xtermRef.current.writeln('\r\n\x1b[31mConnection error.\x1b[0m\r\n');
+          xtermRef.current.writeln(`\r\n\x1b[31mConnection failed: ${errorMsg}\x1b[0m\r\n`);
         }
-        onErrorRef.current?.('Failed to connect to terminal');
-      };
-
-      wsRef.current = ws;
-    } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : 'Unknown error';
-      setConnectionState('error');
-      if (xtermRef.current) {
-        xtermRef.current.writeln(`\r\n\x1b[31mConnection failed: ${errorMsg}\x1b[0m\r\n`);
+        onErrorRef.current?.(errorMsg);
       }
-      onErrorRef.current?.(errorMsg);
-    }
-  }, [connect, connectWithUrl]);
+    },
+    [connect, connectWithUrl]
+  );
 
   // Initialize xterm.js
   useEffect(() => {

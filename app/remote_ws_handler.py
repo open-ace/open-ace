@@ -630,6 +630,18 @@ class RemoteWSHandler(WSGIHandler):
             self.close_connection = True
             return
 
+        # HA: Check if relay is owned by another Pod (Issue #1851)
+        redirect_url = self._check_relay_redirect(vscode_id, token, RelayType.VSCODE)
+        if redirect_url:
+            # Relay is owned by another Pod - send redirect close frame
+            logger.info(
+                "VSCode WS handler: redirecting vscode %s to owner pod",
+                vscode_id[:8],
+            )
+            ws_frame.send_close(self.socket, REDIRECT_CLOSE_CODE, redirect_url)
+            self.close_connection = True
+            return
+
         original_http_url = info.get("original_http_url", "")
         if not original_http_url:
             logger.error("VSCode WS handler: missing remote URL for vscode %s", vscode_id[:8])
@@ -666,7 +678,7 @@ class RemoteWSHandler(WSGIHandler):
     # HA Helper Methods (Issue #1851)
     # ------------------------------------------------------------------
 
-    def _check_relay_redirect(self, relay_id: str, token: str) -> str | None:
+    def _check_relay_redirect(self, relay_id: str, token: str, relay_type: RelayType = RelayType.TERMINAL) -> str | None:
         """Check if relay should be redirected to another Pod.
 
         Queries Redis to check if the relay is owned by another Pod.
@@ -676,6 +688,7 @@ class RemoteWSHandler(WSGIHandler):
         Args:
             relay_id: The terminal or vscode ID
             token: Authentication token for the relay
+            relay_type: Type of relay (terminal or vscode)
 
         Returns:
             Redirect URL if should redirect, None otherwise
@@ -690,9 +703,7 @@ class RemoteWSHandler(WSGIHandler):
                 )
                 return None
 
-            relay_state = distributed_store.get_relay_owner(
-                RelayType.TERMINAL, relay_id
-            )
+            relay_state = distributed_store.get_relay_owner(relay_type, relay_id)
 
             if relay_state is None:
                 # No owner registered - this Pod will handle it
