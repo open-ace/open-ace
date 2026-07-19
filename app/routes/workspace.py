@@ -2025,17 +2025,23 @@ def get_user_webui_url():
 
         system_account = user.get("system_account") or user.get("username")
 
-        # Get or create user's webui instance
-        url, token = manager.get_user_webui_url(int(user_id), str(system_account))
+        # Get or create user's webui instance.
+        # Pass host_url so the iframe URL uses the browser-visible host instead
+        # of config.url (Issue #1306). In Docker deployments config.url holds a
+        # container-detected IP that the browser cannot reach; webui_manager
+        # replaces it with request.host_url. Omitting this argument regresses
+        # the workspace into a blank iframe.
+        from flask import request as flask_request
+
+        host_url = flask_request.host_url.rstrip("/")
+        url, token = manager.get_user_webui_url(int(user_id), str(system_account), host_url)
 
         # Update activity timestamp
         manager.update_user_activity(user_id)
 
         # Build Open-ACE API URL for iframe integration
         # This is needed so qwen-code-webui can call Open-ACE APIs
-        from flask import request as flask_request
-
-        openace_url = flask_request.host_url.rstrip("/")
+        openace_url = host_url
 
         # For HTTPS requests in multi-user mode, convert URL to relative path
         # to avoid mixed content blocking (HTTP iframe in HTTPS page)
