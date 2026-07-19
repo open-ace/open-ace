@@ -66,6 +66,7 @@ VERSION
 *.pem
 *.key
 .env.*
+!.env.example
 
 # Qwen local settings
 .qwen/

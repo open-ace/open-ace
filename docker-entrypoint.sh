@@ -188,6 +188,31 @@ echo "=========================================="
 # ============================================================================
 # 0.2. Generate Default Config (Issue #1260)
 # ============================================================================
+
+# Auto-generate strong random secrets when the operator did not set them.
+# Lets `docker compose up` work with zero configuration: the entrypoint fills
+# SECRET_KEY / OPENACE_ENCRYPTION_KEY / UPLOAD_AUTH_KEY so the Python app
+# (which runs as FLASK_ENV=production and strictly validates these) starts.
+# Generated values are exported into the environment the app inherits. Setting
+# any of them explicitly (e.g. via .env) is always honored.
+ensure_secret_env() {
+    if [ -z "$SECRET_KEY" ]; then
+        SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))")
+        export SECRET_KEY
+        echo "Generated SECRET_KEY (set SECRET_KEY to override)."
+    fi
+    if [ -z "$OPENACE_ENCRYPTION_KEY" ]; then
+        OPENACE_ENCRYPTION_KEY=$(python3 -c "import secrets; print(secrets.token_hex(16))")
+        export OPENACE_ENCRYPTION_KEY
+        echo "Generated OPENACE_ENCRYPTION_KEY (set OPENACE_ENCRYPTION_KEY to override)."
+    fi
+    if [ -z "$UPLOAD_AUTH_KEY" ]; then
+        UPLOAD_AUTH_KEY=$(python3 -c "import secrets; print(secrets.token_hex(16))")
+        export UPLOAD_AUTH_KEY
+        echo "Generated UPLOAD_AUTH_KEY (set UPLOAD_AUTH_KEY to override)."
+    fi
+}
+
 # Generate default config.json if not exists (one-click deploy support)
 generate_default_config() {
     CONFIG_FILE="$OPENACE_CONFIG_FILE"
@@ -220,6 +245,20 @@ generate_default_config() {
             echo "WARNING: Could not auto-detect SERVER_IP, falling back to host.docker.internal"
             SERVER_IP="host.docker.internal"
         else
+            # Validate the detected address is plausibly browser-reachable.
+            # Some runtimes (e.g. OrbStack) resolve host.docker.internal /
+            # hostname -I to a container-internal address in the 0.0.0.0/8
+            # reserved block (e.g. 0.250.250.254) that browsers cannot reach,
+            # which leaves the workspace iframe blank. Default docker-compose
+            # deployments are accessed locally, so localhost is the safe
+            # fallback. Private IPs (192.168/10.x/172.16-31.x) are legit
+            # production access addresses and are left untouched.
+            case "$SERVER_IP" in
+                0.*)
+                    echo "WARNING: detected SERVER_IP $SERVER_IP is in the reserved 0.0.0.0/8 block (unreachable from browser); using localhost"
+                    SERVER_IP="localhost"
+                    ;;
+            esac
             echo "Auto-detected SERVER_IP: $SERVER_IP"
         fi
     fi
@@ -314,6 +353,10 @@ CONFIG_EOF
     echo "Default config generated with permissions 600."
 }
 
+# Ensure security secrets exist before the app starts. Must run before
+# generate_default_config (which embeds UPLOAD_AUTH_KEY into config.json) and
+# before gunicorn (which needs SECRET_KEY / OPENACE_ENCRYPTION_KEY in env).
+ensure_secret_env
 generate_default_config
 
 # ============================================================================

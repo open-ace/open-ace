@@ -42,9 +42,12 @@ services:
     environment:
       - FLASK_ENV=production
       - PYTHONUNBUFFERED=1
-      - SECRET_KEY=${SECRET_KEY:?SECRET_KEY must be set}
-      - OPENACE_ENCRYPTION_KEY=${OPENACE_ENCRYPTION_KEY:?OPENACE_ENCRYPTION_KEY must be set}
-      - UPLOAD_AUTH_KEY=${UPLOAD_AUTH_KEY:?UPLOAD_AUTH_KEY must be set}
+      # Secrets: empty by default — docker-entrypoint.sh auto-generates strong
+      # random values on first start if unset (see ensure_secret_env). For
+      # production, set them explicitly in .env (see .env.example).
+      - SECRET_KEY=${SECRET_KEY:-}
+      - OPENACE_ENCRYPTION_KEY=${OPENACE_ENCRYPTION_KEY:-}
+      - UPLOAD_AUTH_KEY=${UPLOAD_AUTH_KEY:-}
       # Database
       - DATABASE_URL=postgresql://${DB_USER:-ace}:${DB_PASSWORD:-ace-secret}@postgres:5432/${DB_NAME:-ace}
       # Multi-user Workspace
