@@ -3373,6 +3373,26 @@ table .latency-row:hover td {
   border-radius: var(--border-radius);
 }
 
+/* Personal files: file list (upload/download/delete) */
+.personal-files .file-list {
+  margin-top: 0.25rem;
+  border-top: 1px solid var(--border-color);
+}
+
+.personal-files .file-list .file-list-item {
+  padding: 0.35rem 0.75rem;
+}
+
+.personal-files .file-list .file-list-item .file-actions {
+  flex-shrink: 0;
+  margin-left: 0.5rem;
+}
+
+.personal-files .file-list .file-list-item .file-actions .btn {
+  padding: 0.1rem 0.45rem;
+  line-height: 1.2;
+}
+
 /* Sessions page specific styles */
 .work-main .sessions .sessions-list {
   max-width: 100%;

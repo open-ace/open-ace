@@ -55,6 +55,8 @@ export { TOOL_DISPLAY_NAMES };
 
 export { copyToClipboard } from './clipboard';
 
+export { downloadBlob } from './download';
+
 // Query key utilities
 export {
   hashQueryKey,
