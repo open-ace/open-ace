@@ -31,7 +31,7 @@ class TestAuditActionsSynchronization:
         # Expected action counts by category (based on audit_logger.py comments)
         expected_categories = {
             "Authentication": 4,  # LOGIN, LOGOUT, LOGIN_FAILED, SESSION_EXPIRED
-            "User Management": 6,  # USER_CREATE, UPDATE, DELETE, PASSWORD_CHANGE, ROLE_CHANGE, STATUS_CHANGE
+            "User Management": 7,  # USER_CREATE, UPDATE, DELETE, PASSWORD_CHANGE, PASSWORD_CHANGE_FAILED, ROLE_CHANGE, STATUS_CHANGE
             "Permission": 2,  # PERMISSION_GRANT, REVOKE
             "Quota": 3,  # QUOTA_UPDATE, ALERT, EXCEEDED
             "Data Access": 4,  # DATA_VIEW, EXPORT, IMPORT, DELETE

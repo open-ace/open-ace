@@ -32,6 +32,7 @@ class ChangePasswordError(Enum):
     NEW_PASSWORD_SAME_AS_CURRENT = "new_password_same_as_current"
     UPDATE_FAILED = "update_failed"
 
+
 # Cache for security_settings queries (60 second TTL)
 _security_settings_cache: dict = {}  # {"settings": dict, "timestamp": float}
 _SECURITY_SETTINGS_TTL = 60  # seconds
@@ -242,7 +243,11 @@ def _check_change_password_lockout(user_id: int) -> tuple[bool, Optional[str], O
                     )
                     + 1
                 )
-                return True, f"Account temporarily locked. Try again in {remaining} minutes.", remaining
+                return (
+                    True,
+                    f"Account temporarily locked. Try again in {remaining} minutes.",
+                    remaining,
+                )
             else:
                 # Lockout expired — reset
                 db.execute(
@@ -497,7 +502,11 @@ class AuthService:
 
         # Verify current password
         if not password_verify_func(current_password, user.get("password_hash", "")):
-            return False, "Current password is incorrect", ChangePasswordError.CURRENT_PASSWORD_INCORRECT
+            return (
+                False,
+                "Current password is incorrect",
+                ChangePasswordError.CURRENT_PASSWORD_INCORRECT,
+            )
 
         # Validate new password with security policy
         settings = _get_security_settings()
@@ -505,10 +514,18 @@ class AuthService:
         if not is_valid:
             # Restore the "New" context so the error is unambiguous in the
             # change-password flow, vs. the shared validator's generic phrasing.
-            return False, f"New {error_msg[0].lower()}{error_msg[1:]}", ChangePasswordError.NEW_PASSWORD_INVALID
+            return (
+                False,
+                f"New {error_msg[0].lower()}{error_msg[1:]}",
+                ChangePasswordError.NEW_PASSWORD_INVALID,
+            )
 
         if new_password == current_password:
-            return False, "New password must be different from current password", ChangePasswordError.NEW_PASSWORD_SAME_AS_CURRENT
+            return (
+                False,
+                "New password must be different from current password",
+                ChangePasswordError.NEW_PASSWORD_SAME_AS_CURRENT,
+            )
 
         # Hash and update password
         new_password_hash = password_hash_func(new_password)
