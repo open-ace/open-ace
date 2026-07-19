@@ -8,12 +8,29 @@ import logging
 import secrets
 import time
 from datetime import datetime, timedelta, timezone
+from enum import Enum
 from typing import Optional, cast
 
 from app.repositories.user_repo import UserRepository
 from app.utils.validators import validate_password
 
 logger = logging.getLogger(__name__)
+
+
+class ChangePasswordError(Enum):
+    """Enumeration of change-password error types.
+
+    Used to distinguish between different failure reasons for:
+    - Precise failure attempt tracking (only CURRENT_PASSWORD_INCORRECT counts)
+    - Audit log failure_reason classification
+    - Robust error handling (no string matching required)
+    """
+
+    USER_NOT_FOUND = "user_not_found"
+    CURRENT_PASSWORD_INCORRECT = "current_password_incorrect"
+    NEW_PASSWORD_INVALID = "new_password_invalid"
+    NEW_PASSWORD_SAME_AS_CURRENT = "new_password_same_as_current"
+    UPDATE_FAILED = "update_failed"
 
 # Cache for security_settings queries (60 second TTL)
 _security_settings_cache: dict = {}  # {"settings": dict, "timestamp": float}
@@ -159,6 +176,190 @@ def _clear_failed_logins(username: str) -> None:
         logger.warning(f"Failed to clear login attempts for {username}: {e}")
 
 
+# ============================================================================
+# Change-Password Lockout Functions
+# ============================================================================
+# These functions implement rate limiting and lockout for the change-password
+# endpoint, using a namespace prefix ("cp:") to distinguish from login attempts.
+#
+# Key format: "cp:user_{user_id}" (e.g., "cp:user_123")
+# - "cp:" prefix ensures no collision with real usernames (validation regex
+#   prohibits colons in usernames, see app/utils/validators.py)
+# - Uses the same login_attempts table as login lockout
+# - Independent from login lockout (separate counters and lockouts)
+# ============================================================================
+
+
+def _get_change_password_lockout_key(user_id: int) -> str:
+    """Get the lockout key for change-password attempts.
+
+    Uses namespace prefix "cp:" to distinguish from login attempts.
+    The prefix format ensures no collision with real usernames because
+    the username validation regex prohibits colons.
+
+    Args:
+        user_id: User ID.
+
+    Returns:
+        str: Lockout key in format "cp:user_{user_id}".
+    """
+    return f"cp:user_{user_id}"
+
+
+def _check_change_password_lockout(user_id: int) -> tuple[bool, Optional[str], Optional[int]]:
+    """Check if change-password is temporarily locked for a user.
+
+    Returns:
+        Tuple of (is_locked, error_message, remaining_minutes).
+        On DB failure, returns (False, None, None) to allow operation (graceful degradation).
+    """
+    from app.repositories.database import Database, get_param_placeholder
+
+    p = get_param_placeholder()
+    key = _get_change_password_lockout_key(user_id)
+
+    try:
+        db = Database()
+        row = db.fetch_one(
+            f"SELECT attempt_count, locked_until FROM login_attempts WHERE username = {p}",
+            (key,),
+        )
+
+        if not row:
+            return False, None, None
+
+        locked_until = row.get("locked_until")
+        if locked_until:
+            if isinstance(locked_until, str):
+                locked_until = datetime.fromisoformat(locked_until)
+            if locked_until > datetime.now(timezone.utc).replace(tzinfo=None):
+                remaining = (
+                    int(
+                        (
+                            locked_until - datetime.now(timezone.utc).replace(tzinfo=None)
+                        ).total_seconds()
+                        / 60
+                    )
+                    + 1
+                )
+                return True, f"Account temporarily locked. Try again in {remaining} minutes.", remaining
+            else:
+                # Lockout expired — reset
+                db.execute(
+                    f"DELETE FROM login_attempts WHERE username = {p}",
+                    (key,),
+                )
+                return False, None, None
+
+        return False, None, None
+    except Exception as e:
+        logger.warning(f"Change-password lockout check failed for user {user_id}: {e}")
+        return False, None, None
+
+
+def _record_change_password_failure(user_id: int) -> tuple[int, bool]:
+    """Record a failed change-password attempt and lock if threshold exceeded.
+
+    Uses transaction (BEGIN IMMEDIATE for SQLite) to ensure atomicity.
+    Returns (new_count, is_now_locked).
+    On DB failure, returns (0, False) and logs warning (graceful degradation).
+    """
+    from app.repositories.database import Database, get_param_placeholder, is_postgresql
+
+    max_attempts = _get_max_login_attempts()
+    lockout_minutes = _get_lockout_duration_minutes()
+    p = get_param_placeholder()
+    key = _get_change_password_lockout_key(user_id)
+
+    try:
+        db = Database()
+
+        # Use connection context manager to keep all operations on the same connection
+        with db.connection() as conn:
+            cursor = conn.cursor()
+
+            # SQLite: use BEGIN IMMEDIATE for explicit write lock
+            # PostgreSQL: default transaction behavior (auto BEGIN on first statement)
+            if not is_postgresql():
+                cursor.execute("BEGIN IMMEDIATE")
+
+            try:
+                # Check existing record
+                cursor.execute(
+                    f"SELECT attempt_count FROM login_attempts WHERE username = {p}",
+                    (key,),
+                )
+                row = cursor.fetchone()
+
+                if row:
+                    # SQLite returns Row object, PostgreSQL returns tuple or dict
+                    if isinstance(row, dict):
+                        current_count = row["attempt_count"]
+                    else:
+                        current_count = row[0]
+                    new_count = current_count + 1
+                    cursor.execute(
+                        f"UPDATE login_attempts SET attempt_count = {p} WHERE username = {p}",
+                        (new_count, key),
+                    )
+                else:
+                    new_count = 1
+                    cursor.execute(
+                        f"INSERT INTO login_attempts (username, attempt_count, locked_until) VALUES ({p}, {p}, NULL)",
+                        (key, 1),
+                    )
+
+                is_now_locked = False
+                if new_count >= max_attempts:
+                    locked_until = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(
+                        minutes=lockout_minutes
+                    )
+                    cursor.execute(
+                        f"UPDATE login_attempts SET locked_until = {p} WHERE username = {p}",
+                        (locked_until, key),
+                    )
+                    is_now_locked = True
+                    logger.warning(
+                        f"Change-password locked for user {user_id} after {max_attempts} failed attempts"
+                    )
+
+                # Commit transaction
+                conn.commit()
+                return new_count, is_now_locked
+
+            except Exception as e:
+                # Rollback on error
+                conn.rollback()
+                raise e
+
+    except Exception as e:
+        logger.warning(f"Failed to record change-password failure for user {user_id}: {e}")
+        return 0, False
+
+
+def _clear_change_password_failures(user_id: int) -> bool:
+    """Clear failed change-password attempts after successful password change.
+
+    Returns:
+        bool: True if successful, False on failure (logs warning, no exception).
+    """
+    from app.repositories.database import Database, get_param_placeholder
+
+    p = get_param_placeholder()
+    key = _get_change_password_lockout_key(user_id)
+
+    try:
+        db = Database()
+        db.execute(
+            f"DELETE FROM login_attempts WHERE username = {p}",
+            (key,),
+        )
+        return True
+    except Exception as e:
+        logger.warning(f"Failed to clear change-password attempts for user {user_id}: {e}")
+        return False
+
+
 # Session token expiration default (overridden by security_settings DB)
 SESSION_EXPIRATION_HOURS = 24
 
@@ -272,7 +473,7 @@ class AuthService:
         new_password: str,
         password_verify_func,
         password_hash_func,
-    ) -> tuple[bool, Optional[str]]:
+    ) -> tuple[bool, Optional[str], Optional[ChangePasswordError]]:
         """
         Change user password.
 
@@ -284,16 +485,19 @@ class AuthService:
             password_hash_func: Function to hash new password.
 
         Returns:
-            Tuple[bool, Optional[str]]: (Success, Error message or None).
+            Tuple[bool, Optional[str], Optional[ChangePasswordError]]:
+                (Success, Error message or None, Error type or None).
+                Note: Return value changed from 2-tuple to 3-tuple.
+                Callers must handle the third element (error_type).
         """
         # Get user
         user = self.user_repo.get_user_by_id(user_id)
         if not user:
-            return False, "User not found"
+            return False, "User not found", ChangePasswordError.USER_NOT_FOUND
 
         # Verify current password
         if not password_verify_func(current_password, user.get("password_hash", "")):
-            return False, "Current password is incorrect"
+            return False, "Current password is incorrect", ChangePasswordError.CURRENT_PASSWORD_INCORRECT
 
         # Validate new password with security policy
         settings = _get_security_settings()
@@ -301,18 +505,18 @@ class AuthService:
         if not is_valid:
             # Restore the "New" context so the error is unambiguous in the
             # change-password flow, vs. the shared validator's generic phrasing.
-            return False, f"New {error_msg[0].lower()}{error_msg[1:]}"
+            return False, f"New {error_msg[0].lower()}{error_msg[1:]}", ChangePasswordError.NEW_PASSWORD_INVALID
 
         if new_password == current_password:
-            return False, "New password must be different from current password"
+            return False, "New password must be different from current password", ChangePasswordError.NEW_PASSWORD_SAME_AS_CURRENT
 
         # Hash and update password
         new_password_hash = password_hash_func(new_password)
         if not self.user_repo.update_password(user_id, new_password_hash):
-            return False, "Failed to update password"
+            return False, "Failed to update password", ChangePasswordError.UPDATE_FAILED
 
         logger.info(f"Password changed for user ID: {user_id}")
-        return True, None
+        return True, None, None
 
     def get_session(self, token: str) -> Optional[dict]:
         """

@@ -16,7 +16,13 @@ from flask import Blueprint, g, jsonify, make_response, request
 from app.auth.decorators import auth_required, public_endpoint
 from app.modules.governance.audit_logger import AuditAction, AuditLogger
 from app.repositories.user_repo import UserRepository
-from app.services.auth_service import AuthService
+from app.services.auth_service import (
+    AuthService,
+    ChangePasswordError,
+    _check_change_password_lockout,
+    _clear_change_password_failures,
+    _record_change_password_failure,
+)
 
 ALLOWED_EXTENSIONS = {"jpg", "jpeg", "png", "gif", "webp"}
 ALLOWED_MIME_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
@@ -331,7 +337,12 @@ def api_current_user():
 @auth_bp.route("/auth/change-password", methods=["POST"])
 @auth_required
 def api_change_password():
-    """Change password endpoint."""
+    """Change password endpoint.
+
+    Implements rate limiting and lockout for failed current_password attempts.
+    Failed attempts are tracked separately from login attempts using namespace
+    prefix "cp:user_{user_id}" in the login_attempts table.
+    """
     data = request.get_json() or {}
     current_password = data.get("current_password")
     new_password = data.get("new_password")
@@ -342,12 +353,38 @@ def api_change_password():
     user_id = int(g.user_id)
     username = cast("Optional[str]", getattr(g, "user", {}).get("username"))
 
-    success, error = auth_service.change_password(
+    # Check if change-password is locked for this user
+    is_locked, lockout_msg, remaining_minutes = _check_change_password_lockout(user_id)
+    if is_locked:
+        # Log locked attempt (no service call, no failure count increment)
+        audit_logger.log_action(
+            action=AuditAction.USER_PASSWORD_CHANGE_FAILED,
+            user_id=user_id,
+            username=username,
+            resource_type="user",
+            resource_id=str(user_id),
+            resource_name=username,
+            ip_address=request.remote_addr,
+            user_agent=request.headers.get("User-Agent", ""),
+            success=False,
+            error_message=lockout_msg,
+            details={
+                "failure_reason": "account_locked",
+                "remaining_minutes": remaining_minutes,
+            },
+        )
+        return jsonify({"error": lockout_msg}), 429
+
+    # Call service (returns 3-tuple: success, error_message, error_type)
+    success, error_message, error_type = auth_service.change_password(
         user_id, current_password, new_password, verify_password, hash_password
     )
 
     if success:
-        # Log password change
+        # Clear any previous failure attempts
+        _clear_change_password_failures(user_id)
+
+        # Log successful password change
         audit_logger.log_action(
             action=AuditAction.USER_PASSWORD_CHANGE,
             user_id=user_id,
@@ -360,7 +397,33 @@ def api_change_password():
         )
         return jsonify({"success": True, "message": "Password changed successfully"})
 
-    return jsonify({"error": error}), 400
+    # Handle failure
+    attempt_count = 0
+    is_now_locked = False
+
+    # Only record failure for CURRENT_PASSWORD_INCORRECT
+    if error_type == ChangePasswordError.CURRENT_PASSWORD_INCORRECT:
+        attempt_count, is_now_locked = _record_change_password_failure(user_id)
+
+    # Log failed password change attempt
+    audit_logger.log_action(
+        action=AuditAction.USER_PASSWORD_CHANGE_FAILED,
+        user_id=user_id,
+        username=username,
+        resource_type="user",
+        resource_id=str(user_id),
+        resource_name=username,
+        ip_address=request.remote_addr,
+        user_agent=request.headers.get("User-Agent", ""),
+        success=False,
+        error_message=error_message,
+        details={
+            "failure_reason": error_type.value if error_type else None,
+            "attempt_count": attempt_count,
+        },
+    )
+
+    return jsonify({"error": error_message}), 400
 
 
 def allowed_file(filename: str) -> bool:

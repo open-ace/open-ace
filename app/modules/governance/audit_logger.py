@@ -46,6 +46,7 @@ class AuditAction(Enum):
     USER_UPDATE = "user_update"
     USER_DELETE = "user_delete"
     USER_PASSWORD_CHANGE = "user_password_change"
+    USER_PASSWORD_CHANGE_FAILED = "user_password_change_failed"
     USER_ROLE_CHANGE = "user_role_change"
     USER_STATUS_CHANGE = "user_status_change"
 
@@ -736,6 +737,11 @@ def get_action_categories() -> dict[str, dict[str, Any]]:
                     "value": "user_password_change",
                     "label": "Password Change",
                     "i18n_key": "actionUserPasswordChange",
+                },
+                {
+                    "value": "user_password_change_failed",
+                    "label": "Password Change Failed",
+                    "i18n_key": "actionUserPasswordChangeFailed",
                 },
                 {
                     "value": "user_role_change",
