@@ -133,6 +133,26 @@ docker compose up -d --build
 
 > 💡 生产环境部署请参考 [部署指南](scripts/install-central/docker-method/README.md)
 
+#### 🇨🇳 国内网络加速
+
+若构建时拉取 Docker Hub 基础镜像（`python`、`node`、`postgres`）卡住或超时，设置 `BASE_REGISTRY` 指向国内镜像源后重新构建：
+
+```bash
+export BASE_REGISTRY=docker.m.daocloud.io
+docker compose up -d --build
+```
+
+该变量会同时作用于 Dockerfile 的基础镜像拉取和 postgres 镜像拉取。可选镜像源：
+
+| 镜像源 | 地址 |
+|--------|------|
+| DaoCloud | `docker.m.daocloud.io` |
+| 1Panel | `docker.1panel.live` |
+
+> 镜像源可用性会随时间变化，表中任选一个能 pull 通即可；也可换用其他公开的 Docker Hub 镜像。
+
+> 也可在 Docker daemon 配置 `registry-mirrors`（Docker Desktop / OrbStack 的镜像加速设置），效果相同但作用于全局。
+
 ### 方式二：源码安装
 
 ```bash

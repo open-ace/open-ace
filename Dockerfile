@@ -2,11 +2,18 @@
 # Docker build for production deployment
 #
 # Frontend is built inside Docker (Issue #1260: one-click deploy support)
+#
+# Base image registry override (for networks where Docker Hub is unreachable,
+# e.g. mainland China). Pass at build time:
+#   docker compose build --build-arg BASE_REGISTRY=docker.m.daocloud.io
+# or export BASE_REGISTRY=docker.m.daocloud.io before `docker compose up -d --build`
+# (docker-compose.yml forwards it as a build arg). Defaults to docker.io.
+ARG BASE_REGISTRY=docker.io
 
 # =============================================================================
 # Frontend Build Stage (Issue #1260)
 # =============================================================================
-FROM node:20-alpine AS frontend-builder
+FROM ${BASE_REGISTRY}/node:20-alpine AS frontend-builder
 
 WORKDIR /app/frontend
 
@@ -28,7 +35,8 @@ RUN npm run build
 # =============================================================================
 # Python Build Stage
 # =============================================================================
-FROM python:3.11-slim AS builder
+ARG BASE_REGISTRY=docker.io
+FROM ${BASE_REGISTRY}/python:3.11-slim AS builder
 
 WORKDIR /app
 
@@ -54,7 +62,8 @@ RUN pip install --no-cache-dir --upgrade pip -i https://mirrors.aliyun.com/pypi/
 # =============================================================================
 # Production Stage
 # =============================================================================
-FROM python:3.11-slim AS production
+ARG BASE_REGISTRY=docker.io
+FROM ${BASE_REGISTRY}/python:3.11-slim AS production
 
 # Labels for container metadata
 LABEL maintainer="Open ACE Team"
