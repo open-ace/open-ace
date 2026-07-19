@@ -71,7 +71,9 @@ def parse_pip_audit_report(report: dict[str, Any]) -> list[Vulnerability]:
                     package=dep.get("name", "unknown"),
                     severity=vuln.get("severity", "UNKNOWN"),
                     description=vuln.get("description", "No description available"),
-                    fixed_in=vuln.get("fix_versions", [None])[0] if vuln.get("fix_versions") else None,
+                    fixed_in=(
+                        vuln.get("fix_versions", [None])[0] if vuln.get("fix_versions") else None
+                    ),
                     source="pip-audit",
                 )
             )
@@ -128,11 +130,16 @@ def search_existing_issue(cve_id: str | None, package: str) -> str | None:
         [
             "issue",
             "list",
-            "--repo", repo,
-            "--state", "open",
-            "--search", f"{cve_id}",
-            "--json", "number",
-            "--limit", "1",
+            "--repo",
+            repo,
+            "--state",
+            "open",
+            "--search",
+            f"{cve_id}",
+            "--json",
+            "number",
+            "--limit",
+            "1",
         ]
     )
 
@@ -166,30 +173,42 @@ def create_issue(vuln: Vulnerability) -> str | None:
     ]
 
     if vuln.fixed_in:
-        body_lines.extend([
-            "",
-            "### Fix",
-            "Upgrade to version `" + vuln.fixed_in + "` or later.",
-        ])
+        body_lines.extend(
+            [
+                "",
+                "### Fix",
+                "Upgrade to version `" + vuln.fixed_in + "` or later.",
+            ]
+        )
 
-    body_lines.extend([
-        "",
-        "---",
-        "",
-        "_This issue was automatically created by the security audit workflow._",
-        "_Reported at: " + datetime.utcnow().isoformat() + "Z_",
-    ])
+    body_lines.extend(
+        [
+            "",
+            "---",
+            "",
+            "_This issue was automatically created by the security audit workflow._",
+            "_Reported at: " + datetime.utcnow().isoformat() + "Z_",
+        ]
+    )
 
     body = "\n".join(body_lines)
 
-    success, output = run_gh_command([
-        "issue", "create",
-        "--repo", repo,
-        "--title", title,
-        "--body", body,
-        "--label", "security,dependency",
-        "--label", f"audit:{vuln.source}",
-    ])
+    success, output = run_gh_command(
+        [
+            "issue",
+            "create",
+            "--repo",
+            repo,
+            "--title",
+            title,
+            "--body",
+            body,
+            "--label",
+            "security,dependency",
+            "--label",
+            f"audit:{vuln.source}",
+        ]
+    )
 
     if success:
         # Extract issue number from output
@@ -214,11 +233,17 @@ def add_comment(issue_number: str, vuln: Vulnerability) -> bool:
     if vuln.fixed_in:
         comment += "- **Fix available:** Version `" + vuln.fixed_in + "` or later\n"
 
-    success, _ = run_gh_command([
-        "issue", "comment", issue_number,
-        "--repo", repo,
-        "--body", comment,
-    ])
+    success, _ = run_gh_command(
+        [
+            "issue",
+            "comment",
+            issue_number,
+            "--repo",
+            repo,
+            "--body",
+            comment,
+        ]
+    )
 
     return success
 
@@ -288,7 +313,7 @@ def main() -> int:
                     print("   ✅ Added comment to #" + existing)
                     updated += 1
                 else:
-                    print(f"   ⚠️ Failed to add comment")
+                    print("   ⚠️ Failed to add comment")
         else:
             print("   No existing issue found")
             if args.dry_run:
