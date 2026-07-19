@@ -278,6 +278,7 @@ class MessageService:
         conversation_id: Optional[str] = None,
         user_id: Optional[int] = None,
         project_path: Optional[str] = None,
+        tenant_id: Optional[int] = None,  # Issue #1852
     ) -> bool:
         """
         Save a message.
@@ -309,4 +310,5 @@ class MessageService:
             conversation_id=conversation_id,
             user_id=user_id,
             project_path=project_path,
+            tenant_id=tenant_id,
         )

@@ -253,8 +253,8 @@ class MessageRepository:
         Returns:
             List[Dict]: List of message records.
         """
-        conditions = ["date = ?"]
-        params = [date]
+        conditions: list[str] = ["date = ?"]
+        params: list[Any] = [date]
 
         if tool_name:
             conditions.append("tool_name = ?")
@@ -329,8 +329,8 @@ class MessageRepository:
         Returns:
             List[Dict]: List of message records.
         """
-        conditions = ["date >= ?", "date <= ?"]
-        params = [start_date, end_date]
+        conditions: list[str] = ["date >= ?", "date <= ?"]
+        params: list[Any] = [start_date, end_date]
 
         if tool_name:
             conditions.append("tool_name = ?")
@@ -510,8 +510,8 @@ class MessageRepository:
         """
         from datetime import datetime, timedelta, timezone
 
-        conditions = []
-        params = []
+        conditions: list[str] = []
+        params: list[Any] = []
 
         if date:
             conditions.append("date = ?")
@@ -656,8 +656,8 @@ class MessageRepository:
         Returns:
             List[str]: List of sender names.
         """
-        conditions = []
-        params = []
+        conditions: list[str] = []
+        params: list[Any] = []
 
         if host_name:
             conditions.append("host_name = ?")
@@ -709,8 +709,8 @@ class MessageRepository:
         Returns:
             int: Number of matching messages.
         """
-        conditions = []
-        params = []
+        conditions: list[str] = []
+        params: list[Any] = []
 
         if start_date:
             conditions.append("date >= ?")
@@ -782,8 +782,8 @@ class MessageRepository:
         Returns:
             List[Dict]: List of user token totals with unified_username field.
         """
-        conditions = ["dm.date IS NOT NULL"]
-        params = []
+        conditions: list[str] = ["dm.date IS NOT NULL"]
+        params: list[Any] = []
 
         if start_date:
             conditions.append("dm.date >= ?")
@@ -849,8 +849,8 @@ class MessageRepository:
         """
         from app.repositories.database import is_postgresql
 
-        conditions = []
-        params = []
+        conditions: list[str] = []
+        params: list[Any] = []
 
         if start_date:
             conditions.append("date >= ?")
@@ -941,8 +941,8 @@ class MessageRepository:
         Returns:
             List[Dict]: List of daily token totals.
         """
-        conditions = []
-        params = []
+        conditions: list[str] = []
+        params: list[Any] = []
 
         if start_date:
             conditions.append("date >= ?")
@@ -1001,8 +1001,8 @@ class MessageRepository:
             List[Dict]: Rows of {date, tool_name, total_tokens} with normalized
             tool names merged across aliases, sorted by date then tokens desc.
         """
-        conditions = []
-        params = []
+        conditions: list[str] = []
+        params: list[Any] = []
 
         if start_date:
             conditions.append("date >= ?")
@@ -1072,8 +1072,8 @@ class MessageRepository:
         Returns:
             List[Dict]: List of tool token totals.
         """
-        conditions = []
-        params = []
+        conditions: list[str] = []
+        params: list[Any] = []
 
         if start_date:
             conditions.append("date >= ?")
@@ -1129,6 +1129,7 @@ class MessageRepository:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         host_name: Optional[str] = None,
+        tenant_id: Optional[int] = None,
     ) -> dict:
         """
         Get conversation statistics summary without fetching full history.
@@ -1158,6 +1159,7 @@ class MessageRepository:
                 aligned with the analysis callers).
             end_date: Optional end date filter (defaults to today).
             host_name: Optional host name filter.
+            tenant_id: Optional tenant filter for tenant isolation.
 
         Returns:
             Dict: Conversation statistics summary. ``avg_conversation_length`` is kept
@@ -1192,6 +1194,9 @@ class MessageRepository:
         if host_name:
             conditions.append("host_name = ?")
             params.append(host_name)
+        if tenant_id is not None:
+            conditions.append("tenant_id = ?")
+            params.append(tenant_id)
 
         # Same id_filter set for numerator (SUM) and denominator (COUNT DISTINCT)
         # so per-session averages stay scope-consistent. Only count records that
@@ -1279,8 +1284,8 @@ class MessageRepository:
         Returns:
             List[Dict]: List of lightweight usage records.
         """
-        conditions = ["date >= ?", "date <= ?"]
-        params = [start_date, end_date]
+        conditions: list[str] = ["date >= ?", "date <= ?"]
+        params: list[Any] = [start_date, end_date]
 
         if host_name:
             conditions.append("host_name = ?")
@@ -1318,8 +1323,8 @@ class MessageRepository:
             Dict: All aggregate statistics needed for batch analysis.
         """
 
-        conditions = ["date >= ?", "date <= ?"]
-        params = [start_date, end_date]
+        conditions: list[str] = ["date >= ?", "date <= ?"]
+        params: list[Any] = [start_date, end_date]
 
         if host_name:
             conditions.append("host_name = ?")

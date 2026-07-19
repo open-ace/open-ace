@@ -67,7 +67,7 @@ class TestBatchAnalysisDataRange:
         assert result["data_range"]["max_date"] == "2024-12-31"
 
         # Verify get_data_range was called
-        self.daily_stats_repo.get_data_range.assert_called_once()
+        self.daily_stats_repo.get_data_range.assert_called_once_with(None)
 
     def test_batch_analysis_data_range_none_when_empty(self):
         """Test that data_range is None when database is empty."""
@@ -126,8 +126,8 @@ class TestBatchAnalysisDataRange:
         # Call with host filter
         result = self.service.get_batch_analysis(host_name="host1")
 
-        # Verify get_data_range was called without arguments (global range)
-        self.daily_stats_repo.get_data_range.assert_called_once_with()
+        # Verify get_data_range was called with tenant_id=None (global range)
+        self.daily_stats_repo.get_data_range.assert_called_once_with(None)
 
         # Verify data_range is in response
         assert result["data_range"] is not None
@@ -323,7 +323,7 @@ class TestBatchAnalysisSessionMetrics:
         )
 
         self.message_repo.get_conversation_stats_summary.assert_called_once_with(
-            "2026-05-01", "2026-05-23", "host1"
+            "2026-05-01", "2026-05-23", "host1", None
         )
 
     def test_zero_distinct_no_division_by_zero(self):

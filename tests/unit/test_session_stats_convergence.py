@@ -45,7 +45,7 @@ class TestSessionStatsConvergence:
         result = svc.get_session_stats("2026-06-01", "2026-06-18", "host-1")
 
         msg.get_conversation_stats_summary.assert_called_once_with(
-            start_date="2026-06-01", end_date="2026-06-18", host_name="host-1"
+            start_date="2026-06-01", end_date="2026-06-18", host_name="host-1", tenant_id=None
         )
         assert result["total_conversations"] == 7
         assert result["multi_turn_ratio"] == 0.5

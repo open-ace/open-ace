@@ -178,11 +178,10 @@ class TestAnalysisService:
         result = svc.get_conversation_stats("2026-05-01", "2026-05-23")
         # Delegates to the real repo query (single source of truth), no longer
         # to the previous get_conversation_history(limit=1000) in-memory path.
-        mock_msg.get_conversation_stats_summary.assert_called_once()
         assert result["total_conversations"] == 2
         assert result["total_messages"] == 15
         mock_msg.get_conversation_stats_summary.assert_called_once_with(
-            start_date="2026-05-01", end_date="2026-05-23", host_name=None
+            start_date="2026-05-01", end_date="2026-05-23", host_name=None, tenant_id=None
         )
 
     def test_get_tool_comparison(self):

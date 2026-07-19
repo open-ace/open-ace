@@ -54,8 +54,8 @@ class DailyStatsRepository:
         Returns:
             List[Dict]: List of daily totals with date, tokens, messages.
         """
-        conditions = []
-        params = []
+        conditions: list[str] = []
+        params: list[Any] = []
 
         if start_date:
             conditions.append("date >= ?")
@@ -112,8 +112,8 @@ class DailyStatsRepository:
         Returns:
             List[Dict]: List of tool totals.
         """
-        conditions = []
-        params = []
+        conditions: list[str] = []
+        params: list[Any] = []
 
         if start_date:
             conditions.append("date >= ?")
@@ -189,8 +189,8 @@ class DailyStatsRepository:
         Returns:
             Dict[str, Dict]: Summary data keyed by normalized tool name.
         """
-        conditions = []
-        params = []
+        conditions: list[str] = []
+        params: list[Any] = []
 
         if start_date:
             conditions.append("date >= ?")
@@ -284,8 +284,8 @@ class DailyStatsRepository:
         Returns:
             List[Dict]: List of user totals with unified_username field.
         """
-        conditions = ["ds.sender_name IS NOT NULL"]  # Only include rows with sender
-        params = []
+        conditions: list[str] = ["ds.sender_name IS NOT NULL"]  # Only include rows with sender
+        params: list[Any] = []
 
         if start_date:
             conditions.append("ds.date >= ?")
@@ -408,8 +408,8 @@ class DailyStatsRepository:
         Returns:
             List[Dict]: List of hourly totals.
         """
-        conditions = []
-        params = []
+        conditions: list[str] = []
+        params: list[Any] = []
 
         if start_date:
             conditions.append("date >= ?")
@@ -494,8 +494,8 @@ class DailyStatsRepository:
             DeprecationWarning,
             stacklevel=2,
         )
-        conditions = []
-        params = []
+        conditions: list[str] = []
+        params: list[Any] = []
 
         if host_name:
             conditions.append("host_name = ?")
@@ -594,8 +594,8 @@ class DailyStatsRepository:
         """
         start_time = time.time()
 
-        conditions = []
-        params = []
+        conditions: list[str] = []
+        params: list[Any] = []
 
         if start_date:
             conditions.append("date >= ?")
