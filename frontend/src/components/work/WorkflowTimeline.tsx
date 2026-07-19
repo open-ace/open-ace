@@ -381,10 +381,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
     return () => clearInterval(interval);
   }, [isWorkflowActive]);
 
-  const milestones = useMemo(
-    () => (timelineData?.milestones ?? []).filter((m) => m.status !== 'cancelled'),
-    [timelineData?.milestones],
-  );
+  const milestones = useMemo(() => timelineData?.milestones ?? [], [timelineData?.milestones]);
 
   // Latest (highest dev_round, non-empty content) finalized plan / PR review summary.
   // Each dev_round produces its own; the header "final" buttons surface the newest,
@@ -662,8 +659,12 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
     return branches;
   }, [workflow.branch_name, milestones]);
 
-  // Group milestones by dev_round
+  // Group milestones by dev_round (display layer only — hide cancelled so the
+  // timeline stays clean after a user cancels a round. Downstream derivations
+  // like latestPlanFinalized / latestFailedMilestone still use the full
+  // `milestones` array for correctness.)
   const groupedMilestones = milestones.reduce<Record<number, WorkflowMilestone[]>>((acc, ms) => {
+    if (ms.status === 'cancelled') return acc;
     const round = ms.dev_round || 1;
     if (!acc[round]) acc[round] = [];
     acc[round].push(ms);
