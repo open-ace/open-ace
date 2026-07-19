@@ -165,14 +165,14 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
         // Fallback to original URL
         connect();
       }
-      // eslint-disable-next-line react-hooks/exhaustive-deps
     },
     [token]
   );
 
   // Create WebSocket with the given URL
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const createWebSocket = useCallback((wsUrlWithToken: string, reconnectFn: (url: string) => void) => {
+
+  const createWebSocket = useCallback(
+    (wsUrlWithToken: string, reconnectFn: (url: string) => void) => {
       try {
         const ws = new WebSocket(wsUrlWithToken, ['binary']);
         console.log('[TerminalTab] WebSocket created, URL length:', wsUrlWithToken.length);
