@@ -65,7 +65,7 @@ class TestAuthPasswordChangeEnforcement:
         ):
             with patch(
                 "app.routes.auth.auth_service.change_password",
-                return_value=(True, None),
+                return_value=(True, None, None),
             ) as change_password:
                 resp = client.post(
                     "/api/auth/change-password",

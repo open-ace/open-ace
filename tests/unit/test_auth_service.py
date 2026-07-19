@@ -414,7 +414,7 @@ class TestAuthService:
         mock_repo.update_password.return_value = True
 
         # Use password that meets policy requirements (uppercase, lowercase, number)
-        success, error = svc.change_password(
+        success, error, error_type = svc.change_password(
             user_id=1,
             current_password="Oldpass123",
             new_password="Newpass123",
@@ -423,12 +423,13 @@ class TestAuthService:
         )
         assert success is True
         assert error is None
+        assert error_type is None
 
     def test_change_password_user_not_found(self):
         svc, mock_repo = self._make_service()
         mock_repo.get_user_by_id.return_value = None
 
-        success, error = svc.change_password(
+        success, error, error_type = svc.change_password(
             user_id=999,
             current_password="old",
             new_password="new123456",
@@ -437,6 +438,7 @@ class TestAuthService:
         )
         assert success is False
         assert "not found" in error.lower()
+        assert error_type is not None
 
     def test_change_password_wrong_current(self):
         svc, mock_repo = self._make_service()
@@ -445,7 +447,7 @@ class TestAuthService:
             "password_hash": "old_hash",
         }
 
-        success, error = svc.change_password(
+        success, error, error_type = svc.change_password(
             user_id=1,
             current_password="wrong",
             new_password="new123456",
@@ -454,6 +456,7 @@ class TestAuthService:
         )
         assert success is False
         assert "incorrect" in error.lower()
+        assert error_type is not None
 
     def test_change_password_too_short(self):
         svc, mock_repo = self._make_service()
@@ -462,7 +465,7 @@ class TestAuthService:
             "password_hash": "old_hash",
         }
 
-        success, error = svc.change_password(
+        success, error, error_type = svc.change_password(
             user_id=1,
             current_password="oldpass",
             new_password="short",
@@ -473,6 +476,7 @@ class TestAuthService:
         assert "8 characters" in error
         # The change-password flow preserves the "New" context.
         assert "new" in error.lower()
+        assert error_type is not None
 
     def test_change_password_same_as_current(self):
         svc, mock_repo = self._make_service()
@@ -482,7 +486,7 @@ class TestAuthService:
         }
 
         # Use password that meets policy requirements
-        success, error = svc.change_password(
+        success, error, error_type = svc.change_password(
             user_id=1,
             current_password="Samepass123",
             new_password="Samepass123",
@@ -491,6 +495,7 @@ class TestAuthService:
         )
         assert success is False
         assert "different" in error.lower()
+        assert error_type is not None
 
     def test_change_password_update_failure(self):
         svc, mock_repo = self._make_service()
@@ -501,7 +506,7 @@ class TestAuthService:
         mock_repo.update_password.return_value = False
 
         # Use password that meets policy requirements
-        success, error = svc.change_password(
+        success, error, error_type = svc.change_password(
             user_id=1,
             current_password="Oldpass123",
             new_password="Newpass123",
@@ -510,6 +515,7 @@ class TestAuthService:
         )
         assert success is False
         assert "update" in error.lower()
+        assert error_type is not None
 
     def test_get_session(self):
         svc, mock_repo = self._make_service()
