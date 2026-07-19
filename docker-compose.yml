@@ -32,6 +32,10 @@ services:
       context: .
       dockerfile: Dockerfile
       target: production
+      args:
+        # Base image registry. Override for networks where Docker Hub is
+        # unreachable (e.g. mainland China): BASE_REGISTRY=docker.m.daocloud.io
+        BASE_REGISTRY: ${BASE_REGISTRY:-docker.io}
     image: ${IMAGE_NAME:-openace/open-ace:latest}
     container_name: open-ace
     restart: unless-stopped
@@ -98,7 +102,9 @@ services:
   # PostgreSQL Database (required for production)
   # ===========================================================================
   postgres:
-    image: postgres:15-alpine
+    # Same registry override as the app build (BASE_REGISTRY). When unset this
+    # resolves to docker.io's postgres:15-alpine via the library/ auto-prefix.
+    image: ${BASE_REGISTRY:-docker.io}/postgres:15-alpine
     container_name: open-ace-postgres
     restart: unless-stopped
     environment:
