@@ -706,6 +706,16 @@ MAX_TEST_RETRIES = 2  # max retries when test agent itself fails
 MAX_DEV_RETRIES_ON_TEST_FAIL = 2  # max dev round retries for unfixable test failures
 MAX_CI_REPAIR_ATTEMPTS = 3  # max automatic dev-round retries for merge-phase CI failures
 
+# Sentinel digest used by _ci_failure_fingerprint when get_check_failure_excerpt
+# returns empty (old gh CLI / token / REST-API URL-format issues). Deliberately
+# contains non-hex chars so it can never collide with a real sha256[:12].
+# The give-up guard in _start_ci_repair_round checks for this sentinel to skip
+# the "unchanged signature" misfire — a name-only fingerprint has no
+# discriminative power, so firing the guard would wrongly kill workflows whose
+# real failure did change (#1855, #1856). Shared constant so producer
+# (_ci_failure_fingerprint) and consumer (_start_ci_repair_round) can't drift.
+NO_EXCERPT_SENTINEL = "<no-excerpt>"
+
 
 def _next_phase(current_phase: str) -> str:
     """Return the phase that follows current_phase."""
@@ -1207,7 +1217,7 @@ class AutonomousOrchestrator:
                 # fingerprint can't tell whether the agent's fix changed the
                 # error set. Misfiring it would kill workflows (e.g. #1855)
                 # whose real failure did change.
-                digest = "<no-excerpt>"
+                digest = NO_EXCERPT_SENTINEL
             parts.append(f"{name}::{digest}")
         return "\n".join(sorted(parts))
 
@@ -2352,7 +2362,7 @@ class AutonomousOrchestrator:
         # here would misfire and kill workflows whose real failure did change
         # (#1855). Skip the guard in that case; the MAX_CI_REPAIR_ATTEMPTS
         # cap still bounds retries.
-        fingerprint_is_meaningful = "<no-excerpt>" not in signature
+        fingerprint_is_meaningful = NO_EXCERPT_SENTINEL not in signature
         if (
             fingerprint_is_meaningful
             and previous_signature

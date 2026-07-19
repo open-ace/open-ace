@@ -1009,6 +1009,19 @@ class GitHubOps:
         run by the PR head sha + check name, then pull `--log-failed` for the
         whole run. `gh run list/view` are core commands available on older gh
         versions that lack `gh pr checks --json`.
+
+        Known limitation: `gh run list --json name` returns the WORKFLOW run
+        name (the workflow YAML's top-level `name:`, defaulting to the repo
+        name), while `check.name` is the JOB name inside the workflow (e.g.
+        "lint", "test (3.9)"). For an umbrella workflow (run name "CI",
+        jobs "lint"/"test") the name match fails and we fall back to runs[0].
+        If a commit triggers multiple workflows, runs[0] may belong to a
+        different workflow and its failure log gets attributed to this check.
+        This does NOT affect the give-up guard (the fingerprint stays stable
+        across rounds — same wrong log each time), but the repair context
+        fed to the agent may be off-topic in multi-workflow repos. Single-
+        workflow repos (the common case) are unaffected. Could be tightened
+        with `--workflow` filtering if this becomes a real problem.
         """
         head_sha = (check.get("head_sha") or "").strip()
         if not head_sha:

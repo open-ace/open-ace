@@ -197,3 +197,56 @@ def test_get_check_failure_excerpt_run_list_fallback_returns_empty_without_head_
         )
     assert excerpt == ""
     mock_run.assert_not_called()
+
+
+# ── Mixed fingerprint: some checks have real excerpt, some don't ───────
+
+
+def test_mixed_fingerprint_skips_guard_when_any_check_has_no_excerpt():
+    """When a batch has multiple failing checks and at least one's excerpt is
+    unavailable, the combined signature contains <no-excerpt> and the give-up
+    guard must skip (treat the whole signature as non-discriminative). This
+    locks the current safe behavior so a future per-check 'optimization' does
+    not reintroduce the #1855 misfire.
+
+    Scenario: check 'lint' has a real excerpt (real hash), check 'test (3.9)'
+    has no excerpt (REST-API URL issue → <no-excerpt>). Previous round had the
+    same mixed signature + head changed. Guard must NOT fire."""
+    from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+    excerpt_lint = "black....Failed\nwould reformat app/foo.py\n"
+    import hashlib
+
+    lint_digest = hashlib.sha256(
+        AutonomousOrchestrator._normalize_failure_excerpt(excerpt_lint).encode()
+    ).hexdigest()[:12]
+    # Mixed signature: lint has real hash, test (3.9) has sentinel.
+    mixed_signature = sorted([f"lint::{lint_digest}", "test (3.9)::<no-excerpt>"])
+    mixed_signature_str = "\n".join(mixed_signature)
+
+    wf = _make_workflow(
+        last_ci_failure_signature=mixed_signature_str,
+        last_ci_failure_head_sha="sha-old",
+    )
+    orch, mock_repo = _make_orchestrator(wf)
+    gh = MagicMock()
+    gh.get_pr_head_sha.return_value = "sha-new"
+    # lint gets its excerpt back; test (3.9) still gets empty.
+    gh.get_check_failure_excerpt.side_effect = lambda check: (
+        excerpt_lint if check.get("name") == "lint" else ""
+    )
+    orch._get_gh = MagicMock(return_value=gh)
+    orch._run_merge_ci_repair = MagicMock()
+
+    failed_checks = [
+        {"name": "lint", "state": "failure", "bucket": "fail"},
+        {"name": "test (3.9)", "state": "failure", "bucket": "fail"},
+    ]
+    orch._start_ci_repair_round(wf, 1875, failed_checks)
+
+    # Mixed signature → guard skipped → proceeds to repair, not failed.
+    orch._run_merge_ci_repair.assert_called_once()
+    last_updates = [c.args[1] for c in mock_repo.update_workflow.call_args_list]
+    assert not any(
+        u.get("status") == "failed" for u in last_updates
+    ), "mixed fingerprint with <no-excerpt> wrongly triggered give-up"
