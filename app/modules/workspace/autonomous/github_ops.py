@@ -607,6 +607,15 @@ class GitHubOps:
         """Checkout a branch or commit."""
         self._run_git(["checkout", ref])
 
+    def reset_hard_to_head(self) -> None:
+        """Discard all uncommitted changes and staged state, reset to HEAD.
+
+        Used by CI repair before a fresh-session retry to ensure the worktree
+        is clean after an aborted agent run (e.g. a context-overflow failure
+        that produced partial tool edits but no commit).
+        """
+        self._run_git(["reset", "--hard", "HEAD"])
+
     def delete_branch(self, name: str, remote: bool = True) -> None:
         """Delete a branch locally and optionally remotely."""
         self._run_git(["branch", "-D", name], check=False)
