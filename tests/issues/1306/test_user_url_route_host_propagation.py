@@ -12,7 +12,7 @@ These tests lock down the wiring: a request to `/api/workspace/user-url` with a
 custom Host header must return a URL built from that host, not from `config.url`.
 """
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from flask import Flask
@@ -126,3 +126,52 @@ def test_user_url_route_uses_localhost_in_default_case(
     data = resp.get_json()
     assert data["url"] == "http://localhost:3100", data["url"]
     assert data["openace_url"] == "http://localhost:19888", data["openace_url"]
+
+
+@patch("app.services.webui_manager.get_webui_manager")
+@patch("app.repositories.user_repo.UserRepository.get_user_by_id")
+def test_user_url_route_multi_user_uses_request_host_and_instance_port(
+    mock_get_user, mock_get_manager, workspace_app
+):
+    """Multi-user mode: url must use the request host + the instance's port.
+
+    Locks down the multi-user route wiring (webui_manager.py:541-549): when an
+    instance already exists and host_url is provided, the returned URL is built
+    from the browser-visible host and the instance's own port — NOT from the
+    container-detected IP stored on the instance.
+    """
+    from app.services.webui_manager import WebUIManager, WorkspaceConfig
+
+    manager = WebUIManager(
+        WorkspaceConfig(
+            enabled=True,
+            url=UNREACHABLE_CONTAINER_IP,
+            multi_user_mode=True,
+        )
+    )
+    manager.stop_cleanup_thread()
+
+    # Inject a live instance with a distinct port and a stale (container-IP) url.
+    # is_alive() is stubbed True so the manager reuses it instead of restarting.
+    instance = MagicMock()
+    instance.is_alive.return_value = True
+    instance.port = 3123
+    instance.token = "instance-token"
+    instance.url = f"{UNREACHABLE_CONTAINER_IP}:3123"  # stale container-IP url
+    manager._instances = {MOCK_USER["id"]: instance}
+
+    mock_get_manager.return_value = manager
+    mock_get_user.return_value = MOCK_USER
+
+    resp = _authed_get(
+        workspace_app.test_client(),
+        "/api/workspace/user-url",
+        host="my-host.example:19888",
+    )
+
+    assert resp.status_code == 200
+    data = resp.get_json()
+    # host replaced from request, port taken from the instance (3123, not 3100)
+    assert data["url"] == "http://my-host.example:3123", data["url"]
+    assert UNREACHABLE_CONTAINER_IP not in data["url"]
+    assert data["openace_url"] == "http://my-host.example:19888", data["openace_url"]
