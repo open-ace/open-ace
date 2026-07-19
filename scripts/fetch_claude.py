@@ -910,6 +910,12 @@ def update_agent_sessions_stats(messages: list) -> int:
                     )
                     title = wf_title or f"claude - {session_id[:8]}"
 
+                    # Model on the message with the strictly-greatest timestamp
+                    # (most-recently-used); see update_session_last_seen. NOT
+                    # list[-1], and NOT the loop residual `model` variable —
+                    # each session must read its own stats["last_model"].
+                    model = stats["last_model"]
+
                     has_context_column = _column_exists(cursor, "agent_sessions", "context")
                     if wf_context and has_context_column:
                         insert_sql = f"""

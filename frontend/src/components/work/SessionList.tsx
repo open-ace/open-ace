@@ -251,26 +251,37 @@ export const SessionList: React.FC<SessionListProps> = ({ collapsed = false, onS
           <i className="bi bi-plus-lg" />
         </button>
         <div className="session-list-collapsed-divider" />
-        {sessions.slice(0, 5).map((session: AgentSession) => (
-          <button
-            key={session.session_id}
-            className="session-list-collapsed-item"
-            onClick={() =>
-              handleSessionClick({
-                id: session.session_id,
-                title: session.title ?? '',
-                tool: session.tool_name ?? '',
-                time: '',
-                tokens: 0,
-                messages: 0,
-                requests: 0,
-              })
-            }
-            title={session.title ?? `Session ${displaySessionId(session.session_id, 8)}`}
-          >
-            <i className="bi bi-chat-dots" />
-          </button>
-        ))}
+        {sessions.slice(0, 5).map((session: AgentSession) => {
+          // Mirror the expanded-view logic: extract workflow_imported from the
+          // raw AgentSession context so collapsed clicks also jump to the
+          // workflow timeline (consistent behavior in both views).
+          const ctx = session.context as Record<string, unknown> | undefined;
+          const wfId =
+            typeof ctx?.workflow_id === 'string' ? (ctx.workflow_id as string) : undefined;
+          const isWorkflowImported = !!ctx?.workflow_imported && !!wfId;
+          return (
+            <button
+              key={session.session_id}
+              className={`session-list-collapsed-item ${isWorkflowImported ? 'session-workflow-imported' : ''}`}
+              onClick={() =>
+                handleSessionClick({
+                  id: session.session_id,
+                  title: session.title ?? '',
+                  tool: session.tool_name ?? '',
+                  time: '',
+                  tokens: 0,
+                  messages: 0,
+                  requests: 0,
+                  isWorkflowImported,
+                  workflowId: wfId,
+                })
+              }
+              title={session.title ?? `Session ${displaySessionId(session.session_id, 8)}`}
+            >
+              <i className={isWorkflowImported ? 'bi bi-robot' : 'bi bi-chat-dots'} />
+            </button>
+          );
+        })}
       </div>
     );
   }
