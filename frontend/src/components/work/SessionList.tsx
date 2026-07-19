@@ -9,6 +9,7 @@
  */
 
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
 import { useSessions, useSession, useRestoreSession } from '@/hooks';
@@ -38,6 +39,8 @@ interface SessionItem {
   workspace_type?: string;
   machine_name?: string;
   isImported?: boolean; // CLI-imported session (no cli_session_id + completed)
+  isWorkflowImported?: boolean; // CLI session imported from an autonomous workflow (context.workflow_imported)
+  workflowId?: string; // Linked workflow id for workflow-imported sessions (for jump-to)
   firstMessage?: string; // First user message preview (truncated to 100 chars)
 }
 
@@ -74,6 +77,7 @@ export const SessionList: React.FC<SessionListProps> = ({ collapsed = false, onS
   const [showNewSessionModal, setShowNewSessionModal] = useState(false);
   const sessionListRef = useRef<HTMLDivElement>(null);
   const selectedRef = useRef<HTMLButtonElement>(null);
+  const navigate = useNavigate();
 
   // Fetch sessions
   const {
@@ -151,6 +155,14 @@ export const SessionList: React.FC<SessionListProps> = ({ collapsed = false, onS
 
     sessions.forEach((session: AgentSession) => {
       const sessionDate = new Date(session.updated_at ?? session.created_at ?? now);
+      // A CLI session imported from an autonomous workflow worktree. fetch_claude
+      // annotates these with context.workflow_imported + workflow_id so the UI
+      // can badge them and link back to the workflow timeline. Takes precedence
+      // over the generic isImported (archive) classification.
+      const ctx = session.context as Record<string, unknown> | undefined;
+      const workflowIdFromCtx =
+        typeof ctx?.workflow_id === 'string' ? (ctx.workflow_id as string) : undefined;
+      const isWorkflowImported = !!ctx?.workflow_imported && !!workflowIdFromCtx;
       const sessionItem: SessionItem = {
         id: session.session_id,
         title: session.title ?? `Session ${displaySessionId(session.session_id, 8)}`,
@@ -166,7 +178,10 @@ export const SessionList: React.FC<SessionListProps> = ({ collapsed = false, onS
         requests: session.request_count ?? 0,
         workspace_type: session.workspace_type,
         machine_name: session.machine_name,
+        isWorkflowImported,
+        workflowId: workflowIdFromCtx,
         isImported:
+          !isWorkflowImported &&
           session.workspace_type === 'local' &&
           !session.cli_session_id &&
           session.status === 'completed',
@@ -199,11 +214,19 @@ export const SessionList: React.FC<SessionListProps> = ({ collapsed = false, onS
     setSearchInput(e.target.value);
   }, []);
 
-  const handleSessionClick = (sessionId: string) => {
-    setSelectedSessionId(sessionId);
+  const handleSessionClick = (session: SessionItem) => {
+    // A workflow-imported CLI session (real claude session from an autonomous
+    // workflow worktree) jumps to the workflow timeline instead of opening a
+    // chat detail modal — its transcript is already viewable per-milestone in
+    // the workflow view.
+    if (session.isWorkflowImported && session.workflowId) {
+      navigate(`/work/autonomous?workflow_id=${encodeURIComponent(session.workflowId)}`);
+      return;
+    }
+    setSelectedSessionId(session.id);
     setShowDetailModal(true);
     if (onSelectSession) {
-      onSelectSession(sessionId);
+      onSelectSession(session.id);
     }
   };
 
@@ -232,7 +255,17 @@ export const SessionList: React.FC<SessionListProps> = ({ collapsed = false, onS
           <button
             key={session.session_id}
             className="session-list-collapsed-item"
-            onClick={() => handleSessionClick(session.session_id)}
+            onClick={() =>
+              handleSessionClick({
+                id: session.session_id,
+                title: session.title ?? '',
+                tool: session.tool_name ?? '',
+                time: '',
+                tokens: 0,
+                messages: 0,
+                requests: 0,
+              })
+            }
             title={session.title ?? `Session ${displaySessionId(session.session_id, 8)}`}
           >
             <i className="bi bi-chat-dots" />
@@ -371,7 +404,7 @@ export const SessionList: React.FC<SessionListProps> = ({ collapsed = false, onS
 interface SessionGroupProps {
   title: string;
   sessions: SessionItem[];
-  onSessionClick: (sessionId: string) => void;
+  onSessionClick: (session: SessionItem) => void;
   selectedSessionId: string | null;
 }
 
@@ -390,11 +423,16 @@ const SessionGroup: React.FC<SessionGroupProps> = ({
         {sessions.map((session) => (
           <li key={session.id}>
             <button
-              className={`session-item w-100 p-2 ${selectedSessionId === session.id ? 'selected' : ''} ${session.isImported ? 'session-imported' : ''}`}
-              onClick={() => onSessionClick(session.id)}
+              className={`session-item w-100 p-2 ${selectedSessionId === session.id ? 'selected' : ''} ${session.isImported ? 'session-imported' : ''} ${session.isWorkflowImported ? 'session-workflow-imported' : ''}`}
+              onClick={() => onSessionClick(session)}
             >
               <span className="session-id text-truncate">
-                {session.isImported ? (
+                {session.isWorkflowImported ? (
+                  <i
+                    className="bi bi-robot text-primary me-1"
+                    title={t('workflowImported', language)}
+                  />
+                ) : session.isImported ? (
                   <i className="bi bi-archive text-muted me-1" title={t('cliImported', language)} />
                 ) : session.workspace_type === 'terminal' ? (
                   <i className="bi bi-terminal-fill text-info me-1" title="Web Terminal" />

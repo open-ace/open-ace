@@ -72,7 +72,16 @@ _AUTONOMOUS_WORKFLOW_CONTEXT_PATTERN = "%" + escape_like(_WORKFLOW_ID_CONTEXT_MA
 
 
 def visible_session_clause(alias: str = "") -> tuple[str, list[Any]]:
-    """Hide autonomous workflow tracking wrappers from user-facing listings."""
+    """Hide autonomous workflow tracking wrappers from user-facing listings.
+
+    Matches any session_type='workflow' row whose context carries the
+    workflow_id marker, regardless of whether cli_session_id has been
+    backfilled. The cli_session_id!='' guard was removed because wrapper rows
+    are created eagerly (before the agent runs) and an agent that fails to
+    start never backfills cli_session_id — leaving a permanent "orphan" that
+    would otherwise leak into the user-facing list. Workflow wrappers are
+    system bookkeeping rows and should never appear in the session list.
+    """
 
     prefix = f"{alias}." if alias else ""
     p = _param()
@@ -81,7 +90,6 @@ def visible_session_clause(alias: str = "") -> tuple[str, list[Any]]:
     return (
         "NOT ("
         f"{prefix}session_type = {p} "
-        f"AND COALESCE({prefix}cli_session_id, '') != '' "
         f"AND COALESCE({prefix}context, '') LIKE {p} ESCAPE '\\'"
         ")",
         [SessionType.WORKFLOW.value, _AUTONOMOUS_WORKFLOW_CONTEXT_PATTERN],
