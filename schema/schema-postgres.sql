@@ -562,10 +562,15 @@ CREATE TABLE daily_messages (
     deleted_at timestamp without time zone,
     user_id integer,
     project_path text,
+    tenant_id integer DEFAULT NULL,
     CONSTRAINT chk_daily_messages_input_tokens_positive CHECK ((input_tokens >= 0)),
     CONSTRAINT chk_daily_messages_output_tokens_positive CHECK ((output_tokens >= 0)),
     CONSTRAINT chk_daily_messages_tokens_positive CHECK ((tokens_used >= 0))
 );
+
+-- Indexes for tenant isolation (Issue #1852)
+CREATE INDEX idx_daily_messages_tenant_date ON daily_messages(tenant_id, date);
+CREATE INDEX idx_daily_messages_orphan ON daily_messages(date) WHERE tenant_id IS NULL;
 
 CREATE SEQUENCE daily_messages_id_seq
     AS integer
@@ -588,8 +593,13 @@ CREATE TABLE daily_stats (
     updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     project_id integer,
     project_path character varying(500),
-    user_id integer
+    user_id integer,
+    tenant_id integer DEFAULT NULL
 );
+
+-- Indexes for tenant isolation (Issue #1852)
+CREATE INDEX idx_daily_stats_tenant_date ON daily_stats(tenant_id, date);
+CREATE INDEX idx_daily_stats_orphan ON daily_stats(date) WHERE tenant_id IS NULL;
 
 CREATE TABLE daily_usage (
     id integer NOT NULL,
@@ -652,8 +662,13 @@ CREATE TABLE hourly_stats (
     total_input_tokens bigint NOT NULL,
     total_output_tokens bigint NOT NULL,
     message_count integer NOT NULL,
-    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
+    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    tenant_id integer DEFAULT NULL
 );
+
+-- Indexes for tenant isolation (Issue #1852)
+CREATE INDEX idx_hourly_stats_tenant_date ON hourly_stats(tenant_id, date);
+CREATE INDEX idx_hourly_stats_orphan ON hourly_stats(date) WHERE tenant_id IS NULL;
 
 CREATE TABLE insights_reports (
     id integer NOT NULL,

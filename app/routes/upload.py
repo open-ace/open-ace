@@ -156,6 +156,7 @@ def api_upload_messages():
                 conversation_id=msg.get("conversation_id"),
                 user_id=msg.get("user_id"),
                 project_path=msg.get("project_path"),
+                tenant_id=msg.get("tenant_id"),  # Issue #1852: Support explicit tenant_id
             )
 
             if success:
@@ -246,6 +247,7 @@ def api_upload_batch():
                 conversation_id=m.get("conversation_id"),
                 user_id=m.get("user_id"),
                 project_path=m.get("project_path"),
+                tenant_id=m.get("tenant_id"),  # Issue #1852: Support explicit tenant_id
             )
             if success:
                 results["messages"]["saved"] += 1

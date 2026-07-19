@@ -38,14 +38,18 @@ class DailyStatsRepository:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         host_name: Optional[str] = None,
+        tenant_id: Optional[int] = None,
     ) -> list[dict]:
         """
         Get daily token totals from pre-aggregated data.
+
+        Issue #1852: Added tenant_id parameter for tenant isolation.
 
         Args:
             start_date: Optional start date filter.
             end_date: Optional end date filter.
             host_name: Optional host name filter.
+            tenant_id: Optional tenant ID filter. If None, returns all data (admin view).
 
         Returns:
             List[Dict]: List of daily totals with date, tokens, messages.
@@ -64,6 +68,10 @@ class DailyStatsRepository:
         if host_name:
             conditions.append("host_name = ?")
             params.append(host_name)
+
+        if tenant_id is not None:
+            conditions.append("tenant_id = ?")
+            params.append(tenant_id)
 
         # Aggregate by date (sum across all tools/hosts/senders)
         where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
@@ -88,14 +96,18 @@ class DailyStatsRepository:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         host_name: Optional[str] = None,
+        tenant_id: Optional[int] = None,
     ) -> list[dict]:
         """
         Get tool token totals from pre-aggregated data.
+
+        Issue #1852: Added tenant_id parameter for tenant isolation.
 
         Args:
             start_date: Optional start date filter.
             end_date: Optional end date filter.
             host_name: Optional host name filter.
+            tenant_id: Optional tenant ID filter. If None, returns all data (admin view).
 
         Returns:
             List[Dict]: List of tool totals.
@@ -114,6 +126,10 @@ class DailyStatsRepository:
         if host_name:
             conditions.append("host_name = ?")
             params.append(host_name)
+
+        if tenant_id is not None:
+            conditions.append("tenant_id = ?")
+            params.append(tenant_id)
 
         # Aggregate by tool_name (sum across all dates/senders)
         where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
@@ -153,6 +169,7 @@ class DailyStatsRepository:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         host_name: Optional[str] = None,
+        tenant_id: Optional[int] = None,
     ) -> dict[str, dict]:
         """
         Get tool totals with all required fields for summary API.
@@ -161,10 +178,13 @@ class DailyStatsRepository:
         required by the frontend ToolSummary type, including days_count, avg_tokens,
         first_date, and last_date.
 
+        Issue #1852: Added tenant_id parameter for tenant isolation.
+
         Args:
             start_date: Optional start date filter.
             end_date: Optional end date filter.
             host_name: Optional host name filter.
+            tenant_id: Optional tenant ID filter. If None, returns all data (admin view).
 
         Returns:
             Dict[str, Dict]: Summary data keyed by normalized tool name.
@@ -181,6 +201,10 @@ class DailyStatsRepository:
         if host_name:
             conditions.append("host_name = ?")
             params.append(host_name)
+
+        if tenant_id is not None:
+            conditions.append("tenant_id = ?")
+            params.append(tenant_id)
 
         where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
@@ -239,6 +263,7 @@ class DailyStatsRepository:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         host_name: Optional[str] = None,
+        tenant_id: Optional[int] = None,
     ) -> list[dict]:
         """
         Get user token totals from pre-aggregated data.
@@ -248,10 +273,13 @@ class DailyStatsRepository:
         where the same user appears multiple times with different sender_name
         formats (e.g., WebUI format and Feishu format).
 
+        Issue #1852: Added tenant_id parameter for tenant isolation.
+
         Args:
             start_date: Optional start date filter.
             end_date: Optional end date filter.
             host_name: Optional host name filter.
+            tenant_id: Optional tenant ID filter. If None, returns all data (admin view).
 
         Returns:
             List[Dict]: List of user totals with unified_username field.
@@ -270,6 +298,10 @@ class DailyStatsRepository:
         if host_name:
             conditions.append("ds.host_name = ?")
             params.append(host_name)
+
+        if tenant_id is not None:
+            conditions.append("ds.tenant_id = ?")
+            params.append(tenant_id)
 
         # Filter out invalid sender names (Feishu IDs, placeholder values, etc.)
         # Keep in sync with app/utils/senders.py is_valid_sender()
@@ -360,14 +392,18 @@ class DailyStatsRepository:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         host_name: Optional[str] = None,
+        tenant_id: Optional[int] = None,
     ) -> list[dict]:
         """
         Get hourly usage patterns from pre-aggregated hourly_stats table.
+
+        Issue #1852: Added tenant_id parameter for tenant isolation.
 
         Args:
             start_date: Optional start date filter.
             end_date: Optional end date filter.
             host_name: Optional host name filter.
+            tenant_id: Optional tenant ID filter. If None, returns all data (admin view).
 
         Returns:
             List[Dict]: List of hourly totals.
@@ -386,6 +422,10 @@ class DailyStatsRepository:
         if host_name:
             conditions.append("host_name = ?")
             params.append(host_name)
+
+        if tenant_id is not None:
+            conditions.append("tenant_id = ?")
+            params.append(tenant_id)
 
         where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
@@ -416,7 +456,9 @@ class DailyStatsRepository:
 
         return result
 
-    def get_conversation_stats(self, host_name: Optional[str] = None) -> dict:
+    def get_conversation_stats(
+        self, host_name: Optional[str] = None, tenant_id: Optional[int] = None
+    ) -> dict:
         """
         Get conversation statistics from pre-aggregated data.
 
@@ -435,8 +477,11 @@ class DailyStatsRepository:
         This method calculates conversation stats from daily_stats
         instead of scanning daily_messages.
 
+        Issue #1852: Added tenant_id parameter for tenant isolation.
+
         Args:
             host_name: Optional host name filter.
+            tenant_id: Optional tenant ID filter. If None, returns all data (admin view).
 
         Returns:
             Dict: Conversation statistics.
@@ -455,6 +500,10 @@ class DailyStatsRepository:
         if host_name:
             conditions.append("host_name = ?")
             params.append(host_name)
+
+        if tenant_id is not None:
+            conditions.append("tenant_id = ?")
+            params.append(tenant_id)
 
         where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
@@ -524,6 +573,7 @@ class DailyStatsRepository:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         host_name: Optional[str] = None,
+        tenant_id: Optional[int] = None,
     ) -> dict:
         """
         Get all aggregates in a single query from pre-aggregated data.
@@ -531,10 +581,13 @@ class DailyStatsRepository:
         This method counts unique_users by user_id instead of sender_name,
         fixing Issue #626 where users were counted multiple times.
 
+        Issue #1852: Added tenant_id parameter for tenant isolation.
+
         Args:
             start_date: Optional start date filter.
             end_date: Optional end date filter.
             host_name: Optional host name filter.
+            tenant_id: Optional tenant ID filter. If None, returns all data (admin view).
 
         Returns:
             Dict: Aggregate statistics.
@@ -555,6 +608,10 @@ class DailyStatsRepository:
         if host_name:
             conditions.append("host_name = ?")
             params.append(host_name)
+
+        if tenant_id is not None:
+            conditions.append("tenant_id = ?")
+            params.append(tenant_id)
 
         where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
@@ -701,6 +758,8 @@ class DailyStatsRepository:
         by matching sender_name to users table. This fixes Issue #626 where users
         were counted multiple times due to different sender_name formats.
 
+        Issue #1852: Now includes tenant_id for proper tenant isolation.
+
         Args:
             date: Optional specific date to refresh. If None, refreshes all.
 
@@ -728,13 +787,14 @@ class DailyStatsRepository:
                 )
 
                 # Insert new stats with user_id populated from users table
+                # Issue #1852: Include tenant_id for tenant isolation
                 # sender_name formats:
                 # 1. WebUI: {system_account}-{hostname}-{tool} -> match users.system_account
                 # 2. Feishu: username (real name) -> match users.username
                 self.db.execute(
                     f"""
                     INSERT INTO daily_stats
-                    (date, tool_name, host_name, sender_name, user_id, total_tokens,
+                    (date, tool_name, host_name, sender_name, user_id, tenant_id, total_tokens,
                      total_input_tokens, total_output_tokens, message_count, updated_at)
                     SELECT
                         dm.date,
@@ -746,6 +806,7 @@ class DailyStatsRepository:
                              WHERE dm.sender_name LIKE (u.system_account || '-%%')
                                 OR dm.sender_name = u.username
                              LIMIT 1)) as user_id,
+                        dm.tenant_id,
                         SUM(dm.tokens_used) as total_tokens,
                         SUM(dm.input_tokens) as total_input_tokens,
                         SUM(dm.output_tokens) as total_output_tokens,
@@ -758,16 +819,18 @@ class DailyStatsRepository:
                                 (SELECT u.id FROM users u
                                  WHERE dm.sender_name LIKE (u.system_account || '-%%')
                                     OR dm.sender_name = u.username
-                                 LIMIT 1))
+                                 LIMIT 1)),
+                             dm.tenant_id
                     """,
                     (now,) + params,
                 )
             else:
                 # SQLite: use INSERT OR REPLACE with user_id populated
+                # Issue #1852: Include tenant_id for tenant isolation
                 self.db.execute(
                     f"""
                     INSERT OR REPLACE INTO daily_stats
-                    (date, tool_name, host_name, sender_name, user_id, total_tokens,
+                    (date, tool_name, host_name, sender_name, user_id, tenant_id, total_tokens,
                      total_input_tokens, total_output_tokens, message_count, updated_at)
                     SELECT
                         dm.date,
@@ -779,6 +842,7 @@ class DailyStatsRepository:
                              WHERE dm.sender_name LIKE (u.system_account || '-%%')
                                 OR dm.sender_name = u.username
                              LIMIT 1)) as user_id,
+                        dm.tenant_id,
                         SUM(dm.tokens_used) as total_tokens,
                         SUM(dm.input_tokens) as total_input_tokens,
                         SUM(dm.output_tokens) as total_output_tokens,
@@ -791,7 +855,8 @@ class DailyStatsRepository:
                                 (SELECT u.id FROM users u
                                  WHERE dm.sender_name LIKE (u.system_account || '-%%')
                                     OR dm.sender_name = u.username
-                                 LIMIT 1))
+                                 LIMIT 1)),
+                             dm.tenant_id
                     """,
                     (now,) + params,
                 )
@@ -860,7 +925,7 @@ class DailyStatsRepository:
 
         return False
 
-    def get_data_range(self) -> Optional[dict]:
+    def get_data_range(self, tenant_id: Optional[int] = None) -> Optional[dict]:
         """
         Get the actual data range (min and max dates) from daily_stats.
 
@@ -868,23 +933,32 @@ class DailyStatsRepository:
         which can be used by the frontend "All" button to show the actual
         data span instead of a hardcoded 365 days.
 
-        The data range is always global (not filtered by host) by design.
-        The "All" button represents the system's complete data range,
-        providing a consistent global perspective even when users switch
-        between hosts.
+        Issue #1852: Added tenant_id parameter for tenant isolation.
+
+        Args:
+            tenant_id: Optional tenant ID filter. If None, returns all data (admin view).
 
         Returns:
             Optional[Dict]: Data range with min_date and max_date, or None if table is empty.
             Example: {"min_date": "2024-01-01", "max_date": "2024-12-31"}
         """
-        query = """
-            SELECT
-                MIN(date) as min_date,
-                MAX(date) as max_date
-            FROM daily_stats
-        """
-
-        result = self.db.fetch_one(query)
+        if tenant_id is not None:
+            query = """
+                SELECT
+                    MIN(date) as min_date,
+                    MAX(date) as max_date
+                FROM daily_stats
+                WHERE tenant_id = ?
+            """
+            result = self.db.fetch_one(query, (tenant_id,))
+        else:
+            query = """
+                SELECT
+                    MIN(date) as min_date,
+                    MAX(date) as max_date
+                FROM daily_stats
+            """
+            result = self.db.fetch_one(query)
 
         if not result or not result.get("min_date"):
             return None
@@ -897,6 +971,8 @@ class DailyStatsRepository:
     def refresh_hourly_stats(self, date: Optional[str] = None) -> bool:
         """
         Refresh hourly_stats from daily_messages.
+
+        Issue #1852: Now includes tenant_id for proper tenant isolation.
 
         Args:
             date: Optional specific date to refresh. If None, refreshes all.
@@ -924,16 +1000,18 @@ class DailyStatsRepository:
                 )
 
                 # Insert new stats - convert UTC hour to CST (UTC+8)
+                # Issue #1852: Include tenant_id for tenant isolation
                 self.db.execute(
                     f"""
                     INSERT INTO hourly_stats
-                    (date, hour, tool_name, host_name, total_tokens, total_input_tokens,
+                    (date, hour, tool_name, host_name, tenant_id, total_tokens, total_input_tokens,
                      total_output_tokens, message_count, updated_at)
                     SELECT
                         date,
                         MOD(EXTRACT(HOUR FROM timestamp::timestamp)::INTEGER + 8, 24) as hour,
                         tool_name,
                         host_name,
+                        tenant_id,
                         SUM(tokens_used) as total_tokens,
                         SUM(input_tokens) as total_input_tokens,
                         SUM(output_tokens) as total_output_tokens,
@@ -941,22 +1019,24 @@ class DailyStatsRepository:
                         ?
                     FROM daily_messages
                     WHERE {date_condition} AND timestamp IS NOT NULL
-                    GROUP BY date, MOD(EXTRACT(HOUR FROM timestamp::timestamp)::INTEGER + 8, 24), tool_name, host_name
+                    GROUP BY date, MOD(EXTRACT(HOUR FROM timestamp::timestamp)::INTEGER + 8, 24), tool_name, host_name, tenant_id
                     """,
                     (now,) + params,
                 )
             else:
                 # SQLite: use INSERT OR REPLACE
+                # Issue #1852: Include tenant_id for tenant isolation
                 self.db.execute(
                     f"""
                     INSERT OR REPLACE INTO hourly_stats
-                    (date, hour, tool_name, host_name, total_tokens, total_input_tokens,
+                    (date, hour, tool_name, host_name, tenant_id, total_tokens, total_input_tokens,
                      total_output_tokens, message_count, updated_at)
                     SELECT
                         date,
                         (CAST(strftime('%H', timestamp) AS INTEGER) + 8) % 24 as hour,
                         tool_name,
                         host_name,
+                        tenant_id,
                         SUM(tokens_used) as total_tokens,
                         SUM(input_tokens) as total_input_tokens,
                         SUM(output_tokens) as total_output_tokens,
@@ -964,7 +1044,7 @@ class DailyStatsRepository:
                         ?
                     FROM daily_messages
                     WHERE {date_condition} AND timestamp IS NOT NULL
-                    GROUP BY date, (CAST(strftime('%H', timestamp) AS INTEGER) + 8) % 24, tool_name, host_name
+                    GROUP BY date, (CAST(strftime('%H', timestamp) AS INTEGER) + 8) % 24, tool_name, host_name, tenant_id
                     """,
                     (now,) + params,
                 )

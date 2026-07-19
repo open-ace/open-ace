@@ -1717,6 +1717,18 @@ def agent_message():
 
                     try:
                         current_session = sync_session_mgr.get_session(session_id)
+                        # Issue #1852: Get tenant_id from session or infer from user_id
+                        session_tenant_id = getattr(current_session, "tenant_id", None)
+                        if session_tenant_id is None:
+                            session_user_id = getattr(current_session, "user_id", None)
+                            if session_user_id:
+                                # Infer tenant_id from user_id
+                                from app.repositories.user_repo import UserRepository
+
+                                user_row = UserRepository().get_user_by_id(session_user_id)
+                                if user_row and user_row.get("tenant_id"):
+                                    session_tenant_id = user_row["tenant_id"]
+
                         with get_db_connection() as conn:
                             cursor = conn.cursor()
                             from app.repositories.database import is_postgresql
@@ -1727,8 +1739,8 @@ def agent_message():
                                     (date, tool_name, host_name, message_id, role, content,
                                      full_entry, tokens_used, input_tokens, output_tokens,
                                      model, timestamp, message_source,
-                                     conversation_id, agent_session_id, user_id, project_path)
-                                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                     conversation_id, agent_session_id, user_id, project_path, tenant_id)
+                                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                                     ON CONFLICT (date, tool_name, message_id, host_name) DO NOTHING""",
                                     (
                                         date_str,
@@ -1748,6 +1760,7 @@ def agent_message():
                                         session_id,
                                         getattr(current_session, "user_id", None),
                                         project_path or "",
+                                        session_tenant_id,
                                     ),
                                 )
                             else:
@@ -1756,8 +1769,8 @@ def agent_message():
                                     (date, tool_name, host_name, message_id, role, content,
                                      full_entry, tokens_used, input_tokens, output_tokens,
                                      model, timestamp, message_source,
-                                     conversation_id, agent_session_id, user_id, project_path)
-                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                     conversation_id, agent_session_id, user_id, project_path, tenant_id)
+                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                                     (
                                         date_str,
                                         tool_name,
@@ -1776,6 +1789,7 @@ def agent_message():
                                         session_id,
                                         getattr(current_session, "user_id", None),
                                         project_path or "",
+                                        session_tenant_id,
                                     ),
                                 )
                             conn.commit()

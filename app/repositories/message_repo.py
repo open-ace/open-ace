@@ -53,6 +53,7 @@ class MessageRepository:
         conversation_id: Optional[str] = None,
         user_id: Optional[int] = None,
         project_path: Optional[str] = None,
+        tenant_id: Optional[int] = None,
     ) -> bool:
         """
         Save a message to the database.
@@ -81,6 +82,9 @@ class MessageRepository:
             is_group_chat: Is group chat flag.
             agent_session_id: Agent session ID (tool process session).
             conversation_id: Conversation ID (one round of conversation).
+            user_id: User ID (Issue #1852 - used for tenant inference).
+            project_path: Project path.
+            tenant_id: Tenant ID for isolation (Issue #1852). If None, inferred from user_id.
 
         Returns:
             bool: True if successful.
@@ -99,6 +103,25 @@ class MessageRepository:
         # role filter showed "no messages found" for one of them.
         role = normalize_message_role(role)
 
+        # Issue #1852: Infer tenant_id from user_id if not provided
+        effective_tenant_id = tenant_id
+        if effective_tenant_id is None and user_id is not None:
+            user_row = self.db.fetch_one(
+                "SELECT tenant_id FROM users WHERE id = ?",
+                (user_id,),
+            )
+            if user_row and user_row.get("tenant_id"):
+                effective_tenant_id = user_row["tenant_id"]
+
+        # Issue #1852: Infer tenant_id from project_path if still None
+        if effective_tenant_id is None and project_path:
+            project_row = self.db.fetch_one(
+                "SELECT tenant_id FROM projects WHERE path = ?",
+                (project_path,),
+            )
+            if project_row and project_row.get("tenant_id"):
+                effective_tenant_id = project_row["tenant_id"]
+
         if is_postgresql():
             self.db.execute(
                 """
@@ -107,8 +130,8 @@ class MessageRepository:
                  full_entry, tokens_used, input_tokens, output_tokens, model,
                  timestamp, sender_id, sender_name, message_source,
                  feishu_conversation_id, group_subject, is_group_chat,
-                 agent_session_id, conversation_id, user_id, project_path)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 agent_session_id, conversation_id, user_id, project_path, tenant_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT (date, tool_name, host_name, message_id) DO UPDATE SET
                     parent_id = EXCLUDED.parent_id,
                     role = EXCLUDED.role,
@@ -128,7 +151,8 @@ class MessageRepository:
                     agent_session_id = EXCLUDED.agent_session_id,
                     conversation_id = EXCLUDED.conversation_id,
                     user_id = EXCLUDED.user_id,
-                    project_path = EXCLUDED.project_path
+                    project_path = EXCLUDED.project_path,
+                    tenant_id = EXCLUDED.tenant_id
             """,
                 (
                     date,
@@ -154,6 +178,7 @@ class MessageRepository:
                     conversation_id,
                     user_id,
                     project_path,
+                    effective_tenant_id,
                 ),
             )
         else:
@@ -164,8 +189,8 @@ class MessageRepository:
                  full_entry, tokens_used, input_tokens, output_tokens, model,
                  timestamp, sender_id, sender_name, message_source,
                  feishu_conversation_id, group_subject, is_group_chat,
-                 agent_session_id, conversation_id, user_id, project_path)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 agent_session_id, conversation_id, user_id, project_path, tenant_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
                 (
                     date,
@@ -191,6 +216,7 @@ class MessageRepository:
                     conversation_id,
                     user_id,
                     project_path,
+                    effective_tenant_id,
                 ),
             )
 
@@ -207,6 +233,7 @@ class MessageRepository:
         search: Optional[str] = None,
         limit: Optional[int] = None,
         offset: int = 0,
+        tenant_id: Optional[int] = None,
     ) -> list[dict]:
         """
         Get messages for a specific date.
@@ -220,6 +247,8 @@ class MessageRepository:
             search: Optional search term for content.
             limit: Optional limit on number of results.
             offset: Offset for pagination.
+            tenant_id: Optional tenant ID for isolation (Issue #1852).
+                If None, no tenant filtering is applied (admin view).
 
         Returns:
             List[Dict]: List of message records.
@@ -254,6 +283,10 @@ class MessageRepository:
             conditions.append("content LIKE ? ESCAPE '\\'")
             params.append(f"%{escape_like(search)}%")
 
+        if tenant_id is not None:
+            conditions.append("tenant_id = ?")
+            params.append(tenant_id)
+
         query = f"""
             SELECT * FROM daily_messages
             WHERE {" AND ".join(conditions)}
@@ -276,6 +309,7 @@ class MessageRepository:
         search: Optional[str] = None,
         limit: Optional[int] = None,
         offset: int = 0,
+        tenant_id: Optional[int] = None,
     ) -> list[dict]:
         """
         Get messages for a date range.
@@ -289,6 +323,8 @@ class MessageRepository:
             search: Optional search term for content.
             limit: Optional limit on number of results.
             offset: Offset for pagination.
+            tenant_id: Optional tenant ID for isolation (Issue #1852).
+                If None, no tenant filtering is applied (admin view).
 
         Returns:
             List[Dict]: List of message records.
@@ -323,6 +359,10 @@ class MessageRepository:
             conditions.append("content LIKE ? ESCAPE '\\'")
             params.append(f"%{escape_like(search)}%")
 
+        if tenant_id is not None:
+            conditions.append("tenant_id = ?")
+            params.append(tenant_id)
+
         query = f"""
             SELECT * FROM daily_messages
             WHERE {" AND ".join(conditions)}
@@ -344,6 +384,7 @@ class MessageRepository:
         sender_name: Optional[str] = None,
         limit: int = 50,
         offset: int = 0,
+        tenant_id: Optional[int] = None,
     ) -> list[dict]:
         """
         Get conversation history with aggregated statistics.
@@ -357,6 +398,8 @@ class MessageRepository:
             sender_name: Optional sender name filter.
             limit: Limit on number of results.
             offset: Offset for pagination.
+            tenant_id: Optional tenant ID for isolation (Issue #1852).
+                If None, no tenant filtering is applied (admin view).
 
         Returns:
             List[Dict]: List of conversation records.
@@ -392,6 +435,10 @@ class MessageRepository:
         if sender_name:
             conditions.append("sender_name = ?")
             params.append(sender_name)
+
+        if tenant_id is not None:
+            conditions.append("tenant_id = ?")
+            params.append(tenant_id)
 
         where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
@@ -443,8 +490,24 @@ class MessageRepository:
         tool_name: Optional[str] = None,
         host_name: Optional[str] = None,
         sender_name: Optional[str] = None,
+        tenant_id: Optional[int] = None,
     ) -> int:
-        """Count total conversations matching filters."""
+        """
+        Count total conversations matching filters.
+
+        Args:
+            date: Optional date filter.
+            start_date: Optional start date filter (defaults to 90 days ago).
+            end_date: Optional end date filter.
+            tool_name: Optional tool name filter.
+            host_name: Optional host name filter.
+            sender_name: Optional sender name filter.
+            tenant_id: Optional tenant ID for isolation (Issue #1852).
+                If None, no tenant filtering is applied (admin view).
+
+        Returns:
+            int: Count of conversations.
+        """
         from datetime import datetime, timedelta, timezone
 
         conditions = []
@@ -474,6 +537,10 @@ class MessageRepository:
         if sender_name:
             conditions.append("sender_name = ?")
             params.append(sender_name)
+
+        if tenant_id is not None:
+            conditions.append("tenant_id = ?")
+            params.append(tenant_id)
 
         id_filter = (
             "COALESCE(conversation_id, feishu_conversation_id, agent_session_id) IS NOT NULL"
@@ -575,12 +642,16 @@ class MessageRepository:
 
         return self.db.fetch_one(query, (session_id,))
 
-    def get_all_senders(self, host_name: Optional[str] = None) -> list[str]:
+    def get_all_senders(
+        self, host_name: Optional[str] = None, tenant_id: Optional[int] = None
+    ) -> list[str]:
         """
         Get list of all senders.
 
         Args:
             host_name: Optional host name filter.
+            tenant_id: Optional tenant ID for isolation (Issue #1852).
+                If None, no tenant filtering is applied (admin view).
 
         Returns:
             List[str]: List of sender names.
@@ -591,6 +662,10 @@ class MessageRepository:
         if host_name:
             conditions.append("host_name = ?")
             params.append(host_name)
+
+        if tenant_id is not None:
+            conditions.append("tenant_id = ?")
+            params.append(tenant_id)
 
         where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
@@ -615,6 +690,7 @@ class MessageRepository:
         sender_name: Optional[str] = None,
         role: Optional[str] = None,
         search: Optional[str] = None,
+        tenant_id: Optional[int] = None,
     ) -> int:
         """
         Count messages matching filters.
@@ -627,6 +703,8 @@ class MessageRepository:
             sender_name: Optional sender name filter.
             role: Optional role filter (comma-separated for multiple roles).
             search: Optional search term for content.
+            tenant_id: Optional tenant ID for isolation (Issue #1852).
+                If None, no tenant filtering is applied (admin view).
 
         Returns:
             int: Number of matching messages.
@@ -669,6 +747,10 @@ class MessageRepository:
             conditions.append("content LIKE ? ESCAPE '\\'")
             params.append(f"%{escape_like(search)}%")
 
+        if tenant_id is not None:
+            conditions.append("tenant_id = ?")
+            params.append(tenant_id)
+
         where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
         query = f"SELECT COUNT(*) as count FROM daily_messages {where_clause}"
@@ -681,6 +763,7 @@ class MessageRepository:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         host_name: Optional[str] = None,
+        tenant_id: Optional[int] = None,
     ) -> list[dict]:
         """
         Get total tokens per user for segmentation analysis.
@@ -693,6 +776,8 @@ class MessageRepository:
             start_date: Optional start date filter.
             end_date: Optional end date filter.
             host_name: Optional host name filter.
+            tenant_id: Optional tenant ID for isolation (Issue #1852).
+                If None, no tenant filtering is applied (admin view).
 
         Returns:
             List[Dict]: List of user token totals with unified_username field.
@@ -711,6 +796,10 @@ class MessageRepository:
         if host_name:
             conditions.append("dm.host_name = ?")
             params.append(host_name)
+
+        if tenant_id is not None:
+            conditions.append("dm.tenant_id = ?")
+            params.append(tenant_id)
 
         where_clause = f"WHERE {' AND '.join(conditions)}"
 
@@ -742,6 +831,7 @@ class MessageRepository:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         host_name: Optional[str] = None,
+        tenant_id: Optional[int] = None,
     ) -> list[dict]:
         """
         Get hourly usage patterns from message timestamps.
@@ -750,6 +840,8 @@ class MessageRepository:
             start_date: Optional start date filter.
             end_date: Optional end date filter.
             host_name: Optional host name filter.
+            tenant_id: Optional tenant ID for isolation (Issue #1852).
+                If None, no tenant filtering is applied (admin view).
 
         Returns:
             List[Dict]: List of hourly usage data with hour, tokens, requests.
@@ -771,6 +863,10 @@ class MessageRepository:
         if host_name:
             conditions.append("host_name = ?")
             params.append(host_name)
+
+        if tenant_id is not None:
+            conditions.append("tenant_id = ?")
+            params.append(tenant_id)
 
         where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
@@ -830,6 +926,7 @@ class MessageRepository:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         host_name: Optional[str] = None,
+        tenant_id: Optional[int] = None,
     ) -> list[dict]:
         """
         Get total tokens per day for trend analysis.
@@ -838,6 +935,8 @@ class MessageRepository:
             start_date: Optional start date filter.
             end_date: Optional end date filter.
             host_name: Optional host name filter.
+            tenant_id: Optional tenant ID for isolation (Issue #1852).
+                If None, no tenant filtering is applied (admin view).
 
         Returns:
             List[Dict]: List of daily token totals.
@@ -856,6 +955,10 @@ class MessageRepository:
         if host_name:
             conditions.append("host_name = ?")
             params.append(host_name)
+
+        if tenant_id is not None:
+            conditions.append("tenant_id = ?")
+            params.append(tenant_id)
 
         where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
@@ -879,6 +982,7 @@ class MessageRepository:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         host_name: Optional[str] = None,
+        tenant_id: Optional[int] = None,
     ) -> list[dict]:
         """
         Get total tokens per day per tool.
@@ -890,6 +994,8 @@ class MessageRepository:
             start_date: Optional start date filter.
             end_date: Optional end date filter.
             host_name: Optional host name filter.
+            tenant_id: Optional tenant ID for isolation (Issue #1852).
+                If None, no tenant filtering is applied (admin view).
 
         Returns:
             List[Dict]: Rows of {date, tool_name, total_tokens} with normalized
@@ -909,6 +1015,10 @@ class MessageRepository:
         if host_name:
             conditions.append("host_name = ?")
             params.append(host_name)
+
+        if tenant_id is not None:
+            conditions.append("tenant_id = ?")
+            params.append(tenant_id)
 
         where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
@@ -947,6 +1057,7 @@ class MessageRepository:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         host_name: Optional[str] = None,
+        tenant_id: Optional[int] = None,
     ) -> list[dict]:
         """
         Get total tokens per tool for comparison analysis.
@@ -955,6 +1066,8 @@ class MessageRepository:
             start_date: Optional start date filter.
             end_date: Optional end date filter.
             host_name: Optional host name filter.
+            tenant_id: Optional tenant ID for isolation (Issue #1852).
+                If None, no tenant filtering is applied (admin view).
 
         Returns:
             List[Dict]: List of tool token totals.
@@ -973,6 +1086,10 @@ class MessageRepository:
         if host_name:
             conditions.append("host_name = ?")
             params.append(host_name)
+
+        if tenant_id is not None:
+            conditions.append("tenant_id = ?")
+            params.append(tenant_id)
 
         where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
