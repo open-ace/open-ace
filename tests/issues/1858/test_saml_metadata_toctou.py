@@ -5,7 +5,7 @@ to pin the verified IP at connect time, closing the DNS rebinding TOCTOU window.
 """
 
 import socket
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 import requests
@@ -14,7 +14,6 @@ from lxml import etree
 from app.modules.sso.provider import SSOProviderConfig
 from app.modules.sso.saml import SAMLProvider
 from app.utils.outbound_url_guard import OutboundUrlBlockedError, _PinnedIPAdapter
-
 
 # Test fixtures
 SP_ENTITY_ID = "https://openace.example.com/saml/metadata"
@@ -103,7 +102,7 @@ def test_saml_metadata_url_pins_verified_ip(monkeypatch):
     monkeypatch.setattr("app.modules.sso.saml.safe_request", mock_safe_request_with_resolver)
 
     # Trigger metadata loading by accessing idp_entity_id
-    entity_id = provider.idp_entity_id
+    _ = provider.idp_entity_id
 
     # Only ONE resolution happened — the rebinding second call was never made
     assert resolver.calls == 1, f"Expected 1 resolution, got {resolver.calls}"
@@ -284,6 +283,7 @@ def test_saml_metadata_xml_parse_error_propagates(monkeypatch):
 
 def test_saml_metadata_redirect_blocked_propagates(monkeypatch):
     """Verify redirect blocking errors are not caught and continue to propagate."""
+
     # Mock safe_request to return redirect response
     def mock_safe_request(method, url, **kwargs):
         resp = requests.Response()
