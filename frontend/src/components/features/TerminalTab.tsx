@@ -4,6 +4,11 @@
  * Connects to a remote machine's terminal WebSocket server
  * and provides an interactive terminal experience with
  * a status bar showing connection state and machine info.
+ *
+ * HA Support (Issue #1851):
+ * - Handles WebSocket redirect (close code 3010)
+ * - Exponential backoff reconnection
+ * - Graceful reconnection after relay disconnect
  */
 
 import React, { useEffect, useRef, useCallback, useState } from 'react';
@@ -14,6 +19,10 @@ import { useLanguage, useTheme } from '@/store';
 import { t } from '@/i18n';
 
 type ConnectionState = 'connecting' | 'connected' | 'disconnected' | 'error';
+
+// WebSocket close codes for HA redirect (Issue #1851)
+const REDIRECT_CLOSE_CODE = 3010;
+const RELAY_DISCONNECTED_CODE = 1012;
 
 interface TerminalTabProps {
   wsUrl: string;
@@ -114,6 +123,51 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
       if (!terminalUrl.searchParams.has('rows')) terminalUrl.searchParams.set('rows', '24');
       const wsUrlWithToken = terminalUrl.toString();
 
+      createWebSocket(wsUrlWithToken);
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : 'Unknown error';
+      setConnectionState('error');
+      if (xtermRef.current) {
+        xtermRef.current.writeln(`\r\n\x1b[31mConnection failed: ${errorMsg}\x1b[0m\r\n`);
+      }
+      onErrorRef.current?.(errorMsg);
+    }
+  }, [wsUrl, token]);
+
+  // HA: Connect with a specific URL (for redirect support)
+  const connectWithUrl = useCallback((targetUrl: string) => {
+    console.log('[TerminalTab] connectWithUrl called:', targetUrl.substring(0, 50) + '...');
+    if (!xtermRef.current) {
+      console.log('[TerminalTab] Skipping connectWithUrl - no xterm');
+      return;
+    }
+
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+
+    setConnectionState('connecting');
+
+    // Ensure token is in the URL
+    try {
+      const url = new URL(targetUrl);
+      if (!url.searchParams.has('token') && token) {
+        url.searchParams.set('token', token);
+      }
+      if (!url.searchParams.has('cols')) url.searchParams.set('cols', '80');
+      if (!url.searchParams.has('rows')) url.searchParams.set('rows', '24');
+      createWebSocket(url.toString());
+    } catch (err) {
+      console.error('[TerminalTab] Invalid redirect URL:', err);
+      // Fallback to original URL
+      connect();
+    }
+  }, [token, connect]);
+
+  // Create WebSocket with the given URL
+  const createWebSocket = useCallback((wsUrlWithToken: string) => {
+    try {
       const ws = new WebSocket(wsUrlWithToken, ['binary']);
       console.log('[TerminalTab] WebSocket created, URL length:', wsUrlWithToken.length);
       ws.binaryType = 'arraybuffer';
@@ -159,6 +213,39 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
       ws.onclose = (event) => {
         console.log('[TerminalTab] WebSocket CLOSED:', event.code, event.reason);
         setConnectionState('disconnected');
+
+        // HA: Handle redirect from another Pod (Issue #1851)
+        if (event.code === REDIRECT_CLOSE_CODE && event.reason) {
+          const redirectUrl = event.reason;
+          if (xtermRef.current) {
+            xtermRef.current.writeln(
+              '\r\n\x1b[36mRedirecting to owner pod...\x1b[0m\r\n'
+            );
+          }
+          console.log('[TerminalTab] Redirect to:', redirectUrl.substring(0, 50) + '...');
+          // Reconnect to redirect URL after short delay
+          setTimeout(() => {
+            if (isActiveRef.current) {
+              connectWithUrl(redirectUrl);
+            }
+          }, 1000);
+          return;
+        }
+
+        // HA: Handle relay disconnected (Issue #1851)
+        if (event.code === RELAY_DISCONNECTED_CODE) {
+          if (xtermRef.current) {
+            xtermRef.current.writeln(
+              '\r\n\x1b[33mRelay disconnected. Reconnecting...\x1b[0m\r\n'
+            );
+          }
+          reconnectCountRef.current += 1;
+          // Exponential backoff: 1s → 2s → 4s → 8s (max 30s)
+          const delay = Math.min(1000 * Math.pow(2, reconnectCountRef.current - 1), 30000);
+          reconnectTimerRef.current = setTimeout(connect, delay);
+          return;
+        }
+
         if (event.code === 4001) {
           if (xtermRef.current) {
             xtermRef.current.writeln(
@@ -183,7 +270,8 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
           onReattachNeededRef.current();
           return;
         }
-        const delay = Math.min(3000 * Math.pow(1.5, reconnectCountRef.current - 1), 30000);
+        // Exponential backoff: 1s → 2s → 4s → 8s (max 30s)
+        const delay = Math.min(1000 * Math.pow(2, reconnectCountRef.current - 1), 30000);
         reconnectTimerRef.current = setTimeout(connect, delay);
       };
 
@@ -205,7 +293,7 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
       }
       onErrorRef.current?.(errorMsg);
     }
-  }, [wsUrl, token]);
+  }, [connect, connectWithUrl]);
 
   // Initialize xterm.js
   useEffect(() => {

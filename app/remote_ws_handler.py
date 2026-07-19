@@ -5,6 +5,11 @@ Handles WebSocket upgrades for both remote terminals and remote VSCode
 paths, handling the WebSocket handshake and framing directly on the raw
 socket.
 
+HA Support (Issue #1851):
+- Cross-Pod relay state awareness via Redis
+- Close frame redirect (code=3010) for browser WebSocket
+- Graceful degradation when Redis is unavailable
+
 For all other requests the handler delegates to the normal WSGIHandler
 flow (including geventwebsocket if it is configured).
 """
@@ -13,6 +18,7 @@ from __future__ import annotations
 
 import hmac
 import logging
+import os
 import re
 import threading
 from http.cookies import SimpleCookie
@@ -21,6 +27,12 @@ from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 from gevent.pywsgi import WSGIHandler
 
 import app.ws_frame as ws_frame
+from app.modules.workspace.relay_distributed_store import (
+    REDIRECT_CLOSE_CODE,
+    RelayDistributedStore,
+    RelayType,
+    get_relay_distributed_store,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -474,6 +486,18 @@ class RemoteWSHandler(WSGIHandler):
             self.close_connection = True
             return
 
+        # HA: Check if relay is owned by another Pod (Issue #1851)
+        redirect_url = self._check_relay_redirect(terminal_id, token)
+        if redirect_url:
+            # Relay is owned by another Pod - send redirect close frame
+            logger.info(
+                "Terminal WS handler: redirecting terminal %s to owner pod",
+                terminal_id[:8],
+            )
+            ws_frame.send_close(self.socket, REDIRECT_CLOSE_CODE, redirect_url)
+            self.close_connection = True
+            return
+
         # Check if relay connection exists (for private network machines).
         from app.modules.workspace.terminal_relay_store import terminal_relay_store
 
@@ -637,3 +661,98 @@ class RemoteWSHandler(WSGIHandler):
                 pass
 
         self.close_connection = True
+
+    # ------------------------------------------------------------------
+    # HA Helper Methods (Issue #1851)
+    # ------------------------------------------------------------------
+
+    def _check_relay_redirect(self, relay_id: str, token: str) -> str | None:
+        """Check if relay should be redirected to another Pod.
+
+        Queries Redis to check if the relay is owned by another Pod.
+        If so, returns the redirect URL. If this Pod is the owner or
+        Redis is unavailable, returns None.
+
+        Args:
+            relay_id: The terminal or vscode ID
+            token: Authentication token for the relay
+
+        Returns:
+            Redirect URL if should redirect, None otherwise
+        """
+        try:
+            distributed_store = get_relay_distributed_store()
+            if not distributed_store.is_redis_available():
+                # Redis unavailable - fallback to local mode
+                logger.debug(
+                    "Redis unavailable, falling back to local relay mode for %s",
+                    relay_id[:8],
+                )
+                return None
+
+            relay_state = distributed_store.get_relay_owner(
+                RelayType.TERMINAL, relay_id
+            )
+
+            if relay_state is None:
+                # No owner registered - this Pod will handle it
+                return None
+
+            pod_name = os.environ.get("POD_NAME", "unknown")
+            if relay_state.owner_pod == pod_name:
+                # This Pod is the owner - handle locally
+                return None
+
+            # Another Pod owns the relay - build redirect URL
+            redirect_url = self._build_redirect_url(relay_state.owner_pod, relay_id, token)
+            logger.info(
+                "Relay %s owned by pod %s, redirecting to %s",
+                relay_id[:8],
+                relay_state.owner_pod,
+                redirect_url[:50] + "...",
+            )
+            return redirect_url
+
+        except Exception as e:
+            logger.warning(
+                "Failed to check relay redirect for %s: %s, falling back to local mode",
+                relay_id[:8],
+                e,
+            )
+            return None
+
+    def _build_redirect_url(self, owner_pod: str, relay_id: str, token: str) -> str:
+        """Build redirect URL for a relay owned by another Pod.
+
+        Uses the headless Service to connect directly to the owner Pod.
+
+        Args:
+            owner_pod: Name of the Pod that owns the relay
+            relay_id: The terminal or vscode ID
+            token: Authentication token
+
+        Returns:
+            WebSocket URL for the owner Pod
+        """
+        # Use headless Service for direct Pod-to-Pod communication
+        # Format: ws://{pod_name}.{headless_service}.{namespace}.svc.cluster.local:{port}/...
+        namespace = os.environ.get("POD_NAMESPACE", "open-ace")
+        port = 19888
+
+        # Build WebSocket URL
+        # Use the same path but with the owner Pod's address
+        path = self.environ.get("PATH_INFO", "")
+        query = self.environ.get("QUERY_STRING", "")
+
+        # Build redirect URL
+        if query:
+            redirect_url = f"ws://{owner_pod}.open-ace-headless.{namespace}.svc.cluster.local:{port}{path}?{query}"
+        else:
+            redirect_url = f"ws://{owner_pod}.open-ace-headless.{namespace}.svc.cluster.local:{port}{path}"
+
+        # Ensure token is included
+        if "token=" not in redirect_url and token:
+            separator = "&" if "?" in redirect_url else "?"
+            redirect_url = f"{redirect_url}{separator}token={token}"
+
+        return redirect_url

@@ -39,6 +39,11 @@ spec:
         - name: open-ace
           image: open-ace:latest
           imagePullPolicy: IfNotPresent
+          # HA Support (Issue #1851): preStop hook for graceful terminal relay handoff
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sh", "-c", "sleep 30"]
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: false
