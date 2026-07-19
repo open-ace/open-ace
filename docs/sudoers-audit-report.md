@@ -50,6 +50,7 @@
 **说明**:
 - `git clone`在github_ops.py中未调用（不在审计范围）
 - `git push --force`未使用（安全）
+- `git push --force-with-lease`仅用于 auto-dev/* 工作流分支（review-fix / CI-repair / dev round 2+ agent 重新 commit 已推送改动导致 non-fast-forward 时兜底），Python 层 `auto-dev/*` 分支守卫保证不会误推到 main/release（Issue #1854）
 - `git reset --hard`未使用（安全）
 - `git clean -fd`未使用（安全）
 
@@ -105,7 +106,7 @@
 | gh repo fork * | 中危 | fork可能引入恶意仓库 | ❌ |
 | gh api * | 高危 | 允许任意API路径（仅允许特定路径） | ❌ |
 | git push --force | 高危 | 强制推送覆盖远程分支 | ❌ |
-| git push --force-with-lease | 中危 | 强制推送（相对安全但仍需谨慎） | ❌ |
+| git push --force-with-lease | 中危 | 仅限 auto-dev/* 工作流分支；Python 层 `git_push(force_with_lease=True)` 显式拒绝非 auto-dev 分支（defense-in-depth）；sudoers 显式放行 `push origin * --force-with-lease` 精确形态（Issue #1854） | ✅ |
 | git reset --hard | 中危 | 丢弃本地更改 | ❌ |
 | git clean -fd | 中危 | 删除未跟踪文件 | ❌ |
 

@@ -205,7 +205,7 @@ def test_run_merge_ci_repair_pushes_commit_and_stays_in_merge():
         [{"name": "lint", "state": "failure", "bucket": "fail", "link": "https://example.com"}],
     )
 
-    gh.git_push.assert_called_once_with(branch=wf["branch_name"])
+    gh.git_push.assert_called_once_with(branch=wf["branch_name"], force_with_lease=True)
     updates = mock_repo.update_workflow.call_args.args[1]
     assert updates["current_phase"] == "merge"
     assert updates["status"] == "merging"

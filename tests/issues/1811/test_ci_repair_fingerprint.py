@@ -212,7 +212,7 @@ class TestDetectAndPushCiRepairChanges:
         assert sha_changed is True
         assert commit_sha == "sha-B"
         assert push_error == ""
-        gh.git_push.assert_called_once_with(branch="auto-dev/x")
+        gh.git_push.assert_called_once_with(branch="auto-dev/x", force_with_lease=True)
 
     def test_no_changes_when_remote_equals_local(self):
         from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator

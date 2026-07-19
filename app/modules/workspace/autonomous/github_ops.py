@@ -1141,11 +1141,41 @@ class GitHubOps:
         sha = self.get_current_commit()
         return {"sha": sha, "message": message}
 
-    def git_push(self, remote: str = "origin", branch: Optional[str] = None) -> None:
-        """Push to remote."""
+    def git_push(
+        self,
+        remote: str = "origin",
+        branch: Optional[str] = None,
+        force_with_lease: bool = False,
+    ) -> None:
+        """Push to remote.
+
+        ``force_with_lease`` appends ``--force-with-lease`` so a re-committed
+        auto-dev branch (review-fix / CI-repair / dev round 2+ re-committing
+        already-pushed work) can overwrite the remote tip without a
+        non-fast-forward rejection. It is refused unless the resolved branch
+        starts with ``auto-dev/`` — defense-in-depth so no caller can ever
+        force-push main/release/user branches (Issue #1854).
+        """
+        if force_with_lease:
+            target = branch
+            if not target:
+                try:
+                    target = self.get_current_branch()
+                except Exception as e:
+                    raise GitHubOpsError(
+                        "force_with_lease requires an auto-dev/* branch but the "
+                        f"current branch could not be resolved: {e}"
+                    )
+            if not target.startswith("auto-dev/"):
+                raise GitHubOpsError(
+                    f"force_with_lease refused on non-auto-dev branch '{target}' "
+                    "(only auto-dev/* workflow branches may be force-pushed)"
+                )
         args = ["push", remote]
         if branch:
             args.append(branch)
+        if force_with_lease:
+            args.append("--force-with-lease")
         self._run_git(args)
 
     def git_init(self) -> None:
