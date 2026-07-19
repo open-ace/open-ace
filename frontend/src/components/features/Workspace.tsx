@@ -650,8 +650,13 @@ export const Workspace: React.FC = () => {
       // which carries the browser-visible host (via _replace_host_from_request,
       // Issue #1306/#1357) and the fixed WebUI port. config.url only reflects a
       // container-detected address that the browser cannot reach, so using it
-      // directly leaves the iframe blank. Fall back to config.url only when the
-      // user-url request hasn't completed yet.
+      // directly leaves the iframe blank.
+      //
+      // Fall back to config.url when userWebUI is absent — this covers both the
+      // request-in-flight window and the failure modes (success:false or the
+      // fetch throwing, which loadConfig swallows). Note the fallback is itself
+      // the unreachable container address, so in those failure cases the iframe
+      // stays blank; there is no better value available without user-url.
       let url = userWebUI?.success && userWebUI.url ? userWebUI.url : config.url;
       // Add lang parameter for language sync
       const langSeparator = url.includes('?') ? '&' : '?';
