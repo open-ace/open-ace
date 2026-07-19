@@ -417,6 +417,14 @@ def _extract_cli_result_error(parsed: dict, stderr_hint: str = "") -> tuple[str 
     if not parsed.get("is_error"):
         return None, None
 
+    # Claude SDK (2.1.x) can emit contradictory events near the context limit:
+    # is_error=true with subtype="success" and no actual error message. Treat
+    # this as success — the agent completed its task; the is_error flag is a
+    # spurious SDK signal, not a real failure (#1816 regression).
+    subtype = str(parsed.get("subtype") or "").strip()
+    if subtype == "success":
+        return None, None
+
     candidates: list[str] = []
     errors = parsed.get("errors")
     if isinstance(errors, list):
@@ -429,7 +437,6 @@ def _extract_cli_result_error(parsed: dict, stderr_hint: str = "") -> tuple[str 
     if stderr_hint.strip():
         candidates.append(stderr_hint.strip())
 
-    subtype = str(parsed.get("subtype") or "").strip()
     message = next((item for item in candidates if item), "")
     normalized = message.lower()
 
