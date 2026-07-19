@@ -6,7 +6,7 @@ API routes for usage analysis and reporting.
 
 from __future__ import annotations
 
-from typing import Optional, Tuple
+from typing import Tuple
 
 from flask import Blueprint, g, jsonify, request
 
@@ -23,7 +23,7 @@ def _require_auth():
     pass
 
 
-def _get_tenant_filter() -> Tuple[bool, Optional[int]]:
+def _get_tenant_filter() -> Tuple[bool, int | None]:
     """Get tenant filter parameters for the current request (Issue #1852).
 
     Returns:

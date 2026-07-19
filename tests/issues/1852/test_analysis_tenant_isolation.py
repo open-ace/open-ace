@@ -5,11 +5,12 @@ Tests that daily_messages, daily_stats, and hourly_stats tables
 properly isolate tenant data during write and query operations.
 """
 
-import pytest
 from unittest.mock import MagicMock, patch
 
-from app.repositories.message_repo import MessageRepository
+import pytest
+
 from app.repositories.daily_stats_repo import DailyStatsRepository
+from app.repositories.message_repo import MessageRepository
 
 
 class TestMessageRepoTenantIsolation:
@@ -104,11 +105,17 @@ class TestDailyStatsTenantIsolation:
 
         # Mock fetch_all result
         self.db.fetch_all.return_value = [
-            {"date": "2026-01-01", "total_tokens": 100, "total_input_tokens": 50, "total_output_tokens": 50, "message_count": 10}
+            {
+                "date": "2026-01-01",
+                "total_tokens": 100,
+                "total_input_tokens": 50,
+                "total_output_tokens": 50,
+                "message_count": 10,
+            }
         ]
 
         # Call with tenant filter
-        results = self.repo.get_daily_totals(tenant_id=tenant_id)
+        self.repo.get_daily_totals(tenant_id=tenant_id)
 
         # Verify query was called
         assert self.db.fetch_all.called
@@ -124,11 +131,17 @@ class TestDailyStatsTenantIsolation:
         """Test that get_daily_totals without tenant filter returns all data."""
         # Mock fetch_all result
         self.db.fetch_all.return_value = [
-            {"date": "2026-01-01", "total_tokens": 300, "total_input_tokens": 150, "total_output_tokens": 150, "message_count": 30}
+            {
+                "date": "2026-01-01",
+                "total_tokens": 300,
+                "total_input_tokens": 150,
+                "total_output_tokens": 150,
+                "message_count": 30,
+            }
         ]
 
         # Call without tenant filter
-        results = self.repo.get_daily_totals(tenant_id=None)
+        self.repo.get_daily_totals(tenant_id=None)
 
         # Verify query was called
         assert self.db.fetch_all.called
@@ -152,12 +165,10 @@ class TestHourlyStatsTenantIsolation:
         tenant_id = 500
 
         # Mock fetch_all result
-        self.db.fetch_all.return_value = [
-            {"hour": 10, "tokens": 100, "requests": 5}
-        ]
+        self.db.fetch_all.return_value = [{"hour": 10, "tokens": 100, "requests": 5}]
 
         # Call with tenant filter
-        results = self.repo.get_hourly_totals(tenant_id=tenant_id)
+        self.repo.get_hourly_totals(tenant_id=tenant_id)
 
         # Verify query was called
         assert self.db.fetch_all.called
@@ -172,12 +183,10 @@ class TestHourlyStatsTenantIsolation:
     def test_get_hourly_totals_without_tenant_filter(self):
         """Test that get_hourly_totals without tenant filter returns all data."""
         # Mock fetch_all result
-        self.db.fetch_all.return_value = [
-            {"hour": 10, "tokens": 300, "requests": 15}
-        ]
+        self.db.fetch_all.return_value = [{"hour": 10, "tokens": 300, "requests": 15}]
 
         # Call without tenant filter
-        results = self.repo.get_hourly_totals(tenant_id=None)
+        self.repo.get_hourly_totals(tenant_id=None)
 
         # Verify query was called
         assert self.db.fetch_all.called

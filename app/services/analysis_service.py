@@ -82,7 +82,11 @@ class AnalysisService:
         # Issue #1852: Pass tenant_id to all repository methods
         futures: dict[Future, str] = {
             _executor.submit(
-                self.daily_stats_repo.get_batch_aggregates, start_date, end_date, host_name, tenant_id
+                self.daily_stats_repo.get_batch_aggregates,
+                start_date,
+                end_date,
+                host_name,
+                tenant_id,
             ): "aggregates",
             _executor.submit(
                 self.daily_stats_repo.get_user_totals, start_date, end_date, host_name, tenant_id
@@ -97,7 +101,11 @@ class AnalysisService:
                 self.daily_stats_repo.get_hourly_totals, start_date, end_date, host_name, tenant_id
             ): "hourly_data",
             _executor.submit(
-                self.message_repo.get_conversation_stats_summary, start_date, end_date, host_name, tenant_id
+                self.message_repo.get_conversation_stats_summary,
+                start_date,
+                end_date,
+                host_name,
+                tenant_id,
             ): "session_summary",
             _executor.submit(
                 self.usage_repo.get_request_count_total, start_date, end_date, host_name, tenant_id
@@ -383,7 +391,9 @@ class AnalysisService:
         if not end_date:
             end_date = get_today()
 
-        usage_data = self.usage_repo.get_daily_range(start_date, end_date, host_name=host_name, tenant_id=tenant_id)
+        usage_data = self.usage_repo.get_daily_range(
+            start_date, end_date, host_name=host_name, tenant_id=tenant_id
+        )
 
         # Also get message data for tokens (since daily_usage may have 0 tokens)
         user_tokens = self.message_repo.get_user_token_totals(
@@ -625,7 +635,9 @@ class AnalysisService:
             end_date = get_today()
 
         # Get daily token totals from messages (has real token data)
-        daily_data = self.message_repo.get_daily_token_totals(start_date, end_date, host_name, tenant_id)
+        daily_data = self.message_repo.get_daily_token_totals(
+            start_date, end_date, host_name, tenant_id
+        )
 
         if not daily_data:
             return {"peak_days": [], "peak_hours": []}
@@ -803,7 +815,9 @@ class AnalysisService:
         if not end_date:
             end_date = get_today()
 
-        return self.get_session_stats(start_date=start_date, end_date=end_date, host_name=host_name, tenant_id=tenant_id)
+        return self.get_session_stats(
+            start_date=start_date, end_date=end_date, host_name=host_name, tenant_id=tenant_id
+        )
 
     @cached(ttl=60, key_prefix="analysis", skip_args=[0])
     def get_tool_comparison(
@@ -895,7 +909,9 @@ class AnalysisService:
         end_date = datetime.now().strftime("%Y-%m-%d")
         start_date = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
 
-        usage_data = self.usage_repo.get_daily_range(start_date, end_date, host_name=host_name, tenant_id=tenant_id)
+        usage_data = self.usage_repo.get_daily_range(
+            start_date, end_date, host_name=host_name, tenant_id=tenant_id
+        )
 
         if not usage_data:
             return [{"type": "info", "message": "No usage data available for analysis"}]
@@ -1036,7 +1052,9 @@ class AnalysisService:
             end_date = get_today()
 
         # Get daily token totals from messages
-        daily_data = self.message_repo.get_daily_token_totals(start_date, end_date, host_name, tenant_id)
+        daily_data = self.message_repo.get_daily_token_totals(
+            start_date, end_date, host_name, tenant_id
+        )
 
         if not daily_data or len(daily_data) < 3:
             return {"anomalies": [], "summary": {"total": 0, "high": 0, "medium": 0, "low": 0}}
