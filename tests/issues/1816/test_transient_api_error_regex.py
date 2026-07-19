@@ -22,9 +22,9 @@ class TestTransientApiErrorRegex:
     def test_plan_with_429_in_table(self):
         """The exact #1816 case: plan text has '429' in a design table."""
         text = "| T1 | 窗口内连续失败 5 次 | 5 次错误密码 | 第 5 次 429 | 触发锁定 |"
-        assert not _TRANSIENT_API_ERROR_RE.search(text), (
-            "HTTP 429 in a plan design table must not be treated as an API error"
-        )
+        assert not _TRANSIENT_API_ERROR_RE.search(
+            text
+        ), "HTTP 429 in a plan design table must not be treated as an API error"
 
     def test_plan_with_return_429(self):
         text = "锁定时直接返回 429 错误"
@@ -35,7 +35,7 @@ class TestTransientApiErrorRegex:
         assert not _TRANSIENT_API_ERROR_RE.search(text)
 
     def test_code_with_429_constant(self):
-        text = 'if status == 429: retry()'
+        text = "if status == 429: retry()"
         assert not _TRANSIENT_API_ERROR_RE.search(text)
 
     def test_bare_number_429(self):
