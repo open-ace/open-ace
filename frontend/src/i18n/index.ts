@@ -514,6 +514,7 @@ export const translations: Record<Language, Translations> = {
     restoredSession: 'Restored Session',
     cliImported: 'Local CLI History',
     workflowImported: 'Autonomous Workflow Session',
+    viewWorkflow: 'View Workflow',
     // Issue #669: Session terminated recreation
     sessionTerminated: 'Session Process Terminated',
     sessionTerminatedCanResume:
@@ -2190,6 +2191,7 @@ export const translations: Record<Language, Translations> = {
     // Issue #669: Session terminated recreation
     workflowImported: '自主开发工作流会话',
     sessionTerminated: '会话进程已终止',
+    viewWorkflow: '查看工作流',
     sessionTerminatedCanResume: '检测到可恢复的对话历史，是否尝试恢复上下文？',
     sessionTerminatedNoResume: '会话进程已终止，请创建新会话继续工作。',
     createNewSession: '创建新会话',
@@ -4766,6 +4768,7 @@ export const translations: Record<Language, Translations> = {
     started: '開始',
     cliImported: 'ローカル CLI 履歴',
     workflowImported: '自律開発ワークフローセッション',
+    viewWorkflow: 'ワークフローを表示',
 
     // API Key Management
     apiKeys: 'API キー',
@@ -6281,6 +6284,7 @@ export const translations: Record<Language, Translations> = {
 
     workflowImported: '자율 개발 워크플로 세션',
     // API Key Management
+    viewWorkflow: '워크플로 보기',
     apiKeys: 'API 키',
     addApiKey: 'API 키 추가',
     editApiKey: 'API 키 편집',

@@ -215,14 +215,10 @@ export const SessionList: React.FC<SessionListProps> = ({ collapsed = false, onS
   }, []);
 
   const handleSessionClick = (session: SessionItem) => {
-    // A workflow-imported CLI session (real claude session from an autonomous
-    // workflow worktree) jumps to the workflow timeline instead of opening a
-    // chat detail modal — its transcript is already viewable per-milestone in
-    // the workflow view.
-    if (session.isWorkflowImported && session.workflowId) {
-      navigate(`/work/autonomous?workflow_id=${encodeURIComponent(session.workflowId)}`);
-      return;
-    }
+    // All sessions open the detail modal. For workflow-imported sessions the
+    // detail view shows a "View Workflow" button at the top that jumps to the
+    // workflow timeline — the session transcript is also viewable per-milestone
+    // there. (Previously workflow sessions jumped directly, skipping detail.)
     setSelectedSessionId(session.id);
     setShowDetailModal(true);
     if (onSelectSession) {
@@ -392,12 +388,42 @@ export const SessionList: React.FC<SessionListProps> = ({ collapsed = false, onS
         {isLoadingDetail ? (
           <Loading size="sm" text={t('loading', language)} />
         ) : sessionDetail?.data ? (
-          <SessionDetailContent
-            session={sessionDetail.data}
-            language={language}
-            onRestore={(sid) => restoreSession.mutate(sid)}
-            restorePending={restoreSession.isPending}
-          />
+          <>
+            {(() => {
+              // If this CLI session was imported from an autonomous workflow,
+              // show a "View Workflow" button at the top of the detail view.
+              // The session transcript is also viewable per-milestone in the
+              // workflow timeline.
+              const detailCtx = sessionDetail.data.context as Record<string, unknown> | undefined;
+              const detailWfId =
+                typeof detailCtx?.workflow_id === 'string'
+                  ? (detailCtx.workflow_id as string)
+                  : undefined;
+              if (!detailCtx?.workflow_imported || !detailWfId) return null;
+              return (
+                <div className="mb-2 d-flex align-items-center gap-2">
+                  <i className="bi bi-robot text-primary" />
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-outline-primary"
+                    onClick={() => {
+                      navigate(`/work/autonomous?workflow_id=${encodeURIComponent(detailWfId)}`);
+                      setShowDetailModal(false);
+                    }}
+                  >
+                    <i className="bi bi-arrow-up-right-square me-1" />
+                    {t('viewWorkflow', language)}
+                  </button>
+                </div>
+              );
+            })()}
+            <SessionDetailContent
+              session={sessionDetail.data}
+              language={language}
+              onRestore={(sid) => restoreSession.mutate(sid)}
+              restorePending={restoreSession.isPending}
+            />
+          </>
         ) : (
           <div className="text-muted">{t('noData', language)}</div>
         )}
