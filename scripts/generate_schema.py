@@ -333,6 +333,27 @@ def _sqlite_convert_column(col_line):
     # Convert DEFAULT now() to DEFAULT CURRENT_TIMESTAMP
     col_line = re.sub(r"DEFAULT now\(\)", "DEFAULT CURRENT_TIMESTAMP", col_line)
 
+    # Convert PG interval-arithmetic defaults to SQLite datetime() modifiers, so
+    # the committed schema-sqlite.sql matches what the baseline migration creates
+    # on SQLite (avoids schema-sync column drift, Issue #1815).
+    # pg_dump renders INTERVAL '600 seconds' as '00:10:00'::interval; the ::interval
+    # cast is stripped above, so handle both the literal-interval and the
+    # normalized 'HH:MM:SS' forms. Both map to datetime('now', '+N seconds').
+    def _interval_default_to_datetime(m):
+        if m.group(1) is not None:
+            return f"datetime('now', '+{m.group(1)} {m.group(2)}')"
+        hours, minutes, seconds = int(m.group(3)), int(m.group(4)), int(m.group(5))
+        total = hours * 3600 + minutes * 60 + seconds
+        return f"datetime('now', '+{total} seconds')"
+
+    col_line = re.sub(
+        r"CURRENT_TIMESTAMP\s*\+\s*"
+        r"(?:INTERVAL\s*'(\d+)\s*(seconds|minutes|hours|days)'"
+        r"|'(\d+):(\d+):(\d+)')",
+        _interval_default_to_datetime,
+        col_line,
+    )
+
     # Handle id column with nextval sequence -> PRIMARY KEY AUTOINCREMENT
     if re.search(r"id\s+integer\s+NOT\s+NULL\s+DEFAULT\s+nextval", col_line):
         col_line = re.sub(
