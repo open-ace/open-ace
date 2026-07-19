@@ -796,7 +796,7 @@ CREATE TABLE smtp_settings (
 
 -- Issue #1815 Finding 2: Added expires_at for TTL-based cleanup
 CREATE TABLE sso_auth_states (
- state text PRIMARY KEY NOT NULL,
+ state text PRIMARY KEY,
  code_verifier text NOT NULL,
  provider_name text NOT NULL,
  nonce text,

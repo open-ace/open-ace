@@ -21,11 +21,7 @@ if project_root not in sys.path:
 
 import app.utils.smtp_crypto as smtp_crypto
 from app.modules.sso.exceptions import SSOConfigDecryptionError
-from app.modules.sso.manager import (
-    AUTH_STATE_TTL_SECONDS,
-    CLEANUP_BATCH_SIZE,
-    SSOManager,
-)
+from app.modules.sso.manager import AUTH_STATE_TTL_SECONDS, CLEANUP_BATCH_SIZE, SSOManager
 from app.modules.sso.oauth2 import (
     ERROR_TOKEN_EXCHANGE_BLOCKED,
     ERROR_TOKEN_EXCHANGE_ERROR,
