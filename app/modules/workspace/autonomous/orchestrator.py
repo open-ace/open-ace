@@ -670,7 +670,13 @@ _TRANSIENT_API_ERROR_RE = re.compile(
     # "API Error: 429" / "API Error: 5xx". Only 429 among 4xx is transient;
     # 400/401/403/404/422 are permanent client errors and must NOT trigger retry.
     r"api\s*error:?\s*(?:429|5\d{2})"
-    r"|(?:429|quota\s+exceeded|rate[\s-]?limit|too\s+many\s+requests)"
+    # Bare "429" must have context that distinguishes a real API error from a
+    # plan discussing HTTP status codes (e.g. "return 429" in a rate-limit
+    # design). Require "status" or "error" nearby, not just the number alone.
+    r"|status\s*(?:code)?\s*[:：]\s*429"
+    r"|error\s*(?:code)?\s*[:：]\s*429"
+    r"|429\s*too\s+many\s+requests"
+    r"|quota\s+exceeded|rate[\s-]?limit(?:ed)?|too\s+many\s+requests"
     r"|overloaded"  # "The service may be temporarily overloaded"
     r"|bad\s+gateway|service\s+unavailable|gateway\s+timeout|internal\s+server\s+error",
     re.IGNORECASE,
