@@ -22,7 +22,11 @@ from app.modules.sso.provider import (
     SSOToken,
     SSOUser,
 )
-from app.utils.outbound_url_guard import assert_public_http_url
+from app.utils.outbound_url_guard import (
+    OutboundUrlBlockedError,
+    assert_public_http_url,
+    safe_request,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -636,13 +640,16 @@ class SAMLProvider(SSOProvider):
         if not isinstance(metadata_url, str) or not metadata_url.strip():
             return None
 
-        assert_public_http_url(metadata_url)
-        response = requests.get(metadata_url, timeout=10, allow_redirects=False)
-        if 300 <= response.status_code < 400:
-            raise ValueError("metadata_redirect_blocked")
-        response.raise_for_status()
-        self._metadata_root = self._parse_xml(response.content)
-        return self._metadata_root
+        try:
+            response = safe_request("GET", metadata_url, timeout=10, allow_redirects=False)
+            if 300 <= response.status_code < 400:
+                raise ValueError("metadata_redirect_blocked")
+            response.raise_for_status()
+            self._metadata_root = self._parse_xml(response.content)
+            return self._metadata_root
+        except (OutboundUrlBlockedError, requests.exceptions.RequestException) as e:
+            logger.warning(f"Failed to load IdP metadata from {metadata_url}: {e}")
+            return None
 
     def _expires_in(self, assertion: etree._Element) -> int:
         conditions = assertion.find("./saml:Conditions", namespaces=NSMAP)
