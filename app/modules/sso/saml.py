@@ -22,7 +22,11 @@ from app.modules.sso.provider import (
     SSOToken,
     SSOUser,
 )
-from app.utils.outbound_url_guard import OutboundUrlBlockedError, assert_public_http_url, safe_request
+from app.utils.outbound_url_guard import (
+    OutboundUrlBlockedError,
+    assert_public_http_url,
+    safe_request,
+)
 
 logger = logging.getLogger(__name__)
 
