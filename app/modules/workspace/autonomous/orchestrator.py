@@ -454,6 +454,27 @@ _TRANSIENT_ORCHESTRATOR_KEYWORDS = [
     "early eof",
 ]
 
+
+def _is_transient_git_error(e: Exception) -> bool:
+    """Check if an exception is a transient git push error.
+
+    Used by git_push exception handlers to decide whether to propagate
+    the error (triggering Layer-2 orchestrator retry) or handle it locally.
+
+    Args:
+        e: The caught exception.
+
+    Returns:
+        True if the error is transient and should trigger retry.
+    """
+    from app.modules.workspace.autonomous.github_ops import GitHubOpsError
+
+    if not isinstance(e, GitHubOpsError):
+        return False
+    err_str = str(e).lower()
+    return any(kw in err_str for kw in _TRANSIENT_ORCHESTRATOR_KEYWORDS)
+
+
 # GitHub rejects comment bodies longer than 65536 chars. Agent output (plan /
 # review / fix / test) can exceed that, so very long comments are capped with
 # a notice pointing to the timeline full-text view (#988).
@@ -1297,8 +1318,16 @@ class AutonomousOrchestrator:
             try:
                 gh.git_push(branch=branch_name)
             except Exception as e:
-                push_error = str(e)
-                logger.warning("CI repair git_push failed for PR #%s: %s", pr_number, e)
+                # Distinguish transient vs non-transient to enable Layer-2 retry
+                # (Issue #1814).
+                if _is_transient_git_error(e):
+                    # Transient: propagate to trigger Layer-2 retry
+                    logger.warning("Transient CI repair push failure for PR #%s: %s", pr_number, e)
+                    raise
+                else:
+                    # Non-transient: capture error message for milestone
+                    push_error = str(e)
+                    logger.warning("CI repair git_push failed for PR #%s: %s", pr_number, e)
 
         return commit_sha, sha_changed, push_error
 
@@ -4895,9 +4924,17 @@ class AutonomousOrchestrator:
                 )
             gh.git_push(branch=branch_name)
         except Exception as e:
-            logger.error("Failed to push branch %s: %s", branch_name, e, exc_info=True)
-            # 推送失败必须阻止后续 PR 创建，避免 "No commits" 错误 (Issue #1736)
-            raise RuntimeError(f"Branch push failed before PR creation: {e}") from e
+            # Distinguish transient vs non-transient errors to enable Layer-2 retry
+            # for network flakiness (Issue #1814).
+            if _is_transient_git_error(e):
+                # Transient: propagate GitHubOpsError to trigger Layer-2 retry
+                logger.warning("Transient push failure for branch %s: %s", branch_name, e)
+                raise
+            else:
+                # Non-transient: wrap as RuntimeError to signal permanent failure
+                logger.error("Failed to push branch %s: %s", branch_name, e, exc_info=True)
+                # 推送失败必须阻止后续 PR 创建，避免 "No commits" 错误 (Issue #1736)
+                raise RuntimeError(f"Branch push failed before PR creation: {e}") from e
 
         # Create PR on first round
         if round_num == 1:
@@ -5323,31 +5360,67 @@ class AutonomousOrchestrator:
                     sha_changed = True
             except Exception as e:
                 logger.warning("Fix auto-commit failed: %s", e)
+
+        # Track push failure to decide milestone status and avoid misleading comment
+        push_failed = False
+        push_error_msg = ""
         if sha_changed:
             try:
                 gh.git_push()
             except Exception as e:
-                # push failure leaves the fix local; the next pr_review re-reads
-                # the old PR state — log so it's diagnosable.
-                logger.warning("Fix git_push failed (round %d): %s", round_num, e)
+                # Distinguish transient vs non-transient to enable Layer-2 retry
+                # (Issue #1814).
+                if _is_transient_git_error(e):
+                    # Transient: propagate to trigger Layer-2 retry
+                    logger.warning(
+                        "Transient push failure in review fix round %d: %s",
+                        round_num,
+                        e,
+                    )
+                    raise
+                else:
+                    # Non-transient: mark failed, don't post misleading comment
+                    push_failed = True
+                    push_error_msg = str(e)
+                    logger.error("Fix git_push failed (round %d): %s", round_num, e, exc_info=True)
+
+        # Clear commit_sha on push failure to avoid referencing unpushed commit
+        if push_failed:
+            commit_sha = ""
+
         try:
             diff_stats = gh.get_commit_diff_stats(commit_sha) if commit_sha else {}
         except Exception:
             pass
 
-        self.repo.update_milestone(
-            fix_ms.get("milestone_id", ""),
-            {
-                "status": "completed" if fix_result.success else "failed",
-                "session_id": fix_result.session_id,
-                "commit_shas": json.dumps([commit_sha] if commit_sha else []),
-                "diff_stats": json.dumps(diff_stats),
-                "result_summary": self._artifact_text(fix_result)[:200],
-                "tldr": self._artifact_tldr(fix_result),
-            },
-        )
+        if push_failed:
+            self.repo.update_milestone(
+                fix_ms.get("milestone_id", ""),
+                {
+                    "status": "failed",
+                    "error_message": f"Push failed after review fix: {push_error_msg}",
+                    "session_id": fix_result.session_id,
+                    "commit_shas": json.dumps([]),
+                    "diff_stats": json.dumps({}),
+                    "result_summary": self._artifact_text(fix_result)[:200],
+                    "tldr": self._artifact_tldr(fix_result),
+                },
+            )
+        else:
+            self.repo.update_milestone(
+                fix_ms.get("milestone_id", ""),
+                {
+                    "status": "completed" if fix_result.success else "failed",
+                    "session_id": fix_result.session_id,
+                    "commit_shas": json.dumps([commit_sha] if commit_sha else []),
+                    "diff_stats": json.dumps(diff_stats),
+                    "result_summary": self._artifact_text(fix_result)[:200],
+                    "tldr": self._artifact_tldr(fix_result),
+                },
+            )
 
-        if pr_number:
+        # Only post success comment if push succeeded (Issue #1814)
+        if pr_number and not push_failed:
             # Extract fix summary from agent response in full; GitHub comments
             # render long content fine (capped by _post_github_comment if huge).
             fix_summary = self._artifact_text(fix_result)
