@@ -451,4 +451,51 @@ describe('NewAutonomousModal', () => {
       expect(screen.queryByPlaceholderText('autoRequirementsPlaceholder')).not.toBeInTheDocument();
     });
   });
+
+  describe('auto-merge toggle in URL batch mode', () => {
+    // The auto-merge option only renders for batch workflows (URL mode with
+    // a non-empty requirements URL). Switch to that mode by entering a bare
+    // issue number and accepting the suggestion.
+    const switchToBatchMode = () => {
+      fireEvent.change(screen.getByPlaceholderText('autoRequirementsPlaceholder'), {
+        target: { value: '830' },
+      });
+      fireEvent.click(screen.getByText('autoIssueSuggestionSwitch'));
+    };
+
+    it('renders the auto-merge option as a switch matching the other toggles', () => {
+      render(<NewAutonomousModal {...defaultProps} />);
+
+      switchToBatchMode();
+
+      const autoMergeSwitch = screen.getByLabelText('autoMergeAfterPR');
+      // Style parity with the other boolean toggle in the modal
+      // (requireFullReviewRounds): both must render as form-switch toggles,
+      // not plain checkboxes.
+      expect(autoMergeSwitch.closest('.form-switch')).not.toBeNull();
+    });
+
+    it('defaults to enabled and submits auto_merge reflecting the toggled state', async () => {
+      render(<NewAutonomousModal {...defaultProps} />);
+
+      switchToBatchMode();
+
+      const autoMergeSwitch = screen.getByLabelText('autoMergeAfterPR');
+      expect(autoMergeSwitch).toBeChecked(); // autoMerge defaults to true
+
+      // Flip it off and submit.
+      fireEvent.click(autoMergeSwitch);
+      fireEvent.change(screen.getByPlaceholderText('autoProjectPathPlaceholder'), {
+        target: { value: '/Users/batch/project' },
+      });
+      selectModel();
+
+      fireEvent.click(screen.getByText('autoCreateTask'));
+
+      await waitFor(() => {
+        expect(mutateAsyncMock).toHaveBeenCalledTimes(1);
+      });
+      expect(mutateAsyncMock).toHaveBeenCalledWith(expect.objectContaining({ auto_merge: false }));
+    });
+  });
 });
