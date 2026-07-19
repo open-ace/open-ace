@@ -126,6 +126,10 @@ _APPSERVER_TOOLS = frozenset({"zcode", "zcode-code"})
 # via runuser. See scripts/openace-run-as.sh.
 _OPENACE_RUN_AS = os.environ.get("OPENACE_RUN_AS", "/usr/local/bin/openace-run-as")
 
+# Security wrapper paths (Issue #1855)
+_OPENACE_CAT_WRAPPER = os.environ.get("OPENACE_CAT_WRAPPER", "/usr/local/bin/openace-cat")
+_OPENACE_MKDIR_WRAPPER = os.environ.get("OPENACE_MKDIR_WRAPPER", "/usr/local/bin/openace-mkdir")
+
 # CLI tool → LLM provider, used to mint proxy tokens for local autonomous
 # agents (mirrors remote_session_manager._cli_tool_to_provider). Local
 # autonomous agents must route through the Open ACE LLM proxy with a signed
@@ -712,17 +716,32 @@ class AutonomousAgentRunner:
 
     @staticmethod
     def _read_text_as_user(path: Path, system_account: str | None) -> str:
-        """Read a text file, routing through sudo for cross-user private homes."""
+        """Read a text file, routing through sudo for cross-user private homes.
+
+        Issue #1855: 优先使用 openace-cat 安全 wrapper，wrapper 内部做路径校验和审计日志。
+        """
         if not AutonomousAgentRunner._is_cross_user(system_account):
             return path.read_text(encoding="utf-8")
         assert system_account is not None  # _is_cross_user guarantees non-empty
-        result = subprocess.run(
-            ["sudo", "-u", system_account, "cat", str(path)],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=False,
-        )
+
+        # Issue #1855: 优先使用安全 wrapper
+        if os.path.isfile(_OPENACE_CAT_WRAPPER) and os.access(_OPENACE_CAT_WRAPPER, os.X_OK):
+            result = subprocess.run(
+                ["sudo", _OPENACE_CAT_WRAPPER, system_account, str(path)],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+        else:
+            # Fallback: 使用传统 sudo -u cat 命令
+            result = subprocess.run(
+                ["sudo", "-u", system_account, "cat", str(path)],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
         if result.returncode != 0:
             raise OSError(result.stderr.strip() or f"cat exited {result.returncode}")
         return result.stdout
@@ -803,6 +822,8 @@ class AutonomousAgentRunner:
         covered by the sudoers ``OPENACE_UTILS`` alias). Same-user skips sudo
         to avoid failing under systemd ``NoNewPrivileges`` (mirrors
         ``github_ops._needs_sudo``).
+
+        Issue #1855: 优先使用 openace-mkdir 安全 wrapper，wrapper 内部做路径校验和审计日志。
         """
         same_user = False
         if system_account:
@@ -811,16 +832,26 @@ class AutonomousAgentRunner:
             except (KeyError, OverflowError):
                 same_user = False
         if system_account and not same_user:
-            # Mirror Path.mkdir's failure semantics: raise on error so the
-            # caller fails fast instead of chalking it up to a later, fuzzier
-            # CLI-launch failure (Issue #1395 review).
-            result = subprocess.run(
-                ["sudo", "-u", system_account, "mkdir", "-p", project_path],
-                capture_output=True,
-                text=True,
-                timeout=30,
-                check=False,
-            )
+            # Issue #1855: 优先使用安全 wrapper
+            if os.path.isfile(_OPENACE_MKDIR_WRAPPER) and os.access(
+                _OPENACE_MKDIR_WRAPPER, os.X_OK
+            ):
+                result = subprocess.run(
+                    ["sudo", _OPENACE_MKDIR_WRAPPER, system_account, project_path],
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                    check=False,
+                )
+            else:
+                # Fallback: 使用传统 sudo -u mkdir 命令
+                result = subprocess.run(
+                    ["sudo", "-u", system_account, "mkdir", "-p", project_path],
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                    check=False,
+                )
             if result.returncode != 0:
                 raise PermissionError(
                     f"Failed to create project dir {project_path} as "

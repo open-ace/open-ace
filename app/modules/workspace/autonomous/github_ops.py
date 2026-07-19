@@ -799,6 +799,9 @@ class GitHubOps:
         When ``admin`` is set, adds ``--admin`` to bypass branch-protection
         checks — used after conflict resolution when the only blocker is CI
         not yet catching up to the freshly-pushed merge commit.
+
+        Security Note (Issue #1855): ``--admin`` bypasses branch protection
+        and requires explicit opt-in via ``OPENACE_ALLOW_ADMIN_MERGE=1``.
         """
         args = ["pr", "merge", str(number)]
         if strategy == "squash":
@@ -810,10 +813,17 @@ class GitHubOps:
         if auto:
             args.append("--auto")
         if admin:
+            # Issue #1855: Check for explicit opt-in before using --admin
+            if os.environ.get("OPENACE_ALLOW_ADMIN_MERGE") != "1":
+                raise PermissionError(
+                    "gh pr merge --admin requires explicit opt-in. "
+                    "Set OPENACE_ALLOW_ADMIN_MERGE=1 to enable admin merge, "
+                    "which bypasses branch protection checks."
+                )
             args.append("--admin")
 
         self._run_gh(args)
-        logger.info("Merged PR #%s (auto=%s)", number, auto)
+        logger.info("Merged PR #%s (auto=%s, admin=%s)", number, auto, admin)
         return {"number": number, "merged": True}
 
     def list_pr_commits(self, number: int) -> list:
