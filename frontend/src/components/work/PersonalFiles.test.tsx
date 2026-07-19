@@ -48,9 +48,7 @@ vi.mock('./LocalDirectoryBrowser', () => ({
       <span data-testid="root-path">{rootPath || 'none'}</span>
       <span data-testid="hide-manual-input">{hideManualInput ? 'true' : 'false'}</span>
       <span data-testid="hide-recent-paths">{hideRecentPaths ? 'true' : 'false'}</span>
-      <span data-testid="enable-file-actions">
-        {enableFileActions ? 'true' : 'false'}
-      </span>
+      <span data-testid="enable-file-actions">{enableFileActions ? 'true' : 'false'}</span>
       <button onClick={() => onSelectPath('/home/alice/project')} data-testid="select-path">
         Select
       </button>

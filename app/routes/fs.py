@@ -326,7 +326,7 @@ def _resolve_user_owned_path(target_dir: str, user) -> tuple[str, str | None]:
     return resolved, system_account
 
 
-def _chown_to_user(path: str, system_account: str | None) -> None:
+def _chown_to_user(path: str, system_account: str | None) -> bool:
     """Change ownership of *path* to *system_account*.
 
     Used after a root process writes into a per-user workspace so the file
@@ -335,10 +335,15 @@ def _chown_to_user(path: str, system_account: str | None) -> None:
     - Root process: os.chown directly (see app/services/webui_manager.py:807-810).
     - Non-root: prefer the openace-chown wrapper (audited, path-checked), fall
       back to sudo chown via run_as_root_if_needed.
-    - system_account None or uid/gid lookup failure: warn and return (best-effort).
+    - system_account None: no-op (single-user case), returns True.
+
+    Returns True on success (or no-op). Returns False when uid/gid lookup or
+    the chown itself failed — callers MUST treat False as a hard failure so
+    the file does not end up owned by the web process user (which would leave
+    the target user unable to read/delete their own upload).
     """
     if not system_account:
-        return
+        return True
     try:
         uid_out = subprocess.run(
             ["id", "-u", system_account], capture_output=True, text=True, timeout=5
@@ -348,27 +353,83 @@ def _chown_to_user(path: str, system_account: str | None) -> None:
         )
         if uid_out.returncode != 0 or gid_out.returncode != 0:
             logger.warning(f"Cannot resolve uid/gid for {system_account}")
-            return
+            return False
         uid = int(uid_out.stdout.strip())
         gid = int(gid_out.stdout.strip())
     except Exception as e:
         logger.warning(f"Cannot resolve uid/gid for {system_account}: {e}")
-        return
+        return False
 
     try:
         if os.geteuid() == 0:
             os.chown(path, uid, gid)
-        elif _is_wrapper_available(OPENACE_CHOWN_WRAPPER):
-            subprocess.run(
+            return True
+        if _is_wrapper_available(OPENACE_CHOWN_WRAPPER):
+            r = subprocess.run(
                 [OPENACE_CHOWN_WRAPPER, f"{uid}:{gid}", path],
                 capture_output=True,
                 text=True,
                 timeout=30,
             )
-        else:
-            run_as_root_if_needed(["chown", f"{uid}:{gid}", path])
+            if r.returncode != 0:
+                logger.warning(f"openace-chown failed for {path} -> {system_account}: {r.stderr}")
+                return False
+            return True
+        r = run_as_root_if_needed(["chown", f"{uid}:{gid}", path])
+        if getattr(r, "returncode", 0) != 0:
+            logger.warning(
+                f"chown failed for {path} -> {system_account}: {getattr(r, 'stderr', '')}"
+            )
+            return False
+        return True
     except Exception as e:
         logger.warning(f"chown {path} -> {system_account} failed: {e}")
+        return False
+
+
+def _resolve_file_in_home(raw_path: str, user) -> tuple[str, str | None] | tuple[None, None]:
+    """Validate that *raw_path* resolves to a file inside the user's home subtree.
+
+    Single source of truth for download/delete file-path validation. Combines:
+      1. is_valid_path (base_dirs prefix + system blacklist, reusing existing logic)
+      2. home subtree lock (Issue #1813) via home + os.sep boundary check
+
+    realpath() collapses ``..`` and follows symlinks, so a single check on the
+    resolved target is sufficient — no need to validate dirname separately.
+
+    Returns (resolved_abs_path, system_account), or (None, None) if rejected
+    (caller should return 400 with the reason in the optional second element —
+    kept simple here to match the common case).
+    """
+    if not raw_path:
+        return None, None
+    base_dirs = get_workspace_base_dirs()
+    if not is_valid_path(raw_path, allowed_prefixes=base_dirs):
+        return None, None
+    target = os.path.realpath(raw_path)
+    home = get_home_directory(user)
+    if target != home and not target.startswith(home + os.sep):
+        return None, None
+    system_account = (user.get("system_account") if user else None) or None
+    return target, system_account
+
+
+def _content_disposition_filename(filename: str) -> str:
+    """Build a Content-Disposition value with an RFC 5987 ``filename*``.
+
+    A plain ``filename="...`` breaks if the name contains ``"`` (header parse
+    error) or non-ASCII bytes (mojibake on many clients). We emit BOTH a
+    sanitized ASCII fallback (quotes/controls stripped) and a percent-encoded
+    UTF-8 ``filename*`` per RFC 5987; modern clients prefer the latter.
+    """
+    from urllib.parse import quote
+
+    # ASCII fallback: strip quotes and control chars so the quoted token stays valid.
+    ascii_fallback = (
+        "".join(c for c in filename if c.isprintable() and c not in '"\\') or "download"
+    )
+    encoded = quote(filename, safe="")
+    return f"attachment; filename=\"{ascii_fallback}\"; filename*=UTF-8''{encoded}"
 
 
 def get_directory_info(path: str, system_account: str | None = None):
@@ -538,60 +599,87 @@ def list_subdirectories(
 
     try:
         if effective_system_account:
-            # Use sudo to list directory as the specified user
-            result = run_as_user(effective_system_account, ["ls", "-1", path])
-            if result.returncode != 0:
+            # Use sudo to list directory as the specified user.
+            # Performance: we batch stat into a SINGLE sudo call instead of
+            # forking per-entry (test -d/-r/-w/stat per file used to be ~3N
+            # forks; with 200 files that is hundreds of sudo execs and tens
+            # of seconds). ``stat *`` is in the sudoers OPENACE_UTILS
+            # whitelist. %F=type, %s=size, %A=perm mode string, %n=name.
+            ls_result = run_as_user(effective_system_account, ["ls", "-1", path])
+            if ls_result.returncode != 0:
                 logger.warning(f"Permission denied accessing {path} as {system_account}")
                 return {"directories": directories, "files": files}
 
-            entries = result.stdout.strip().split("\n") if result.stdout.strip() else []
-
-            for entry in entries:
-                full_path = os.path.join(path, entry)
-
-                # Skip hidden files/directories (except .qwen for special case)
+            raw_entries = ls_result.stdout.split("\n") if ls_result.stdout else []
+            # Build the candidate list (skip hidden, except .qwen), preserving
+            # the original entry names so we can rejoin with full_path.
+            candidate_paths: list[str] = []
+            name_by_path: dict[str, str] = {}
+            for entry in raw_entries:
+                entry = entry.strip()
+                if not entry:
+                    continue
                 if entry.startswith(".") and entry != ".qwen":
                     continue
+                full_path = os.path.join(path, entry)
+                candidate_paths.append(full_path)
+                name_by_path[full_path] = entry
 
-                # Check if it's a directory
-                dir_result = run_as_user(effective_system_account, ["test", "-d", full_path])
-                if dir_result.returncode == 0:
-                    # Check permissions
-                    readable_result = run_as_user(
-                        effective_system_account, ["test", "-r", full_path]
-                    )
-                    writable_result = run_as_user(
-                        effective_system_account, ["test", "-w", full_path]
-                    )
+            if not candidate_paths:
+                return {"directories": directories, "files": files}
 
+            # One stat for ALL candidates. ``stat *`` whitelisted in sudoers.
+            # We always gather %F/%A so directories keep their r/w flags; the
+            # %s column is only consumed for files (include_files=True), but
+            # reading it costs nothing extra.
+            stat_fmt = "%n\t%F\t%s\t%A"
+            stat_result = run_as_user(
+                effective_system_account, ["stat", "-c", stat_fmt, *candidate_paths]
+            )
+            stat_by_path: dict[str, dict[str, str]] = {}
+            if stat_result.returncode == 0:
+                for line in stat_result.stdout.split("\n"):
+                    if not line:
+                        continue
+                    parts = line.split("\t")
+                    if len(parts) < 4:
+                        continue
+                    n, ftype, size_s, perm = parts[0], parts[1], parts[2], parts[3]
+                    stat_by_path[n] = {"type": ftype, "size": size_s, "perm": perm}
+
+            for full_path in candidate_paths:
+                entry = name_by_path[full_path]
+                st = stat_by_path.get(full_path)
+                if not st:
+                    # stat failed for this entry (e.g. broken symlink) — skip.
+                    continue
+                is_dir = st["type"] == "directory"
+                # perm looks like "drwxr-xr-x" / "-rw-r--r--". Owner triplet
+                # is chars [1:4]; 'r' present => readable, 'w' present => writable.
+                owner_bits = st["perm"][1:4] if len(st["perm"]) >= 4 else ""
+                is_readable = "r" in owner_bits
+                is_writable = "w" in owner_bits
+
+                if is_dir:
                     directories.append(
                         {
                             "name": entry,
                             "path": full_path,
-                            "isReadable": readable_result.returncode == 0,
-                            "isWritable": writable_result.returncode == 0,
+                            "isReadable": is_readable,
+                            "isWritable": is_writable,
                         }
                     )
                 elif include_files:
-                    # Regular file: gather size + readable flag.
-                    size_result = run_as_user(
-                        effective_system_account, ["stat", "-c", "%s", full_path]
-                    )
-                    readable_result = run_as_user(
-                        effective_system_account, ["test", "-r", full_path]
-                    )
-                    size = 0
-                    if size_result.returncode == 0:
-                        try:
-                            size = int(size_result.stdout.strip())
-                        except ValueError:
-                            size = 0
+                    try:
+                        size = int(st["size"])
+                    except (ValueError, TypeError):
+                        size = 0
                     files.append(
                         {
                             "name": entry,
                             "path": full_path,
                             "size": size,
-                            "is_readable": readable_result.returncode == 0,
+                            "is_readable": is_readable,
                         }
                     )
         else:
@@ -869,21 +957,29 @@ def api_upload_file():
     """
     user = g.user
 
+    # Cheap pre-filter: reject declared-oversized requests before the body is
+    # fully buffered to disk. The Content-Length header can be spoofed, so the
+    # authoritative check below still uses the real byte count from seek().
+    max_bytes = MAX_UPLOAD_SIZE_MB * 1024 * 1024
+    declared = request.content_length or 0
+    if declared > max_bytes:
+        return jsonify({"error": f"File too large (max {MAX_UPLOAD_SIZE_MB}MB)"}), 413
+
     if "file" not in request.files:
         return jsonify({"error": "No file provided"}), 400
     file = request.files["file"]
     if not file.filename:
         return jsonify({"error": "No file selected"}), 400
 
-    # Size check (in-view, per app/__init__.py:199-205 we must NOT set a
-    # global MAX_CONTENT_LENGTH). werkzeug FileStorage supports seek().
+    # Authoritative size check (in-view, per app/__init__.py:199-205 we must
+    # NOT set a global MAX_CONTENT_LENGTH). werkzeug FileStorage supports seek().
     try:
         file.seek(0, os.SEEK_END)
         size = file.tell()
         file.seek(0)
     except Exception as e:
         return jsonify({"error": f"Cannot read upload: {e}"}), 400
-    if size > MAX_UPLOAD_SIZE_MB * 1024 * 1024:
+    if size > max_bytes:
         return jsonify({"error": f"File too large (max {MAX_UPLOAD_SIZE_MB}MB)"}), 413
 
     # Path + home subtree lock
@@ -918,7 +1014,15 @@ def api_upload_file():
             os.close(fd)
             try:
                 file.save(tmp_path)
-                _chown_to_user(tmp_path, system_account)
+                if not _chown_to_user(tmp_path, system_account):
+                    # chown failed: without it the file would be owned by the
+                    # web (root) process and the target user could not read
+                    # or delete their own upload. Roll back and fail hard.
+                    _safe_remove(tmp_path)
+                    return (
+                        jsonify({"error": "Failed to set file ownership for target user"}),
+                        500,
+                    )
                 os.replace(tmp_path, target_path)
             except Exception:
                 _safe_remove(tmp_path)
@@ -949,21 +1053,9 @@ def api_download_file():
     user = g.user
 
     raw_path = request.args.get("path", "")
-    try:
-        resolved_dir, system_account = _resolve_user_owned_path(
-            os.path.dirname(raw_path) or raw_path, user
-        )
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 400
-
-    # The requested file must live inside the resolved home subtree.
-    target_path = os.path.realpath(raw_path)
-    base_dirs = get_workspace_base_dirs()
-    if not is_valid_path(target_path, allowed_prefixes=base_dirs):
-        return jsonify({"error": "Invalid path"}), 400
-    home = get_home_directory(user)
-    if target_path != home and not target_path.startswith(home + os.sep):
-        return jsonify({"error": "Path must be inside your home directory"}), 400
+    target_path, _ = _resolve_file_in_home(raw_path, user)
+    if target_path is None:
+        return jsonify({"error": "Invalid path (must be a file in your home)"}), 400
 
     if not os.path.isfile(target_path):
         return jsonify({"error": "Not a file"}), 400
@@ -989,7 +1081,7 @@ def api_download_file():
         stream_with_context(generate()),
         mimetype=mime,
         headers={
-            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Disposition": _content_disposition_filename(filename),
             "Content-Length": str(size),
             "Cache-Control": "no-store",
         },
@@ -1007,18 +1099,9 @@ def api_delete_file():
 
     data = request.get_json(silent=True) or {}
     raw_path = data.get("path", "")
-    try:
-        resolved_dir, _ = _resolve_user_owned_path(os.path.dirname(raw_path) or raw_path, user)
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 400
-
-    target_path = os.path.realpath(raw_path)
-    base_dirs = get_workspace_base_dirs()
-    if not is_valid_path(target_path, allowed_prefixes=base_dirs):
-        return jsonify({"error": "Invalid path"}), 400
-    home = get_home_directory(user)
-    if target_path != home and not target_path.startswith(home + os.sep):
-        return jsonify({"error": "Path must be inside your home directory"}), 400
+    target_path, _ = _resolve_file_in_home(raw_path, user)
+    if target_path is None:
+        return jsonify({"error": "Invalid path (must be a file in your home)"}), 400
 
     if not os.path.isfile(target_path):
         return jsonify({"error": "Not a file"}), 400

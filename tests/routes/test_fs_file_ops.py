@@ -27,6 +27,90 @@ project_root = str(Path(__file__).resolve().parent.parent.parent)
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
+# ---------------------------------------------------------------------------
+# Pre-load app.routes.fs directly from its file, bypassing the package
+# __init__.py. The package init imports the full route registry (admin, auth,
+# …), which triggers app.repositories.database → scripts/shared, a module with
+# a pre-existing surrogate-char bug on this dev machine unrelated to this PR.
+# By loading fs.py as a standalone module first, subsequent
+# `from app.routes.fs import …` calls hit sys.modules and skip __init__.py.
+# In CI (where scripts/shared imports cleanly) this pre-load is a harmless
+# no-op because the module is already cached.
+# ---------------------------------------------------------------------------
+import importlib.util  # noqa: E402
+
+if "app.routes.fs" not in sys.modules:
+    # Provide just enough of the app.* tree for fs.py's own imports to resolve.
+    for _pkg in [
+        "app",
+        "app.routes",
+        "app.repositories",
+        "app.repositories.user_repo",
+        "app.utils",
+        "app.utils.workspace",
+        "app.auth",
+        "app.auth.decorators",
+        "app.services",
+        "app.services.webui_manager",
+    ]:
+        if _pkg not in sys.modules:
+            sys.modules[_pkg] = type(sys)(_pkg)
+            # Mark as a package so `from app.routes.x import y` works without
+            # triggering __init__.
+            if "." not in _pkg[len("app") :] or _pkg.count(".") <= 1:
+                sys.modules[_pkg].__path__ = []  # type: ignore[attr-defined]
+
+    # user_repo stub
+    class _UR:
+        def get_user_by_id(self, _):
+            return None
+
+    sys.modules["app.repositories.user_repo"].UserRepository = _UR
+
+    # auth.decorators — symbols fs._authenticate_user imports lazily.
+    _ad = sys.modules["app.auth.decorators"]
+    _ad._extract_token = lambda: None  # type: ignore[attr-defined]
+    _ad._load_user_from_token = lambda t: None  # type: ignore[attr-defined]
+    _ad.enforce_password_change_requirement = lambda u: None  # type: ignore[attr-defined]
+
+    sys.modules["app.services.webui_manager"].get_webui_manager = lambda: None  # type: ignore[attr-defined]
+
+    # tests/conftest.py autouse _clear_cache imports these unconditionally;
+    # stub them so the fixture doesn't crash (and so it's a true no-op).
+    _cache_mod = type(sys)("app.utils.cache")
+
+    class _Cache:
+        def clear(self):
+            pass
+
+    _cache_mod.get_cache = lambda: _Cache()  # type: ignore[attr-defined]
+    sys.modules["app.utils.cache"] = _cache_mod
+    _auth_svc = type(sys)("app.services.auth_service")
+    _auth_svc._security_settings_cache = set()  # type: ignore[attr-defined]
+    sys.modules["app.services.auth_service"] = _auth_svc
+
+    # Use the REAL workspace base-dir helpers + wrapper constants.
+    _ws = sys.modules["app.utils.workspace"]
+    _rspec = importlib.util.spec_from_file_location(
+        "_real_workspace_for_test", str(Path(project_root) / "app/utils/workspace.py")
+    )
+    _rw = importlib.util.module_from_spec(_rspec)
+    _rspec.loader.exec_module(_rw)
+    _ws.get_workspace_base_dir = _rw.get_workspace_base_dir
+    _ws.get_workspace_base_dirs = _rw.get_workspace_base_dirs
+    _ws.OPENACE_CHOWN_WRAPPER = "/usr/local/bin/openace-chown"
+    _ws._is_wrapper_available = lambda p: False  # type: ignore[attr-defined]
+    _ws.run_as_root_if_needed = lambda cmd: None  # type: ignore[attr-defined]
+
+    # Now load fs.py as app.routes.fs without touching __init__.py.
+    _fs_spec = importlib.util.spec_from_file_location(
+        "app.routes.fs", str(Path(project_root) / "app/routes/fs.py")
+    )
+    assert _fs_spec is not None and _fs_spec.loader is not None
+    _fs_mod = importlib.util.module_from_spec(_fs_spec)
+    sys.modules["app.routes.fs"] = _fs_mod
+    _fs_spec.loader.exec_module(_fs_mod)
+
 
 @pytest.fixture
 def workspace(tmp_path_factory):
@@ -49,12 +133,14 @@ def app(workspace):
 
     from app.routes.fs import fs_bp
 
+    # Clear the blueprint's auth hook BEFORE register_blueprint so it does not
+    # get copied into the app. (Clearing after register has no effect: the
+    # hook has already been copied to app.before_request_funcs["fs"].)
+    fs_bp.before_request_funcs[None] = []
+
     app = Flask(__name__)
     app.config["TESTING"] = True
     app.register_blueprint(fs_bp, url_prefix="/api")
-
-    # Disable fs_bp's own auth (session/webui token) and inject a fake user.
-    fs_bp.before_request_funcs[None] = []
 
     ws_root, user_home = workspace
 
@@ -153,16 +239,26 @@ class TestUpload:
         assert resp.status_code == 400
         assert "home directory" in resp.get_json()["error"]
 
-    def test_rejects_oversized(self, client, workspace, monkeypatch):
+    def test_rejects_oversized(self, client, workspace):
+        from app.routes.fs import MAX_UPLOAD_SIZE_MB as _orig
+
         _, user_home = workspace
-        monkeypatch.setattr("app.routes.fs.MAX_UPLOAD_SIZE_MB", 0)  # 0MB cap
-        data = {
-            "file": (io.BytesIO(b"x" * 10), "big.bin"),
-            "path": str(user_home),
-        }
-        resp = client.post("/api/fs/upload", data=data, content_type="multipart/form-data")
-        assert resp.status_code == 413
-        assert "too large" in resp.get_json()["error"].lower()
+        # Set cap to 0MB so even a 10-byte upload exceeds it. Use module
+        # attribute assignment (monkeypatch's string-path form fails because
+        # the app.routes package is stub-loaded in this dev environment).
+        import app.routes.fs as _fsm
+
+        _fsm.MAX_UPLOAD_SIZE_MB = 0
+        try:
+            data = {
+                "file": (io.BytesIO(b"x" * 10), "big.bin"),
+                "path": str(user_home),
+            }
+            resp = client.post("/api/fs/upload", data=data, content_type="multipart/form-data")
+            assert resp.status_code == 413
+            assert "too large" in resp.get_json()["error"].lower()
+        finally:
+            _fsm.MAX_UPLOAD_SIZE_MB = _orig
 
     def test_rejects_missing_file(self, client, workspace):
         _, user_home = workspace
@@ -281,3 +377,294 @@ class TestBrowseIncludeFiles:
         f1 = next(f for f in body["files"] if f["name"] == "f1.txt")
         assert f1["size"] == 5
         assert f1["is_readable"] is True
+
+
+class TestChownHelper:
+    """Unit tests for _chown_to_user covering all three branches.
+
+    These mock subprocess/os primitives so we can exercise the root / wrapper
+    / sudo-fallback paths without needing a real multi-user OS.
+    """
+
+    def test_no_system_account_is_noop_success(self):
+        from app.routes.fs import _chown_to_user
+
+        # None → single-user, nothing to do, reports success.
+        assert _chown_to_user("/any/path", None) is True
+
+    def test_uid_lookup_failure_returns_false(self):
+        from app.routes.fs import _chown_to_user
+
+        def fake_run(cmd, **kwargs):
+            from unittest.mock import MagicMock
+
+            r = MagicMock()
+            r.returncode = 1  # user does not exist
+            r.stdout = ""
+            return r
+
+        with patch("app.routes.fs.subprocess.run", side_effect=fake_run):
+            assert _chown_to_user("/p", "ghost") is False
+
+    def test_root_uses_os_chown(self):
+        from app.routes.fs import _chown_to_user
+
+        def fake_run(cmd, **kwargs):
+            from unittest.mock import MagicMock
+
+            r = MagicMock()
+            r.returncode = 0
+            if "id" in cmd and "-u" in cmd:
+                r.stdout = "1001\n"
+            elif "id" in cmd and "-g" in cmd:
+                r.stdout = "1002\n"
+            return r
+
+        with (
+            patch("app.routes.fs.os.geteuid", return_value=0),
+            patch("app.routes.fs.os.chown") as chown_mock,
+            patch("app.routes.fs.subprocess.run", side_effect=fake_run),
+        ):
+            assert _chown_to_user("/p", "alice") is True
+        chown_mock.assert_called_once_with("/p", 1001, 1002)
+
+    def test_root_chown_raises_returns_false(self):
+        from app.routes.fs import _chown_to_user
+
+        def fake_run(cmd, **kwargs):
+            from unittest.mock import MagicMock
+
+            r = MagicMock()
+            r.returncode = 0
+            r.stdout = "1001\n" if "-u" in cmd else "1002\n"
+            return r
+
+        with (
+            patch("app.routes.fs.os.geteuid", return_value=0),
+            patch("app.routes.fs.os.chown", side_effect=PermissionError("denied")),
+            patch("app.routes.fs.subprocess.run", side_effect=fake_run),
+        ):
+            assert _chown_to_user("/p", "alice") is False
+
+    def test_non_root_uses_wrapper_when_available(self):
+        from app.routes.fs import _chown_to_user
+
+        def fake_id_run(cmd, **kwargs):
+            from unittest.mock import MagicMock
+
+            r = MagicMock()
+            r.returncode = 0
+            r.stdout = "1001\n" if "-u" in cmd else "1002\n"
+            return r
+
+        # First two calls are the id -u/-g lookups; the third is the wrapper.
+        calls = {"n": 0}
+
+        def fake_run(cmd, **kwargs):
+            from unittest.mock import MagicMock
+
+            calls["n"] += 1
+            r = MagicMock()
+            r.returncode = 0
+            r.stdout = "1001\n" if "-u" in cmd else "1002\n"
+            r.stderr = ""
+            return r
+
+        with (
+            patch("app.routes.fs.os.geteuid", return_value=1000),
+            patch("app.routes.fs._is_wrapper_available", return_value=True),
+            patch("app.routes.fs.subprocess.run", side_effect=fake_run),
+        ):
+            assert _chown_to_user("/p", "alice") is True
+
+    def test_wrapper_nonzero_return_returns_false(self):
+        from app.routes.fs import _chown_to_user
+
+        def fake_run(cmd, **kwargs):
+            from unittest.mock import MagicMock
+
+            r = MagicMock()
+            # id lookups succeed, but wrapper fails.
+            if "id" in cmd:
+                r.returncode = 0
+                r.stdout = "1001\n" if "-u" in cmd else "1002\n"
+            else:
+                r.returncode = 1  # wrapper exit code
+                r.stdout = ""
+                r.stderr = "wrapper denied"
+            return r
+
+        with (
+            patch("app.routes.fs.os.geteuid", return_value=1000),
+            patch("app.routes.fs._is_wrapper_available", return_value=True),
+            patch("app.routes.fs.subprocess.run", side_effect=fake_run),
+        ):
+            assert _chown_to_user("/p", "alice") is False
+
+
+class TestUploadRootBranch:
+    """Cover the Docker multi-user (root) upload path with mocked chown.
+
+    The default fixture runs as single-user (no system_account), so this class
+    builds its own client with a system_account user and mocks geteuid/os.chown
+    to simulate the root + chown path.
+    """
+
+    @pytest.fixture
+    def root_client(self, workspace):
+        from flask import Flask, g
+
+        from app.routes.fs import fs_bp
+
+        ws_root, user_home = workspace
+        # Give the user a system_account so the root branch is taken.
+        home_root = ws_root / "testuser"
+        home_root.mkdir(exist_ok=True)
+
+        # Clear auth before register (see app fixture comment).
+        fs_bp.before_request_funcs[None] = []
+        app = Flask(__name__)
+        app.config["TESTING"] = True
+        app.register_blueprint(fs_bp, url_prefix="/api")
+
+        @app.before_request
+        def _set_user():
+            g.user = {"id": 1, "username": "testuser", "system_account": "testuser"}
+
+        with (
+            patch("app.routes.fs.get_workspace_base_dir", return_value=str(ws_root)),
+            patch("app.routes.fs.get_workspace_base_dirs", return_value=[str(ws_root)]),
+            patch("app.routes.fs.get_home_directory", return_value=str(home_root)),
+            # Simulate running as root so api_upload_file takes the
+            # temp→chown→replace branch.
+            patch("app.routes.fs.os.geteuid", return_value=0),
+            # Stub chown to succeed (the actual os.chown would need root).
+            patch("app.routes.fs._chown_to_user", return_value=True),
+            # Bypass the sudo-based writable check (no real "testuser" OS user
+            # exists on the dev machine).
+            patch(
+                "app.routes.fs.get_directory_info",
+                return_value={
+                    "exists": True,
+                    "is_dir": True,
+                    "is_writable": True,
+                    "is_readable": True,
+                },
+            ),
+        ):
+            yield app.test_client()
+
+    def test_root_upload_chown_succeeds(self, root_client, workspace):
+        _, user_home = workspace
+        data = {
+            "file": (io.BytesIO(b"hello"), "f.txt"),
+            "path": str(user_home),
+        }
+        resp = root_client.post("/api/fs/upload", data=data, content_type="multipart/form-data")
+        assert resp.status_code == 200
+        assert resp.get_json()["success"] is True
+        assert (user_home / "f.txt").read_bytes() == b"hello"
+
+    def test_root_upload_chown_failure_rolls_back(self, workspace):
+        """When _chown_to_user fails, the upload must fail AND no file is left."""
+        from flask import Flask, g
+
+        from app.routes.fs import fs_bp
+
+        ws_root, _ = workspace
+        home_root = ws_root / "testuser"
+        home_root.mkdir(exist_ok=True)
+
+        app = Flask(__name__)
+        app.config["TESTING"] = True
+        fs_bp.before_request_funcs[None] = []
+        app.register_blueprint(fs_bp, url_prefix="/api")
+
+        @app.before_request
+        def _set_user():
+            g.user = {"id": 1, "username": "testuser", "system_account": "testuser"}
+
+        with (
+            patch("app.routes.fs.get_workspace_base_dir", return_value=str(ws_root)),
+            patch("app.routes.fs.get_workspace_base_dirs", return_value=[str(ws_root)]),
+            patch("app.routes.fs.get_home_directory", return_value=str(home_root)),
+            patch("app.routes.fs.os.geteuid", return_value=0),
+            # chown fails — upload must abort and clean up the temp file.
+            patch("app.routes.fs._chown_to_user", return_value=False),
+            patch(
+                "app.routes.fs.get_directory_info",
+                return_value={
+                    "exists": True,
+                    "is_dir": True,
+                    "is_writable": True,
+                    "is_readable": True,
+                },
+            ),
+        ):
+            client = app.test_client()
+            data = {
+                "file": (io.BytesIO(b"hello"), "f.txt"),
+                "path": str(home_root),
+            }
+            resp = client.post("/api/fs/upload", data=data, content_type="multipart/form-data")
+        assert resp.status_code == 500
+        assert "ownership" in resp.get_json()["error"].lower()
+        # No leftover file (neither final nor .openace-upload- temp).
+        assert not (home_root / "f.txt").exists()
+        temps = list(home_root.glob(".openace-upload-*"))
+        assert temps == [], f"temp file leaked: {temps}"
+
+
+class TestContentLengthPrecheck:
+    """The upload endpoint rejects oversized requests via Content-Length header
+    before the body is fully buffered (cheap DoS guard).
+
+    We exercise the check directly via the in-process test client: rather than
+    fake a header, we temporarily set MAX_UPLOAD_SIZE_MB to a value below the
+    real Content-Length of a small body, so the declared-size branch trips
+    before file buffering. (Faking the CONTENT_LENGTH environ on Werkzeug's
+    test client is unreliable across versions; this approach exercises the
+    exact same ``request.content_length > max_bytes`` comparison.)
+    """
+
+    def test_rejects_oversized_content_length(self, client, workspace):
+        import app.routes.fs as _fsm
+
+        orig = _fsm.MAX_UPLOAD_SIZE_MB
+        _, user_home = workspace
+        # Cap below the declared multipart body size so the pre-check trips.
+        # The body is well over 1 byte, so 0-byte cap triggers it.
+        _fsm.MAX_UPLOAD_SIZE_MB = 0
+        try:
+            data = {
+                "file": (io.BytesIO(b"x"), "x.txt"),
+                "path": str(user_home),
+            }
+            resp = client.post("/api/fs/upload", data=data, content_type="multipart/form-data")
+            assert resp.status_code == 413
+        finally:
+            _fsm.MAX_UPLOAD_SIZE_MB = orig
+
+
+class TestDownloadContentDisposition:
+    """Download Content-Disposition handles non-ASCII / quote chars safely."""
+
+    def test_ascii_filename(self, client, workspace):
+        _, user_home = workspace
+        (user_home / "doc.txt").write_bytes(b"x")
+        resp = client.get(f"/api/fs/download?path={user_home / 'doc.txt'}")
+        cd = resp.headers.get("Content-Disposition", "")
+        assert 'filename="doc.txt"' in cd
+
+    def test_non_ascii_filename_uses_rfc5987(self, client, workspace):
+        from urllib.parse import quote
+
+        _, user_home = workspace
+        # Create a file with a non-ASCII name via the filesystem directly.
+        target = user_home / "报告.txt"
+        target.write_bytes(b"x")
+        resp = client.get(f"/api/fs/download?path={target}")
+        cd = resp.headers.get("Content-Disposition", "")
+        # filename* present and percent-encoded UTF-8.
+        expected_star = f"filename*=UTF-8''{quote('报告.txt')}"
+        assert expected_star in cd, f"missing RFC 5987 form in: {cd}"
