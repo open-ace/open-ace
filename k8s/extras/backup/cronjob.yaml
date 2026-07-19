@@ -1,0 +1,163 @@
+# Open ACE - PostgreSQL Backup CronJob
+# Scheduled database backup with integrity verification
+# Issue #1853
+#
+# NOTE: Uses initContainer to install AWS CLI into an emptyDir volume,
+# which is then shared with the main container.
+
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: postgres-backup
+  namespace: open-ace
+  labels:
+    app.kubernetes.io/name: open-ace
+    app.kubernetes.io/component: backup
+spec:
+  # Run daily at 02:00 UTC
+  schedule: "0 2 * * *"
+
+  # Don't start new job if previous is still running
+  concurrencyPolicy: Forbid
+
+  # Keep history for debugging
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+
+  jobTemplate:
+    spec:
+      # Retry up to 2 times on failure
+      backoffLimit: 2
+
+      # Timeout after 1 hour (increase to 7200 for large databases)
+      activeDeadlineSeconds: 3600
+
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: open-ace
+            app.kubernetes.io/component: backup
+        spec:
+          serviceAccountName: open-ace-backup
+          restartPolicy: OnFailure
+
+          # InitContainer to install AWS CLI
+          initContainers:
+            - name: install-awscli
+              image: alpine:3.19
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -e
+                  echo "Installing AWS CLI..."
+                  apk add --no-cache aws-cli
+                  # Copy aws binary to shared volume
+                  cp /usr/bin/aws /awscli/aws
+                  echo "AWS CLI installed successfully"
+              volumeMounts:
+                - name: aws-cli
+                  mountPath: /awscli
+
+          containers:
+            - name: backup
+              image: postgres:15-alpine
+
+              command:
+                - /bin/sh
+                - /scripts/backup.sh
+
+              env:
+                # Database connection
+                - name: DB_HOST
+                  value: "postgres"
+                - name: DB_PORT
+                  value: "5432"
+                - name: DB_NAME
+                  valueFrom:
+                    configMapKeyRef:
+                      name: open-ace-env
+                      key: DB_NAME
+                      optional: true
+                - name: DB_USER
+                  valueFrom:
+                    secretKeyRef:
+                      name: open-ace-secrets
+                      key: DB_USER
+                - name: DB_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: open-ace-secrets
+                      key: DB_PASSWORD
+
+                # Object storage credentials
+                - name: S3_BUCKET
+                  valueFrom:
+                    secretKeyRef:
+                      name: backup-storage-credentials
+                      key: S3_BUCKET
+                - name: AWS_ACCESS_KEY_ID
+                  valueFrom:
+                    secretKeyRef:
+                      name: backup-storage-credentials
+                      key: AWS_ACCESS_KEY_ID
+                - name: AWS_SECRET_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: backup-storage-credentials
+                      key: AWS_SECRET_ACCESS_KEY
+                - name: AWS_REGION
+                  valueFrom:
+                    secretKeyRef:
+                      name: backup-storage-credentials
+                      key: AWS_REGION
+                      optional: true
+                - name: S3_ENDPOINT
+                  valueFrom:
+                    secretKeyRef:
+                      name: backup-storage-credentials
+                      key: S3_ENDPOINT
+                      optional: true
+
+                # Optional: Enable Redis backup
+                - name: BACKUP_REDIS
+                  value: "false"
+                - name: REDIS_HOST
+                  value: "redis"
+                - name: REDIS_PORT
+                  value: "6379"
+
+              resources:
+                requests:
+                  cpu: 200m
+                  memory: 256Mi
+                limits:
+                  cpu: 500m
+                  # Increase to 1Gi for databases > 1GB
+                  memory: 512Mi
+
+              volumeMounts:
+                - name: backup-script
+                  mountPath: /scripts
+                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
+                - name: aws-cli
+                  mountPath: /usr/local/bin/aws
+                  subPath: aws
+
+          volumes:
+            - name: backup-script
+              configMap:
+                name: backup-script
+                defaultMode: 0755
+            - name: tmp
+              emptyDir: {}
+            - name: aws-cli
+              emptyDir: {}
+
+          # Pod security context
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 999  # postgres user in alpine image
+            fsGroup: 999
