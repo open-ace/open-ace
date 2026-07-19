@@ -29,7 +29,6 @@ from gevent.pywsgi import WSGIHandler
 import app.ws_frame as ws_frame
 from app.modules.workspace.relay_distributed_store import (
     REDIRECT_CLOSE_CODE,
-    RelayDistributedStore,
     RelayType,
     get_relay_distributed_store,
 )
@@ -678,7 +677,9 @@ class RemoteWSHandler(WSGIHandler):
     # HA Helper Methods (Issue #1851)
     # ------------------------------------------------------------------
 
-    def _check_relay_redirect(self, relay_id: str, token: str, relay_type: RelayType = RelayType.TERMINAL) -> str | None:
+    def _check_relay_redirect(
+        self, relay_id: str, token: str, relay_type: RelayType = RelayType.TERMINAL
+    ) -> str | None:
         """Check if relay should be redirected to another Pod.
 
         Queries Redis to check if the relay is owned by another Pod.
@@ -759,7 +760,9 @@ class RemoteWSHandler(WSGIHandler):
         if query:
             redirect_url = f"ws://{owner_pod}.open-ace-headless.{namespace}.svc.cluster.local:{port}{path}?{query}"
         else:
-            redirect_url = f"ws://{owner_pod}.open-ace-headless.{namespace}.svc.cluster.local:{port}{path}"
+            redirect_url = (
+                f"ws://{owner_pod}.open-ace-headless.{namespace}.svc.cluster.local:{port}{path}"
+            )
 
         # Ensure token is included
         if "token=" not in redirect_url and token:

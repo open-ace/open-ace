@@ -26,7 +26,6 @@ from typing import Any
 from app.modules.workspace.relay_distributed_store import (
     KEY_TTL,
     RelayDistributedStore,
-    RelayStatus,
     RelayType,
     get_relay_distributed_store,
 )
