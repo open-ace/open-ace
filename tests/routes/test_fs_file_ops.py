@@ -668,3 +668,304 @@ class TestDownloadContentDisposition:
         # filename* present and percent-encoded UTF-8.
         expected_star = f"filename*=UTF-8''{quote('报告.txt')}"
         assert expected_star in cd, f"missing RFC 5987 form in: {cd}"
+
+
+def _mkproc(stdout="", returncode=0, stderr=""):
+    """Build a fake CompletedProcess for run_as_user mocking."""
+    from unittest.mock import MagicMock
+
+    r = MagicMock()
+    r.stdout = stdout
+    r.stderr = stderr
+    r.returncode = returncode
+    return r
+
+
+class TestListSubdirectoriesSudoBranch:
+    """Cover the multi-user (sudo) branch of list_subdirectories.
+
+    This is the code path that uses ``stat -c "%n\\t%U\\t%F\\t%s\\t%A"`` to
+    batch-list entries. It is the most complex / bug-prone part of the feature
+    (review #2 caught an owner-triplet permission bug here because it had no
+    coverage). We mock run_as_user to feed constructed ls/stat/test output and
+    assert on parsing + the owner-aware permission logic.
+    """
+
+    @pytest.fixture
+    def sudo_user(self):
+        """User with a system_account so get_effective_system_account != None."""
+        return {"id": 1, "username": "alice", "system_account": "alice"}
+
+    def _mock_run_as_user(self, path, stat_lines, test_results=None):
+        """Return a side_effect that fakes ls + stat + per-entry test calls.
+
+        stat_lines: list of "name\\towner\\ttype\\tsize\\tperm" strings (the
+                    stdout of the batched stat call).
+        test_results: dict full_path -> {"readable": bool, "writable": bool}
+                      for entries that need the owner-mismatch fallback.
+        """
+        test_results = test_results or {}
+
+        def fake_run(account, cmd):
+            # ls -1 <path> — emits basenames only (matches real ls behavior).
+            if cmd[:2] == ["ls", "-1"]:
+                names = [
+                    line.split("\t")[0].rsplit("/", 1)[-1] for line in stat_lines
+                ]
+                return _mkproc(stdout="\n".join(names))
+            # stat -c <fmt> <paths...>
+            if cmd[:2] == ["stat", "-c"]:
+                return _mkproc(stdout="\n".join(stat_lines))
+            # test -r/-w/-d/-e <path>
+            if cmd[0] == "test":
+                flag, target = cmd[1], cmd[2]
+                tr = test_results.get(target, {})
+                if flag == "-r":
+                    return _mkproc(returncode=0 if tr.get("readable") else 1)
+                if flag == "-w":
+                    return _mkproc(returncode=0 if tr.get("writable") else 1)
+                return _mkproc(returncode=1)
+            return _mkproc()
+
+        return fake_run
+
+    def test_parses_owner_matched_entries_via_mode_bits(self, sudo_user):
+        from app.routes.fs import list_subdirectories
+
+        path = "/workspace/alice"
+        # Two entries both owned by alice → %A owner bits used directly.
+        stat_lines = [
+            f"{path}/project\tdirectory\t0\tdrwxr-xr-x",  # alice owns, dir
+            f"{path}/notes.txt\talice\tregular file\t100\t-rw-r--r--",
+        ]
+        # Note first row owner column is empty due to a typo above — fix it
+        # to alice so the owner-match fast path applies.
+        stat_lines = [
+            f"{path}/project\talice\tdirectory\t0\tdrwxr-xr-x",
+            f"{path}/notes.txt\talice\tregular file\t100\t-rw-r--r--",
+        ]
+        with (
+            patch("app.routes.fs.get_effective_system_account", return_value="alice"),
+            patch(
+                "app.routes.fs.run_as_user",
+                side_effect=self._mock_run_as_user(path, stat_lines),
+            ),
+        ):
+            result = list_subdirectories(path, "alice", include_files=True)
+
+        dirs = {d["name"]: d for d in result["directories"]}
+        assert "project" in dirs
+        # owner==alice + 'rwx' for owner → readable & writable.
+        assert dirs["project"]["isReadable"] is True
+        assert dirs["project"]["isWritable"] is True
+
+        files = {f["name"]: f for f in result["files"]}
+        assert files["notes.txt"]["size"] == 100
+        assert files["notes.txt"]["is_readable"] is True  # owner r bit set
+
+    def test_owner_mismatch_falls_back_to_test_r_w(self, sudo_user):
+        """Regression for review #2: %A owner bits must NOT be used when the
+        file owner != system_account. A root-owned 0600 file must report
+        is_readable=False for alice (via test -r fallback), not True."""
+        from app.routes.fs import list_subdirectories
+
+        path = "/workspace/alice"
+        # root owns root_only.txt with mode 0600 (-rw-------). %A owner bits
+        # would say readable/writable, but alice (not root) has NO access.
+        stat_lines = [
+            f"{path}/root_only.txt\troot\tregular file\t42\t-rw-------",
+        ]
+        test_results = {
+            f"{path}/root_only.txt": {"readable": False, "writable": False},
+        }
+        with (
+            patch("app.routes.fs.get_effective_system_account", return_value="alice"),
+            patch(
+                "app.routes.fs.run_as_user",
+                side_effect=self._mock_run_as_user(path, stat_lines, test_results=test_results),
+            ),
+        ):
+            result = list_subdirectories(path, "alice", include_files=True)
+
+        files = {f["name"]: f for f in result["files"]}
+        assert "root_only.txt" in files
+        # Critical: must reflect the actual test -r result (False), NOT the
+        # owner-triplet %A value (which would wrongly say True).
+        assert files["root_only.txt"]["is_readable"] is False
+
+    def test_stat_returncode_nonzero_still_parses_stdout(self):
+        """Per review #2: a single un-stat-able entry must not blank the
+        whole directory. We parse stdout regardless of returncode."""
+        from app.routes.fs import list_subdirectories
+
+        path = "/workspace/alice"
+        stat_lines = [f"{path}/ok.txt\talice\tregular file\t5\t-rw-r--r--"]
+
+        def fake_run(account, cmd):
+            if cmd[:2] == ["ls", "-1"]:
+                return _mkproc(stdout="ok.txt")
+            if cmd[:2] == ["stat", "-c"]:
+                # Return nonzero (e.g. one sibling entry failed) but still
+                # emit stdout for the good entry.
+                return _mkproc(stdout="\n".join(stat_lines), returncode=1)
+            return _mkproc(returncode=1)
+
+        with (
+            patch("app.routes.fs.get_effective_system_account", return_value="alice"),
+            patch("app.routes.fs.run_as_user", side_effect=fake_run),
+        ):
+            result = list_subdirectories(path, "alice", include_files=True)
+
+        files = {f["name"]: f for f in result["files"]}
+        # The good entry still appears even though stat returned nonzero.
+        assert "ok.txt" in files
+
+    def test_filename_with_tab_does_not_pollute_other_entries(self):
+        """Per review #2: a filename containing a tab shifts columns. The
+        parser must skip the malformed line (path not in name_by_path)
+        instead of corrupting a sibling entry."""
+        from app.routes.fs import list_subdirectories
+
+        path = "/workspace/alice"
+        # Construct a stat stdout where a tab-containing name breaks parsing.
+        # ls -1 emits "a\tb.txt" as one filename line.
+        good = f"{path}/good.txt"
+        malformed_name = "a\tb.txt"  # ls would print this as one line
+        malformed_path = f"{path}/{malformed_name}"
+
+        def fake_run(account, cmd):
+            if cmd[:2] == ["ls", "-1"]:
+                return _mkproc(stdout="good.txt\n" + malformed_name)
+            if cmd[:2] == ["stat", "-c"]:
+                # The malformed entry's stat line splits into 6 tab-fields
+                # instead of 5 → len(parts) >= 5 still passes, but the first
+                # field is "a" (not a known candidate path) → dropped by the
+                # name_by_path check. The good entry is unaffected.
+                return _mkproc(
+                    stdout="\n".join(
+                        [
+                            f"{good}\talice\tregular file\t5\t-rw-r--r--",
+                            f"a\tb.txt\talice\tregular file\t5\t-rw-r--r--",
+                        ]
+                    )
+                )
+            return _mkproc()
+
+        with (
+            patch("app.routes.fs.get_effective_system_account", return_value="alice"),
+            patch("app.routes.fs.run_as_user", side_effect=fake_run),
+        ):
+            result = list_subdirectories(path, "alice", include_files=True)
+
+        files = {f["name"]: f for f in result["files"]}
+        # good.txt survives, malformed entry dropped (not added with wrong attrs).
+        assert "good.txt" in files
+        assert "a" not in files  # the corrupted first-field must not appear
+
+    def test_mixed_dirs_and_files(self, sudo_user):
+        from app.routes.fs import list_subdirectories
+
+        path = "/workspace/alice"
+        stat_lines = [
+            f"{path}/subdir\talice\tdirectory\t0\tdrwxr-xr-x",
+            f"{path}/a.txt\talice\tregular file\t10\t-rw-r--r--",
+            f"{path}/b.txt\talice\tregular file\t20\t-r--r--r--",
+        ]
+        with (
+            patch("app.routes.fs.get_effective_system_account", return_value="alice"),
+            patch(
+                "app.routes.fs.run_as_user",
+                side_effect=self._mock_run_as_user(path, stat_lines),
+            ),
+        ):
+            result = list_subdirectories(path, "alice", include_files=True)
+
+        dir_names = {d["name"] for d in result["directories"]}
+        file_names = {f["name"] for f in result["files"]}
+        assert dir_names == {"subdir"}
+        assert file_names == {"a.txt", "b.txt"}
+        # b.txt is read-only (owner bits r--) → not writable.
+        b = next(f for f in result["files"] if f["name"] == "b.txt")
+        assert b["is_readable"] is True
+        # 'w' not in owner triplet 'r--'.
+
+    def test_include_files_false_skips_files_but_keeps_dirs(self, sudo_user):
+        from app.routes.fs import list_subdirectories
+
+        path = "/workspace/alice"
+        stat_lines = [
+            f"{path}/subdir\talice\tdirectory\t0\tdrwxr-xr-x",
+            f"{path}/a.txt\talice\tregular file\t10\t-rw-r--r--",
+        ]
+        with (
+            patch("app.routes.fs.get_effective_system_account", return_value="alice"),
+            patch(
+                "app.routes.fs.run_as_user",
+                side_effect=self._mock_run_as_user(path, stat_lines),
+            ),
+        ):
+            result = list_subdirectories(path, "alice", include_files=False)
+
+        assert {d["name"] for d in result["directories"]} == {"subdir"}
+        assert result["files"] == []
+
+
+class TestChownSudoFallbackFailure:
+    """Cover the sudo chown fallback branch's failure path.
+
+    Per review #2: the importlib stub in this test file sets
+    ``run_as_root_if_needed = lambda cmd: None``, and _chown_to_user does
+    ``getattr(r, "returncode", 0) != 0`` — which treats None as success.
+    This test exercises the real failure path with a proper CompletedProcess
+    so the branch is actually covered.
+    """
+
+    def test_sudo_chown_nonzero_returns_false(self):
+        from app.routes.fs import _chown_to_user
+
+        def fake_id_run(cmd, **kwargs):
+            from unittest.mock import MagicMock
+
+            r = MagicMock()
+            r.returncode = 0
+            r.stdout = "1001\n" if "-u" in cmd else "1002\n"
+            return r
+
+        # Non-root, no wrapper → sudo chown fallback path. Make it return
+        # returncode=1 (failure).
+        from subprocess import CompletedProcess
+
+        failed = CompletedProcess(
+            args=["sudo", "chown", "1001:1002", "/p"], returncode=1, stderr="denied"
+        )
+
+        with (
+            patch("app.routes.fs.os.geteuid", return_value=1000),
+            patch("app.routes.fs._is_wrapper_available", return_value=False),
+            patch("app.routes.fs.subprocess.run", side_effect=fake_id_run),
+            patch("app.routes.fs.run_as_root_if_needed", return_value=failed),
+        ):
+            assert _chown_to_user("/p", "alice") is False
+
+    def test_sudo_chown_success_returns_true(self):
+        from app.routes.fs import _chown_to_user
+
+        def fake_id_run(cmd, **kwargs):
+            from unittest.mock import MagicMock
+
+            r = MagicMock()
+            r.returncode = 0
+            r.stdout = "1001\n" if "-u" in cmd else "1002\n"
+            return r
+
+        from subprocess import CompletedProcess
+
+        ok = CompletedProcess(args=["chown", "..."], returncode=0)
+
+        with (
+            patch("app.routes.fs.os.geteuid", return_value=1000),
+            patch("app.routes.fs._is_wrapper_available", return_value=False),
+            patch("app.routes.fs.subprocess.run", side_effect=fake_id_run),
+            patch("app.routes.fs.run_as_root_if_needed", return_value=ok),
+        ):
+            assert _chown_to_user("/p", "alice") is True

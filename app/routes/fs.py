@@ -604,7 +604,14 @@ def list_subdirectories(
             # forking per-entry (test -d/-r/-w/stat per file used to be ~3N
             # forks; with 200 files that is hundreds of sudo execs and tens
             # of seconds). ``stat *`` is in the sudoers OPENACE_UTILS
-            # whitelist. %F=type, %s=size, %A=perm mode string, %n=name.
+            # whitelist.
+            #
+            # Permission accuracy (review #2): %A reflects the file *owner's*
+            # permission bits, which only matches effective-user access when
+            # owner == system_account. We therefore gather %U (owner name)
+            # and only trust %A for owner==system_account entries; entries
+            # whose owner differs fall back to a per-entry test -r/-w (rare:
+            # mostly root-owned .qwen configs / migrated files).
             ls_result = run_as_user(effective_system_account, ["ls", "-1", path])
             if ls_result.returncode != 0:
                 logger.warning(f"Permission denied accessing {path} as {system_account}")
@@ -628,24 +635,59 @@ def list_subdirectories(
             if not candidate_paths:
                 return {"directories": directories, "files": files}
 
-            # One stat for ALL candidates. ``stat *`` whitelisted in sudoers.
-            # We always gather %F/%A so directories keep their r/w flags; the
-            # %s column is only consumed for files (include_files=True), but
-            # reading it costs nothing extra.
-            stat_fmt = "%n\t%F\t%s\t%A"
+            # One stat for ALL candidates. %n=name %U=owner %F=type %s=size
+            # %A=perm mode. We parse stdout directly (NOT gated on returncode):
+            # a single un-stat-able entry only lands in stderr and should not
+            # blank out the whole directory.
+            stat_fmt = "%n\t%U\t%F\t%s\t%A"
             stat_result = run_as_user(
                 effective_system_account, ["stat", "-c", stat_fmt, *candidate_paths]
             )
             stat_by_path: dict[str, dict[str, str]] = {}
-            if stat_result.returncode == 0:
-                for line in stat_result.stdout.split("\n"):
-                    if not line:
-                        continue
-                    parts = line.split("\t")
-                    if len(parts) < 4:
-                        continue
-                    n, ftype, size_s, perm = parts[0], parts[1], parts[2], parts[3]
-                    stat_by_path[n] = {"type": ftype, "size": size_s, "perm": perm}
+            for line in stat_result.stdout.split("\n"):
+                if not line:
+                    continue
+                parts = line.split("\t")
+                if len(parts) < 5:
+                    # Filename with embedded tab → columns shift. Skip lines
+                    # whose first field isn't a known candidate path so a
+                    # malformed name can't pollute other entries.
+                    continue
+                n, owner, ftype, size_s, perm = (
+                    parts[0],
+                    parts[1],
+                    parts[2],
+                    parts[3],
+                    parts[4],
+                )
+                if n not in name_by_path:
+                    # Path mismatch (embedded newline split the record, or
+                    # stat emitted something unexpected) — ignore safely.
+                    continue
+                stat_by_path[n] = {
+                    "type": ftype,
+                    "size": size_s,
+                    "perm": perm,
+                    "owner": owner,
+                }
+
+            # Collect entries whose owner != system_account so we can fall
+            # back to accurate access checks for just those (keeps the common
+            # case — owner==system_account — on the fast batched path).
+            needs_access_check: list[str] = []
+            for full_path in candidate_paths:
+                st = stat_by_path.get(full_path)
+                if st and st.get("owner") != effective_system_account:
+                    needs_access_check.append(full_path)
+
+            access_cache: dict[str, dict[str, bool]] = {}
+            for full_path in needs_access_check:
+                rr = run_as_user(effective_system_account, ["test", "-r", full_path])
+                ww = run_as_user(effective_system_account, ["test", "-w", full_path])
+                access_cache[full_path] = {
+                    "readable": rr.returncode == 0,
+                    "writable": ww.returncode == 0,
+                }
 
             for full_path in candidate_paths:
                 entry = name_by_path[full_path]
@@ -654,11 +696,18 @@ def list_subdirectories(
                     # stat failed for this entry (e.g. broken symlink) — skip.
                     continue
                 is_dir = st["type"] == "directory"
-                # perm looks like "drwxr-xr-x" / "-rw-r--r--". Owner triplet
-                # is chars [1:4]; 'r' present => readable, 'w' present => writable.
-                owner_bits = st["perm"][1:4] if len(st["perm"]) >= 4 else ""
-                is_readable = "r" in owner_bits
-                is_writable = "w" in owner_bits
+
+                if full_path in access_cache:
+                    # owner != system_account: use the accurate access check.
+                    is_readable = access_cache[full_path]["readable"]
+                    is_writable = access_cache[full_path]["writable"]
+                else:
+                    # owner == system_account: %A owner bits are authoritative.
+                    # perm looks like "drwxr-xr-x" / "-rw-r--r--"; chars [1:4]
+                    # are the owner triplet.
+                    owner_bits = st["perm"][1:4] if len(st["perm"]) >= 4 else ""
+                    is_readable = "r" in owner_bits
+                    is_writable = "w" in owner_bits
 
                 if is_dir:
                     directories.append(
