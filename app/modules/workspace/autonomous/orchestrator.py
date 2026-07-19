@@ -1436,7 +1436,7 @@ class AutonomousOrchestrator:
         push_error = ""
         if sha_changed:
             try:
-                gh.git_push(branch=branch_name)
+                gh.git_push(branch=branch_name, force_with_lease=True)
             except Exception as e:
                 # Distinguish transient vs non-transient to enable Layer-2 retry
                 # (Issue #1814).
@@ -5085,7 +5085,7 @@ class AutonomousOrchestrator:
                 raise RuntimeError(
                     f"Branch mismatch before push: expected {branch_name}, actual {current_branch}"
                 )
-            gh.git_push(branch=branch_name)
+            gh.git_push(branch=branch_name, force_with_lease=True)
         except Exception as e:
             # Distinguish transient vs non-transient errors to enable Layer-2 retry
             # for network flakiness (Issue #1814).
@@ -5529,7 +5529,7 @@ class AutonomousOrchestrator:
         push_error_msg = ""
         if sha_changed:
             try:
-                gh.git_push()
+                gh.git_push(force_with_lease=True)
             except Exception as e:
                 # Distinguish transient vs non-transient to enable Layer-2 retry
                 # (Issue #1814).
@@ -6141,7 +6141,7 @@ class AutonomousOrchestrator:
                     current_branch,
                 )
                 branch_name = current_branch
-            wt_gh.git_push(branch=branch_name)
+            wt_gh.git_push(branch=branch_name, force_with_lease=True)
             self._create_milestone(
                 phase="merge",
                 milestone_type="conflicts_pushed",

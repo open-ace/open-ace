@@ -404,7 +404,7 @@ class TestResolveMergeConflictsWorktreeIsolation:
         # _do_merge's next cycle (after CI passes).
         caller_gh.merge_pr.assert_not_called()
         # git_push runs inside the temp worktree (wt_gh), not the caller gh.
-        wt_gh.git_push.assert_called_once_with(branch="auto-dev/fc82f22a")
+        wt_gh.git_push.assert_called_once_with(branch="auto-dev/fc82f22a", force_with_lease=True)
 
     @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
     def test_cleans_up_temp_worktree_on_failure(self, mock_gh_cls):
