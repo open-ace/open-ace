@@ -165,6 +165,29 @@ def test_update_agent_sessions_stats_writes_per_session_model(tmp_path, monkeypa
         )
         """
     )
+    # fetch_claude also inserts into session_messages; without this table the
+    # test logs WARNING noise (the model assertion doesn't depend on it, but a
+    # clean log is preferable).
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS session_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL,
+            role TEXT NOT NULL,
+            content TEXT,
+            tokens_used INTEGER DEFAULT 0,
+            model TEXT,
+            "timestamp" TEXT,
+            metadata TEXT,
+            milestone_id TEXT DEFAULT '',
+            source TEXT DEFAULT '',
+            source_timestamp TEXT,
+            external_message_id TEXT DEFAULT '',
+            content_blocks TEXT,
+            tenant_id INTEGER DEFAULT 1
+        )
+        """
+    )
     conn.commit()
     conn.close()
 

@@ -268,8 +268,6 @@ export const SessionList: React.FC<SessionListProps> = ({ collapsed = false, onS
                   tokens: 0,
                   messages: 0,
                   requests: 0,
-                  isWorkflowImported,
-                  workflowId: wfId,
                 })
               }
               title={session.title ?? `Session ${displaySessionId(session.session_id, 8)}`}
