@@ -116,6 +116,7 @@ export const PersonalFiles: React.FC = () => {
           rootPath={homePath ?? undefined}
           hideManualInput={true}
           hideRecentPaths={true}
+          enableFileActions={true}
         />
       </div>
     </div>

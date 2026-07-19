@@ -39,6 +39,7 @@ vi.mock('./LocalDirectoryBrowser', () => ({
     rootPath,
     hideManualInput,
     hideRecentPaths,
+    enableFileActions,
   }: any) => (
     <div data-testid="local-directory-browser">
       <span data-testid="initial-path">{initialPath}</span>
@@ -47,6 +48,9 @@ vi.mock('./LocalDirectoryBrowser', () => ({
       <span data-testid="root-path">{rootPath || 'none'}</span>
       <span data-testid="hide-manual-input">{hideManualInput ? 'true' : 'false'}</span>
       <span data-testid="hide-recent-paths">{hideRecentPaths ? 'true' : 'false'}</span>
+      <span data-testid="enable-file-actions">
+        {enableFileActions ? 'true' : 'false'}
+      </span>
       <button onClick={() => onSelectPath('/home/alice/project')} data-testid="select-path">
         Select
       </button>
@@ -77,6 +81,8 @@ describe('PersonalFiles', () => {
     expect(screen.getByTestId('root-path')).toHaveTextContent('/home/alice');
     expect(screen.getByTestId('hide-manual-input')).toHaveTextContent('true');
     expect(screen.getByTestId('hide-recent-paths')).toHaveTextContent('true');
+    // Personal files page enables upload/download/delete UI
+    expect(screen.getByTestId('enable-file-actions')).toHaveTextContent('true');
   });
 
   it('opens a local workspace tab for the selected path', async () => {
