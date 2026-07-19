@@ -166,8 +166,9 @@ class RelayDistributedStore:
             pod_name: Pod name for owner identification. Defaults to POD_NAME env var.
         """
         self._redis_client = redis_client
-        self._pod_name = pod_name or os.environ.get("POD_NAME", "unknown")
-        self._pod_namespace = os.environ.get("POD_NAMESPACE", "open-ace")
+        # pod_name is always str due to fallbacks: parameter -> env var -> "unknown"
+        self._pod_name: str = pod_name or os.environ.get("POD_NAME", "") or "unknown"
+        self._pod_namespace: str = os.environ.get("POD_NAMESPACE", "") or "open-ace"
         self._circuit_breaker = CircuitBreaker(
             failure_threshold=5,
             recovery_timeout=60.0,
