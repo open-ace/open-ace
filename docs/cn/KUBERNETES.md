@@ -86,6 +86,45 @@ k8s/
 
 凭证来自 Secret `open-ace-secrets`（键：`DB_USER`、`DB_PASSWORD`）。
 
+#### 数据库备份责任
+
+**重要：** 参考 Kubernetes 清单**不包含**自动数据库备份。您需要自行负责：
+
+1. **备份策略：** 选择以下方案之一：
+   - **托管 PostgreSQL**（生产环境推荐）：云厂商负责备份和 PITR
+   - **自管备份：** 使用 `k8s/extras/backup/` 中的可选 CronJob
+
+2. **RPO/RTO：** 由您定义并验证：
+   - RPO（恢复点目标）：取决于备份频率
+   - RTO（恢复时间目标）：取决于恢复演练频率
+
+3. **恢复演练：** 建议定期进行恢复测试（至少每月一次）
+
+详细备份/恢复步骤请参见 [DATABASE-BACKUP.md](./DATABASE-BACKUP.md)。
+
+#### 可选备份 CronJob
+
+`k8s/extras/backup/` 提供备份 CronJob：
+
+```bash
+# 部署备份基础设施
+kubectl apply -k k8s/extras/backup/
+
+# 验证 CronJob
+kubectl get cronjob -n open-ace
+```
+
+**备份 CronJob 特性：**
+- 每日 02:00 UTC 执行 PostgreSQL 备份
+- 使用 `pg_restore --list` 进行完整性校验
+- 上传到 S3 兼容对象存储
+- 资源限制：512Mi 内存、500m CPU
+- 超时：1 小时（大型数据库可调整）
+
+**NetworkPolicy 兼容性：** 备份 Job 与现有 NetworkPolicy 兼容，无需修改（已允许到 PostgreSQL 和外部 HTTPS 的出站流量）。
+
+**RBAC 要求：** 备份 Job 使用独立的 ServiceAccount（`open-ace-backup`），具有最小权限。
+
 ### Redis StatefulSet
 
 | 设置 | 值 |

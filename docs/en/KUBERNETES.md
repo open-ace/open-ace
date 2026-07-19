@@ -86,6 +86,45 @@ Creates the `open-ace` namespace with standard Kubernetes labels.
 
 Credentials from Secret `open-ace-secrets` (keys: `DB_USER`, `DB_PASSWORD`).
 
+#### Database Backup Responsibility
+
+**IMPORTANT:** The reference Kubernetes manifest does **not** include automated database backups. You are responsible for:
+
+1. **Backup Strategy**: Choose between:
+   - **Managed PostgreSQL** (recommended for production): Cloud provider handles backups and PITR
+   - **Self-managed backups**: Use the optional CronJob in `k8s/extras/backup/`
+
+2. **RPO/RTO**: These are your responsibility to define and verify:
+   - RPO (Recovery Point Objective): Depends on backup frequency
+   - RTO (Recovery Time Objective): Depends on restore testing
+
+3. **Restore Testing**: Regular recovery drills are recommended (at least monthly)
+
+For detailed backup/restore procedures, see [DATABASE-BACKUP.md](./DATABASE-BACKUP.md).
+
+#### Optional Backup CronJob
+
+A backup CronJob is provided in `k8s/extras/backup/`:
+
+```bash
+# Deploy backup infrastructure
+kubectl apply -k k8s/extras/backup/
+
+# Verify CronJob
+kubectl get cronjob -n open-ace
+```
+
+**Backup CronJob Features:**
+- Daily PostgreSQL backup at 02:00 UTC
+- Integrity verification with `pg_restore --list`
+- Upload to S3-compatible object storage
+- Resource limits: 512Mi memory, 500m CPU
+- Timeout: 1 hour (adjust for large databases)
+
+**NetworkPolicy Compatibility:** The backup Job works with the existing NetworkPolicy without modification (egress to PostgreSQL and external HTTPS is already allowed).
+
+**RBAC Requirements:** The backup Job uses a separate ServiceAccount (`open-ace-backup`) with minimal permissions.
+
 ### Redis StatefulSet
 
 | Setting | Value |

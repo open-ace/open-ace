@@ -1,0 +1,39 @@
+# Open ACE - Backup RBAC
+# Note: Backup Job primarily needs network access to database and object storage.
+# Kubernetes API access is optional and only needed if backing up ConfigMaps/Secrets.
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: open-ace-backup
+  namespace: open-ace
+  labels:
+    app.kubernetes.io/name: open-ace
+    app.kubernetes.io/component: backup
+rules:
+  # Optional: Only needed if backup script exports ConfigMaps/Secrets
+  - apiGroups: [""]
+    resources: ["configmaps", "secrets"]
+    verbs: ["get", "list"]
+  # For cleanup of old job history (optional)
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["list", "delete"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: open-ace-backup
+  namespace: open-ace
+  labels:
+    app.kubernetes.io/name: open-ace
+    app.kubernetes.io/component: backup
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: open-ace-backup
+subjects:
+  - kind: ServiceAccount
+    name: open-ace-backup
+    namespace: open-ace
