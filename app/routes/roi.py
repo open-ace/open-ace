@@ -7,18 +7,17 @@ API endpoints for ROI analysis and cost optimization.
 import logging
 import math
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Tuple
+from typing import TYPE_CHECKING, Optional, Tuple
 
 from flask import Blueprint, g, jsonify, request
 
 from app.auth.decorators import auth_required, require_tenant_scope
 from app.modules.analytics.cost_optimizer import CostOptimizer
-from app.modules.analytics.roi_calculator import (
-    AssumptionSource,
-    ROIAssumptions,
-    ROICalculator,
-)
+from app.modules.analytics.roi_calculator import AssumptionSource, ROIAssumptions, ROICalculator
 from app.repositories.tenant_repo import TenantRepository
+
+if TYPE_CHECKING:
+    from app.models.tenant import Tenant
 
 logger = logging.getLogger(__name__)
 

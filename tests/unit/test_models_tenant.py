@@ -191,9 +191,7 @@ class TestTenantSettings:
 
     def test_to_dict_includes_roi_assumptions(self):
         """TenantSettings.to_dict() should include roi_assumptions."""
-        ts = TenantSettings(
-            roi_assumptions={"hourly_labor_cost": 100.0, "currency": "EUR"}
-        )
+        ts = TenantSettings(roi_assumptions={"hourly_labor_cost": 100.0, "currency": "EUR"})
         d = ts.to_dict()
         assert "roi_assumptions" in d
         assert d["roi_assumptions"]["hourly_labor_cost"] == 100.0

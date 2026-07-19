@@ -166,6 +166,7 @@ class TestTenantService:
     def test_update_settings(self):
         svc, mock_repo, _ = self._make_service()
         mock_tenant = MagicMock()
+        mock_tenant._last_settings_update = None
         mock_tenant.settings.to_dict.return_value = {"theme": "light"}
         mock_repo.get_by_id.return_value = mock_tenant
         mock_repo.update.return_value = True

@@ -12,11 +12,14 @@ import os
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Literal, Optional, cast
+from typing import TYPE_CHECKING, Any, Literal, Optional, cast
 
 from app.repositories.database import Database
 from app.utils.cache import cached
 from app.utils.tool_names import normalize_tool_name
+
+if TYPE_CHECKING:
+    from app.models.tenant import Tenant
 
 logger = logging.getLogger(__name__)
 
@@ -161,7 +164,9 @@ class ROIAssumptions:
         )
 
     @classmethod
-    def from_tenant_or_env(cls, tenant: Optional["Tenant"]) -> tuple["ROIAssumptions", AssumptionSource]:
+    def from_tenant_or_env(
+        cls, tenant: Optional["Tenant"]
+    ) -> tuple["ROIAssumptions", AssumptionSource]:
         """Build ROI assumptions from tenant config or environment variables.
 
         Priority: tenant config > environment vars > defaults.
@@ -172,9 +177,6 @@ class ROIAssumptions:
         Returns:
             tuple: (ROIAssumptions, assumption_source)
         """
-        # Import here to avoid circular dependency
-        from app.models.tenant import Tenant
-
         # 1. Check tenant configuration
         if tenant and hasattr(tenant, "settings") and tenant.settings:
             roi_assumptions = getattr(tenant.settings, "roi_assumptions", None)

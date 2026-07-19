@@ -4277,7 +4277,8 @@ export const translations: Record<Language, Translations> = {
     roiEstimatedBadgeTitle: '前提に基づく推定',
     roiEstimatedBadgeTooltip:
       'ROI は設定可能な前提に基づいて計算されており、実際の節約を示すものではありません。このバージョンではリアルタイム ROI 測定はサポートされていません。',
-    roiDisclaimerFull: 'ROI は設定可能な前提に基づく推定値です。このバージョンではリアルタイム測定はサポートされていません。',
+    roiDisclaimerFull:
+      'ROI は設定可能な前提に基づく推定値です。このバージョンではリアルタイム測定はサポートされていません。',
     roiCurrencyNotice:
       '通貨ラベルを変更しても人件費前提だけが更新され、プロバイダー費用の為替換算は行われません。',
     roiAssumptionValidation:
@@ -5791,7 +5792,8 @@ export const translations: Record<Language, Translations> = {
     roiEstimatedBadgeTitle: '가정에 기반한 추정',
     roiEstimatedBadgeTooltip:
       'ROI는 구성 가능한 가정을 기반으로 계산되며 실제 절감을 나타내지 않습니다. 이 버전은 실시간 ROI 측정을 지원하지 않습니다.',
-    roiDisclaimerFull: 'ROI는 구성 가능한 가정을 기반으로 한 추정값입니다. 이 버전은 실시간 측정을 지원하지 않습니다.',
+    roiDisclaimerFull:
+      'ROI는 구성 가능한 가정을 기반으로 한 추정값입니다. 이 버전은 실시간 측정을 지원하지 않습니다.',
     roiCurrencyNotice:
       '통화 라벨을 바꿔도 인건비 가정만 바뀌며, 제공자 비용에는 환율 변환이 적용되지 않습니다.',
     roiAssumptionValidation:

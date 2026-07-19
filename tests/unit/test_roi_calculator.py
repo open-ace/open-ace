@@ -773,7 +773,10 @@ class TestROIAssumptionsFromTenantOrEnv:
         assert source == "tenant_config"
         assert assumptions.hourly_labor_cost == 75.0
         assert assumptions.productivity_multiplier == ROIAssumptions.DEFAULT_PRODUCTIVITY_MULTIPLIER
-        assert assumptions.avg_time_saved_per_request == ROIAssumptions.DEFAULT_AVG_TIME_SAVED_PER_REQUEST
+        assert (
+            assumptions.avg_time_saved_per_request
+            == ROIAssumptions.DEFAULT_AVG_TIME_SAVED_PER_REQUEST
+        )
 
     def test_from_tenant_or_env_ignores_empty_dict(self):
         """Should fall back to defaults when tenant config is empty dict."""
@@ -824,7 +827,12 @@ class TestCalculatorWithAssumptionSource:
             "total_tokens": 1500,
         }
         mock_db.fetch_all.return_value = [
-            {"tool_name": "test", "model": "claude-3-haiku", "input_tokens": 1000, "output_tokens": 500}
+            {
+                "tool_name": "test",
+                "model": "claude-3-haiku",
+                "input_tokens": 1000,
+                "output_tokens": 500,
+            }
         ]
 
         roi = calc.calculate_roi("2026-01-01", "2026-01-31")

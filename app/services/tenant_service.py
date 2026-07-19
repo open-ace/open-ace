@@ -233,10 +233,11 @@ class TenantService:
 
         # Detect concurrent updates (5-second window)
         last_update = getattr(tenant, "_last_settings_update", None)
-        if last_update and (datetime.now(timezone.utc).replace(tzinfo=None) - last_update).seconds < 5:
-            logger.warning(
-                "Concurrent tenant settings update detected for tenant_id=%s", tenant_id
-            )
+        if (
+            last_update
+            and (datetime.now(timezone.utc).replace(tzinfo=None) - last_update).seconds < 5
+        ):
+            logger.warning("Concurrent tenant settings update detected for tenant_id=%s", tenant_id)
 
         tenant._last_settings_update = datetime.now(timezone.utc).replace(tzinfo=None)
 

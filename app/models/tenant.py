@@ -152,6 +152,10 @@ class Tenant:
     trial_ends_at: Optional[datetime] = None
     subscription_ends_at: Optional[datetime] = None
 
+    # Ephemeral runtime marker for concurrent-settings-update detection
+    # (not persisted; reset to None on every load).
+    _last_settings_update: Optional[datetime] = None
+
     # Statistics
     user_count: int = 0
     total_tokens_used: int = 0
