@@ -11,6 +11,32 @@ The backup solution provides:
 - Optional Redis backup
 - Restore Job for disaster recovery
 
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                      Backup Pod                          │
+│                                                          │
+│  ┌──────────────────────────────────────────────────┐  │
+│  │ InitContainer: install-awscli (alpine:3.19)      │  │
+│  │   - apk add --no-cache aws-cli                   │  │
+│  │   - Copy /usr/bin/aws to shared volume           │  │
+│  └──────────────────────────────────────────────────┘  │
+│                         ↓                                │
+│  ┌──────────────────────────────────────────────────┐  │
+│  │ Main Container: backup (postgres:15-alpine)      │  │
+│  │   - Mount aws binary from shared volume          │  │
+│  │   - Run pg_dump, integrity check, upload         │  │
+│  └──────────────────────────────────────────────────┘  │
+│                                                          │
+└─────────────────────────────────────────────────────────┘
+```
+
+**Why initContainer?**
+- The `postgres:15-alpine` image does NOT include AWS CLI
+- Using initContainer ensures AWS CLI is installed before the main container starts
+- This approach is more reliable than runtime installation
+
 ## Quick Start
 
 ```bash
@@ -30,11 +56,11 @@ kubectl get cronjob -n open-ace
 | File | Purpose |
 |------|---------|
 | `kustomization.yaml` | Kustomize entry point |
-| `cronjob.yaml` | Scheduled backup CronJob |
+| `cronjob.yaml` | Scheduled backup CronJob (with initContainer) |
 | `backup-script-configmap.yaml` | Backup script with integrity check |
 | `serviceaccount.yaml` | ServiceAccount for backup jobs |
 | `rbac.yaml` | Role and RoleBinding (optional) |
-| `restore-job.yaml` | One-time restore Job |
+| `restore-job.yaml` | One-time restore Job (with initContainer) |
 | `secret-s3.yaml.example` | AWS S3 credentials template |
 | `secret-minio.yaml.example` | MinIO credentials template |
 
@@ -55,7 +81,7 @@ kubectl get cronjob -n open-ace
 The backup Job is compatible with the existing NetworkPolicy in `k8s/policies.yaml`:
 - Egress to PostgreSQL (TCP 5432): Already allowed
 - Egress to Redis (TCP 6379): Already allowed
-- Egress to external HTTPS (TCP 443): Already allowed for object storage
+- Egress to external HTTPS (TCP 443): Already allowed for object storage and package download
 
 **No NetworkPolicy modification required.**
 
@@ -127,6 +153,13 @@ When `ENABLE_MULTI_TENANT` is enabled:
 - Restore: Verify tenant schema permissions after restore
 - Run application-level permission validation script
 
+## PostgreSQL Version Compatibility
+
+The backup includes PostgreSQL version metadata. During restore:
+- Version numbers are compared
+- Major version mismatch triggers a warning (does not block restore)
+- Consider restoring to matching version first for cross-version migration
+
 ## Troubleshooting
 
 ### CronJob not running
@@ -141,6 +174,12 @@ Increase memory limit in `cronjob.yaml`:
 resources:
   limits:
     memory: 1Gi
+```
+
+### AWS CLI installation fails (initContainer)
+Check initContainer logs:
+```bash
+kubectl logs job/postgres-backup-xxx -n open-ace -c install-awscli
 ```
 
 ### Network timeout

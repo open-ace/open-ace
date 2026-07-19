@@ -1,6 +1,9 @@
 # Open ACE - PostgreSQL Backup CronJob
 # Scheduled database backup with integrity verification
 # Issue #1853
+#
+# NOTE: Uses initContainer to install AWS CLI into an emptyDir volume,
+# which is then shared with the main container.
 
 apiVersion: batch/v1
 kind: CronJob
@@ -37,6 +40,24 @@ spec:
         spec:
           serviceAccountName: open-ace-backup
           restartPolicy: OnFailure
+
+          # InitContainer to install AWS CLI
+          initContainers:
+            - name: install-awscli
+              image: alpine:3.19
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -e
+                  echo "Installing AWS CLI..."
+                  apk add --no-cache aws-cli
+                  # Copy aws binary to shared volume
+                  cp /usr/bin/aws /awscli/aws
+                  echo "AWS CLI installed successfully"
+              volumeMounts:
+                - name: aws-cli
+                  mountPath: /awscli
 
           containers:
             - name: backup
@@ -121,6 +142,9 @@ spec:
                   readOnly: true
                 - name: tmp
                   mountPath: /tmp
+                - name: aws-cli
+                  mountPath: /usr/local/bin/aws
+                  subPath: aws
 
           volumes:
             - name: backup-script
@@ -128,6 +152,8 @@ spec:
                 name: backup-script
                 defaultMode: 0755
             - name: tmp
+              emptyDir: {}
+            - name: aws-cli
               emptyDir: {}
 
           # Pod security context

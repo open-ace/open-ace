@@ -1,5 +1,9 @@
 # Open ACE - Backup Script ConfigMap
 # Contains the backup script with integrity verification
+# Issue #1853
+#
+# NOTE: AWS CLI is provided by the initContainer in cronjob.yaml/restore-job.yaml
+# The aws binary is mounted at /usr/local/bin/aws
 
 apiVersion: v1
 kind: ConfigMap
@@ -14,6 +18,8 @@ data:
     #!/bin/sh
     # Open ACE - PostgreSQL Backup Script with Integrity Verification
     # Issue #1853
+    #
+    # NOTE: AWS CLI is provided by initContainer (mounted at /usr/local/bin/aws)
 
     set -e
 
@@ -62,7 +68,15 @@ data:
       exit 1
     fi
 
+    # Verify AWS CLI is available (installed by initContainer)
+    if ! command -v aws > /dev/null 2>&1; then
+      echo "${RED}ERROR: AWS CLI not found. InitContainer may have failed.${NC}"
+      exit 1
+    fi
+    echo "${GREEN}AWS CLI available${NC}"
+
     # Create backup directory
+    echo ""
     echo "${YELLOW}Creating backup directory: ${BACKUP_DIR}${NC}"
     mkdir -p "$BACKUP_DIR"
 
@@ -80,7 +94,9 @@ data:
 
     # Get PostgreSQL version
     PG_VERSION=$(psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -t -c "SELECT version();" 2>/dev/null | head -1 | xargs)
+    PG_VERSION_NUM=$(psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -t -c "SHOW server_version_num;" 2>/dev/null | head -1 | xargs)
     echo "PostgreSQL version: $PG_VERSION"
+    echo "PostgreSQL version number: $PG_VERSION_NUM"
 
     # Record metadata
     cat > "$BACKUP_DIR/metadata.json" << EOF
@@ -88,6 +104,7 @@ data:
       "timestamp": "$(date -Iseconds)",
       "database": "$DB_NAME",
       "postgresql_version": "$PG_VERSION",
+      "postgresql_version_num": "$PG_VERSION_NUM",
       "backup_type": "pg_dump -Fc"
     }
     EOF
@@ -135,14 +152,10 @@ data:
       REDIS_HOST="${REDIS_HOST:-redis}"
       REDIS_PORT="${REDIS_PORT:-6379}"
 
-      # Trigger Redis BGSAVE
+      # Note: Redis backup requires access to Redis PVC or sidecar container
+      # This implementation only triggers BGSAVE; actual file copy needs sidecar
       if redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" BGSAVE 2>/dev/null; then
-        # Wait for BGSAVE to complete
-        sleep 5
-
-        # Copy dump.rdb (this requires Redis PVC access or sidecar)
-        # For now, we skip Redis backup as it requires special setup
-        echo "${YELLOW}Redis backup initiated (check Redis logs for completion)${NC}"
+        echo "${YELLOW}Redis BGSAVE initiated. Note: dump.rdb not copied - requires sidecar setup${NC}"
       else
         echo "${YELLOW}WARNING: Redis BGSAVE failed (Redis may not be available)${NC}"
       fi
@@ -215,6 +228,8 @@ data:
     #!/bin/sh
     # Open ACE - Database Restore Script
     # Issue #1853
+    #
+    # NOTE: AWS CLI is provided by initContainer (mounted at /usr/local/bin/aws)
 
     set -e
 
@@ -261,6 +276,13 @@ data:
       exit 1
     fi
 
+    # Verify AWS CLI is available (installed by initContainer)
+    if ! command -v aws > /dev/null 2>&1; then
+      echo "${RED}ERROR: AWS CLI not found. InitContainer may have failed.${NC}"
+      exit 1
+    fi
+    echo "${GREEN}AWS CLI available${NC}"
+
     # Create restore directory
     mkdir -p "$RESTORE_DIR"
 
@@ -270,6 +292,7 @@ data:
     # ========================================
     # Step 1: Download backup from object storage
     # ========================================
+    echo ""
     echo "${YELLOW}Step 1: Downloading backup...${NC}"
 
     S3_PATH="s3://${S3_BUCKET}/open-ace/${RESTORE_TIMESTAMP}/backup.tar.gz"
@@ -289,9 +312,10 @@ data:
     tar -xzf "$BACKUP_FILE" -C "$RESTORE_DIR"
 
     # ========================================
-    # Step 2: Verify backup integrity
+    # Step 2: Verify backup integrity and version compatibility
     # ========================================
-    echo "${YELLOW}Step 2: Verifying backup integrity...${NC}"
+    echo ""
+    echo "${YELLOW}Step 2: Verifying backup integrity and version compatibility...${NC}"
 
     if ! pg_restore --list "$RESTORE_DIR/db.dump" > /dev/null 2>&1; then
       echo "${RED}ERROR: Backup file is corrupted${NC}"
@@ -300,20 +324,55 @@ data:
 
     echo "${GREEN}Backup integrity verified${NC}"
 
+    # Check version compatibility if metadata exists
+    if [ -f "$RESTORE_DIR/metadata.json" ]; then
+      BACKUP_VERSION_NUM=$(grep -o '"postgresql_version_num": "[0-9]*"' "$RESTORE_DIR/metadata.json" | grep -o '[0-9]*' || echo "")
+
+      if [ -n "$BACKUP_VERSION_NUM" ]; then
+        CURRENT_VERSION_NUM=$(psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d postgres -t -c "SHOW server_version_num;" 2>/dev/null | head -1 | xargs || echo "")
+
+        if [ -n "$CURRENT_VERSION_NUM" ]; then
+          echo "Backup PostgreSQL version number: $BACKUP_VERSION_NUM"
+          echo "Current PostgreSQL version number: $CURRENT_VERSION_NUM"
+
+          # Major version check (first 2 digits, e.g., 150000 -> 15)
+          BACKUP_MAJOR=$(echo "$BACKUP_VERSION_NUM" | cut -c1-2)
+          CURRENT_MAJOR=$(echo "$CURRENT_VERSION_NUM" | cut -c1-2)
+
+          if [ "$BACKUP_MAJOR" != "$CURRENT_MAJOR" ]; then
+            echo ""
+            echo "${YELLOW}WARNING: PostgreSQL major version mismatch!${NC}"
+            echo "  Backup major version: $BACKUP_MAJOR"
+            echo "  Current major version: $CURRENT_MAJOR"
+            echo "  Cross-version restore may have compatibility issues."
+            echo "  Consider restoring to a database with matching version first."
+            echo ""
+            echo "${YELLOW}Continuing with restore... (this warning does not block the restore)${NC}"
+          else
+            echo "${GREEN}PostgreSQL version compatible${NC}"
+          fi
+        fi
+      fi
+    fi
+
     # ========================================
     # Step 3: Restore globals (if exists)
     # ========================================
-    if [ -f "$RESTORE_DIR/globals.sql" ] && [ -s "$RESTORE_DIR/globals.sql" ]; then
-      echo "${YELLOW}Step 3: Restoring global objects...${NC}"
+    echo ""
+    echo "${YELLOW}Step 3: Restoring global objects...${NC}"
 
+    if [ -f "$RESTORE_DIR/globals.sql" ] && [ -s "$RESTORE_DIR/globals.sql" ]; then
       # Note: This may fail if the user doesn't have superuser privileges
       psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d postgres -f "$RESTORE_DIR/globals.sql" 2>/dev/null || \
         echo "${YELLOW}WARNING: Could not restore globals (may require superuser)${NC}"
+    else
+      echo "${YELLOW}No globals.sql found, skipping${NC}"
     fi
 
     # ========================================
     # Step 4: Restore database
     # ========================================
+    echo ""
     echo "${YELLOW}Step 4: Restoring database...${NC}"
 
     # Drop existing connections
@@ -337,6 +396,7 @@ data:
     # ========================================
     # Step 5: Cleanup
     # ========================================
+    echo ""
     echo "${YELLOW}Step 5: Cleaning up...${NC}"
 
     rm -rf "$RESTORE_DIR" "$BACKUP_FILE"

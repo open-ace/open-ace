@@ -6,6 +6,9 @@
 #   1. Set RESTORE_TIMESTAMP environment variable (format: YYYYMMDD)
 #   2. Apply this manifest: kubectl apply -f restore-job.yaml
 #   3. Monitor logs: kubectl logs -f job/postgres-restore -n open-ace
+#
+# NOTE: Uses initContainer to install AWS CLI into an emptyDir volume,
+# which is then shared with the main container.
 
 apiVersion: batch/v1
 kind: Job
@@ -30,6 +33,23 @@ spec:
     spec:
       serviceAccountName: open-ace-backup
       restartPolicy: Never
+
+      # InitContainer to install AWS CLI
+      initContainers:
+        - name: install-awscli
+          image: alpine:3.19
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              echo "Installing AWS CLI..."
+              apk add --no-cache aws-cli
+              cp /usr/bin/aws /awscli/aws
+              echo "AWS CLI installed successfully"
+          volumeMounts:
+            - name: aws-cli
+              mountPath: /awscli
 
       containers:
         - name: restore
@@ -110,6 +130,9 @@ spec:
               readOnly: true
             - name: tmp
               mountPath: /tmp
+            - name: aws-cli
+              mountPath: /usr/local/bin/aws
+              subPath: aws
 
       volumes:
         - name: backup-script
@@ -117,6 +140,8 @@ spec:
             name: backup-script
             defaultMode: 0755
         - name: tmp
+          emptyDir: {}
+        - name: aws-cli
           emptyDir: {}
 
       securityContext:
