@@ -17,12 +17,23 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Run pre-commit
+      - name: Install Bandit
+        run: pip install bandit[toml]
+
+      - name: Run Bandit security check
+        # Use severity+confidence layering with baseline support (Issue #1856)
+        # Bypass with 'skip-security-check' label for emergencies only
+        if: "!contains(github.event.pull_request.labels.*.name, 'skip-security-check')"
+        run: python scripts/lint/bandit_check.py --baseline scripts/lint/bandit_baseline.json
+
+      - name: Security check bypassed warning
+        if: contains(github.event.pull_request.labels.*.name, 'skip-security-check')
+        run: echo "::warning::Security check bypassed with skip-security-check label. This should only be used in emergencies."
+
+      - name: Run pre-commit (excluding Bandit)
         uses: pre-commit/action@v3.0.1
         env:
-          # The repository has existing Bandit findings; keep Bandit available
-          # for local/incremental checks, but do not fail full-repo CI on legacy
-          # issues unrelated to the current PR.
+          # Bandit is handled separately above with baseline support.
           # Skip no-commit-to-branch in CI: GitHub branch protection already
           # prevents direct pushes; this hook is for local development only.
           SKIP: bandit,no-commit-to-branch
@@ -61,8 +72,16 @@ jobs:
         run: |
           # E2E/Playwright/HTTP tests live under tests/e2e/ and are excluded via
           # pytest.ini's norecursedirs. PostgreSQL tests are marked and deselected
-          # here since CI has no Postgres service (Issue #238).
-          pytest tests/ -v --cov=scripts/shared --cov-report=xml --cov-report=html -m "not postgres"
+          # here; they run in the postgres-test job below.
+          # Coverage includes scripts/shared and P0 security modules (Issue #1856)
+          pytest tests/ -v \
+            --cov=scripts/shared \
+            --cov=app/auth \
+            --cov=app/remote_ws_handler \
+            --cov=app/modules/sso \
+            --cov-report=xml \
+            --cov-report=html \
+            -m "not postgres"
 
       - name: Upload coverage to Codecov
         timeout-minutes: 2
@@ -116,3 +135,70 @@ jobs:
           tags: open-ace:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # PostgreSQL integration tests (Issue #1856)
+  # Runs only when database-related files are changed
+  postgres-test:
+    runs-on: ubuntu-latest
+    # Skip if explicitly requested via label
+    if: |
+      github.event_name == 'push' ||
+      (github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'skip-extended-tests'))
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: ace
+          POSTGRES_PASSWORD: ace
+          POSTGRES_DB: ace_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ace -d ace_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Check for relevant changes
+        id: changes
+        if: github.event_name == 'pull_request'
+        run: |
+          # Check if database-related files were modified
+          git diff --name-only origin/main...HEAD > changed_files.txt || true
+          if grep -qE '(app/repositories/|migrations/|tests/integration/.*_pg\.py|app/models/)' changed_files.txt; then
+            echo "run_tests=true" >> $GITHUB_OUTPUT
+          else
+            echo "run_tests=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Set up Python
+        if: |
+          github.event_name == 'push' ||
+          steps.changes.outputs.run_tests == 'true'
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        if: |
+          github.event_name == 'push' ||
+          steps.changes.outputs.run_tests == 'true'
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-cov pytest-asyncio
+
+      - name: Run Postgres integration tests
+        if: |
+          github.event_name == 'push' ||
+          steps.changes.outputs.run_tests == 'true'
+        run: pytest tests/integration -v -m postgres --tb=short
+        env:
+          DATABASE_URL: postgresql://ace:ace@localhost:5432/ace_test
+          # Use separate database to avoid conflict with schema-sync workflow
+          ACE_DATABASE_NAME: ace_test
