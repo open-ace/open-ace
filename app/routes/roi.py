@@ -7,13 +7,17 @@ API endpoints for ROI analysis and cost optimization.
 import logging
 import math
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import TYPE_CHECKING, Optional, Tuple
 
 from flask import Blueprint, g, jsonify, request
 
 from app.auth.decorators import auth_required, require_tenant_scope
 from app.modules.analytics.cost_optimizer import CostOptimizer
-from app.modules.analytics.roi_calculator import ROIAssumptions, ROICalculator
+from app.modules.analytics.roi_calculator import AssumptionSource, ROIAssumptions, ROICalculator
+from app.repositories.tenant_repo import TenantRepository
+
+if TYPE_CHECKING:
+    from app.models.tenant import Tenant
 
 logger = logging.getLogger(__name__)
 
@@ -34,35 +38,75 @@ def _parse_positive_float_arg(name: str) -> tuple[Optional[float], Optional[str]
     return parsed, None
 
 
-def _build_roi_assumptions() -> tuple[Optional[ROIAssumptions], Optional[str]]:
-    """Build ROI assumptions from request overrides."""
-    hourly_labor_cost, error = _parse_positive_float_arg("hourly_labor_cost")
-    if error:
-        return None, error
+def _get_caller_tenant() -> Optional["Tenant"]:
+    """Get the caller's tenant object.
 
-    productivity_multiplier, error = _parse_positive_float_arg("productivity_multiplier")
-    if error:
-        return None, error
+    Returns:
+        Tenant object if caller is tenant-scoped, None otherwise.
+    """
+    tenant_id = _caller_tenant_id()
+    if not tenant_id:
+        return None
 
-    avg_time_saved_per_request, error = _parse_positive_float_arg("avg_time_saved_per_request")
-    if error:
-        return None, error
+    tenant_repo = TenantRepository()
+    return tenant_repo.get_by_id(tenant_id)
 
+
+def _build_roi_assumptions() -> Tuple[ROIAssumptions, AssumptionSource]:
+    """Build ROI assumptions from tenant config, environment, and request overrides.
+
+    Priority: request params > tenant config > environment vars > defaults.
+
+    Returns:
+        tuple: (ROIAssumptions, assumption_source)
+    """
+    # Check for request-level overrides
+    hourly_labor_cost = request.args.get("hourly_labor_cost")
+    productivity_multiplier = request.args.get("productivity_multiplier")
+    avg_time_saved_per_request = request.args.get("avg_time_saved_per_request")
     currency = request.args.get("currency")
-    if currency is not None:
-        currency = currency.strip().upper()
-        if not currency:
-            return None, "currency must not be empty"
-        if len(currency) > 8:
-            return None, "currency must be 8 characters or fewer"
 
-    assumptions = ROIAssumptions.from_env().with_overrides(
-        hourly_labor_cost=hourly_labor_cost,
-        productivity_multiplier=productivity_multiplier,
-        avg_time_saved_per_request=avg_time_saved_per_request,
-        currency=currency,
+    has_request_overrides = any(
+        [hourly_labor_cost, productivity_multiplier, avg_time_saved_per_request, currency]
     )
-    return assumptions, None
+
+    # Get tenant if available
+    tenant = _get_caller_tenant()
+
+    # Get base assumptions from tenant or env
+    base_assumptions, base_source = ROIAssumptions.from_tenant_or_env(tenant)
+
+    # Apply request-level overrides if present
+    if has_request_overrides:
+        # Parse and validate overrides
+        hourly_val, err = _parse_positive_float_arg("hourly_labor_cost")
+        if err:
+            raise ValueError(err)
+
+        prod_val, err = _parse_positive_float_arg("productivity_multiplier")
+        if err:
+            raise ValueError(err)
+
+        time_val, err = _parse_positive_float_arg("avg_time_saved_per_request")
+        if err:
+            raise ValueError(err)
+
+        if currency is not None:
+            currency = currency.strip().upper()
+            if not currency:
+                raise ValueError("currency must not be empty")
+            if len(currency) > 8:
+                raise ValueError("currency must be 8 characters or fewer")
+
+        assumptions = base_assumptions.with_overrides(
+            hourly_labor_cost=hourly_val,
+            productivity_multiplier=prod_val,
+            avg_time_saved_per_request=time_val,
+            currency=currency,
+        )
+        return assumptions, "request_params"
+
+    return base_assumptions, base_source
 
 
 @roi_bp.before_request
@@ -119,11 +163,12 @@ def get_roi():
                 datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
             ).strftime("%Y-%m-%d")
 
-        assumptions, error = _build_roi_assumptions()
-        if error:
-            return jsonify({"success": False, "error": error}), 400
+        try:
+            assumptions, assumption_source = _build_roi_assumptions()
+        except ValueError as e:
+            return jsonify({"success": False, "error": str(e)}), 400
 
-        calculator = ROICalculator(assumptions=assumptions)
+        calculator = ROICalculator(assumptions=assumptions, assumption_source=assumption_source)
         roi = calculator.calculate_roi(
             start_date, end_date, user_id, tool_name, tenant_id=_caller_tenant_id()
         )
@@ -141,11 +186,12 @@ def get_roi_trend():
         months = request.args.get("months", default=6, type=int)
         user_id = request.args.get("user_id", type=int)
 
-        assumptions, error = _build_roi_assumptions()
-        if error:
-            return jsonify({"success": False, "error": error}), 400
+        try:
+            assumptions, assumption_source = _build_roi_assumptions()
+        except ValueError as e:
+            return jsonify({"success": False, "error": str(e)}), 400
 
-        calculator = ROICalculator(assumptions=assumptions)
+        calculator = ROICalculator(assumptions=assumptions, assumption_source=assumption_source)
         trends = calculator.get_roi_trend(months, user_id, tenant_id=_caller_tenant_id())
 
         return jsonify({"success": True, "data": [t.to_dict() for t in trends]})
@@ -167,11 +213,12 @@ def get_roi_by_tool():
                 datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
             ).strftime("%Y-%m-%d")
 
-        assumptions, error = _build_roi_assumptions()
-        if error:
-            return jsonify({"success": False, "error": error}), 400
+        try:
+            assumptions, assumption_source = _build_roi_assumptions()
+        except ValueError as e:
+            return jsonify({"success": False, "error": str(e)}), 400
 
-        calculator = ROICalculator(assumptions=assumptions)
+        calculator = ROICalculator(assumptions=assumptions, assumption_source=assumption_source)
         roi_by_tool = calculator.get_roi_by_tool(
             start_date, end_date, tenant_id=_caller_tenant_id()
         )
@@ -195,11 +242,12 @@ def get_roi_by_user():
                 datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
             ).strftime("%Y-%m-%d")
 
-        assumptions, error = _build_roi_assumptions()
-        if error:
-            return jsonify({"success": False, "error": error}), 400
+        try:
+            assumptions, assumption_source = _build_roi_assumptions()
+        except ValueError as e:
+            return jsonify({"success": False, "error": str(e)}), 400
 
-        calculator = ROICalculator(assumptions=assumptions)
+        calculator = ROICalculator(assumptions=assumptions, assumption_source=assumption_source)
         roi_by_user = calculator.get_roi_by_user(
             start_date, end_date, tenant_id=_caller_tenant_id()
         )
@@ -294,11 +342,12 @@ def get_roi_summary():
                 datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
             ).strftime("%Y-%m-%d")
 
-        assumptions, error = _build_roi_assumptions()
-        if error:
-            return jsonify({"success": False, "error": error}), 400
+        try:
+            assumptions, assumption_source = _build_roi_assumptions()
+        except ValueError as e:
+            return jsonify({"success": False, "error": str(e)}), 400
 
-        calculator = ROICalculator(assumptions=assumptions)
+        calculator = ROICalculator(assumptions=assumptions, assumption_source=assumption_source)
         summary = calculator.get_summary_stats(
             start_date, end_date, user_id, tenant_id=_caller_tenant_id()
         )
