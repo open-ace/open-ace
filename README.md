@@ -131,7 +131,11 @@ docker compose up -d --build
 # 访问 http://localhost:19888
 ```
 
-> 💡 生产环境部署请参考 [部署指南](scripts/install-central/docker-method/README.md)
+> 💡 **零配置**：安全密钥（`SECRET_KEY` / `OPENACE_ENCRYPTION_KEY` / `UPLOAD_AUTH_KEY`）在首次启动时自动生成，无需预先配置。
+>
+> ⚠️ 生产环境请通过 `.env` 显式设置强密钥（参考 `.env.example`）、修改默认密码，并参阅 [部署指南](docs/cn/DEPLOYMENT.md)。自动生成的密钥仅存在于运行环境，容器/卷销毁后不保留。
+
+> 🇨🇳 **国内网络**：若构建时拉取基础镜像卡住或超时，见 [国内网络加速](#-国内网络加速)。
 
 #### 🇨🇳 国内网络加速
 
