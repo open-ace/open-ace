@@ -512,7 +512,7 @@ export const NewAutonomousModal: React.FC<NewAutonomousModalProps> = ({
 
           {/* Project Path */}
           <div className="col-12">
-            <div className="form-check mb-2">
+            <div className="form-check form-switch mb-2">
               <input
                 type="checkbox"
                 className="form-check-input"
@@ -536,7 +536,7 @@ export const NewAutonomousModal: React.FC<NewAutonomousModalProps> = ({
                   />
                 </div>
                 <div className="col-md-4">
-                  <div className="form-check">
+                  <div className="form-check form-switch">
                     <input
                       type="checkbox"
                       className="form-check-input"
@@ -649,7 +649,7 @@ export const NewAutonomousModal: React.FC<NewAutonomousModalProps> = ({
           {/* Auto Merge - only show for batch workflows (URL mode with multiple issues) */}
           {requirementsMode === 'url' && requirementsUrl.trim() && (
             <div className="col-12">
-              <div className="form-check">
+              <div className="form-check form-switch">
                 <input
                   type="checkbox"
                   className="form-check-input"
