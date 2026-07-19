@@ -381,7 +381,10 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
     return () => clearInterval(interval);
   }, [isWorkflowActive]);
 
-  const milestones = useMemo(() => timelineData?.milestones ?? [], [timelineData?.milestones]);
+  const milestones = useMemo(
+    () => (timelineData?.milestones ?? []).filter((m) => m.status !== 'cancelled'),
+    [timelineData?.milestones],
+  );
 
   // Latest (highest dev_round, non-empty content) finalized plan / PR review summary.
   // Each dev_round produces its own; the header "final" buttons surface the newest,
