@@ -85,7 +85,6 @@ def parse_npm_audit_report(report: dict[str, Any]) -> list[Vulnerability]:
 
     for name, data in report.get("advisories", {}).items():
         # npm audit JSON v1 format
-        vulns = data.get("findings", [])
         severity = data.get("severity", "moderate")
         cve = data.get("cves", [None])[0] if data.get("cves") else None
 
@@ -155,12 +154,12 @@ def create_issue(vuln: Vulnerability) -> str | None:
     title = vuln.issue_title()
 
     body_lines = [
-        f"## Security Vulnerability Report",
+        "## Security Vulnerability Report",
         "",
-        f"**Source:** {vuln.source}",
-        f"**Package:** `{vuln.package}`",
-        f"**Severity:** {vuln.severity}",
-        f"**CVE:** {vuln.cve_id or 'N/A'}",
+        "**Source:** " + vuln.source,
+        "**Package:** `" + vuln.package + "`",
+        "**Severity:** " + vuln.severity,
+        "**CVE:** " + (vuln.cve_id or "N/A"),
         "",
         "### Description",
         vuln.description,
@@ -170,7 +169,7 @@ def create_issue(vuln: Vulnerability) -> str | None:
         body_lines.extend([
             "",
             "### Fix",
-            f"Upgrade to version `{vuln.fixed_in}` or later.",
+            "Upgrade to version `" + vuln.fixed_in + "` or later.",
         ])
 
     body_lines.extend([
@@ -178,7 +177,7 @@ def create_issue(vuln: Vulnerability) -> str | None:
         "---",
         "",
         "_This issue was automatically created by the security audit workflow._",
-        f"_Reported at: {datetime.utcnow().isoformat()}Z_",
+        "_Reported at: " + datetime.utcnow().isoformat() + "Z_",
     ])
 
     body = "\n".join(body_lines)
@@ -206,14 +205,14 @@ def add_comment(issue_number: str, vuln: Vulnerability) -> bool:
     repo = os.environ.get("GITHUB_REPOSITORY", "")
 
     comment = (
-        f"## Recurring Security Alert\n\n"
-        f"This vulnerability was detected again in the latest security audit.\n\n"
-        f"- **Detected at:** {datetime.utcnow().isoformat()}Z\n"
-        f"- **Source:** {vuln.source}\n"
+        "## Recurring Security Alert\n\n"
+        "This vulnerability was detected again in the latest security audit.\n\n"
+        "- **Detected at:** " + datetime.utcnow().isoformat() + "Z\n"
+        "- **Source:** " + vuln.source + "\n"
     )
 
     if vuln.fixed_in:
-        comment += f"- **Fix available:** Version `{vuln.fixed_in}` or later\n"
+        comment += "- **Fix available:** Version `" + vuln.fixed_in + "` or later\n"
 
     success, _ = run_gh_command([
         "issue", "comment", issue_number,
@@ -283,32 +282,32 @@ def main() -> int:
         if existing:
             print(f"   Found existing issue #{existing}")
             if args.dry_run:
-                print(f"   [DRY-RUN] Would add comment to #{existing}")
+                print("   [DRY-RUN] Would add comment to #" + existing)
             else:
                 if add_comment(existing, vuln):
-                    print(f"   ✅ Added comment to #{existing}")
+                    print("   ✅ Added comment to #" + existing)
                     updated += 1
                 else:
                     print(f"   ⚠️ Failed to add comment")
         else:
             print("   No existing issue found")
             if args.dry_run:
-                print(f"   [DRY-RUN] Would create new issue: {vuln.issue_title()}")
+                print("   [DRY-RUN] Would create new issue: " + vuln.issue_title())
                 created += 1
             else:
                 issue_num = create_issue(vuln)
                 if issue_num:
-                    print(f"   ✅ Created issue #{issue_num}")
+                    print("   ✅ Created issue #" + issue_num)
                     created += 1
                 else:
-                    print(f"   ⚠️ Failed to create issue")
+                    print("   ⚠️ Failed to create issue")
                     skipped += 1
 
     # Summary
-    print(f"\n📊 Summary:")
-    print(f"   New issues created: {created}")
-    print(f"   Existing issues updated: {updated}")
-    print(f"   Skipped: {skipped}")
+    print("\n📊 Summary:")
+    print("   New issues created: " + str(created))
+    print("   Existing issues updated: " + str(updated))
+    print("   Skipped: " + str(skipped))
 
     return 0 if skipped == 0 else 1
 

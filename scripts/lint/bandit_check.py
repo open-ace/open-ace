@@ -42,7 +42,7 @@ class Finding:
     cwe: dict[str, Any] | None = None
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "Finding":
+    def from_dict(cls, data: dict[str, Any]) -> Finding:
         return cls(
             test_id=data.get("test_id", ""),
             test_name=data.get("test_name", ""),
