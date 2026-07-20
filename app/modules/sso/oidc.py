@@ -7,7 +7,6 @@ Extends OAuth2 with ID token verification.
 from __future__ import annotations
 
 
-
 import base64
 import json
 import logging

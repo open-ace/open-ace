@@ -8,7 +8,6 @@ All methods invoke gh/git via subprocess and return parsed results.
 from __future__ import annotations
 
 
-
 import json
 import logging
 import os

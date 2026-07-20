@@ -6,7 +6,6 @@ Business logic for role-based access control (RBAC).
 from __future__ import annotations
 
 
-
 import logging
 from dataclasses import dataclass, field
 from enum import Enum

@@ -7,8 +7,6 @@ This module provides the Flask application factory for the Open ACE platform.
 from __future__ import annotations
 
 
-
-
 import logging
 import os
 import re

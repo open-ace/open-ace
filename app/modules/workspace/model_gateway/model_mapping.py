@@ -10,8 +10,6 @@ model knowledge (R1 scope decision).
 from __future__ import annotations
 
 
-
-
 # Open ACE provider token value -> LiteLLM provider tag prefix.
 _PROVIDER_PREFIX = {
     "openai": "openai",

@@ -12,8 +12,6 @@ geventwebsocket 0.10.1 and newer gevent versions.
 from __future__ import annotations
 
 
-
-
 import hashlib
 import logging
 import os

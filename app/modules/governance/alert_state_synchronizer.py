@@ -7,7 +7,6 @@ Ensures consistency when users acknowledge, delete, or clean up alerts.
 from __future__ import annotations
 
 
-
 import json
 import logging
 from datetime import datetime, timedelta, timezone

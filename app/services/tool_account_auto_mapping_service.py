@@ -11,7 +11,6 @@ This service runs after data collection to auto-assign tool accounts to users.
 from __future__ import annotations
 
 
-
 import logging
 from dataclasses import dataclass
 

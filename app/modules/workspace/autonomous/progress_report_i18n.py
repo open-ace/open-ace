@@ -20,8 +20,6 @@ localized. Numbers use comma grouping universally.
 from __future__ import annotations
 
 
-
-
 from typing import Any
 
 PROGRESS_REPORT_SCHEMA_VERSION = 1

@@ -6,7 +6,6 @@ Business logic for usage analysis and reporting.
 from __future__ import annotations
 
 
-
 import logging
 import time
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed

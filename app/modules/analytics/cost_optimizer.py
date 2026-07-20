@@ -7,7 +7,6 @@ Identifies opportunities for cost savings and efficiency improvements.
 from __future__ import annotations
 
 
-
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field

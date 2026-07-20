@@ -14,8 +14,6 @@ through the dedicated timeline API.
 from __future__ import annotations
 
 
-
-
 import logging
 from typing import Any
 

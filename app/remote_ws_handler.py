@@ -17,8 +17,6 @@ flow (including geventwebsocket if it is configured).
 from __future__ import annotations
 
 
-
-
 import hmac
 import logging
 import os

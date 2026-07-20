@@ -10,7 +10,6 @@ PostgreSQL) via adapt_sql(); all queries use ``?`` placeholders.
 from __future__ import annotations
 
 
-
 import logging
 from datetime import datetime
 from typing import Any

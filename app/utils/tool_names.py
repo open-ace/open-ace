@@ -21,8 +21,6 @@ future legitimately-distinct tool (e.g. ``qwen-<something>``) into ``qwen``.
 from __future__ import annotations
 
 
-
-
 TOOL_NAME_ALIASES = {
     "qwen": ["qwen", "qwen-code", "qwen-code-cli"],
     "claude": ["claude", "claude-code"],

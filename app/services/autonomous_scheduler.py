@@ -9,8 +9,6 @@ Follows the same singleton pattern as DataFetchScheduler.
 from __future__ import annotations
 
 
-
-
 import logging
 import os
 import re

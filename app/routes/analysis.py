@@ -7,8 +7,6 @@ API routes for usage analysis and reporting.
 from __future__ import annotations
 
 
-
-
 from flask import Blueprint, g, jsonify, request
 
 from app.auth.decorators import auth_required

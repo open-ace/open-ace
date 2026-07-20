@@ -21,8 +21,6 @@ unit-tested directly (see tests/unit/test_session_diagnostics.py).
 from __future__ import annotations
 
 
-
-
 from typing import Any
 
 

@@ -27,8 +27,6 @@ Attribution is resolved per-run and cached (plan §2.3 source map):
 from __future__ import annotations
 
 
-
-
 import logging
 import queue as queue_module
 import threading

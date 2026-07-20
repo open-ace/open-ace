@@ -8,8 +8,6 @@ Processes the alert_creation_failures queue and attempts to create alerts.
 from __future__ import annotations
 
 
-
-
 import logging
 import os
 import threading

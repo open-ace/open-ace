@@ -7,7 +7,6 @@ Supports WebSocket connections for live updates and event broadcasting.
 from __future__ import annotations
 
 
-
 import asyncio
 import json
 import logging

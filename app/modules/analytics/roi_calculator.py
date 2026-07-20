@@ -7,7 +7,6 @@ Provides cost analysis, savings estimation, and productivity metrics.
 from __future__ import annotations
 
 
-
 import json
 import logging
 import math

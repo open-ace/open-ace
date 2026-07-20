@@ -11,7 +11,6 @@ Supports WebSocket push, email, and webhook notifications.
 from __future__ import annotations
 
 
-
 import asyncio
 import base64
 import hashlib

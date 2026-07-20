@@ -13,8 +13,6 @@ Usage in production::
 from __future__ import annotations
 
 
-
-
 from gunicorn.workers.ggevent import GeventPyWSGIWorker
 
 from app.remote_ws_handler import RemoteWSHandler
