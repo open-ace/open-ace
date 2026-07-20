@@ -12,6 +12,8 @@
 #   --install-cli TOOL   Install a CLI tool: qwen-code-cli, claude-code (default: qwen-code-cli)
 #   --dir DIR            Installation directory (default: ~/.open-ace-agent)
 #   --skip-code-server   Skip code-server installation
+#   --insecure-skip-tls-verify  Skip TLS certificate verification (Issue #1892)
+#   --ca-bundle PATH     Custom CA bundle file path (Issue #1892)
 #   --help               Show this help
 #
 
@@ -37,6 +39,9 @@ INSTALL_CLI="qwen-code-cli"
 INSTALL_DIR="$HOME/.open-ace-agent"
 AGENT_VERSION="1.0.0"
 SKIP_CODE_SERVER=false
+# Issue #1892: SSL configuration options
+INSECURE_SKIP_TLS_VERIFY=false
+CA_BUNDLE_PATH=""
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -65,6 +70,15 @@ while [[ $# -gt 0 ]]; do
             SKIP_CODE_SERVER=true
             shift
             ;;
+        # Issue #1892: SSL configuration options
+        --insecure-skip-tls-verify)
+            INSECURE_SKIP_TLS_VERIFY=true
+            shift
+            ;;
+        --ca-bundle)
+            CA_BUNDLE_PATH="$2"
+            shift 2
+            ;;
         --help)
             head -20 "$0" | grep '^#' | sed 's/^# \?//'
             exit 0
@@ -89,6 +103,15 @@ fi
 
 # Remove trailing slash from server URL
 SERVER_URL="${SERVER_URL%/}"
+
+# Issue #1892: Security warning for insecure mode
+if [[ "$INSECURE_SKIP_TLS_VERIFY" == "true" ]]; then
+    log_warn "==========================================="
+    log_warn "[SECURITY WARNING] TLS certificate verification will be DISABLED."
+    log_warn "This mode is NOT recommended for production use."
+    log_warn "Consider using --ca-bundle for self-signed certificates."
+    log_warn "==========================================="
+fi
 
 log_info "Open ACE Remote Agent Installer"
 log_info "================================"
@@ -625,6 +648,13 @@ else
     log_info "Generated new machine_id: $MACHINE_ID"
 fi
 
+# Issue #1892: Generate config without skip_ssl_verify (use secure default)
+# Only include ca_bundle_path if specified
+CONFIG_EXTRA=""
+if [[ -n "$CA_BUNDLE_PATH" ]]; then
+    CONFIG_EXTRA=",\\n    \"ca_bundle_path\": \"${CA_BUNDLE_PATH}\""
+fi
+
 cat > "${INSTALL_DIR}/config.json" << EOF
 {
     "server_url": "${SERVER_URL}",
@@ -634,7 +664,7 @@ cat > "${INSTALL_DIR}/config.json" << EOF
     "cli_tool": "${INSTALL_CLI}",
     "python_path": "${PYTHON_PATH}",
     "heartbeat_interval": 60,
-    "reconnect_backoff_max": 60
+    "reconnect_backoff_max": 60${CONFIG_EXTRA}
 }
 EOF
 
@@ -691,7 +721,23 @@ caps['has_code_server'] = shutil.which('code-server') is not None
 print(json.dumps(caps))
 " 2>/dev/null || echo "{}")
 
-REGISTER_RESPONSE=$(curl -s -X POST "${SERVER_URL}/api/remote/agent/register" \
+# Issue #1892: Build curl SSL options
+CURL_SSL_OPTS=""
+if [[ "$INSECURE_SKIP_TLS_VERIFY" == "true" ]]; then
+    CURL_SSL_OPTS="-k"
+    log_warn "Using insecure TLS mode for registration (-k)"
+fi
+if [[ -n "$CA_BUNDLE_PATH" ]]; then
+    if [[ -f "$CA_BUNDLE_PATH" ]]; then
+        CURL_SSL_OPTS="$CURL_SSL_OPTS --cacert $CA_BUNDLE_PATH"
+        log_info "Using CA bundle: $CA_BUNDLE_PATH"
+    else
+        log_error "CA bundle file not found: $CA_BUNDLE_PATH"
+        exit 1
+    fi
+fi
+
+REGISTER_RESPONSE=$(curl -s $CURL_SSL_OPTS -X POST "${SERVER_URL}/api/remote/agent/register" \
     -H "Content-Type: application/json" \
     -d "{
         \"registration_token\": \"${REGISTRATION_TOKEN}\",
@@ -741,6 +787,14 @@ with open(config_path, 'w') as f:
     fi
 else
     log_error "Registration failed. Response: $REGISTER_RESPONSE"
+    # Issue #1892: Provide SSL diagnostic hints
+    if echo "$REGISTER_RESPONSE" | grep -qi "ssl\|tls\|certificate"; then
+        log_error "This may be an SSL/TLS certificate issue."
+        log_error "If using self-signed certificates, try:"
+        log_error "  --ca-bundle /path/to/ca-bundle.crt"
+        log_error "Or for development only (NOT recommended for production):"
+        log_error "  --insecure-skip-tls-verify"
+    fi
     log_error "Please check your registration token and server URL."
     exit 1
 fi

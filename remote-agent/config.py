@@ -27,7 +27,9 @@ DEFAULTS = {
     "output_buffer_size": 4096,
     "max_sessions": 5,
     "log_level": "INFO",
-    "skip_ssl_verify": True,
+    "skip_ssl_verify": False,  # Default to secure (Issue #1892)
+    "ca_bundle_path": None,  # Custom CA bundle path (Issue #1892)
+    "insecure_mode_allowed": True,  # Allow insecure mode (Issue #1892)
 }
 
 CONFIG_DIR = Path.home() / ".open-ace-agent"
@@ -78,6 +80,12 @@ class AgentConfig:
             "OPENACE_LOG_LEVEL": ("log_level", str),
             "OPENACE_SKIP_SSL_VERIFY": (
                 "skip_ssl_verify",
+                lambda v: v.lower() in ("true", "1", "yes"),
+            ),
+            # Issue #1892: New SSL configuration options
+            "OPENACE_CA_BUNDLE_PATH": ("ca_bundle_path", str),
+            "OPENACE_INSECURE_MODE_ALLOWED": (
+                "insecure_mode_allowed",
                 lambda v: v.lower() in ("true", "1", "yes"),
             ),
         }
@@ -164,6 +172,67 @@ class AgentConfig:
     def skip_ssl_verify(self) -> bool:
         """Skip SSL certificate verification (for self-signed certs)."""
         return self._data.get("skip_ssl_verify", DEFAULTS["skip_ssl_verify"])
+
+    @property
+    def ca_bundle_path(self) -> str | None:
+        """Custom CA bundle path for SSL verification (Issue #1892)."""
+        return self._data.get("ca_bundle_path", DEFAULTS["ca_bundle_path"])
+
+    @property
+    def insecure_mode_allowed(self) -> bool:
+        """Whether insecure mode (skip_ssl_verify=true) is allowed (Issue #1892)."""
+        return self._data.get("insecure_mode_allowed", DEFAULTS["insecure_mode_allowed"])
+
+    def _resolve_ca_bundle_path(self) -> str | None:
+        """
+        Resolve CA bundle path from multiple sources (Issue #1892).
+
+        Priority order:
+        1. OPENACE_CA_BUNDLE_PATH env var (already in _data)
+        2. SSL_CERT_FILE env var
+        3. REQUESTS_CA_BUNDLE env var
+        4. ca_bundle_path from config file (already in _data)
+
+        Returns:
+            Resolved CA bundle path or None.
+        """
+        # Check explicit configuration first
+        if self._data.get("ca_bundle_path"):
+            return self._data["ca_bundle_path"]
+
+        # Check standard environment variables as fallback
+        for env_var in ("SSL_CERT_FILE", "REQUESTS_CA_BUNDLE"):
+            path = os.environ.get(env_var)
+            if path:
+                logger.debug("Using CA bundle from %s: %s", env_var, path)
+                return path
+
+        return None
+
+    def get_ssl_verify_setting(self) -> bool | str:
+        """
+        Get the SSL verify setting for requests library (Issue #1892).
+
+        Returns:
+            - False: Skip SSL verification (insecure mode)
+            - True: Use system default CA bundle
+            - str: Path to custom CA bundle file
+        """
+        if self.skip_ssl_verify:
+            return False
+
+        ca_bundle_path = self._resolve_ca_bundle_path()
+        if ca_bundle_path:
+            # Validate file exists
+            if os.path.isfile(ca_bundle_path):
+                return ca_bundle_path
+            else:
+                logger.warning(
+                    "CA bundle file not found: %s, falling back to system CA",
+                    ca_bundle_path
+                )
+
+        return True
 
     @property
     def max_sessions(self) -> int:

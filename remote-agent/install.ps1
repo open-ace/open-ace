@@ -12,6 +12,8 @@
 #   -MachineName         Machine display name (default: $env:COMPUTERNAME)
 #   -InstallCli          CLI tool to install: qwen-code-cli, claude-code (default: qwen-code-cli)
 #   -InstallDir          Installation directory (default: $env:USERPROFILE\.open-ace-agent)
+#   -InsecureSkipTlsVerify  Skip TLS certificate verification (Issue #1892)
+#   -CaBundlePath         Custom CA bundle file path (Issue #1892)
 
 param(
     [Parameter(Mandatory=$true)]
@@ -23,7 +25,10 @@ param(
     [string]$MachineName = $env:COMPUTERNAME,
     [string]$InstallCli = "qwen-code-cli",
     [string]$InstallDir = "$env:USERPROFILE\.open-ace-agent",
-    [switch]$SkipCodeServer
+    [switch]$SkipCodeServer,
+    # Issue #1892: SSL configuration options
+    [switch]$InsecureSkipTlsVerify,
+    [string]$CaBundlePath
 )
 
 $ErrorActionPreference = "Stop"
@@ -44,6 +49,14 @@ Write-Host "Install dir: $InstallDir"
 Write-Host ""
 
 $ServerUrl = $ServerUrl.TrimEnd('/')
+
+# Issue #1892: Security warning for insecure mode
+if ($InsecureSkipTlsVerify) {
+    Write-Host "[SECURITY WARNING] TLS certificate verification will be DISABLED." -ForegroundColor Yellow
+    Write-Host "This mode is NOT recommended for production use." -ForegroundColor Yellow
+    Write-Host "Consider using -CaBundlePath for self-signed certificates." -ForegroundColor Yellow
+    Write-Host ""
+}
 
 # Step 1: Check prerequisites
 Write-Host "[INFO] Checking prerequisites..." -ForegroundColor Cyan
@@ -279,6 +292,7 @@ if ($SkipCodeServer) {
 Write-Host "[INFO] Generating configuration..." -ForegroundColor Cyan
 $machineId = [guid]::NewGuid().ToString()
 
+# Issue #1892: Generate config without skip_ssl_verify (use secure default)
 $config = @{
     server_url = $ServerUrl
     machine_id = $machineId
@@ -287,6 +301,11 @@ $config = @{
     cli_tool = $InstallCli
     heartbeat_interval = 60
     reconnect_backoff_max = 60
+}
+
+# Add ca_bundle_path if specified (Issue #1892)
+if ($CaBundlePath) {
+    $config.ca_bundle_path = $CaBundlePath
 }
 
 $config | ConvertTo-Json | Set-Content -Path "$InstallDir\config.json"
@@ -343,10 +362,36 @@ try {
 
     $responseFile = "$env:TEMP\agent_response_$([System.Guid]::NewGuid()).json"
     $curlPath = "$env:SYSTEMROOT\System32\curl.exe"
-    & $curlPath -s --ssl-no-revoke -X POST -H "Content-Type: application/json" -d "@$bodyFile" -o $responseFile "$ServerUrl/api/remote/agent/register"
+
+    # Issue #1892: Build curl SSL options
+    # - --ssl-no-revoke: Disable certificate revocation check (kept for Windows compatibility)
+    # - -k: Skip certificate verification (only if $InsecureSkipTlsVerify)
+    # - --cacert: Custom CA bundle (if $CaBundlePath specified)
+    $curlSslOpts = @("--ssl-no-revoke")
+    if ($InsecureSkipTlsVerify) {
+        $curlSslOpts += "-k"
+        Write-Host "[WARN] Using insecure TLS mode for registration (-k)" -ForegroundColor Yellow
+    }
+    if ($CaBundlePath) {
+        if (Test-Path $CaBundlePath) {
+            $curlSslOpts += @("--cacert", $CaBundlePath)
+            Write-Host "[INFO] Using CA bundle: $CaBundlePath" -ForegroundColor Cyan
+        } else {
+            Write-Host "[ERROR] CA bundle file not found: $CaBundlePath" -ForegroundColor Red
+            exit 1
+        }
+    }
+
+    & $curlPath -s @curlSslOpts -X POST -H "Content-Type: application/json" -d "@$bodyFile" -o $responseFile "$ServerUrl/api/remote/agent/register"
 
     if (-not (Test-Path $responseFile)) {
         Write-Host "[ERROR] Registration failed: no response from server" -ForegroundColor Red
+        # Issue #1892: Provide SSL diagnostic hints
+        Write-Host "This may be an SSL/TLS certificate issue." -ForegroundColor Yellow
+        Write-Host "If using self-signed certificates, try:" -ForegroundColor Yellow
+        Write-Host "  -CaBundlePath C:\path\to\ca-bundle.crt" -ForegroundColor Yellow
+        Write-Host "Or for development only (NOT recommended for production):" -ForegroundColor Yellow
+        Write-Host "  -InsecureSkipTlsVerify" -ForegroundColor Yellow
         exit 1
     }
 

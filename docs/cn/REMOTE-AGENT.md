@@ -34,12 +34,18 @@ curl -fsSL https://<server>/api/remote/agent/install.sh | bash -s -- \
 - `--name` — 机器显示名称
 - `--install-cli` — 默认 CLI 工具（默认：qwen-code-cli）
 - `--dir` — 安装目录（默认：`~/.open-ace-agent`）
+- `--insecure-skip-tls-verify` — 跳过 TLS 证书验证（不推荐用于生产环境）
+- `--ca-bundle PATH` — 自定义 CA bundle 文件路径
 
 ### Windows
 
 ```powershell
-.\install.ps1 -ServerUrl https://your-server.com -Token <agent-token>
+.\install.ps1 -ServerUrl https://your-server.com -RegistrationToken <agent-token>
 ```
+
+参数说明：
+- `-InsecureSkipTlsVerify` — 跳过 TLS 证书验证（不推荐用于生产环境）
+- `-CaBundlePath PATH` — 自定义 CA bundle 文件路径
 
 ### 系统要求
 
@@ -59,9 +65,112 @@ curl -fsSL https://<server>/api/remote/agent/install.sh | bash -s -- \
 | buffer_size | 4096 | 终端输出缓冲 |
 | max_sessions | 5 | 并发会话数 |
 | log_level | INFO | 日志级别 |
-| skip_ssl_verify | true | 跳过 SSL 验证 |
+| skip_ssl_verify | **false** | 跳过 SSL 验证（默认关闭，保持安全） |
+| ca_bundle_path | null | 自定义 CA bundle 路径 |
+| insecure_mode_allowed | true | 是否允许 insecure 模式 |
 
-环境变量覆盖：`OPENACE_SERVER_URL`、`OPENACE_AGENT_TOKEN`、`OPENACE_MACHINE_ID`、`OPENACE_HEARTBEAT_INTERVAL`、`OPENACE_MAX_SESSIONS`、`OPENACE_LOG_LEVEL`、`OPENACE_SKIP_SSL_VERIFY`
+环境变量覆盖：`OPENACE_SERVER_URL`、`OPENACE_AGENT_TOKEN`、`OPENACE_MACHINE_ID`、`OPENACE_HEARTBEAT_INTERVAL`、`OPENACE_MAX_SESSIONS`、`OPENACE_LOG_LEVEL`、`OPENACE_SKIP_SSL_VERIFY`、`OPENACE_CA_BUNDLE_PATH`、`OPENACE_INSECURE_MODE_ALLOWED`
+
+## SSL/TLS 安全配置
+
+### 安全最佳实践
+
+**默认行为：** 远程代理默认验证 TLS 证书，确保与控制面的通信安全。
+
+**推荐配置：**
+- 使用受信任 CA 签发的证书（如 Let's Encrypt）
+- 私有化部署使用内网 CA 时，配置 `ca_bundle_path`
+
+**不推荐：**
+- 在生产环境使用 `skip_ssl_verify: true`
+- 在非 localhost URL 下跳过 TLS 验证
+
+### 自签名证书配置
+
+如果服务器使用自签名证书或内网 CA，请按以下步骤配置：
+
+**1. 准备 CA bundle 文件**
+
+```bash
+# 导出内网 CA 证书
+openssl x509 -in /path/to/ca.crt -out >> ~/.open-ace-agent/ca-bundle.crt
+
+# 或合并系统 CA + 企业 CA
+cat /etc/ssl/certs/ca-certificates.crt /path/to/enterprise-ca.crt > ~/.open-ace-agent/ca-bundle.crt
+```
+
+**2. 配置方式（任选其一）**
+
+```bash
+# 方式一：配置文件
+echo '{"ca_bundle_path": "~/.open-ace-agent/ca-bundle.crt"}' >> ~/.open-ace-agent/config.json
+
+# 方式二：环境变量
+export OPENACE_CA_BUNDLE_PATH=~/.open-ace-agent/ca-bundle.crt
+
+# 方式三：命令行参数
+--ca-bundle ~/.open-ace-agent/ca-bundle.crt
+```
+
+### 开发/测试环境
+
+对于使用自签名证书的开发环境，可以临时跳过 TLS 验证：
+
+```bash
+# 安装时
+curl -fsSL https://<server>/api/remote/agent/install.sh | bash -s -- \
+  --server https://your-server.com \
+  --token <token> \
+  --insecure-skip-tls-verify
+
+# 或通过环境变量
+export OPENACE_SKIP_SSL_VERIFY=true
+```
+
+**注意：** 启用此模式时，日志会显示 `[SECURITY WARNING]` 告警。
+
+### 生产环境强化
+
+在生产环境中，可以完全禁止 insecure 模式：
+
+```json
+{
+  "insecure_mode_allowed": false
+}
+```
+
+配置后，如果 `skip_ssl_verify=true`，代理将拒绝启动并输出错误。
+
+## 从旧版本升级
+
+### 从 `skip_ssl_verify: true` 升级
+
+如果您之前的配置包含 `"skip_ssl_verify": true`：
+
+**场景 A：使用公网 CA 证书**
+1. 直接升级即可
+2. 代理将自动验证 TLS
+
+**场景 B：使用自签名证书**
+1. 获取内网 CA 的 CA bundle 文件
+2. 配置 `ca_bundle_path`
+3. 重启代理
+
+**场景 C：临时跳过验证**
+1. 设置 `OPENACE_SKIP_SSL_VERIFY=true` 环境变量
+2. 检查日志中的 `[SECURITY WARNING]`
+3. 尽快配置 CA bundle
+
+### 回滚方案
+
+如果升级后连接失败：
+
+```bash
+# 快速回滚
+export OPENACE_SKIP_SSL_VERIFY=true
+
+# 或恢复旧版本配置
+```
 
 ## 支持的 CLI 工具
 
@@ -141,6 +250,12 @@ curl -fsSL https://<server>/api/remote/agent/install.sh | bash -s -- \
 - 检查 `OPENACE_SERVER_URL` 是否可达
 - 验证代理 token 是否有效
 - 检查 `~/.open-ace-agent/agent.log`
+- 如果出现 SSL 错误，检查日志中的诊断信息
+
+**SSL/TLS 错误：**
+- 证书链不完整：确保服务器证书包含中间 CA
+- 主机名不匹配：检查证书的 SAN/CN
+- 自签名证书：配置 `ca_bundle_path` 或临时使用 `OPENACE_SKIP_SSL_VERIFY=true`
 
 **CLI 工具未找到：**
 - 确保工具已全局安装（`which claude` / `which qwen` / `which codex`）

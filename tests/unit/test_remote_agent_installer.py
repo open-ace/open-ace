@@ -90,3 +90,66 @@ def test_powershell_installer_downloads_all_cli_adapters():
 
     assert match is not None
     assert sorted(re.findall(r'"([^"]+)"', match.group(1))) == expected
+
+
+# Issue #1892: SSL configuration tests
+
+
+def test_shell_installer_has_insecure_option():
+    """Verify install.sh has --insecure-skip-tls-verify option (Issue #1892)."""
+    script = (REPO_ROOT / "remote-agent" / "install.sh").read_text(encoding="utf-8")
+
+    # Check for the option in argument parsing
+    assert "--insecure-skip-tls-verify" in script
+    assert "INSECURE_SKIP_TLS_VERIFY" in script
+
+
+def test_shell_installer_has_ca_bundle_option():
+    """Verify install.sh has --ca-bundle option (Issue #1892)."""
+    script = (REPO_ROOT / "remote-agent" / "install.sh").read_text(encoding="utf-8")
+
+    # Check for the option in argument parsing
+    assert "--ca-bundle" in script
+    assert "CA_BUNDLE_PATH" in script
+
+
+def test_shell_installer_security_warning_for_insecure():
+    """Verify install.sh outputs security warning for insecure mode (Issue #1892)."""
+    script = (REPO_ROOT / "remote-agent" / "install.sh").read_text(encoding="utf-8")
+
+    # Check for security warning
+    assert "[SECURITY WARNING]" in script
+    assert "TLS certificate verification will be DISABLED" in script
+
+
+def test_powershell_installer_has_insecure_option():
+    """Verify install.ps1 has -InsecureSkipTlsVerify option (Issue #1892)."""
+    script = (REPO_ROOT / "remote-agent" / "install.ps1").read_text(encoding="utf-8")
+
+    # Check for the parameter
+    assert "InsecureSkipTlsVerify" in script
+
+
+def test_powershell_installer_has_ca_bundle_option():
+    """Verify install.ps1 has -CaBundlePath option (Issue #1892)."""
+    script = (REPO_ROOT / "remote-agent" / "install.ps1").read_text(encoding="utf-8")
+
+    # Check for the parameter
+    assert "CaBundlePath" in script
+
+
+def test_powershell_installer_preserves_ssl_no_revoke():
+    """Verify install.ps1 preserves --ssl-no-revoke for Windows (Issue #1892)."""
+    script = (REPO_ROOT / "remote-agent" / "install.ps1").read_text(encoding="utf-8")
+
+    # Check that --ssl-no-revoke is still used
+    assert "--ssl-no-revoke" in script
+
+
+def test_shell_installer_ssl_diagnostic_on_failure():
+    """Verify install.sh provides SSL diagnostic on registration failure (Issue #1892)."""
+    script = (REPO_ROOT / "remote-agent" / "install.sh").read_text(encoding="utf-8")
+
+    # Check for SSL diagnostic hints
+    assert "SSL/TLS certificate issue" in script
+    assert "--ca-bundle" in script

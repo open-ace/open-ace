@@ -39,6 +39,26 @@ AUTH_TOKEN = ""
 BACKEND_URL = ""
 MACHINE_ID = ""
 TERMINAL_ID = ""
+SKIP_SSL_VERIFY = False
+CA_BUNDLE_PATH = None
+
+
+def _get_ssl_verify_setting() -> bool | str:
+    """
+    Get SSL verify setting for requests (Issue #1892).
+
+    Returns:
+        - False: Skip SSL verification
+        - True: Use system default CA
+        - str: Path to custom CA bundle
+    """
+    if SKIP_SSL_VERIFY:
+        return False
+
+    if CA_BUNDLE_PATH and os.path.isfile(CA_BUNDLE_PATH):
+        return CA_BUNDLE_PATH
+
+    return True
 
 
 async def get_remote_ws_info() -> tuple[str, str]:
@@ -55,8 +75,10 @@ async def get_remote_ws_info() -> tuple[str, str]:
 
     try:
         loop = asyncio.get_event_loop()
+        # Issue #1892: Use SSL verify setting
+        verify = _get_ssl_verify_setting()
         resp = await loop.run_in_executor(
-            None, lambda: requests.get(url, cookies=cookies, timeout=10)
+            None, lambda: requests.get(url, cookies=cookies, timeout=10, verify=verify)
         )
         if resp.status_code == 200:
             data = resp.json()
@@ -174,13 +196,26 @@ async def run_server(port: int):
 
 
 def main():
-    global AUTH_TOKEN, BACKEND_URL, MACHINE_ID, TERMINAL_ID
+    global AUTH_TOKEN, BACKEND_URL, MACHINE_ID, TERMINAL_ID, SKIP_SSL_VERIFY, CA_BUNDLE_PATH
 
     parser = argparse.ArgumentParser(description="Open ACE WebSocket Terminal Proxy")
     parser.add_argument("--backend-url", required=True, help="Open ACE backend URL")
     parser.add_argument("--machine-id", required=True, help="Remote machine ID")
     parser.add_argument("--terminal-id", required=True, help="Terminal session ID")
     parser.add_argument("--port", type=int, default=0, help="Port to listen on (0=auto)")
+    # Issue #1892: SSL configuration options (backward compatible defaults)
+    parser.add_argument(
+        "--skip-ssl-verify",
+        action="store_true",
+        default=False,
+        help="Skip SSL certificate verification (insecure, not recommended for production)"
+    )
+    parser.add_argument(
+        "--ca-bundle",
+        dest="ca_bundle",
+        default=None,
+        help="Path to custom CA bundle file for SSL verification"
+    )
     args = parser.parse_args()
 
     # Read token from environment variable (not CLI arg, to avoid ps aux exposure)
@@ -188,6 +223,8 @@ def main():
     BACKEND_URL = args.backend_url
     MACHINE_ID = args.machine_id
     TERMINAL_ID = args.terminal_id
+    SKIP_SSL_VERIFY = args.skip_ssl_verify
+    CA_BUNDLE_PATH = args.ca_bundle
 
     # Log to file for debugging (stdout reserved for READY signal only)
     log_file = f"/tmp/ws_proxy_{TERMINAL_ID[:8]}.log"

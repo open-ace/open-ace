@@ -34,12 +34,18 @@ Options:
 - `--name` — Machine display name
 - `--install-cli` — Default CLI tool (default: qwen-code-cli)
 - `--dir` — Installation directory (default: `~/.open-ace-agent`)
+- `--insecure-skip-tls-verify` — Skip TLS certificate verification (not recommended for production)
+- `--ca-bundle PATH` — Custom CA bundle file path
 
 ### Windows
 
 ```powershell
-.\install.ps1 -ServerUrl https://your-server.com -Token <agent-token>
+.\install.ps1 -ServerUrl https://your-server.com -RegistrationToken <agent-token>
 ```
+
+Options:
+- `-InsecureSkipTlsVerify` — Skip TLS certificate verification (not recommended for production)
+- `-CaBundlePath PATH` — Custom CA bundle file path
 
 ### Requirements
 
@@ -59,9 +65,112 @@ Config file: `~/.open-ace-agent/config.json`
 | buffer_size | 4096 | Terminal output buffer |
 | max_sessions | 5 | Concurrent sessions |
 | log_level | INFO | Logging level |
-| skip_ssl_verify | true | Skip SSL verification |
+| skip_ssl_verify | **false** | Skip SSL verification (default: secure) |
+| ca_bundle_path | null | Custom CA bundle path |
+| insecure_mode_allowed | true | Allow insecure mode |
 
-Environment variable overrides: `OPENACE_SERVER_URL`, `OPENACE_AGENT_TOKEN`, `OPENACE_MACHINE_ID`, `OPENACE_HEARTBEAT_INTERVAL`, `OPENACE_MAX_SESSIONS`, `OPENACE_LOG_LEVEL`, `OPENACE_SKIP_SSL_VERIFY`
+Environment variable overrides: `OPENACE_SERVER_URL`, `OPENACE_AGENT_TOKEN`, `OPENACE_MACHINE_ID`, `OPENACE_HEARTBEAT_INTERVAL`, `OPENACE_MAX_SESSIONS`, `OPENACE_LOG_LEVEL`, `OPENACE_SKIP_SSL_VERIFY`, `OPENACE_CA_BUNDLE_PATH`, `OPENACE_INSECURE_MODE_ALLOWED`
+
+## SSL/TLS Security Configuration
+
+### Security Best Practices
+
+**Default behavior:** The remote agent validates TLS certificates by default, ensuring secure communication with the control plane.
+
+**Recommended configuration:**
+- Use certificates signed by trusted CAs (e.g., Let's Encrypt)
+- For private deployments with internal CAs, configure `ca_bundle_path`
+
+**Not recommended:**
+- Using `skip_ssl_verify: true` in production environments
+- Skipping TLS verification for non-localhost URLs
+
+### Self-Signed Certificate Configuration
+
+If your server uses self-signed certificates or internal CAs, follow these steps:
+
+**1. Prepare the CA bundle file**
+
+```bash
+# Export internal CA certificate
+openssl x509 -in /path/to/ca.crt -out >> ~/.open-ace-agent/ca-bundle.crt
+
+# Or merge system CA + enterprise CA
+cat /etc/ssl/certs/ca-certificates.crt /path/to/enterprise-ca.crt > ~/.open-ace-agent/ca-bundle.crt
+```
+
+**2. Configuration options (choose one)**
+
+```bash
+# Option 1: Config file
+echo '{"ca_bundle_path": "~/.open-ace-agent/ca-bundle.crt"}' >> ~/.open-ace-agent/config.json
+
+# Option 2: Environment variable
+export OPENACE_CA_BUNDLE_PATH=~/.open-ace-agent/ca-bundle.crt
+
+# Option 3: Command-line parameter
+--ca-bundle ~/.open-ace-agent/ca-bundle.crt
+```
+
+### Development/Testing Environments
+
+For development environments using self-signed certificates, you can temporarily skip TLS verification:
+
+```bash
+# During installation
+curl -fsSL https://<server>/api/remote/agent/install.sh | bash -s -- \
+  --server https://your-server.com \
+  --token <token> \
+  --insecure-skip-tls-verify
+
+# Or via environment variable
+export OPENACE_SKIP_SSL_VERIFY=true
+```
+
+**Note:** When enabled, logs will display `[SECURITY WARNING]` alerts.
+
+### Production Hardening
+
+In production environments, you can completely disable insecure mode:
+
+```json
+{
+  "insecure_mode_allowed": false
+}
+```
+
+With this configuration, if `skip_ssl_verify=true`, the agent will refuse to start and output an error.
+
+## Upgrading from Previous Versions
+
+### Upgrading from `skip_ssl_verify: true`
+
+If your previous configuration had `"skip_ssl_verify": true`:
+
+**Scenario A: Using public CA certificates**
+1. Upgrade directly
+2. Agent will automatically validate TLS
+
+**Scenario B: Using self-signed certificates**
+1. Obtain your internal CA's CA bundle file
+2. Configure `ca_bundle_path`
+3. Restart the agent
+
+**Scenario C: Temporarily skip verification**
+1. Set `OPENACE_SKIP_SSL_VERIFY=true` environment variable
+2. Check logs for `[SECURITY WARNING]`
+3. Configure CA bundle as soon as possible
+
+### Rollback Plan
+
+If connection fails after upgrade:
+
+```bash
+# Quick rollback
+export OPENACE_SKIP_SSL_VERIFY=true
+
+# Or restore previous configuration
+```
 
 ## Supported CLI Tools
 
@@ -141,6 +250,12 @@ The agent handles these commands from the server:
 - Check `OPENACE_SERVER_URL` is reachable
 - Verify agent token is valid
 - Check `~/.open-ace-agent/agent.log`
+- If SSL errors appear, check diagnostic information in logs
+
+**SSL/TLS errors:**
+- Incomplete certificate chain: Ensure server certificate includes intermediate CAs
+- Hostname mismatch: Check certificate's SAN/CN
+- Self-signed certificates: Configure `ca_bundle_path` or temporarily use `OPENACE_SKIP_SSL_VERIFY=true`
 
 **CLI tool not found:**
 - Ensure the tool is installed globally (`which claude` / `which qwen` / `which codex`)

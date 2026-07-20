@@ -8,6 +8,7 @@ manages CLI subprocesses through the executor module, and sends heartbeats.
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import logging
 import os
@@ -22,6 +23,7 @@ import threading
 import time
 from datetime import datetime
 from typing import Any
+from urllib.parse import urlparse
 
 import requests
 from cli_settings import apply_cli_settings, clear_codex_bearer_token
@@ -40,6 +42,42 @@ def get_local_ip() -> str:
         return socket.gethostbyname(socket.gethostname())
     except Exception:
         return "127.0.0.1"
+
+
+def _is_localhost_url(url: str) -> bool:
+    """
+    判断 URL 是否为本地地址（Issue #1892）。
+
+    涵盖：127.0.0.0/8、::1、localhost、*.localhost
+
+    Args:
+        url: 要检查的 URL
+
+    Returns:
+        True 如果是 localhost，否则 False
+    """
+    try:
+        parsed = urlparse(url)
+        host = parsed.hostname or parsed.netloc.split(":")[0]
+
+        # IPv4/IPv6 loopback
+        try:
+            ip = ipaddress.ip_address(host)
+            if ip.is_loopback:
+                return True
+        except ValueError:
+            pass
+
+        # 域名匹配
+        host_lower = host.lower()
+        if host_lower == "localhost":
+            return True
+        if host_lower.endswith(".localhost"):
+            return True
+
+        return False
+    except Exception:
+        return False
 
 
 class RemoteAgent:
@@ -80,6 +118,82 @@ class RemoteAgent:
         self._session_sync = SessionSyncService(self._http_send, self.config)
         # Restore terminal sessions from files
         self._restore_terminal_sessions()
+
+    # ----------------------------------------------------------------
+    # TLS Security (Issue #1892)
+    # ----------------------------------------------------------------
+
+    def _validate_ca_bundle(self) -> bool:
+        """
+        Validate CA bundle file if configured (Issue #1892).
+
+        Returns:
+            True if valid or not configured, False if invalid
+        """
+        ca_bundle_path = self.config.ca_bundle_path
+        if not ca_bundle_path:
+            return True
+
+        if not os.path.isfile(ca_bundle_path):
+            logger.error(
+                "CA bundle file not found: %s. "
+                "Please check the path or unset ca_bundle_path.",
+                ca_bundle_path
+            )
+            return False
+
+        if not os.access(ca_bundle_path, os.R_OK):
+            logger.error(
+                "CA bundle file not readable: %s. "
+                "Please check file permissions.",
+                ca_bundle_path
+            )
+            return False
+
+        logger.info("Using CA bundle: %s", ca_bundle_path)
+        return True
+
+    def _check_tls_security(self) -> bool:
+        """
+        Check TLS security configuration and output warnings (Issue #1892).
+
+        Returns:
+            True if configuration is acceptable, False if should abort
+        """
+        if not self.config.skip_ssl_verify:
+            # Secure mode - validate CA bundle if configured
+            return self._validate_ca_bundle()
+
+        # Insecure mode enabled
+        server_url = self.config.server_url
+
+        # Check if localhost
+        if _is_localhost_url(server_url):
+            logger.info(
+                "TLS verification disabled for localhost connection: %s",
+                server_url
+            )
+            return True
+
+        # Non-localhost URL with insecure mode
+        if not self.config.insecure_mode_allowed:
+            logger.error(
+                "[SECURITY ERROR] TLS certificate verification is DISABLED for "
+                "production URL: %s. This is not allowed by insecure_mode_allowed=false. "
+                "Set skip_ssl_verify=false or configure ca_bundle_path.",
+                server_url
+            )
+            return False
+
+        # Output strong security warning
+        logger.warning(
+            "[SECURITY WARNING] TLS certificate verification is DISABLED. "
+            "This mode is NOT recommended for production use. "
+            "Server URL: %s. "
+            "Consider configuring ca_bundle_path for self-signed certificates.",
+            server_url
+        )
+        return True
 
     def _restore_terminal_sessions(self) -> None:
         """Restore terminal session info from persisted files."""
@@ -187,6 +301,11 @@ class RemoteAgent:
         Blocks until shutdown is requested via signal or unhandled error.
         """
         self._running = True
+
+        # Issue #1892: Check TLS security before starting
+        if not self._check_tls_security():
+            logger.error("Aborting due to TLS security check failure")
+            sys.exit(1)
 
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
@@ -322,12 +441,14 @@ class RemoteAgent:
             headers["Authorization"] = f"Bearer {self.config.agent_token}"
 
         try:
+            # Issue #1892: Use unified SSL verify setting
+            verify = self.config.get_ssl_verify_setting()
             resp = requests.post(
                 url,
                 json=message,
                 headers=headers,
                 timeout=30,
-                verify=not self.config.skip_ssl_verify,
+                verify=verify,
             )
             if resp.status_code == 200:
                 return resp.json()
@@ -355,9 +476,61 @@ class RemoteAgent:
                     resp.text[:200],
                 )
                 return None
+        except requests.exceptions.SSLError as e:
+            # Issue #1892: Enhanced SSL error diagnostics
+            self._log_ssl_error(e, url)
+            return None
         except requests.RequestException as e:
             logger.error("HTTP request failed: %s", e)
             return None
+
+    def _log_ssl_error(self, error: requests.exceptions.SSLError, url: str) -> None:
+        """
+        Log detailed SSL error information (Issue #1892).
+
+        Args:
+            error: The SSL error that occurred
+            url: The URL that failed
+        """
+        error_str = str(error)
+        logger.error("SSL certificate verification failed for %s", url)
+
+        # Parse common SSL error types
+        if "certificate verify failed" in error_str.lower():
+            if "unable to get local issuer certificate" in error_str.lower():
+                logger.error(
+                    "SSL Error: Certificate chain incomplete. "
+                    "The server certificate may not include intermediate CA certificates. "
+                    "Consider using --ca-bundle with your CA certificates."
+                )
+            elif "certificate has expired" in error_str.lower():
+                logger.error(
+                    "SSL Error: Server certificate has expired. "
+                    "Contact your administrator to renew the certificate."
+                )
+            elif "certificate is not yet valid" in error_str.lower():
+                logger.error(
+                    "SSL Error: Server certificate is not yet valid. "
+                    "Check system clock synchronization."
+                )
+            elif "hostname" in error_str.lower():
+                logger.error(
+                    "SSL Error: Certificate hostname mismatch. "
+                    "The certificate is not valid for this server hostname."
+                )
+            else:
+                logger.error(
+                    "SSL Error: Certificate verification failed. "
+                    "If using self-signed certificates, configure --ca-bundle "
+                    "or use --insecure-skip-tls-verify (not recommended for production)."
+                )
+        else:
+            logger.error(
+                "SSL Error: %s. "
+                "If using self-signed certificates, configure --ca-bundle "
+                "or use --insecure-skip-tls-verify (not recommended for production).",
+                error_str
+            )
 
     def _send_heartbeat_via_http(self) -> None:
         """Send a heartbeat via HTTP and process any pending commands."""
@@ -1782,6 +1955,12 @@ class RemoteAgent:
             "--local-ws-url",
             local_ws_url,
         ]
+
+        # Issue #1892: Pass SSL configuration to relay subprocess
+        if self.config.skip_ssl_verify:
+            cmd.append("--skip-ssl-verify")
+        if self.config.ca_bundle_path:
+            cmd.extend(["--ca-bundle", self.config.ca_bundle_path])
 
         env = os.environ.copy()
         env["OPEN_ACE_RELAY_TOKEN"] = token
