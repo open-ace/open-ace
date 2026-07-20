@@ -247,9 +247,16 @@ jobs:
 
       - name: Audit npm dependencies
         working-directory: frontend
+        env:
+          # Force the official registry: mirror registries (e.g. npmmirror.com)
+          # do not implement the /security/audits endpoint and return 404,
+          # which would otherwise fail this gate with a false positive.
+          npm_config_registry: https://registry.npmjs.org
         run: |
-          # Run npm audit for production dependencies only
-          npm audit --omit=dev --audit-level=high || exit_code=$?
+          # Run npm audit for production dependencies only.
+          # --registry pins the audit to the official npm registry per the
+          # issue #1890 acceptance criteria.
+          npm audit --omit=dev --audit-level=high --registry=https://registry.npmjs.org || exit_code=$?
 
           if [ "${exit_code:-0}" -ne 0 ]; then
             echo "::error::npm audit found high/critical vulnerabilities in production dependencies. Add 'skip-security-check' label to bypass in emergencies."
