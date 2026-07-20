@@ -4,6 +4,7 @@ Open ACE - Audit Analyzer
 Analyzes audit logs for compliance and security insights.
 """
 
+from __future__ import annotations
 import logging
 import math
 from collections import defaultdict

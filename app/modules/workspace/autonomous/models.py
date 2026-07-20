@@ -11,6 +11,7 @@ compatibility, these models provide:
 - A migration path toward typed ORM in future iterations
 """
 
+from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 

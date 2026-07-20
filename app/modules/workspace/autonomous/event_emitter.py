@@ -7,6 +7,7 @@ Uses an in-process queue per subscriber for push-based notifications.
 Includes TTL-based cleanup to prevent memory leaks from disconnected clients.
 """
 
+from __future__ import annotations
 import logging
 import queue
 import threading

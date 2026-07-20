@@ -20,6 +20,7 @@ Resource conventions (governance audit logging):
   parsing and surface details as a raw string.
 """
 
+from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field

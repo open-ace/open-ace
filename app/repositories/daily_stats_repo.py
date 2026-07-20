@@ -6,6 +6,7 @@ Provides fast queries for trend analysis by reading from daily_stats table
 instead of scanning the large daily_messages table.
 """
 
+from __future__ import annotations
 import logging
 import time
 import warnings

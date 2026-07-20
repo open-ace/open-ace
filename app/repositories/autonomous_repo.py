@@ -5,6 +5,7 @@ Open ACE - Autonomous Workflow Repository
 Database operations for the AI autonomous development feature.
 """
 
+from __future__ import annotations
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone

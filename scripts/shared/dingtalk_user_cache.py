@@ -6,6 +6,7 @@ Caches DingTalk user information to avoid frequent API calls.
 Fetches user details from DingTalk APIs when needed.
 """
 
+from __future__ import annotations
 import json
 import logging
 import time

@@ -6,6 +6,7 @@ Stores AI agent configuration such as the GitHub account
 used by autonomous workflows.
 """
 
+from __future__ import annotations
 import logging
 from typing import Any
 

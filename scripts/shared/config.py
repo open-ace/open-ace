@@ -9,6 +9,9 @@ For remote machine configurations, edit the config.json file or use the
 environment variables to override defaults.
 """
 
+from __future__ import annotations
+from __future__ import annotations
+
 import json
 import os
 from typing import Optional, cast

@@ -5,6 +5,7 @@ Provides comprehensive usage analytics for enterprise insights.
 Analyzes trends, detects anomalies, and generates reports.
 """
 
+from __future__ import annotations
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
