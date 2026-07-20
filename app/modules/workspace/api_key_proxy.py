@@ -6,6 +6,7 @@ API keys never leave the server — remote agents receive short-lived proxy toke
 that are exchanged for real keys by the server's LLM proxy endpoint.
 """
 
+from __future__ import annotations
 import hashlib
 import json
 import logging

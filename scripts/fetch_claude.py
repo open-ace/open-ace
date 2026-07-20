@@ -5,6 +5,7 @@ AI Token Usage - Claude Fetcher
 Fetches daily token usage from Claude Code local JSONL logs.
 """
 
+from __future__ import annotations
 import argparse
 import getpass
 import json

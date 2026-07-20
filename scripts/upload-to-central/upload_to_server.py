@@ -6,6 +6,7 @@ Fetches data from all tools (OpenClaw, Qwen, Claude) and uploads to central serv
 Supports incremental sync - only uploads new data since last successful upload.
 """
 
+from __future__ import annotations
 import argparse
 import json
 import os

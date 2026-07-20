@@ -6,6 +6,8 @@ Caches DingTalk user information to avoid frequent API calls.
 Fetches user details from DingTalk APIs when needed.
 """
 
+from __future__ import annotations
+
 import json
 import logging
 import time
@@ -64,7 +66,7 @@ def get_dingtalk_access_token(app_key: str, app_secret: str) -> str | None:
         response = requests.post(url, json=payload, timeout=10)
         response.raise_for_status()
         data = response.json()
-        return cast(str | None, data.get("accessToken"))
+        return cast(Optional[str], data.get("accessToken"))
     except Exception as e:
         logger.error("Error getting DingTalk access token: %s", e)
         return None
@@ -92,7 +94,7 @@ def get_user_info(user_id: str, app_key: str, app_secret: str) -> dict | None:
             # If no identity was ever recorded (legacy entries), the TTL alone gates it.
             and (cached_identity is not None or not CACHE_IDENTITY_FIELDS)
         ):
-            return cast(dict | None, user_cache.get("data"))
+            return cast(Optional[dict], user_cache.get("data"))
 
     token = get_dingtalk_access_token(app_key, app_secret)
     if not token:
@@ -115,7 +117,7 @@ def get_user_info(user_id: str, app_key: str, app_secret: str) -> dict | None:
                 "identity": _cache_identity_for(user_info),
             }
             save_cache(cache)
-            return cast(dict | None, user_info)
+            return cast(Optional[dict], user_info)
     except Exception:
         # Never log the raw request object: the access_token lives in the URL/headers.
         logger.exception("Error getting DingTalk user info for userid %s", user_id)
@@ -138,7 +140,7 @@ def get_user_display_name(user_id: str, app_key: str, app_secret: str) -> str | 
         or user_info.get("nickname")
         or user_info.get("realAuthedName")
     )
-    return cast(str | None, display_name)
+    return cast(Optional[str], display_name)
 
 
 def get_user_display_name_from_cache(user_id: str) -> str | None:
@@ -153,7 +155,7 @@ def get_user_display_name_from_cache(user_id: str) -> str | None:
 
     user_data = user_cache.get("data", {})
     return cast(
-        str | None,
+        Optional[str],
         user_data.get("name")
         or user_data.get("nick")
         or user_data.get("nickname")

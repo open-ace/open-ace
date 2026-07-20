@@ -5,6 +5,7 @@ API routes for quota checking and user usage status.
 Used by Work mode to check if user can continue using workspace.
 """
 
+from __future__ import annotations
 import logging
 import time
 from datetime import datetime

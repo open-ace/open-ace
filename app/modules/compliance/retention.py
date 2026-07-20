@@ -4,6 +4,7 @@ Open ACE - Data Retention Manager
 Manages data retention policies and cleanup for compliance.
 """
 
+from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone

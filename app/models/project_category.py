@@ -4,6 +4,7 @@ Project Category Model
 Issue #1278: Project categorization for workspace grouping display
 """
 
+from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from datetime import datetime

@@ -10,6 +10,7 @@ This service should be called:
 3. After new messages are saved (incremental update)
 """
 
+from __future__ import annotations
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import cast

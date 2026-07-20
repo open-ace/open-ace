@@ -5,6 +5,7 @@ Provides content security filtering for enterprise compliance.
 Detects and filters sensitive information, PII, and prohibited content.
 """
 
+from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass, field

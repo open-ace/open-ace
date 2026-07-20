@@ -5,6 +5,7 @@ Provides database connection management for the Open ACE application.
 Supports both SQLite (default) and PostgreSQL databases with connection pooling.
 """
 
+from __future__ import annotations
 import logging
 import os
 import sqlite3

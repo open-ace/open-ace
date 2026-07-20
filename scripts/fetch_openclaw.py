@@ -6,6 +6,7 @@ Fetches daily token usage from OpenClaw gateway using WebSocket API.
 Also fetches individual messages from OpenClaw session logs.
 """
 
+from __future__ import annotations
 import argparse
 import asyncio
 import getpass

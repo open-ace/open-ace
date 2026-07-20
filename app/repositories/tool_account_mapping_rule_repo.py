@@ -4,6 +4,7 @@ Open ACE - Tool Account Mapping Rule Repository
 Repository for tool_account_mapping_rules table operations.
 """
 
+from __future__ import annotations
 import logging
 from typing import Any
 

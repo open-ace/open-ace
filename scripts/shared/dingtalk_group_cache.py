@@ -6,6 +6,8 @@ Caches DingTalk group information to avoid frequent API calls.
 Fetches group details from DingTalk APIs when needed.
 """
 
+from __future__ import annotations
+
 import importlib
 import json
 import logging
@@ -30,7 +32,7 @@ CACHE_TTL = 86400  # 24 hours
 
 def get_dingtalk_access_token(app_key: str, app_secret: str) -> str | None:
     """Keep the historical helper available for callers and monkeypatch-based tests."""
-    return cast(str | None, _dingtalk_user_cache.get_dingtalk_access_token(app_key, app_secret))
+    return cast(Optional[str], _dingtalk_user_cache.get_dingtalk_access_token(app_key, app_secret))
 
 
 def ensure_cache_dir():
@@ -80,7 +82,7 @@ def get_group_info(chat_id: str, app_key: str, app_secret: str) -> dict | None:
     if chat_id in cache["groups"]:
         group_cache = cache["groups"][chat_id]
         if time.time() - group_cache.get("cached_at", 0) < CACHE_TTL:
-            return cast(dict | None, group_cache.get("data"))
+            return cast(Optional[dict], group_cache.get("data"))
 
     token = get_dingtalk_access_token(app_key, app_secret)
     if not token:
@@ -99,7 +101,7 @@ def get_group_info(chat_id: str, app_key: str, app_secret: str) -> dict | None:
             group_info = data
             cache["groups"][chat_id] = {"data": group_info, "cached_at": time.time()}
             save_cache(cache)
-            return cast(dict | None, group_info)
+            return cast(Optional[dict], group_info)
     except Exception:
         # Never log the raw request: the access_token lives in the URL/headers.
         logger.exception("Error getting DingTalk group info for chatid %s", chat_id)
@@ -116,7 +118,7 @@ def get_group_name(chat_id: str, app_key: str, app_secret: str) -> str | None:
     if not group_info:
         return None
 
-    return cast(str | None, group_info.get("name") or group_info.get("title"))
+    return cast(Optional[str], group_info.get("name") or group_info.get("title"))
 
 
 def get_group_name_from_conversation_label(label: str, app_key: str, app_secret: str) -> str | None:
@@ -126,7 +128,7 @@ def get_group_name_from_conversation_label(label: str, app_key: str, app_secret:
         group_cache = cache["groups"][label]
         if time.time() - group_cache.get("cached_at", 0) < CACHE_TTL:
             data = group_cache.get("data", {})
-            return cast(str | None, data.get("name") or data.get("title"))
+            return cast(Optional[str], data.get("name") or data.get("title"))
 
     chat_id = extract_chat_id(label)
     if not chat_id:
@@ -138,7 +140,7 @@ def get_group_name_from_conversation_label(label: str, app_key: str, app_secret:
 
     cache["groups"][label] = {"data": group_info, "cached_at": time.time()}
     save_cache(cache)
-    return cast(str | None, group_info.get("name") or group_info.get("title"))
+    return cast(Optional[str], group_info.get("name") or group_info.get("title"))
 
 
 def clear_cache():

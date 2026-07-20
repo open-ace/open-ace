@@ -6,6 +6,7 @@ This script creates a default admin user and default tenant.
 Database schema is created by schema.sql during installation.
 """
 
+from __future__ import annotations
 import os
 import sys
 from typing import Optional, Tuple

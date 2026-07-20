@@ -4,6 +4,7 @@ Open ACE - AI Computing Explorer - Auth Service
 Business logic for authentication and authorization.
 """
 
+from __future__ import annotations
 import logging
 import secrets
 import time

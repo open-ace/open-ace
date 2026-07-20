@@ -6,6 +6,7 @@ Wraps the `gh` CLI for repo, issue, branch, worktree, and PR operations.
 All methods invoke gh/git via subprocess and return parsed results.
 """
 
+from __future__ import annotations
 import json
 import logging
 import os

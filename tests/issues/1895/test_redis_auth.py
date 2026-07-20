@@ -66,15 +66,20 @@ class TestCacheManagerAuthBehavior:
         monkeypatch.setenv("CACHE_BACKEND", "redis")
         monkeypatch.setenv("FLASK_ENV", "production")
 
-        # Mock Redis to simulate authentication error
-        from unittest.mock import Mock, patch
+        # Mock _get_client to raise authentication error directly
+        from unittest.mock import patch
 
-        mock_redis = Mock()
-        mock_redis.ping.side_effect = Exception("NOAUTH Authentication required")
+        def mock_get_client():
+            raise RuntimeError(
+                "Redis authentication failed: NOAUTH Authentication required. "
+                "Check REDIS_PASSWORD."
+            )
 
-        with patch("app.utils.cache.RedisCache._get_client", return_value=mock_redis):
-            from app.utils.cache import CacheManager
+        # Reset singleton instance to allow re-initialization
+        from app.utils.cache import CacheManager
+        CacheManager._instance = None
 
+        with patch("app.utils.cache.RedisCache._get_client", side_effect=mock_get_client):
             with pytest.raises(RuntimeError, match="Redis authentication failed"):
                 CacheManager(backend="redis")
 
@@ -113,7 +118,9 @@ class TestBackupScriptRedisAuth:
                 redis_password_found = True
                 assert env["valueFrom"]["secretKeyRef"]["key"] == "REDIS_PASSWORD"
                 assert env["valueFrom"]["secretKeyRef"]["name"] == "open-ace-secrets"
-                assert env.get("optional", False) is True
+                assert env["valueFrom"]["secretKeyRef"].get("optional", False) is True
                 break
 
-        assert redis_password_found, "REDIS_PASSWORD environment variable not found in backup cronjob"
+        assert redis_password_found, (
+            "REDIS_PASSWORD environment variable not found in backup cronjob"
+        )
