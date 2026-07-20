@@ -1374,7 +1374,11 @@ def _entry_visible(name: str) -> bool:
 
 
 def _search_tree_direct(root: str, matcher, max_depth: int, max_results: int, kind: str):
-    """Recursive search via os.walk (process user can read the tree directly)."""
+    """Recursive search via os.walk (process user can read the tree directly).
+
+    Returns ``(results, truncated, error)`` — *error* is always None here
+    (kept in the tuple for parity with _search_tree_sudo).
+    """
     results: list[dict[str, Any]] = []
     for dirpath, dirnames, filenames in os.walk(root):
         rel = os.path.relpath(dirpath, root)
@@ -1391,7 +1395,7 @@ def _search_tree_direct(root: str, matcher, max_depth: int, max_results: int, ki
 
         for d in dirnames if want_dirs else []:
             if len(results) >= max_results:
-                return results, True
+                return results, True, None
             if not matcher(d):
                 continue
             full = os.path.join(dirpath, d)
@@ -1411,7 +1415,7 @@ def _search_tree_direct(root: str, matcher, max_depth: int, max_results: int, ki
             if not _entry_visible(f):
                 continue
             if len(results) >= max_results:
-                return results, True
+                return results, True, None
             if not matcher(f):
                 continue
             full = os.path.join(dirpath, f)
@@ -1432,7 +1436,7 @@ def _search_tree_direct(root: str, matcher, max_depth: int, max_results: int, ki
                 }
             )
 
-    return results, len(results) >= max_results
+    return results, len(results) >= max_results, None
 
 
 def _search_tree_sudo(
@@ -1445,6 +1449,12 @@ def _search_tree_sudo(
     and matches the same semantics as ``os.access(R_OK)`` in direct mode —
     unreadable files/dirs are excluded, and unreadable dirs are not descended
     into.
+
+    Returns ``(results, truncated, error)``. *error* is a short human-readable
+    string when the sudo ``find`` call itself fails (e.g. ``find`` is not in
+    the sudoers OPENACE_UTILS whitelist for this deployment); the caller
+    surfaces it as a 500 so the user sees a clear message instead of a silent
+    empty result.
     """
     results: list[dict[str, Any]] = []
     # %y=type letter (f/d), %p=path, %s=size, \n=record separator.
@@ -1461,7 +1471,17 @@ def _search_tree_sudo(
     if proc.returncode != 0:
         stderr = (proc.stderr or "").strip()
         logger.warning(f"find as {effective} failed for {root}: {stderr}")
-        return results, False
+        # Distinguish "find not in sudoers" (deployment config issue) from
+        # other failures so the operator knows what to fix.
+        if "password" in stderr.lower() or "not allowed" in stderr.lower() or "sudo" in stderr.lower():
+            error = (
+                "Search unavailable: 'find' is not permitted via sudo on this "
+                "host. Add '/usr/bin/find *' to the OPENACE_UTILS sudoers alias "
+                "(see scripts/install-central/package-method/install.sh)."
+            )
+        else:
+            error = f"Search failed: {stderr or 'unknown error'}"
+        return results, False, error
 
     want_dirs = kind in ("all", "dir")
     want_files = kind in ("all", "file")
@@ -1490,7 +1510,7 @@ def _search_tree_sudo(
         except ValueError:
             size = 0
         if len(results) >= max_results:
-            return results, True
+            return results, True, None
         entry: dict[str, Any] = {
             "name": name,
             "path": entry_path,
@@ -1502,7 +1522,7 @@ def _search_tree_sudo(
             entry["size"] = size
         results.append(entry)
 
-    return results, len(results) >= max_results
+    return results, len(results) >= max_results, None
 
 
 @fs_bp.route("/fs/search", methods=["GET"])
@@ -1564,13 +1584,16 @@ def api_search_files():
         return jsonify({"error": "Permission denied"}), 403
 
     if _is_direct_access(sa):
-        results, truncated = _search_tree_direct(root, matcher, max_depth, max_results, kind)
+        results, truncated, error = _search_tree_direct(root, matcher, max_depth, max_results, kind)
     else:
         effective = get_effective_system_account(sa)
         assert effective is not None  # _is_direct_access False ⇒ effective set
-        results, truncated = _search_tree_sudo(
+        results, truncated, error = _search_tree_sudo(
             root, matcher, max_depth, max_results, kind, effective
         )
+
+    if error:
+        return jsonify({"error": error}), 500
 
     return jsonify(
         {
