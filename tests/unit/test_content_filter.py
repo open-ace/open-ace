@@ -70,7 +70,7 @@ class TestContentFilter:
         # sensitive_keyword is now warn-only (Issue #1898), does not block
         assert result.passed is True
         assert result.risk_level in ("medium", "high")
-        assert result.action == "none"  # warn-only, no blocking
+        assert result.action == "warn"  # warn-only, generates audit log but no blocking
         assert any(r["type"] == "sensitive_keyword" for r in result.matched_rules)
 
     def test_redaction_enabled(self):
@@ -93,7 +93,7 @@ class TestContentFilter:
         result = cf.check_content("This is confidential information")
         # sensitive_keyword is now warn-only (Issue #1898), does not block
         assert result.passed is True
-        assert result.action == "none"  # warn-only, no blocking
+        assert result.action == "warn"  # warn-only, generates audit log but no blocking
         assert any(r["type"] == "sensitive_keyword" for r in result.matched_rules)
 
     def test_get_stats(self):
