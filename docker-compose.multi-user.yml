@@ -1,0 +1,30 @@
+# Open ACE - Multi-User Workspace Mode Override
+# Use this file to enable multi-user workspace mode with root privileges.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.multi-user.yml up -d
+#
+# Or set environment variables:
+#   WORKSPACE_MULTI_USER_MODE=true OPENACE_ALLOW_ROOT_MULTI_USER=1 docker compose up -d
+#
+# Security Note:
+#   Multi-user mode requires the container to run as root (user: "0") to:
+#   - Create system users for each workspace user (useradd)
+#   - Change file ownership (chown)
+#   - Switch user context for isolated workspace sessions (sudo -u)
+#
+#   Only use this mode when you genuinely need multi-user isolation.
+#   For single-user deployments, use the default docker-compose.yml which runs
+#   as non-root (uid 1000) for better security.
+#
+# Issue #1893: Production security hardening
+
+services:
+  open-ace:
+    # Multi-user mode requires root for user management
+    user: "0"
+    environment:
+      # Enable multi-user workspace mode
+      - WORKSPACE_MULTI_USER_MODE=true
+      # Explicit opt-in for root multi-user mode (required)
+      - OPENACE_ALLOW_ROOT_MULTI_USER=1

@@ -57,6 +57,25 @@ server {
     ssl_session_cache   shared:SSL:10m;
     ssl_session_timeout 10m;
 
+    # ── 安全健康检查端点（仅内网访问）───────────────────────────────────────
+    # /health/security 返回详细的安全检查结果，应限制为内网访问
+    # 公开的 /health 端点仅返回简化状态，不暴露敏感信息
+    location /health/security {
+        # 仅允许私有网络访问（可根据实际网络拓扑调整）
+        allow 10.0.0.0/8;       # A 类私有网络
+        allow 172.16.0.0/12;    # B 类私有网络
+        allow 192.168.0.0/16;   # C 类私有网络
+        allow 127.0.0.1;        # 本地回环
+        deny all;
+
+        proxy_pass         http://127.0.0.1:19888;
+        proxy_http_version 1.1;
+        proxy_set_header   Host $host;
+        proxy_set_header   X-Real-IP $remote_addr;
+        proxy_set_header   X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+    }
+
     # ── JS 文件：直接代理（无需 sub_filter，basename 由 webui 内置支持） ──
     # qwen-code-webui v0.2.29+ 会自动读取 window.__WEBUI_BASENAME__ 作为 Router basename
     location ~ ^/webui/(310[0-9]|31[1-9][0-9]|3200)/(.+\.js)$ {

@@ -48,6 +48,25 @@ server {
     ssl_session_cache   shared:SSL:10m;
     ssl_session_timeout 10m;
 
+    # ── Security health check endpoint (internal network only) ───────────────────
+    # /health/security returns detailed security check results, restrict to internal
+    # Public /health endpoint only returns simplified status, no sensitive info
+    location /health/security {
+        # Allow private networks only (adjust based on actual network topology)
+        allow 10.0.0.0/8;       # Class A private network
+        allow 172.16.0.0/12;    # Class B private network
+        allow 192.168.0.0/16;   # Class C private network
+        allow 127.0.0.1;        # Local loopback
+        deny all;
+
+        proxy_pass         http://127.0.0.1:19888;
+        proxy_http_version 1.1;
+        proxy_set_header   Host $host;
+        proxy_set_header   X-Real-IP $remote_addr;
+        proxy_set_header   X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+    }
+
     # JS files: proxy directly. No sub_filter is needed because webui supports basename.
     # qwen-code-webui v0.2.29+ reads window.__WEBUI_BASENAME__ as the router basename.
     location ~ ^/webui/(310[0-9]|31[1-9][0-9]|3200)/(.+\.js)$ {

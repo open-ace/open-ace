@@ -390,6 +390,133 @@ sudo firewall-cmd --reload
 | Binary | `~/.open-ace/config.json` | Modify `server.web_port` |
 | Docker | Environment variable `PORT` | `.env` file or command line |
 
+### Docker Deployment Tiers
+
+Based on security requirements and deployment scale, Open ACE Docker deployment has three tiers:
+
+#### Tier 1: Development/Trial (Quick Start)
+
+Suitable for local testing, feature evaluation, 30-minute trial.
+
+```bash
+# One-click start, no configuration required
+docker compose up -d
+
+# Check logs to confirm startup
+docker compose logs -f open-ace
+```
+
+**Characteristics**:
+- Secrets: Auto-generated (SECRET_KEY, OPENACE_ENCRYPTION_KEY)
+- Database: Default password `ace-secret` allowed
+- Network: localhost access
+- User: Non-root (uid 1000)
+
+**Warning**: This mode shows security warnings in logs, not recommended for production.
+
+#### Tier 2: Pilot Deployment (Small Team)
+
+Suitable for small team trial, internal network, non-sensitive data.
+
+```bash
+# Create .env file
+cat > .env << 'EOF'
+# Database password (change default)
+DB_PASSWORD=your-secure-password-here
+
+# Security keys (explicitly set)
+SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))")
+OPENACE_ENCRYPTION_KEY=$(python3 -c "import secrets; print(secrets.token_hex(16))")
+EOF
+
+# Start service
+docker compose up -d
+```
+
+**Characteristics**:
+- Secrets: Explicitly configured
+- Database: Modified default password
+- Network: Internal network
+- User: Non-root (uid 1000)
+
+#### Tier 3: Production Deployment (Formal Environment)
+
+Suitable for formal environments, sensitive data, external services.
+
+```bash
+# Create production .env file
+cat > .env << 'EOF'
+# Enable production mode security checks
+OPENACE_PRODUCTION_MODE=true
+
+# Database password (strong)
+DB_PASSWORD=$(python3 -c "import secrets; print(secrets.token_urlsafe(16))")
+
+# Security keys (strong random values)
+SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))")
+OPENACE_ENCRYPTION_KEY=$(python3 -c "import secrets; print(secrets.token_hex(16))")
+
+# Upload auth key (optional)
+UPLOAD_AUTH_KEY=$(python3 -c "import secrets; print(secrets.token_hex(16))")
+EOF
+
+# Start service
+docker compose up -d
+
+# Verify security status
+curl http://localhost:19888/health | jq '.security_status'
+# Should return "ok" or "warnings"
+```
+
+**Characteristics**:
+- Secrets: All explicitly configured
+- Database: Strong password (default password rejected)
+- Network: HTTPS reverse proxy
+- User: Non-root (uid 1000)
+- Checks: Mandatory security validation at startup
+
+**Important**: Production mode will fail to start with default database password.
+
+#### Multi-User Workspace Deployment
+
+Multi-user mode requires the container to run as root for creating system users and switching identity:
+
+```bash
+# Method 1: Use override file
+docker compose -f docker-compose.yml -f docker-compose.multi-user.yml up -d
+
+# Method 2: Set environment variables directly
+WORKSPACE_MULTI_USER_MODE=true OPENACE_ALLOW_ROOT_MULTI_USER=1 \
+  docker compose --user 0 up -d
+```
+
+**Security Note**: Multi-user mode is only for scenarios requiring user isolation. Default single-user mode running as non-root is more secure.
+
+#### Downgrade from Multi-User to Single-User Mode
+
+If multi-user isolation is no longer needed, downgrade to non-root single-user mode:
+
+```bash
+# 1. Stop and clean up containers
+docker compose -f docker-compose.yml -f docker-compose.multi-user.yml down
+
+# 2. Start with default config (non-root)
+docker compose up -d
+
+# 3. Set environment variable to disable multi-user mode
+# Add to .env:
+# WORKSPACE_MULTI_USER_MODE=false
+
+# 4. Verify container runs as uid 1000
+docker exec open-ace id
+# Output should be: uid=1000(open-ace) gid=1000(open-ace)
+
+# 5. Clean up leftover system users (optional)
+# On host machine:
+# sudo userdel -r workspace_user1
+# sudo userdel -r workspace_user2
+```
+
 ## Deployment Scenarios
 
 ### 1. Single Machine (Recommended for Personal Use)

@@ -66,6 +66,82 @@ The same key is used for:
 
 ## Key Rotation
 
+### Database Password Rotation
+
+Database passwords should be rotated regularly, separately from encryption key rotation.
+
+**Steps**:
+
+1. **Connect to PostgreSQL and change password**
+
+   ```bash
+   # Connect via Docker container
+   docker exec -it open-ace-postgres psql -U ace -d ace
+
+   # Change password
+   ALTER USER ace WITH PASSWORD 'new-strong-password';
+
+   # Exit
+   \q
+   ```
+
+2. **Update .env file**
+
+   ```bash
+   # Edit .env file
+   DB_PASSWORD=new-strong-password
+   ```
+
+3. **Restart service**
+
+   ```bash
+   docker compose restart
+   ```
+
+4. **Verify connection**
+
+   ```bash
+   # Check logs for successful database connection
+   docker compose logs open-ace | grep "PostgreSQL is ready"
+   ```
+
+**Connection Pool Refresh**:
+
+- PostgreSQL container: No restart needed, password change takes effect immediately
+- Application connection pool: Automatically uses new password on next connection
+- If using PgBouncer or similar connection pool middleware: Restart middleware service
+
+**Generate Strong Password**:
+
+```bash
+python3 -c "import secrets; print(secrets.token_urlsafe(16))"
+```
+
+### OPENACE_ENCRYPTION_KEY Rotation Warning
+
+> **CRITICAL WARNING**: Rotating `OPENACE_ENCRYPTION_KEY` will make previously encrypted data **permanently undecryptable**.
+
+**Impact Scope**:
+
+- API Keys (`api_key_store` table) — Stored API keys cannot be decrypted
+- SMTP passwords (`smtp_settings` table) — SMTP configurations cannot be decrypted
+- Model Gateway API Keys (`model_gateway_config` table) — Gateway configs cannot be decrypted
+- Proxy Token signatures — All active remote session tokens will become invalid
+
+**Required Steps Before Rotation**:
+
+1. **Backup database**: `pg_dump openace > backup.sql`
+2. **Export encrypted data**: Use `scripts/export_encrypted_data.py` to export plaintext data
+3. **Document all keys**: Ensure new keys are securely stored
+4. **Plan maintenance window**: Service will be unavailable during rotation
+
+**Best Practices**:
+
+- Only rotate during planned maintenance windows
+- Notify users in advance that sessions will be interrupted
+- Test data decryption immediately after rotation
+- Retain old key backup for at least 30 days (secure storage)
+
 ### Current Limitations
 
 - **Single-key Fernet**: No support for MultiFernet multi-key decryption

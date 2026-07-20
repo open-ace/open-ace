@@ -66,6 +66,82 @@ fernet_key = base64.urlsafe_b64encode(derived_key)
 
 ## 密钥轮换
 
+### 数据库密码轮换
+
+数据库密码应定期轮换，与加密密钥轮换分开进行。
+
+**步骤**：
+
+1. **连接 PostgreSQL 修改密码**
+
+   ```bash
+   # 使用 Docker 容器连接
+   docker exec -it open-ace-postgres psql -U ace -d ace
+
+   # 修改密码
+   ALTER USER ace WITH PASSWORD 'new-strong-password';
+
+   # 退出
+   \q
+   ```
+
+2. **更新 .env 文件**
+
+   ```bash
+   # 编辑 .env 文件
+   DB_PASSWORD=new-strong-password
+   ```
+
+3. **重启服务**
+
+   ```bash
+   docker compose restart
+   ```
+
+4. **验证连接**
+
+   ```bash
+   # 查看日志确认数据库连接成功
+   docker compose logs open-ace | grep "PostgreSQL is ready"
+   ```
+
+**连接池刷新说明**：
+
+- PostgreSQL 容器：无需重启，密码修改立即生效
+- 应用连接池：下次连接时自动使用新密码
+- 如使用 PgBouncer 等连接池中间件：需重启中间件服务
+
+**生成强密码**：
+
+```bash
+python3 -c "import secrets; print(secrets.token_urlsafe(16))"
+```
+
+### OPENACE_ENCRYPTION_KEY 轮换警告
+
+> **严重警告**：轮换 `OPENACE_ENCRYPTION_KEY` 后，此前加密的数据将**永久不可解密**。
+
+**影响范围**：
+
+- API Key（`api_key_store` 表）— 存储的 API Key 将无法解密
+- SMTP 密码（`smtp_settings` 表）— SMTP 配置将无法解密
+- Model Gateway API Key（`model_gateway_config` 表）— Gateway 配置将无法解密
+- Proxy Token 签名 — 所有活跃的远程会话 Token 将失效
+
+**轮换前的必要步骤**：
+
+1. **备份数据库**：`pg_dump openace > backup.sql`
+2. **导出加密数据**：使用 `scripts/export_encrypted_data.py` 导出明文数据
+3. **记录所有密钥**：确保新密钥安全存储
+4. **计划维护窗口**：轮换期间服务将不可用
+
+**推荐做法**：
+
+- 仅在计划维护窗口执行轮换
+- 提前通知用户会话将中断
+- 轮换后立即测试数据解密功能
+- 保留旧密钥备份至少 30 天（安全存储）
+
 ### 当前限制
 
 - **单密钥 Fernet**：不支持 MultiFernet 多密钥解密

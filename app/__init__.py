@@ -267,10 +267,58 @@ def create_app(config=None):
     except Exception:
         pass  # cryptography not installed — handled at encrypt/decrypt time
 
+    def _get_security_status() -> str:
+        """Get security status for health check endpoint.
+
+        Returns:
+            "ok" if all security checks pass, "warnings" if there are non-blocking
+            issues, "check_logs" if there are significant concerns.
+        """
+        from app.utils.security_env import is_weak_secret_value
+
+        warnings = []
+
+        # Check database password
+        database_url = os.environ.get("DATABASE_URL", "")
+        if database_url:
+            try:
+                # Extract password from URL
+                auth_part = database_url.split("://", 1)[1].split("@", 1)[0]
+                if ":" in auth_part:
+                    password = auth_part.split(":", 1)[1]
+                    # URL decode
+                    from urllib.parse import unquote
+                    password = unquote(password)
+                    if password == "ace-secret":
+                        warnings.append("default_db_password")
+            except Exception:
+                pass
+
+        # Check SECRET_KEY
+        secret_key = os.environ.get("SECRET_KEY", "")
+        if is_weak_secret_value(secret_key):
+            warnings.append("weak_secret_key")
+
+        # Check OPENACE_ENCRYPTION_KEY
+        enc_key = os.environ.get("OPENACE_ENCRYPTION_KEY", "")
+        if is_weak_secret_value(enc_key):
+            warnings.append("weak_encryption_key")
+
+        if not warnings:
+            return "ok"
+        elif len(warnings) <= 2:
+            return "warnings"
+        else:
+            return "check_logs"
+
     # Health check endpoint
     @app.route("/health")
     def health_check():
-        """Health check endpoint for Docker and load balancers."""
+        """Health check endpoint for Docker and load balancers.
+
+        Returns basic health status with security status indicator.
+        Security details are intentionally limited to prevent information leakage.
+        """
         from app.utils.version import get_git_commit
 
         return jsonify(
@@ -278,6 +326,66 @@ def create_app(config=None):
                 "status": "healthy",
                 "service": "open-ace",
                 "version": get_git_commit(),
+                "security_status": _get_security_status(),
+            }
+        )
+
+    # Detailed security health check endpoint (should be access-controlled via reverse proxy)
+    @app.route("/health/security")
+    def health_security():
+        """Detailed security status endpoint.
+
+        This endpoint returns detailed security check results.
+        Access should be restricted via reverse proxy to internal networks only.
+
+        Returns detailed security status without exposing actual secret values.
+        """
+        from app.utils.security_env import is_weak_secret_value
+
+        checks = {}
+
+        # Check database password
+        database_url = os.environ.get("DATABASE_URL", "")
+        if database_url:
+            try:
+                auth_part = database_url.split("://", 1)[1].split("@", 1)[0]
+                if ":" in auth_part:
+                    password = auth_part.split(":", 1)[1]
+                    from urllib.parse import unquote
+                    password = unquote(password)
+                    checks["db_password"] = "default_value" if password == "ace-secret" else "ok"
+                else:
+                    checks["db_password"] = "ok"
+            except Exception:
+                checks["db_password"] = "ok"
+        else:
+            checks["db_password"] = "ok"
+
+        # Check SECRET_KEY
+        secret_key = os.environ.get("SECRET_KEY", "")
+        if not secret_key:
+            checks["secret_key"] = "missing"
+        elif is_weak_secret_value(secret_key):
+            checks["secret_key"] = "weak"
+        else:
+            checks["secret_key"] = "ok"
+
+        # Check OPENACE_ENCRYPTION_KEY
+        enc_key = os.environ.get("OPENACE_ENCRYPTION_KEY", "")
+        if not enc_key:
+            checks["encryption_key"] = "missing"
+        elif is_weak_secret_value(enc_key):
+            checks["encryption_key"] = "weak"
+        else:
+            checks["encryption_key"] = "ok"
+
+        # Overall status
+        all_ok = all(v == "ok" for v in checks.values())
+
+        return jsonify(
+            {
+                "status": "ok" if all_ok else "warnings",
+                "checks": checks,
             }
         )
 

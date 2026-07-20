@@ -386,6 +386,133 @@ sudo firewall-cmd --reload
 | 二进制 | `~/.open-ace/config.json` | 修改 `server.web_port` |
 | Docker | 环境变量 `PORT` | `.env` 文件或命令行传入 |
 
+### Docker 部署场景分级
+
+根据安全要求和部署规模，Open ACE Docker 部署分为三个级别：
+
+#### 场景一：开发/试用（快速体验）
+
+适用于本地测试、功能评估、30 分钟试用。
+
+```bash
+# 一键启动，无需配置
+docker compose up -d
+
+# 查看日志确认启动
+docker compose logs -f open-ace
+```
+
+**特点**：
+- 密钥：自动生成（SECRET_KEY, OPENACE_ENCRYPTION_KEY）
+- 数据库：允许默认密码 `ace-secret`
+- 网络：localhost 访问
+- 用户：非 root（uid 1000）
+
+**警告**：此模式会在日志中显示安全警告，不建议用于生产环境。
+
+#### 场景二：试点部署（小团队）
+
+适用于小团队试用、内网访问、非敏感数据。
+
+```bash
+# 创建 .env 文件
+cat > .env << 'EOF'
+# 数据库密码（修改默认值）
+DB_PASSWORD=your-secure-password-here
+
+# 安全密钥（显式设置）
+SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))")
+OPENACE_ENCRYPTION_KEY=$(python3 -c "import secrets; print(secrets.token_hex(16))")
+EOF
+
+# 启动服务
+docker compose up -d
+```
+
+**特点**：
+- 密钥：显式设置
+- 数据库：修改默认密码
+- 网络：内网访问
+- 用户：非 root（uid 1000）
+
+#### 场景三：生产部署（正式环境）
+
+适用于正式环境、敏感数据、对外服务。
+
+```bash
+# 创建生产配置 .env 文件
+cat > .env << 'EOF'
+# 启用生产模式安全检查
+OPENACE_PRODUCTION_MODE=true
+
+# 数据库密码（强密码）
+DB_PASSWORD=$(python3 -c "import secrets; print(secrets.token_urlsafe(16))")
+
+# 安全密钥（强随机值）
+SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))")
+OPENACE_ENCRYPTION_KEY=$(python3 -c "import secrets; print(secrets.token_hex(16))")
+
+# 上传认证密钥（可选）
+UPLOAD_AUTH_KEY=$(python3 -c "import secrets; print(secrets.token_hex(16))")
+EOF
+
+# 启动服务
+docker compose up -d
+
+# 验证安全状态
+curl http://localhost:19888/health | jq '.security_status'
+# 应返回 "ok" 或 "warnings"
+```
+
+**特点**：
+- 密钥：全部显式配置
+- 数据库：强密码（默认密码被拒绝）
+- 网络：HTTPS 反向代理
+- 用户：非 root（uid 1000）
+- 检查：启动时强制安全验证
+
+**重要**：生产模式下使用默认数据库密码会导致启动失败。
+
+#### 多用户工作区部署
+
+多用户模式需要容器以 root 运行，用于创建系统用户和切换身份：
+
+```bash
+# 方法一：使用 override 文件
+docker compose -f docker-compose.yml -f docker-compose.multi-user.yml up -d
+
+# 方法二：直接设置环境变量
+WORKSPACE_MULTI_USER_MODE=true OPENACE_ALLOW_ROOT_MULTI_USER=1 \
+  docker compose --user 0 up -d
+```
+
+**安全说明**：多用户模式仅用于需要用户隔离的场景，默认单用户模式以非 root 运行更安全。
+
+#### 从多用户模式降级到单用户模式
+
+如果不再需要多用户隔离，可以降级到非 root 单用户模式：
+
+```bash
+# 1. 停止并清理容器
+docker compose -f docker-compose.yml -f docker-compose.multi-user.yml down
+
+# 2. 使用默认配置启动（非 root）
+docker compose up -d
+
+# 3. 设置环境变量禁用多用户模式
+# 在 .env 中添加：
+# WORKSPACE_MULTI_USER_MODE=false
+
+# 4. 验证容器以 uid 1000 运行
+docker exec open-ace id
+# 输出应为：uid=1000(open-ace) gid=1000(open-ace)
+
+# 5. 清理遗留的系统用户（可选）
+# 在宿主机上执行：
+# sudo userdel -r workspace_user1
+# sudo userdel -r workspace_user2
+```
+
 ## 部署场景
 
 ### 场景一：单机部署（推荐个人使用）

@@ -64,7 +64,145 @@ OPENACE_CONFIG_FILE="${OPENACE_CONFIG_FILE:-${OPENACE_CONFIG_DIR}/config.json}"
 export OPENACE_CONFIG_DIR OPENACE_CONFIG_FILE
 
 # ============================================================================
-# 0.1. Pre-flight Validation (Issue #1006)
+# 0.1. Production Security Validation (Issue #1893)
+# ============================================================================
+# Validate security settings in production mode.
+# OPENACE_PRODUCTION_MODE must be explicitly set to "true" to enable strict checks.
+
+# Extract database password from DATABASE_URL with URL decoding support
+extract_db_password() {
+    python3 -c "
+import os, urllib.parse
+url = os.environ.get('DATABASE_URL', '')
+if not url:
+    print('')
+    exit(0)
+try:
+    # Format: postgresql://user:password@host:port/dbname
+    # Handle URL-encoded characters like %40 (@), %23 (#), %25 (%)
+    auth_part = url.split('://', 1)[1].split('@', 1)[0]  # user:password
+    password = auth_part.split(':', 1)[1] if ':' in auth_part else ''
+    print(urllib.parse.unquote(password))
+except Exception:
+    print('')
+"
+}
+
+# Validate secrets using Python validation logic (reuses app/utils/security_env.py)
+validate_secrets_via_python() {
+    python3 -c "
+import os, sys
+sys.path.insert(0, '/app')
+
+# Import validation functions from security_env
+try:
+    from app.utils.security_env import is_weak_secret_value
+    HAS_SECURITY_ENV = True
+except ImportError:
+    HAS_SECURITY_ENV = False
+
+errors = []
+warnings = []
+
+production_mode = os.environ.get('OPENACE_PRODUCTION_MODE', '').lower() == 'true'
+
+# Check SECRET_KEY
+secret_key = os.environ.get('SECRET_KEY', '')
+if HAS_SECURITY_ENV:
+    if is_weak_secret_value(secret_key):
+        if production_mode:
+            errors.append('SECRET_KEY is weak or missing in production mode')
+        elif secret_key:
+            warnings.append('SECRET_KEY uses weak development value')
+else:
+    # Fallback: basic check without security_env
+    weak_secrets = ['', 'change-me-in-production', 'dev-secret-key', 'default-secret-key']
+    if secret_key in weak_secrets or (secret_key and secret_key.startswith('replace-with-random')):
+        if production_mode:
+            errors.append('SECRET_KEY is weak or missing in production mode')
+        elif secret_key:
+            warnings.append('SECRET_KEY uses weak development value')
+
+# Check OPENACE_ENCRYPTION_KEY
+enc_key = os.environ.get('OPENACE_ENCRYPTION_KEY', '')
+if HAS_SECURITY_ENV:
+    if is_weak_secret_value(enc_key):
+        if production_mode:
+            errors.append('OPENACE_ENCRYPTION_KEY is weak or missing in production mode')
+        elif enc_key:
+            warnings.append('OPENACE_ENCRYPTION_KEY uses weak development value')
+else:
+    if enc_key in weak_secrets or (enc_key and enc_key.startswith('replace-with-random')):
+        if production_mode:
+            errors.append('OPENACE_ENCRYPTION_KEY is weak or missing in production mode')
+        elif enc_key:
+            warnings.append('OPENACE_ENCRYPTION_KEY uses weak development value')
+
+# Output results
+for w in warnings:
+    print(f'WARNING: {w}')
+for e in errors:
+    print(f'ERROR: {e}')
+
+if errors:
+    sys.exit(1)
+"
+}
+
+# Validate database security settings
+validate_database_security() {
+    local db_password
+    db_password=$(extract_db_password)
+
+    # Default password check
+    if [ "${db_password}" = "ace-secret" ]; then
+        if [ "${OPENACE_PRODUCTION_MODE}" = "true" ]; then
+            echo "ERROR: Production mode requires explicit database password."
+            echo "       The default 'ace-secret' password is not allowed."
+            echo "       Set DB_PASSWORD in .env or pass DATABASE_URL explicitly."
+            echo ""
+            echo "       Generate a strong password:"
+            echo "         python3 -c \"import secrets; print(secrets.token_urlsafe(16))\""
+            exit 1
+        else
+            echo "WARNING: Using default database password 'ace-secret'."
+            echo "         This is acceptable for evaluation but NOT for production."
+            echo "         Set OPENACE_PRODUCTION_MODE=true to enforce production checks."
+        fi
+    fi
+}
+
+# Run production security validation
+validate_production_security() {
+    echo "Validating production security settings..."
+
+    # Validate database password
+    if [ -n "${DATABASE_URL}" ]; then
+        validate_database_security
+    fi
+
+    # Validate secrets via Python (reuses app layer logic)
+    if ! validate_secrets_via_python; then
+        echo ""
+        echo "To fix production security errors:"
+        echo "  1. Generate strong secrets:"
+        echo "     python3 -c \"import secrets; print('SECRET_KEY=' + secrets.token_hex(32))\""
+        echo "     python3 -c \"import secrets; print('OPENACE_ENCRYPTION_KEY=' + secrets.token_hex(16))\""
+        echo "  2. Add them to your .env file"
+        echo "  3. Restart the container"
+        exit 1
+    fi
+
+    echo "Production security validation passed."
+}
+
+# Run security validation in production mode
+if [ "${OPENACE_PRODUCTION_MODE}" = "true" ]; then
+    validate_production_security
+fi
+
+# ============================================================================
+# 0.2. Pre-flight Validation (Issue #1006)
 # ============================================================================
 validate_node_environment() {
     echo "Validating Node.js environment..."
