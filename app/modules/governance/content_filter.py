@@ -98,6 +98,10 @@ class ContentFilter:
     - Configurable severity levels
     """
 
+    # Priority mappings for risk levels and actions (used by static helper methods)
+    _RISK_PRIORITY = {"critical": 4, "high": 3, "medium": 2, "low": 1}
+    _ACTION_PRIORITY = {"block": 3, "warn": 2, "redact": 1, "none": 0}
+
     # Default PII patterns
     DEFAULT_PII_PATTERNS = {
         "pii_email": r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}",
@@ -288,21 +292,9 @@ class ContentFilter:
                         }
                     )
 
-                    # Update overall risk
-                    if rule_severity == "critical":
-                        overall_risk = "critical"
-                    elif rule_severity == "high" and overall_risk not in ["critical"]:
-                        overall_risk = "high"
-                    elif rule_severity == "medium" and overall_risk not in ["critical", "high"]:
-                        overall_risk = "medium"
-
-                    # Update overall action (block takes precedence over warn/redact)
-                    if rule_action == "block":
-                        overall_action = "block"
-                    elif rule_action == "warn" and overall_action not in ["block"]:
-                        overall_action = "warn"
-                    elif rule_action == "redact" and overall_action not in ["block", "warn"]:
-                        overall_action = "redact"
+                    # Update overall risk and action
+                    overall_risk = self._update_risk_level(overall_risk, rule_severity)
+                    overall_action = self._update_action(overall_action, rule_action)
 
                     # Apply redaction if action is redact
                     if rule_action == "redact":
@@ -335,20 +327,13 @@ class ContentFilter:
                 )
 
                 # Update overall risk
-                if risk == "critical":
-                    overall_risk = "critical"
-                elif risk == "high" and overall_risk not in ["critical"]:
-                    overall_risk = "high"
-                elif risk == "medium" and overall_risk not in ["critical", "high"]:
-                    overall_risk = "medium"
+                overall_risk = self._update_risk_level(overall_risk, risk)
 
                 # For built-in PII, use block_high_risk config for action
                 if self.block_high_risk and risk in ["high", "critical"]:
-                    if overall_action not in ["block"]:
-                        overall_action = "block"
+                    overall_action = self._update_action(overall_action, "block")
                 elif self.redact_pii:
-                    if overall_action not in ["block", "warn"]:
-                        overall_action = "redact"
+                    overall_action = self._update_action(overall_action, "redact")
 
                 # Redact if enabled
                 if self.redact_pii:
@@ -369,14 +354,12 @@ class ContentFilter:
 
             # Update overall_risk but do NOT force overall_action to block
             # sensitive_keyword should only generate audit logs, not block requests
-            if overall_risk not in ["critical", "high"]:
-                overall_risk = "medium"
+            overall_risk = self._update_risk_level(overall_risk, "medium")
 
             # Set action to 'warn' for audit visibility, but do NOT block
             # This prevents blocking legitimate messages containing words like
             # "password" or "secret" in non-sensitive contexts
-            if overall_action not in ["block", "warn"]:
-                overall_action = "warn"
+            overall_action = self._update_action(overall_action, "warn")
 
         # Determine passed based on action
         passed = overall_action != "block"
@@ -421,6 +404,44 @@ class ContentFilter:
                 found.add(keyword)
 
         return found
+
+    @staticmethod
+    def _update_risk_level(current: str, new_risk: str) -> str:
+        """
+        Return the higher of two risk levels.
+
+        Invalid risk levels are treated as priority 0 (lowest) and will not
+        override any valid level.
+
+        Args:
+            current: Current overall risk level.
+            new_risk: Newly detected risk level.
+
+        Returns:
+            The higher severity level.
+        """
+        current_priority = ContentFilter._RISK_PRIORITY.get(current, 0)
+        new_priority = ContentFilter._RISK_PRIORITY.get(new_risk, 0)
+        return new_risk if new_priority > current_priority else current
+
+    @staticmethod
+    def _update_action(current: str, new_action: str) -> str:
+        """
+        Return the more severe of two actions.
+
+        Invalid actions are treated as priority 0 (lowest) and will not
+        override any valid action.
+
+        Args:
+            current: Current overall action.
+            new_action: Newly detected action.
+
+        Returns:
+            The more severe action.
+        """
+        current_priority = ContentFilter._ACTION_PRIORITY.get(current, 0)
+        new_priority = ContentFilter._ACTION_PRIORITY.get(new_action, 0)
+        return new_action if new_priority > current_priority else current
 
     def _redact_matches(self, content: str, pattern: re.Pattern, pattern_name: str) -> str:
         """Redact matched patterns in content using predefined templates."""
