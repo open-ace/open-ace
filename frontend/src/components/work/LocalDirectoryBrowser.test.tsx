@@ -259,7 +259,7 @@ describe('LocalDirectoryBrowser', () => {
     expect(screen.queryByText('uploadFile')).not.toBeInTheDocument();
   });
 
-// ---- Issue #1923: recursive name search ----
+  // ---- Issue #1923: recursive name search ----
 
   it('does NOT render search input when enableFileActions is false', async () => {
     render(<LocalDirectoryBrowser initialPath="/home/alice" onSelectPath={() => {}} />);
@@ -278,9 +278,7 @@ describe('LocalDirectoryBrowser', () => {
     await waitFor(() => {
       expect(browseDirectoryMock).toHaveBeenCalled();
     });
-    expect(
-      await screen.findByPlaceholderText('searchFilesPlaceholder')
-    ).toBeInTheDocument();
+    expect(await screen.findByPlaceholderText('searchFilesPlaceholder')).toBeInTheDocument();
   });
 
   it('fires searchFiles after debounce and renders directory + file results', async () => {
@@ -312,7 +310,11 @@ describe('LocalDirectoryBrowser', () => {
       });
 
       render(
-        <LocalDirectoryBrowser initialPath="/home/alice" onSelectPath={() => {}} enableFileActions />
+        <LocalDirectoryBrowser
+          initialPath="/home/alice"
+          onSelectPath={() => {}}
+          enableFileActions
+        />
       );
 
       // Wait for initial browse to resolve.
@@ -358,7 +360,11 @@ describe('LocalDirectoryBrowser', () => {
       });
 
       render(
-        <LocalDirectoryBrowser initialPath="/home/alice" onSelectPath={() => {}} enableFileActions />
+        <LocalDirectoryBrowser
+          initialPath="/home/alice"
+          onSelectPath={() => {}}
+          enableFileActions
+        />
       );
 
       await waitFor(() => expect(browseDirectoryMock).toHaveBeenCalled());
@@ -399,7 +405,11 @@ describe('LocalDirectoryBrowser', () => {
       });
 
       render(
-        <LocalDirectoryBrowser initialPath="/home/alice" onSelectPath={() => {}} enableFileActions />
+        <LocalDirectoryBrowser
+          initialPath="/home/alice"
+          onSelectPath={() => {}}
+          enableFileActions
+        />
       );
 
       await waitFor(() => expect(browseDirectoryMock).toHaveBeenCalled());
@@ -419,7 +429,9 @@ describe('LocalDirectoryBrowser', () => {
     try {
       browseDirectoryMock.mockResolvedValue(
         browseResponse({
-          files: [{ name: 'report.txt', path: '/home/alice/report.txt', size: 1, is_readable: true }],
+          files: [
+            { name: 'report.txt', path: '/home/alice/report.txt', size: 1, is_readable: true },
+          ],
         })
       );
       searchFilesMock.mockResolvedValue({
@@ -440,7 +452,11 @@ describe('LocalDirectoryBrowser', () => {
       });
 
       render(
-        <LocalDirectoryBrowser initialPath="/home/alice" onSelectPath={() => {}} enableFileActions />
+        <LocalDirectoryBrowser
+          initialPath="/home/alice"
+          onSelectPath={() => {}}
+          enableFileActions
+        />
       );
 
       await waitFor(() => expect(browseDirectoryMock).toHaveBeenCalled());

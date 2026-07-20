@@ -13,7 +13,13 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useLanguage, useAppStore } from '@/store';
 import { t } from '@/i18n';
-import { fsApi, type DirectoryEntry, type FileEntry, type SearchEntry, MAX_UPLOAD_SIZE_MB } from '@/api/fs';
+import {
+  fsApi,
+  type DirectoryEntry,
+  type FileEntry,
+  type SearchEntry,
+  MAX_UPLOAD_SIZE_MB,
+} from '@/api/fs';
 import { Loading, Button, EmptyState } from '@/components/common';
 import { useToast, useConfirm } from '@/components/common';
 import { downloadBlob, formatBytes } from '@/utils';
@@ -691,11 +697,19 @@ export const LocalDirectoryBrowser: React.FC<LocalDirectoryBrowserProps> = ({
               {searchTruncated && (
                 <div className="alert alert-info small mb-2">
                   <i className="bi bi-info-circle me-1" />
-                  {t('searchTruncated', language, { count: String(searchResults.length) }) as string}
+                  {
+                    t('searchTruncated', language, {
+                      count: String(searchResults.length),
+                    }) as string
+                  }
                 </div>
               )}
               <div className="small text-muted mb-1">
-                {t('searchResultsCount', language, { count: String(searchResults.length) }) as string}
+                {
+                  t('searchResultsCount', language, {
+                    count: String(searchResults.length),
+                  }) as string
+                }
               </div>
               <ul className="list-group">
                 {searchResults.map((entry) => (
@@ -704,12 +718,19 @@ export const LocalDirectoryBrowser: React.FC<LocalDirectoryBrowserProps> = ({
                     className={`list-group-item list-group-item-action d-flex justify-content-between align-items-center ${
                       entry.type === 'dir' ? 'search-result-dir' : 'search-result-file'
                     }`}
-                    onClick={entry.type === 'dir' ? () => handleNavigateToSearchResult(entry) : undefined}
+                    onClick={
+                      entry.type === 'dir' ? () => handleNavigateToSearchResult(entry) : undefined
+                    }
                     style={{ cursor: entry.type === 'dir' ? 'pointer' : 'default' }}
                     title={entry.relative_path}
                   >
-                    <div className="text-truncate d-flex align-items-center" style={{ minWidth: 0 }}>
-                      <i className={`bi ${entry.type === 'dir' ? 'bi-folder' : 'bi-file-earmark'} me-2`} />
+                    <div
+                      className="text-truncate d-flex align-items-center"
+                      style={{ minWidth: 0 }}
+                    >
+                      <i
+                        className={`bi ${entry.type === 'dir' ? 'bi-folder' : 'bi-file-earmark'} me-2`}
+                      />
                       <span className="text-truncate">{entry.name}</span>
                       {entry.type === 'file' && typeof entry.size === 'number' && (
                         <span className="badge text-muted fw-normal ms-2 small">
@@ -717,7 +738,10 @@ export const LocalDirectoryBrowser: React.FC<LocalDirectoryBrowserProps> = ({
                         </span>
                       )}
                     </div>
-                    <span className="text-muted small ms-2 text-truncate" style={{ maxWidth: '45%' }}>
+                    <span
+                      className="text-muted small ms-2 text-truncate"
+                      style={{ maxWidth: '45%' }}
+                    >
                       {entry.relative_path}
                     </span>
                   </li>
