@@ -708,7 +708,14 @@ def list_subdirectories(
                 if not st:
                     # stat failed for this entry (e.g. broken symlink) — skip.
                     continue
-                is_dir = st["type"] == "directory"
+                # %F (st["type"]) is locale-dependent — under non-C locales
+                # stat emits a translated string (e.g. "目录" under zh_CN),
+                # which would misclassify every directory as a non-directory
+                # and break PersonalFiles navigation (Issue #1912). The %A
+                # perm string is always ASCII ("drwxr-xr-x" / "-rw-r--r--"),
+                # so its first char is a locale-independent type marker.
+                perm = st.get("perm") or ""
+                is_dir = perm[:1] == "d"
 
                 if full_path in access_cache:
                     # owner != system_account: use the accurate access check.

@@ -182,12 +182,17 @@ export const LocalDirectoryBrowser: React.FC<LocalDirectoryBrowserProps> = ({
           setFallbackNote(result.fallback_note);
         }
       } catch (err) {
-        setError((err as Error)?.message || 'Failed to browse directory');
+        const msg = (err as Error)?.message || 'Failed to browse directory';
+        setError(msg);
+        // Issue #1912: Also surface the error as a toast so a failed
+        // navigation into a subdirectory is not missed (the inline alert
+        // can be overlooked when the list state visually does not change).
+        toast.error(t('browseDirectory', language) || 'Browse Directory', msg);
       } finally {
         setIsLoading(false);
       }
     },
-    [enableFileActions]
+    [enableFileActions, toast, language]
   );
 
   useEffect(() => {
@@ -581,18 +586,28 @@ export const LocalDirectoryBrowser: React.FC<LocalDirectoryBrowserProps> = ({
                   key={dir.path}
                   className="list-group-item list-group-item-action d-flex justify-content-between align-items-center"
                   onClick={() => handleNavigate(dir)}
+                  onDoubleClick={() => handleNavigate(dir)}
+                  title={t('doubleClickToOpen', language) || 'Double-click to open'}
                   style={{ cursor: 'pointer' }}
                 >
-                  <div>
-                    <i className="bi bi-folder me-2" />
-                    <span>{dir.name}</span>
+                  <div className="d-flex align-items-center text-truncate">
+                    <i
+                      className="bi bi-folder-fill me-2"
+                      role="img"
+                      aria-label={t('folder', language) || 'Folder'}
+                    />
+                    <span className="text-truncate">{dir.name}</span>
                   </div>
-                  {dir.is_writable && (
-                    <span className="badge bg-success-subtle text-success small">
-                      <i className="bi bi-pencil me-1" />
-                      {t('writable', language) || 'Writable'}
-                    </span>
-                  )}
+                  <div className="d-flex align-items-center gap-1 flex-shrink-0">
+                    {dir.is_writable && (
+                      <span className="badge bg-success-subtle text-success small">
+                        <i className="bi bi-pencil me-1" />
+                        {t('writable', language) || 'Writable'}
+                      </span>
+                    )}
+                    {/* Issue #1912: visual affordance that the row enters a subdirectory */}
+                    <i className="bi bi-chevron-right text-muted small" aria-hidden="true" />
+                  </div>
                 </li>
               ))}
             </ul>
@@ -604,7 +619,11 @@ export const LocalDirectoryBrowser: React.FC<LocalDirectoryBrowserProps> = ({
                     className="list-group-item file-list-item d-flex justify-content-between align-items-center"
                   >
                     <div className="text-truncate">
-                      <i className="bi bi-file-earmark me-2" />
+                      <i
+                        className="bi bi-file-earmark me-2"
+                        role="img"
+                        aria-label={t('file', language) || 'File'}
+                      />
                       <span className="text-truncate">{file.name}</span>
                       <span className="badge text-muted fw-normal ms-2 small">
                         {formatBytes(file.size)}
@@ -679,11 +698,19 @@ export const LocalDirectoryBrowser: React.FC<LocalDirectoryBrowserProps> = ({
       )}
 
       {/* Issue #1813: Always show Select button when manual input is hidden */}
+      {/* Issue #1912: Rename to "Open Session Here" + show the path that will be used, */}
+      {/* so the button's behaviour matches its label (it opens a new session in currentPath). */}
       {hideManualInput && (
-        <div className="mt-3">
+        <div className="mt-3 d-flex flex-column gap-2 align-items-start">
+          {currentPath && (
+            <span className="small text-muted text-break">
+              <i className="bi bi-folder2-open me-1" aria-hidden="true" />
+              {t('willUsePath', language, { path: currentPath }) || `Will use: ${currentPath}`}
+            </span>
+          )}
           <Button variant="primary" onClick={handleSelect}>
-            <i className="bi bi-check-lg me-1" />
-            {t('select', language) || 'Select'}
+            <i className="bi bi-folder-plus me-1" />
+            {t('openSessionHere', language) || 'Open Session Here'}
           </Button>
         </div>
       )}
