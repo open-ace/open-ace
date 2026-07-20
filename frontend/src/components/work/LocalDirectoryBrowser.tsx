@@ -15,7 +15,7 @@ import { useLanguage, useAppStore } from '@/store';
 import { t } from '@/i18n';
 import { fsApi, type DirectoryEntry, type FileEntry, MAX_UPLOAD_SIZE_MB } from '@/api/fs';
 import { Loading, Button, EmptyState } from '@/components/common';
-import { useToast } from '@/components/common';
+import { useToast, useConfirm } from '@/components/common';
 import { downloadBlob, formatBytes } from '@/utils';
 
 interface LocalDirectoryBrowserProps {
@@ -336,6 +336,14 @@ export const LocalDirectoryBrowser: React.FC<LocalDirectoryBrowserProps> = ({
     }
   };
 
+  // Issue #1917: use the app's rendered confirm modal instead of the native
+  // `window.confirm()`. The native dialog can be silently suppressed in
+  // sandboxed/iframe contexts (resolving without ever showing a UI), which
+  // previously caused files to be deleted immediately on click with no
+  // confirmation. `useConfirm()` is the project-wide standard for destructive
+  // actions and is already used by Prompts/Sessions/UserManagement/etc.
+  const confirm = useConfirm();
+
   const handleDelete = async (file: FileEntry) => {
     // The delete button is only shown when the parent directory is writable,
     // but we still gate on is_readable: an unreadable file (e.g. root-owned
@@ -348,9 +356,10 @@ export const LocalDirectoryBrowser: React.FC<LocalDirectoryBrowserProps> = ({
       );
       return;
     }
-    const ok = window.confirm(
-      (t('confirmDeleteFile', language) as string) || `Delete "${file.name}"?`
-    );
+    const ok = await confirm({
+      message: (t('confirmDeleteFile', language) as string) || `Delete "${file.name}"?`,
+      variant: 'danger',
+    });
     if (!ok) return;
 
     setDeletingPath(file.path);

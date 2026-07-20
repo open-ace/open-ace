@@ -21,8 +21,12 @@ const toastMock = {
   warning: vi.fn(),
   info: vi.fn(),
 };
+// Issue #1917: handleDelete uses the app's useConfirm() hook instead of
+// window.confirm(). Tests drive this mock to resolve true/false per case.
+const confirmMock = vi.fn<(opts?: any) => Promise<boolean>>();
 vi.mock('@/components/common', () => ({
   useToast: () => toastMock,
+  useConfirm: () => confirmMock,
   Loading: ({ text }: any) => <div>{text}</div>,
   Button: ({ children, onClick, disabled, variant, size }: any) => (
     <button onClick={onClick} disabled={disabled} data-variant={variant} data-size={size}>
@@ -152,7 +156,7 @@ describe('LocalDirectoryBrowser', () => {
   });
 
   it('calls fsApi.deleteFile on delete click after confirm', async () => {
-    window.confirm = vi.fn(() => true);
+    confirmMock.mockResolvedValue(true);
     deleteFileMock.mockResolvedValue({ success: true });
     browseDirectoryMock.mockResolvedValue(
       browseResponse({
@@ -174,10 +178,13 @@ describe('LocalDirectoryBrowser', () => {
       expect(deleteFileMock).toHaveBeenCalledWith('/home/alice/trash.txt');
     });
     expect(toastMock.success).toHaveBeenCalledWith('deleteSuccess', 'trash.txt');
+    // Issue #1917: the app confirm modal (not window.confirm) must be invoked
+    // with the danger variant before the delete fires.
+    expect(confirmMock).toHaveBeenCalledWith({ message: 'confirmDeleteFile', variant: 'danger' });
   });
 
   it('aborts delete when confirm dialog is cancelled', async () => {
-    window.confirm = vi.fn(() => false);
+    confirmMock.mockResolvedValue(false);
     deleteFileMock.mockResolvedValue({ success: true });
     browseDirectoryMock.mockResolvedValue(
       browseResponse({
