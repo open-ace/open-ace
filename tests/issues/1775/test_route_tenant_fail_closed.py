@@ -171,9 +171,38 @@ class TestRouteTenantFailClosed(unittest.TestCase):
         self.assertEqual(resp.status_code, 403)
 
     def test_projects_denied_for_notenant_non_admin(self):
+        # Issue #1859: the list endpoint returns an empty list (not 403) so
+        # the qwen-code-webui project picker renders for no-tenant non-admins.
+        # This is still fail-closed — no cross-tenant rows are returned.
         resp = self._authed_get("/api/projects", user_id=11, role="user", tenant_id=None)
-        self.assertNotEqual(resp.status_code, 200)
-        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.get_json()
+        self.assertEqual(payload.get("projects"), [])
+
+    def test_projects_notenant_non_admin_leaks_no_cross_tenant_rows(self):
+        # Seed a project owned by tenant_user (tenant 7) and verify the
+        # no-tenant non-admin (user 11) cannot see it via GET /api/projects.
+        import app.routes.projects as projects_mod
+
+        with projects_mod.project_repo.db.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM projects")
+            cursor.execute(
+                "INSERT INTO projects (path, name, created_by, is_shared, tenant_id) "
+                "VALUES (?, ?, ?, ?, ?)",
+                ("/projects/tenant-seven-secret", "Tenant Seven Secret", 10, 1, 7),
+            )
+            conn.commit()
+        try:
+            resp = self._authed_get("/api/projects", user_id=11, role="user", tenant_id=None)
+            self.assertEqual(resp.status_code, 200)
+            names = [p.get("name") for p in resp.get_json().get("projects", [])]
+            self.assertNotIn("Tenant Seven Secret", names)
+            self.assertEqual(names, [])
+        finally:
+            with projects_mod.project_repo.db.get_connection() as conn:
+                conn.cursor().execute("DELETE FROM projects")
+                conn.commit()
 
     # --- admins keep global scope (must NOT be locked out) ---
 

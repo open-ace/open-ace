@@ -93,7 +93,16 @@ def _require_tenant_scope():
     project repository treats it as a wildcard/global filter, leaking
     cross-tenant projects to a no-tenant non-admin. Admins keep global
     scope; tenant-scoped non-admins keep their tenant.
+
+    The list endpoint ``GET /api/projects`` is exempted so a no-tenant
+    non-admin still receives an empty list (rather than a 403) — this
+    unblocks the qwen-code-webui new-session picker, which otherwise
+    surfaces "Failed to fetch projects: FORBIDDEN". The handler itself
+    returns an empty result without touching the repository when the
+    tenant scope is missing, so no wildcard leak occurs (Issue #1859).
     """
+    if request.endpoint == "projects.api_get_projects" and request.method == "GET":
+        return None
     _, error = require_tenant_scope()
     if error is not None:
         return error
@@ -128,6 +137,18 @@ def api_get_projects():
     """Get projects accessible by current user."""
     user_id = g.user_id
     tenant_id = _current_tenant_id()
+
+    # Non-admin without a tenant has no accessible projects — return an
+    # empty list instead of falling through to the repository with
+    # ``tenant_id=None`` (which is treated as a wildcard and would leak
+    # cross-tenant data). The before_request gate exempts this route from
+    # the 403 so the qwen-code-webui project picker still renders.
+    # Admins keep their global scope when their own tenant_id is unset.
+    # (Issue #1859)
+    if tenant_id is None:
+        user = getattr(g, "user", None) or {}
+        if user.get("role") != "admin":
+            return jsonify({"success": True, "projects": []})
 
     # Get user's projects
     projects = project_repo.get_user_projects(user_id, tenant_id=tenant_id)
