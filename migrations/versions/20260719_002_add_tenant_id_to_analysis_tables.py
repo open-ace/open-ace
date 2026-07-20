@@ -272,9 +272,12 @@ def downgrade() -> None:
                 )
         else:
             op.drop_index("idx_hourly_stats_tenant_date", table_name="hourly_stats")
-    hs_columns = _column_names(inspector, "hourly_stats")
-    if "tenant_id" in hs_columns:
-        op.drop_column("hourly_stats", "tenant_id")
+    # SQLite doesn't support DROP COLUMN in older versions, skip for SQLite
+    # See: https://www.sqlite.org/altertable.html#alter_table_drop_column
+    if is_postgres:
+        hs_columns = _column_names(inspector, "hourly_stats")
+        if "tenant_id" in hs_columns:
+            op.drop_column("hourly_stats", "tenant_id")
 
     # daily_stats
     ds_indexes = _index_names(inspector, "daily_stats")
@@ -291,9 +294,10 @@ def downgrade() -> None:
                 )
         else:
             op.drop_index("idx_daily_stats_tenant_date", table_name="daily_stats")
-    ds_columns = _column_names(inspector, "daily_stats")
-    if "tenant_id" in ds_columns:
-        op.drop_column("daily_stats", "tenant_id")
+    if is_postgres:
+        ds_columns = _column_names(inspector, "daily_stats")
+        if "tenant_id" in ds_columns:
+            op.drop_column("daily_stats", "tenant_id")
 
     # daily_messages
     dm_indexes = _index_names(inspector, "daily_messages")
@@ -310,6 +314,7 @@ def downgrade() -> None:
                 )
         else:
             op.drop_index("idx_daily_messages_tenant_date", table_name="daily_messages")
-    dm_columns = _column_names(inspector, "daily_messages")
-    if "tenant_id" in dm_columns:
-        op.drop_column("daily_messages", "tenant_id")
+    if is_postgres:
+        dm_columns = _column_names(inspector, "daily_messages")
+        if "tenant_id" in dm_columns:
+            op.drop_column("daily_messages", "tenant_id")
