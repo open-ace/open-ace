@@ -925,6 +925,95 @@ class AutonomousOrchestrator:
             "head": head,
         }
 
+    def _ancestor_check(self, gh: "GitHubOps", a: str, b: str) -> bool | None:
+        """Return True if ``a`` is an ancestor of ``b``, False if not, None on
+        a git error.
+
+        ``git merge-base --is-ancestor`` exits 0 (yes), 1 (no), or 128+ (git
+        error such as a missing object). The 1-vs-error distinction matters:
+        a "no" is a definitive commit-graph answer we act on, a git error is
+        an indeterminate probe that must fail closed (see
+        ``_main_drift_is_benign_pull``).
+        """
+        rc = gh._run_git(["merge-base", "--is-ancestor", a, b], check=False).returncode
+        if rc == 0:
+            return True
+        if rc == 1:
+            return False
+        return None
+
+    def _main_drift_is_benign_pull(
+        self,
+        repo_path: str,
+        before: str,
+        after: str,
+        system_account: str | None,
+    ) -> bool:
+        """Return True if main HEAD moving ``before`` → ``after`` is a benign
+        external ``git pull`` (rather than an agent escaping the worktree).
+
+        Requires BOTH commit-graph conditions:
+          1. ``before`` is an ancestor of ``after`` — main moved *forward*
+             (rules out reset/rollback/history-rewrite).
+          2. ``after`` is an ancestor of ``origin/main`` — the new HEAD is a
+             remote-sourced commit (rules out a local, not-yet-pushed
+             ``git commit``).
+
+        What this detects, stated as commit-graph states rather than as claims
+        about who ran which command: it blocks (a) a local un-pushed commit on
+        main (after is not on origin/main) and (b) a non-fast-forward change
+        (main did not move forward). It does NOT identify the operation's
+        source: an agent running ``git pull`` / ``reset --hard origin/main`` /
+        checking out a newer remote commit is graph-identical to an external
+        pull (forward + on remote) and is likewise allowed. That boundary is
+        inherent to a commit-graph check.
+
+        Failure policy is fail-closed. Reaching this method already means main
+        HEAD moved suspiciously during an agent run, so a probe that cannot
+        produce a definitive answer (a git error on merge-base) defaults to
+        "not proven benign" → block. ``fetch`` is best-effort (``check=False``):
+        a network/auth failure does not short-circuit — we fall back to the
+        existing origin/main ref, which a concurrent external pull has already
+        updated, so the two conditions remain distinguishable.
+        """
+        if not before or not after or before == after:
+            # Defensive: the sole caller (_validate_repo_context_after_run)
+            # only reaches this method when before_main != after_main, so
+            # before == after is currently unreachable. Kept so a future caller
+            # gets the correct "no drift → benign" answer instead of a probe.
+            return True
+        gh = GitHubOps(repo_path, system_account=system_account)
+        try:
+            # Best-effort refresh of origin/main. A concurrent external pull
+            # runs its own fetch and updates this ref, so even if this fetch
+            # fails the local ref is fresh enough to tell pull from local commit.
+            gh._run_git(["fetch", "origin", "main"], check=False)
+            moved_forward = self._ancestor_check(gh, before, after)
+            after_on_remote = self._ancestor_check(gh, after, "origin/main")
+            # A git error on either probe → cannot prove benign → fail closed.
+            if moved_forward is None or after_on_remote is None:
+                logger.warning(
+                    "Workflow %s: benign-pull probe indeterminate for main HEAD "
+                    "%s..%s (git error); failing closed.",
+                    self._workflow_id,
+                    before[:8],
+                    after[:8],
+                )
+                return False
+            return moved_forward and after_on_remote
+        except Exception as e:
+            # Unexpected exception (not a merge-base exit code). main HEAD has
+            # already moved suspiciously, so do not assume benign.
+            logger.warning(
+                "Workflow %s: benign-pull probe raised for main HEAD %s..%s: %s; "
+                "failing closed.",
+                self._workflow_id,
+                before[:8],
+                after[:8],
+                e,
+            )
+            return False
+
     def _snapshot_repo_context(
         self, wf: dict | None, workspace_type: str, system_account: str | None
     ) -> dict | None:
@@ -994,6 +1083,26 @@ class AutonomousOrchestrator:
                 and before_main.get("head") != after_main.get("head")
                 and before_effective.get("head") == after_effective.get("head")
             ):
+                # main HEAD moved but the worktree did not. This is either an
+                # agent operating on the main repo, or an external `git pull`
+                # moving HEAD to a remote commit during the agent run. Allow
+                # only when the move is a forward update to a remote-sourced
+                # commit (a benign pull); a local escape commit (not pushed),
+                # a reset/rollback, or a non-fast-forward rewrite is blocked.
+                if self._main_drift_is_benign_pull(
+                    ctx.get("project_path", ""),
+                    before_main.get("head"),
+                    after_main.get("head"),
+                    system_account,
+                ):
+                    logger.info(
+                        "Workflow %s: main repo HEAD moved %s..%s during agent run "
+                        "(benign external pull); allowing.",
+                        self._workflow_id,
+                        before_main.get("head", "")[:8],
+                        after_main.get("head", "")[:8],
+                    )
+                    return ""
                 return (
                     "Detected commits on the main repository while the workflow worktree "
                     "HEAD did not move; the agent likely executed git commands outside "
