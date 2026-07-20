@@ -82,7 +82,23 @@ def store_api_key():
 
     if result.get("success"):
         return jsonify({"success": True, "key": result})
-    return jsonify({"error": result.get("error", "Failed to store API key")}), 400
+
+    # Handle validation errors with user-friendly message
+    error_msg = result.get("error", "Failed to store API key")
+    if "allowlist" in error_msg.lower() or "private" in error_msg.lower():
+        return (
+            jsonify(
+                {
+                    "error": {
+                        "message": error_msg,
+                        "type": "base_url_blocked",
+                        "code": "SSRF_BLOCKED",
+                    }
+                }
+            ),
+            400,
+        )
+    return jsonify({"error": error_msg}), 400
 
 
 @api_keys_bp.route("/api-keys/<int:key_id>", methods=["PUT"])

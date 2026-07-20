@@ -5,6 +5,17 @@ headless/CI setups), then the single admin DB row (Phase B). Returns None when n
 usable base_url + api_key are configured, regardless of the toggle — the planner
 treats None as "not configured" and the handler surfaces a 503 (no silent
 fallback to direct mode).
+
+Security Note (Issue #1894):
+    The gateway base_url (whether from OPENACE_MODEL_GATEWAY_BASE_URL environment
+    variable or database configuration) is validated for SSRF protection at request
+    time. Private network addresses are blocked by default. To use a private
+    model gateway endpoint, add the host to OPENACE_LLM_PROXY_ALLOWED_HOSTS.
+
+    Example:
+        # To allow a private gateway:
+        export OPENACE_MODEL_GATEWAY_BASE_URL=http://private-llm.internal:8080
+        export OPENACE_LLM_PROXY_ALLOWED_HOSTS=private-llm.internal
 """
 
 from __future__ import annotations

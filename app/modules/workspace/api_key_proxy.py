@@ -4,6 +4,11 @@ Open ACE - API Key Proxy Service
 Provides encrypted storage and proxy token management for LLM API keys.
 API keys never leave the server — remote agents receive short-lived proxy tokens
 that are exchanged for real keys by the server's LLM proxy endpoint.
+
+Security Note (Issue #1894):
+    Custom base_url values are validated for SSRF protection at storage time
+    and request time. Private network addresses are blocked by default.
+    Use OPENACE_LLM_PROXY_ALLOWED_HOSTS to allow private model endpoints.
 """
 
 import hashlib
@@ -519,7 +524,30 @@ class APIKeyProxyService:
 
         Returns:
             Dict with success status and key info.
+
+        Security (Issue #1894):
+            base_url is validated for SSRF protection before storage.
+            Private network addresses are blocked unless in allowlist.
         """
+        # Validate base_url for SSRF protection (Issue #1894)
+        if base_url:
+            from app.utils.llm_proxy_request import validate_base_url_for_storage
+
+            is_valid, error_message = validate_base_url_for_storage(
+                base_url,
+                tenant_id=tenant_id,
+                provider=provider,
+                user_id=created_by,
+            )
+            if not is_valid:
+                logger.warning(
+                    "Rejected base_url for tenant %s provider %s: %s",
+                    tenant_id,
+                    provider,
+                    error_message,
+                )
+                return {"success": False, "error": error_message}
+
         encrypted = self._encrypt_key(api_key)
         key_hash = self._hash_key(api_key)
 
@@ -777,7 +805,46 @@ class APIKeyProxyService:
 
         Returns:
             True if updated successfully, False otherwise.
+
+        Security (Issue #1894):
+            base_url is validated for SSRF protection before update.
+            Private network addresses are blocked unless in allowlist.
         """
+        # Validate base_url for SSRF protection if being updated (Issue #1894)
+        if base_url is not None:
+            # Need to get provider for validation context
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                f"SELECT provider FROM api_key_store WHERE id = {_param()} AND tenant_id = {_param()}",
+                (key_id, tenant_id),
+            )
+            row = cursor.fetchone()
+            conn.close()
+
+            if not row:
+                return False
+
+            provider = row["provider"] if isinstance(row, dict) else row[0]
+
+            from app.utils.llm_proxy_request import validate_base_url_for_storage
+
+            is_valid, error_message = validate_base_url_for_storage(
+                base_url,
+                tenant_id=tenant_id,
+                provider=provider,
+            )
+            if not is_valid:
+                logger.warning(
+                    "Rejected base_url update for key %s tenant %s provider %s: %s",
+                    key_id,
+                    tenant_id,
+                    provider,
+                    error_message,
+                )
+                # Return False to indicate update failed (validation error)
+                return False
+
         conn = self._get_connection()
         cursor = conn.cursor()
 

@@ -1,4 +1,8 @@
-"""Shared LLM proxy request handling for local and remote workspace scopes."""
+"""Shared LLM proxy request handling for local and remote workspace scopes.
+
+Security: All outbound requests via custom base_url are validated against SSRF
+attacks using app.utils.llm_proxy_request.safe_llm_proxy_request (Issue #1894).
+"""
 
 from __future__ import annotations
 
@@ -13,6 +17,7 @@ from flask import Response, g, jsonify, request, stream_with_context
 # returns a real planner and the seam below routes through it. Removing the
 # gateway feature = drop this import + the seam + the two _gateway_* helpers.
 from app.modules.workspace.model_gateway import get_gateway_planner
+from app.utils.llm_proxy_request import safe_llm_proxy_request
 
 logger = logging.getLogger(__name__)
 
@@ -661,6 +666,7 @@ def _forward_via_gateway(
     session_id: str,
     user_id: int,
     provider: str,
+    tenant_id: int,
 ) -> Response | tuple[Response, int]:
     """Execute a single gateway attempt and return the finalized response.
 
@@ -669,9 +675,9 @@ def _forward_via_gateway(
     of this call. Usage recording + streaming passthrough are handled by the
     shared ``_finalize_upstream_response`` tail. Errors are sanitized via
     ``_gateway_error_response`` so the gateway key never leaks (R7).
-    """
-    import requests as http_requests
 
+    Security: Uses safe_llm_proxy_request for SSRF protection (Issue #1894).
+    """
     try:
         fwd_headers = {}
         for key, value in request.headers:
@@ -682,15 +688,23 @@ def _forward_via_gateway(
 
         body = plan.body_transformer(request.get_data())
 
-        resp = http_requests.request(
-            method=request.method,
-            url=plan.target_url,
+        # Use safe_llm_proxy_request for SSRF protection
+        resp = safe_llm_proxy_request(
+            request.method,
+            plan.target_url,
+            tenant_id=tenant_id,
+            provider=provider,
+            user_id=user_id,
             headers=fwd_headers,
             data=body,
             stream=True,
             timeout=120,
-            proxies={"http": None, "https": None},  # type: ignore[dict-item]
+            source="request",
         )
+
+        # Handle SSRF blocking response
+        if isinstance(resp, tuple):
+            return resp
 
         if resp.status_code >= 400:
             return _gateway_error_response(resp, plan.gateway_key)
@@ -855,7 +869,7 @@ def handle_llm_proxy_request(
                 503,
             )
         return _forward_via_gateway(
-            _gateway_plan, session_id=session_id, user_id=user_id, provider=provider
+            _gateway_plan, session_id=session_id, user_id=user_id, provider=provider, tenant_id=tenant_id
         )
     # ── end model-gateway seam ───────────────────────────────────────────
 
@@ -1016,8 +1030,9 @@ def handle_llm_proxy_request(
                 logger.warning("Failed to convert Responses API request: %s", exc)
 
         try:
-            import requests as http_requests
-
+            # ── SSRF Protection (Issue #1894) ───────────────────────────────
+            # Use safe_llm_proxy_request to validate base_url and prevent
+            # SSRF attacks via administrator-configured endpoints.
             fwd_headers = {}
             for key, value in request.headers:
                 if key.lower() in ("content-type", "accept", "user-agent"):
@@ -1032,15 +1047,23 @@ def handle_llm_proxy_request(
             if not converted_from_responses:
                 body = request.get_data()
 
-            resp = http_requests.request(
-                method=request.method,
-                url=target_url,
+            resp = safe_llm_proxy_request(
+                request.method,
+                target_url,
+                tenant_id=tenant_id,
+                provider=provider,
+                user_id=user_id,
+                api_key_id=key_id,
                 headers=fwd_headers,
                 data=body,
                 stream=True,
                 timeout=120,
-                proxies={"http": None, "https": None},  # type: ignore[dict-item]
+                source="request",
             )
+
+            # Handle SSRF blocking response
+            if isinstance(resp, tuple):
+                return resp
 
             if resp.status_code >= 400:
                 peek = (

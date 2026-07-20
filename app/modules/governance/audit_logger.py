@@ -83,6 +83,9 @@ class AuditAction(Enum):
     AGENT_AUTH_FAILURE = "agent_auth_failure"
     AGENT_RECONNECT = "agent_reconnect"
 
+    # LLM Proxy URL security actions (Issue #1894)
+    LLM_PROXY_URL_BLOCKED = "llm_proxy_url_blocked"
+
 
 class AuditSeverity(Enum):
     """Severity levels for audit events."""
@@ -904,6 +907,18 @@ def get_action_categories() -> dict[str, dict[str, Any]]:
                     "value": "agent_reconnect",
                     "label": "Agent Reconnect",
                     "i18n_key": "actionAgentReconnect",
+                },
+            ],
+        },
+        "llm_proxy": {
+            "label": "LLM Proxy Security",
+            "i18n_key": "categoryLlmProxy",
+            "resource_types": ["llm_proxy_url"],
+            "actions": [
+                {
+                    "value": "llm_proxy_url_blocked",
+                    "label": "LLM Proxy URL Blocked",
+                    "i18n_key": "actionLlmProxyUrlBlocked",
                 },
             ],
         },

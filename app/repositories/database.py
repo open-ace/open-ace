@@ -5,11 +5,13 @@ Provides database connection management for the Open ACE application.
 Supports both SQLite (default) and PostgreSQL databases with connection pooling.
 """
 
+from __future__ import annotations
+
 import logging
 import os
 import sqlite3
 from contextlib import contextmanager, suppress
-from typing import Any
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +51,7 @@ POOL_MIN_CONN = 1
 POOL_MAX_CONN = 10
 
 # Global connection pool for PostgreSQL
-_pg_pool: Any | None = None
+_pg_pool: Optional[Any] = None
 
 
 def _get_db_path() -> str:

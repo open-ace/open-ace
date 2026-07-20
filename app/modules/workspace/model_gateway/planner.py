@@ -5,6 +5,14 @@ Mirrors the run_timeline recorder shape: a Null/real strategy pair, an
 the toggle. ``plan()`` returns a :class:`GatewayPlan` (gateway mode) or ``None``
 (disabled -> direct mode, OR enabled-but-misconfigured -> the handler surfaces a
 503 rather than silently falling back).
+
+Security Note (Issue #1894):
+    The gateway base_url is validated for SSRF protection at request time by
+    llm_proxy_handler._forward_via_gateway() which calls
+    safe_llm_proxy_request(). Gateway URLs configured via environment variable
+    (OPENACE_MODEL_GATEWAY_BASE_URL) or database are equally subject to this
+    validation. Private network endpoints can be allowed via
+    OPENACE_LLM_PROXY_ALLOWED_HOSTS.
 """
 
 from __future__ import annotations
