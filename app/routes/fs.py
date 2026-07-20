@@ -21,13 +21,10 @@ from typing import Any
 from flask import Blueprint, Response, g, jsonify, request, stream_with_context
 
 from app.repositories.user_repo import UserRepository
-from app.utils.workspace import (
-    OPENACE_CHOWN_WRAPPER,
-    _is_wrapper_available,
-    get_workspace_base_dir,
-    get_workspace_base_dirs,
-    run_as_root_if_needed,
-)
+from app.utils.workspace import (OPENACE_CHOWN_WRAPPER, _is_wrapper_available,
+                                 get_workspace_base_dir,
+                                 get_workspace_base_dirs,
+                                 run_as_root_if_needed)
 
 logger = logging.getLogger(__name__)
 
@@ -86,12 +83,9 @@ def _authenticate_user():
         return None
 
     # Try session token first
-    from app.auth.decorators import (
-        _extract_token,
-        _load_user_from_token,
-        enforce_password_change_requirement,
-        normalize_webui_token,
-    )
+    from app.auth.decorators import (_extract_token, _load_user_from_token,
+                                     enforce_password_change_requirement,
+                                     normalize_webui_token)
 
     token = _extract_token()
     if token:
