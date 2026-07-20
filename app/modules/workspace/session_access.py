@@ -20,8 +20,9 @@ from typing import Any
 from flask import g, jsonify, request
 
 from app.auth.decorators import (
-    _extract_token,
+    _extract_url_token,
     _load_user_from_token,
+    _looks_like_webui_token,
     enforce_password_change_requirement,
 )
 from app.modules.workspace.remote_agent_manager import get_remote_agent_manager
@@ -87,10 +88,20 @@ def _set_user_from_token() -> bool:
 
 
 def _set_user_from_webui_token() -> bool:
-    """Load g.user from the WebUI URL token (iframe requests). Returns True/False."""
-    url_token = request.args.get("token")
+    """Load g.user from the WebUI URL token (iframe requests). Returns True/False.
+
+    Note: This function only accepts tokens that match the WebUI token format
+    (user_id:port:random:signature). Session tokens from query parameters
+    are NOT accepted to prevent credential leakage through URLs.
+    """
+    url_token = _extract_url_token()
     if not url_token:
         return False
+
+    # Check if token matches WebUI token format before attempting validation
+    if not _looks_like_webui_token(url_token):
+        return False
+
     # Handle double-encoded tokens from some clients
     from app.auth.decorators import normalize_webui_token
 

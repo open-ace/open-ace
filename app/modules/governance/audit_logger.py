@@ -83,6 +83,9 @@ class AuditAction(Enum):
     AGENT_AUTH_FAILURE = "agent_auth_failure"
     AGENT_RECONNECT = "agent_reconnect"
 
+    # Token security actions (Issue #1896)
+    QUERY_TOKEN_DEPRECATED = "query_token_deprecated"
+
 
 class AuditSeverity(Enum):
     """Severity levels for audit events."""

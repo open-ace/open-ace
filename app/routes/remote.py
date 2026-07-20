@@ -24,7 +24,11 @@ from typing import Any
 
 from flask import Blueprint, Response, g, jsonify, request, stream_with_context
 
-from app.auth.decorators import _extract_token, admin_required, enforce_password_change_requirement
+from app.auth.decorators import (
+    _extract_url_token,
+    admin_required,
+    enforce_password_change_requirement,
+)
 from app.modules.governance.audit_logger import AuditAction, AuditLogger
 from app.modules.workspace.agent_token import token_hash_prefix
 from app.modules.workspace.api_key_proxy import get_api_key_proxy_service
@@ -112,6 +116,13 @@ def load_user():
     # terminal_info_store) to fetch terminal info for connecting to the remote
     # terminal server. This sits between the session-token and WebUI-token
     # fallbacks, so it cannot be folded into the shared load_remote_user().
+    #
+    # Note: This endpoint extracts the token directly from query parameters
+    # using request.args.get() instead of _extract_token(), because:
+    # 1. _extract_token() is being refactored to NOT extract from query params
+    #    for session tokens (Issue #1896)
+    # 2. This endpoint specifically uses proxy tokens (short-lived, scoped),
+    #    not session tokens
     if request.path.startswith("/api/remote/terminal/") and request.path.endswith("/status"):
         from app.modules.workspace.terminal_store import terminal_info_store
 
@@ -120,7 +131,9 @@ def load_user():
         if len(path_parts) >= 5:
             terminal_id = path_parts[4]
             machine_id = request.args.get("machine_id", "")
-            token = _extract_token()
+            # Extract token directly from query params (not via _extract_token)
+            # This is a proxy token, not a session token
+            token = request.args.get("token", "")
             if machine_id and token:
                 info = terminal_info_store.get(machine_id, terminal_id)
                 if info:

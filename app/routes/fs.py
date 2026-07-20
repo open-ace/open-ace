@@ -81,20 +81,26 @@ _BLACKLISTED_RESOLVED = {
 
 @fs_bp.before_request
 def _authenticate_user():
-    """Authenticate via session token or WebUI token (for iframe integration)."""
+    """Authenticate via session token or WebUI token (for iframe integration).
+
+    Note: Session tokens are extracted from cookie/Authorization header only,
+    NOT from query parameters, to prevent credential leakage through URLs.
+    """
     # Skip auth for OPTIONS preflight requests
     if request.method == "OPTIONS":
         return None
 
-    # Try session token first
+    # Try session token first (cookie/header only, not query param)
     from app.auth.decorators import (
-        _extract_token,
+        _extract_session_token,
+        _extract_url_token,
         _load_user_from_token,
+        _looks_like_webui_token,
         enforce_password_change_requirement,
         normalize_webui_token,
     )
 
-    token = _extract_token()
+    token = _extract_session_token()
     if token:
         user_data = _load_user_from_token(token)
         if user_data:
@@ -109,8 +115,9 @@ def _authenticate_user():
                 return None
 
     # Fallback: try WebUI token from query param (for iframe integration)
-    url_token = request.args.get("token")
-    if url_token:
+    # Note: Only WebUI tokens (with specific format) are accepted from query params
+    url_token = _extract_url_token()
+    if url_token and _looks_like_webui_token(url_token):
         # Handle double-encoded tokens from some clients
         url_token = normalize_webui_token(url_token)
         from app.services.webui_manager import get_webui_manager

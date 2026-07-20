@@ -16,8 +16,10 @@ from typing import Any, cast
 from flask import Blueprint, g, jsonify, request
 
 from app.auth.decorators import (
-    _extract_token,
+    _extract_session_token,
+    _extract_url_token,
     _load_user_from_token,
+    _looks_like_webui_token,
     enforce_password_change_requirement,
     normalize_webui_token,
     require_tenant_scope,
@@ -47,8 +49,14 @@ def _current_tenant_id() -> int | None:
 
 @projects_bp.before_request
 def _authenticate_user():
-    """Authenticate via session token or WebUI token."""
-    token = _extract_token()
+    """Authenticate via session token or WebUI token.
+
+    Note: Session tokens are extracted from cookie/Authorization header only,
+    NOT from query parameters, to prevent credential leakage through URLs.
+    Only WebUI tokens (with specific format) are accepted from query params.
+    """
+    # Try session token first (cookie/header only, not query param)
+    token = _extract_session_token()
     if token:
         user_data = _load_user_from_token(token)
         if user_data:
@@ -63,9 +71,9 @@ def _authenticate_user():
                     return password_change_response
                 return None
 
-    # Fallback: try WebUI token from query param
-    url_token = request.args.get("token")
-    if url_token:
+    # Fallback: try WebUI token from query param (with format check)
+    url_token = _extract_url_token()
+    if url_token and _looks_like_webui_token(url_token):
         # Handle double-encoded tokens from some clients
         url_token = normalize_webui_token(url_token)
         from app.services.webui_manager import get_webui_manager

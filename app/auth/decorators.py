@@ -14,7 +14,9 @@ Usage:
 
 from __future__ import annotations
 
+import hashlib
 import logging
+import os
 from functools import wraps
 from typing import TYPE_CHECKING, cast
 from urllib.parse import unquote
@@ -22,6 +24,10 @@ from urllib.parse import unquote
 from flask import Response, g, jsonify, request
 
 logger = logging.getLogger(__name__)
+
+# Configuration: Allow query session token for emergency rollback
+# Set ALLOW_QUERY_SESSION_TOKEN=true to temporarily allow session tokens from query params
+ALLOW_QUERY_SESSION_TOKEN = os.environ.get("ALLOW_QUERY_SESSION_TOKEN", "false").lower() == "true"
 
 if TYPE_CHECKING:
     from app.services.auth_service import AuthService
@@ -74,8 +80,100 @@ def normalize_webui_token(token: str) -> str:
     return normalize_token(token)
 
 
+def _extract_session_token() -> str:
+    """Extract session token from request (cookie → header only).
+
+    This function ONLY extracts session tokens from secure sources
+    (cookie and Authorization header). Query parameter tokens are NOT
+    accepted for session authentication to prevent credential leakage
+    through URLs.
+
+    Returns:
+        Session token string, or empty string if not found.
+    """
+    token = request.cookies.get("session_token")
+    if token:
+        return cast("str", token)
+
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        return cast("str", auth_header[7:])
+
+    # Emergency rollback: allow query param if explicitly enabled
+    if ALLOW_QUERY_SESSION_TOKEN:
+        return cast("str", request.args.get("token", ""))
+
+    return ""
+
+
+def _extract_url_token() -> str:
+    """Extract URL token from request query parameter.
+
+    This function extracts tokens from query parameters, which should
+    ONLY be used for short-lived, scoped tokens like WebUI tokens
+    or proxy tokens (not regular session tokens).
+
+    Returns:
+        URL token string, or empty string if not found.
+    """
+    return cast("str", request.args.get("token", ""))
+
+
+def _looks_like_webui_token(token: str) -> bool:
+    """Check if a token looks like a WebUI token format.
+
+    WebUI tokens have format: user_id:port:random:signature
+    - 4 parts separated by colons
+    - user_id: positive integer
+    - port: integer in range 1024-65535
+    - random: 32-character hex string
+    - signature: 16-character hex string
+
+    This is a format check only; actual validation is done by
+    WebUIManager.validate_token() which verifies the signature.
+
+    Args:
+        token: Token string to check.
+
+    Returns:
+        True if token matches WebUI token format, False otherwise.
+    """
+    if not token:
+        return False
+
+    parts = token.split(":")
+    if len(parts) != 4:
+        return False
+
+    try:
+        user_id = int(parts[0])
+        port = int(parts[1])
+        random_part = parts[2]
+        signature = parts[3]
+
+        return (
+            user_id > 0
+            and 1024 <= port <= 65535
+            and len(random_part) == 32
+            and len(signature) == 16
+            and all(c in "0123456789abcdef" for c in random_part.lower())
+            and all(c in "0123456789abcdef" for c in signature.lower())
+        )
+    except (ValueError, TypeError):
+        return False
+
+
 def _extract_token() -> str:
-    """Extract auth token from request (cookie → header → query param)."""
+    """Extract auth token from request (cookie → header → query param).
+
+    DEPRECATED: This function is kept for backward compatibility but should
+    not be used for new code. Use _extract_session_token() or _extract_url_token()
+    instead depending on the authentication context.
+
+    For session authentication, use _extract_session_token().
+    For WebUI/proxy token authentication, use _extract_url_token() with
+    appropriate type checking.
+    """
     token = request.cookies.get("session_token")
     if token:
         return cast("str", token)
@@ -209,12 +307,16 @@ def auth_required(f=None, *, ownership=None):
             'machine' — verifies machine admin permission
 
     Sets g.user, g.user_id, g.user_role on success.
+
+    Note: Session tokens must come from cookie or Authorization header,
+    not from query parameters (to prevent credential leakage through URLs).
     """
 
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
-            token = _extract_token()
+            # Use session token extraction (cookie/header only, not query param)
+            token = _extract_session_token()
             if not token:
                 return jsonify({"error": "Authentication required"}), 401
 
@@ -271,17 +373,21 @@ def admin_required(f=None):
     Decorator: require admin role.
 
     Supports two authentication methods:
-    1. Session token (from cookie, header, or query param)
-    2. WebUI token (fallback from query param for iframe requests)
+    1. Session token (from cookie or Authorization header only, NOT query param)
+    2. WebUI token (from query param for iframe requests, with format check)
 
     Sets g.user, g.user_id, g.user_role on success.
+
+    Note: Session tokens from query parameters are NOT accepted to prevent
+    credential leakage through URLs. Only WebUI tokens (which are short-lived
+    and scoped) are accepted from query parameters.
     """
 
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
-            # First try session token authentication
-            token = _extract_token()
+            # First try session token authentication (cookie/header only)
+            token = _extract_session_token()
             if token:
                 user = _load_user_from_token(token)
                 if user:
@@ -298,10 +404,10 @@ def admin_required(f=None):
                         return password_change_response
                     return func(*args, **kwargs)
 
-            # Fallback: try WebUI token from query param
+            # Fallback: try WebUI token from query param (with format check)
             # This supports iframe requests from WebUI where session token is not available
-            url_token = request.args.get("token")
-            if url_token:
+            url_token = _extract_url_token()
+            if url_token and _looks_like_webui_token(url_token):
                 # Handle double-encoded tokens from some clients
                 url_token = normalize_webui_token(url_token)
                 from app.services.webui_manager import get_webui_manager
@@ -409,3 +515,48 @@ def require_tenant_scope() -> tuple[int | None, tuple[Response, int] | None]:
     if tenant_id is None:
         return None, (jsonify({"error": "Tenant scope required"}), 403)
     return tenant_id, None
+
+
+# ── Token extraction helpers for external modules ──────────────────────────────
+
+
+def extract_session_token_for_auth() -> str:
+    """Public wrapper for _extract_session_token().
+
+    Use this function when you need to extract session tokens for
+    authentication purposes. This function only extracts from cookie
+    and Authorization header (NOT query params) to prevent credential
+    leakage through URLs.
+
+    Returns:
+        Session token string, or empty string if not found.
+    """
+    return _extract_session_token()
+
+
+def extract_url_token_for_auth() -> str:
+    """Public wrapper for _extract_url_token().
+
+    Use this function when you need to extract URL tokens (WebUI tokens,
+    proxy tokens) for authentication purposes. This function only extracts
+    from query parameters.
+
+    Returns:
+        URL token string, or empty string if not found.
+    """
+    return _extract_url_token()
+
+
+def is_webui_token_format(token: str) -> bool:
+    """Public wrapper for _looks_like_webui_token().
+
+    Use this function to check if a token matches the WebUI token format
+    before attempting validation.
+
+    Args:
+        token: Token string to check.
+
+    Returns:
+        True if token matches WebUI token format, False otherwise.
+    """
+    return _looks_like_webui_token(token)
