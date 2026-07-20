@@ -182,10 +182,20 @@ class TestRouteTenantFailClosed(unittest.TestCase):
     def test_projects_notenant_non_admin_leaks_no_cross_tenant_rows(self):
         # Seed a project owned by tenant_user (tenant 7) and verify the
         # no-tenant non-admin (user 11) cannot see it via GET /api/projects.
+        #
+        # Isolation: snapshot existing projects rows, truncate, seed our
+        # fixture, then restore the snapshot in ``finally`` so the test does
+        # not pollute sibling tests that may rely on a pre-seeded table
+        # (Issue #1859 review follow-up).
         import app.routes.projects as projects_mod
 
-        with projects_mod.project_repo.db.get_connection() as conn:
+        db = projects_mod.project_repo.db
+        with db.get_connection() as conn:
             cursor = conn.cursor()
+            snapshot = cursor.execute("SELECT * FROM projects").fetchall()
+            cols = (
+                [d[0] for d in cursor.description] if cursor.description else []
+            )
             cursor.execute("DELETE FROM projects")
             cursor.execute(
                 "INSERT INTO projects (path, name, created_by, is_shared, tenant_id) "
@@ -200,8 +210,16 @@ class TestRouteTenantFailClosed(unittest.TestCase):
             self.assertNotIn("Tenant Seven Secret", names)
             self.assertEqual(names, [])
         finally:
-            with projects_mod.project_repo.db.get_connection() as conn:
-                conn.cursor().execute("DELETE FROM projects")
+            with db.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM projects")
+                if snapshot and cols:
+                    placeholders = ", ".join(["?"] * len(cols))
+                    col_list = ", ".join(cols)
+                    cursor.executemany(
+                        f"INSERT INTO projects ({col_list}) VALUES ({placeholders})",
+                        [tuple(row) for row in snapshot],
+                    )
                 conn.commit()
 
     # --- admins keep global scope (must NOT be locked out) ---

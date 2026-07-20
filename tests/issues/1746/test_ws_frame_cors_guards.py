@@ -145,22 +145,46 @@ class TestCorsPolicy:
         """Issue #1859: LAN IP access must allow the WebUI iframe origin.
 
         When the browser reaches the backend via a non-loopback address (e.g.
-        ``http://192.168.1.237:5000``), the per-user qwen-code-webui iframe
+        ``http://198.51.100.1:5000``), the per-user qwen-code-webui iframe
         is served on a webui port using the same hostname
-        (``http://192.168.1.237:3101``). The backend must emit CORS headers
+        (``http://198.51.100.1:3101``). The backend must emit CORS headers
         for that origin so the iframe's credentialed API calls are not blocked
         by the browser ("NetworkError when attempting to fetch resource.").
+
+        Uses RFC 5737 TEST-NET-2 documentation address to avoid embedding
+        real infrastructure IPs in the repo.
         """
         client = cors_app.test_client()
 
         resp = client.get(
             "/api/ping",
-            headers={"Origin": "http://192.168.1.237:3101"},
-            base_url="http://192.168.1.237:5000",
+            headers={"Origin": "http://198.51.100.1:3101"},
+            base_url="http://198.51.100.1:5000",
         )
 
         assert resp.status_code == 200
-        assert resp.headers["Access-Control-Allow-Origin"] == "http://192.168.1.237:3101"
+        assert resp.headers["Access-Control-Allow-Origin"] == "http://198.51.100.1:3101"
+        assert resp.headers["Access-Control-Allow-Credentials"] == "true"
+
+    def test_same_host_ipv6_webui_origin_is_allowed(self, cors_app):
+        """Issue #1859 review follow-up: IPv6 same-host access must work.
+
+        ``Host: [2001:db8::1]:5000`` must be parsed to ``2001:db8::1`` and
+        match the origin hostname from ``http://[2001:db8::1]:3101``. A naive
+        ``host.split(":", 1)[0]`` would yield ``"[2001"`` and fail closed.
+
+        Uses RFC 3849 documentation IPv6 prefix ``2001:db8::/32``.
+        """
+        client = cors_app.test_client()
+
+        resp = client.get(
+            "/api/ping",
+            headers={"Origin": "http://[2001:db8::1]:3101"},
+            base_url="http://[2001:db8::1]:5000",
+        )
+
+        assert resp.status_code == 200
+        assert resp.headers["Access-Control-Allow-Origin"] == "http://[2001:db8::1]:3101"
         assert resp.headers["Access-Control-Allow-Credentials"] == "true"
 
     def test_mismatched_host_webui_origin_is_not_reflected(self, cors_app):
@@ -172,7 +196,7 @@ class TestCorsPolicy:
         resp = client.get(
             "/api/ping",
             headers={"Origin": "http://evil.example:3101"},
-            base_url="http://192.168.1.237:5000",
+            base_url="http://198.51.100.1:5000",
         )
 
         assert resp.status_code == 200

@@ -12,7 +12,7 @@ import re
 import uuid
 from urllib.parse import urlparse
 
-from flask import Flask, g, jsonify, request
+from flask import Flask, g, has_request_context, jsonify, request
 from werkzeug.exceptions import HTTPException
 from werkzeug.middleware.proxy_fix import ProxyFix
 
@@ -167,11 +167,15 @@ def _is_allowed_local_webui_origin(origin: str) -> bool:
     # origin does not open a credential-reuse vector for arbitrary third
     # parties (they would have to control a webui port on the same host the
     # victim is browsing).
+    #
+    # Parse the Host header via ``urlparse("//" + host)`` so IPv6 literals
+    # (e.g. ``[2001:db8::1]:5000``) are normalized to the bare address
+    # (``2001:db8::1``), matching ``parsed.hostname``. A naive
+    # ``host.split(":", 1)[0]`` would yield ``"[2001"`` for IPv6 and silently
+    # fail closed. (Issue #1859 review follow-up.)
     try:
-        from flask import has_request_context, request
-
         if has_request_context():
-            host_header = (request.host or "").split(":", 1)[0].lower()
+            host_header = (urlparse(f"//{request.host or ''}").hostname or "").lower()
             if host_header and parsed.hostname == host_header:
                 return True
     except Exception:
