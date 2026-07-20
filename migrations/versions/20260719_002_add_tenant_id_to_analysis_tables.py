@@ -68,14 +68,21 @@ def upgrade() -> None:
 
     if "idx_daily_messages_orphan" not in dm_indexes:
         if is_postgres:
-            op.execute(
-                "CREATE INDEX idx_daily_messages_orphan ON daily_messages(date) "
-                "WHERE tenant_id IS NULL"
-            )
+            # MIG002: CONCURRENTLY avoids ACCESS EXCLUSIVE lock during build.
+            with op.get_context().autocommit_block():
+                op.create_index(
+                    "idx_daily_messages_orphan",
+                    "daily_messages",
+                    ["date"],
+                    postgresql_concurrently=True,
+                    postgresql_where=sa.text("tenant_id IS NULL"),
+                )
         else:
-            op.execute(
-                "CREATE INDEX idx_daily_messages_orphan ON daily_messages(date) "
-                "WHERE tenant_id IS NULL"
+            op.create_index(
+                "idx_daily_messages_orphan",
+                "daily_messages",
+                ["date"],
+                sqlite_where=sa.text("tenant_id IS NULL"),
             )
 
     # daily_stats
@@ -106,14 +113,21 @@ def upgrade() -> None:
 
     if "idx_daily_stats_orphan" not in ds_indexes:
         if is_postgres:
-            op.execute(
-                "CREATE INDEX idx_daily_stats_orphan ON daily_stats(date) "
-                "WHERE tenant_id IS NULL"
-            )
+            # MIG002: CONCURRENTLY avoids ACCESS EXCLUSIVE lock during build.
+            with op.get_context().autocommit_block():
+                op.create_index(
+                    "idx_daily_stats_orphan",
+                    "daily_stats",
+                    ["date"],
+                    postgresql_concurrently=True,
+                    postgresql_where=sa.text("tenant_id IS NULL"),
+                )
         else:
-            op.execute(
-                "CREATE INDEX idx_daily_stats_orphan ON daily_stats(date) "
-                "WHERE tenant_id IS NULL"
+            op.create_index(
+                "idx_daily_stats_orphan",
+                "daily_stats",
+                ["date"],
+                sqlite_where=sa.text("tenant_id IS NULL"),
             )
 
     # hourly_stats
@@ -144,45 +158,105 @@ def upgrade() -> None:
 
     if "idx_hourly_stats_orphan" not in hs_indexes:
         if is_postgres:
-            op.execute(
-                "CREATE INDEX idx_hourly_stats_orphan ON hourly_stats(date) "
-                "WHERE tenant_id IS NULL"
-            )
+            # MIG002: CONCURRENTLY avoids ACCESS EXCLUSIVE lock during build.
+            with op.get_context().autocommit_block():
+                op.create_index(
+                    "idx_hourly_stats_orphan",
+                    "hourly_stats",
+                    ["date"],
+                    postgresql_concurrently=True,
+                    postgresql_where=sa.text("tenant_id IS NULL"),
+                )
         else:
-            op.execute(
-                "CREATE INDEX idx_hourly_stats_orphan ON hourly_stats(date) "
-                "WHERE tenant_id IS NULL"
+            op.create_index(
+                "idx_hourly_stats_orphan",
+                "hourly_stats",
+                ["date"],
+                sqlite_where=sa.text("tenant_id IS NULL"),
             )
 
-    # Backfill tenant_id from user_id for daily_messages
-    conn.execute(
-        sa.text(
-            """
-            UPDATE daily_messages
-            SET tenant_id = (
-                SELECT users.tenant_id
-                FROM users
-                WHERE users.id = daily_messages.user_id
-            )
-            WHERE tenant_id IS NULL AND user_id IS NOT NULL
-            """
-        )
-    )
+    # Backfill tenant_id for daily_messages.
+    # On PostgreSQL we build a temporary single-column index on projects(path)
+    # first: the only existing projects index is (tenant_id, path), which cannot
+    # serve a path-only join (left-prefix rule), so the correlated subquery
+    # would degrade to O(rows(daily_messages) * rows(projects)) full scans.
+    if is_postgres:
+        project_indexes = _index_names(inspector, "projects")
+        if "idx_projects_path_backfill" not in project_indexes:
+            with op.get_context().autocommit_block():
+                op.create_index(
+                    "idx_projects_path_backfill",
+                    "projects",
+                    ["path"],
+                    postgresql_concurrently=True,
+                )
 
-    # Backfill tenant_id from project_path for daily_messages
-    conn.execute(
-        sa.text(
-            """
-            UPDATE daily_messages
-            SET tenant_id = (
-                SELECT projects.tenant_id
-                FROM projects
-                WHERE projects.path = daily_messages.project_path
+        # Two UPDATE ... FROM statements (matching the original semantics):
+        # first fill from users.user_id, then fill the still-NULL rows from
+        # projects.project_path. Each statement JOINs the target table to a
+        # single source table only, which is the legal PostgreSQL form
+        # (the target table cannot be referenced by alias inside FROM/JOIN).
+        conn.execute(
+            sa.text(
+                """
+                UPDATE daily_messages
+                SET tenant_id = u.tenant_id
+                FROM users u
+                WHERE daily_messages.tenant_id IS NULL
+                  AND daily_messages.user_id = u.id
+                """
             )
-            WHERE tenant_id IS NULL AND project_path IS NOT NULL
-            """
         )
-    )
+        conn.execute(
+            sa.text(
+                """
+                UPDATE daily_messages
+                SET tenant_id = p.tenant_id
+                FROM projects p
+                WHERE daily_messages.tenant_id IS NULL
+                  AND daily_messages.project_path = p.path
+                """
+            )
+        )
+
+        # Drop the backfill-only index to keep the schema clean.
+        project_indexes = _index_names(sa.inspect(conn), "projects")
+        if "idx_projects_path_backfill" in project_indexes:
+            with op.get_context().autocommit_block():
+                op.drop_index(
+                    "idx_projects_path_backfill",
+                    table_name="projects",
+                    postgresql_concurrently=True,
+                )
+    else:
+        # SQLite: no UPDATE ... FROM / no CONCURRENTLY; keep correlated
+        # subqueries (small tables, not a concern).
+        conn.execute(
+            sa.text(
+                """
+                UPDATE daily_messages
+                SET tenant_id = (
+                    SELECT users.tenant_id
+                    FROM users
+                    WHERE users.id = daily_messages.user_id
+                )
+                WHERE tenant_id IS NULL AND user_id IS NOT NULL
+                """
+            )
+        )
+        conn.execute(
+            sa.text(
+                """
+                UPDATE daily_messages
+                SET tenant_id = (
+                    SELECT projects.tenant_id
+                    FROM projects
+                    WHERE projects.path = daily_messages.project_path
+                )
+                WHERE tenant_id IS NULL AND project_path IS NOT NULL
+                """
+            )
+        )
 
 
 def downgrade() -> None:
