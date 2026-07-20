@@ -255,9 +255,7 @@ describe('LocalDirectoryBrowser', () => {
   it('navigates into a subdirectory on double-click', async () => {
     browseDirectoryMock.mockResolvedValue(
       browseResponse({
-        directories: [
-          { name: 'subdir', path: '/home/alice/subdir', is_writable: true },
-        ],
+        directories: [{ name: 'subdir', path: '/home/alice/subdir', is_writable: true }],
       })
     );
 
@@ -295,16 +293,10 @@ describe('LocalDirectoryBrowser', () => {
   // action button should read "Open Session Here" and show the path that
   // will be used, instead of the misleading "Select" label.
   it('renders "Open Session Here" button and path preview when hideManualInput=true', async () => {
-    browseDirectoryMock.mockResolvedValue(
-      browseResponse({ path: '/home/alice' })
-    );
+    browseDirectoryMock.mockResolvedValue(browseResponse({ path: '/home/alice' }));
 
     render(
-      <LocalDirectoryBrowser
-        initialPath="/home/alice"
-        onSelectPath={() => {}}
-        hideManualInput
-      />
+      <LocalDirectoryBrowser initialPath="/home/alice" onSelectPath={() => {}} hideManualInput />
     );
 
     await waitFor(() => {

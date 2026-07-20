@@ -592,7 +592,7 @@ export const LocalDirectoryBrowser: React.FC<LocalDirectoryBrowserProps> = ({
                 >
                   <div className="d-flex align-items-center text-truncate">
                     <i
-                      className="bi bi-folder-fill me-2 text-warning"
+                      className="bi bi-folder-fill me-2"
                       role="img"
                       aria-label={t('folder', language) || 'Folder'}
                     />
@@ -620,7 +620,7 @@ export const LocalDirectoryBrowser: React.FC<LocalDirectoryBrowserProps> = ({
                   >
                     <div className="text-truncate">
                       <i
-                        className="bi bi-file-earmark me-2 text-muted"
+                        className="bi bi-file-earmark me-2"
                         role="img"
                         aria-label={t('file', language) || 'File'}
                       />
