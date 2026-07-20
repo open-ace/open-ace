@@ -68,14 +68,21 @@ def upgrade() -> None:
 
     if "idx_daily_messages_orphan" not in dm_indexes:
         if is_postgres:
-            op.execute(
-                "CREATE INDEX idx_daily_messages_orphan ON daily_messages(date) "
-                "WHERE tenant_id IS NULL"
-            )
+            # MIG002: CONCURRENTLY avoids ACCESS EXCLUSIVE lock during build.
+            with op.get_context().autocommit_block():
+                op.create_index(
+                    "idx_daily_messages_orphan",
+                    "daily_messages",
+                    ["date"],
+                    postgresql_concurrently=True,
+                    postgresql_where=sa.text("tenant_id IS NULL"),
+                )
         else:
-            op.execute(
-                "CREATE INDEX idx_daily_messages_orphan ON daily_messages(date) "
-                "WHERE tenant_id IS NULL"
+            op.create_index(
+                "idx_daily_messages_orphan",
+                "daily_messages",
+                ["date"],
+                sqlite_where=sa.text("tenant_id IS NULL"),
             )
 
     # daily_stats
@@ -106,14 +113,21 @@ def upgrade() -> None:
 
     if "idx_daily_stats_orphan" not in ds_indexes:
         if is_postgres:
-            op.execute(
-                "CREATE INDEX idx_daily_stats_orphan ON daily_stats(date) "
-                "WHERE tenant_id IS NULL"
-            )
+            # MIG002: CONCURRENTLY avoids ACCESS EXCLUSIVE lock during build.
+            with op.get_context().autocommit_block():
+                op.create_index(
+                    "idx_daily_stats_orphan",
+                    "daily_stats",
+                    ["date"],
+                    postgresql_concurrently=True,
+                    postgresql_where=sa.text("tenant_id IS NULL"),
+                )
         else:
-            op.execute(
-                "CREATE INDEX idx_daily_stats_orphan ON daily_stats(date) "
-                "WHERE tenant_id IS NULL"
+            op.create_index(
+                "idx_daily_stats_orphan",
+                "daily_stats",
+                ["date"],
+                sqlite_where=sa.text("tenant_id IS NULL"),
             )
 
     # hourly_stats
@@ -144,45 +158,97 @@ def upgrade() -> None:
 
     if "idx_hourly_stats_orphan" not in hs_indexes:
         if is_postgres:
-            op.execute(
-                "CREATE INDEX idx_hourly_stats_orphan ON hourly_stats(date) "
-                "WHERE tenant_id IS NULL"
-            )
+            # MIG002: CONCURRENTLY avoids ACCESS EXCLUSIVE lock during build.
+            with op.get_context().autocommit_block():
+                op.create_index(
+                    "idx_hourly_stats_orphan",
+                    "hourly_stats",
+                    ["date"],
+                    postgresql_concurrently=True,
+                    postgresql_where=sa.text("tenant_id IS NULL"),
+                )
         else:
-            op.execute(
-                "CREATE INDEX idx_hourly_stats_orphan ON hourly_stats(date) "
-                "WHERE tenant_id IS NULL"
+            op.create_index(
+                "idx_hourly_stats_orphan",
+                "hourly_stats",
+                ["date"],
+                sqlite_where=sa.text("tenant_id IS NULL"),
             )
 
-    # Backfill tenant_id from user_id for daily_messages
-    conn.execute(
-        sa.text(
-            """
-            UPDATE daily_messages
-            SET tenant_id = (
-                SELECT users.tenant_id
-                FROM users
-                WHERE users.id = daily_messages.user_id
+    # Backfill tenant_id for daily_messages.
+    # On PostgreSQL we use UPDATE ... FROM (the only legal form for JOINing a
+    # target table to a source table — the target cannot be aliased inside
+    # FROM/JOIN). This lets the planner pick hash/merge join instead of the
+    # per-row nested loop a correlated subquery forces, which is the main win.
+    # No temporary index on projects(path) is needed: EXPLAIN on a 430k-row
+    # table shows the planner choosing a nested loop with projects as the
+    # inner (tiny, seq-scanned) side and using the *existing*
+    # idx_messages_project_path on the daily_messages side. A projects(path)
+    # index was never reached, so building one would be pure overhead.
+    if is_postgres:
+        # Two UPDATE ... FROM statements matching the original semantics:
+        # first fill from users.user_id, then fill still-NULL rows from
+        # projects.project_path. user_id is safe (users.id is a PK, globally
+        # unique). For project_path: projects.path is NOT globally unique
+        # (uq_projects_path is (tenant_id, path) WHERE is_active, so the same
+        # path can repeat across tenants or for inactive rows). The original
+        # correlated-subquery form raised "more than one row returned" if a
+        # path matched multiple projects; this UPDATE ... FROM form instead
+        # silently picks one. Given current data has no duplicate paths and
+        # the project_path backfill matches ~0 rows anyway (format mismatch,
+        # see PR #1885), the practical impact is nil — flagged here so the
+        # behavior change is explicit, not accidental.
+        conn.execute(
+            sa.text(
+                """
+                UPDATE daily_messages
+                SET tenant_id = u.tenant_id
+                FROM users u
+                WHERE daily_messages.tenant_id IS NULL
+                  AND daily_messages.user_id = u.id
+                """
             )
-            WHERE tenant_id IS NULL AND user_id IS NOT NULL
-            """
         )
-    )
-
-    # Backfill tenant_id from project_path for daily_messages
-    conn.execute(
-        sa.text(
-            """
-            UPDATE daily_messages
-            SET tenant_id = (
-                SELECT projects.tenant_id
-                FROM projects
-                WHERE projects.path = daily_messages.project_path
+        conn.execute(
+            sa.text(
+                """
+                UPDATE daily_messages
+                SET tenant_id = p.tenant_id
+                FROM projects p
+                WHERE daily_messages.tenant_id IS NULL
+                  AND daily_messages.project_path = p.path
+                """
             )
-            WHERE tenant_id IS NULL AND project_path IS NOT NULL
-            """
         )
-    )
+    else:
+        # SQLite: no UPDATE ... FROM / no CONCURRENTLY; keep correlated
+        # subqueries (small tables, not a concern).
+        conn.execute(
+            sa.text(
+                """
+                UPDATE daily_messages
+                SET tenant_id = (
+                    SELECT users.tenant_id
+                    FROM users
+                    WHERE users.id = daily_messages.user_id
+                )
+                WHERE tenant_id IS NULL AND user_id IS NOT NULL
+                """
+            )
+        )
+        conn.execute(
+            sa.text(
+                """
+                UPDATE daily_messages
+                SET tenant_id = (
+                    SELECT projects.tenant_id
+                    FROM projects
+                    WHERE projects.path = daily_messages.project_path
+                )
+                WHERE tenant_id IS NULL AND project_path IS NOT NULL
+                """
+            )
+        )
 
 
 def downgrade() -> None:
