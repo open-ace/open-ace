@@ -378,7 +378,9 @@ def _chown_to_user(path: str, system_account: str | None) -> bool:
                 timeout=30,
             )
             if r.returncode != 0:
-                logger.warning(f"openace-chown failed for {path} -> {system_account}: {r.stderr}")
+                logger.warning(
+                    f"openace-chown failed for {path} -> {system_account}: {r.stderr}"
+                )
                 return False
             return True
         r = run_as_root_if_needed(["chown", f"{uid}:{gid}", path])
@@ -393,7 +395,9 @@ def _chown_to_user(path: str, system_account: str | None) -> bool:
         return False
 
 
-def _resolve_file_in_home(raw_path: str, user) -> tuple[str, str | None] | tuple[None, None]:
+def _resolve_file_in_home(
+    raw_path: str, user
+) -> tuple[str, str | None] | tuple[None, None]:
     """Validate that *raw_path* resolves to a file inside the user's home subtree.
 
     Single source of truth for download/delete file-path validation. Combines:
@@ -515,7 +519,11 @@ def api_browse_directory():
 
     # include_files is opt-in via ?include_files=1 so existing callers
     # (directory selector, remote workspace fallback) are unaffected.
-    include_files = request.args.get("include_files", "").lower() in ("1", "true", "yes")
+    include_files = request.args.get("include_files", "").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
 
     # Get path parameter
     path = request.args.get("path", "")
@@ -528,7 +536,10 @@ def api_browse_directory():
         base_dirs = get_workspace_base_dirs()
         if not is_valid_path(path, allowed_prefixes=base_dirs):
             allowed_paths = ", ".join(base_dirs)
-            return jsonify({"error": f"Path must be under one of: {allowed_paths}"}), 400
+            return (
+                jsonify({"error": f"Path must be under one of: {allowed_paths}"}),
+                400,
+            )
 
         path = os.path.realpath(path)
 
@@ -551,7 +562,9 @@ def api_browse_directory():
                     "directories": listing["directories"],
                     "files": listing["files"],
                     "homePath": home,
-                    "canCreate": get_directory_info(home, system_account).get("is_writable", False),
+                    "canCreate": get_directory_info(home, system_account).get(
+                        "is_writable", False
+                    ),
                 },
             }
         )
@@ -620,7 +633,9 @@ def list_subdirectories(
             # mostly root-owned .qwen configs / migrated files).
             ls_result = run_as_user(effective_system_account, ["ls", "-1", path])
             if ls_result.returncode != 0:
-                logger.warning(f"Permission denied accessing {path} as {system_account}")
+                logger.warning(
+                    f"Permission denied accessing {path} as {system_account}"
+                )
                 return {"directories": directories, "files": files}
 
             raw_entries = ls_result.stdout.split("\n") if ls_result.stdout else []
@@ -938,17 +953,28 @@ def api_create_directory():
                 }
             )
         else:
-            return jsonify({"success": False, "error": "Path exists but is not a directory"}), 400
+            return (
+                jsonify(
+                    {"success": False, "error": "Path exists but is not a directory"}
+                ),
+                400,
+            )
 
     # Check if parent directory is writable
     parent = str(Path(dir_path).parent)
     parent_info = get_directory_info(parent, system_account)
 
     if not parent_info["exists"]:
-        return jsonify({"success": False, "error": "Parent directory does not exist"}), 400
+        return (
+            jsonify({"success": False, "error": "Parent directory does not exist"}),
+            400,
+        )
 
     if not parent_info["is_writable"]:
-        return jsonify({"success": False, "error": "Parent directory is not writable"}), 403
+        return (
+            jsonify({"success": False, "error": "Parent directory is not writable"}),
+            403,
+        )
 
     # Create the directory
     try:
@@ -957,10 +983,15 @@ def api_create_directory():
             # Use sudo to create directory as the specified user
             result = run_as_user(effective_system_account, ["mkdir", "-p", dir_path])
             if result.returncode != 0:
-                logger.error(f"Failed to create directory as {system_account}: {result.stderr}")
+                logger.error(
+                    f"Failed to create directory as {system_account}: {result.stderr}"
+                )
                 return (
                     jsonify(
-                        {"success": False, "error": f"Failed to create directory: {result.stderr}"}
+                        {
+                            "success": False,
+                            "error": f"Failed to create directory: {result.stderr}",
+                        }
                     ),
                     403,
                 )
@@ -983,7 +1014,10 @@ def api_create_directory():
         return jsonify({"success": False, "error": "Timeout creating directory"}), 500
     except Exception as e:
         logger.error(f"Error creating directory: {e}")
-        return jsonify({"success": False, "error": f"Failed to create directory: {e}"}), 500
+        return (
+            jsonify({"success": False, "error": f"Failed to create directory: {e}"}),
+            500,
+        )
 
 
 # ============================================================
@@ -1075,7 +1109,9 @@ def api_upload_file():
                     # or delete their own upload. Roll back and fail hard.
                     _safe_remove(tmp_path)
                     return (
-                        jsonify({"error": "Failed to set file ownership for target user"}),
+                        jsonify(
+                            {"error": "Failed to set file ownership for target user"}
+                        ),
                         500,
                     )
                 os.replace(tmp_path, target_path)
@@ -1148,9 +1184,7 @@ def _filesize_as_user(target_path: str, system_account: str | None) -> int | Non
 
     effective = get_effective_system_account(system_account)
     assert effective is not None  # _is_direct_access 为 False 时 effective 必定非 None
-    result = run_as_user(
-        effective, ["stat", "-c", "%s", target_path]
-    )
+    result = run_as_user(effective, ["stat", "-c", "%s", target_path])
     if result.returncode != 0:
         return None
     try:
@@ -1272,13 +1306,13 @@ def api_delete_file():
             os.remove(target_path)
         else:
             effective = get_effective_system_account(system_account)
-            assert effective is not None  # _is_direct_access 为 False 时 effective 必定非 None
+            assert (
+                effective is not None
+            )  # _is_direct_access 为 False 时 effective 必定非 None
             result = run_as_user(effective, ["rm", "--", target_path])
             if result.returncode != 0:
                 stderr = (result.stderr or "").strip()
-                logger.warning(
-                    f"rm as {effective} failed for {target_path}: {stderr}"
-                )
+                logger.warning(f"rm as {effective} failed for {target_path}: {stderr}")
                 # sudoers policy denial vs. filesystem permission error
                 if "not allowed" in stderr.lower() or "sudo" in stderr.lower():
                     return (
