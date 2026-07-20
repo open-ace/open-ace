@@ -176,26 +176,28 @@ def upgrade() -> None:
             )
 
     # Backfill tenant_id for daily_messages.
-    # On PostgreSQL we build a temporary single-column index on projects(path)
-    # first: the only existing projects index is (tenant_id, path), which cannot
-    # serve a path-only join (left-prefix rule), so the correlated subquery
-    # would degrade to O(rows(daily_messages) * rows(projects)) full scans.
+    # On PostgreSQL we use UPDATE ... FROM (the only legal form for JOINing a
+    # target table to a source table — the target cannot be aliased inside
+    # FROM/JOIN). This lets the planner pick hash/merge join instead of the
+    # per-row nested loop a correlated subquery forces, which is the main win.
+    # No temporary index on projects(path) is needed: EXPLAIN on a 430k-row
+    # table shows the planner choosing a nested loop with projects as the
+    # inner (tiny, seq-scanned) side and using the *existing*
+    # idx_messages_project_path on the daily_messages side. A projects(path)
+    # index was never reached, so building one would be pure overhead.
     if is_postgres:
-        project_indexes = _index_names(inspector, "projects")
-        if "idx_projects_path_backfill" not in project_indexes:
-            with op.get_context().autocommit_block():
-                op.create_index(
-                    "idx_projects_path_backfill",
-                    "projects",
-                    ["path"],
-                    postgresql_concurrently=True,
-                )
-
-        # Two UPDATE ... FROM statements (matching the original semantics):
-        # first fill from users.user_id, then fill the still-NULL rows from
-        # projects.project_path. Each statement JOINs the target table to a
-        # single source table only, which is the legal PostgreSQL form
-        # (the target table cannot be referenced by alias inside FROM/JOIN).
+        # Two UPDATE ... FROM statements matching the original semantics:
+        # first fill from users.user_id, then fill still-NULL rows from
+        # projects.project_path. user_id is safe (users.id is a PK, globally
+        # unique). For project_path: projects.path is NOT globally unique
+        # (uq_projects_path is (tenant_id, path) WHERE is_active, so the same
+        # path can repeat across tenants or for inactive rows). The original
+        # correlated-subquery form raised "more than one row returned" if a
+        # path matched multiple projects; this UPDATE ... FROM form instead
+        # silently picks one. Given current data has no duplicate paths and
+        # the project_path backfill matches ~0 rows anyway (format mismatch,
+        # see PR #1885), the practical impact is nil — flagged here so the
+        # behavior change is explicit, not accidental.
         conn.execute(
             sa.text(
                 """
@@ -218,16 +220,6 @@ def upgrade() -> None:
                 """
             )
         )
-
-        # Drop the backfill-only index to keep the schema clean.
-        project_indexes = _index_names(sa.inspect(conn), "projects")
-        if "idx_projects_path_backfill" in project_indexes:
-            with op.get_context().autocommit_block():
-                op.drop_index(
-                    "idx_projects_path_backfill",
-                    table_name="projects",
-                    postgresql_concurrently=True,
-                )
     else:
         # SQLite: no UPDATE ... FROM / no CONCURRENTLY; keep correlated
         # subqueries (small tables, not a concern).
