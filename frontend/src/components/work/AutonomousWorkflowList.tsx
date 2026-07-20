@@ -488,21 +488,21 @@ export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
           onClick={() => onSelect(workflow)}
         >
           {compact ? (
-            <div className="d-flex align-items-start justify-content-between gap-2">
-              <div className="min-width-0">
-                <div className="d-flex align-items-center gap-2 flex-wrap">
-                  <div className="auto-workflow-issue-label">
+            <span className="d-flex align-items-start justify-content-between gap-2">
+              <span className="d-block min-width-0">
+                <span className="d-flex align-items-center gap-2 flex-wrap">
+                  <span className="auto-workflow-issue-label">
                     {isForkChild && <i className="bi bi-diagram-3 text-info me-1"></i>}
                     {getIssueLabel(workflow)}
-                  </div>
+                  </span>
                   {workflow.batch_order && workflow.batch_total && (
                     <Badge variant="light">
                       {workflow.batch_order}/{workflow.batch_total}
                     </Badge>
                   )}
                   {workflow.dev_round > 1 && <Badge variant="light">R{workflow.dev_round}</Badge>}
-                </div>
-                <div className="d-flex align-items-center gap-1 mt-2 flex-wrap">
+                </span>
+                <span className="d-flex align-items-center gap-1 mt-2 flex-wrap">
                   <Badge
                     variant={
                       statusCfg.variant as
@@ -522,20 +522,20 @@ export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
                       {t('autoForkedFrom', language)}
                     </Badge>
                   )}
-                </div>
-              </div>
-            </div>
+                </span>
+              </span>
+            </span>
           ) : (
             <>
-              <div className="fw-semibold text-truncate auto-workflow-title">
+              <span className="d-block fw-semibold text-truncate auto-workflow-title">
                 {isForkChild && (
                   <i className="bi bi-diagram-3 text-info me-1" style={{ fontSize: '0.75rem' }}></i>
                 )}
                 {workflow.title ||
                   workflow.requirements_text?.slice(0, 50) ||
                   `Workflow ${workflow.workflow_id.slice(0, 8)}`}
-              </div>
-              <div className="d-flex align-items-center gap-1 mt-1 flex-wrap">
+              </span>
+              <span className="d-flex align-items-center gap-1 mt-1 flex-wrap">
                 <Badge
                   variant={
                     statusCfg.variant as
@@ -561,14 +561,14 @@ export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
                     {t('autoForkedFrom', language)}
                   </Badge>
                 )}
-              </div>
-              <div className="text-muted mt-1 auto-workflow-meta">
+              </span>
+              <span className="d-block text-muted mt-1 auto-workflow-meta">
                 <i
                   className={`bi ${workflow.workspace_type === 'remote' ? 'bi-cloud' : 'bi-laptop'} me-1`}
                 ></i>
                 {workflow.cli_tool}
                 {workflowDate && <span className="ms-2">{workflowDate}</span>}
-              </div>
+              </span>
             </>
           )}
         </button>

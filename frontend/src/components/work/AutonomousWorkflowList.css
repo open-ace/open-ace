@@ -41,7 +41,6 @@
 }
 
 .auto-workflow-item {
-  cursor: pointer;
   border-bottom: 1px solid rgba(15, 23, 42, 0.06) !important;
   background: var(--bg-primary);
 }

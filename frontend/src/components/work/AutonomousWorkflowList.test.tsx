@@ -147,20 +147,21 @@ describe('AutonomousWorkflowList', () => {
       }),
     ]);
 
-    render(
+    const { container } = render(
       <AutonomousWorkflowList selectedId={null} onSelect={onSelect} onClearSelection={vi.fn()} />
     );
 
     const workflowButton = screen.getByRole('button', { name: 'Keyboard workflow' });
     expect(workflowButton.tagName).toBe('BUTTON');
+    expect(workflowButton.querySelector('div')).toBeNull();
     onSelect.mockClear();
     fireEvent.click(workflowButton);
 
     expect(onSelect).toHaveBeenCalledWith(
       expect.objectContaining({ workflow_id: 'wf-1', title: 'Keyboard workflow' })
     );
-    expect(screen.getByRole('textbox', { name: 'Search workflows...' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Delete' })).toBeInTheDocument();
+    expect(screen.getByRole('textbox')).toHaveAttribute('aria-label');
+    expect(container.querySelector('.auto-workflow-delete-btn')).toHaveAttribute('aria-label');
   });
 
   it('requests the next page with a 50 item offset', () => {
