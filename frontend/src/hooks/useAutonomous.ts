@@ -66,7 +66,6 @@ export interface AgentActivity {
   total_output_tokens?: number;
   // system-type fields
   subtype?: string;
-  estimated_tokens?: number;
   attempt?: number;
 }
 

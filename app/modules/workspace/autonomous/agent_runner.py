@@ -989,7 +989,12 @@ class AutonomousAgentRunner:
         if not project_path:
             return ""
         resolved = os.path.realpath(project_path)
-        return resolved.replace("/", "-")
+        # Claude Code 2.1.201's embedded project-path diagnostic specifies
+        # ``pwd | sed 's|[^a-zA-Z0-9]|-|g'`` (also observed in its project-dir
+        # function). In particular ``/.worktrees`` becomes ``--worktrees``;
+        # replacing slashes alone leaves ``-.worktrees`` and misses the
+        # directory the CLI actually created.
+        return re.sub(r"[^A-Za-z0-9]", "-", resolved)
 
     def _find_latest_claude_session_id(
         self,
@@ -2834,14 +2839,17 @@ class AutonomousAgentRunner:
                         # UI showed "no AI activity" for minutes until the
                         # first `assistant` event finally arrived.
                         subtype = parsed.get("subtype", "")
+                        # This is a high-frequency cumulative estimate, not a
+                        # discrete user-visible activity. Skipping the event
+                        # also prevents one sidebar fallback probe per token.
+                        if subtype == "thinking_tokens":
+                            continue
                         if self._activity_callback and subtype:
                             activity: dict[str, Any] = {
                                 "type": "system",
                                 "subtype": subtype,
                             }
-                            if subtype == "thinking_tokens":
-                                activity["estimated_tokens"] = parsed.get("estimated_tokens", 0)
-                            elif subtype == "api_retry":
+                            if subtype == "api_retry":
                                 activity["attempt"] = parsed.get("attempt", 0)
                             self._activity_callback(session.session_id, activity)
 
