@@ -340,9 +340,9 @@ class TestCompiledPatternCache:
         cf = ContentFilter()
         pattern = r"\d+"
 
-        compiled1 = cf._get_compiled_pattern(pattern, re.IGNORECASE)
-        compiled2 = cf._get_compiled_pattern(pattern, re.MULTILINE)
-        compiled3 = cf._get_compiled_pattern(pattern, re.IGNORECASE | re.MULTILINE)
+        cf._get_compiled_pattern(pattern, re.IGNORECASE)
+        cf._get_compiled_pattern(pattern, re.MULTILINE)
+        cf._get_compiled_pattern(pattern, re.IGNORECASE | re.MULTILINE)
 
         # All should be cached separately
         assert cf._cache_misses == 3
@@ -496,7 +496,6 @@ class TestCompiledPatternCache:
         assert any(r["id"] == "test-rule" for r in result1.matched_rules)
 
         # Check cache stats
-        initial_misses = cf._cache_misses
         initial_hits = cf._cache_hits
 
         # Second check with same pattern - should hit cache
@@ -554,8 +553,22 @@ class TestCacheWithDatabaseRules:
         """测试多个规则共享同一缓存"""
         mock_repo = MagicMock()
         mock_repo.get_filter_rules.return_value = [
-            {"id": "rule-1", "pattern": r"\d+", "type": "regex", "action": "warn", "severity": "medium", "is_enabled": True},
-            {"id": "rule-2", "pattern": r"[a-z]+", "type": "regex", "action": "warn", "severity": "medium", "is_enabled": True},
+            {
+                "id": "rule-1",
+                "pattern": r"\d+",
+                "type": "regex",
+                "action": "warn",
+                "severity": "medium",
+                "is_enabled": True,
+            },
+            {
+                "id": "rule-2",
+                "pattern": r"[a-z]+",
+                "type": "regex",
+                "action": "warn",
+                "severity": "medium",
+                "is_enabled": True,
+            },
         ]
 
         cf = ContentFilter(governance_repo=mock_repo)
