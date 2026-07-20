@@ -5130,8 +5130,16 @@ class AutonomousOrchestrator:
                 # 推送失败必须阻止后续 PR 创建，避免 "No commits" 错误 (Issue #1736)
                 raise RuntimeError(f"Branch push failed before PR creation: {e}") from e
 
-        # Create PR on first round
-        if round_num == 1:
+        # Create PR on first round (idempotent: skip if a PR already exists for
+        # this workflow). advance() is reentrant — the scheduler may call it
+        # again while a review agent is still running and current_round hasn't
+        # been persisted yet (it's written at the end of the review round). On
+        # re-entry round_num is still 1, so without this guard the workflow
+        # would call gh pr create again and hit "a pull request ... already
+        # exists", failing the whole workflow (#1857). Checking github_pr_number
+        # covers both re-entry and process-restart resume.
+        existing_pr_number = wf.get("github_pr_number") or self.workflow.get("github_pr_number")
+        if round_num == 1 and not existing_pr_number:
             try:
                 # Build PR body with issue linkage
                 pr_body = f"Autonomous development for dev round {dev_round}.\n\nRequirements: {wf.get('requirements_text', '')}"
@@ -5162,14 +5170,44 @@ class AutonomousOrchestrator:
                     }
                 )
             except GitHubOpsError as e:
-                self._create_milestone(
-                    phase="pr_review",
-                    milestone_type="pr_created",
-                    status="failed",
-                    title="PR creation failed",
-                    error_message=str(e),
-                )
-                raise
+                # Graceful recovery: if gh reports a PR already exists for this
+                # branch (race between the guard above and the API call), look
+                # up the existing PR and reuse it instead of failing the
+                # workflow. Reaching here means github_pr_number wasn't set yet
+                # but the PR was created by a concurrent advance() call.
+                existing = gh.find_existing_pr(branch_name)
+                if existing:
+                    pr_number = existing.get("number")
+                    pr_url = existing.get("url", "")
+                    logger.warning(
+                        "PR create for %s returned 'already exists'; reusing PR #%s",
+                        branch_name,
+                        pr_number,
+                    )
+                    self._create_milestone(
+                        phase="pr_review",
+                        dev_round=dev_round,
+                        milestone_type="pr_created",
+                        status="completed",
+                        title=f"PR #{pr_number} already exists (reused)",
+                        github_pr_number=pr_number,
+                        result_summary=pr_url,
+                    )
+                    self._update_workflow(
+                        {
+                            "github_pr_number": pr_number,
+                            "github_pr_url": pr_url,
+                        }
+                    )
+                else:
+                    self._create_milestone(
+                        phase="pr_review",
+                        milestone_type="pr_created",
+                        status="failed",
+                        title="PR creation failed",
+                        error_message=str(e),
+                    )
+                    raise
 
             # Check CI status after PR creation — poll until finished or timeout
             if pr_number:

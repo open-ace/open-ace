@@ -720,6 +720,39 @@ class GitHubOps:
         )
         return json.loads(result.stdout.strip())
 
+    def find_existing_pr(self, head_branch: str) -> Optional[dict]:
+        """Find an existing open PR for a head branch.
+
+        Returns the first matching PR dict ({number, url, title, ...}) or None.
+        Used by the PR-creation path to recover gracefully when gh pr create
+        reports "already exists" (race between the github_pr_number guard and
+        the API call, or a re-entrant advance()).
+        """
+        if not head_branch:
+            return None
+        result = self._run_gh(
+            [
+                "pr",
+                "list",
+                "--head",
+                head_branch,
+                "--state",
+                "open",
+                "--json",
+                "number,url,title",
+                "--limit",
+                "1",
+            ],
+            check=False,
+        )
+        if result.returncode != 0:
+            return None
+        try:
+            prs = json.loads((result.stdout or "").strip() or "[]")
+        except json.JSONDecodeError:
+            return None
+        return prs[0] if prs else None
+
     def add_pr_comment(self, number: int, body: str) -> dict:
         """Add a comment to a PR."""
         self._run_gh(["pr", "comment", str(number), "--body", body])
