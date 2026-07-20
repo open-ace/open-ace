@@ -25,7 +25,6 @@ from typing import Any
 from flask import Blueprint, Response, g, jsonify, request, stream_with_context
 
 from app.auth.decorators import (
-    _extract_url_token,
     admin_required,
     enforce_password_change_requirement,
 )
@@ -1196,7 +1195,8 @@ def agent_message():
         else:
             d = (data.get("data") or "")[:200]
         print(
-            f"AGENT-DEBUG type={msg_type} sid={(data.get('session_id') or '')[:8]} status={status} stream={stream} data={d}",
+            f"AGENT-DEBUG type={msg_type} sid={(data.get('session_id') or '')[:8]} "
+            f"status={status} stream={stream} data={d}",
             file=sys.stderr,
             flush=True,
         )

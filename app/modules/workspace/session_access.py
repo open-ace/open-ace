@@ -13,7 +13,6 @@ Centralises two things the remote and run-timeline blueprints otherwise duplicat
 """
 
 from __future__ import annotations
-from __future__ import annotations
 
 import logging
 from typing import Any
@@ -21,6 +20,7 @@ from typing import Any
 from flask import g, jsonify, request
 
 from app.auth.decorators import (
+    _extract_session_token,
     _extract_url_token,
     _load_user_from_token,
     _looks_like_webui_token,
@@ -78,7 +78,7 @@ def _apply_user(user: dict[str, Any]) -> None:
 
 def _set_user_from_token() -> bool:
     """Load g.user from the session/Authorization token. Returns True on success."""
-    token = _extract_token()
+    token = _extract_session_token()
     if not token:
         return False
     user = _load_user_from_token(token)
