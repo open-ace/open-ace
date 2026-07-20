@@ -1133,6 +1133,7 @@ def _check_file_as_user(
         return False
 
     effective = get_effective_system_account(system_account)
+    assert effective is not None  # _is_direct_access 为 False 时 effective 必定非 None
     result = run_as_user(effective, ["test", flag, target_path])
     return result.returncode == 0
 
@@ -1146,6 +1147,7 @@ def _filesize_as_user(target_path: str, system_account: str | None) -> int | Non
             return None
 
     effective = get_effective_system_account(system_account)
+    assert effective is not None  # _is_direct_access 为 False 时 effective 必定非 None
     result = run_as_user(
         effective, ["stat", "-c", "%s", target_path]
     )
@@ -1175,6 +1177,7 @@ def _stream_file_as_user(target_path: str, system_account: str | None):
         return
 
     effective = get_effective_system_account(system_account)
+    assert effective is not None  # _is_direct_access 为 False 时 effective 必定非 None
     # Don't use run_as_user() here — it uses subprocess.run with a 10s
     # timeout and capture_output=True, which would buffer the whole file
     # in memory and time out on large downloads. Popen lets us stream.
@@ -1269,6 +1272,7 @@ def api_delete_file():
             os.remove(target_path)
         else:
             effective = get_effective_system_account(system_account)
+            assert effective is not None  # _is_direct_access 为 False 时 effective 必定非 None
             result = run_as_user(effective, ["rm", "--", target_path])
             if result.returncode != 0:
                 stderr = (result.stderr or "").strip()
