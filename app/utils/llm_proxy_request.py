@@ -244,8 +244,7 @@ def _classify_rejection_reason(url: str, validation_result: Any) -> str:
         return "link_local"
 
     if any(
-        term in error_msg.lower()
-        for term in ["private", "10.", "172.", "192.168", "fc00", "fe80"]
+        term in error_msg.lower() for term in ["private", "10.", "172.", "192.168", "fc00", "fe80"]
     ):
         return "private_ip"
 

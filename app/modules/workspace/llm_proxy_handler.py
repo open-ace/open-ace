@@ -869,7 +869,11 @@ def handle_llm_proxy_request(
                 503,
             )
         return _forward_via_gateway(
-            _gateway_plan, session_id=session_id, user_id=user_id, provider=provider, tenant_id=tenant_id
+            _gateway_plan,
+            session_id=session_id,
+            user_id=user_id,
+            provider=provider,
+            tenant_id=tenant_id,
         )
     # ── end model-gateway seam ───────────────────────────────────────────
 
