@@ -26,29 +26,18 @@ def test_zcode_shown_on_all_platforms(monkeypatch):
     assert len(zcode_items) == 1, "ZCode should appear in menu on all platforms"
 
 
-def test_zcode_shows_manual_instructions_on_windows(monkeypatch):
-    """ZCode should show manual installation instructions on Windows."""
+def test_zcode_uses_npm_install(monkeypatch):
+    """ZCode should use npm install like other tools."""
     terminal_menu = load_terminal_menu()
-    shown_messages = []
-
-    def fake_show_message(msg):
-        shown_messages.append(msg)
-
-    monkeypatch.setattr(terminal_menu, "IS_WINDOWS", True)
-    monkeypatch.setattr(terminal_menu, "show_message", fake_show_message)
-    monkeypatch.setattr(terminal_menu, "wait_for_continue", lambda: None)
 
     # Find ZCode tool definition
     items = terminal_menu.get_menu_items()
     zcode_item = next(item for item in items if item.get("cli") == "zcode")
-    zcode_item["installed"] = False
-    zcode_item["configured"] = True
 
-    terminal_menu.handle_select(zcode_item)
-
-    # Should show manual instructions, not execute install command
-    assert len(shown_messages) == 1
-    assert "manual setup" in shown_messages[0].lower() or "requires manual" in shown_messages[0].lower()
+    # Should use npm install command
+    install_cmd = zcode_item.get("install_cmd", "")
+    assert "npm install" in install_cmd, f"ZCode should use npm install, got: {install_cmd}"
+    assert "zcode-cli" in install_cmd, f"Should install zcode-cli package, got: {install_cmd}"
 
 
 def test_npm_tools_show_error_when_nodejs_missing_on_windows(monkeypatch):

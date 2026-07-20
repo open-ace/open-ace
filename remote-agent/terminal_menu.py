@@ -44,18 +44,9 @@ TOOLS = [
         "name": "ZCode",
         "cli": "zcode",
         "cmd": "zcode",
-        # macOS: symlink from bundled engine inside the desktop app.
-        # Windows: ZCode desktop app bundles zcode.cjs, but path varies by installation method.
-        # Show manual installation instructions instead of auto-install.
-        "install_cmd": "sudo ln -s /Applications/ZCode.app/Contents/Resources/glm/zcode.cjs /usr/local/bin/zcode",
-        # Windows: show manual installation instructions
-        "install_instructions_win": (
-            "ZCode CLI requires manual setup on Windows:\n"
-            "  1. Install ZCode desktop app from official website\n"
-            "  2. Find zcode.cjs in the installation directory (e.g., resources/glm/zcode.cjs)\n"
-            "  3. Create a batch file or add the directory to PATH\n"
-            "  Example: echo @node \"<path-to-zcode.cjs>\" %%* > %LOCALAPPDATA%\\zcode.bat"
-        ),
+        # ZCode CLI can be installed via npm (zcode-cli package).
+        # On macOS with ZCode desktop app installed, alternatively symlink the bundled engine.
+        "install_cmd": "npm install -g zcode-cli@latest",
         "env_key": "ANTHROPIC_API_KEY",
     },
 ]
