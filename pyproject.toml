@@ -4,7 +4,7 @@ version = "1.2.0"
 description = "Self-hosted enterprise AI workspace and governance platform"
 readme = "README.md"
 license = "Apache-2.0"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 authors = [
     {name = "Open ACE Team"}
 ]
@@ -24,7 +24,6 @@ classifiers = [
     "Intended Audience :: Developers",
     "Intended Audience :: System Administrators",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -34,15 +33,14 @@ classifiers = [
 ]
 dependencies = [
     "flask>=3.1.3,<4.0.0",
-    "aiohttp>=3.9.0,<4.0.0",
+    "aiohttp>=3.14.1,<4.0.0",
     "websockets>=13.0,<17.0",
-    "requests>=2.32.5,<3.0.0",
+    "requests>=2.33.0,<3.0.0",
     "bcrypt>=4.0.0,<6.0.0",
     "PyJWT>=2.12.1,<3.0.0",
     "cryptography>=44.0.0,<50.0.0",
     "signxml>=4.2.2,<5.0.0",
     "filetype>=1.2.0,<2.0.0",
-    "tomli>=2.4.1,<3.0.0; python_version < \"3.11\"",
     "gunicorn>=23.0.0,<24.0.0",
     "gevent>=23.9.1,<25.0.0",
     "werkzeug>=3.1.3,<4.0.0",
@@ -83,7 +81,7 @@ Roadmap = "https://github.com/open-ace/open-ace/blob/main/ROADMAP.md"
 # =============================================================================
 [tool.black]
 line-length = 100
-target-version = ['py39', 'py310', 'py311']
+target-version = ['py310', 'py311']
 include = '\.pyi?$'
 exclude = '''
 /(
@@ -118,7 +116,7 @@ skip = [".git", ".hg", ".mypy_cache", ".tox", ".venv", "_build", "buck-out", "bu
 # =============================================================================
 [tool.ruff]
 line-length = 100
-target-version = "py39"
+target-version = "py310"
 exclude = ["*.sh", "*.bash", "*.zsh", "docker-entrypoint.sh"]
 
 [tool.ruff.lint]
@@ -149,8 +147,6 @@ ignore = [
     "B904",  # raise without from inside except (compatibility)
     "SIM115", # open file without context handler (scripts)
     "UP031", # printf string formatting (migration risk)
-    "UP006", # use tuple instead of Tuple (Python 3.9 compatibility)
-    "UP035", # typing.Tuple deprecated (Python 3.9 compatibility)
 ]
 
 [tool.ruff.lint.per-file-ignores]
@@ -162,7 +158,7 @@ ignore = [
 # MyPy Configuration
 # =============================================================================
 [tool.mypy]
-python_version = "3.9"
+python_version = "3.10"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = false
