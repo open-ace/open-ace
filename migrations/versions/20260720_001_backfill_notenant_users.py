@@ -63,12 +63,16 @@ def backfill_null_tenant_users(conn) -> int:
         )
         return 0
 
-    result = conn.execute(sa.text("""
+    result = conn.execute(
+        sa.text(
+            """
             UPDATE users
             SET tenant_id = 1
             WHERE tenant_id IS NULL
               AND COALESCE(role, 'user') <> 'admin'
-            """))
+            """
+        )
+    )
     # ``result.rowcount`` may be -1 on some drivers; log best-effort.
     try:
         affected = result.rowcount
