@@ -12,7 +12,6 @@ import platform
 import pwd
 import subprocess
 from typing import Any, cast
-from urllib.parse import unquote
 
 from flask import Blueprint, g, jsonify, request
 
@@ -20,6 +19,7 @@ from app.auth.decorators import (
     _extract_token,
     _load_user_from_token,
     enforce_password_change_requirement,
+    normalize_webui_token,
     require_tenant_scope,
 )
 from app.repositories.project_repo import ProjectRepository
@@ -45,26 +45,6 @@ def _current_tenant_id() -> int | None:
     return tenant_id if tenant_id > 0 else None
 
 
-def _normalize_token(token: str) -> str:
-    """Normalize token that may be double-encoded.
-
-    Some clients pass URL-encoded tokens through encodeURIComponent() twice,
-    resulting in %3A becoming %253A. Flask's request.args.get() decodes once,
-    so we get %3A in the token. We need to decode it again to get the correct
-    format (user_id:port:random:signature).
-
-    Args:
-        token: Token string from request, may contain %3A if double-encoded.
-
-    Returns:
-        Normalized token with colons restored.
-    """
-    if token and ("%3A" in token or "%3a" in token.lower()):
-        # Token was double-encoded, decode again
-        return unquote(token)
-    return token
-
-
 @projects_bp.before_request
 def _authenticate_user():
     """Authenticate via session token or WebUI token."""
@@ -87,7 +67,7 @@ def _authenticate_user():
     url_token = request.args.get("token")
     if url_token:
         # Handle double-encoded tokens from some clients
-        url_token = _normalize_token(url_token)
+        url_token = normalize_webui_token(url_token)
         from app.services.webui_manager import get_webui_manager
 
         manager = get_webui_manager()

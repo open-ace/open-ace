@@ -91,6 +91,10 @@ def _set_user_from_webui_token() -> bool:
     url_token = request.args.get("token")
     if not url_token:
         return False
+    # Handle double-encoded tokens from some clients
+    from app.auth.decorators import normalize_webui_token
+
+    url_token = normalize_webui_token(url_token)
     try:
         from app.services.webui_manager import WebUIManager
 
