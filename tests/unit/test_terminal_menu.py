@@ -16,6 +16,44 @@ def load_terminal_menu():
     return module
 
 
+def test_zcode_shown_on_linux_macos(monkeypatch):
+    """ZCode should appear in menu on Linux and macOS platforms."""
+    terminal_menu = load_terminal_menu()
+    monkeypatch.setattr(terminal_menu, "check_installed", lambda _: False)
+
+    # Mock platform.system to return "Linux"
+    import platform
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
+
+    items = terminal_menu.get_menu_items()
+    zcode_items = [item for item in items if item.get("cli") == "zcode"]
+    assert len(zcode_items) == 1, "ZCode should appear in menu on Linux"
+
+    # Mock platform.system to return "Darwin" (macOS)
+    monkeypatch.setattr(platform, "system", lambda: "Darwin")
+    items = terminal_menu.get_menu_items()
+    zcode_items = [item for item in items if item.get("cli") == "zcode"]
+    assert len(zcode_items) == 1, "ZCode should appear in menu on macOS"
+
+
+def test_zcode_hidden_on_windows(monkeypatch):
+    """ZCode should NOT appear in menu on Windows (it's macOS-only)."""
+    terminal_menu = load_terminal_menu()
+    monkeypatch.setattr(terminal_menu, "check_installed", lambda _: False)
+
+    # Mock platform.system to return "Windows"
+    import platform
+    monkeypatch.setattr(platform, "system", lambda: "Windows")
+
+    items = terminal_menu.get_menu_items()
+    zcode_items = [item for item in items if item.get("cli") == "zcode"]
+    assert len(zcode_items) == 0, "ZCode should NOT appear in menu on Windows"
+
+    # Verify other tools are still shown
+    claude_items = [item for item in items if item.get("cli") == "claude"]
+    assert len(claude_items) == 1, "Claude Code should still appear on Windows"
+
+
 def test_handle_select_execs_command(monkeypatch):
     terminal_menu = load_terminal_menu()
     executed_commands = []

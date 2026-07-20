@@ -48,6 +48,9 @@ TOOLS = [
         # On Linux, install/symlink the engine per ZCode's docs instead.
         "install_cmd": "sudo ln -s /Applications/ZCode.app/Contents/Resources/glm/zcode.cjs /usr/local/bin/zcode",
         "env_key": "ANTHROPIC_API_KEY",
+        # ZCode is macOS-only (ships as a desktop app bundle).
+        # Exclude from Windows menu to avoid confusing error messages.
+        "platforms": ["darwin", "linux"],
     },
 ]
 
@@ -72,8 +75,15 @@ def check_installed(cli_name: str) -> bool:
 
 
 def get_menu_items() -> list[dict]:
+    import platform
+
+    current_platform = platform.system().lower()  # "darwin", "linux", "windows"
     items = []
     for tool in TOOLS:
+        # Filter tools by platform if "platforms" field is specified
+        allowed_platforms = tool.get("platforms")
+        if allowed_platforms and current_platform not in allowed_platforms:
+            continue
         installed = check_installed(tool["cli"])
         configured = bool(os.environ.get(tool["env_key"]))
         items.append({**tool, "installed": installed, "configured": configured})
