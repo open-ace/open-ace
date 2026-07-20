@@ -873,9 +873,11 @@ Cmnd_Alias GH_SAFE = \
 
 # 【安全加固 Issue #1855】移除高风险通配命令
 # 原 cat/chown/useradd 通配已移除，改用安全 wrapper 脚本
-# 保留的低风险命令：test, ls, stat, mkdir, id
+# 保留的低风险命令：test, ls, stat, mkdir, id, rm
 # 注意：mkdir 和 id 保留通配，因为参数风险较低
-Cmnd_Alias OPENACE_UTILS = /usr/bin/test *, /usr/bin/ls *, /usr/bin/stat *, /usr/bin/mkdir *, /usr/bin/id *
+# rm 通配用于个人文件页删除（Issue #1902）：sudo -u <owner> rm <path>，
+# 仅能删除目标用户有权删除的文件（DAC 充分约束）。
+Cmnd_Alias OPENACE_UTILS = /usr/bin/test *, /usr/bin/ls *, /usr/bin/stat *, /usr/bin/mkdir *, /usr/bin/id *, /usr/bin/rm *
 
 # 【修复 Issue #1395】autonomous 开发 CLI 工具权限
 Cmnd_Alias OPENACE_CLI = /usr/bin/qwen *, /usr/local/bin/qwen *, /usr/bin/qwen-code *, /usr/local/bin/qwen-code *, /usr/bin/codex *, /usr/local/bin/codex *, /usr/bin/claude *, /usr/local/bin/claude *, /usr/bin/openclaw *, /usr/local/bin/openclaw *, /usr/bin/zcode *, /usr/local/bin/zcode *

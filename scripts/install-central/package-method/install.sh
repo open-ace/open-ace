@@ -1958,7 +1958,10 @@ Defaults secure_path = /usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin"
 # Commands must have '*' suffix to allow arguments (Issue #1262)
 # useradd/id: for creating system users in Package multi-user mode (uid >= 1000 validated in code)
 # git/gh: for autonomous development workflows (Issue #1395)
-Cmnd_Alias OPENACE_UTILS = /usr/bin/test *, /usr/bin/ls *, /usr/bin/cat *, /usr/bin/stat *, /usr/bin/mkdir *, /usr/bin/chown *, /usr/bin/useradd *, /usr/bin/id *, /usr/bin/git *, /usr/bin/gh *, /usr/local/bin/git *, /usr/local/bin/gh *
+# cat/rm: for personal-files download/delete as the file owner (Issue #1902).
+#   sudo -u <owner> cat|rm <path> — DAC constrains operations to files the
+#   target user already owns/can access.
+Cmnd_Alias OPENACE_UTILS = /usr/bin/test *, /usr/bin/ls *, /usr/bin/cat *, /usr/bin/stat *, /usr/bin/mkdir *, /usr/bin/chown *, /usr/bin/useradd *, /usr/bin/id *, /usr/bin/rm *, /usr/bin/git *, /usr/bin/gh *, /usr/local/bin/git *, /usr/local/bin/gh *
 
 # Autonomous development CLI tools (Issue #1395)
 # Allow running qwen-code/codex/etc. as target user for permission isolation
