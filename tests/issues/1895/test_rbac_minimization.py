@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import pytest
 import yaml
 
 
@@ -147,7 +146,9 @@ class TestRedisStatefulSetConfig:
 
         # Check that requirepass is in the command
         command_str = " ".join(command)
-        assert "requirepass" in command_str, "Redis should have requirepass in command"
+        assert "requirepass" in command_str, (
+            "Redis should have requirepass in command"
+        )
 
     def test_redis_statefulset_has_rediscli_auth_env(self):
         """Redis StatefulSet should have REDISCLI_AUTH environment variable."""
@@ -181,10 +182,12 @@ class TestRedisStatefulSetConfig:
                 rediscli_auth_found = True
                 assert env["valueFrom"]["secretKeyRef"]["key"] == "REDIS_PASSWORD"
                 assert env["valueFrom"]["secretKeyRef"]["name"] == "open-ace-secrets"
-                assert env.get("optional", False) is True
+                assert env["valueFrom"]["secretKeyRef"].get("optional", False) is True
                 break
 
-        assert rediscli_auth_found, "REDISCLI_AUTH environment variable not found in Redis StatefulSet"
+        assert rediscli_auth_found, (
+            "REDISCLI_AUTH environment variable not found in Redis StatefulSet"
+        )
 
 
 class TestSecretDefinition:
