@@ -2231,10 +2231,15 @@ def usage_report():
 
     # 1. machine_id format validation
     if not machine_id:
-        return jsonify({
-            "error": "machine_id is required",
-            "hint": "Please upgrade your agent to the latest version"
-        }), 400
+        return (
+            jsonify(
+                {
+                    "error": "machine_id is required",
+                    "hint": "Please upgrade your agent to the latest version",
+                }
+            ),
+            400,
+        )
 
     if len(machine_id) > 64:
         return jsonify({"error": "Invalid machine_id format"}), 400
@@ -2304,10 +2309,15 @@ def usage_report():
             },
             success=False,
         )
-        return jsonify({
-            "error": "Invalid workspace type",
-            "details": "Usage reports are only allowed for remote sessions"
-        }), 400
+        return (
+            jsonify(
+                {
+                    "error": "Invalid workspace type",
+                    "details": "Usage reports are only allowed for remote sessions",
+                }
+            ),
+            400,
+        )
 
     # 7. Session-Machine binding validation
     remote_machine_id = getattr(session, "remote_machine_id", None)

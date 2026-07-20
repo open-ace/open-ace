@@ -36,6 +36,7 @@ def _patch_db_compat():
 def test_db(tmp_path):
     """Create a temporary test database."""
     import os
+
     from app.repositories.database import Database
     from app.repositories.schema_init import load_schema_from_file
 
@@ -49,7 +50,8 @@ def test_db(tmp_path):
             try:
                 # Create minimal tables for testing
                 cursor = conn.cursor()
-                cursor.execute("""
+                cursor.execute(
+                    """
                     CREATE TABLE IF NOT EXISTS users (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         username TEXT UNIQUE NOT NULL,
@@ -59,15 +61,18 @@ def test_db(tmp_path):
                         tenant_id INTEGER,
                         is_active INTEGER DEFAULT 1
                     )
-                """)
-                cursor.execute("""
+                """
+                )
+                cursor.execute(
+                    """
                     CREATE TABLE IF NOT EXISTS tenants (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         name TEXT NOT NULL,
                         slug TEXT UNIQUE NOT NULL,
                         quota TEXT
                     )
-                """)
+                """
+                )
                 # Load full schema
                 load_schema_from_file(db_url=db.db_url, dialect="sqlite")
                 conn.commit()
@@ -98,9 +103,7 @@ def app_context(test_db):
 @pytest.fixture
 def mock_agent_manager():
     """Mock RemoteAgentManager."""
-    with patch(
-        "app.routes.remote.get_remote_agent_manager"
-    ) as mock_get:
+    with patch("app.routes.remote.get_remote_agent_manager") as mock_get:
         manager = MagicMock()
         mock_get.return_value = manager
         yield manager
@@ -109,9 +112,7 @@ def mock_agent_manager():
 @pytest.fixture
 def mock_session_manager():
     """Mock RemoteSessionManager."""
-    with patch(
-        "app.routes.remote.get_remote_session_manager"
-    ) as mock_get:
+    with patch("app.routes.remote.get_remote_session_manager") as mock_get:
         manager = MagicMock()
         mock_get.return_value = manager
         yield manager
@@ -215,9 +216,7 @@ class TestT05_MachineIdFormatInvalid:
 class TestT06_MachineNotFound:
     """T6: machine_id not found → 404 + audit log."""
 
-    def test_machine_not_found(
-        self, app_context, mock_agent_manager, mock_audit_logger
-    ):
+    def test_machine_not_found(self, app_context, mock_agent_manager, mock_audit_logger):
         mock_agent_manager.get_machine.return_value = None
 
         response = app_context.test_client().post(
@@ -243,9 +242,7 @@ class TestT06_MachineNotFound:
 class TestT07_SessionNotFound:
     """T7: session_id not found → 404."""
 
-    def test_session_not_found(
-        self, app_context, mock_agent_manager, mock_session_manager
-    ):
+    def test_session_not_found(self, app_context, mock_agent_manager, mock_session_manager):
         mock_agent_manager.get_machine.return_value = {
             "machine_id": "machine-001",
             "tenant_id": 1,
