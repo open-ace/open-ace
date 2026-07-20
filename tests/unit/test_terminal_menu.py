@@ -16,42 +16,69 @@ def load_terminal_menu():
     return module
 
 
-def test_zcode_shown_on_linux_macos(monkeypatch):
-    """ZCode should appear in menu on Linux and macOS platforms."""
+def test_zcode_shown_on_all_platforms(monkeypatch):
+    """ZCode should appear in menu on all platforms (Windows, Linux, macOS)."""
     terminal_menu = load_terminal_menu()
     monkeypatch.setattr(terminal_menu, "check_installed", lambda _: False)
 
-    # Mock platform.system to return "Linux"
-    import platform
-    monkeypatch.setattr(platform, "system", lambda: "Linux")
-
     items = terminal_menu.get_menu_items()
     zcode_items = [item for item in items if item.get("cli") == "zcode"]
-    assert len(zcode_items) == 1, "ZCode should appear in menu on Linux"
-
-    # Mock platform.system to return "Darwin" (macOS)
-    monkeypatch.setattr(platform, "system", lambda: "Darwin")
-    items = terminal_menu.get_menu_items()
-    zcode_items = [item for item in items if item.get("cli") == "zcode"]
-    assert len(zcode_items) == 1, "ZCode should appear in menu on macOS"
+    assert len(zcode_items) == 1, "ZCode should appear in menu on all platforms"
 
 
-def test_zcode_hidden_on_windows(monkeypatch):
-    """ZCode should NOT appear in menu on Windows (it's macOS-only)."""
+def test_zcode_shows_manual_instructions_on_windows(monkeypatch):
+    """ZCode should show manual installation instructions on Windows."""
     terminal_menu = load_terminal_menu()
-    monkeypatch.setattr(terminal_menu, "check_installed", lambda _: False)
+    shown_messages = []
 
-    # Mock platform.system to return "Windows"
-    import platform
-    monkeypatch.setattr(platform, "system", lambda: "Windows")
+    def fake_show_message(msg):
+        shown_messages.append(msg)
 
+    monkeypatch.setattr(terminal_menu, "IS_WINDOWS", True)
+    monkeypatch.setattr(terminal_menu, "show_message", fake_show_message)
+    monkeypatch.setattr(terminal_menu, "wait_for_continue", lambda: None)
+
+    # Find ZCode tool definition
     items = terminal_menu.get_menu_items()
-    zcode_items = [item for item in items if item.get("cli") == "zcode"]
-    assert len(zcode_items) == 0, "ZCode should NOT appear in menu on Windows"
+    zcode_item = next(item for item in items if item.get("cli") == "zcode")
+    zcode_item["installed"] = False
+    zcode_item["configured"] = True
 
-    # Verify other tools are still shown
-    claude_items = [item for item in items if item.get("cli") == "claude"]
-    assert len(claude_items) == 1, "Claude Code should still appear on Windows"
+    terminal_menu.handle_select(zcode_item)
+
+    # Should show manual instructions, not execute install command
+    assert len(shown_messages) == 1
+    assert "manual setup" in shown_messages[0].lower() or "requires manual" in shown_messages[0].lower()
+
+
+def test_npm_tools_show_error_when_nodejs_missing_on_windows(monkeypatch):
+    """npm-based tools should show error when Node.js is not installed."""
+    terminal_menu = load_terminal_menu()
+    shown_messages = []
+
+    def fake_show_message(msg):
+        shown_messages.append(msg)
+
+    monkeypatch.setattr(terminal_menu, "IS_WINDOWS", True)
+    monkeypatch.setattr(terminal_menu, "show_message", fake_show_message)
+    monkeypatch.setattr(terminal_menu, "wait_for_continue", lambda: None)
+    monkeypatch.setattr(terminal_menu.shutil, "which", lambda _: None)  # npm not found
+
+    # Claude Code uses npm install
+    claude_item = {
+        "name": "Claude Code",
+        "cli": "claude",
+        "cmd": "claude --bare",
+        "install_cmd": "npm install -g @anthropic-ai/claude-code@latest",
+        "installed": False,
+        "configured": True,
+    }
+
+    terminal_menu.handle_select(claude_item)
+
+    # Should show Node.js missing error
+    assert len(shown_messages) == 1
+    assert "Node.js" in shown_messages[0] or "npm" in shown_messages[0]
 
 
 def test_handle_select_execs_command(monkeypatch):

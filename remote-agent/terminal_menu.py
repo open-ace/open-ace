@@ -44,13 +44,19 @@ TOOLS = [
         "name": "ZCode",
         "cli": "zcode",
         "cmd": "zcode",
-        # ZCode ships inside the macOS desktop app; symlink the bundled engine.
-        # On Linux, install/symlink the engine per ZCode's docs instead.
+        # macOS: symlink from bundled engine inside the desktop app.
+        # Windows: ZCode desktop app bundles zcode.cjs, but path varies by installation method.
+        # Show manual installation instructions instead of auto-install.
         "install_cmd": "sudo ln -s /Applications/ZCode.app/Contents/Resources/glm/zcode.cjs /usr/local/bin/zcode",
+        # Windows: show manual installation instructions
+        "install_instructions_win": (
+            "ZCode CLI requires manual setup on Windows:\n"
+            "  1. Install ZCode desktop app from official website\n"
+            "  2. Find zcode.cjs in the installation directory (e.g., resources/glm/zcode.cjs)\n"
+            "  3. Create a batch file or add the directory to PATH\n"
+            "  Example: echo @node \"<path-to-zcode.cjs>\" %%* > %LOCALAPPDATA%\\zcode.bat"
+        ),
         "env_key": "ANTHROPIC_API_KEY",
-        # ZCode is macOS-only (ships as a desktop app bundle).
-        # Exclude from Windows menu to avoid confusing error messages.
-        "platforms": ["darwin", "linux"],
     },
 ]
 
@@ -75,15 +81,8 @@ def check_installed(cli_name: str) -> bool:
 
 
 def get_menu_items() -> list[dict]:
-    import platform
-
-    current_platform = platform.system().lower()  # "darwin", "linux", "windows"
     items = []
     for tool in TOOLS:
-        # Filter tools by platform if "platforms" field is specified
-        allowed_platforms = tool.get("platforms")
-        if allowed_platforms and current_platform not in allowed_platforms:
-            continue
         installed = check_installed(tool["cli"])
         configured = bool(os.environ.get(tool["env_key"]))
         items.append({**tool, "installed": installed, "configured": configured})
@@ -230,6 +229,26 @@ def handle_select(item: dict) -> None:
 
     if IS_WINDOWS:
         if not item["installed"]:
+            # Check if tool has Windows-specific install instructions
+            install_instructions = item.get("install_instructions_win")
+            if install_instructions:
+                # Show manual installation instructions instead of auto-install
+                show_message(f"{BOLD_YELLOW}{item['name']} requires manual setup:\n\n{install_instructions}{RESET}")
+                wait_for_continue()
+                return
+
+            # Check if npm is available for tools that need it
+            if "npm install" in item.get("install_cmd", ""):
+                if not shutil.which("npm"):
+                    show_message(
+                        f"{BOLD_RED}Cannot install {item['name']}: Node.js/npm is not installed.\n\n"
+                        f"  Please install Node.js from https://nodejs.org/\n"
+                        f"  Then restart the terminal and try again.{RESET}"
+                    )
+                    wait_for_continue()
+                    return
+
+            # Execute install command
             install_result = subprocess.run(item["install_cmd"], shell=True, check=False)
             if install_result.returncode != 0:
                 show_message(f"{BOLD_RED}Failed to install {item['name']}.{RESET}")
