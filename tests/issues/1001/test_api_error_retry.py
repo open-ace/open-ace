@@ -13,6 +13,8 @@ Covers:
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from app.modules.workspace.autonomous import orchestrator as orch_module
 from app.modules.workspace.autonomous.models import AgentTaskResult
 from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
@@ -119,6 +121,29 @@ class TestRunAgentApiErrorRetry:
         assert result.success is True
         assert result.response_text == "## Plan\nreal plan"
 
+    def test_no_retry_on_token_bearing_plan_that_mentions_rate_limit(self, monkeypatch):
+        """The exact issue-1891 false positive must remain a normal success."""
+        monkeypatch.setattr("time.sleep", lambda *a, **k: None)
+        o = _make_orchestrator(_make_workflow())
+        plan = AgentTaskResult(
+            session_id="sess-track",
+            tracking_session_id="sess-track",
+            response_text=(
+                "## Security plan\n"
+                "#### Step 4.2: Rate Limit\n"
+                "| R6 | Rate limit | P2 | Prevent abuse |"
+            ),
+            total_tokens=1200,
+            success=True,
+        )
+        o._runner.run_agent_task = MagicMock(return_value=plan)
+
+        result = o._run_agent(wf=_make_workflow(), session_line="main", prompt="x")
+
+        assert o._runner.run_agent_task.call_count == 1
+        assert result.success is True
+        assert "Rate Limit" in result.response_text
+
     def test_retries_transient_error_then_succeeds(self, monkeypatch):
         # Simulate time.sleep as a no-op so the backoff loop is instant.
         monkeypatch.setattr("time.sleep", lambda *a, **k: None)
@@ -139,6 +164,73 @@ class TestRunAgentApiErrorRetry:
         assert o._runner.run_agent_task.call_count == 2  # retried once
         assert result.success is True
         assert result.response_text == "## Plan\nrecovered plan"
+
+    @pytest.mark.parametrize(
+        ("session_line", "workflow_field"),
+        [
+            ("main", "main_session_id"),
+            ("review", "review_session_id"),
+            ("test", "test_session_id"),
+        ],
+    )
+    def test_named_line_retry_reuses_tracking_and_provider_session(
+        self, monkeypatch, session_line, workflow_field
+    ):
+        monkeypatch.setattr("time.sleep", lambda *a, **k: None)
+        o = _make_orchestrator(_make_workflow())
+        o._runner._uses_sidebar_session_source = MagicMock(return_value=True)
+        err = AgentTaskResult(
+            session_id="sess-track",
+            tracking_session_id="sess-track",
+            source_session_id="cli-main",
+            error="API Error: 503 Service Unavailable",
+            total_tokens=100,
+            total_input_tokens=80,
+            total_output_tokens=20,
+            request_count=1,
+            success=False,
+        )
+        ok = AgentTaskResult(
+            session_id="sess-track",
+            tracking_session_id="sess-track",
+            source_session_id="cli-main",
+            response_text="## Plan\nrecovered plan",
+            total_tokens=200,
+            total_input_tokens=150,
+            total_output_tokens=50,
+            request_count=2,
+            success=True,
+        )
+        o._runner.run_agent_task = MagicMock(side_effect=[err, ok])
+
+        result = o._run_agent(
+            wf=_make_workflow(),
+            session_line=session_line,
+            milestone_id="ms-plan",
+            prompt="x",
+        )
+
+        first_call, second_call = o._runner.run_agent_task.call_args_list
+        assert first_call.kwargs["session_id"] == "sess-track"
+        assert second_call.kwargs["session_id"] == "sess-track"
+        assert second_call.kwargs["resume"] is True
+        assert second_call.kwargs["resume_session_id"] == "cli-main"
+        assert all(
+            call.args[0] == "sess-track"
+            for call in o._link_session_to_current_milestone.call_args_list
+        )
+        o._update_workflow.assert_called_with({workflow_field: "sess-track"})
+        o._write_phase_usage.assert_called_once_with(
+            "ms-plan",
+            ok,
+            {
+                "total_tokens": 100,
+                "total_input_tokens": 80,
+                "total_output_tokens": 20,
+                "request_count": 1,
+            },
+        )
+        assert result is ok
 
     def test_synthesizes_failure_after_exhaustion(self, monkeypatch):
         # Retry loop disabled (0 timeout) + always-error runner -> the post-loop

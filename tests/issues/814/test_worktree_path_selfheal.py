@@ -20,6 +20,7 @@ Covers:
 """
 
 import os
+import re
 from unittest.mock import MagicMock, patch
 
 from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner
@@ -36,7 +37,7 @@ class TestEncodeProjectPathNormalizes:
         encoded = AutonomousAgentRunner._encode_project_path(raw)
         # realpath collapses the ".." — encoding must match what Claude CLI
         # writes, not the raw input.
-        expected = os.path.realpath(raw).replace("/", "-")
+        expected = re.sub(r"[^A-Za-z0-9]", "-", os.path.realpath(raw))
         assert encoded == expected
         assert ".." not in encoded
 
@@ -46,13 +47,18 @@ class TestEncodeProjectPathNormalizes:
         link_target = tmp_path / "real"
         link_target.mkdir()
         encoded = AutonomousAgentRunner._encode_project_path(str(link_target))
-        assert encoded == os.path.realpath(str(link_target)).replace("/", "-")
+        assert encoded == re.sub(r"[^A-Za-z0-9]", "-", os.path.realpath(str(link_target)))
 
     def test_already_canonical_unchanged(self):
         path = "/Users/rhuang/workspace/open-ace"
-        assert AutonomousAgentRunner._encode_project_path(path) == os.path.realpath(path).replace(
-            "/", "-"
+        assert AutonomousAgentRunner._encode_project_path(path) == re.sub(
+            r"[^A-Za-z0-9]", "-", os.path.realpath(path)
         )
+
+    def test_dot_worktree_matches_claude_code_encoding(self):
+        path = "/home/rhuang/open-ace/.worktrees/workflow-id"
+        encoded = AutonomousAgentRunner._encode_project_path(path)
+        assert "open-ace--worktrees-workflow-id" in encoded
 
     def test_empty_string_returns_empty(self):
         assert AutonomousAgentRunner._encode_project_path("") == ""
