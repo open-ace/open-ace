@@ -2720,6 +2720,7 @@ class AutonomousOrchestrator:
             milestone_id: Milestone to attribute this call's phase usage to.
         """
         workflow_data = wf or self.workflow
+        field = SESSION_LINE_FIELDS.get(session_line)
 
         # Resolve the session line: resume an established session or start new.
         session_id, resume_session_id, resume = self._resolve_session_line(
@@ -2805,7 +2806,6 @@ class AutonomousOrchestrator:
             # resolves the actual transcript session at read time via
             # agent_sessions.cli_session_id, which keeps DB identity stable
             # while still letting the UI open the real transcript.
-            field = SESSION_LINE_FIELDS.get(session_line)
             link_session_id = (
                 tracking_session_id if field else (result.tracking_session_id or result.session_id)
             )
@@ -2840,7 +2840,13 @@ class AutonomousOrchestrator:
                 self._write_phase_usage(milestone_id, result, retry_usage)
                 self._clear_session_usage_offsets(usage_session_ids)
                 with self._session_lock:
-                    self._current_session_id = tracking_session_id
+                    self._current_session_id = (
+                        tracking_session_id
+                        if field
+                        else (
+                            result.tracking_session_id or result.session_id or tracking_session_id
+                        )
+                    )
                 return result
 
             if not self._should_retry_transient_api_failure(result):
@@ -2853,7 +2859,7 @@ class AutonomousOrchestrator:
                 else "zero-token response"
             )
             logger.warning(
-                "Transient API error detected, retrying in %ds " "(elapsed: %ds / %ds, source=%s)",
+                "Transient API retry in %ds (elapsed=%ds/%ds, source=%s)",
                 delay,
                 elapsed,
                 API_RETRY_TOTAL_TIMEOUT,
@@ -2882,18 +2888,31 @@ class AutonomousOrchestrator:
                     self._write_phase_usage(milestone_id, result, retry_usage)
                     self._clear_session_usage_offsets(usage_session_ids)
                     with self._session_lock:
-                        self._current_session_id = tracking_session_id
+                        self._current_session_id = (
+                            tracking_session_id
+                            if field
+                            else (
+                                result.tracking_session_id
+                                or result.session_id
+                                or tracking_session_id
+                            )
+                        )
                     return result
 
             delay = min(delay * 2, API_RETRY_MAX_DELAY)
 
+            # AgentTaskResult's runner contract is usage for one
+            # run_agent_task invocation: Claude reports per-request values and
+            # cumulative-result adapters difference turns before building the
+            # result. Any provider that replays pre-resume history must
+            # normalize that in its adapter; the orchestrator sums only these
+            # per-invocation deltas.
             for key in retry_usage:
                 retry_usage[key] += int(getattr(result, key, 0) or 0)
 
             # Strict main/review/test topology: retries reuse the line's stable
             # tracking id and, when possible, the provider transcript created
             # by the preceding attempt. One-off "fresh" calls may rotate.
-            field = SESSION_LINE_FIELDS.get(session_line)
             retry_session_id = tracking_session_id if field else str(uuid.uuid4())
             kwargs["session_id"] = retry_session_id
             if field:
@@ -2941,7 +2960,11 @@ class AutonomousOrchestrator:
         self._clear_session_usage_offsets(usage_session_ids)
 
         with self._session_lock:
-            self._current_session_id = tracking_session_id
+            self._current_session_id = (
+                tracking_session_id
+                if field
+                else (result.tracking_session_id or result.session_id or tracking_session_id)
+            )
         return result
 
     def _synthesize_transient_failure(self, result: AgentTaskResult) -> None:

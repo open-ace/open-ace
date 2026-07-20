@@ -989,8 +989,9 @@ class AutonomousAgentRunner:
         if not project_path:
             return ""
         resolved = os.path.realpath(project_path)
-        # Claude Code 2.1.x replaces every non-alphanumeric path character
-        # with ``-``. In particular ``/.worktrees`` becomes ``--worktrees``;
+        # Claude Code 2.1.201's embedded project-path diagnostic specifies
+        # ``pwd | sed 's|[^a-zA-Z0-9]|-|g'`` (also observed in its project-dir
+        # function). In particular ``/.worktrees`` becomes ``--worktrees``;
         # replacing slashes alone leaves ``-.worktrees`` and misses the
         # directory the CLI actually created.
         return re.sub(r"[^A-Za-z0-9]", "-", resolved)

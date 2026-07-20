@@ -23,6 +23,8 @@ import os
 import re
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner
 from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
 
@@ -55,10 +57,21 @@ class TestEncodeProjectPathNormalizes:
             r"[^A-Za-z0-9]", "-", os.path.realpath(path)
         )
 
-    def test_dot_worktree_matches_claude_code_encoding(self):
-        path = "/home/rhuang/open-ace/.worktrees/workflow-id"
-        encoded = AutonomousAgentRunner._encode_project_path(path)
-        assert "open-ace--worktrees-workflow-id" in encoded
+    @pytest.mark.parametrize(
+        ("path", "expected"),
+        [
+            (
+                "/Users/open_ace/repo name/.worktrees/workflow.v1",
+                "-Users-open-ace-repo-name--worktrees-workflow-v1",
+            ),
+            ("/Users/rhuang/open-ace", "-Users-rhuang-open-ace"),
+        ],
+    )
+    def test_matches_claude_code_non_alphanumeric_contract(self, path, expected):
+        # Fixed expected values intentionally do not reuse the implementation's
+        # regex. Claude Code 2.1.201 embeds the equivalent shell rule:
+        #   pwd | sed 's|[^a-zA-Z0-9]|-|g'
+        assert AutonomousAgentRunner._encode_project_path(path) == expected
 
     def test_empty_string_returns_empty(self):
         assert AutonomousAgentRunner._encode_project_path("") == ""

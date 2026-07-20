@@ -162,6 +162,12 @@ class TestRunAgentApiErrorRetry:
         result = o._run_agent(wf=_make_workflow(), prompt="x")
 
         assert o._runner.run_agent_task.call_count == 2  # retried once
+        first_call, second_call = o._runner.run_agent_task.call_args_list
+        assert first_call.kwargs["session_id"] == "sess-track"
+        assert second_call.kwargs["session_id"] != first_call.kwargs["session_id"]
+        assert second_call.kwargs["resume"] is False
+        assert second_call.kwargs["resume_session_id"] is None
+        assert o._current_session_id == "s2"
         assert result.success is True
         assert result.response_text == "## Plan\nrecovered plan"
 
@@ -176,6 +182,7 @@ class TestRunAgentApiErrorRetry:
     def test_named_line_retry_reuses_tracking_and_provider_session(
         self, monkeypatch, session_line, workflow_field
     ):
+        """Retry usage values are per-run deltas, not resumed-session totals."""
         monkeypatch.setattr("time.sleep", lambda *a, **k: None)
         o = _make_orchestrator(_make_workflow())
         o._runner._uses_sidebar_session_source = MagicMock(return_value=True)
