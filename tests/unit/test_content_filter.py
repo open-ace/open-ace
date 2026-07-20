@@ -1,5 +1,8 @@
 """Unit tests for ContentFilter module."""
 
+import re
+import threading
+from collections import OrderedDict
 from unittest.mock import MagicMock
 
 import pytest
@@ -287,3 +290,281 @@ class TestCombinedScenarios:
         cf = ContentFilter(config={"block_high_risk": True})
         result = cf.check_content("password is secret and SSN: 123-45-6789")
         assert result.action == "block"  # Block takes precedence over warn
+
+
+class TestCompiledPatternCache:
+    """Test compiled pattern caching functionality (Issue #1906)."""
+
+    def test_cache_initialization(self):
+        """测试缓存属性正确初始化"""
+        cf = ContentFilter()
+        assert hasattr(cf, "_compiled_rules_cache")
+        assert hasattr(cf, "_cache_lock")
+        assert hasattr(cf, "_cache_hits")
+        assert hasattr(cf, "_cache_misses")
+        assert cf._cache_hits == 0
+        assert cf._cache_misses == 0
+        assert isinstance(cf._compiled_rules_cache, OrderedDict)
+
+    def test_get_compiled_pattern_caches_pattern(self):
+        """测试新模式正确编译并缓存"""
+        cf = ContentFilter()
+        pattern = r"\d+"
+        compiled = cf._get_compiled_pattern(pattern, re.IGNORECASE)
+
+        assert compiled is not None
+        assert isinstance(compiled, type(re.compile(r"\d+")))
+        assert (pattern, re.IGNORECASE) in cf._compiled_rules_cache
+        assert cf._cache_misses == 1
+        assert cf._cache_hits == 0
+
+    def test_cache_hit_returns_same_object(self):
+        """测试缓存命中时返回同一对象"""
+        cf = ContentFilter()
+        pattern = r"\d+"
+
+        # First call - cache miss
+        compiled1 = cf._get_compiled_pattern(pattern, re.IGNORECASE)
+        assert cf._cache_misses == 1
+        assert cf._cache_hits == 0
+
+        # Second call - cache hit
+        compiled2 = cf._get_compiled_pattern(pattern, re.IGNORECASE)
+        assert cf._cache_hits == 1
+
+        # Should be the exact same object
+        assert compiled1 is compiled2
+
+    def test_different_flags_cached_separately(self):
+        """测试不同 flags 的正则独立缓存"""
+        cf = ContentFilter()
+        pattern = r"\d+"
+
+        compiled1 = cf._get_compiled_pattern(pattern, re.IGNORECASE)
+        compiled2 = cf._get_compiled_pattern(pattern, re.MULTILINE)
+        compiled3 = cf._get_compiled_pattern(pattern, re.IGNORECASE | re.MULTILINE)
+
+        # All should be cached separately
+        assert cf._cache_misses == 3
+        assert (pattern, re.IGNORECASE) in cf._compiled_rules_cache
+        assert (pattern, re.MULTILINE) in cf._compiled_rules_cache
+        assert (pattern, re.IGNORECASE | re.MULTILINE) in cf._compiled_rules_cache
+
+    def test_invalidate_cache_clears_compiled_cache(self):
+        """测试 invalidate_cache 清除编译缓存"""
+        cf = ContentFilter()
+        pattern = r"\d+"
+
+        # Compile and cache a pattern
+        cf._get_compiled_pattern(pattern, re.IGNORECASE)
+        assert len(cf._compiled_rules_cache) == 1
+        assert cf._cache_misses == 1
+
+        # Invalidate cache
+        cf.invalidate_cache()
+
+        # Cache should be cleared and counters reset
+        assert len(cf._compiled_rules_cache) == 0
+        assert cf._cache_hits == 0
+        assert cf._cache_misses == 0
+
+    def test_invalid_pattern_returns_none(self):
+        """测试无效正则返回 None 且不缓存"""
+        cf = ContentFilter()
+        invalid_pattern = r"[invalid("  # Unmatched parenthesis
+
+        compiled = cf._get_compiled_pattern(invalid_pattern, re.IGNORECASE, rule_id="test-rule")
+
+        assert compiled is None
+        assert len(cf._compiled_rules_cache) == 0
+        # Should count as miss for tracking purposes
+        assert cf._cache_misses == 1
+
+    def test_empty_pattern_returns_none(self):
+        """测试空模式返回 None"""
+        cf = ContentFilter()
+
+        compiled = cf._get_compiled_pattern("", re.IGNORECASE)
+
+        assert compiled is None
+        assert len(cf._compiled_rules_cache) == 0
+
+    def test_lru_eviction_removes_oldest(self):
+        """测试 LRU 逐出移除最旧条目"""
+        cf = ContentFilter(config={"max_compiled_cache_size": 2})
+
+        # Add patterns: first, second
+        cf._get_compiled_pattern(r"\d+", re.IGNORECASE)  # oldest
+        cf._get_compiled_pattern(r"[a-z]+", re.IGNORECASE)  # newer
+        assert len(cf._compiled_rules_cache) == 2
+
+        # Add third pattern - should evict oldest
+        cf._get_compiled_pattern(r"[A-Z]+", re.IGNORECASE)
+        assert len(cf._compiled_rules_cache) == 2
+        # Oldest should be evicted
+        assert (r"\d+", re.IGNORECASE) not in cf._compiled_rules_cache
+        assert (r"[a-z]+", re.IGNORECASE) not in cf._compiled_rules_cache
+        # Newest should remain
+        assert (r"[A-Z]+", re.IGNORECASE) in cf._compiled_rules_cache
+
+    def test_lru_access_moves_to_end(self):
+        """测试访问缓存条目时移动到末尾（LRU 更新）"""
+        cf = ContentFilter(config={"max_compiled_cache_size": 3})
+
+        # Add patterns
+        cf._get_compiled_pattern(r"first", re.IGNORECASE)
+        cf._get_compiled_pattern(r"second", re.IGNORECASE)
+        cf._get_compiled_pattern(r"third", re.IGNORECASE)
+
+        # Access first again - should move to end
+        cf._get_compiled_pattern(r"first", re.IGNORECASE)
+
+        # Add fourth - should evict second (oldest after first was accessed)
+        cf._get_compiled_pattern(r"fourth", re.IGNORECASE)
+
+        assert len(cf._compiled_rules_cache) == 3
+        assert (r"first", re.IGNORECASE) in cf._compiled_rules_cache
+        assert (r"second", re.IGNORECASE) not in cf._compiled_rules_cache  # evicted
+
+    def test_get_stats_includes_cache_info(self):
+        """测试 get_stats 返回缓存统计信息"""
+        cf = ContentFilter()
+        cf._get_compiled_pattern(r"\d+", re.IGNORECASE)
+        cf._get_compiled_pattern(r"\d+", re.IGNORECASE)  # hit
+        cf._get_compiled_pattern(r"[a-z]+", re.IGNORECASE)  # miss
+
+        stats = cf.get_stats()
+
+        assert "compiled_cache_size" in stats
+        assert "compiled_cache_hits" in stats
+        assert "compiled_cache_misses" in stats
+        assert "compiled_cache_hit_rate" in stats
+        assert "compiled_cache_max_size" in stats
+        assert stats["compiled_cache_size"] == 2
+        assert stats["compiled_cache_hits"] == 1
+        assert stats["compiled_cache_misses"] == 2
+        assert stats["compiled_cache_hit_rate"] == 33.33  # 1/(1+2) * 100
+
+    def test_concurrent_access_thread_safe(self):
+        """测试多线程并发访问无竞态条件"""
+        cf = ContentFilter()
+        pattern = r"\d+"
+        errors = []
+        results = []
+
+        def compile_pattern():
+            try:
+                compiled = cf._get_compiled_pattern(pattern, re.IGNORECASE)
+                results.append(compiled is not None)
+            except Exception as e:
+                errors.append(e)
+
+        # Create multiple threads
+        threads = [threading.Thread(target=compile_pattern) for _ in range(20)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        # No errors should occur
+        assert len(errors) == 0
+        # All threads should have successfully compiled
+        assert all(results)
+        # Cache should have exactly one entry
+        assert len(cf._compiled_rules_cache) == 1
+
+    def test_check_content_uses_cache(self):
+        """测试 check_content 使用缓存而非重复编译"""
+        # Setup mock governance_repo with regex rule
+        mock_repo = MagicMock()
+        mock_repo.get_filter_rules.return_value = [
+            {
+                "id": "test-rule",
+                "pattern": r"\d+",
+                "type": "regex",
+                "action": "warn",
+                "severity": "medium",
+                "is_enabled": True,
+            }
+        ]
+
+        cf = ContentFilter(governance_repo=mock_repo)
+
+        # First check - should compile and cache
+        result1 = cf.check_content("Number: 123")
+        assert result1.passed is True
+        assert any(r["id"] == "test-rule" for r in result1.matched_rules)
+
+        # Check cache stats
+        initial_misses = cf._cache_misses
+        initial_hits = cf._cache_hits
+
+        # Second check with same pattern - should hit cache
+        result2 = cf.check_content("Another: 456")
+        assert result2.passed is True
+
+        # Cache hits should have increased
+        assert cf._cache_hits > initial_hits
+
+
+class TestCacheWithDatabaseRules:
+    """Test cache behavior with database rules integration."""
+
+    def test_cache_invalidation_on_rule_change(self):
+        """测试规则变更后缓存正确失效"""
+        mock_repo = MagicMock()
+        mock_repo.get_filter_rules.return_value = [
+            {
+                "id": "rule-1",
+                "pattern": r"\d+",
+                "type": "regex",
+                "action": "warn",
+                "severity": "medium",
+                "is_enabled": True,
+            }
+        ]
+
+        cf = ContentFilter(governance_repo=mock_repo)
+
+        # First check
+        cf.check_content("Test 123")
+        assert cf._cache_misses >= 1
+
+        # Simulate rule update - invalidate cache
+        cf.invalidate_cache()
+
+        # Update mock to return different rules
+        mock_repo.get_filter_rules.return_value = [
+            {
+                "id": "rule-2",
+                "pattern": r"[a-z]+",
+                "type": "regex",
+                "action": "block",
+                "severity": "high",
+                "is_enabled": True,
+            }
+        ]
+
+        # Next check should use new rules
+        result = cf.check_content("test")
+        assert result.passed is False  # Blocked by new rule
+        assert cf._cache_misses >= 1  # New misses after invalidation
+
+    def test_multiple_rules_share_cache(self):
+        """测试多个规则共享同一缓存"""
+        mock_repo = MagicMock()
+        mock_repo.get_filter_rules.return_value = [
+            {"id": "rule-1", "pattern": r"\d+", "type": "regex", "action": "warn", "severity": "medium", "is_enabled": True},
+            {"id": "rule-2", "pattern": r"[a-z]+", "type": "regex", "action": "warn", "severity": "medium", "is_enabled": True},
+        ]
+
+        cf = ContentFilter(governance_repo=mock_repo)
+        cf.check_content("test 123")
+
+        # Both patterns should be cached
+        assert len(cf._compiled_rules_cache) == 2
+
+        # Second check should hit cache for both
+        initial_hits = cf._cache_hits
+        cf.check_content("another 456")
+        assert cf._cache_hits > initial_hits
