@@ -1621,7 +1621,13 @@ class APIKeyProxyService:
         """
         conn = None
         try:
-            payload = self._decode_proxy_token(token)
+            # Handle URL-encoded tokens (Issue #1886)
+            # Proxy tokens may be URL-encoded if passed through query params or headers.
+            from app.auth.decorators import normalize_token
+
+            decoded_token = normalize_token(token)
+
+            payload = self._decode_proxy_token(decoded_token)
             if not payload:
                 return None
 
@@ -1638,7 +1644,11 @@ class APIKeyProxyService:
             if not record:
                 logger.warning("Proxy token jti not issued by this server: %s", jti[:8])
                 return None
-            if self._row_get(record, "token_hash") != hashlib.sha256(token.encode()).hexdigest():
+            # Use decoded token for hash verification
+            if (
+                self._row_get(record, "token_hash")
+                != hashlib.sha256(decoded_token.encode()).hexdigest()
+            ):
                 logger.warning("Proxy token hash mismatch for jti=%s", jti[:8])
                 return None
             if self._row_get(record, "revoked_at"):

@@ -404,7 +404,15 @@ class RemoteWSHandler(WSGIHandler):
         # For agent relay, we use the original_token (the terminal server's token)
         # Agent must present this token to authenticate
         original_token = info.get("original_token", "")
-        if not token or not original_token or not hmac.compare_digest(token, original_token):
+        # Handle URL-encoded tokens (Issue #1886)
+        from app.auth.decorators import normalize_token
+
+        decoded_token = normalize_token(token)
+        if (
+            not decoded_token
+            or not original_token
+            or not hmac.compare_digest(decoded_token, original_token)
+        ):
             logger.warning("Agent relay WS: invalid token for terminal %s", terminal_id[:8])
             ws_frame.send_close(self.socket, 4001)
             self.close_connection = True
@@ -479,7 +487,15 @@ class RemoteWSHandler(WSGIHandler):
 
         # Validate token.
         stored_token = info.get("token", "")
-        if not token or not stored_token or not hmac.compare_digest(token, stored_token):
+        # Handle URL-encoded tokens (Issue #1886)
+        from app.auth.decorators import normalize_token
+
+        decoded_token = normalize_token(token)
+        if (
+            not decoded_token
+            or not stored_token
+            or not hmac.compare_digest(decoded_token, stored_token)
+        ):
             logger.warning("Terminal WS handler: invalid token for terminal %s", terminal_id[:8])
             ws_frame.send_close(self.socket, 4001)
             self.close_connection = True
@@ -623,7 +639,15 @@ class RemoteWSHandler(WSGIHandler):
             )
         if not token and info.get("status") == "running":
             token = stored_token
-        if not token or not stored_token or not hmac.compare_digest(token, stored_token):
+        # Handle URL-encoded tokens (Issue #1886)
+        from app.auth.decorators import normalize_token
+
+        decoded_token = normalize_token(token)
+        if (
+            not decoded_token
+            or not stored_token
+            or not hmac.compare_digest(decoded_token, stored_token)
+        ):
             logger.warning("VSCode WS handler: invalid token for vscode %s", vscode_id[:8])
             ws_frame.send_close(self.socket, 4001)
             self.close_connection = True
