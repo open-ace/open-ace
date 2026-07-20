@@ -141,7 +141,12 @@ class APIKeyProxyService:
         self._start_proxy_token_cleanup()
 
     def _get_encryption_key(self) -> bytes:
-        """Get the AES encryption key from environment variable."""
+        """Derive the Fernet encryption key from OPENACE_ENCRYPTION_KEY.
+
+        The environment variable is hashed with SHA-256 to produce a 32-byte
+        key, then base64-encoded at encrypt/decrypt time for Fernet
+        compatibility. Shared with smtp_crypto and model_gateway.
+        """
         key_env = get_encryption_key_material(purpose="API key encryption")
         # Derive a 32-byte key using SHA-256
         return hashlib.sha256(key_env.encode()).digest()

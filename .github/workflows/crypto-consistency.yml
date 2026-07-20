@@ -4,19 +4,23 @@ on:
   push:
     paths:
       - 'app/modules/workspace/api_key_proxy.py'
+      - 'app/modules/workspace/model_gateway/repository.py'
       - 'app/utils/smtp_crypto.py'
       - 'docs/cn/REMOTE-WORKSPACE.md'
       - 'docs/en/REMOTE-WORKSPACE.md'
       - 'docs/cn/KEY_MANAGEMENT.md'
       - 'docs/en/KEY_MANAGEMENT.md'
+      - '.github/workflows/crypto-consistency.yml'
   pull_request:
     paths:
       - 'app/modules/workspace/api_key_proxy.py'
+      - 'app/modules/workspace/model_gateway/repository.py'
       - 'app/utils/smtp_crypto.py'
       - 'docs/cn/REMOTE-WORKSPACE.md'
       - 'docs/en/REMOTE-WORKSPACE.md'
       - 'docs/cn/KEY_MANAGEMENT.md'
       - 'docs/en/KEY_MANAGEMENT.md'
+      - '.github/workflows/crypto-consistency.yml'
 
 jobs:
   check:
@@ -27,23 +31,32 @@ jobs:
 
       - name: Check for AES-256-GCM drift in encryption context
         run: |
-          echo "Checking for AES-256-GCM references in API key encryption context..."
+          echo "Checking for AES-256-GCM references in encryption context..."
 
-          # Define files to check
+          # Files that document or implement secret encryption. Any new file
+          # touching encryption should be registered here so drift is caught.
           FILES=(
             "app/modules/workspace/api_key_proxy.py"
+            "app/modules/workspace/model_gateway/repository.py"
             "app/utils/smtp_crypto.py"
             "docs/cn/REMOTE-WORKSPACE.md"
             "docs/en/REMOTE-WORKSPACE.md"
+            "docs/cn/KEY_MANAGEMENT.md"
+            "docs/en/KEY_MANAGEMENT.md"
           )
 
           FOUND_DRIFT=0
 
+          # Match AES-256-GCM on the same line as encrypt/加密 (allowing
+          # arbitrary separators between them, e.g. "AES-256-GCM encryption").
+          # Does NOT flag the version-mapping table row that merely lists
+          # AES-256-GCM as a *future* reserved algorithm (no encrypt/加密 on
+          # that line).
+          DRIFT_RE='AES-256-GCM[^[:cntrl:]]*(encrypt|加密)|(encrypt|加密)[^[:cntrl:]]*AES-256-GCM'
+
           for file in "${FILES[@]}"; do
             if [ -f "$file" ]; then
-              # Check for AES-256-GCM in encryption context
-              # Allow mentions in "not AES-256-GCM" or "does not support" contexts
-              if grep -E "AES-256-GCM.*encrypt|encrypt.*AES-256-GCM|AES-256-GCM 加密|加密.*AES-256-GCM" "$file" > /dev/null 2>&1; then
+              if grep -nE "$DRIFT_RE" "$file" > /dev/null 2>&1; then
                 echo "::error file=$file::Found AES-256-GCM reference in encryption context."
                 echo "API keys use Fernet (AES-128-CBC with HMAC-SHA256), not AES-256-GCM."
                 echo "Please update: $file"

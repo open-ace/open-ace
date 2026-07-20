@@ -10,7 +10,7 @@ Issue: #1857 - API Key encryption algorithm documentation inconsistency
 import hashlib
 import os
 import tempfile
-from base64 import b64decode, b64encode
+from base64 import b64decode, b64encode, urlsafe_b64decode
 from unittest.mock import patch
 
 import pytest
@@ -36,18 +36,22 @@ class TestAPIKeyEncryptionConsistency:
                 assert encrypted is not None
                 assert len(encrypted) > 0
 
-                # Verify it's valid base64
+                # Verify it's a valid Fernet token. Fernet uses URL-safe base64
+                # (alphabet includes '-' and '_'), so urlsafe_b64decode is the
+                # correct decoder — plain b64decode flakes whenever the random
+                # IV/ciphertext happens to contain a '-' or '_'.
                 try:
-                    decoded = b64decode(encrypted.encode())
+                    decoded = urlsafe_b64decode(encrypted.encode())
                     # Fernet version byte is 0x80
                     assert decoded[0] == 0x80, "Should be Fernet token (version 0x80)"
                 except Exception:
-                    pytest.fail("Encrypted value should be valid base64")
+                    pytest.fail("Encrypted value should be valid URL-safe base64 Fernet token")
 
     def test_encrypted_key_is_fernet_token(self):
         """Encrypted keys should be valid Fernet tokens."""
-        from app.modules.workspace.api_key_proxy import APIKeyProxyService
         from cryptography.fernet import Fernet
+
+        from app.modules.workspace.api_key_proxy import APIKeyProxyService
 
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = os.path.join(tmpdir, "test.db")
@@ -102,30 +106,36 @@ class TestAPIKeyEncryptionConsistency:
         docstring = inspect.getdoc(APIKeyProxyService)
 
         # Should NOT contain AES-256-GCM reference
-        assert "AES-256-GCM" not in docstring, (
-            "Class docstring incorrectly claims AES-256-GCM encryption"
-        )
+        assert (
+            "AES-256-GCM" not in docstring
+        ), "Class docstring incorrectly claims AES-256-GCM encryption"
 
         # Should contain Fernet reference
-        assert "Fernet" in docstring, (
-            "Class docstring should mention Fernet encryption"
-        )
+        assert "Fernet" in docstring, "Class docstring should mention Fernet encryption"
 
-    def test_smtp_crypto_method_docstring_accuracy(self):
-        """Verify smtp_crypto method docstring is accurate."""
+    def test_encryption_key_method_docstrings_accuracy(self):
+        """Both modules' _get_encryption_key docstrings must not claim AES.
+
+        Regression guard for Issue #1857: the original docstring was
+        "Get the AES encryption key from environment variable." while the
+        implementation derives a Fernet key. The conditional form of this
+        test (``if 'AES' in docstring: assert ...``) silently passed when the
+        trigger word was absent, so a drift in *one* module escaped CI. Assert
+        unconditionally against both modules.
+        """
         import inspect
 
+        from app.modules.workspace.api_key_proxy import APIKeyProxyService
         from app.utils.smtp_crypto import SMTPPasswordManager
 
-        docstring = inspect.getdoc(SMTPPasswordManager._get_encryption_key)
-
-        # Should not mislead about AES encryption key
-        # (The original said "Get the AES encryption key" which is misleading
-        # since we're actually deriving a Fernet key)
-        if "AES encryption key" in docstring:
-            # If it mentions AES, it should clarify it's for Fernet
-            assert "Fernet" in docstring, (
-                "Method docstring mentions AES but should clarify Fernet"
+        for owner, method in (
+            ("api_key_proxy", APIKeyProxyService._get_encryption_key),
+            ("smtp_crypto", SMTPPasswordManager._get_encryption_key),
+        ):
+            docstring = inspect.getdoc(method) or ""
+            assert "AES encryption key" not in docstring, (
+                f"{owner}._get_encryption_key docstring still claims "
+                "'AES encryption key' — it derives a Fernet key (Issue #1857)"
             )
 
 
@@ -186,9 +196,7 @@ class TestProxyTokenSignature:
 
                 # Fernet tokens start with version byte 0x80 (commonly 'gAAAA' in base64)
                 # Proxy tokens are payload_b64.signature format
-                assert not token.startswith("gAAAA"), (
-                    "Proxy token should not be Fernet format"
-                )
+                assert not token.startswith("gAAAA"), "Proxy token should not be Fernet format"
 
                 # Should have exactly one dot separator
                 assert token.count(".") == 1, "Proxy token should be payload.signature"
@@ -230,6 +238,9 @@ class TestCrossModuleKeyConsistency:
         """Verify API key, SMTP, and Model Gateway use identical key derivation."""
         import hashlib
 
+        from app.modules.workspace.api_key_proxy import APIKeyProxyService
+        from app.utils.smtp_crypto import SMTPPasswordManager
+
         test_key = "consistency-test-key-12345678901234"
 
         with patch.dict(os.environ, {"OPENACE_ENCRYPTION_KEY": test_key}):
@@ -237,17 +248,18 @@ class TestCrossModuleKeyConsistency:
             expected = hashlib.sha256(test_key.encode()).digest()
 
             # API Key Proxy
-            from app.modules.workspace.api_key_proxy import APIKeyProxyService
-
             with tempfile.TemporaryDirectory() as tmpdir:
                 db_path = os.path.join(tmpdir, "test.db")
                 api_service = APIKeyProxyService(db_path=db_path)
                 api_key = api_service._encryption_key
 
-            # SMTP Crypto
-            from app.utils.smtp_crypto import get_password_manager
-
-            smtp_manager = get_password_manager()
+            # SMTP Crypto — construct directly. get_password_manager() is a
+            # module-level singleton (app/utils/smtp_crypto.py) that caches the
+            # first instance, so its _encryption_key is NOT affected by
+            # patch.dict(os.environ) after the first call in the test session.
+            # Constructing SMTPPasswordManager() forces re-derivation under the
+            # patched env, which is what we actually want to assert here.
+            smtp_manager = SMTPPasswordManager()
             smtp_key = smtp_manager._encryption_key
 
             # Model Gateway (uses same SMTP crypto)
@@ -261,7 +273,7 @@ class TestCrossModuleKeyConsistency:
     def test_encryption_decryption_roundtrip(self):
         """Verify encryption/decryption roundtrip works across modules."""
         from app.modules.workspace.api_key_proxy import APIKeyProxyService
-        from app.utils.smtp_crypto import get_password_manager
+        from app.utils.smtp_crypto import SMTPPasswordManager
 
         test_key = "roundtrip-test-key-123456789012345"
 
@@ -276,8 +288,9 @@ class TestCrossModuleKeyConsistency:
                 decrypted_api = api_service._decrypt_key(encrypted_api)
                 assert decrypted_api == test_value
 
-            # SMTP encryption
-            smtp_manager = get_password_manager()
+            # SMTP encryption — construct directly (see note in the test above
+            # about the get_password_manager() singleton not re-deriving).
+            smtp_manager = SMTPPasswordManager()
             encrypted_smtp = smtp_manager.encrypt(test_value)
             decrypted_smtp = smtp_manager.decrypt(encrypted_smtp)
             assert decrypted_smtp == test_value

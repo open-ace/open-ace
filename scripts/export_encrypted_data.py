@@ -61,29 +61,21 @@ def get_database_connection():
 def export_api_keys(conn) -> list[dict[str, Any]]:
     """Export all API keys from api_key_store table."""
     from app.modules.workspace.api_key_proxy import APIKeyProxyService
+    from app.repositories.database import adapt_boolean_condition
 
     service = APIKeyProxyService()
     cursor = conn.cursor()
 
-    # Use direct query to get encrypted keys
-    if hasattr(conn, "cursor_factory"):  # PostgreSQL
-        cursor.execute(
-            """
-            SELECT id, tenant_id, provider, key_name, encrypted_key, base_url,
-                   cli_tools, cli_settings, scope, priority, weight
-            FROM api_key_store
-            WHERE is_active = TRUE
-            """
-        )
-    else:  # SQLite
-        cursor.execute(
-            """
-            SELECT id, tenant_id, provider, key_name, encrypted_key, base_url,
-                   cli_tools, cli_settings, scope, priority, weight
-            FROM api_key_store
-            WHERE is_active = 1
-            """
-        )
+    # adapt_boolean_condition emits "(is_active)::int != 0" on PostgreSQL and
+    # "is_active = 1" on SQLite, covering both boolean and INTEGER columns.
+    cursor.execute(
+        f"""
+        SELECT id, tenant_id, provider, key_name, encrypted_key, base_url,
+               cli_tools, cli_settings, scope, priority, weight
+        FROM api_key_store
+        WHERE {adapt_boolean_condition("is_active", True)}
+        """
+    )
 
     rows = cursor.fetchall()
     exported = []
@@ -109,9 +101,7 @@ def export_api_keys(conn) -> list[dict[str, Any]]:
                 }
             )
         except Exception as e:
-            logger.warning(
-                f"Failed to decrypt API key id={row_dict['id']}: {e}"
-            )
+            logger.warning(f"Failed to decrypt API key id={row_dict['id']}: {e}")
 
     logger.info(f"Exported {len(exported)} API keys")
     return exported
@@ -208,6 +198,11 @@ def main():
         action="store_true",
         help="Suppress info messages",
     )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Decrypt and report counts without writing the plaintext file",
+    )
     args = parser.parse_args()
 
     if args.quiet:
@@ -228,20 +223,41 @@ def main():
 
     conn = get_database_connection()
     try:
+        api_keys = export_api_keys(conn)
+        smtp_settings = export_smtp_settings(conn)
+        gateway_config = export_gateway_config(conn)
+
+        if args.dry_run:
+            logger.info(
+                "Dry-run: would export %d API keys, smtp=%s, gateway=%s",
+                len(api_keys),
+                bool(smtp_settings),
+                bool(gateway_config),
+            )
+            logger.info("Dry-run complete — no file written.")
+            return
+
         export_data = {
             "export_timestamp": datetime.now().isoformat(),
-            "api_keys": export_api_keys(conn),
-            "smtp_settings": export_smtp_settings(conn),
-            "gateway_config": export_gateway_config(conn),
+            "api_keys": api_keys,
+            "smtp_settings": smtp_settings,
+            "gateway_config": gateway_config,
         }
 
-        # Write to file
-        with open(output_path, "w", encoding="utf-8") as f:
+        # Write with restrictive permissions (0600). The file contains
+        # plaintext secrets; default umask may leave it group/world readable.
+        # On POSIX we pre-create the file 0600 so the secrets never touch a
+        # more-permissive inode. Windows ignores the mode bits.
+        flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+        fd = os.open(output_path, flags, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(export_data, f, indent=2, ensure_ascii=False)
+        # Belt-and-suspenders: chmod in case the file pre-existed.
+        os.chmod(output_path, 0o600)
 
         logger.info(f"Export complete. Output written to: {output_path}")
         logger.warning(
-            "SECURITY: This file contains plaintext secrets. "
+            "SECURITY: This file contains plaintext secrets (mode 0600). "
             "Delete after re-encryption is complete."
         )
 
