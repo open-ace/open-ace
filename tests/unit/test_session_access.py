@@ -25,7 +25,7 @@ class TestSetUserFromToken:
         with app.test_request_context("/api/remote/x"):
             with (
                 patch(
-                    "app.modules.workspace.session_access._extract_token",
+                    "app.modules.workspace.session_access._extract_session_token",
                     return_value="tok",
                 ),
                 patch(
@@ -39,7 +39,7 @@ class TestSetUserFromToken:
 
     def test_returns_false_when_no_token(self, app):
         with app.test_request_context("/api/remote/x"):
-            with patch("app.modules.workspace.session_access._extract_token", return_value=""):
+            with patch("app.modules.workspace.session_access._extract_session_token", return_value=""):
                 assert _set_user_from_token() is False
 
 

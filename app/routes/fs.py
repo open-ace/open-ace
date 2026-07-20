@@ -553,7 +553,10 @@ def api_browse_directory():
         # Return home directory as fallback
         home = get_home_directory(user)
         # Provide helpful note: directory will be created when project is set up
-        fallback_note = f"Directory '{path}' does not exist. It will be created automatically when you create a project here."
+        fallback_note = (
+            f"Directory '{path}' does not exist. "
+            "It will be created automatically when you create a project here."
+        )
         listing = list_subdirectories(home, system_account, include_files=include_files)
         return jsonify(
             {
