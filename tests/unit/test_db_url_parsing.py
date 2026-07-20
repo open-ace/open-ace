@@ -5,6 +5,7 @@ Issue #1893: Production security hardening for Docker Compose.
 """
 
 import os
+import secrets
 import pytest
 from urllib.parse import unquote
 
@@ -152,7 +153,9 @@ class TestSecurityEnvIntegration:
 
         # Strong values are not weak
         assert is_weak_secret_value("a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4") is False
-        assert is_weak_secret_value(secrets.token_hex(32)) is False  # noqa: F821
+        # Test with a dynamically generated strong value
+        strong_key = secrets.token_hex(32)
+        assert is_weak_secret_value(strong_key) is False
 
     def test_production_mode_detection(self):
         """Production mode detection works correctly."""
