@@ -1454,6 +1454,14 @@ export const translations: Record<Language, Translations> = {
     noSubdirectories: 'No subdirectories found',
     folderName: 'Folder name',
     createDirError: 'Failed to create directory.',
+    // Issue #1912: Personal files browser clarity
+    folder: 'Folder',
+    file: 'File',
+    folders: 'Folders',
+    files: 'Files',
+    doubleClickToOpen: 'Double-click to open',
+    openSessionHere: 'Open Session Here',
+    willUsePath: 'Will use: {path}',
 
     // AI Autonomous Development
     autonomousDev: 'AI Autonomous Dev',
@@ -3120,6 +3128,13 @@ export const translations: Record<Language, Translations> = {
     noSubdirectories: '没有子目录',
     folderName: '文件夹名称',
     createDirError: '创建目录失败。',
+    folder: '文件夹',
+    file: '文件',
+    folders: '文件夹',
+    files: '文件',
+    doubleClickToOpen: '双击打开',
+    openSessionHere: '在此目录新建会话',
+    willUsePath: '将使用：{path}',
 
     // AI 自主开发
     autonomousDev: 'AI 自主开发',
@@ -4565,6 +4580,13 @@ export const translations: Record<Language, Translations> = {
     noSubdirectories: 'サブディレクトリがありません',
     folderName: 'フォルダ名',
     createDirError: 'ディレクトリの作成に失敗しました。',
+    folder: 'フォルダ',
+    file: 'ファイル',
+    folders: 'フォルダ',
+    files: 'ファイル',
+    doubleClickToOpen: 'ダブルクリックで開く',
+    openSessionHere: 'ここでセッションを開く',
+    willUsePath: '使用パス: {path}',
 
     // AI自律開発
     autonomousDev: 'AI自律開発',
@@ -6100,6 +6122,13 @@ export const translations: Record<Language, Translations> = {
     noSubdirectories: '하위 디렉토리 없음',
     folderName: '폴더 이름',
     createDirError: '디렉토리 생성에 실패했습니다.',
+    folder: '폴더',
+    file: '파일',
+    folders: '폴더',
+    files: '파일',
+    doubleClickToOpen: '더블클릭하여 열기',
+    openSessionHere: '이 디렉토리에서 세션 열기',
+    willUsePath: '사용 경로: {path}',
 
     // AI 자율 개발
     autonomousDev: 'AI 자율 개발',

@@ -249,4 +249,92 @@ describe('LocalDirectoryBrowser', () => {
     // Upload button hidden too (only shown when isWritable)
     expect(screen.queryByText('uploadFile')).not.toBeInTheDocument();
   });
+
+  // Issue #1912: double-clicking a directory should also navigate into it
+  // (matches desktop file-manager muscle memory).
+  it('navigates into a subdirectory on double-click', async () => {
+    browseDirectoryMock.mockResolvedValue(
+      browseResponse({
+        directories: [
+          { name: 'subdir', path: '/home/alice/subdir', is_writable: true },
+        ],
+      })
+    );
+
+    render(
+      <LocalDirectoryBrowser initialPath="/home/alice" onSelectPath={() => {}} enableFileActions />
+    );
+
+    const row = await screen.findByText('subdir');
+    fireEvent.doubleClick(row);
+    await waitFor(() => {
+      expect(browseDirectoryMock).toHaveBeenCalledWith('/home/alice/subdir', {
+        includeFiles: true,
+      });
+    });
+  });
+
+  // Issue #1912: a failed browseDirectory should surface a toast so the
+  // error is not missed when the list visually does not change.
+  it('surfaces a toast error when browseDirectory fails', async () => {
+    browseDirectoryMock.mockRejectedValue(new Error('boom'));
+
+    render(
+      <LocalDirectoryBrowser initialPath="/home/alice" onSelectPath={() => {}} enableFileActions />
+    );
+
+    await waitFor(() => {
+      expect(toastMock.error).toHaveBeenCalledWith(
+        'browseDirectory',
+        expect.stringContaining('boom')
+      );
+    });
+  });
+
+  // Issue #1912: when manual input is hidden (PersonalFiles use case), the
+  // action button should read "Open Session Here" and show the path that
+  // will be used, instead of the misleading "Select" label.
+  it('renders "Open Session Here" button and path preview when hideManualInput=true', async () => {
+    browseDirectoryMock.mockResolvedValue(
+      browseResponse({ path: '/home/alice' })
+    );
+
+    render(
+      <LocalDirectoryBrowser
+        initialPath="/home/alice"
+        onSelectPath={() => {}}
+        hideManualInput
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('openSessionHere')).toBeInTheDocument();
+    });
+    // Path preview label present (only rendered in the hideManualInput branch)
+    expect(screen.getByText(/willUsePath/)).toBeInTheDocument();
+    // Legacy "Select" label absent
+    expect(screen.queryByText('select')).not.toBeInTheDocument();
+  });
+
+  // Issue #1912: directories and files must be visually distinguishable —
+  // directories use the solid filled folder icon, files use the file-earmark.
+  it('uses bi-folder-fill for directories and bi-file-earmark for files', async () => {
+    browseDirectoryMock.mockResolvedValue(
+      browseResponse({
+        directories: [{ name: 'subdir', path: '/home/alice/subdir', is_writable: true }],
+        files: [{ name: 'note.txt', path: '/home/alice/note.txt', size: 4, is_readable: true }],
+      })
+    );
+
+    const { container } = render(
+      <LocalDirectoryBrowser initialPath="/home/alice" onSelectPath={() => {}} enableFileActions />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('subdir')).toBeInTheDocument();
+    });
+
+    expect(container.querySelector('.bi-folder-fill')).not.toBeNull();
+    expect(container.querySelector('.bi-file-earmark')).not.toBeNull();
+  });
 });

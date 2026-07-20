@@ -3379,6 +3379,20 @@ table .latency-row:hover td {
   border-top: 1px solid var(--border-color);
 }
 
+/* Issue #1912: Tint folder/file icons so directories and files are
+   distinguishable at a glance (solid yellow folder vs muted file). */
+.personal-files .directory-list .bi-folder-fill {
+  color: #e0a800;
+}
+
+.personal-files .directory-list .bi-file-earmark {
+  color: var(--bs-secondary-color, #6c757d);
+}
+
+[data-bs-theme='dark'] .personal-files .directory-list .bi-folder-fill {
+  color: #f0ad4e;
+}
+
 .personal-files .file-list .file-list-item {
   padding: 0.35rem 0.75rem;
 }
