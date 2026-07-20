@@ -3,13 +3,18 @@
 The post-run guardrail in ``_validate_repo_context_after_run`` flags any case
 where the main repo HEAD moved during an agent run while the worktree HEAD did
 not. Issue #1890 exposed that this also fires for a benign external ``git pull``
-on the main repo (a fast-forward), which is common on shared dev machines.
+on the main repo, which is common on shared dev machines.
+
+The guardrail distinguishes the two by checking whether the new main HEAD
+already exists on ``origin/main``: a pull brings a remote-sourced commit, while
+a local escape commit (agent running ``git commit`` on main) is not yet pushed.
 
 Covers:
-  - External ``git pull`` fast-forward on main during an agent run → allowed.
-  - Real escape (non-fast-forward main rewrite) → still blocked.
+  - External ``git pull`` (new HEAD is on origin/main) → allowed.
+  - Agent local commit on main (new HEAD NOT on origin/main) → blocked.
+  - Non-fast-forward main rewrite (HEAD NOT on origin/main) → blocked.
   - Worktree HEAD also moved → allowed (pre-existing behaviour preserved).
-  - Fast-forward probe itself raises → conservatively allowed.
+  - Remote-source probe itself raises → conservatively allowed.
 """
 
 import os
@@ -20,10 +25,11 @@ from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
 MAIN_REPO = "/srv/open-ace"
 WORKTREE = "/srv/open-ace/.worktrees/wf-1890"
 
-# Short SHAs used as HEAD values in the scenarios below.
+# SHAs used as HEAD values in the scenarios below.
 MAIN_BEFORE = "93f4753ae15c5e7cb0dec5c5bbfe5971e93dfec9"
-MAIN_AFTER_FF = "a7409645a750904ecf1d313aa412169db41c4866"  # descendant of MAIN_BEFORE
-MAIN_AFTER_ESCAPE = "ff00bad0000000000000000000000000000bad00"  # not a descendant
+MAIN_AFTER_PULL = "a7409645a750904ecf1d313aa412169db41c4866"  # on origin/main (pulled)
+MAIN_AFTER_LOCAL = "a1b2c3d40000000000000000000000000000aaaa"  # local-only escape commit
+MAIN_AFTER_REWRITE = "ff00bad0000000000000000000000000000bad00"  # history rewrite
 WORKTREE_HEAD = "a7409645a750904ecf1d313aa412169db41c4866"
 
 
@@ -80,15 +86,16 @@ def _install_fake_gh(
     *,
     after_main_head,
     effective_head=WORKTREE_HEAD,
-    is_ancestor=True,
-    is_ancestor_raises=False,
+    on_origin_main=True,
+    probe_raises=False,
 ):
     """Patch GitHubOps so _capture_repo_state returns scripted heads.
 
     - Worktree repo (repo_path == WORKTREE) → effective_head, branch auto-dev/wf-1890.
     - Main repo (repo_path == MAIN_REPO) → after_main_head, branch main.
-    - merge-base --is-ancestor exits 0 when is_ancestor else 1, unless
-      is_ancestor_raises (then _run_git raises) to test probe-failure handling.
+    - ``fetch origin main`` → success (or raises when probe_raises).
+    - ``merge-base --is-ancestor <after> origin/main`` exits 0 when
+      on_origin_main else 1, modeling whether after_main_head is on the remote.
     """
 
     def factory(repo_path, system_account=None):
@@ -101,10 +108,19 @@ def _install_fake_gh(
             gh.get_current_commit.return_value = after_main_head
 
         def run_git(args, check=True):
+            # probe_raises only breaks the remote-source probe (fetch +
+            # merge-base), NOT the rev-parse/branch/commit probes used by
+            # _capture_repo_state — otherwise the after-snapshot itself fails
+            # before the probe is ever reached.
+            if probe_raises and (
+                args[:3] == ["fetch", "origin", "main"]
+                or args[:2] == ["merge-base", "--is-ancestor"]
+            ):
+                raise RuntimeError("probe boom")
+            if args[:3] == ["fetch", "origin", "main"]:
+                return MagicMock(returncode=0)
             if args[:2] == ["merge-base", "--is-ancestor"]:
-                if is_ancestor_raises:
-                    raise RuntimeError("probe boom")
-                return MagicMock(returncode=0 if is_ancestor else 1)
+                return MagicMock(returncode=0 if on_origin_main else 1)
             # rev-parse --show-toplevel used by _capture_repo_state
             if args and args[0] == "rev-parse":
                 return MagicMock(stdout=repo_path)
@@ -117,28 +133,44 @@ def _install_fake_gh(
 
 
 class TestRepoDriftValidation:
-    def test_external_pull_fast_forward_is_allowed(self, monkeypatch):
-        # Regression core: main HEAD fast-forwarded (external git pull) while
-        # the worktree stayed put — must NOT be treated as an escape.
+    def test_external_pull_with_remote_sourced_head_is_allowed(self, monkeypatch):
+        # Regression core: main HEAD moved to a commit already on origin/main
+        # (external git pull) while the worktree stayed put → NOT an escape.
         _install_fake_gh(
             monkeypatch,
-            after_main_head=MAIN_AFTER_FF,
+            after_main_head=MAIN_AFTER_PULL,
             effective_head=WORKTREE_HEAD,
-            is_ancestor=True,  # MAIN_BEFORE is an ancestor of MAIN_AFTER_FF
+            on_origin_main=True,
         )
         o = _make_orchestrator()
         before = _before_state(MAIN_BEFORE)
 
         assert o._validate_repo_context_after_run(before, system_account=None) == ""
 
-    def test_non_fast_forward_main_rewrite_is_blocked(self, monkeypatch):
-        # main HEAD changed to a commit that is NOT a descendant of the before
-        # commit (history rewrite / branch switch) — real escape, still blocked.
+    def test_agent_local_commit_on_main_is_blocked(self, monkeypatch):
+        # The case the fast-forward check missed (#1890 review): agent ran a
+        # plain `git commit` on main. The new HEAD is a descendant of before
+        # but is NOT on origin/main (not pushed) → must still be blocked.
         _install_fake_gh(
             monkeypatch,
-            after_main_head=MAIN_AFTER_ESCAPE,
+            after_main_head=MAIN_AFTER_LOCAL,
             effective_head=WORKTREE_HEAD,
-            is_ancestor=False,
+            on_origin_main=False,
+        )
+        o = _make_orchestrator()
+        before = _before_state(MAIN_BEFORE)
+
+        err = o._validate_repo_context_after_run(before, system_account=None)
+        assert "Detected commits on the main repository" in err
+
+    def test_non_fast_forward_main_rewrite_is_blocked(self, monkeypatch):
+        # main HEAD changed to a commit not on origin/main (history rewrite /
+        # branch switch) — real escape, still blocked.
+        _install_fake_gh(
+            monkeypatch,
+            after_main_head=MAIN_AFTER_REWRITE,
+            effective_head=WORKTREE_HEAD,
+            on_origin_main=False,
         )
         o = _make_orchestrator()
         before = _before_state(MAIN_BEFORE)
@@ -152,7 +184,7 @@ class TestRepoDriftValidation:
         # what main did. Guards against regressing the original logic.
         _install_fake_gh(
             monkeypatch,
-            after_main_head=MAIN_AFTER_FF,
+            after_main_head=MAIN_AFTER_PULL,
             effective_head="cccccccc000000000000000000000000000000",  # worktree moved
         )
         o = _make_orchestrator()
@@ -160,15 +192,15 @@ class TestRepoDriftValidation:
 
         assert o._validate_repo_context_after_run(before, system_account=None) == ""
 
-    def test_fast_forward_probe_failure_is_allowed(self, monkeypatch):
-        # If the merge-base probe itself raises (detached HEAD, shallow clone,
-        # etc.) we must NOT escalate a transient probe error into a workflow
-        # failure — conservatively allow.
+    def test_remote_source_probe_failure_is_allowed(self, monkeypatch):
+        # If the fetch / merge-base probe itself raises (network, missing ref)
+        # we must NOT escalate a transient probe error into a workflow failure
+        # — conservatively allow.
         _install_fake_gh(
             monkeypatch,
-            after_main_head=MAIN_AFTER_FF,
+            after_main_head=MAIN_AFTER_PULL,
             effective_head=WORKTREE_HEAD,
-            is_ancestor_raises=True,
+            probe_raises=True,
         )
         o = _make_orchestrator()
         before = _before_state(MAIN_BEFORE)

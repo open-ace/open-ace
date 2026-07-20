@@ -920,32 +920,45 @@ class AutonomousOrchestrator:
             "head": head,
         }
 
-    def _is_fast_forward(
+    def _main_head_is_remote_sourced(
         self,
         repo_path: str,
         before: str,
         after: str,
         system_account: str | None,
     ) -> bool:
-        """Return True if ``after`` is a descendant of ``before`` (fast-forward).
+        """Return True if ``after`` already exists on ``origin/main``.
 
-        Distinguishes a benign external ``git pull`` on the main repo (HEAD
-        fast-forwards during an agent run) from an agent committing outside the
-        workflow worktree (#1890). On any git probe failure we conservatively
-        return True so a transient probe error cannot fail an otherwise-healthy
-        workflow.
+        Tells a benign external ``git pull`` on the main repo (HEAD moves to a
+        remote-sourced commit during an agent run) apart from an agent
+        committing outside the workflow worktree. The previous fast-forward
+        check (``is-ancestor before after``) could not make this distinction:
+        a local escape ``git commit`` on main is *also* a descendant of
+        ``before``, so it was wrongly allowed. Membership in ``origin/main``
+        can — a pull brings a commit already on the remote, a local escape
+        commit is not yet pushed (#1890 review).
+
+        On any probe failure (network, missing ref) we conservatively return
+        True so a transient error cannot fail an otherwise-healthy workflow.
         """
         if not before or not after or before == after:
             return True
         try:
             gh = GitHubOps(repo_path, system_account=system_account)
+            # Refresh origin/main so the membership check sees the latest
+            # remote tip. A concurrent `git pull` updates this ref too, but an
+            # explicit fetch closes the fetch↔merge race window.
+            gh._run_git(["fetch", "origin", "main"])
             return (
-                gh._run_git(["merge-base", "--is-ancestor", before, after], check=False).returncode
+                gh._run_git(
+                    ["merge-base", "--is-ancestor", after, "origin/main"], check=False
+                ).returncode
                 == 0
             )
         except Exception as e:
             logger.warning(
-                "Workflow %s: fast-forward probe failed (%s..%s): %s; assuming fast-forward.",
+                "Workflow %s: remote-source probe failed for main HEAD %s..%s: %s; "
+                "assuming remote-sourced.",
                 self._workflow_id,
                 before[:8],
                 after[:8],
@@ -1024,18 +1037,20 @@ class AutonomousOrchestrator:
             ):
                 # main HEAD moved but the worktree did not. This is either an
                 # agent committing outside the worktree, or an external `git
-                # pull` on the main repo fast-forwarding HEAD during the agent
-                # run (#1890). The latter is benign — only treat it as an
-                # escape when the main HEAD did NOT fast-forward before→after.
-                if self._is_fast_forward(
+                # pull` on the main repo moving HEAD to a remote commit during
+                # the agent run (#1890). Allow only when the new HEAD already
+                # exists on origin/main (i.e. it was pulled, not locally
+                # committed); a local escape commit is not yet on the remote
+                # and is still blocked.
+                if self._main_head_is_remote_sourced(
                     ctx.get("project_path", ""),
                     before_main.get("head"),
                     after_main.get("head"),
                     system_account,
                 ):
                     logger.info(
-                        "Workflow %s: main repo HEAD fast-forwarded %s..%s during "
-                        "agent run (external pull); allowing.",
+                        "Workflow %s: main repo HEAD moved to a remote-sourced "
+                        "commit %s..%s during agent run (external pull); allowing.",
                         self._workflow_id,
                         before_main.get("head", "")[:8],
                         after_main.get("head", "")[:8],
