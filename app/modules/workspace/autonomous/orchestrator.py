@@ -557,6 +557,24 @@ _REVIEW_APPROVAL_PHRASES = {
 }
 
 
+def _extract_pr_number_from_error(error_text: str) -> Optional[int]:
+    """Extract a PR number from a gh "already exists" error message.
+
+    gh's already-exists message includes the PR URL, e.g.:
+      "a pull request for branch X into branch main already exists:
+       https://github.com/owner/repo/pull/1877"
+    Parsing the /pull/<n> URL gives the PR number directly — this avoids
+    coupling recovery to the exact "already exists" wording, skips the
+    eventually-consistent find_existing_pr API call, and proves the error
+    really is the already-exists case (no URL → not recoverable here).
+    Returns the PR number or None.
+    """
+    if not error_text:
+        return None
+    m = re.search(r"/pull/(\d+)", error_text)
+    return int(m.group(1)) if m else None
+
+
 def _review_approval_phrase(content_language: Optional[str]) -> str:
     """Approval marker for PR review in the given content language."""
     return _REVIEW_APPROVAL_PHRASES.get(
@@ -5130,8 +5148,25 @@ class AutonomousOrchestrator:
                 # 推送失败必须阻止后续 PR 创建，避免 "No commits" 错误 (Issue #1736)
                 raise RuntimeError(f"Branch push failed before PR creation: {e}") from e
 
-        # Create PR on first round
-        if round_num == 1:
+        # Create PR on first round (idempotent: skip if a PR already exists for
+        # this workflow). advance() is reentrant — the scheduler may call it
+        # again while a review agent is still running and current_round hasn't
+        # been persisted yet (it's written at the end of the review round). On
+        # re-entry round_num is still 1, so without this guard the workflow
+        # would call gh pr create again and hit "a pull request ... already
+        # exists", failing the whole workflow (#1857). Checking github_pr_number
+        # covers both re-entry and process-restart resume.
+        #
+        # Reads from both the passed-in wf dict AND self.workflow: self.workflow
+        # is a @property that re-queries the repo on every access, so once an
+        # earlier advance() persisted github_pr_number, a later advance()'s
+        # fallback (self.workflow.get) sees the fresh value even though the
+        # caller's wf snapshot is stale. This is what makes the guard reliable
+        # across re-entries (the test suite mocks get_workflow statically, so
+        # this property-refresh path is exercised in production but not in the
+        # PR-creation unit tests — see test_create_pr_already_exists_recovers).
+        existing_pr_number = wf.get("github_pr_number") or self.workflow.get("github_pr_number")
+        if round_num == 1 and not existing_pr_number:
             try:
                 # Build PR body with issue linkage
                 pr_body = f"Autonomous development for dev round {dev_round}.\n\nRequirements: {wf.get('requirements_text', '')}"
@@ -5162,14 +5197,74 @@ class AutonomousOrchestrator:
                     }
                 )
             except GitHubOpsError as e:
-                self._create_milestone(
-                    phase="pr_review",
-                    milestone_type="pr_created",
-                    status="failed",
-                    title="PR creation failed",
-                    error_message=str(e),
-                )
-                raise
+                # Graceful recovery ONLY for the "already exists" case (race
+                # between the github_pr_number guard above and the API call, or
+                # a re-entrant advance()). Other GitHubOpsError causes (network
+                # / auth / body-too-long) must NOT be masked by reusing an
+                # unrelated leftover open PR on this branch — those still raise.
+                #
+                # Prefer parsing the PR URL out of gh's error text (gh's
+                # already-exists message includes the PR URL, e.g.
+                # "... already exists: https://github.com/o/r/pull/1877").
+                # This avoids coupling to the exact "already exists" wording
+                # AND skips the eventually-consistent find_existing_pr race
+                # AND saves an API call. find_existing_pr is the fallback when
+                # the error text has no parseable URL.
+                pr_number_reused = _extract_pr_number_from_error(str(e))
+                if pr_number_reused:
+                    existing = {"number": pr_number_reused}
+                else:
+                    # Only treat as recoverable if it really is the
+                    # already-exists case (no PR URL to prove it). Other
+                    # errors have no PR URL and fall through to raise below.
+                    if "already exists" not in str(e).lower():
+                        self._create_milestone(
+                            phase="pr_review",
+                            milestone_type="pr_created",
+                            status="failed",
+                            title="PR creation failed",
+                            error_message=str(e),
+                        )
+                        raise
+                    existing = gh.find_existing_pr(branch_name)
+                    if not existing:
+                        # GitHub's PR list API is eventually consistent — the
+                        # PR that "already exists" may not be indexed yet right
+                        # after a concurrent create. One short retry covers it.
+                        time.sleep(2)
+                        existing = gh.find_existing_pr(branch_name)
+                if existing:
+                    pr_number = existing.get("number")
+                    pr_url = existing.get("url", "")
+                    logger.warning(
+                        "PR create for %s returned 'already exists'; reusing PR #%s",
+                        branch_name,
+                        pr_number,
+                    )
+                    self._create_milestone(
+                        phase="pr_review",
+                        dev_round=dev_round,
+                        milestone_type="pr_created",
+                        status="completed",
+                        title=f"PR #{pr_number} already exists (reused)",
+                        github_pr_number=pr_number,
+                        result_summary=pr_url,
+                    )
+                    self._update_workflow(
+                        {
+                            "github_pr_number": pr_number,
+                            "github_pr_url": pr_url,
+                        }
+                    )
+                else:
+                    self._create_milestone(
+                        phase="pr_review",
+                        milestone_type="pr_created",
+                        status="failed",
+                        title="PR creation failed",
+                        error_message=str(e),
+                    )
+                    raise
 
             # Check CI status after PR creation — poll until finished or timeout
             if pr_number:
