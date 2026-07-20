@@ -90,6 +90,7 @@ def _authenticate_user():
         _extract_token,
         _load_user_from_token,
         enforce_password_change_requirement,
+        normalize_webui_token,
     )
 
     token = _extract_token()
@@ -109,6 +110,8 @@ def _authenticate_user():
     # Fallback: try WebUI token from query param (for iframe integration)
     url_token = request.args.get("token")
     if url_token:
+        # Handle double-encoded tokens from some clients
+        url_token = normalize_webui_token(url_token)
         from app.services.webui_manager import get_webui_manager
 
         manager = get_webui_manager()
@@ -171,6 +174,7 @@ def get_current_user():
 
 def get_webui_user():
     """Get user from webui token (for iframe integration)."""
+    from app.auth.decorators import normalize_webui_token
     from app.services.webui_manager import get_webui_manager
 
     token: str | None = request.cookies.get("session_token") or request.headers.get(
@@ -178,6 +182,8 @@ def get_webui_user():
     ).replace("Bearer ", "")
     if not token:
         token = request.args.get("token") or ""
+        # Handle double-encoded tokens from some clients
+        token = normalize_webui_token(token)
 
     if not token:
         return None, {"error": "Unauthorized"}, 401

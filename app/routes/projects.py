@@ -19,6 +19,7 @@ from app.auth.decorators import (
     _extract_token,
     _load_user_from_token,
     enforce_password_change_requirement,
+    normalize_webui_token,
     require_tenant_scope,
 )
 from app.repositories.project_repo import ProjectRepository
@@ -65,6 +66,8 @@ def _authenticate_user():
     # Fallback: try WebUI token from query param
     url_token = request.args.get("token")
     if url_token:
+        # Handle double-encoded tokens from some clients
+        url_token = normalize_webui_token(url_token)
         from app.services.webui_manager import get_webui_manager
 
         manager = get_webui_manager()

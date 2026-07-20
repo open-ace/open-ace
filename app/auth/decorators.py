@@ -17,6 +17,7 @@ from __future__ import annotations
 import logging
 from functools import wraps
 from typing import TYPE_CHECKING, cast
+from urllib.parse import unquote
 
 from flask import Response, g, jsonify, request
 
@@ -31,6 +32,26 @@ def _get_auth_service() -> AuthService:
     from app.services.auth_service import AuthService
 
     return AuthService()
+
+
+def normalize_webui_token(token: str) -> str:
+    """Normalize WebUI token that may be double-encoded.
+
+    Some clients pass URL-encoded tokens through encodeURIComponent() twice,
+    resulting in %3A becoming %253A. Flask's request.args.get() decodes once,
+    so we get %3A in the token. We need to decode it again to get the correct
+    format (user_id:port:random:signature).
+
+    Args:
+        token: Token string from request, may contain %3A if double-encoded.
+
+    Returns:
+        Normalized token with colons restored.
+    """
+    if token and ("%3A" in token or "%3a" in token.lower()):
+        # Token was double-encoded, decode again
+        return unquote(token)
+    return token
 
 
 def _extract_token() -> str:
@@ -261,6 +282,8 @@ def admin_required(f=None):
             # This supports iframe requests from WebUI where session token is not available
             url_token = request.args.get("token")
             if url_token:
+                # Handle double-encoded tokens from some clients
+                url_token = normalize_webui_token(url_token)
                 from app.services.webui_manager import get_webui_manager
 
                 manager = get_webui_manager()
