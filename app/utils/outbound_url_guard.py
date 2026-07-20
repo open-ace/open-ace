@@ -12,6 +12,7 @@ rebind the destination to a private address between validation and the dial
 """
 
 from __future__ import annotations
+from __future__ import annotations
 
 import ipaddress
 import logging

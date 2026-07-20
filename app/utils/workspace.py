@@ -8,6 +8,7 @@ browser works out of the box on any platform; Docker/server deployments set
 the env explicitly (e.g. ``/workspace``).
 """
 
+from __future__ import annotations
 import logging
 import os
 import platform

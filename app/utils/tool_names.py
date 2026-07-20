@@ -1,3 +1,4 @@
+from __future__ import annotations
 """Canonical tool-name normalization.
 
 Centralizes the mapping of variant tool names (e.g. ``qwen-code``,

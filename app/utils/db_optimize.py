@@ -4,6 +4,7 @@ Open ACE - Database Optimization
 Provides database indexing and optimization utilities.
 """
 
+from __future__ import annotations
 import logging
 from typing import Any
 
