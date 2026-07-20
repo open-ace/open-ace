@@ -1480,7 +1480,11 @@ def _search_tree_sudo(
         logger.warning(f"find as {effective} failed for {root}: {stderr}")
         # Distinguish "find not in sudoers" (deployment config issue) from
         # other failures so the operator knows what to fix.
-        if "password" in stderr.lower() or "not allowed" in stderr.lower() or "sudo" in stderr.lower():
+        if (
+            "password" in stderr.lower()
+            or "not allowed" in stderr.lower()
+            or "sudo" in stderr.lower()
+        ):
             error = (
                 "Search unavailable: 'find' is not permitted via sudo on this "
                 "host. Add '/usr/bin/find *' to the OPENACE_UTILS sudoers alias "
@@ -1549,7 +1553,6 @@ def api_search_files():
     entries are included; unreadable matches are silently skipped.
     """
     user = g.user
-    system_account = user.get("system_account") if user else None
 
     query = (request.args.get("q", "") or "").strip()
     matcher = _build_name_matcher(query)
