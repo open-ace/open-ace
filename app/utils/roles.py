@@ -1,3 +1,4 @@
+from __future__ import annotations
 """Canonical message-role normalization.
 
 Centralizes the mapping of variant tool-result role spellings
