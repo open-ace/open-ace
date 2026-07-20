@@ -13,6 +13,8 @@ Each JSONL file represents one session. Events have the format:
 Event types: session_meta, response_item, event_msg, turn_context
 """
 
+from __future__ import annotations
+
 import argparse
 import getpass
 import hashlib
