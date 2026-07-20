@@ -76,6 +76,28 @@ class TestSensitiveKeywordFix:
         assert result.passed is False
         assert result.action == "block"
 
+    def test_critical_pii_plus_keyword_still_blocks(self):
+        """Verify that critical PII + sensitive_keyword still blocks.
+
+        Regression test for PR #1903 review feedback:
+        - SSN (critical) + password should still block
+        - Credit card (critical) + password should still block
+        """
+        content_filter = ContentFilter()
+
+        # SSN + password should still block (critical takes precedence)
+        result = content_filter.check_content("SSN: 123-45-6789 and my password is secret")
+        assert result.passed is False, "Critical PII + keyword should still block"
+        assert result.action == "block", "Critical PII should keep action='block'"
+        assert result.risk_level == "critical"
+
+        # Credit card + password should still block
+        result = content_filter.check_content(
+            "Credit card: 4111-1111-1111-1111, password is secret123"
+        )
+        assert result.passed is False, "Critical PII + keyword should still block"
+        assert result.action == "block"
+
     def test_pii_medium_only_redacts(self):
         """Verify that medium-risk PII only triggers redact, not block."""
         content_filter = ContentFilter()
