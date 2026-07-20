@@ -59,10 +59,8 @@ class TestSessionTokenQueryRejected:
             return_value=(True, MOCK_SESSION),
         ):
             with app.test_client() as client:
-                resp = client.get(
-                    "/api/user",
-                    cookies={"session_token": "valid-session-token"},
-                )
+                client.set_cookie("session_token", "valid-session-token")
+                resp = client.get("/api/user")
                 assert resp.status_code == 200
                 data = resp.get_json()
                 assert data["user_id"] == 42
@@ -114,10 +112,8 @@ class TestSessionTokenQueryRejected:
         ):
             with app.test_client() as client:
                 # Cookie should be used, query param should be ignored
-                resp = client.get(
-                    "/api/user?token=wrong-token",
-                    cookies={"session_token": "valid-cookie-token"},
-                )
+                client.set_cookie("session_token", "valid-cookie-token")
+                resp = client.get("/api/user?token=wrong-token")
                 assert resp.status_code == 200
                 data = resp.get_json()
                 assert data["user_id"] == 99  # From cookie, not query
