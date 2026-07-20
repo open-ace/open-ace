@@ -4,6 +4,8 @@ Open ACE - SSO Routes
 API endpoints for Single Sign-On authentication.
 """
 
+from __future__ import annotations
+
 import json
 import logging
 import os
