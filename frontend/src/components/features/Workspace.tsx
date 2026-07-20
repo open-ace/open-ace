@@ -571,6 +571,43 @@ export const Workspace: React.FC = () => {
         return `${url}${separator}${key}=${encodeURIComponent(value)}`;
       };
 
+      // Issue #1924: For new local sessions (project path present, no session
+      // to restore, not remote), route the iframe to qwen-code-webui's
+      // /projects/* path so ChatPage renders directly with a fresh session.
+      //
+      // Without this, the iframe URL hits RootRedirect at "/" which only
+      // renders ChatPage when a sessionId query param is present; otherwise it
+      // renders ProjectSelector — which ignores encodedProjectName and strands
+      // the user in the project picker. Putting the path in the URL path
+      // (instead of a query param) hits the /projects/* route, which renders
+      // ChatPage WITHOUT loading conversation history (so no 404 for a
+      // brand-new session that has no JSONL file yet).
+      const isNewLocalProject =
+        !!encodedProjectName && !restoreSessionId && remoteParams?.workspaceType !== 'remote';
+
+      // Build the "/projects/<encoded-segments>" path segment.
+      // Each path segment is encodeURIComponent'd so spaces / special chars
+      // survive the URL, while slashes are preserved as path separators
+      // (matching how ProjectSelector.navigate(`/projects${path}`) works).
+      const projectsPathSegment = isNewLocalProject
+        ? 'projects' +
+          encodedProjectName
+            .split('/')
+            .map((seg) => encodeURIComponent(seg))
+            .join('/')
+        : '';
+
+      // Inject the projects path segment into a base URL (before any existing
+      // query string), e.g. "http://h:3100" → "http://h:3100/projects/home/u".
+      const injectProjectsPath = (base: string): string => {
+        if (!projectsPathSegment) return base;
+        const qIdx = base.indexOf('?');
+        const pathPart = qIdx === -1 ? base : base.slice(0, qIdx);
+        const queryPart = qIdx === -1 ? '' : base.slice(qIdx);
+        const glue = pathPart.endsWith('/') ? '' : '/';
+        return `${pathPart}${glue}${projectsPathSegment}${queryPart}`;
+      };
+
       // Helper to append remote workspace parameters
       const appendRemoteParams = (url: string) => {
         if (!remoteParams?.workspaceType) return url;
@@ -600,7 +637,7 @@ export const Workspace: React.FC = () => {
 
       // Multi-user mode: use user-specific URL with token and openace_url
       if (config.multi_user_mode && userWebUI?.success) {
-        const baseUrl = userWebUI.url;
+        const baseUrl = injectProjectsPath(userWebUI.url);
         const token = userWebUI.token;
         const openaceUrl = userWebUI.openace_url;
         // Add token and openace_url as URL parameters
@@ -616,7 +653,9 @@ export const Workspace: React.FC = () => {
         if (restoreSessionId) {
           url = appendParam(url, 'sessionId', restoreSessionId);
         }
-        if (encodedProjectName) {
+        // Issue #1924: Skip encodedProjectName query param for new local
+        // sessions — the path is already in the URL via /projects/*.
+        if (encodedProjectName && !isNewLocalProject) {
           url = appendParam(url, 'encodedProjectName', encodedProjectName);
         }
         if (toolName) {
@@ -657,7 +696,9 @@ export const Workspace: React.FC = () => {
       // fetch throwing, which loadConfig swallows). Note the fallback is itself
       // the unreachable container address, so in those failure cases the iframe
       // stays blank; there is no better value available without user-url.
-      let url = userWebUI?.success && userWebUI.url ? userWebUI.url : config.url;
+      let url = injectProjectsPath(
+        userWebUI?.success && userWebUI.url ? userWebUI.url : config.url
+      );
       // Add lang parameter for language sync
       const langSeparator = url.includes('?') ? '&' : '?';
       url = `${url}${langSeparator}lang=${encodeURIComponent(language)}&theme=${theme}`;
@@ -671,7 +712,9 @@ export const Workspace: React.FC = () => {
       if (restoreSessionId) {
         url = appendParam(url, 'sessionId', restoreSessionId);
       }
-      if (encodedProjectName) {
+      // Issue #1924: Skip encodedProjectName query param for new local
+      // sessions — the path is already in the URL via /projects/*.
+      if (encodedProjectName && !isNewLocalProject) {
         url = appendParam(url, 'encodedProjectName', encodedProjectName);
       }
       if (toolName) {

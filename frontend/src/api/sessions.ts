@@ -127,36 +127,7 @@ export interface SessionStatsResponse {
   error?: string;
 }
 
-export interface CreateSessionResponse {
-  success: boolean;
-  data?: AgentSession;
-  error?: string;
-}
-
 export const sessionsApi = {
-  /**
-   * Create a new agent session.
-   *
-   * Used by PersonalFiles "Open Session Here" (Issue #1924) to pre-create a
-   * local session for a chosen directory so the embedded qwen-code-webui
-   * iframe receives a sessionId and opens ChatPage directly (instead of
-   * falling back to the project picker, which ignores encodedProjectName).
-   */
-  async createSession(payload: {
-    tool_name: string;
-    project_path?: string;
-    project_id?: number;
-    session_type?: string;
-    title?: string;
-    model?: string;
-  }): Promise<CreateSessionResponse> {
-    const response = await apiClient.post<CreateSessionResponse>(
-      '/api/workspace/sessions',
-      payload
-    );
-    return response;
-  },
-
   /**
    * Get sessions with filters and pagination
    */

@@ -3366,7 +3366,6 @@ table .latency-row:hover td {
 
 .personal-files-browser {
   max-width: 960px;
-  position: relative; /* Issue #1924: anchor for session-creation loading overlay */
 }
 
 .personal-files .directory-list {
