@@ -179,7 +179,7 @@ class ContentFilter:
             "pii_email": "medium",
             "pii_phone_us": "medium",
             "pii_phone_intl": "medium",
-            "sensitive_keyword": "high",
+            "sensitive_keyword": "medium",  # Downgraded: prone to false positives with substring match
             "custom_pattern": "medium",
         }
 
@@ -361,18 +361,22 @@ class ContentFilter:
                 {
                     "type": "sensitive_keyword",
                     "count": len(keyword_matches),
-                    "risk": "high",
+                    "risk": "medium",  # Downgrade: sensitive_keyword sub-match is prone to false positives
                     "keywords": list(keyword_matches),
                     "source": "builtin",
                 }
             )
 
-            if overall_risk not in ["critical"]:
-                overall_risk = "high"
+            # Update overall_risk but do NOT force overall_action to block
+            # sensitive_keyword should only generate audit logs, not block requests
+            if overall_risk not in ["critical", "high"]:
+                overall_risk = "medium"
 
-            # For keywords, use block_high_risk config for action
-            if self.block_high_risk and overall_action not in ["block"]:
-                overall_action = "block"
+            # Set action to 'warn' for audit visibility, but do NOT block
+            # This prevents blocking legitimate messages containing words like
+            # "password" or "secret" in non-sensitive contexts
+            if overall_action not in ["block", "warn"]:
+                overall_action = "warn"
 
         # Determine passed based on action
         passed = overall_action != "block"

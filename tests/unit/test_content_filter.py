@@ -67,8 +67,11 @@ class TestContentFilter:
     def test_detect_sensitive_keyword(self):
         cf = ContentFilter()
         result = cf.check_content("The password is secret123")
-        assert result.passed is False
+        # sensitive_keyword is now warn-only (Issue #1898), does not block
+        assert result.passed is True
         assert result.risk_level in ("medium", "high")
+        assert result.action == "warn"  # warn-only, generates audit log but no blocking
+        assert any(r["type"] == "sensitive_keyword" for r in result.matched_rules)
 
     def test_redaction_enabled(self):
         cf = ContentFilter(config={"redact_pii": True, "block_high_risk": False})
@@ -88,7 +91,10 @@ class TestContentFilter:
         cf = ContentFilter()
         cf.add_custom_keyword("confidential")
         result = cf.check_content("This is confidential information")
-        assert result.passed is False
+        # sensitive_keyword is now warn-only (Issue #1898), does not block
+        assert result.passed is True
+        assert result.action == "warn"  # warn-only, generates audit log but no blocking
+        assert any(r["type"] == "sensitive_keyword" for r in result.matched_rules)
 
     def test_get_stats(self):
         cf = ContentFilter(custom_patterns={"test": r"\d+"}, custom_keywords=["secret"])
