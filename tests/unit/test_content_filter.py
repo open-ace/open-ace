@@ -262,9 +262,7 @@ class TestCombinedScenarios:
     def test_multiple_pii_types(self):
         """测试多种PII类型同时检测"""
         cf = ContentFilter(config={"block_high_risk": True, "redact_pii": True})
-        result = cf.check_content(
-            "Email: test@example.com, Phone: 555-123-4567, SSN: 123-45-6789"
-        )
+        result = cf.check_content("Email: test@example.com, Phone: 555-123-4567, SSN: 123-45-6789")
         assert result.passed is False  # Blocked by SSN
         assert result.risk_level == "critical"
         assert result.action == "block"
