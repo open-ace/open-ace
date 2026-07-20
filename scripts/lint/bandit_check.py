@@ -59,12 +59,15 @@ class Finding:
 def run_bandit(targets: list[str]) -> dict[str, Any]:
     """Run Bandit and return parsed JSON output."""
     cmd = [
+        "python",
+        "-m",
         "bandit",
         "-r",
         "-f",
         "json",
         "-c",
         "pyproject.toml",
+        "--silent",  # Suppress progress bar for clean JSON output
         *targets,
     ]
 
