@@ -1468,6 +1468,9 @@ export const translations: Record<Language, Translations> = {
     doubleClickToOpen: 'Double-click to open',
     openSessionHere: 'Open Session Here',
     willUsePath: 'Will use: {path}',
+    openingSession: 'Opening session…',
+    openSessionHereFailed: 'Failed to open a session in this directory. Please try again.',
+    dismiss: 'Dismiss',
 
     // AI Autonomous Development
     autonomousDev: 'AI Autonomous Dev',
@@ -3147,6 +3150,9 @@ export const translations: Record<Language, Translations> = {
     doubleClickToOpen: '双击打开',
     openSessionHere: '在此目录新建会话',
     willUsePath: '将使用：{path}',
+    openingSession: '正在打开会话…',
+    openSessionHereFailed: '在该目录打开会话失败，请重试。',
+    dismiss: '关闭',
 
     // AI 自主开发
     autonomousDev: 'AI 自主开发',
@@ -4605,6 +4611,9 @@ export const translations: Record<Language, Translations> = {
     doubleClickToOpen: 'ダブルクリックで開く',
     openSessionHere: 'ここでセッションを開く',
     willUsePath: '使用パス: {path}',
+    openingSession: 'セッションを開いています…',
+    openSessionHereFailed: 'このディレクトリでセッションを開けませんでした。もう一度お試しください。',
+    dismiss: '閉じる',
 
     // AI自律開発
     autonomousDev: 'AI自律開発',
@@ -6153,6 +6162,9 @@ export const translations: Record<Language, Translations> = {
     doubleClickToOpen: '더블클릭하여 열기',
     openSessionHere: '이 디렉토리에서 세션 열기',
     willUsePath: '사용 경로: {path}',
+    openingSession: '세션을 여는 중…',
+    openSessionHereFailed: '이 디렉토리에서 세션을 열지 못했습니다. 다시 시도해 주세요.',
+    dismiss: '닫기',
 
     // AI 자율 개발
     autonomousDev: 'AI 자율 개발',

@@ -30,6 +30,14 @@ vi.mock('@/api/fs', () => ({
   },
 }));
 
+const createSessionMock = vi.fn();
+
+vi.mock('@/api/sessions', () => ({
+  sessionsApi: {
+    createSession: (...args: unknown[]) => createSessionMock(...args),
+  },
+}));
+
 vi.mock('./LocalDirectoryBrowser', () => ({
   LocalDirectoryBrowser: ({
     initialPath,
@@ -61,7 +69,7 @@ import { PersonalFiles } from './PersonalFiles';
 describe('PersonalFiles', () => {
   beforeEach(() => {
     navigateMock.mockClear();
-    vi.clearAllMocks();
+    createSessionMock.mockReset();
   });
 
   it('renders the home directory browser', async () => {
@@ -83,7 +91,12 @@ describe('PersonalFiles', () => {
     expect(screen.getByTestId('enable-file-actions')).toHaveTextContent('true');
   });
 
-  it('opens a local workspace tab for the selected path', async () => {
+  it('pre-creates a session and navigates with sessionId (Issue #1924)', async () => {
+    createSessionMock.mockResolvedValue({
+      success: true,
+      data: { session_id: 'sess-123' },
+    });
+
     render(<PersonalFiles />);
 
     // Wait for loading to complete
@@ -93,10 +106,42 @@ describe('PersonalFiles', () => {
 
     fireEvent.click(screen.getByTestId('select-path'));
 
-    expect(navigateMock).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(navigateMock).toHaveBeenCalledTimes(1));
+
+    // Should pre-create a session with the local tool name and the chosen path
+    expect(createSessionMock).toHaveBeenCalledTimes(1);
+    const payload = createSessionMock.mock.calls[0][0];
+    expect(payload.tool_name).toBe('qwen-code');
+    expect(payload.project_path).toBe('/home/alice/project');
+
+    // Navigation target must include sessionId so qwen-code-webui opens
+    // ChatPage directly instead of the project picker.
     const target = navigateMock.mock.calls[0][0] as string;
     expect(target).toContain('/work?newTab=true');
     expect(target).toContain('workspaceType=local');
     expect(target).toContain('projectPath=%2Fhome%2Falice%2Fproject');
+    expect(target).toContain('sessionId=sess-123');
+  });
+
+  it('shows an error and stays on the page when session creation fails (Issue #1924)', async () => {
+    createSessionMock.mockResolvedValue({
+      success: false,
+      error: 'Invalid project path',
+    });
+
+    render(<PersonalFiles />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('local-directory-browser')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('select-path'));
+
+    await waitFor(() => expect(createSessionMock).toHaveBeenCalledTimes(1));
+
+    // Must NOT navigate away when session creation failed
+    expect(navigateMock).not.toHaveBeenCalled();
+    // Should surface the failure to the user
+    expect(screen.getByText('openSessionHereFailed')).toBeInTheDocument();
   });
 });
