@@ -29,6 +29,12 @@ __all__ = [
 OPENACE_USERADD_WRAPPER = "/usr/local/bin/openace-useradd"
 OPENACE_CHOWN_WRAPPER = "/usr/local/bin/openace-chown"
 OPENACE_MKDIR_WRAPPER = "/usr/local/bin/openace-mkdir"
+# Cross-user file write wrapper (Issue #1916): used by the upload endpoint in
+# Package non-root multi-user mode to write into a user's 0700 home directory.
+# cp/tee/mv are NOT in the sudoers OPENACE_UTILS whitelist, so uploads delegate
+# through this root-authorized wrapper (which drops to the target user via
+# runuser). Docker multi-user runs as root and never hits this path.
+OPENACE_WRITE_AS_WRAPPER = "/usr/local/bin/openace-write-as"
 
 
 def _is_wrapper_available(wrapper_path: str) -> bool:

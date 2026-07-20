@@ -99,6 +99,7 @@ if "app.routes.fs" not in sys.modules:
     _ws.get_workspace_base_dir = _rw.get_workspace_base_dir
     _ws.get_workspace_base_dirs = _rw.get_workspace_base_dirs
     _ws.OPENACE_CHOWN_WRAPPER = "/usr/local/bin/openace-chown"
+    _ws.OPENACE_WRITE_AS_WRAPPER = _rw.OPENACE_WRITE_AS_WRAPPER
     _ws._is_wrapper_available = lambda p: False  # type: ignore[attr-defined]
     _ws.run_as_root_if_needed = lambda cmd: None  # type: ignore[attr-defined]
 
@@ -1235,3 +1236,201 @@ class TestDirectAccessHelper:
         call = run_mock.call_args[0]
         assert call[0] == "alice"
         assert call[1] == ["test", "-f", "/p/f.txt"]
+
+
+class TestUploadNonRootMultiUserBranch:
+    """Cover the Package non-root multi-user upload path (Issue #1916).
+
+    In this mode the Flask process is a service account (non-root) with a
+    ``system_account`` user whose 0700 home it cannot traverse. The endpoint
+    must delegate the write to the ``openace-write-as`` wrapper (sudoers-
+    authorized, runs as root, drops to the target user via runuser) instead
+    of calling ``file.save()`` directly (which would hit EACCES).
+    """
+
+    @pytest.fixture
+    def sudo_client(self, workspace):
+        from flask import Flask, g
+
+        from app.routes.fs import fs_bp
+
+        ws_root, user_home = workspace
+        home_root = ws_root / "testuser"
+        home_root.mkdir(exist_ok=True)
+
+        app = Flask(__name__)
+        app.config["TESTING"] = True
+        app.register_blueprint(fs_bp, url_prefix="/api")
+        app.before_request_funcs["fs"] = []
+
+        @app.before_request
+        def _set_user():
+            g.user = {"id": 1, "username": "testuser", "system_account": "testuser"}
+
+        with (
+            patch("app.routes.fs.get_workspace_base_dir", return_value=str(ws_root)),
+            patch("app.routes.fs.get_workspace_base_dirs", return_value=[str(ws_root)]),
+            patch("app.routes.fs.get_home_directory", return_value=str(home_root)),
+            # Non-root process → _is_direct_access returns False.
+            patch("app.routes.fs.os.geteuid", return_value=1000),
+            patch("app.routes.fs.get_effective_system_account", return_value="testuser"),
+            # Wrapper is installed.
+            patch("app.routes.fs._is_wrapper_available", return_value=True),
+            # Bypass the sudo-based writable pre-check (no real "testuser" OS
+            # user exists on the dev machine).
+            patch(
+                "app.routes.fs.get_directory_info",
+                return_value={
+                    "exists": True,
+                    "is_dir": True,
+                    "is_writable": True,
+                    "is_readable": True,
+                },
+            ),
+        ):
+            yield app.test_client()
+
+    class _FakeProc:
+        """Minimal Popen stand-in that records stdin writes and exits 0."""
+
+        def __init__(self, returncode=0, stderr=b""):
+            self._returncode = returncode
+            self._stderr = stderr
+            self._written = bytearray()
+            self.stdin = self._FakeStream(self)
+            self.stdout = None
+            self.returncode = None
+
+        class _FakeStream:
+            def __init__(self, parent):
+                self._parent = parent
+
+            def write(self, data):
+                self._parent._written.extend(data)
+                return len(data)
+
+            def close(self):
+                pass
+
+        def communicate(self, timeout=None):
+            self.returncode = self._returncode
+            return (b"", self._stderr)
+
+        def wait(self):
+            self.returncode = self._returncode
+            return self._returncode
+
+        def kill(self):
+            self.returncode = -9
+
+    def test_upload_streams_via_write_as_wrapper(self, sudo_client, workspace):
+        """Upload in non-root multi-user mode streams content to the
+        openace-write-as wrapper and returns 200 on success."""
+        _, user_home = workspace
+        target = user_home / "up.txt"
+
+        fake = self._FakeProc(returncode=0)
+        with patch("app.routes.fs.subprocess.Popen", return_value=fake) as popen_mock:
+            data = {
+                "file": (io.BytesIO(b"hello-upload"), "up.txt"),
+                "path": str(user_home),
+            }
+            resp = sudo_client.post("/api/fs/upload", data=data, content_type="multipart/form-data")
+
+        assert resp.status_code == 200
+        assert resp.get_json()["success"] is True
+        # The wrapper was invoked as: sudo -n /usr/local/bin/openace-write-as <user> <path>
+        cmd = popen_mock.call_args[0][0]
+        assert cmd[:2] == ["sudo", "-n"]
+        assert "/usr/local/bin/openace-write-as" in cmd
+        assert "testuser" in cmd
+        assert str(target) in cmd
+        # The uploaded bytes were streamed to the wrapper's stdin.
+        assert bytes(fake._written) == b"hello-upload"
+
+    def test_upload_wrapper_failure_returns_403(self, sudo_client, workspace):
+        """When the wrapper exits non-zero with a filesystem error, surface 403."""
+        _, user_home = workspace
+
+        fake = self._FakeProc(returncode=4, stderr=b"Permission denied")
+        with patch("app.routes.fs.subprocess.Popen", return_value=fake):
+            data = {
+                "file": (io.BytesIO(b"x"), "up.txt"),
+                "path": str(user_home),
+            }
+            resp = sudo_client.post("/api/fs/upload", data=data, content_type="multipart/form-data")
+
+        assert resp.status_code == 403
+        assert resp.get_json()["error"] == "Permission denied"
+
+    def test_upload_sudoers_policy_missing_returns_500(self, sudo_client, workspace):
+        """When the wrapper is denied by sudoers (not authorized), return a
+        clear 500 referencing the missing sudoers policy — mirroring delete's
+        run_as_user failure handling."""
+        _, user_home = workspace
+
+        fake = self._FakeProc(
+            returncode=1,
+            stderr=b"sudo: a password is required for openace",
+        )
+        with patch("app.routes.fs.subprocess.Popen", return_value=fake):
+            data = {
+                "file": (io.BytesIO(b"x"), "up.txt"),
+                "path": str(user_home),
+            }
+            resp = sudo_client.post("/api/fs/upload", data=data, content_type="multipart/form-data")
+
+        assert resp.status_code == 500
+        assert "sudoers policy" in resp.get_json()["error"]
+
+    def test_upload_wrapper_not_installed_returns_500(self, workspace):
+        """When the openace-write-as wrapper is absent, upload in multi-user
+        mode fails with a clear error rather than falling through to the
+        broken direct-write path (which would EACCES)."""
+        from flask import Flask, g
+
+        from app.routes.fs import fs_bp
+
+        ws_root, user_home = workspace
+        home_root = ws_root / "testuser"
+        home_root.mkdir(exist_ok=True)
+
+        app = Flask(__name__)
+        app.config["TESTING"] = True
+        app.register_blueprint(fs_bp, url_prefix="/api")
+        app.before_request_funcs["fs"] = []
+
+        @app.before_request
+        def _set_user():
+            g.user = {"id": 1, "username": "testuser", "system_account": "testuser"}
+
+        with (
+            patch("app.routes.fs.get_workspace_base_dir", return_value=str(ws_root)),
+            patch("app.routes.fs.get_workspace_base_dirs", return_value=[str(ws_root)]),
+            patch("app.routes.fs.get_home_directory", return_value=str(home_root)),
+            patch("app.routes.fs.os.geteuid", return_value=1000),
+            patch("app.routes.fs.get_effective_system_account", return_value="testuser"),
+            # Wrapper NOT installed.
+            patch("app.routes.fs._is_wrapper_available", return_value=False),
+            patch(
+                "app.routes.fs.get_directory_info",
+                return_value={
+                    "exists": True,
+                    "is_dir": True,
+                    "is_writable": True,
+                    "is_readable": True,
+                },
+            ),
+            patch("app.routes.fs.subprocess.Popen") as popen_mock,
+        ):
+            client = app.test_client()
+            data = {
+                "file": (io.BytesIO(b"x"), "up.txt"),
+                "path": str(home_root),
+            }
+            resp = client.post("/api/fs/upload", data=data, content_type="multipart/form-data")
+
+        assert resp.status_code == 500
+        assert "openace-write-as" in resp.get_json()["error"]
+        # Must not have spawned the wrapper at all.
+        popen_mock.assert_not_called()

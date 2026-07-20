@@ -767,7 +767,7 @@ openace ALL=(root) NOPASSWD: ${WRAPPER_PATH} *"
         # 【安全加固 Issue #1855】安全 wrapper 脚本 sudoers 规则
         # 使用 wrapper 替代通配命令，wrapper 内部做参数校验和审计日志
         SECURITY_WRAPPERS_RULE=""
-        for wrapper in openace-chown openace-useradd openace-cat openace-mkdir; do
+        for wrapper in openace-chown openace-useradd openace-cat openace-mkdir openace-write-as; do
             wrapper_path="/usr/local/bin/${wrapper}"
             if [ -x "$wrapper_path" ]; then
                 SECURITY_WRAPPERS_RULE="${SECURITY_WRAPPERS_RULE}open-ace ALL=(root) NOPASSWD: ${wrapper_path} *
