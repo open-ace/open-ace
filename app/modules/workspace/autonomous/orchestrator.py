@@ -920,23 +920,33 @@ class AutonomousOrchestrator:
             "head": head,
         }
 
-    def _main_head_is_remote_sourced(
+    def _main_drift_is_benign_pull(
         self,
         repo_path: str,
         before: str,
         after: str,
         system_account: str | None,
     ) -> bool:
-        """Return True if ``after`` already exists on ``origin/main``.
+        """Return True if main HEAD moving ``before`` → ``after`` is a benign
+        external ``git pull`` (rather than an agent escaping the worktree).
 
-        Tells a benign external ``git pull`` on the main repo (HEAD moves to a
-        remote-sourced commit during an agent run) apart from an agent
-        committing outside the workflow worktree. The previous fast-forward
-        check (``is-ancestor before after``) could not make this distinction:
-        a local escape ``git commit`` on main is *also* a descendant of
-        ``before``, so it was wrongly allowed. Membership in ``origin/main``
-        can — a pull brings a commit already on the remote, a local escape
-        commit is not yet pushed (#1890 review).
+        Requires BOTH:
+          1. ``before`` is an ancestor of ``after`` — main moved *forward*.
+             A bare remote-membership check is not enough: ``reset --hard`` to
+             an older remote commit leaves ``after`` on origin/main but is a
+             non-fast-forward rollback that must be blocked.
+          2. ``after`` is an ancestor of ``origin/main`` — the new HEAD came
+             from the remote. A local escape ``git commit`` is a forward
+             descendant of ``before`` too, but is not yet pushed, so this
+             catches the common escape form.
+
+        Guarantee scope (this guardrail is commit-graph based and cannot prove
+        the *source* of an operation): it blocks an agent that runs ``git
+        commit`` / ``reset`` / ``checkout`` on the main repo without pushing.
+        It CANNOT block an agent that commits on main and then pushes to
+        ``origin/main`` — that forges the "remote-sourced" signal. Defending
+        against that requires main branch protection or revoking the agent's
+        push credentials, which is outside this guardrail's scope.
 
         On any probe failure (network, missing ref) we conservatively return
         True so a transient error cannot fail an otherwise-healthy workflow.
@@ -949,16 +959,21 @@ class AutonomousOrchestrator:
             # remote tip. A concurrent `git pull` updates this ref too, but an
             # explicit fetch closes the fetch↔merge race window.
             gh._run_git(["fetch", "origin", "main"])
-            return (
+            moved_forward = (
+                gh._run_git(["merge-base", "--is-ancestor", before, after], check=False).returncode
+                == 0
+            )
+            after_on_remote = (
                 gh._run_git(
                     ["merge-base", "--is-ancestor", after, "origin/main"], check=False
                 ).returncode
                 == 0
             )
+            return moved_forward and after_on_remote
         except Exception as e:
             logger.warning(
-                "Workflow %s: remote-source probe failed for main HEAD %s..%s: %s; "
-                "assuming remote-sourced.",
+                "Workflow %s: benign-pull probe failed for main HEAD %s..%s: %s; "
+                "assuming benign.",
                 self._workflow_id,
                 before[:8],
                 after[:8],
@@ -1036,21 +1051,20 @@ class AutonomousOrchestrator:
                 and before_effective.get("head") == after_effective.get("head")
             ):
                 # main HEAD moved but the worktree did not. This is either an
-                # agent committing outside the worktree, or an external `git
-                # pull` on the main repo moving HEAD to a remote commit during
-                # the agent run (#1890). Allow only when the new HEAD already
-                # exists on origin/main (i.e. it was pulled, not locally
-                # committed); a local escape commit is not yet on the remote
-                # and is still blocked.
-                if self._main_head_is_remote_sourced(
+                # agent operating on the main repo, or an external `git pull`
+                # moving HEAD to a remote commit during the agent run. Allow
+                # only when the move is a forward update to a remote-sourced
+                # commit (a benign pull); a local escape commit (not pushed),
+                # a reset/rollback, or a non-fast-forward rewrite is blocked.
+                if self._main_drift_is_benign_pull(
                     ctx.get("project_path", ""),
                     before_main.get("head"),
                     after_main.get("head"),
                     system_account,
                 ):
                     logger.info(
-                        "Workflow %s: main repo HEAD moved to a remote-sourced "
-                        "commit %s..%s during agent run (external pull); allowing.",
+                        "Workflow %s: main repo HEAD moved %s..%s during agent run "
+                        "(benign external pull); allowing.",
                         self._workflow_id,
                         before_main.get("head", "")[:8],
                         after_main.get("head", "")[:8],
