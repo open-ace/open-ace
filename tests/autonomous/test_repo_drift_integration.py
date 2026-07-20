@@ -57,16 +57,19 @@ def _add_remote_commit(origin, clone):
     """Add a new commit on origin/main (simulating a collaborator push).
 
     Returns the new commit SHA. Pushed via a second clone so the original
-    clone's main isn't moved yet.
+    clone's main isn't moved yet. Uses ``HEAD:refs/heads/main`` so the push is
+    independent of the clone's default branch name (CI runners may default to
+    ``master``).
     """
     other = clone.parent / "other"
     _git(clone.parent, "clone", "-q", str(origin), str(other))
     _git(other, "config", "user.email", "t@t.test")
     _git(other, "config", "user.name", "Test")
+    _git(other, "checkout", "-q", "-B", "main", "origin/main")
     (other / "f.txt").write_text("v2\n")
     _git(other, "add", "f.txt")
     _git(other, "commit", "-q", "-m", "remote c2")
-    _git(other, "push", "-q", "origin", "main")
+    _git(other, "push", "-q", "origin", "HEAD:refs/heads/main")
     return _git(other, "rev-parse", "HEAD").stdout.strip()
 
 
