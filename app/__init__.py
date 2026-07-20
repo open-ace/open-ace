@@ -12,7 +12,7 @@ import re
 import uuid
 from urllib.parse import urlparse
 
-from flask import Flask, g, jsonify, request
+from flask import Flask, g, has_request_context, jsonify, request
 from werkzeug.exceptions import HTTPException
 from werkzeug.middleware.proxy_fix import ProxyFix
 
@@ -131,7 +131,18 @@ def _reset_cors_origins_cache():
 
 
 def _is_allowed_local_webui_origin(origin: str) -> bool:
-    """Allow only loopback WebUI origins in the dev port range."""
+    """Allow WebUI origins in the dev port range when loopback or same-host.
+
+    Loopback hostnames (``localhost``/``127.0.0.1``/``::1``) are always
+    allowed on the webui port range 3100-3200. Non-loopback hostnames are
+    allowed only when they match the hostname the browser used to reach the
+    backend (taken from the current request's ``Host`` header). This covers
+    LAN IP / container-hostname access where the per-user qwen-code-webui
+    iframe is served on a webui port using the same hostname the browser used
+    to reach the backend. Without this, Firefox blocks the iframe's
+    credentialed API calls with "NetworkError when attempting to fetch
+    resource." (Issue #1859)
+    """
     try:
         parsed = urlparse(origin)
     except Exception:
@@ -140,13 +151,37 @@ def _is_allowed_local_webui_origin(origin: str) -> bool:
     if parsed.scheme not in ("http", "https"):
         return False
 
-    if parsed.hostname not in _LOCAL_CORS_HOSTS:
-        return False
-
     if parsed.port is None:
         return False
 
-    return 3100 <= parsed.port <= 3200
+    if not (3100 <= parsed.port <= 3200):
+        return False
+
+    if parsed.hostname in _LOCAL_CORS_HOSTS:
+        return True
+
+    # Allow the server's own hostname (e.g. LAN IP / container hostname) so
+    # that browsers reaching the backend via a non-loopback address can still
+    # load the per-user qwen-code-webui iframe on a webui port. The Host
+    # header reflects the address the browser itself used, so reflecting this
+    # origin does not open a credential-reuse vector for arbitrary third
+    # parties (they would have to control a webui port on the same host the
+    # victim is browsing).
+    #
+    # Parse the Host header via ``urlparse("//" + host)`` so IPv6 literals
+    # (e.g. ``[2001:db8::1]:5000``) are normalized to the bare address
+    # (``2001:db8::1``), matching ``parsed.hostname``. A naive
+    # ``host.split(":", 1)[0]`` would yield ``"[2001"`` for IPv6 and silently
+    # fail closed. (Issue #1859 review follow-up.)
+    try:
+        if has_request_context():
+            host_header = (urlparse(f"//{request.host or ''}").hostname or "").lower()
+            if host_header and parsed.hostname == host_header:
+                return True
+    except Exception:
+        pass
+
+    return False
 
 
 def _is_allowed_cors_origin(origin: str) -> bool:
