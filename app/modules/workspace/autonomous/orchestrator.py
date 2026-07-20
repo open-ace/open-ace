@@ -972,6 +972,10 @@ class AutonomousOrchestrator:
         updated, so the two conditions remain distinguishable.
         """
         if not before or not after or before == after:
+            # Defensive: the sole caller (_validate_repo_context_after_run)
+            # only reaches this method when before_main != after_main, so
+            # before == after is currently unreachable. Kept so a future caller
+            # gets the correct "no drift → benign" answer instead of a probe.
             return True
         gh = GitHubOps(repo_path, system_account=system_account)
         try:
