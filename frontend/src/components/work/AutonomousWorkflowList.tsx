@@ -461,7 +461,6 @@ export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
     const workflowDate = formatWorkflowDate(workflow.created_at);
     const itemClasses = [
       'list-group-item',
-      'list-group-item-action',
       'border-0',
       'px-3',
       'py-2',
@@ -476,8 +475,18 @@ export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
       .join(' ');
 
     return (
-      <div key={workflow.workflow_id} className={itemClasses} onClick={() => onSelect(workflow)}>
-        <div className="flex-grow-1 min-width-0">
+      <div key={workflow.workflow_id} className={itemClasses}>
+        <button
+          type="button"
+          className="flex-grow-1 auto-workflow-select-btn"
+          aria-current={isSelected ? 'true' : undefined}
+          aria-label={
+            workflow.title ||
+            workflow.requirements_text?.slice(0, 50) ||
+            `Workflow ${workflow.workflow_id.slice(0, 8)}`
+          }
+          onClick={() => onSelect(workflow)}
+        >
           {compact ? (
             <div className="d-flex align-items-start justify-content-between gap-2">
               <div className="min-width-0">
@@ -562,7 +571,7 @@ export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
               </div>
             </>
           )}
-        </div>
+        </button>
         <div className="d-flex align-items-center gap-1 ms-2">
           {isActive && (
             <span className="spinner-border spinner-border-sm text-primary" role="status">
@@ -571,8 +580,10 @@ export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
           )}
           {!isActive && (
             <button
+              type="button"
               className={`btn btn-sm border-0 p-0 auto-workflow-delete-btn ${isConfirming ? 'btn-outline-danger' : 'btn-outline-secondary'}`}
               title={t('autoDeleteWorkflow', language)}
+              aria-label={t('autoDeleteWorkflow', language)}
               disabled={deleteMutation.isPending}
               onClick={(e) => handleDeleteClick(e, workflow.workflow_id)}
             >
@@ -690,8 +701,10 @@ export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
               )}
               {!hasActiveWorkflow && (
                 <button
+                  type="button"
                   className={`btn btn-sm border-0 p-0 auto-workflow-delete-btn ${confirmDeleteId === batchDeleteConfirmKey ? 'btn-outline-danger' : 'btn-outline-secondary'}`}
                   title={t('autoDeleteWorkflow', language)}
+                  aria-label={t('autoDeleteWorkflow', language)}
                   disabled={deleteBatchMutation.isPending}
                   onClick={(event) => handleBatchDeleteClick(event, entry.batchId)}
                 >
@@ -727,6 +740,7 @@ export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
           <input
             className="form-control"
             placeholder={t('autoSearchWorkflows', language)}
+            aria-label={t('autoSearchWorkflows', language)}
             value={searchInput}
             onChange={(e) => handleSearchChange(e.target.value)}
           />
@@ -746,6 +760,7 @@ export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
         {STATUS_FILTER_TABS.map((tab) => (
           <button
             key={tab.key}
+            type="button"
             className={`btn btn-sm px-2 py-1 border-0 rounded-0 ${statusFilter === tab.key ? 'fw-bold text-primary border-bottom border-2 border-primary' : 'text-muted'}`}
             style={{ borderBottomWidth: '2px' }}
             onClick={() => handleStatusFilterChange(tab.key)}
