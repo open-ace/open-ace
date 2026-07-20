@@ -920,6 +920,39 @@ class AutonomousOrchestrator:
             "head": head,
         }
 
+    def _is_fast_forward(
+        self,
+        repo_path: str,
+        before: str,
+        after: str,
+        system_account: str | None,
+    ) -> bool:
+        """Return True if ``after`` is a descendant of ``before`` (fast-forward).
+
+        Distinguishes a benign external ``git pull`` on the main repo (HEAD
+        fast-forwards during an agent run) from an agent committing outside the
+        workflow worktree (#1890). On any git probe failure we conservatively
+        return True so a transient probe error cannot fail an otherwise-healthy
+        workflow.
+        """
+        if not before or not after or before == after:
+            return True
+        try:
+            gh = GitHubOps(repo_path, system_account=system_account)
+            return (
+                gh._run_git(["merge-base", "--is-ancestor", before, after], check=False).returncode
+                == 0
+            )
+        except Exception as e:
+            logger.warning(
+                "Workflow %s: fast-forward probe failed (%s..%s): %s; assuming fast-forward.",
+                self._workflow_id,
+                before[:8],
+                after[:8],
+                e,
+            )
+            return True
+
     def _snapshot_repo_context(
         self, wf: dict | None, workspace_type: str, system_account: str | None
     ) -> dict | None:
@@ -989,6 +1022,25 @@ class AutonomousOrchestrator:
                 and before_main.get("head") != after_main.get("head")
                 and before_effective.get("head") == after_effective.get("head")
             ):
+                # main HEAD moved but the worktree did not. This is either an
+                # agent committing outside the worktree, or an external `git
+                # pull` on the main repo fast-forwarding HEAD during the agent
+                # run (#1890). The latter is benign — only treat it as an
+                # escape when the main HEAD did NOT fast-forward before→after.
+                if self._is_fast_forward(
+                    ctx.get("project_path", ""),
+                    before_main.get("head"),
+                    after_main.get("head"),
+                    system_account,
+                ):
+                    logger.info(
+                        "Workflow %s: main repo HEAD fast-forwarded %s..%s during "
+                        "agent run (external pull); allowing.",
+                        self._workflow_id,
+                        before_main.get("head", "")[:8],
+                        after_main.get("head", "")[:8],
+                    )
+                    return ""
                 return (
                     "Detected commits on the main repository while the workflow worktree "
                     "HEAD did not move; the agent likely executed git commands outside "
