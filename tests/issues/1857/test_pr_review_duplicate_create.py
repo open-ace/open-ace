@@ -136,13 +136,15 @@ def test_re_entry_skips_create_pr_when_pr_already_exists():
     gh.find_existing_pr.assert_not_called()
 
 
-# ── Layer 2: recover via find_existing_pr when 'already exists' slips through ─
+# ── Layer 2: recover when 'already exists' slips through the guard ─────
 
 
-def test_create_pr_already_exists_recovers_via_find_existing_pr():
-    """If gh pr create returns 'already exists' (race past the guard),
-    find_existing_pr must locate and reuse the existing PR instead of
-    failing the workflow."""
+def test_create_pr_already_exists_recovers_by_parsing_pr_url_from_error():
+    """When gh pr create returns 'already exists' with a PR URL in the error
+    text, the PR number is parsed directly from the URL (no find_existing_pr
+    API call needed). This is the preferred path — it avoids the eventually-
+    consistent find_existing_pr race AND avoids coupling to the 'already
+    exists' wording."""
     wf = _make_workflow(current_round=0, github_pr_number=None)
     orch, mock_repo = _make_orchestrator(wf)
     gh = _make_gh_with_changes()
@@ -151,6 +153,33 @@ def test_create_pr_already_exists_recovers_via_find_existing_pr():
         'into branch "main" already exists: '
         "https://github.com/open-ace/open-ace/pull/1877"
     )
+    orch._get_gh = MagicMock(return_value=gh)
+    orch._run_agent = MagicMock(side_effect=RuntimeError("stop-after-pr-block"))
+
+    try:
+        orch._do_pr_review(wf)
+    except RuntimeError:
+        pass
+
+    # Recovery: PR number parsed from the URL in the error text.
+    updates = [c.args[1] for c in mock_repo.update_workflow.call_args_list]
+    pr_updates = [u for u in updates if u.get("github_pr_number") == 1877]
+    assert pr_updates, "PR number not parsed from error URL and persisted"
+    # find_existing_pr is the FALLBACK — must NOT be called when the URL was
+    # parseable.
+    gh.find_existing_pr.assert_not_called()
+    assert not any(
+        u.get("status") == "failed" for u in updates
+    ), "workflow wrongly failed on 'already exists' instead of recovering"
+
+
+def test_create_pr_already_exists_falls_back_to_find_existing_pr_without_url():
+    """When the 'already exists' error has NO parseable PR URL (older gh / GHES
+    / truncated message), recovery falls back to find_existing_pr."""
+    wf = _make_workflow(current_round=0, github_pr_number=None)
+    orch, mock_repo = _make_orchestrator(wf)
+    gh = _make_gh_with_changes()
+    gh.create_pr.side_effect = GitHubOpsError("a pull request for this branch already exists")
     gh.find_existing_pr.return_value = {
         "number": 1877,
         "url": "https://github.com/open-ace/open-ace/pull/1877",
@@ -164,14 +193,79 @@ def test_create_pr_already_exists_recovers_via_find_existing_pr():
     except RuntimeError:
         pass
 
-    # Recovery happened: workflow updated with the reused PR number.
+    gh.find_existing_pr.assert_called_once_with("auto-dev/wf-1857")
     updates = [c.args[1] for c in mock_repo.update_workflow.call_args_list]
-    pr_updates = [u for u in updates if u.get("github_pr_number") == 1877]
-    assert pr_updates, "reused PR number not persisted to workflow"
-    # And the workflow was NOT failed by the GitHubOpsError.
-    assert not any(
-        u.get("status") == "failed" for u in updates
-    ), "workflow wrongly failed on 'already exists' instead of recovering"
+    assert any(u.get("github_pr_number") == 1877 for u in updates)
+
+
+def test_create_pr_already_exists_retries_find_when_first_returns_none():
+    """When the 'already exists' error has no URL AND find_existing_pr returns
+    None the first time (GitHub eventual consistency), recovery retries once
+    after a short sleep and reuses the PR found on retry."""
+    wf = _make_workflow(current_round=0, github_pr_number=None)
+    orch, mock_repo = _make_orchestrator(wf)
+    gh = _make_gh_with_changes()
+    gh.create_pr.side_effect = GitHubOpsError("a pull request for this branch already exists")
+    # First lookup None (not indexed yet), second lookup hits.
+    gh.find_existing_pr.side_effect = [
+        None,
+        {"number": 1877, "url": "https://github.com/open-ace/open-ace/pull/1877"},
+    ]
+    orch._get_gh = MagicMock(return_value=gh)
+    orch._run_agent = MagicMock(side_effect=RuntimeError("stop-after-pr-block"))
+
+    # Patch sleep so the test doesn't actually wait.
+    with patch("app.modules.workspace.autonomous.orchestrator.time.sleep") as mock_sleep:
+        try:
+            orch._do_pr_review(wf)
+        except RuntimeError:
+            pass
+
+    assert gh.find_existing_pr.call_count == 2
+    mock_sleep.assert_called_once_with(2)
+    updates = [c.args[1] for c in mock_repo.update_workflow.call_args_list]
+    assert any(u.get("github_pr_number") == 1877 for u in updates)
+
+
+def test_create_pr_already_exists_fails_when_retry_still_finds_nothing():
+    """When the 'already exists' error has no URL AND find_existing_pr returns
+    None even after the retry, the workflow must fail (can't recover)."""
+    wf = _make_workflow(current_round=0, github_pr_number=None)
+    orch, mock_repo = _make_orchestrator(wf)
+    gh = _make_gh_with_changes()
+    gh.create_pr.side_effect = GitHubOpsError("a pull request for this branch already exists")
+    gh.find_existing_pr.return_value = None  # both attempts
+    orch._get_gh = MagicMock(return_value=gh)
+
+    with patch("app.modules.workspace.autonomous.orchestrator.time.sleep"):
+        raised = False
+        try:
+            orch._do_pr_review(wf)
+        except GitHubOpsError:
+            raised = True
+
+    assert raised, "should fail when recovery can't locate the existing PR"
+    assert gh.find_existing_pr.call_count == 2
+
+
+# ── _extract_pr_number_from_error unit tests ────────────────────────────
+
+
+def test_extract_pr_number_from_error_parses_url():
+    from app.modules.workspace.autonomous.orchestrator import _extract_pr_number_from_error
+
+    err = (
+        'a pull request for branch "x" into branch "main" already exists: '
+        "https://github.com/open-ace/open-ace/pull/1877"
+    )
+    assert _extract_pr_number_from_error(err) == 1877
+
+
+def test_extract_pr_number_from_error_returns_none_without_url():
+    from app.modules.workspace.autonomous.orchestrator import _extract_pr_number_from_error
+
+    assert _extract_pr_number_from_error("network unreachable") is None
+    assert _extract_pr_number_from_error("") is None
 
 
 def test_create_pr_unrecoverable_error_still_fails():

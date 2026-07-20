@@ -557,6 +557,24 @@ _REVIEW_APPROVAL_PHRASES = {
 }
 
 
+def _extract_pr_number_from_error(error_text: str) -> Optional[int]:
+    """Extract a PR number from a gh "already exists" error message.
+
+    gh's already-exists message includes the PR URL, e.g.:
+      "a pull request for branch X into branch main already exists:
+       https://github.com/owner/repo/pull/1877"
+    Parsing the /pull/<n> URL gives the PR number directly — this avoids
+    coupling recovery to the exact "already exists" wording, skips the
+    eventually-consistent find_existing_pr API call, and proves the error
+    really is the already-exists case (no URL → not recoverable here).
+    Returns the PR number or None.
+    """
+    if not error_text:
+        return None
+    m = re.search(r"/pull/(\d+)", error_text)
+    return int(m.group(1)) if m else None
+
+
 def _review_approval_phrase(content_language: Optional[str]) -> str:
     """Approval marker for PR review in the given content language."""
     return _REVIEW_APPROVAL_PHRASES.get(
@@ -5184,22 +5202,37 @@ class AutonomousOrchestrator:
                 # a re-entrant advance()). Other GitHubOpsError causes (network
                 # / auth / body-too-long) must NOT be masked by reusing an
                 # unrelated leftover open PR on this branch — those still raise.
-                if "already exists" not in str(e).lower():
-                    self._create_milestone(
-                        phase="pr_review",
-                        milestone_type="pr_created",
-                        status="failed",
-                        title="PR creation failed",
-                        error_message=str(e),
-                    )
-                    raise
-                existing = gh.find_existing_pr(branch_name)
-                if not existing:
-                    # GitHub's PR list API is eventually consistent — the PR
-                    # that "already exists" may not be indexed yet right after
-                    # a concurrent create. One short retry covers that window.
-                    time.sleep(2)
+                #
+                # Prefer parsing the PR URL out of gh's error text (gh's
+                # already-exists message includes the PR URL, e.g.
+                # "... already exists: https://github.com/o/r/pull/1877").
+                # This avoids coupling to the exact "already exists" wording
+                # AND skips the eventually-consistent find_existing_pr race
+                # AND saves an API call. find_existing_pr is the fallback when
+                # the error text has no parseable URL.
+                pr_number_reused = _extract_pr_number_from_error(str(e))
+                if pr_number_reused:
+                    existing = {"number": pr_number_reused}
+                else:
+                    # Only treat as recoverable if it really is the
+                    # already-exists case (no PR URL to prove it). Other
+                    # errors have no PR URL and fall through to raise below.
+                    if "already exists" not in str(e).lower():
+                        self._create_milestone(
+                            phase="pr_review",
+                            milestone_type="pr_created",
+                            status="failed",
+                            title="PR creation failed",
+                            error_message=str(e),
+                        )
+                        raise
                     existing = gh.find_existing_pr(branch_name)
+                    if not existing:
+                        # GitHub's PR list API is eventually consistent — the
+                        # PR that "already exists" may not be indexed yet right
+                        # after a concurrent create. One short retry covers it.
+                        time.sleep(2)
+                        existing = gh.find_existing_pr(branch_name)
                 if existing:
                     pr_number = existing.get("number")
                     pr_url = existing.get("url", "")
