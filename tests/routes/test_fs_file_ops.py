@@ -1242,8 +1242,9 @@ class TestDirectAccessHelper:
             assert _is_direct_access("alice") is False
 
     def test_check_file_as_user_uses_sudo_test(self):
-        from app.routes.fs import _check_file_as_user
         from subprocess import CompletedProcess
+
+        from app.routes.fs import _check_file_as_user
 
         with (
             patch("app.routes.fs.os.geteuid", return_value=1000),
