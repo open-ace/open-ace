@@ -34,6 +34,25 @@ def _get_auth_service() -> AuthService:
     return AuthService()
 
 
+def normalize_token(token: str) -> str:
+    """Normalize token that may be URL-encoded.
+
+    Some clients pass URL-encoded tokens through query params or headers.
+    urllib.parse.unquote is idempotent for non-encoded strings, so this
+    safely handles both encoded and non-encoded tokens.
+
+    This is the centralized normalization function for all token types
+    (WebUI tokens, proxy tokens, terminal tokens, etc.).
+
+    Args:
+        token: Token string from request, may be URL-encoded.
+
+    Returns:
+        Decoded token string.
+    """
+    return unquote(token) if token else ""
+
+
 def normalize_webui_token(token: str) -> str:
     """Normalize WebUI token that may be double-encoded.
 
@@ -42,16 +61,17 @@ def normalize_webui_token(token: str) -> str:
     so we get %3A in the token. We need to decode it again to get the correct
     format (user_id:port:random:signature).
 
+    DEPRECATED: Use normalize_token() instead for all token types.
+    This function is kept for backward compatibility.
+
     Args:
         token: Token string from request, may contain %3A if double-encoded.
 
     Returns:
         Normalized token with colons restored.
     """
-    if token and ("%3A" in token or "%3a" in token.lower()):
-        # Token was double-encoded, decode again
-        return unquote(token)
-    return token
+    # Use the general normalize_token function
+    return normalize_token(token)
 
 
 def _extract_token() -> str:
