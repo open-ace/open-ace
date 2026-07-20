@@ -29,6 +29,12 @@ GLOBAL_TENANT_SENTINEL = "GLOBAL_TENANT"
 # Shared ContentFilter instance for performance (uses cached rules)
 _content_filter_instance = None
 
+# Tenant config cache for sensitive keyword settings
+# Structure: {tenant_id: {"config": dict, "expiry": datetime}}
+_tenant_config_cache: dict[int, dict[str, Any]] = {}
+_tenant_config_cache_lock = threading.Lock()
+_TENANT_CONFIG_CACHE_TTL = 300  # 5 minutes
+
 
 def _get_content_filter():
     """Get or create shared ContentFilter instance."""
@@ -40,6 +46,74 @@ def _get_content_filter():
         governance_repo = GovernanceRepository()
         _content_filter_instance = ContentFilter(governance_repo=governance_repo)
     return _content_filter_instance
+
+
+def _get_tenant_sensitive_keyword_config(tenant_id: int) -> dict[str, Any]:
+    """
+    Get tenant-specific sensitive keyword configuration with caching.
+
+    Args:
+        tenant_id: Tenant ID.
+
+    Returns:
+        Dictionary with 'block_sensitive_keyword' and 'sensitive_keyword_match_mode' keys.
+    """
+    from datetime import datetime as dt
+
+    now = dt.now(timezone.utc).replace(tzinfo=None)
+
+    # Check cache first
+    with _tenant_config_cache_lock:
+        if tenant_id in _tenant_config_cache:
+            cached = _tenant_config_cache[tenant_id]
+            if cached["expiry"] > now:
+                return cached["config"]
+
+    # Fetch from database
+    try:
+        from app.repositories.tenant_repo import TenantRepository
+
+        tenant_repo = TenantRepository()
+        tenant = tenant_repo.get_by_id(tenant_id)
+        if tenant and tenant.settings:
+            config = {
+                "block_sensitive_keyword": tenant.settings.block_sensitive_keyword,
+                "sensitive_keyword_match_mode": tenant.settings.sensitive_keyword_match_mode,
+            }
+        else:
+            config = {
+                "block_sensitive_keyword": False,
+                "sensitive_keyword_match_mode": "word_boundary",
+            }
+    except Exception as e:
+        logger.warning(f"Failed to fetch tenant config for tenant {tenant_id}: {e}")
+        config = {
+            "block_sensitive_keyword": False,
+            "sensitive_keyword_match_mode": "word_boundary",
+        }
+
+    # Update cache
+    with _tenant_config_cache_lock:
+        _tenant_config_cache[tenant_id] = {
+            "config": config,
+            "expiry": now + timedelta(seconds=_TENANT_CONFIG_CACHE_TTL),
+        }
+
+    return config
+
+
+def invalidate_tenant_config_cache(tenant_id: Optional[int] = None) -> None:
+    """
+    Invalidate tenant config cache.
+
+    Args:
+        tenant_id: Specific tenant ID to invalidate, or None to clear all.
+    """
+    with _tenant_config_cache_lock:
+        if tenant_id is not None:
+            _tenant_config_cache.pop(tenant_id, None)
+        else:
+            _tenant_config_cache.clear()
 
 
 def _sanitize_text_value(text: Optional[str]) -> Optional[str]:
@@ -1480,7 +1554,10 @@ class SessionManager:
                 filter_session_row = cursor.fetchone()
                 filter_user_id = filter_session_row["user_id"] if filter_session_row else None
 
-                result = content_filter.check_content(content)
+                # Get tenant-specific sensitive keyword config
+                tenant_config = _get_tenant_sensitive_keyword_config(int(effective_tenant_id))
+
+                result = content_filter.check_content(content, tenant_config=tenant_config)
 
                 if result.action in ("block", "warn", "redact"):
                     audit_logger = AuditLogger()

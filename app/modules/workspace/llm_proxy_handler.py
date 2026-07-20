@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from flask import Response, g, jsonify, request, stream_with_context
@@ -19,6 +21,12 @@ logger = logging.getLogger(__name__)
 # Shared ContentFilter instance for performance (uses cached rules)
 _content_filter_instance = None
 
+# Tenant config cache for sensitive keyword settings
+# Structure: {tenant_id: {"config": dict, "expiry": datetime}}
+_tenant_config_cache: dict[int, dict[str, Any]] = {}
+_tenant_config_cache_lock = threading.Lock()
+_TENANT_CONFIG_CACHE_TTL = 300  # 5 minutes
+
 
 def _get_content_filter():
     """Get or create shared ContentFilter instance."""
@@ -30,6 +38,64 @@ def _get_content_filter():
         governance_repo = GovernanceRepository()
         _content_filter_instance = ContentFilter(governance_repo=governance_repo)
     return _content_filter_instance
+
+
+def _get_tenant_sensitive_keyword_config(tenant_id: int | None) -> dict[str, Any]:
+    """
+    Get tenant-specific sensitive keyword configuration with caching.
+
+    Args:
+        tenant_id: Tenant ID, or None for default behavior.
+
+    Returns:
+        Dictionary with 'block_sensitive_keyword' and 'sensitive_keyword_match_mode' keys.
+    """
+    if tenant_id is None:
+        return {
+            "block_sensitive_keyword": False,
+            "sensitive_keyword_match_mode": "word_boundary",
+        }
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    # Check cache first
+    with _tenant_config_cache_lock:
+        if tenant_id in _tenant_config_cache:
+            cached = _tenant_config_cache[tenant_id]
+            if cached["expiry"] > now:
+                return cached["config"]
+
+    # Fetch from database
+    try:
+        from app.repositories.tenant_repo import TenantRepository
+
+        tenant_repo = TenantRepository()
+        tenant = tenant_repo.get_by_id(tenant_id)
+        if tenant and tenant.settings:
+            config = {
+                "block_sensitive_keyword": tenant.settings.block_sensitive_keyword,
+                "sensitive_keyword_match_mode": tenant.settings.sensitive_keyword_match_mode,
+            }
+        else:
+            config = {
+                "block_sensitive_keyword": False,
+                "sensitive_keyword_match_mode": "word_boundary",
+            }
+    except Exception as e:
+        logger.warning(f"Failed to fetch tenant config for tenant {tenant_id}: {e}")
+        config = {
+            "block_sensitive_keyword": False,
+            "sensitive_keyword_match_mode": "word_boundary",
+        }
+
+    # Update cache
+    with _tenant_config_cache_lock:
+        _tenant_config_cache[tenant_id] = {
+            "config": config,
+            "expiry": now + timedelta(seconds=_TENANT_CONFIG_CACHE_TTL),
+        }
+
+    return config
 
 
 def _extract_requested_model() -> str | None:
@@ -530,6 +596,7 @@ def _check_content_filter(
     user_id: int,
     username: str | None,
     request_body: bytes | None,
+    tenant_id: int | None = None,
 ) -> tuple[Response, int] | str | None:
     """Check user input content for sensitive information.
 
@@ -537,6 +604,7 @@ def _check_content_filter(
         user_id: User ID for audit logging.
         username: Username for audit logging.
         request_body: Raw request body bytes.
+        tenant_id: Optional tenant ID for tenant-specific filtering config.
 
     Returns:
         - tuple(Response, int): Error response if blocked (403)
@@ -580,7 +648,10 @@ def _check_content_filter(
         content_filter = _get_content_filter()
         audit_logger = AuditLogger()
 
-        result = content_filter.check_content(combined_content)
+        # Get tenant-specific sensitive keyword config
+        tenant_config = _get_tenant_sensitive_keyword_config(tenant_id)
+
+        result = content_filter.check_content(combined_content, tenant_config=tenant_config)
 
         if result.action == "block":
             # Log the block action
@@ -813,6 +884,7 @@ def handle_llm_proxy_request(
         user_id=user_id,
         username=username,
         request_body=request.get_data(),
+        tenant_id=tenant_id,
     )
     if isinstance(content_filter_result, tuple):
         # Block: return error response
