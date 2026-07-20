@@ -353,7 +353,7 @@ class TestAdminRequiredWebuiToken:
                     return_value=mock_user_repo,
                 ):
                     with app.test_client() as client:
-                        resp = client.get("/api/admin?token=webui-token")
+                        resp = client.get("/api/admin?token=1:3100:1234567890abcdef1234567890abcdef:1234567890abcdef")
                         assert resp.status_code == 200
                         data = resp.get_json()
                         assert data["role"] == "admin"
@@ -384,7 +384,7 @@ class TestAdminRequiredWebuiToken:
                     return_value=mock_user_repo,
                 ):
                     with app.test_client() as client:
-                        resp = client.get("/api/admin?token=webui-token")
+                        resp = client.get("/api/admin?token=1:3100:1234567890abcdef1234567890abcdef:1234567890abcdef")
                         assert resp.status_code == 403
                         data = resp.get_json()
                         assert data["error"] == "Admin access required"
@@ -454,7 +454,7 @@ class TestAdminRequiredWebuiToken:
                     return_value=mock_user_repo,
                 ):
                     with app.test_client() as client:
-                        resp = client.get("/api/admin?token=webui-token")
+                        resp = client.get("/api/admin?token=1:3100:1234567890abcdef1234567890abcdef:1234567890abcdef")
                         assert resp.status_code == 401
 
     def test_session_token_preferred_over_webui_token(self):
@@ -476,7 +476,7 @@ class TestAdminRequiredWebuiToken:
                 # Use both session token (in header) and WebUI token (in query)
                 with app.test_client() as client:
                     resp = client.get(
-                        "/api/admin?token=webui-token",
+                        "/api/admin?token=1:3100:1234567890abcdef1234567890abcdef:1234567890abcdef",
                         headers={"Authorization": "Bearer session-token"},
                     )
                     assert resp.status_code == 200
@@ -511,7 +511,7 @@ class TestAdminRequiredWebuiToken:
                     with app.test_client() as client:
                         # Provide both invalid session token and valid WebUI token
                         resp = client.get(
-                            "/api/admin?token=webui-token",
+                            "/api/admin?token=1:3100:1234567890abcdef1234567890abcdef:1234567890abcdef",
                             headers={"Authorization": "Bearer invalid-session"},
                         )
                         assert resp.status_code == 200
