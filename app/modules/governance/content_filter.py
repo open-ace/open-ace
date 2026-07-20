@@ -257,6 +257,9 @@ class ContentFilter:
                 self._cache_hits += 1
                 return self._compiled_rules_cache[cache_key]
 
+            # Track attempt before compiling (counts as miss regardless of validity)
+            self._cache_misses += 1
+
             # Compile the pattern
             try:
                 compiled = re.compile(pattern, flags)
@@ -266,7 +269,6 @@ class ContentFilter:
 
             # Cache the compiled pattern
             self._compiled_rules_cache[cache_key] = compiled
-            self._cache_misses += 1
 
             # Check cache size and evict oldest if needed (LRU)
             while len(self._compiled_rules_cache) > self._max_compiled_cache_size:
