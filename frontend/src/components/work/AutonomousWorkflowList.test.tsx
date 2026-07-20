@@ -138,6 +138,32 @@ describe('AutonomousWorkflowList', () => {
     expect(lastFilters?.offset).toBe('0');
   });
 
+  it('uses semantic workflow buttons and exposes accessible controls', () => {
+    const onSelect = vi.fn();
+    mockWorkflowList([
+      workflow({
+        title: 'Keyboard workflow',
+        status: 'completed',
+      }),
+    ]);
+
+    const { container } = render(
+      <AutonomousWorkflowList selectedId={null} onSelect={onSelect} onClearSelection={vi.fn()} />
+    );
+
+    const workflowButton = screen.getByRole('button', { name: 'Keyboard workflow' });
+    expect(workflowButton.tagName).toBe('BUTTON');
+    expect(workflowButton.querySelector('div')).toBeNull();
+    onSelect.mockClear();
+    fireEvent.click(workflowButton);
+
+    expect(onSelect).toHaveBeenCalledWith(
+      expect.objectContaining({ workflow_id: 'wf-1', title: 'Keyboard workflow' })
+    );
+    expect(screen.getByRole('textbox')).toHaveAttribute('aria-label');
+    expect(container.querySelector('.auto-workflow-delete-btn')).toHaveAttribute('aria-label');
+  });
+
   it('requests the next page with a 50 item offset', () => {
     mockWorkflowList([workflow()], 75);
 
