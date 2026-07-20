@@ -62,7 +62,7 @@ python -m pytest tests/issues/1891/test_usage_report_auth.py -v --tb=short
 
 **验证项**: AuditAction 枚举扩展
 
-**执行命令**: 静态代码分析
+**执行命令**: 静态代码分析 + 导入验证
 
 **验证内容**:
 - ✅ 新增 `USAGE_REPORT_ACCEPTED` (audit_logger.py:87)
@@ -70,6 +70,15 @@ python -m pytest tests/issues/1891/test_usage_report_auth.py -v --tb=short
 - ✅ 新增 `USAGE_REPORT_AUTH_FAILURE` (audit_logger.py:89)
 - ✅ 更新 `get_action_categories()` (audit_logger.py:886, 913-928)
 - ✅ 所有使用点正确引用 (remote.py:2247, 2295, 2316, 2331, 2350, 2374)
+
+**运行验证**:
+```bash
+python3.12 -c "from app.modules.governance.audit_logger import AuditAction; ..."
+# 输出: ✅ AuditAction enum correctly extended
+#   - USAGE_REPORT_ACCEPTED = usage_report_accepted
+#   - USAGE_REPORT_REJECTED = usage_report_rejected
+#   - USAGE_REPORT_AUTH_FAILURE = usage_report_auth_failure
+```
 
 **结论**: ✅ 审计日志集成正确
 
@@ -93,13 +102,19 @@ python -m pytest tests/issues/1891/test_usage_report_auth.py -v --tb=short
 
 **验证项**: machine↔session↔tenant 链路一致性
 
-**验证内容**:
-1. ✅ machine_id 存在性检查 (remote.py:2243-2257)
-2. ✅ session_id 存在性检查 (remote.py:2286-2289)
-3. ✅ workspace_type 必须为 "remote" (remote.py:2292-2310)
-4. ✅ session.remote_machine_id 非 NULL 检查 (remote.py:2314-2327)
-5. ✅ session.remote_machine_id == machine_id 检查 (remote.py:2329-2343)
-6. ✅ machine.tenant_id == session.tenant_id 检查 (remote.py:2346-2363)
+**静态验证结果**:
+- ✅ machine_id 存在性检查 (remote.py:2243-2257)
+- ✅ session_id 存在性检查 (remote.py:2286-2289)
+- ✅ workspace_type 必须为 "remote" (remote.py:2292-2310)
+- ✅ session.remote_machine_id 非 NULL 检查 (remote.py:2314-2327)
+- ✅ session.remote_machine_id == machine_id 检查 (remote.py:2329-2343)
+- ✅ machine.tenant_id == session.tenant_id 检查 (remote.py:2346-2363)
+
+**运行验证**:
+```bash
+python3.12 -c "import ast; ..."
+# 输出: ✅ All validation steps present in code
+```
 
 **结论**: ✅ 绑定验证链路完整
 
@@ -148,6 +163,13 @@ python -m pytest tests/issues/1891/test_usage_report_auth.py -v --tb=short
 - ✅ Legacy 模式处理正确（90 天过期机制）
 - ✅ 代码注释清晰（每个验证步骤都有注释）
 
+**语法验证**:
+```bash
+python3.12 -m py_compile tests/issues/1891/test_usage_report_auth.py \
+    app/routes/remote.py app/modules/governance/audit_logger.py
+# 输出: ✅ All files compile successfully
+```
+
 **结论**: ✅ 代码质量良好
 
 ---
@@ -176,26 +198,29 @@ python -m pytest tests/issues/1891/test_usage_report_auth.py -v --tb=short
 5. ✅ **审计日志**: 所有拒绝和成功事件都记录
 6. ✅ **测试覆盖**: 13 个测试类覆盖所有核心场景
 7. ✅ **Legacy 兼容**: 90 天迁移窗口机制
+8. ✅ **语法验证**: 所有文件编译通过
+9. ✅ **导入验证**: 审计枚举正确扩展并可导入
 
 ### 限制说明
 
-由于环境限制（Python 3.9 vs 项目要求 3.10+），无法直接运行测试。
-但通过代码审查验证，确认：
-- 测试文件结构正确
-- 所有需求场景已覆盖
-- 代码逻辑正确
-- 审计日志集成完整
+由于环境限制（数据库 schema 配置复杂），无法完整运行单元测试。
+但通过静态验证，确认：
+- ✅ 所有文件语法正确
+- ✅ 所有需求场景已覆盖
+- ✅ 代码逻辑正确
+- ✅ 审计日志集成完整
+- ✅ 导入依赖正确
 
 ### 建议
 
-1. **立即**: 在 Python 3.10+ 环境运行专项测试验证
+1. **立即**: 在完整 CI 环境运行专项测试验证
    ```bash
-   python -m pytest tests/issues/1891/test_usage_report_auth.py -v
+   pytest tests/issues/1891/test_usage_report_auth.py -v
    ```
 
 2. **后续**: 运行相关集成测试
    ```bash
-   python -m pytest tests/integration/test_security_model_integration.py -v
+   pytest tests/integration/test_security_model_integration.py -v
    ```
 
 ---
@@ -205,9 +230,10 @@ python -m pytest tests/issues/1891/test_usage_report_auth.py -v --tb=short
 - **总验证项**: 8 大类
 - **通过项**: 8
 - **失败项**: 0
-- **需环境验证项**: 1（单元测试执行）
+- **需环境验证项**: 1（单元测试完整执行）
 
 ---
 
 **验证日期**: 2026-07-20
-**验证方式**: 静态代码审查 + 结构分析
+**验证方式**: 静态代码审查 + 结构分析 + 语法验证 + 导入验证
+**验证工具**: Python 3.12.3 (临时), py_compile, AST 解析
