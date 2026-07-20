@@ -141,6 +141,44 @@ class TestCorsPolicy:
         assert "Access-Control-Allow-Origin" not in resp.headers
         assert "Access-Control-Allow-Credentials" not in resp.headers
 
+    def test_same_host_lan_ip_webui_origin_is_allowed(self, cors_app):
+        """Issue #1859: LAN IP access must allow the WebUI iframe origin.
+
+        When the browser reaches the backend via a non-loopback address (e.g.
+        ``http://192.168.1.237:5000``), the per-user qwen-code-webui iframe
+        is served on a webui port using the same hostname
+        (``http://192.168.1.237:3101``). The backend must emit CORS headers
+        for that origin so the iframe's credentialed API calls are not blocked
+        by the browser ("NetworkError when attempting to fetch resource.").
+        """
+        client = cors_app.test_client()
+
+        resp = client.get(
+            "/api/ping",
+            headers={"Origin": "http://192.168.1.237:3101"},
+            base_url="http://192.168.1.237:5000",
+        )
+
+        assert resp.status_code == 200
+        assert resp.headers["Access-Control-Allow-Origin"] == "http://192.168.1.237:3101"
+        assert resp.headers["Access-Control-Allow-Credentials"] == "true"
+
+    def test_mismatched_host_webui_origin_is_not_reflected(self, cors_app):
+        """Issue #1859: a WebUI origin whose host differs from the backend
+        Host header must still be rejected to prevent credential reflection
+        onto an attacker-controlled host."""
+        client = cors_app.test_client()
+
+        resp = client.get(
+            "/api/ping",
+            headers={"Origin": "http://evil.example:3101"},
+            base_url="http://192.168.1.237:5000",
+        )
+
+        assert resp.status_code == 200
+        assert "Access-Control-Allow-Origin" not in resp.headers
+        assert "Access-Control-Allow-Credentials" not in resp.headers
+
     def test_preflight_honors_explicit_allowlist(self, monkeypatch, request):
         # Use monkeypatch to set env - this happens AFTER autouse fixture clears it
         # Create a fresh app for this test to avoid state pollution
