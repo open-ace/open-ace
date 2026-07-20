@@ -13,16 +13,15 @@ compatibility, these models provide:
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional
 
 
 @dataclass
 class AutonomousWorkflow:
     """Represents an autonomous development workflow."""
 
-    id: Optional[int] = None
+    id: int | None = None
     workflow_id: str = ""
-    user_id: Optional[int] = None
+    user_id: int | None = None
     title: str = ""
     status: str = (
         "pending"  # queued|pending|preparing|planning|developing|pr_review|reporting|waiting|merging|completed|failed|cancelled|paused
@@ -42,15 +41,15 @@ class AutonomousWorkflow:
     remote_machine_id: str = ""
     worktree_path: str = ""
     preferred_worktree_path: str = ""
-    github_issue_number: Optional[int] = None
-    github_pr_number: Optional[int] = None
+    github_issue_number: int | None = None
+    github_pr_number: int | None = None
     github_pr_url: str = ""
-    batch_id: Optional[str] = None
-    batch_order: Optional[int] = None
-    batch_total: Optional[int] = None
-    base_commit_sha: Optional[str] = None  # Locked SHA for batch workflows (Issue #1552)
+    batch_id: str | None = None
+    batch_order: int | None = None
+    batch_total: int | None = None
+    base_commit_sha: str | None = None  # Locked SHA for batch workflows (Issue #1552)
     auto_merge: bool = True  # Auto merge PR and proceed to next workflow in batch
-    definition_snapshot: Optional[dict] = None
+    definition_snapshot: dict | None = None
     current_phase: str = (
         "preparation"  # preparation|planning|development|pr_review|report|wait|merge
     )
@@ -73,10 +72,10 @@ class AutonomousWorkflow:
     # verbatim (it does NOT switch per viewer). System-authored structured
     # content is rendered from structured payloads instead.
     content_language: str = "en"
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
-    paused_at: Optional[datetime] = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    completed_at: datetime | None = None
+    paused_at: datetime | None = None
 
     ACTIVE_STATUSES = (
         "pending",
@@ -218,7 +217,7 @@ class AutonomousWorkflow:
 class WorkflowMilestone:
     """Represents a milestone in the workflow timeline."""
 
-    id: Optional[int] = None
+    id: int | None = None
     workflow_id: str = ""
     milestone_id: str = ""
     phase: str = ""
@@ -230,8 +229,8 @@ class WorkflowMilestone:
     description: str = ""
     session_id: str = ""
     review_session_id: str = ""
-    github_issue_number: Optional[int] = None
-    github_pr_number: Optional[int] = None
+    github_issue_number: int | None = None
+    github_pr_number: int | None = None
     github_comment_id: str = ""
     commit_shas: str = ""  # JSON array
     diff_stats: str = ""  # JSON
@@ -243,10 +242,10 @@ class WorkflowMilestone:
     fork_branch: str = ""
     fork_workflow_id: str = ""
     metadata: str = ""  # JSON
-    started_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -330,12 +329,12 @@ class WorkflowMilestone:
 class WorkflowEvent:
     """Append-only event for real-time timeline updates."""
 
-    id: Optional[int] = None
+    id: int | None = None
     workflow_id: str = ""
     milestone_id: str = ""
     event_type: str = ""
     event_data: str = ""  # JSON
-    created_at: Optional[datetime] = None
+    created_at: datetime | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -384,9 +383,9 @@ class AgentTaskResult:
     request_count: int = 0
     tool_calls: list = field(default_factory=list)
     success: bool = False
-    error: Optional[str] = None
+    error: str | None = None
     # Runtime-only classification for logs/tests; not persisted or used for
     # retry/control-flow decisions yet.
-    error_code: Optional[str] = None
+    error_code: str | None = None
     # Ordered event log preserving actual message interleaving
     event_log: list = field(default_factory=list)

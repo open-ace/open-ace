@@ -9,7 +9,7 @@ import secrets
 import time
 from datetime import datetime, timedelta, timezone
 from enum import Enum
-from typing import Optional, cast
+from typing import cast
 
 from app.repositories.user_repo import UserRepository
 from app.utils.validators import validate_password
@@ -66,7 +66,7 @@ def _get_max_login_attempts() -> int:
     return int(_get_security_settings().get("max_login_attempts", 5))
 
 
-def _check_login_lockout(username: str) -> tuple[bool, Optional[str]]:
+def _check_login_lockout(username: str) -> tuple[bool, str | None]:
     """Check if account is temporarily locked. Returns (is_locked, error_message).
 
     Degrades gracefully on DB failure: logs warning and allows login (no lockout).
@@ -207,7 +207,7 @@ def _get_change_password_lockout_key(user_id: int) -> str:
     return f"cp:user_{user_id}"
 
 
-def _check_change_password_lockout(user_id: int) -> tuple[bool, Optional[str], Optional[int]]:
+def _check_change_password_lockout(user_id: int) -> tuple[bool, str | None, int | None]:
     """Check if change-password is temporarily locked for a user.
 
     Returns:
@@ -382,7 +382,7 @@ def _get_session_timeout_hours() -> float:
 class AuthService:
     """Service for authentication-related business logic."""
 
-    def __init__(self, user_repo: Optional[UserRepository] = None):
+    def __init__(self, user_repo: UserRepository | None = None):
         """
         Initialize service.
 
@@ -393,7 +393,7 @@ class AuthService:
 
     def login(
         self, username: str, password: str, password_verify_func
-    ) -> tuple[Optional[dict], Optional[str]]:
+    ) -> tuple[dict | None, str | None]:
         """
         Authenticate a user and create a session.
 
@@ -478,7 +478,7 @@ class AuthService:
         new_password: str,
         password_verify_func,
         password_hash_func,
-    ) -> tuple[bool, Optional[str], Optional[ChangePasswordError]]:
+    ) -> tuple[bool, str | None, ChangePasswordError | None]:
         """
         Change user password.
 
@@ -535,7 +535,7 @@ class AuthService:
         logger.info(f"Password changed for user ID: {user_id}")
         return True, None, None
 
-    def get_session(self, token: str) -> Optional[dict]:
+    def get_session(self, token: str) -> dict | None:
         """
         Get session data by token.
 
@@ -547,7 +547,7 @@ class AuthService:
         """
         return self.user_repo.get_session_by_token(token)
 
-    def validate_session(self, token: str) -> tuple[bool, Optional[dict]]:
+    def validate_session(self, token: str) -> tuple[bool, dict | None]:
         """
         Validate a session token and return session data.
 
@@ -579,7 +579,7 @@ class AuthService:
             expires_at = datetime.fromisoformat(expires_at)
         return bool(expires_at < datetime.now(timezone.utc).replace(tzinfo=None))
 
-    def get_user_profile(self, user_id: int) -> Optional[dict]:
+    def get_user_profile(self, user_id: int) -> dict | None:
         """
         Get user profile.
 
@@ -610,7 +610,7 @@ class AuthService:
             return False
         return session.get("role") == "admin"
 
-    def require_auth(self, token: str) -> tuple[bool, Optional[dict]]:
+    def require_auth(self, token: str) -> tuple[bool, dict | None]:
         """
         Require authentication and return session data.
 
@@ -624,7 +624,7 @@ class AuthService:
         """
         return self.validate_session(token)
 
-    def require_admin(self, token: str) -> tuple[bool, Optional[dict]]:
+    def require_admin(self, token: str) -> tuple[bool, dict | None]:
         """
         Require admin role and return session data.
 

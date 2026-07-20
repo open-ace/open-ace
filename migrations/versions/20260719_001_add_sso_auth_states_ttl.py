@@ -15,7 +15,6 @@ the authorization-code replay window.
 """
 
 import logging
-from typing import Union
 
 import sqlalchemy as sa
 from alembic import op
@@ -23,9 +22,9 @@ from alembic import op
 log = logging.getLogger(__name__)
 
 revision: str = "20260719_001_add_sso_auth_states_ttl"
-down_revision: Union[str, None] = "20260718_001_add_remote_runtime_state"
-branch_labels: Union[str, None] = None
-depends_on: Union[str, None] = None
+down_revision: str | None = "20260718_001_add_remote_runtime_state"
+branch_labels: str | None = None
+depends_on: str | None = None
 
 # Default TTL for auth_state records (10 minutes)
 DEFAULT_TTL_SECONDS = 600

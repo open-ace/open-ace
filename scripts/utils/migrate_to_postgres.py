@@ -78,7 +78,7 @@ def migrate_table(
     sqlite_conn: sqlite3.Connection,
     pg_conn: Any,
     table_name: str,
-    columns: Optional[list[str]] = None,
+    columns: list[str] | None = None,
     batch_size: int = 5000,
 ) -> int:
     """

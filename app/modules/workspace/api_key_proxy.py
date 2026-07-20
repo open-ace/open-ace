@@ -16,7 +16,7 @@ import threading
 from base64 import b64decode, b64encode
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional, Union, cast
+from typing import Any, cast
 
 from app.modules.workspace.api_key_router import APIKeyRouter
 from app.repositories.database import DB_PATH, is_postgresql
@@ -79,7 +79,7 @@ def _parse_codex_settings(raw_settings: Any, *, raise_on_error: bool = False) ->
     return {}
 
 
-def validate_cli_settings_payload(raw_cli_settings: Optional[str]) -> Optional[str]:
+def validate_cli_settings_payload(raw_cli_settings: str | None) -> str | None:
     """Validate CLI settings payload before storing it."""
     if not raw_cli_settings:
         return None
@@ -133,7 +133,7 @@ class APIKeyProxyService:
     _DEFAULT_PROXY_TOKEN_REUSE_MODE = "multi_use"
     _ALLOWED_PROXY_TOKEN_REUSE_MODES = frozenset({"multi_use", "single_use"})
 
-    def __init__(self, db_path: Optional[str] = None):
+    def __init__(self, db_path: str | None = None):
         self.db_path = db_path or str(DB_PATH)
         self._encryption_key = self._get_encryption_key()
         self._router = APIKeyRouter()
@@ -151,7 +151,7 @@ class APIKeyProxyService:
         # Derive a 32-byte key using SHA-256
         return hashlib.sha256(key_env.encode()).digest()
 
-    def _get_connection(self) -> Union[sqlite3.Connection, Any]:
+    def _get_connection(self) -> sqlite3.Connection | Any:
         """Get database connection from pool (PostgreSQL) or direct (SQLite)."""
         if is_postgresql():
             # Use global connection pool for PostgreSQL
@@ -284,7 +284,7 @@ class APIKeyProxyService:
             return self._DEFAULT_PROXY_TOKEN_REUSE_MODE
         return normalized
 
-    def _decode_proxy_token(self, token: str) -> Optional[dict[str, Any]]:
+    def _decode_proxy_token(self, token: str) -> dict[str, Any] | None:
         """Verify the proxy-token signature and return the payload."""
         import hmac
 
@@ -319,7 +319,7 @@ class APIKeyProxyService:
         payload: dict[str, Any],
         expires_at: datetime,
         reuse_mode: str,
-        metadata: Optional[dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         """Persist the server-side lifecycle record for a proxy token."""
         conn = self._get_connection()
@@ -358,7 +358,7 @@ class APIKeyProxyService:
         finally:
             conn.close()
 
-    def _get_proxy_token_record(self, jti: str) -> Optional[dict[str, Any]]:
+    def _get_proxy_token_record(self, jti: str) -> dict[str, Any] | None:
         """Load a proxy-token lifecycle record by JTI."""
         conn = self._get_connection()
         try:
@@ -496,10 +496,10 @@ class APIKeyProxyService:
         provider: str,
         key_name: str,
         api_key: str,
-        base_url: Optional[str] = None,
-        created_by: Optional[int] = None,
-        cli_tools: Optional[str] = None,
-        cli_settings: Optional[str] = None,
+        base_url: str | None = None,
+        created_by: int | None = None,
+        cli_tools: str | None = None,
+        cli_settings: str | None = None,
         scope: str = "remote",
         priority: int = 0,
         weight: int = 100,
@@ -576,7 +576,7 @@ class APIKeyProxyService:
         finally:
             conn.close()
 
-    def resolve_api_key(self, tenant_id: int, provider: str) -> Optional[tuple[str, Optional[str]]]:
+    def resolve_api_key(self, tenant_id: int, provider: str) -> tuple[str, str | None] | None:
         """
         Resolve and decrypt an API key for a tenant/provider.
 
@@ -600,8 +600,8 @@ class APIKeyProxyService:
         tenant_id: int,
         provider: str,
         scope: str = "remote",
-        exclude_key_ids: Optional[set[int]] = None,
-    ) -> Optional[tuple[str, Optional[str], int, Optional[str]]]:
+        exclude_key_ids: set[int] | None = None,
+    ) -> tuple[str, str | None, int, str | None] | None:
         """
         Resolve and decrypt an API key for a tenant/provider with scope filtering
         and multi-key scheduling.
@@ -751,14 +751,14 @@ class APIKeyProxyService:
         self,
         key_id: int,
         tenant_id: int,
-        key_name: Optional[str] = None,
-        base_url: Optional[str] = None,
-        cli_tools: Optional[str] = None,
-        cli_settings: Optional[str] = None,
-        is_active: Optional[bool] = None,
-        scope: Optional[str] = None,
-        priority: Optional[int] = None,
-        weight: Optional[int] = None,
+        key_name: str | None = None,
+        base_url: str | None = None,
+        cli_tools: str | None = None,
+        cli_settings: str | None = None,
+        is_active: bool | None = None,
+        scope: str | None = None,
+        priority: int | None = None,
+        weight: int | None = None,
     ) -> bool:
         """
         Update an API key by its ID.
@@ -835,7 +835,7 @@ class APIKeyProxyService:
         tenant_id: int,
         tool_name: str,
         scope: str = "remote",
-    ) -> Optional[dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """
         Get CLI settings for a specific tool from active API keys.
 
@@ -1377,8 +1377,8 @@ class APIKeyProxyService:
         tenant_id: int,
         provider: str,
         key_ids: list[int],
-        exclude_key_ids: Optional[set[int]] = None,
-    ) -> Optional[tuple[str, Optional[str], int, Optional[str]]]:
+        exclude_key_ids: set[int] | None = None,
+    ) -> tuple[str, str | None, int, str | None] | None:
         """Resolve a real API key from an allowed key-id subset using HA routing.
 
         Returns:
@@ -1428,9 +1428,9 @@ class APIKeyProxyService:
             return None
         return (
             cast("str", selected["api_key"]),
-            cast("Optional[str]", selected.get("base_url")),
+            cast("str | None", selected.get("base_url")),
             int(selected["id"]),
-            cast("Optional[str]", selected.get("cli_settings")),
+            cast("str | None", selected.get("cli_settings")),
         )
 
     def delete_api_key_by_id(self, key_id: int, tenant_id: int) -> bool:
@@ -1457,9 +1457,9 @@ class APIKeyProxyService:
         session_id: str,
         tenant_id: int,
         provider: str,
-        expires_minutes: Optional[int] = None,
+        expires_minutes: int | None = None,
         session_type: str = "agent",
-        extra_payload: Optional[dict[str, Any]] = None,
+        extra_payload: dict[str, Any] | None = None,
     ) -> str:
         """
         Generate a proxy token for a remote agent session.
@@ -1529,7 +1529,7 @@ class APIKeyProxyService:
         )
         return token
 
-    def _webui_instance_alive(self, session_id: Optional[str], user_id: Any) -> bool:
+    def _webui_instance_alive(self, session_id: str | None, user_id: Any) -> bool:
         """Return True when session_id is a webui: token whose instance is alive.
 
         Used as the authoritative lifecycle signal for WebUI proxy tokens: WebUI
@@ -1557,7 +1557,7 @@ class APIKeyProxyService:
     def _session_allows_proxy_token(
         self,
         *,
-        session_id: Optional[str],
+        session_id: str | None,
         session_type: str,
         user_id: Any,
         now: datetime,
@@ -1619,7 +1619,7 @@ class APIKeyProxyService:
             return False
         return True
 
-    def validate_proxy_token(self, token: str) -> Optional[dict[str, Any]]:
+    def validate_proxy_token(self, token: str) -> dict[str, Any] | None:
         """
         Validate a proxy token and extract its payload.
 
@@ -1703,7 +1703,7 @@ class APIKeyProxyService:
                     return None
                 self._touch_proxy_token_record_with_conn(conn, jti, now)
 
-            return cast("Optional[dict[str, Any]]", payload)
+            return cast("dict[str, Any] | None", payload)
         except Exception as e:
             logger.warning(f"Failed to validate proxy token: {e}")
             return None
@@ -1714,7 +1714,7 @@ class APIKeyProxyService:
                 except Exception:
                     pass
 
-    def _get_proxy_token_record_with_conn(self, conn: Any, jti: str) -> Optional[dict[str, Any]]:
+    def _get_proxy_token_record_with_conn(self, conn: Any, jti: str) -> dict[str, Any] | None:
         """Load a proxy-token lifecycle record by JTI using provided connection."""
         try:
             cursor = conn.cursor()
@@ -1749,7 +1749,7 @@ class APIKeyProxyService:
         self,
         conn: Any,
         *,
-        session_id: Optional[str],
+        session_id: str | None,
         session_type: str,
         user_id: Any,
         now: datetime,
@@ -1935,7 +1935,7 @@ class APIKeyProxyService:
 
 
 # Module-level singleton
-_instance: Optional[APIKeyProxyService] = None
+_instance: APIKeyProxyService | None = None
 _instance_lock = threading.Lock()
 
 

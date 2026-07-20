@@ -7,7 +7,7 @@ API endpoints for ROI analysis and cost optimization.
 import logging
 import math
 from datetime import datetime, timedelta, timezone
-from typing import TYPE_CHECKING, Optional, Tuple
+from typing import TYPE_CHECKING, Optional
 
 from flask import Blueprint, g, jsonify, request
 
@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 roi_bp = Blueprint("roi", __name__)
 
 
-def _parse_positive_float_arg(name: str) -> tuple[Optional[float], Optional[str]]:
+def _parse_positive_float_arg(name: str) -> tuple[float | None, str | None]:
     """Parse a positive float query parameter."""
     raw_value = request.args.get(name)
     if raw_value is None or raw_value == "":
@@ -52,7 +52,7 @@ def _get_caller_tenant() -> Optional["Tenant"]:
     return tenant_repo.get_by_id(tenant_id)
 
 
-def _build_roi_assumptions() -> Tuple[ROIAssumptions, AssumptionSource]:
+def _build_roi_assumptions() -> tuple[ROIAssumptions, AssumptionSource]:
     """Build ROI assumptions from tenant config, environment, and request overrides.
 
     Priority: request params > tenant config > environment vars > defaults.
@@ -131,7 +131,7 @@ def _require_tenant_scope():
         return error
 
 
-def _caller_tenant_id() -> Optional[int]:
+def _caller_tenant_id() -> int | None:
     """Return the authenticated caller's tenant scope.
 
     Non-admins reaching this point are guaranteed to have a resolvable

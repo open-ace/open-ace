@@ -5,7 +5,7 @@ Provides database indexing and optimization utilities.
 """
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from app.repositories.database import Database
 
@@ -88,7 +88,7 @@ class DatabaseOptimizer:
     - Performance recommendations
     """
 
-    def __init__(self, db: Optional[Database] = None):
+    def __init__(self, db: Database | None = None):
         """
         Initialize database optimizer.
 
@@ -97,7 +97,7 @@ class DatabaseOptimizer:
         """
         self.db = db or Database()
 
-    def create_indexes(self, tables: Optional[list[str]] = None) -> dict[str, Any]:
+    def create_indexes(self, tables: list[str] | None = None) -> dict[str, Any]:
         """
         Create recommended indexes.
 
@@ -154,7 +154,7 @@ class DatabaseOptimizer:
         logger.info(f"Created {len(results['created'])} indexes, {len(results['errors'])} errors")
         return results
 
-    def drop_indexes(self, tables: Optional[list[str]] = None) -> dict[str, Any]:
+    def drop_indexes(self, tables: list[str] | None = None) -> dict[str, Any]:
         """
         Drop all custom indexes.
 

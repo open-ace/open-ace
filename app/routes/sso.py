@@ -9,7 +9,7 @@ import logging
 import os
 import threading
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional
+from typing import Any
 
 import requests
 from flask import Blueprint, Response, g, jsonify, make_response, redirect, request, url_for
@@ -71,7 +71,7 @@ def _encode_state(original_state: str, redirect_uri: str) -> str:
     return base64.urlsafe_b64encode(json.dumps(state_data).encode()).decode()
 
 
-def _decode_state(encoded_state: str) -> tuple[str, Optional[str]]:
+def _decode_state(encoded_state: str) -> tuple[str, str | None]:
     """Decode state parameter to get original state and redirect_uri.
 
     Args:
@@ -148,8 +148,8 @@ user_repo = UserRepository()
 
 
 def validate_tenant_access(
-    tenant_id: Optional[int] = None, provider_name: Optional[str] = None
-) -> tuple[bool, Optional[int], Optional[str]]:
+    tenant_id: int | None = None, provider_name: str | None = None
+) -> tuple[bool, int | None, str | None]:
     """
     Validate tenant access for the current user.
 
@@ -246,7 +246,7 @@ def sanitize_config_for_audit(config: dict[str, Any]) -> dict[str, Any]:
     return sanitized
 
 
-def _get_client_ip() -> Optional[str]:
+def _get_client_ip() -> str | None:
     """Get client IP address from request."""
     forwarded_for = request.headers.get("X-Forwarded-For")
     if forwarded_for:
@@ -1253,7 +1253,7 @@ def _allow_email_linking(provider_name: str) -> bool:
     return bool(provider.config.extra_params.get("allow_email_linking"))
 
 
-def _finalize_sso_login(provider_name: str, auth_result, frontend_url: Optional[str]):
+def _finalize_sso_login(provider_name: str, auth_result, frontend_url: str | None):
     """Create/link the local user and establish Open ACE sessions after SSO success."""
     user_id = None
     linked_by_email = False
@@ -1524,7 +1524,7 @@ def unlink_identity(user_id: int, provider_name: str):
         return jsonify({"error": "Failed to unlink identity"}), 500
 
 
-def _create_user_from_sso(sso_user, provider_name: str) -> Optional[int]:
+def _create_user_from_sso(sso_user, provider_name: str) -> int | None:
     """
     Create a local user from SSO user info.
 

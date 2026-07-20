@@ -5,7 +5,6 @@ Data formatting functions.
 """
 
 from datetime import datetime
-from typing import Optional
 
 
 def format_usage_data(usage: dict) -> dict:
@@ -84,7 +83,7 @@ def format_user_data(user: dict, include_sensitive: bool = False) -> dict:
     return data
 
 
-def format_timestamp(ts: Optional[str]) -> Optional[str]:
+def format_timestamp(ts: str | None) -> str | None:
     """
     Format a timestamp string.
 

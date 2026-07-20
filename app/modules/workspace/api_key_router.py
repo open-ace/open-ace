@@ -6,7 +6,7 @@ Multi-key scheduling with priority-based selection and failover support.
 
 import logging
 import random
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -25,8 +25,8 @@ class APIKeyRouter:
     def select_key(
         self,
         candidates: list[dict[str, Any]],
-        exclude_key_ids: Optional[set[int]] = None,
-    ) -> Optional[dict[str, Any]]:
+        exclude_key_ids: set[int] | None = None,
+    ) -> dict[str, Any] | None:
         """
         Select the best API key from candidates.
 

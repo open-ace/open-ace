@@ -11,7 +11,7 @@ import logging
 import secrets
 import urllib.parse
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional, cast
+from typing import Any, cast
 
 import jwt
 import requests
@@ -35,15 +35,15 @@ class OIDCProvider(OAuth2Provider):
             config: Provider configuration.
         """
         super().__init__(config)
-        self._jwks_cache: Optional[dict[str, Any]] = None
-        self._jwks_cache_time: Optional[datetime] = None
+        self._jwks_cache: dict[str, Any] | None = None
+        self._jwks_cache_time: datetime | None = None
 
     def get_authorization_url(
         self,
         state: str,
-        redirect_uri: Optional[str] = None,
-        code_challenge: Optional[str] = None,
-        nonce: Optional[str] = None,
+        redirect_uri: str | None = None,
+        code_challenge: str | None = None,
+        nonce: str | None = None,
     ) -> str:
         """
         Get the authorization URL for the OIDC flow.
@@ -80,7 +80,7 @@ class OIDCProvider(OAuth2Provider):
         return f"{self.config.authorization_url}?{urllib.parse.urlencode(params)}"
 
     def exchange_code(
-        self, code: str, redirect_uri: Optional[str] = None, code_verifier: Optional[str] = None
+        self, code: str, redirect_uri: str | None = None, code_verifier: str | None = None
     ) -> SSOAuthResult:
         """
         Exchange authorization code for tokens.
@@ -108,7 +108,7 @@ class OIDCProvider(OAuth2Provider):
 
         return result
 
-    def get_user_info(self, access_token: str) -> Optional[SSOUser]:
+    def get_user_info(self, access_token: str) -> SSOUser | None:
         """
         Get user information using access token.
 
@@ -178,7 +178,7 @@ class OIDCProvider(OAuth2Provider):
             logger.error(f"Failed to fetch JWKS from {jwks_url}: {e}")
             raise ValueError(f"Failed to fetch JWKS: {e}")
 
-    def _get_signing_key(self, kid: str) -> Optional[str]:
+    def _get_signing_key(self, kid: str) -> str | None:
         """
         Get the signing key for a given key ID.
 
@@ -194,7 +194,7 @@ class OIDCProvider(OAuth2Provider):
             for key in jwks.get("keys", []):
                 if key.get("kid") == kid:
                     # Convert JWK to PEM format
-                    return cast("Optional[str]", self._jwk_to_pem(key))
+                    return cast("str | None", self._jwk_to_pem(key))
 
             logger.warning(f"No matching key found for kid: {kid}")
             return None
@@ -232,7 +232,7 @@ class OIDCProvider(OAuth2Provider):
 
         return cast("str", pem.decode("utf-8"))
 
-    def _verify_id_token(self, id_token: str) -> Optional[dict[str, Any]]:
+    def _verify_id_token(self, id_token: str) -> dict[str, Any] | None:
         """
         Verify and decode the ID token with proper signature verification.
 
@@ -277,7 +277,7 @@ class OIDCProvider(OAuth2Provider):
             )
 
             logger.debug(f"Successfully verified ID token for sub: {payload.get('sub')}")
-            return cast("Optional[dict[str, Any]]", payload)
+            return cast("dict[str, Any] | None", payload)
 
         except jwt.ExpiredSignatureError:
             logger.error("ID token has expired")

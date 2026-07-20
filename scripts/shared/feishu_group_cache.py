@@ -44,7 +44,7 @@ def save_cache(cache: dict):
         json.dump(cache, f, ensure_ascii=False, indent=2)
 
 
-def get_feishu_token(app_id: str, app_secret: str) -> Optional[str]:
+def get_feishu_token(app_id: str, app_secret: str) -> str | None:
     """Get Feishu API access token using tenant access token."""
     url = "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal"
     payload = {"app_id": app_id, "app_secret": app_secret}
@@ -55,7 +55,7 @@ def get_feishu_token(app_id: str, app_secret: str) -> Optional[str]:
         data = response.json()
 
         if data.get("code") == 0:
-            return cast(Optional[str], data.get("tenant_access_token"))
+            return cast(str | None, data.get("tenant_access_token"))
         else:
             print(f"Failed to get Feishu token: {data}")
             return None
@@ -64,7 +64,7 @@ def get_feishu_token(app_id: str, app_secret: str) -> Optional[str]:
         return None
 
 
-def get_group_subject(group_id: str, token: str) -> Optional[str]:
+def get_group_subject(group_id: str, token: str) -> str | None:
     """Get group subject from Feishu API using internal API."""
     # Use the chat get API to get group info
     url = f"https://open.feishu.cn/open-apis/chat/v4/chat/{group_id}"
@@ -77,7 +77,7 @@ def get_group_subject(group_id: str, token: str) -> Optional[str]:
 
         if data.get("code") == 0:
             chat_info = data.get("data", {})
-            return cast(Optional[str], chat_info.get("name"))
+            return cast(str | None, chat_info.get("name"))
         else:
             print(f"Failed to get group info for {group_id}: {data}")
             return None
@@ -88,7 +88,7 @@ def get_group_subject(group_id: str, token: str) -> Optional[str]:
 
 def get_group_subject_from_conversation_label(
     label: str, app_id: str, app_secret: str
-) -> Optional[str]:
+) -> str | None:
     """Get group subject using conversation_label."""
     # conversation_label format in Feishu is typically: chat_[chat_id]_[timestamp]
     if not label or not label.startswith("chat_"):
@@ -112,7 +112,7 @@ def get_group_subject_from_conversation_label(
     if chat_id in cache["groups"]:
         group_cache = cache["groups"][chat_id]
         if time.time() - group_cache.get("cached_at", 0) < CACHE_TTL:
-            return cast(Optional[str], group_cache.get("name"))
+            return cast(str | None, group_cache.get("name"))
 
     # Get access token
     token = get_feishu_token(app_id, app_secret)
@@ -130,7 +130,7 @@ def get_group_subject_from_conversation_label(
     return group_name
 
 
-def get_group_name(group_id: str, app_id: str, app_secret: str) -> Optional[str]:
+def get_group_name(group_id: str, app_id: str, app_secret: str) -> str | None:
     """Get group name from cache or API."""
     cache = load_cache()
 
@@ -138,7 +138,7 @@ def get_group_name(group_id: str, app_id: str, app_secret: str) -> Optional[str]
     if group_id in cache["groups"]:
         group_cache = cache["groups"][group_id]
         if time.time() - group_cache.get("cached_at", 0) < CACHE_TTL:
-            return cast(Optional[str], group_cache.get("name"))
+            return cast(str | None, group_cache.get("name"))
 
     # Get access token
     token = get_feishu_token(app_id, app_secret)
@@ -156,9 +156,7 @@ def get_group_name(group_id: str, app_id: str, app_secret: str) -> Optional[str]
     return group_name
 
 
-def get_group_name_from_conversation_label(
-    label: str, app_id: str, app_secret: str
-) -> Optional[str]:
+def get_group_name_from_conversation_label(label: str, app_id: str, app_secret: str) -> str | None:
     """Get group name using conversation_label."""
     if not label:
         return None
@@ -169,7 +167,7 @@ def get_group_name_from_conversation_label(
     if label in cache["groups"]:
         group_cache = cache["groups"][label]
         if time.time() - group_cache.get("cached_at", 0) < CACHE_TTL:
-            return cast(Optional[str], group_cache.get("name"))
+            return cast(str | None, group_cache.get("name"))
 
     # Try to get group name from API
     group_name = get_group_subject_from_conversation_label(label, app_id, app_secret)

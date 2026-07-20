@@ -9,7 +9,7 @@ import smtplib
 import socket
 import ssl
 from email.mime.text import MIMEText
-from typing import Any, Optional, Union
+from typing import Any
 
 from app.repositories.email_notification_log_repository import get_email_log_repository
 from app.repositories.smtp_config_repository import get_smtp_config_repository
@@ -25,7 +25,7 @@ class SMTPConfigService:
         self.config_repo = get_smtp_config_repository()
         self.log_repo = get_email_log_repository()
 
-    def get_config(self) -> Optional[dict[str, Any]]:
+    def get_config(self) -> dict[str, Any] | None:
         """
         Get SMTP configuration.
 
@@ -39,10 +39,10 @@ class SMTPConfigService:
         smtp_host: str,
         smtp_port: int,
         from_address: str,
-        smtp_user: Optional[str] = None,
-        smtp_password: Optional[str] = None,
+        smtp_user: str | None = None,
+        smtp_password: str | None = None,
         use_tls: bool = True,
-        created_by: Optional[int] = None,
+        created_by: int | None = None,
     ) -> dict[str, Any]:
         """
         Save SMTP configuration.
@@ -71,12 +71,12 @@ class SMTPConfigService:
 
     def test_connection(
         self,
-        smtp_host: Optional[str] = None,
-        smtp_port: Optional[int] = None,
-        smtp_user: Optional[str] = None,
-        smtp_password: Optional[str] = None,
-        from_address: Optional[str] = None,
-        use_tls: Optional[bool] = None,
+        smtp_host: str | None = None,
+        smtp_port: int | None = None,
+        smtp_user: str | None = None,
+        smtp_password: str | None = None,
+        from_address: str | None = None,
+        use_tls: bool | None = None,
     ) -> dict[str, Any]:
         """
         Test SMTP connection.
@@ -118,7 +118,7 @@ class SMTPConfigService:
         try:
             # Create SMTP connection
             # Port 465 uses SSL connection (SMTPS), other ports use SMTP with optional STARTTLS
-            smtp: Union[smtplib.SMTP, smtplib.SMTP_SSL]
+            smtp: smtplib.SMTP | smtplib.SMTP_SSL
             use_ssl = smtp_port == 465
             if use_ssl:
                 smtp = smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=10)
@@ -197,7 +197,7 @@ class SMTPConfigService:
                 "message": error_msg,
             }
 
-        except socket.timeout as e:
+        except TimeoutError as e:
             error_msg = f"Connection timeout: unable to connect within 10 seconds - {str(e)}"
             logger.error(error_msg)
             return {
@@ -260,7 +260,7 @@ class SMTPConfigService:
 
 
 # Global service instance
-_smtp_config_service: Optional[SMTPConfigService] = None
+_smtp_config_service: SMTPConfigService | None = None
 
 
 def get_smtp_config_service() -> SMTPConfigService:

@@ -7,7 +7,7 @@ Issue #1278: Data access for project categories
 import json
 import logging
 from datetime import datetime, timezone
-from typing import Any, List, Optional
+from typing import Any
 
 from app.models.project_category import ProjectCategory
 from app.repositories.database import Database, adapt_boolean_condition, adapt_boolean_value
@@ -18,10 +18,10 @@ logger = logging.getLogger(__name__)
 class ProjectCategoryRepository:
     """Repository for project category operations."""
 
-    def __init__(self, db: Optional[Database] = None):
+    def __init__(self, db: Database | None = None):
         self.db = db or Database()
 
-    def list_categories(self, active_only: bool = True) -> List[ProjectCategory]:
+    def list_categories(self, active_only: bool = True) -> list[ProjectCategory]:
         """List all project categories."""
         conditions = []
         if active_only:
@@ -33,7 +33,7 @@ class ProjectCategoryRepository:
         results = self.db.fetch_all(query)
         return [ProjectCategory.from_dict(r) for r in results]
 
-    def get_category(self, category_id: int) -> Optional[ProjectCategory]:
+    def get_category(self, category_id: int) -> ProjectCategory | None:
         """Get a single category by ID."""
         query = "SELECT * FROM project_categories WHERE id = ?"
         result = self.db.fetch_one(query, (category_id,))
@@ -42,9 +42,9 @@ class ProjectCategoryRepository:
     def create_category(
         self,
         name: str,
-        key_patterns: List[str],
+        key_patterns: list[str],
         sort_order: int = 0,
-    ) -> Optional[int]:
+    ) -> int | None:
         """Create a new category."""
         try:
             now = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -77,15 +77,15 @@ class ProjectCategoryRepository:
     def update_category(
         self,
         category_id: int,
-        name: Optional[str] = None,
-        key_patterns: Optional[List[str]] = None,
-        sort_order: Optional[int] = None,
-        is_active: Optional[bool] = None,
+        name: str | None = None,
+        key_patterns: list[str] | None = None,
+        sort_order: int | None = None,
+        is_active: bool | None = None,
     ) -> bool:
         """Update a category."""
         try:
             updates = []
-            params: List[Any] = []
+            params: list[Any] = []
 
             if name is not None:
                 updates.append("name = ?")

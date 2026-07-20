@@ -5,7 +5,7 @@ Repository for tool_account_mapping_rules table operations.
 """
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from app.models.tool_account_mapping_rule import ToolAccountMappingRule
 from app.repositories.database import Database, adapt_boolean_condition
@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 class ToolAccountMappingRuleRepository:
     """Repository for tool account mapping rules."""
 
-    def __init__(self, db: Optional[Database] = None):
+    def __init__(self, db: Database | None = None):
         self.db = db or Database()
 
     def get_all(self) -> list[ToolAccountMappingRule]:
@@ -59,7 +59,7 @@ class ToolAccountMappingRuleRepository:
         rows = self.db.fetch_all(query, (user_id,))
         return [self._row_to_model(row) for row in rows]
 
-    def get_by_id(self, id: int) -> Optional[ToolAccountMappingRule]:
+    def get_by_id(self, id: int) -> ToolAccountMappingRule | None:
         """Get rule by ID."""
         query = "SELECT * FROM tool_account_mapping_rules WHERE id = ?"
         row = self.db.fetch_one(query, (id,))
@@ -70,12 +70,12 @@ class ToolAccountMappingRuleRepository:
         user_id: int,
         pattern: str,
         match_type: str = "exact",
-        tool_type: Optional[str] = None,
+        tool_type: str | None = None,
         priority: int = 0,
         is_auto: bool = True,
         is_active: bool = True,
-        description: Optional[str] = None,
-    ) -> Optional[ToolAccountMappingRule]:
+        description: str | None = None,
+    ) -> ToolAccountMappingRule | None:
         """Create a new mapping rule."""
         from app.repositories.database import is_postgresql
 
@@ -122,15 +122,15 @@ class ToolAccountMappingRuleRepository:
     def update(
         self,
         id: int,
-        user_id: Optional[int] = None,
-        pattern: Optional[str] = None,
-        match_type: Optional[str] = None,
-        tool_type: Optional[str] = None,
-        priority: Optional[int] = None,
-        is_auto: Optional[bool] = None,
-        is_active: Optional[bool] = None,
-        description: Optional[str] = None,
-    ) -> Optional[ToolAccountMappingRule]:
+        user_id: int | None = None,
+        pattern: str | None = None,
+        match_type: str | None = None,
+        tool_type: str | None = None,
+        priority: int | None = None,
+        is_auto: bool | None = None,
+        is_active: bool | None = None,
+        description: str | None = None,
+    ) -> ToolAccountMappingRule | None:
         """Update a mapping rule."""
         updates = []
         params: list[Any] = []

@@ -31,7 +31,7 @@ class AutonomousEventEmitter:
             {}
         )  # workflow_id -> [(queue, last_read_ts)]
         self._emit_lock = threading.Lock()
-        self._cleanup_thread: Optional[threading.Thread] = None
+        self._cleanup_thread: threading.Thread | None = None
         self._stop_event = threading.Event()
 
     @classmethod

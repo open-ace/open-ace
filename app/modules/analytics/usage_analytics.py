@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 from app.repositories.database import Database
 from app.repositories.usage_repo import UsageRepository
@@ -102,7 +102,7 @@ class UsageReport:
     unique_hosts: int = 0
     daily_average_tokens: float = 0.0
     daily_average_requests: float = 0.0
-    peak_day: Optional[str] = None
+    peak_day: str | None = None
     peak_tokens: int = 0
     trends: list[TrendAnalysis] = field(default_factory=list)
     anomalies: list[Anomaly] = field(default_factory=list)
@@ -149,7 +149,7 @@ class UsageAnalytics:
     SPIKE_THRESHOLD = 2.0  # Standard deviations
     DROP_THRESHOLD = 0.5  # Ratio of expected
 
-    def __init__(self, db: Optional[Database] = None, usage_repo: Optional[UsageRepository] = None):
+    def __init__(self, db: Database | None = None, usage_repo: UsageRepository | None = None):
         """
         Initialize analytics service.
 

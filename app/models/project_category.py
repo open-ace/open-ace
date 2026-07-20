@@ -7,7 +7,7 @@ Issue #1278: Project categorization for workspace grouping display
 import json
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from app.utils.helpers import parse_db_datetime
 
@@ -16,15 +16,15 @@ from app.utils.helpers import parse_db_datetime
 class ProjectCategory:
     """Project category model for workspace grouping."""
 
-    id: Optional[int] = None
+    id: int | None = None
     name: str = ""
-    key_patterns: List[str] = field(default_factory=list)
+    key_patterns: list[str] = field(default_factory=list)
     sort_order: int = 0
     is_active: bool = True
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "id": self.id,
@@ -37,7 +37,7 @@ class ProjectCategory:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "ProjectCategory":
+    def from_dict(cls, data: dict[str, Any]) -> "ProjectCategory":
         """Create from dictionary."""
         patterns = data.get("key_patterns", [])
         if isinstance(patterns, str):

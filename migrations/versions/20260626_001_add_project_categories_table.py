@@ -16,14 +16,14 @@ Fields:
 - is_active: Soft delete flag
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 from alembic import op
 
 revision: str = "001_add_project_categories"
-down_revision: Union[str, None] = "20260626_003_add_workflow_status_index"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = "20260626_003_add_workflow_status_index"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:

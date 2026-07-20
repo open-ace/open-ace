@@ -6,7 +6,7 @@ Repository for user data access operations.
 
 import logging
 from datetime import datetime, timezone
-from typing import Any, Optional, cast
+from typing import Any, cast
 
 from app.repositories.database import Database, adapt_boolean_value, adapt_sql
 
@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 class UserRepository:
     """Repository for user data operations."""
 
-    def __init__(self, db: Optional[Database] = None):
+    def __init__(self, db: Database | None = None):
         """
         Initialize repository.
 
@@ -32,9 +32,9 @@ class UserRepository:
         password_hash: str,
         role: str = "user",
         is_active: bool = True,
-        system_account: Optional[str] = None,
+        system_account: str | None = None,
         tenant_id: int = 1,
-    ) -> Optional[int]:
+    ) -> int | None:
         """
         Create a new user.
 
@@ -97,7 +97,7 @@ class UserRepository:
             logger.error(f"Error creating user: {e}")
             return None
 
-    def get_user_by_id(self, user_id: int) -> Optional[dict]:
+    def get_user_by_id(self, user_id: int) -> dict | None:
         """
         Get user by ID.
 
@@ -110,7 +110,7 @@ class UserRepository:
         query = "SELECT * FROM users WHERE id = ?"
         return self.db.fetch_one(query, (user_id,))
 
-    def get_user_by_username(self, username: str) -> Optional[dict]:
+    def get_user_by_username(self, username: str) -> dict | None:
         """
         Get user by username.
 
@@ -123,7 +123,7 @@ class UserRepository:
         query = "SELECT * FROM users WHERE username = ?"
         return self.db.fetch_one(query, (username,))
 
-    def get_user_by_email(self, email: str) -> Optional[dict]:
+    def get_user_by_email(self, email: str) -> dict | None:
         """
         Get user by email.
 
@@ -140,7 +140,7 @@ class UserRepository:
         self,
         include_inactive: bool = True,
         include_deleted: bool = False,
-        tenant_id: Optional[int] = None,
+        tenant_id: int | None = None,
     ) -> list[dict]:
         """
         Get all users.
@@ -176,12 +176,12 @@ class UserRepository:
     def update_user(
         self,
         user_id: int,
-        username: Optional[str] = None,
-        email: Optional[str] = None,
-        role: Optional[str] = None,
-        is_active: Optional[bool] = None,
-        system_account: Optional[str] = None,
-        tenant_id: Optional[int] = None,
+        username: str | None = None,
+        email: str | None = None,
+        role: str | None = None,
+        is_active: bool | None = None,
+        system_account: str | None = None,
+        tenant_id: int | None = None,
     ) -> bool:
         """
         Update user information.
@@ -305,7 +305,7 @@ class UserRepository:
             logger.error(f"Error updating last login: {e}")
             return False
 
-    def update_avatar(self, user_id: int, avatar_url: Optional[str]) -> bool:
+    def update_avatar(self, user_id: int, avatar_url: str | None) -> bool:
         """
         Update user avatar URL.
 
@@ -392,10 +392,10 @@ class UserRepository:
     def update_user_quota(
         self,
         user_id: int,
-        daily_token_quota: Optional[int] = None,
-        monthly_token_quota: Optional[int] = None,
-        daily_request_quota: Optional[int] = None,
-        monthly_request_quota: Optional[int] = None,
+        daily_token_quota: int | None = None,
+        monthly_token_quota: int | None = None,
+        daily_request_quota: int | None = None,
+        monthly_request_quota: int | None = None,
     ) -> bool:
         """
         Update user quota settings.
@@ -470,7 +470,7 @@ class UserRepository:
             logger.error(f"Error creating session: {e}")
             return False
 
-    def get_session_by_token(self, token: str) -> Optional[dict]:
+    def get_session_by_token(self, token: str) -> dict | None:
         """
         Get session by token with user information.
 

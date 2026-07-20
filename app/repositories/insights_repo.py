@@ -6,7 +6,6 @@ Repository for insights report CRUD operations.
 
 import json
 import logging
-from typing import Optional
 
 from app.repositories.database import Database, is_postgresql
 
@@ -16,7 +15,7 @@ logger = logging.getLogger(__name__)
 class InsightsReportRepository:
     """Repository for insights report data operations."""
 
-    def __init__(self, db: Optional[Database] = None):
+    def __init__(self, db: Database | None = None):
         self.db = db or Database()
 
     def save_report(
@@ -26,7 +25,7 @@ class InsightsReportRepository:
         end_date: str,
         report_data: dict,
         model: str,
-    ) -> Optional[int]:
+    ) -> int | None:
         """
         Save an insights report to the database.
 
@@ -101,7 +100,7 @@ class InsightsReportRepository:
             logger.error(f"Error saving insights report: {e}")
             return None
 
-    def get_report(self, user_id: int, start_date: str, end_date: str) -> Optional[dict]:
+    def get_report(self, user_id: int, start_date: str, end_date: str) -> dict | None:
         """
         Get an existing report for the given user and date range.
 
@@ -162,7 +161,7 @@ class InsightsReportRepository:
             logger.error(f"Error deleting insights report {report_id}: {e}")
             return False
 
-    def get_report_by_id(self, report_id: int, user_id: int) -> Optional[dict]:
+    def get_report_by_id(self, report_id: int, user_id: int) -> dict | None:
         """
         Get a specific report by ID with user ownership verification.
 

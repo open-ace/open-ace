@@ -8,7 +8,7 @@ import logging
 import time
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
-from typing import Any, Optional
+from typing import Any
 
 from app.repositories.daily_stats_repo import DailyStatsRepository
 from app.repositories.message_repo import MessageRepository
@@ -29,9 +29,9 @@ class AnalysisService:
 
     def __init__(
         self,
-        usage_repo: Optional[UsageRepository] = None,
-        message_repo: Optional[MessageRepository] = None,
-        daily_stats_repo: Optional[DailyStatsRepository] = None,
+        usage_repo: UsageRepository | None = None,
+        message_repo: MessageRepository | None = None,
+        daily_stats_repo: DailyStatsRepository | None = None,
     ):
         """
         Initialize service.
@@ -48,10 +48,10 @@ class AnalysisService:
     @cached(ttl=60, key_prefix="analysis", skip_args=[0])
     def get_batch_analysis(
         self,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
-        host_name: Optional[str] = None,
-        tenant_id: Optional[int] = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        host_name: str | None = None,
+        tenant_id: int | None = None,
     ) -> dict:
         """
         Get all analysis data in a single optimized call.
@@ -345,7 +345,7 @@ class AnalysisService:
         }
 
     @cached(ttl=300, key_prefix="analysis", skip_args=[0])
-    def get_data_range(self, tenant_id: Optional[int] = None) -> Optional[dict]:
+    def get_data_range(self, tenant_id: int | None = None) -> dict | None:
         """
         Get the global data range (min and max dates) from daily_stats.
 
@@ -367,10 +367,10 @@ class AnalysisService:
     @cached(ttl=120, key_prefix="analysis")
     def get_key_metrics(
         self,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
-        host_name: Optional[str] = None,
-        tenant_id: Optional[int] = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        host_name: str | None = None,
+        tenant_id: int | None = None,
     ) -> dict:
         """
         Get key metrics for the dashboard.
@@ -494,10 +494,10 @@ class AnalysisService:
 
     def get_hourly_usage(
         self,
-        date: Optional[str] = None,
-        tool_name: Optional[str] = None,
-        host_name: Optional[str] = None,
-        tenant_id: Optional[int] = None,
+        date: str | None = None,
+        tool_name: str | None = None,
+        host_name: str | None = None,
+        tenant_id: int | None = None,
     ) -> list[dict]:
         """
         Get hourly usage breakdown from hourly_stats table.
@@ -540,10 +540,10 @@ class AnalysisService:
     @cached(ttl=60, key_prefix="analysis", skip_args=[0])
     def get_daily_hourly_usage(
         self,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
-        host_name: Optional[str] = None,
-        tenant_id: Optional[int] = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        host_name: str | None = None,
+        tenant_id: int | None = None,
     ) -> dict:
         """
         Get daily and hourly usage patterns.
@@ -610,10 +610,10 @@ class AnalysisService:
     @cached(ttl=120, key_prefix="analysis")
     def get_peak_usage(
         self,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
-        host_name: Optional[str] = None,
-        tenant_id: Optional[int] = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        host_name: str | None = None,
+        tenant_id: int | None = None,
     ) -> dict:
         """
         Get peak usage periods.
@@ -681,11 +681,11 @@ class AnalysisService:
     @cached(ttl=60, key_prefix="analysis", skip_args=[0])
     def get_user_ranking(
         self,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
-        host_name: Optional[str] = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        host_name: str | None = None,
         limit: int = 10,
-        tenant_id: Optional[int] = None,
+        tenant_id: int | None = None,
     ) -> dict:
         """
         Get user ranking by token usage.
@@ -733,10 +733,10 @@ class AnalysisService:
 
     def get_session_stats(
         self,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
-        host_name: Optional[str] = None,
-        tenant_id: Optional[int] = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        host_name: str | None = None,
+        tenant_id: int | None = None,
     ) -> dict:
         """
         Single source of truth for session/conversation statistics.
@@ -773,10 +773,10 @@ class AnalysisService:
     @cached(ttl=60, key_prefix="analysis", skip_args=[0])
     def get_conversation_stats(
         self,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
-        host_name: Optional[str] = None,
-        tenant_id: Optional[int] = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        host_name: str | None = None,
+        tenant_id: int | None = None,
     ) -> dict:
         """
         Get conversation statistics (standalone endpoint).
@@ -822,10 +822,10 @@ class AnalysisService:
     @cached(ttl=60, key_prefix="analysis", skip_args=[0])
     def get_tool_comparison(
         self,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
-        host_name: Optional[str] = None,
-        tenant_id: Optional[int] = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        host_name: str | None = None,
+        tenant_id: int | None = None,
     ) -> dict:
         """
         Get tool comparison data.
@@ -889,7 +889,7 @@ class AnalysisService:
 
     @cached(ttl=300, key_prefix="analysis", skip_args=[0])
     def get_recommendations(
-        self, host_name: Optional[str] = None, tenant_id: Optional[int] = None
+        self, host_name: str | None = None, tenant_id: int | None = None
     ) -> list[dict]:
         """
         Get usage optimization recommendations.
@@ -959,10 +959,10 @@ class AnalysisService:
     @cached(ttl=60, key_prefix="analysis", skip_args=[0])
     def get_user_segmentation(
         self,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
-        host_name: Optional[str] = None,
-        tenant_id: Optional[int] = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        host_name: str | None = None,
+        tenant_id: int | None = None,
     ) -> dict:
         """
         Get user segmentation based on token usage.
@@ -1016,12 +1016,12 @@ class AnalysisService:
     @cached(ttl=60, key_prefix="analysis", skip_args=[0])
     def detect_anomalies(
         self,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
-        host_name: Optional[str] = None,
-        anomaly_type: Optional[str] = None,
-        severity: Optional[str] = None,
-        tenant_id: Optional[int] = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        host_name: str | None = None,
+        anomaly_type: str | None = None,
+        severity: str | None = None,
+        tenant_id: int | None = None,
     ) -> dict:
         """
         Detect usage anomalies.
@@ -1194,12 +1194,12 @@ class AnalysisService:
     @cached(ttl=60, key_prefix="analysis", skip_args=[0])
     def get_anomaly_trend(
         self,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
-        host_name: Optional[str] = None,
-        anomaly_type: Optional[str] = None,
-        severity: Optional[str] = None,
-        tenant_id: Optional[int] = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        host_name: str | None = None,
+        anomaly_type: str | None = None,
+        severity: str | None = None,
+        tenant_id: int | None = None,
     ) -> dict:
         """
         Get anomaly trend over time.

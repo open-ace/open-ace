@@ -10,7 +10,7 @@ import json
 import logging
 import os
 from datetime import datetime, timezone
-from typing import Any, Optional, cast
+from typing import Any, cast
 
 from app.repositories.database import CONFIG_DIR, Database
 
@@ -23,7 +23,7 @@ SETTINGS_FILE = os.path.join(CONFIG_DIR, "governance_settings.json")
 class GovernanceRepository:
     """Repository for governance data operations."""
 
-    def __init__(self, db: Optional[Database] = None):
+    def __init__(self, db: Database | None = None):
         """
         Initialize repository.
 
@@ -57,7 +57,7 @@ class GovernanceRepository:
 
         return rules
 
-    def get_filter_rule(self, rule_id: int) -> Optional[dict]:
+    def get_filter_rule(self, rule_id: int) -> dict | None:
         """
         Get a specific filter rule.
 
@@ -81,9 +81,9 @@ class GovernanceRepository:
         rule_type: str = "keyword",
         severity: str = "medium",
         action: str = "warn",
-        description: Optional[str] = None,
+        description: str | None = None,
         is_enabled: bool = True,
-    ) -> Optional[int]:
+    ) -> int | None:
         """
         Create a new filter rule.
 
@@ -141,7 +141,7 @@ class GovernanceRepository:
                         datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
                     ),
                 )
-                return cast("Optional[int]", cursor.lastrowid)
+                return cast("int | None", cursor.lastrowid)
         except Exception as e:
             logger.error(f"Error creating filter rule: {e}")
             return None
@@ -149,12 +149,12 @@ class GovernanceRepository:
     def update_filter_rule(
         self,
         rule_id: int,
-        pattern: Optional[str] = None,
-        rule_type: Optional[str] = None,
-        severity: Optional[str] = None,
-        action: Optional[str] = None,
-        description: Optional[str] = None,
-        is_enabled: Optional[bool] = None,
+        pattern: str | None = None,
+        rule_type: str | None = None,
+        severity: str | None = None,
+        action: str | None = None,
+        description: str | None = None,
+        is_enabled: bool | None = None,
     ) -> bool:
         """
         Update a filter rule.

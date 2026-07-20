@@ -13,15 +13,15 @@ conversion. For new databases created from baseline_2026_06_23-postgres.sql,
 the column is already boolean, so no conversion is needed.
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 import sqlalchemy as sa
 from alembic import op
 
 revision: str = "001_fix_auto_provision"
-down_revision: Union[str, None] = "baseline_2026_06_23"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = "baseline_2026_06_23"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def get_column_type(conn, table_name: str, column_name: str) -> str:

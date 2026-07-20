@@ -18,7 +18,6 @@ Columns (all INTEGER DEFAULT 0, nullable for back-compat with existing rows):
 """
 
 import logging
-from typing import Union
 
 import sqlalchemy as sa
 from alembic import op
@@ -26,9 +25,9 @@ from alembic import op
 log = logging.getLogger(__name__)
 
 revision: str = "20260704_001_add_test_retry_columns"
-down_revision: Union[str, None] = "20260703_002_add_sso_auth_states"
-branch_labels: Union[str, None] = None
-depends_on: Union[str, None] = None
+down_revision: str | None = "20260703_002_add_sso_auth_states"
+branch_labels: str | None = None
+depends_on: str | None = None
 
 
 def _column_exists(conn, table_name: str, column_name: str) -> bool:

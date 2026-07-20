@@ -5,7 +5,7 @@ Repository for user_tool_accounts table operations.
 """
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from app.models.user_tool_account import UserToolAccount
 from app.repositories.database import Database
@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 class UserToolAccountRepository:
     """Repository for user tool account mappings."""
 
-    def __init__(self, db: Optional[Database] = None):
+    def __init__(self, db: Database | None = None):
         self.db = db or Database()
 
     def get_all(self) -> list[UserToolAccount]:
@@ -38,7 +38,7 @@ class UserToolAccountRepository:
         rows = self.db.fetch_all(query, (user_id,))
         return [self._row_to_model(row) for row in rows]
 
-    def get_by_tool_account(self, tool_account: str) -> Optional[UserToolAccount]:
+    def get_by_tool_account(self, tool_account: str) -> UserToolAccount | None:
         """Get mapping by tool account name."""
         query = "SELECT * FROM user_tool_accounts WHERE tool_account = ?"
         row = self.db.fetch_one(query, (tool_account,))
@@ -71,9 +71,9 @@ class UserToolAccountRepository:
         self,
         user_id: int,
         tool_account: str,
-        tool_type: Optional[str] = None,
-        description: Optional[str] = None,
-    ) -> Optional[UserToolAccount]:
+        tool_type: str | None = None,
+        description: str | None = None,
+    ) -> UserToolAccount | None:
         """Create a new tool account mapping."""
         from app.repositories.database import is_postgresql
 
@@ -107,11 +107,11 @@ class UserToolAccountRepository:
     def update(
         self,
         id: int,
-        user_id: Optional[int] = None,
-        tool_account: Optional[str] = None,
-        tool_type: Optional[str] = None,
-        description: Optional[str] = None,
-    ) -> Optional[UserToolAccount]:
+        user_id: int | None = None,
+        tool_account: str | None = None,
+        tool_type: str | None = None,
+        description: str | None = None,
+    ) -> UserToolAccount | None:
         """Update a tool account mapping."""
         updates = []
         params: list[Any] = []
@@ -166,7 +166,7 @@ class UserToolAccountRepository:
             logger.error(f"Error deleting tool account mapping: {e}")
             return False
 
-    def get_by_id(self, id: int) -> Optional[UserToolAccount]:
+    def get_by_id(self, id: int) -> UserToolAccount | None:
         """Get mapping by ID."""
         query = "SELECT * FROM user_tool_accounts WHERE id = ?"
         row = self.db.fetch_one(query, (id,))

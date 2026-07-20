@@ -6,21 +6,20 @@ Data models for session management.
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Optional
 
 
 @dataclass
 class Session:
     """Session data model for user authentication."""
 
-    id: Optional[int] = None
-    user_id: Optional[int] = None
+    id: int | None = None
+    user_id: int | None = None
     username: str = ""
-    email: Optional[str] = None
+    email: str | None = None
     role: str = "user"
     token: str = ""
-    created_at: Optional[datetime] = None
-    expires_at: Optional[datetime] = None
+    created_at: datetime | None = None
+    expires_at: datetime | None = None
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""

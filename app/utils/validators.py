@@ -5,7 +5,6 @@ Input validation functions.
 """
 
 import re
-from typing import Optional
 
 
 def validate_date(date_str: str) -> bool:
@@ -103,7 +102,7 @@ def validate_email(email: str) -> bool:
     return bool(re.match(pattern, email))
 
 
-def validate_password(password: str, policy_settings: Optional[dict] = None) -> tuple:
+def validate_password(password: str, policy_settings: dict | None = None) -> tuple:
     """
     Validate a password against security policy.
 

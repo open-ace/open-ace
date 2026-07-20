@@ -18,8 +18,9 @@ import logging
 import os
 import socket
 import urllib.parse
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from typing import Any, Callable, Iterable, Union
+from typing import Any
 from urllib.parse import urlparse, urlunparse
 
 import requests
@@ -28,7 +29,7 @@ from requests.adapters import HTTPAdapter
 logger = logging.getLogger(__name__)
 
 Resolver = Callable[..., Iterable[tuple]]
-IPAddress = Union[ipaddress.IPv4Address, ipaddress.IPv6Address]
+IPAddress = ipaddress.IPv4Address | ipaddress.IPv6Address
 
 BLOCKED_HOSTNAMES = {
     # IPv4 loopback

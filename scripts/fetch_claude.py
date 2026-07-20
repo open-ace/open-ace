@@ -37,7 +37,7 @@ from shared import db
 from shared.utils import update_session_last_seen, warn_if_skipped_message_has_text
 
 
-def get_agent_session_id_from_path(project_path: str) -> Optional[str]:
+def get_agent_session_id_from_path(project_path: str) -> str | None:
     """
     Extract agent_session_id from project path.
 
@@ -120,7 +120,7 @@ def extract_tokens_from_entry(entry: dict) -> dict:
     return result
 
 
-def extract_content_from_entry(entry: dict) -> Optional[str]:
+def extract_content_from_entry(entry: dict) -> str | None:
     """Extract content from a Claude Code log entry."""
     entry_type = entry.get("type")
 
@@ -397,7 +397,7 @@ def _build_daily_stats_from_messages(messages: list[dict[str, Any]]) -> dict[str
 
 
 def process_jsonl_file(
-    filepath: Path, hostname: str = "localhost", system_account: Optional[str] = None
+    filepath: Path, hostname: str = "localhost", system_account: str | None = None
 ) -> tuple:
     """Process a single JSONL file and return daily token aggregates and messages.
 
@@ -462,7 +462,7 @@ def process_jsonl_file(
 
     # Build conversation_id mapping: each root message defines a conversation
     # All descendants of a root message belong to the same conversation
-    def find_root(uuid: str) -> Optional[str]:
+    def find_root(uuid: str) -> str | None:
         """Find the root message uuid for a given message uuid (iterative to avoid recursion limit)."""
         visited = set()
         current_uuid = uuid
@@ -680,7 +680,7 @@ def find_all_claude_project_dirs() -> list:
     return results
 
 
-def find_claude_project_dir() -> Optional[Path]:
+def find_claude_project_dir() -> Path | None:
     """Find the Claude project directory.
 
     Returns the parent projects directory if there are multiple subdirectories,
@@ -1168,8 +1168,8 @@ def update_agent_sessions_stats(messages: list) -> int:
 
 def fetch_and_save(
     days: int = 7,
-    project_dir: Optional[Path] = None,
-    hostname: Optional[str] = None,
+    project_dir: Path | None = None,
+    hostname: str | None = None,
     multi_user_mode: bool = False,
     recent: bool = False,
 ) -> bool:

@@ -9,7 +9,6 @@ import argparse
 import os
 import sys
 from collections import defaultdict
-from typing import Optional
 
 # Add shared directory to path
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -22,7 +21,7 @@ from shared import db, email_notifier, utils
 from shared.config import CONFIG_DIR, CONFIG_PATH
 
 
-def cmd_today(tool: Optional[str] = None, host: Optional[str] = None) -> None:
+def cmd_today(tool: str | None = None, host: str | None = None) -> None:
     """Show usage for today."""
     today = utils.get_today()
     entries = db.get_usage_by_date(today, tool, host)
@@ -59,7 +58,7 @@ def cmd_today(tool: Optional[str] = None, host: Optional[str] = None) -> None:
             print(f"  Models: {', '.join(entry['models_used'])}")
 
 
-def cmd_query(date: str, tool: Optional[str] = None, host: Optional[str] = None) -> None:
+def cmd_query(date: str, tool: str | None = None, host: str | None = None) -> None:
     """Query usage for a specific date."""
     parsed_date = utils.parse_date(date)
     if not parsed_date:
@@ -90,7 +89,7 @@ def cmd_query(date: str, tool: Optional[str] = None, host: Optional[str] = None)
             print(f"  Models: {', '.join(entry['models_used'])}")
 
 
-def cmd_top(tool: Optional[str] = None, days: int = 7, host: Optional[str] = None) -> None:
+def cmd_top(tool: str | None = None, days: int = 7, host: str | None = None) -> None:
     """Show top usage for the last N days."""
     entries = []
     if tool:
@@ -254,7 +253,7 @@ def cmd_config(action: str) -> None:
         os.system(f"{editor} {config_path}")
 
 
-def cmd_summary(host: Optional[str] = None) -> None:
+def cmd_summary(host: str | None = None) -> None:
     """Show a summary of all data."""
     summary = db.get_summary_by_tool(host_name=host)
 
@@ -282,7 +281,7 @@ def cmd_summary(host: Optional[str] = None) -> None:
         print(f"  Date range:     {stats['first_date']} to {stats['last_date']}")
 
 
-def cmd_aggregate_quota(start_date: Optional[str] = None, end_date: Optional[str] = None) -> None:
+def cmd_aggregate_quota(start_date: str | None = None, end_date: str | None = None) -> None:
     """Aggregate quota usage from daily_messages table and tenant usage from quota_usage."""
     print("=" * 60)
     print("STEP 1: Aggregating quota usage from daily_messages...")
@@ -356,7 +355,7 @@ def cmd_reset_tenant_period(tenant_id: int) -> None:
         sys.exit(1)
 
 
-def cmd_repair_consistency(tenant_id: Optional[int] = None) -> None:
+def cmd_repair_consistency(tenant_id: int | None = None) -> None:
     """Repair data consistency issues."""
     print("Repairing data consistency...")
 

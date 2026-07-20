@@ -10,7 +10,7 @@ import logging
 import time
 import warnings
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any
 
 from app.repositories.database import Database, is_postgresql
 from app.utils.cache import cached
@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 class DailyStatsRepository:
     """Repository for pre-aggregated daily statistics."""
 
-    def __init__(self, db: Optional[Database] = None):
+    def __init__(self, db: Database | None = None):
         """
         Initialize repository.
 
@@ -35,10 +35,10 @@ class DailyStatsRepository:
 
     def get_daily_totals(
         self,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
-        host_name: Optional[str] = None,
-        tenant_id: Optional[int] = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        host_name: str | None = None,
+        tenant_id: int | None = None,
     ) -> list[dict]:
         """
         Get daily token totals from pre-aggregated data.
@@ -93,10 +93,10 @@ class DailyStatsRepository:
 
     def get_tool_totals(
         self,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
-        host_name: Optional[str] = None,
-        tenant_id: Optional[int] = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        host_name: str | None = None,
+        tenant_id: int | None = None,
     ) -> list[dict]:
         """
         Get tool token totals from pre-aggregated data.
@@ -166,10 +166,10 @@ class DailyStatsRepository:
 
     def get_tool_totals_with_range(
         self,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
-        host_name: Optional[str] = None,
-        tenant_id: Optional[int] = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        host_name: str | None = None,
+        tenant_id: int | None = None,
     ) -> dict[str, dict]:
         """
         Get tool totals with all required fields for summary API.
@@ -260,10 +260,10 @@ class DailyStatsRepository:
 
     def get_user_totals(
         self,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
-        host_name: Optional[str] = None,
-        tenant_id: Optional[int] = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        host_name: str | None = None,
+        tenant_id: int | None = None,
     ) -> list[dict]:
         """
         Get user token totals from pre-aggregated data.
@@ -389,10 +389,10 @@ class DailyStatsRepository:
     @cached(ttl=300, key_prefix="hourly_stats", skip_args=[0])
     def get_hourly_totals(
         self,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
-        host_name: Optional[str] = None,
-        tenant_id: Optional[int] = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        host_name: str | None = None,
+        tenant_id: int | None = None,
     ) -> list[dict]:
         """
         Get hourly usage patterns from pre-aggregated hourly_stats table.
@@ -457,7 +457,7 @@ class DailyStatsRepository:
         return result
 
     def get_conversation_stats(
-        self, host_name: Optional[str] = None, tenant_id: Optional[int] = None
+        self, host_name: str | None = None, tenant_id: int | None = None
     ) -> dict:
         """
         Get conversation statistics from pre-aggregated data.
@@ -570,10 +570,10 @@ class DailyStatsRepository:
 
     def get_batch_aggregates(
         self,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
-        host_name: Optional[str] = None,
-        tenant_id: Optional[int] = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        host_name: str | None = None,
+        tenant_id: int | None = None,
     ) -> dict:
         """
         Get all aggregates in a single query from pre-aggregated data.
@@ -750,7 +750,7 @@ class DailyStatsRepository:
                 "unique_days": result.get("unique_days", 0) or 0,
             }
 
-    def refresh_stats(self, date: Optional[str] = None) -> bool:
+    def refresh_stats(self, date: str | None = None) -> bool:
         """
         Refresh daily_stats from daily_messages.
 
@@ -925,7 +925,7 @@ class DailyStatsRepository:
 
         return False
 
-    def get_data_range(self, tenant_id: Optional[int] = None) -> Optional[dict]:
+    def get_data_range(self, tenant_id: int | None = None) -> dict | None:
         """
         Get the actual data range (min and max dates) from daily_stats.
 
@@ -968,7 +968,7 @@ class DailyStatsRepository:
             "max_date": result["max_date"],
         }
 
-    def refresh_hourly_stats(self, date: Optional[str] = None) -> bool:
+    def refresh_hourly_stats(self, date: str | None = None) -> bool:
         """
         Refresh hourly_stats from daily_messages.
 

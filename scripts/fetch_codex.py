@@ -100,7 +100,7 @@ def find_all_codex_session_dirs() -> list:
     return results
 
 
-def find_codex_session_dir() -> Optional[Path]:
+def find_codex_session_dir() -> Path | None:
     """Find the Codex sessions directory for the current user."""
     home = Path.home()
     sessions_dir = home / ".codex" / "sessions"
@@ -142,7 +142,7 @@ def extract_content_blocks_from_response_item(event: dict) -> list[dict]:
     return _shared_extract_blocks(payload)
 
 
-def extract_content_from_response_item(event: dict) -> Optional[str]:
+def extract_content_from_response_item(event: dict) -> str | None:
     """Extract plain text content from a response_item event for database storage.
 
     Delegates to the shared codex_jsonl_parser module.
@@ -154,7 +154,7 @@ def extract_content_from_response_item(event: dict) -> Optional[str]:
 
 
 def process_jsonl_file(
-    filepath: Path, hostname: str = "localhost", system_account: Optional[str] = None
+    filepath: Path, hostname: str = "localhost", system_account: str | None = None
 ) -> tuple:
     """Process a single Codex JSONL session file and return daily token aggregates and messages.
 
@@ -204,7 +204,7 @@ def process_jsonl_file(
     session_meta = None
     session_id = None
     current_model = None
-    active_turn_id: Optional[str] = None
+    active_turn_id: str | None = None
     synthetic_turn_index = 0
     turn_stats: dict[str, dict[str, Any]] = {}
     turn_order: list[str] = []
@@ -212,7 +212,7 @@ def process_jsonl_file(
     def _fallback_date() -> str:
         return file_date or "unknown"
 
-    def _ensure_turn(turn_id: Optional[str], ts: str = "") -> dict[str, Any]:
+    def _ensure_turn(turn_id: str | None, ts: str = "") -> dict[str, Any]:
         nonlocal synthetic_turn_index
         if not turn_id:
             synthetic_turn_index += 1
@@ -653,7 +653,7 @@ def process_jsonl_file(
 def _process_sessions_dir(
     sessions_dir: Path,
     hostname: str,
-    system_account: Optional[str],
+    system_account: str | None,
     aggregated: dict,
     all_messages: list,
     recent: bool = False,
@@ -731,7 +731,7 @@ def _process_sessions_dir(
     return total_files
 
 
-def _resolve_user_id_from_sender(cursor, sender_name: str, all_users_cache: list) -> Optional[int]:
+def _resolve_user_id_from_sender(cursor, sender_name: str, all_users_cache: list) -> int | None:
     """Resolve user_id from sender_name (format: {user}-{hostname}-{tool}).
 
     Hostname may contain hyphens, so rsplit alone is unreliable.
@@ -1117,7 +1117,7 @@ def update_agent_sessions_stats(messages: list) -> int:
 
 def fetch_and_save(
     days: int = 7,
-    hostname: Optional[str] = None,
+    hostname: str | None = None,
     multi_user_mode: bool = False,
     recent: bool = False,
 ) -> bool:

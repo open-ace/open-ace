@@ -55,7 +55,7 @@ def save_cache(cache: dict):
         json.dump(cache, f, ensure_ascii=False, indent=2)
 
 
-def get_dingtalk_access_token(app_key: str, app_secret: str) -> Optional[str]:
+def get_dingtalk_access_token(app_key: str, app_secret: str) -> str | None:
     """Get DingTalk access token for an internal application."""
     url = "https://api.dingtalk.com/v1.0/oauth2/accessToken"
     payload = {"appKey": app_key, "appSecret": app_secret}
@@ -64,13 +64,13 @@ def get_dingtalk_access_token(app_key: str, app_secret: str) -> Optional[str]:
         response = requests.post(url, json=payload, timeout=10)
         response.raise_for_status()
         data = response.json()
-        return cast(Optional[str], data.get("accessToken"))
+        return cast(str | None, data.get("accessToken"))
     except Exception as e:
         logger.error("Error getting DingTalk access token: %s", e)
         return None
 
 
-def _cache_identity_for(user_info: dict) -> Optional[str]:
+def _cache_identity_for(user_info: dict) -> str | None:
     """Return the stable identity field stored alongside a cached user (if any)."""
     for field in CACHE_IDENTITY_FIELDS:
         value = user_info.get(field)
@@ -79,7 +79,7 @@ def _cache_identity_for(user_info: dict) -> Optional[str]:
     return None
 
 
-def get_user_info(user_id: str, app_key: str, app_secret: str) -> Optional[dict]:
+def get_user_info(user_id: str, app_key: str, app_secret: str) -> dict | None:
     """Get user info from DingTalk API."""
     cache = load_cache()
     if user_id in cache["users"]:
@@ -92,7 +92,7 @@ def get_user_info(user_id: str, app_key: str, app_secret: str) -> Optional[dict]
             # If no identity was ever recorded (legacy entries), the TTL alone gates it.
             and (cached_identity is not None or not CACHE_IDENTITY_FIELDS)
         ):
-            return cast(Optional[dict], user_cache.get("data"))
+            return cast(dict | None, user_cache.get("data"))
 
     token = get_dingtalk_access_token(app_key, app_secret)
     if not token:
@@ -115,7 +115,7 @@ def get_user_info(user_id: str, app_key: str, app_secret: str) -> Optional[dict]
                 "identity": _cache_identity_for(user_info),
             }
             save_cache(cache)
-            return cast(Optional[dict], user_info)
+            return cast(dict | None, user_info)
     except Exception:
         # Never log the raw request object: the access_token lives in the URL/headers.
         logger.exception("Error getting DingTalk user info for userid %s", user_id)
@@ -123,7 +123,7 @@ def get_user_info(user_id: str, app_key: str, app_secret: str) -> Optional[dict]
     return None
 
 
-def get_user_display_name(user_id: str, app_key: str, app_secret: str) -> Optional[str]:
+def get_user_display_name(user_id: str, app_key: str, app_secret: str) -> str | None:
     """Get user's display name from DingTalk API."""
     if not user_id:
         return None
@@ -138,10 +138,10 @@ def get_user_display_name(user_id: str, app_key: str, app_secret: str) -> Option
         or user_info.get("nickname")
         or user_info.get("realAuthedName")
     )
-    return cast(Optional[str], display_name)
+    return cast(str | None, display_name)
 
 
-def get_user_display_name_from_cache(user_id: str) -> Optional[str]:
+def get_user_display_name_from_cache(user_id: str) -> str | None:
     """Get user display name from local cache without API call."""
     cache = load_cache()
     if user_id not in cache["users"]:
@@ -153,7 +153,7 @@ def get_user_display_name_from_cache(user_id: str) -> Optional[str]:
 
     user_data = user_cache.get("data", {})
     return cast(
-        Optional[str],
+        str | None,
         user_data.get("name")
         or user_data.get("nick")
         or user_data.get("nickname")

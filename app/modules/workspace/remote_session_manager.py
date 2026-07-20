@@ -138,13 +138,13 @@ class RemoteSessionManager:
     def _evaluate_model_policy(
         self,
         *,
-        tenant_id: Optional[int],
-        project_path: Optional[str],
-        machine_id: Optional[str],
-        user_id: Optional[int],
-        model: Optional[str],
-        provider: Optional[str],
-        session_id: Optional[str] = None,
+        tenant_id: int | None,
+        project_path: str | None,
+        machine_id: str | None,
+        user_id: int | None,
+        model: str | None,
+        provider: str | None,
+        session_id: str | None = None,
     ):
         """Evaluate model/provider policy. Never raises (evaluator is fail-closed)."""
         ctx = PolicyContext(
@@ -165,9 +165,9 @@ class RemoteSessionManager:
         session_id: str,
         result,
         *,
-        model: Optional[str] = None,
-        provider: Optional[str] = None,
-        request_id: Optional[str] = None,
+        model: str | None = None,
+        provider: str | None = None,
+        request_id: str | None = None,
     ) -> None:
         """Emit a ``policy_decision`` run-timeline event (visibility/audit only)."""
         metadata: dict[str, Any] = {
@@ -257,14 +257,14 @@ class RemoteSessionManager:
         user_id: int,
         machine_id: str,
         project_path: str,
-        model: Optional[str] = None,
+        model: str | None = None,
         cli_tool: str = "qwen-code-cli",
         title: str = "",
-        tenant_id: Optional[int] = None,
-        permission_mode: Optional[str] = None,
-        ha_pool_token: Optional[str] = None,
-        allowed_tools: Optional[list[str]] = None,
-    ) -> Optional[dict[str, Any]]:
+        tenant_id: int | None = None,
+        permission_mode: str | None = None,
+        ha_pool_token: str | None = None,
+        allowed_tools: list[str] | None = None,
+    ) -> dict[str, Any] | None:
         """
         Create a new remote session.
 
@@ -322,7 +322,7 @@ class RemoteSessionManager:
                 )
                 return None
 
-        ha_pool: Optional[dict[str, Any]] = None
+        ha_pool: dict[str, Any] | None = None
         if tool_name == "qwen":
             if not ha_pool_token:
                 logger.warning("Missing ha_pool_token for qwen remote session creation")
@@ -501,7 +501,7 @@ class RemoteSessionManager:
             "created_at": session.created_at.isoformat() if session.created_at else None,
         }
 
-    def _get_machine_id(self, session_id: str) -> Optional[str]:
+    def _get_machine_id(self, session_id: str) -> str | None:
         """Get machine_id for a session, with DB fallback on restart.
 
         Tries in-memory mapping first, then falls back to agent_sessions
@@ -545,7 +545,7 @@ class RemoteSessionManager:
 
         return machine_id
 
-    def send_message(self, session_id: str, content: str, user_id: Optional[int] = None) -> bool:
+    def send_message(self, session_id: str, content: str, user_id: int | None = None) -> bool:
         """
         Forward a user message to the remote CLI process.
 
@@ -631,13 +631,13 @@ class RemoteSessionManager:
     def respond_to_permission(
         self,
         session_id: str,
-        request_id: Optional[str],
+        request_id: str | None,
         behavior: str,
         tool_name: str = "",
-        message: Optional[str] = None,
+        message: str | None = None,
         *,
-        decided_by: Optional[int] = None,
-        decided_by_name: Optional[str] = None,
+        decided_by: int | None = None,
+        decided_by_name: str | None = None,
     ) -> bool:
         """Send a permission response (approve/deny) to the remote agent.
 
@@ -702,8 +702,8 @@ class RemoteSessionManager:
         msg_id: str,
         response: dict[str, Any],
         *,
-        decided_by: Optional[int] = None,
-        decided_by_name: Optional[str] = None,
+        decided_by: int | None = None,
+        decided_by_name: str | None = None,
     ) -> bool:
         """Send an interaction response to the remote agent.
 
@@ -746,10 +746,10 @@ class RemoteSessionManager:
     def _enforce_policy_consume(
         self,
         session_id: str,
-        request_id: Optional[str],
+        request_id: str | None,
         behavior: str,
-        decided_by: Optional[int],
-        decided_by_name: Optional[str],
+        decided_by: int | None,
+        decided_by_name: str | None,
     ) -> str:
         """Atomically consume the policy decision for ``request_id``.
 
@@ -950,7 +950,7 @@ class RemoteSessionManager:
         self._timeline("record_run_status", session_id, "resume")
         return True
 
-    def get_session_status(self, session_id: str) -> Optional[dict[str, Any]]:
+    def get_session_status(self, session_id: str) -> dict[str, Any] | None:
         """Get remote session status and recent output."""
         session = self._session_manager.get_session(session_id)
         if not session:
@@ -1358,7 +1358,7 @@ class RemoteSessionManager:
         session_id: str,
         state: str,
         reason: str = "user",
-        message: Optional[str] = None,
+        message: str | None = None,
     ) -> None:
         """Buffer a request lifecycle event for SSE delivery to the frontend."""
         if state not in self._allowed_request_states:
@@ -1393,7 +1393,7 @@ class RemoteSessionManager:
         )
 
     def process_session_status_update(
-        self, session_id: str, status: str, pid: Optional[int] = None
+        self, session_id: str, status: str, pid: int | None = None
     ) -> None:
         """Process a session status update from a remote agent."""
         session = self._session_manager.get_session(session_id)
@@ -1448,7 +1448,7 @@ class RemoteSessionManager:
         }
         return mapping.get(cli_tool, "openai")
 
-    def _get_user_name(self, user_id: Optional[int]) -> str:
+    def _get_user_name(self, user_id: int | None) -> str:
         """Get user display name with caching."""
         if not user_id:
             return ""

@@ -9,7 +9,7 @@ import math
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional
+from typing import Any
 
 from app.modules.governance.audit_logger import AuditLogger
 from app.repositories.database import adapt_sql, get_db_connection  # noqa: E402
@@ -56,8 +56,8 @@ class AuditAnalyzer:
 
     def __init__(
         self,
-        audit_logger: Optional[AuditLogger] = None,
-        settings: Optional[dict[str, Any]] = None,
+        audit_logger: AuditLogger | None = None,
+        settings: dict[str, Any] | None = None,
     ):
         self.audit_logger = audit_logger or AuditLogger()
         settings = settings or {}
@@ -68,7 +68,7 @@ class AuditAnalyzer:
         self.permission_change_threshold = settings.get("audit_permission_change_threshold", 10)
 
     def analyze_patterns(
-        self, start_time: Optional[datetime] = None, end_time: Optional[datetime] = None
+        self, start_time: datetime | None = None, end_time: datetime | None = None
     ) -> dict[str, Any]:
         """
         Analyze patterns in audit logs.
@@ -138,7 +138,7 @@ class AuditAnalyzer:
         }
 
     def detect_anomalies(
-        self, start_time: Optional[datetime] = None, end_time: Optional[datetime] = None
+        self, start_time: datetime | None = None, end_time: datetime | None = None
     ) -> list[AnomalyDetection]:
         """
         Detect anomalies in audit logs.
@@ -178,7 +178,7 @@ class AuditAnalyzer:
 
     def _detect_failed_login_anomaly(
         self, start_time: datetime, end_time: datetime
-    ) -> Optional[AnomalyDetection]:
+    ) -> AnomalyDetection | None:
         """Detect failed login anomalies."""
         failed_logins = self.audit_logger.query(
             action="login_failed",
@@ -538,7 +538,7 @@ class AuditAnalyzer:
         }
 
     def generate_security_score(
-        self, start_time: Optional[datetime] = None, end_time: Optional[datetime] = None
+        self, start_time: datetime | None = None, end_time: datetime | None = None
     ) -> dict[str, Any]:
         """
         Generate a security score based on audit analysis.

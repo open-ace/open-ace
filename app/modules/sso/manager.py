@@ -10,7 +10,7 @@ import os
 import secrets
 import threading
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional, Union, cast
+from typing import Any, cast
 
 from app.modules.sso.exceptions import SSOConfigDecryptionError
 from app.modules.sso.oauth2 import OAuth2Provider
@@ -48,7 +48,7 @@ CLEANUP_BATCH_SIZE = int(os.environ.get("OPENACE_SSO_CLEANUP_BATCH_SIZE", "1000"
 # ============================================================================
 
 _cleanup_lock_path = "/tmp/openace-sso-cleanup.lock"
-_cleanup_timer: Optional[threading.Timer] = None
+_cleanup_timer: threading.Timer | None = None
 _shutdown_requested = False
 _cleanup_lock_file = None  # type: ignore[var-annotated]  # File handle for lock
 
@@ -67,7 +67,7 @@ class SSOManager:
     # Session expiration time (24 hours)
     SESSION_EXPIRATION_HOURS = 24
 
-    def __init__(self, db: Optional[Database] = None):
+    def __init__(self, db: Database | None = None):
         """
         Initialize SSO manager.
 
@@ -90,7 +90,7 @@ class SSOManager:
         return json.dumps(stored)
 
     def deserialize_provider_config(
-        self, raw_config: Union[str, dict[str, Any]], provider_name: Optional[str] = None
+        self, raw_config: str | dict[str, Any], provider_name: str | None = None
     ) -> dict[str, Any]:
         """Deserialize provider config and restore the decrypted client secret.
 
@@ -216,12 +216,12 @@ class SSOManager:
         client_secret: str,
         authorization_url: str,
         token_url: str,
-        userinfo_url: Optional[str] = None,
-        redirect_uri: Optional[str] = None,
-        scope: Optional[list[str]] = None,
-        issuer_url: Optional[str] = None,
-        tenant_id: Optional[int] = None,
-        extra_params: Optional[dict[str, Any]] = None,
+        userinfo_url: str | None = None,
+        redirect_uri: str | None = None,
+        scope: list[str] | None = None,
+        issuer_url: str | None = None,
+        tenant_id: int | None = None,
+        extra_params: dict[str, Any] | None = None,
     ) -> bool:
         """
         Register a new SSO provider.
@@ -302,8 +302,8 @@ class SSOManager:
         client_id: str,
         client_secret: str,
         redirect_uri: str,
-        tenant_id: Optional[int] = None,
-        extra_params: Optional[dict[str, Any]] = None,
+        tenant_id: int | None = None,
+        extra_params: dict[str, Any] | None = None,
     ) -> bool:
         """
         Register a predefined SSO provider (e.g., 'google', 'github').
@@ -339,7 +339,7 @@ class SSOManager:
             extra_params=extra_params,
         )
 
-    def get_provider(self, name: str) -> Optional[SSOProvider]:
+    def get_provider(self, name: str) -> SSOProvider | None:
         """
         Get an SSO provider by name.
 
@@ -388,7 +388,7 @@ class SSOManager:
             with self._providers_lock:
                 self._providers[name] = provider
 
-            return cast("Optional[SSOProvider]", provider)
+            return cast("SSOProvider | None", provider)
 
         except SSOConfigDecryptionError as e:
             # Issue #1815 Finding 1: Audit log for decryption failures
@@ -413,7 +413,7 @@ class SSOManager:
             logger.error(f"Failed to load SSO provider {name}: {e}")
             return None
 
-    def list_providers(self, tenant_id: Optional[int] = None) -> list[dict[str, Any]]:
+    def list_providers(self, tenant_id: int | None = None) -> list[dict[str, Any]]:
         """
         List all registered SSO providers.
 
@@ -467,9 +467,7 @@ class SSOManager:
             logger.error(f"Failed to enable provider: {e}")
             return False
 
-    def start_authentication(
-        self, provider_name: str, redirect_uri: str
-    ) -> Optional[dict[str, str]]:
+    def start_authentication(self, provider_name: str, redirect_uri: str) -> dict[str, str] | None:
         """
         Start the SSO authentication flow.
 
@@ -547,7 +545,7 @@ class SSOManager:
         # SAMLProvider._validate_response gates on `if request_id:`; without
         # this normalization a stored "" would silently disable the check,
         # which is exactly the replay gap this PR closes.
-        request_id = cast("Optional[str]", auth_state.get("code_verifier")) or None
+        request_id = cast("str | None", auth_state.get("code_verifier")) or None
         result = provider.authenticate_saml_response(
             saml_response=saml_response,
             request_id=request_id,
@@ -592,7 +590,7 @@ class SSOManager:
                 error="invalid_state",
             )
 
-        code_verifier = cast("Optional[str]", auth_state.get("code_verifier"))
+        code_verifier = cast("str | None", auth_state.get("code_verifier"))
         if not code_verifier:
             logger.error(
                 "SSO auth state for provider %s is missing code_verifier; "
@@ -616,7 +614,7 @@ class SSOManager:
         user_id: int,
         provider_name: str,
         provider_user_id: str,
-        provider_data: Optional[dict[str, Any]] = None,
+        provider_data: dict[str, Any] | None = None,
     ) -> bool:
         """
         Link an SSO identity to a local user.
@@ -683,7 +681,7 @@ class SSOManager:
             logger.error(f"Failed to link SSO identity: {e}")
             return False
 
-    def get_user_by_sso_identity(self, provider_name: str, provider_user_id: str) -> Optional[int]:
+    def get_user_by_sso_identity(self, provider_name: str, provider_user_id: str) -> int | None:
         """
         Get local user ID by SSO identity.
 
@@ -709,9 +707,9 @@ class SSOManager:
         user_id: int,
         provider_name: str,
         access_token: str,
-        refresh_token: Optional[str] = None,
+        refresh_token: str | None = None,
         expires_in: int = 3600,
-    ) -> Optional[str]:
+    ) -> str | None:
         """
         Create an SSO session.
 
@@ -751,7 +749,7 @@ class SSOManager:
             logger.error(f"Failed to create SSO session: {e}")
             return None
 
-    def get_sso_session(self, session_token: str) -> Optional[dict[str, Any]]:
+    def get_sso_session(self, session_token: str) -> dict[str, Any] | None:
         """
         Get SSO session by token.
 
@@ -802,7 +800,7 @@ class SSOManager:
     # ========================================================================
 
     def _store_auth_state(
-        self, state: str, code_verifier: str, provider_name: str, nonce: Optional[str] = None
+        self, state: str, code_verifier: str, provider_name: str, nonce: str | None = None
     ) -> None:
         """Store authentication state for verification with TTL.
 
@@ -832,7 +830,7 @@ class SSOManager:
         except Exception as e:
             logger.error(f"Failed to store auth state: {e}")
 
-    def _get_auth_state(self, state: str) -> Optional[dict[str, Any]]:
+    def _get_auth_state(self, state: str) -> dict[str, Any] | None:
         """Get authentication state, excluding expired entries.
 
         Issue #1815 Finding 2: Added expiry predicate to prevent replay attacks.

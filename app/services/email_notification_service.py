@@ -19,7 +19,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from typing import Any, Optional, Union
+from typing import Any
 
 from app.repositories.email_notification_log_repository import get_email_log_repository
 from app.repositories.smtp_config_repository import get_smtp_config_repository
@@ -219,7 +219,7 @@ class EmailQueue:
     def __init__(self):
         """Initialize email queue."""
         self._queue: queue.Queue = queue.Queue()
-        self._worker_thread: Optional[threading.Thread] = None
+        self._worker_thread: threading.Thread | None = None
         self._running = False
         self._max_retry = 3
 
@@ -342,7 +342,7 @@ class EmailQueue:
             smtp_port = config["smtp_port"]
             use_ssl = smtp_port == 465
             use_tls = config["use_tls"]
-            smtp: Union[smtplib.SMTP, smtplib.SMTP_SSL]
+            smtp: smtplib.SMTP | smtplib.SMTP_SSL
 
             if use_ssl:
                 smtp = smtplib.SMTP_SSL(config["smtp_host"], smtp_port, timeout=30)
@@ -372,7 +372,7 @@ class EmailQueue:
         except ssl.SSLError as e:
             logger.error(f"SMTP SSL error: {e}")
             return False
-        except socket.timeout as e:
+        except TimeoutError as e:
             logger.error(f"SMTP timeout error: {e}")
             return False
         except socket.gaierror as e:
@@ -566,7 +566,7 @@ class EmailNotificationService:
 
 
 # Global service instance
-_email_notification_service: Optional[EmailNotificationService] = None
+_email_notification_service: EmailNotificationService | None = None
 
 
 def get_email_notification_service() -> EmailNotificationService:

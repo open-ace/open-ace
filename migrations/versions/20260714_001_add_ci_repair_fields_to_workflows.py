@@ -13,7 +13,6 @@ The merge phase needs durable state for:
 """
 
 import logging
-from typing import Union
 
 import sqlalchemy as sa
 from alembic import op
@@ -21,9 +20,9 @@ from alembic import op
 log = logging.getLogger(__name__)
 
 revision: str = "20260714_001_add_ci_repair_fields_to_workflows"
-down_revision: Union[str, None] = "20260709_003_add_tenant_usage_aggregation"
-branch_labels: Union[str, None] = None
-depends_on: Union[str, None] = None
+down_revision: str | None = "20260709_003_add_tenant_usage_aggregation"
+branch_labels: str | None = None
+depends_on: str | None = None
 
 
 def upgrade() -> None:

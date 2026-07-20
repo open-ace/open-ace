@@ -7,7 +7,6 @@ Supports multi-source accounts: Slack, Feishu, DingTalk, Qwen, Claude, Openclaw,
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional
 
 
 @dataclass
@@ -17,10 +16,10 @@ class UserToolAccount:
     id: int
     user_id: int
     tool_account: str  # sender_name in the tool
-    tool_type: Optional[str] = None  # qwen, claude, openclaw, feishu, dingtalk, slack, etc.
-    description: Optional[str] = None
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
+    tool_type: str | None = None  # qwen, claude, openclaw, feishu, dingtalk, slack, etc.
+    description: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""
@@ -49,7 +48,7 @@ TOOL_TYPES = {
 }
 
 
-def get_tool_type_display(tool_type: Optional[str]) -> str:
+def get_tool_type_display(tool_type: str | None) -> str:
     """Get display name for tool type."""
     if not tool_type:
         return "其他"

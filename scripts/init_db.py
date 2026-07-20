@@ -105,9 +105,9 @@ def create_default_admin(
     username: str = "admin",
     password: str = "admin123",
     email: str = "admin@localhost",
-    system_account: Optional[str] = None,
+    system_account: str | None = None,
     tenant_id: int = 1,
-) -> Tuple[bool, bool]:
+) -> tuple[bool, bool]:
     """Create a default admin user with forced password change on first login.
 
     Returns:

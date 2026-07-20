@@ -9,7 +9,6 @@ configured maximum rounds instead of stopping early after approval.
 """
 
 import logging
-from typing import Union
 
 import sqlalchemy as sa
 from alembic import op
@@ -17,9 +16,9 @@ from alembic import op
 log = logging.getLogger(__name__)
 
 revision: str = "20260703_001_add_require_full_review_rounds"
-down_revision: Union[str, None] = "20260627_001_add_model_gateway_config"
-branch_labels: Union[str, None] = None
-depends_on: Union[str, None] = None
+down_revision: str | None = "20260627_001_add_model_gateway_config"
+branch_labels: str | None = None
+depends_on: str | None = None
 
 
 def _column_exists(conn, table_name: str, column_name: str) -> bool:

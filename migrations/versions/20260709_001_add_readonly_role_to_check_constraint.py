@@ -13,7 +13,6 @@ This migration:
 """
 
 import logging
-from typing import Union
 
 import sqlalchemy as sa
 from alembic import op
@@ -21,9 +20,9 @@ from alembic import op
 log = logging.getLogger(__name__)
 
 revision: str = "20260709_001_add_readonly_role_to_check_constraint"
-down_revision: Union[str, None] = "20260707_001_add_system_account_to_workflows"
-branch_labels: Union[str, None] = None
-depends_on: Union[str, None] = None
+down_revision: str | None = "20260707_001_add_system_account_to_workflows"
+branch_labels: str | None = None
+depends_on: str | None = None
 
 
 def upgrade() -> None:

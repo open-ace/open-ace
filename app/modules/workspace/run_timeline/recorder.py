@@ -29,8 +29,9 @@ from __future__ import annotations
 import logging
 import queue as queue_module
 import threading
+from collections.abc import Callable
 from datetime import datetime
-from typing import Any, Callable
+from typing import Any
 
 from app.modules.workspace.run_timeline.audit_bridge import maybe_log_audit
 from app.modules.workspace.run_timeline.models import _dump_json

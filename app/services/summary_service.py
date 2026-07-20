@@ -7,7 +7,7 @@ Provides fast dashboard queries by maintaining a summary table.
 
 import logging
 from datetime import datetime, timezone
-from typing import Any, Optional, cast
+from typing import Any, cast
 
 from app.repositories.database import Database, is_postgresql
 from app.repositories.usage_repo import UsageRepository
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 class SummaryService:
     """Service for managing usage summary data."""
 
-    def __init__(self, db: Optional[Database] = None, usage_repo: Optional[UsageRepository] = None):
+    def __init__(self, db: Database | None = None, usage_repo: UsageRepository | None = None):
         """
         Initialize service.
 
@@ -31,7 +31,7 @@ class SummaryService:
         self.db = db or Database()
         self.usage_repo = usage_repo or UsageRepository()
 
-    def refresh_summary(self, host_name: Optional[str] = None) -> bool:
+    def refresh_summary(self, host_name: str | None = None) -> bool:
         """
         Refresh summary data from daily_messages table.
 
@@ -59,7 +59,7 @@ class SummaryService:
             logger.error(f"Failed to refresh summary: {e}")
             return False
 
-    def _calculate_aggregates(self, host_name: Optional[str] = None) -> list[dict]:
+    def _calculate_aggregates(self, host_name: str | None = None) -> list[dict]:
         """
         Calculate aggregate statistics from daily_messages.
 
@@ -253,7 +253,7 @@ class SummaryService:
 
             conn.commit()
 
-    def get_summary(self, host_name: Optional[str] = None) -> dict[str, dict]:
+    def get_summary(self, host_name: str | None = None) -> dict[str, dict]:
         """
         Get summary data from usage_summary table.
 

@@ -14,7 +14,6 @@ import re
 import subprocess
 import time
 from pathlib import Path
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -110,7 +109,7 @@ class GitHubOps:
     # Class-level cache: track which system_accounts have safe.directory configured
     _safe_directory_configured: set[str] = set()
 
-    def __init__(self, repo_path: str, system_account: Optional[str] = None):
+    def __init__(self, repo_path: str, system_account: str | None = None):
         """
         Args:
             repo_path: Local path to the git repository (for cwd in gh commands).
@@ -124,19 +123,19 @@ class GitHubOps:
         # under a sudo wrapper where gh can no longer infer the repo from cwd.
         # Lazily populated by _resolve_owner_repo(); None means "not resolvable
         # / not yet tried".
-        self._owner_repo: Optional[str] = None
+        self._owner_repo: str | None = None
         # Pure OWNER/REPO slug (never carries the GHES host), used for REST API
         # paths (gh api repos/<owner>/<repo>/...). Populated alongside
         # _owner_repo by _resolve_owner_repo().
-        self._repo_slug: Optional[str] = None
+        self._repo_slug: str | None = None
         # The remote host (e.g. "github.com" or "gh.example.com"), needed for
         # gh api --hostname under a sudo wrapper on GHES. None until resolved.
-        self._repo_host: Optional[str] = None
+        self._repo_host: str | None = None
         # Tracks whether _resolve_owner_repo has been attempted, so None can
         # distinguish "tried and failed" from "not yet tried".
         self._owner_repo_resolved: bool = False
 
-    def _get_env(self) -> Optional[dict[str, str]]:
+    def _get_env(self) -> dict[str, str] | None:
         """Get environment overrides for AI GitHub account.
 
         Delegates to ``config.get_ai_github_env()`` which has a 60-second
@@ -189,7 +188,7 @@ class GitHubOps:
             return True
         return current_user != self.system_account
 
-    def _resolve_owner_repo(self) -> Optional[str]:
+    def _resolve_owner_repo(self) -> str | None:
         """Resolve the ``owner/repo`` slug for the local repo's origin remote.
 
         gh CLI infers the target repo from the working directory's ``.git``,
@@ -223,8 +222,8 @@ class GitHubOps:
         #   https://gh.example.com/<owner>/<repo>[.git]    (GHES)
         # gh's -R/--repo accepts [HOST/]OWNER/REPO, so for non-github.com hosts
         # (GHES) we include the host so the command targets the right server.
-        host: Optional[str] = None
-        slug: Optional[str] = None
+        host: str | None = None
+        slug: str | None = None
         m = re.match(
             r"(?:https?://([^/]+)/|ssh://[^@]+@([^/]+)/|(?:[^@]+@([^:]+):))"  # host capture
             r"([^/]+/[^/]+?)(?:\.git)?/?$",
@@ -284,7 +283,7 @@ class GitHubOps:
             # Same-user (or no system_account): run gh directly with cwd so it
             # infers owner/repo from the working directory as before.
             cmd = ["gh"] + args
-        last_error: Optional[GitHubOpsError] = None
+        last_error: GitHubOpsError | None = None
         for attempt in range(GIT_NETWORK_RETRY_COUNT):
             try:
                 result = subprocess.run(cmd, **kwargs)
@@ -382,7 +381,7 @@ class GitHubOps:
             kwargs.pop("cwd", None)  # Remove cwd to avoid Python permission check
         else:
             cmd = ["git"] + args
-        last_error: Optional[GitHubOpsError] = None
+        last_error: GitHubOpsError | None = None
         for attempt in range(GIT_NETWORK_RETRY_COUNT):
             try:
                 result = subprocess.run(cmd, **kwargs)
@@ -516,7 +515,7 @@ class GitHubOps:
 
     # ── Issue Operations ────────────────────────────────────────────
 
-    def create_issue(self, title: str, body: str = "", labels: Optional[list[str]] = None) -> dict:
+    def create_issue(self, title: str, body: str = "", labels: list[str] | None = None) -> dict:
         """Create a GitHub issue."""
         args = ["issue", "create", "--title", title, "--body", body or ""]
         if labels:
@@ -558,7 +557,7 @@ class GitHubOps:
         logger.info("Added comment to issue #%s", number)
         return {"number": number}
 
-    def list_issue_comments(self, number: int, since: Optional[str] = None) -> list:
+    def list_issue_comments(self, number: int, since: str | None = None) -> list:
         """List comments on an issue, optionally since a timestamp."""
         args = ["issue", "view", str(number), "--comments", "--json", "comments"]
         result = self._run_gh(args)
@@ -568,9 +567,7 @@ class GitHubOps:
             comments = [c for c in comments if c.get("createdAt", "") > since]
         return comments
 
-    def update_issue(
-        self, number: int, title: Optional[str] = None, body: Optional[str] = None
-    ) -> dict:
+    def update_issue(self, number: int, title: str | None = None, body: str | None = None) -> dict:
         """Update an issue's title or body."""
         args = ["issue", "edit", str(number)]
         if title:
@@ -671,7 +668,7 @@ class GitHubOps:
         self,
         title: str,
         body: str = "",
-        head: Optional[str] = None,
+        head: str | None = None,
         base: str = "main",
         draft: bool = False,
     ) -> dict:
@@ -720,7 +717,7 @@ class GitHubOps:
         )
         return json.loads(result.stdout.strip())
 
-    def find_existing_pr(self, head_branch: str) -> Optional[dict]:
+    def find_existing_pr(self, head_branch: str) -> dict | None:
         """Find an existing open PR for a head branch (scoped to base=main).
 
         Returns the first matching PR dict ({number, url, title, ...}) or None.
@@ -1009,7 +1006,7 @@ class GitHubOps:
             ) from api_err
 
     @staticmethod
-    def _parse_github_actions_job_url(url: str) -> Optional[tuple[str, str]]:
+    def _parse_github_actions_job_url(url: str) -> tuple[str, str] | None:
         """Extract GitHub Actions run/job ids from a check details URL."""
         if not url:
             return None
@@ -1263,7 +1260,7 @@ class GitHubOps:
     def git_push(
         self,
         remote: str = "origin",
-        branch: Optional[str] = None,
+        branch: str | None = None,
         force_with_lease: bool = False,
     ) -> None:
         """Push to remote.

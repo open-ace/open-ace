@@ -14,8 +14,9 @@ import os
 import pickle
 import time
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, TypeVar, cast
+from typing import Any, TypeVar, cast
 
 from gevent.lock import RLock, Semaphore
 

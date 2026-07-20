@@ -25,7 +25,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from enum import Enum
-from typing import Any, Optional, cast
+from typing import Any, cast
 
 from app.repositories.database import Database, adapt_boolean_value, adapt_sql
 
@@ -97,23 +97,23 @@ class AuditSeverity(Enum):
 class AuditLog:
     """Audit log entry data model."""
 
-    id: Optional[int] = None
+    id: int | None = None
     timestamp: datetime = field(
         default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None)
     )
-    user_id: Optional[int] = None
-    username: Optional[str] = None
+    user_id: int | None = None
+    username: str | None = None
     action: str = ""
     severity: str = "info"
     resource_type: str = ""
-    resource_id: Optional[str] = None
+    resource_id: str | None = None
     details: dict[str, Any] = field(default_factory=dict)
-    ip_address: Optional[str] = None
-    user_agent: Optional[str] = None
-    session_id: Optional[str] = None
+    ip_address: str | None = None
+    user_agent: str | None = None
+    session_id: str | None = None
     success: bool = True
-    error_message: Optional[str] = None
-    tenant_id: Optional[int] = None
+    error_message: str | None = None
+    tenant_id: int | None = None
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""
@@ -211,7 +211,7 @@ class AuditLogger:
     - Export capabilities for compliance reporting
     """
 
-    def __init__(self, db: Optional[Database] = None):
+    def __init__(self, db: Database | None = None):
         """
         Initialize audit logger.
 
@@ -222,7 +222,7 @@ class AuditLogger:
         # Table structure managed by Alembic migrations
 
     @staticmethod
-    def _normalize_tenant_id(value: Any) -> Optional[int]:
+    def _normalize_tenant_id(value: Any) -> int | None:
         """Normalize a tenant identifier to a positive integer."""
         if value in (None, "", 0, "0"):
             return None
@@ -233,8 +233,8 @@ class AuditLogger:
         return tenant_id if tenant_id > 0 else None
 
     def _resolve_tenant_id(
-        self, tenant_id: Optional[int] = None, user_id: Optional[int] = None
-    ) -> Optional[int]:
+        self, tenant_id: int | None = None, user_id: int | None = None
+    ) -> int | None:
         """Resolve tenant scope from an explicit tenant_id or a user record."""
         normalized = self._normalize_tenant_id(tenant_id)
         if normalized is not None or not user_id:
@@ -252,19 +252,19 @@ class AuditLogger:
     def log(
         self,
         action: str,
-        user_id: Optional[int] = None,
-        username: Optional[str] = None,
+        user_id: int | None = None,
+        username: str | None = None,
         severity: str = "info",
         resource_type: str = "",
-        resource_id: Optional[str] = None,
-        details: Optional[dict[str, Any]] = None,
-        ip_address: Optional[str] = None,
-        user_agent: Optional[str] = None,
-        session_id: Optional[str] = None,
+        resource_id: str | None = None,
+        details: dict[str, Any] | None = None,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
+        session_id: str | None = None,
         success: bool = True,
-        error_message: Optional[str] = None,
-        resource_name: Optional[str] = None,
-        tenant_id: Optional[int] = None,
+        error_message: str | None = None,
+        resource_name: str | None = None,
+        tenant_id: int | None = None,
     ) -> bool:
         """
         Log an audit event.
@@ -339,9 +339,9 @@ class AuditLogger:
     def log_action(
         self,
         action: AuditAction,
-        user_id: Optional[int] = None,
-        username: Optional[str] = None,
-        resource_name: Optional[str] = None,
+        user_id: int | None = None,
+        username: str | None = None,
+        resource_name: str | None = None,
         **kwargs,
     ) -> bool:
         """
@@ -367,15 +367,15 @@ class AuditLogger:
 
     def query(
         self,
-        user_id: Optional[int] = None,
-        username: Optional[str] = None,
-        action: Optional[str] = None,
-        resource_type: Optional[str] = None,
-        severity: Optional[str] = None,
-        start_time: Optional[datetime] = None,
-        end_time: Optional[datetime] = None,
-        success: Optional[bool] = None,
-        tenant_id: Optional[int] = None,
+        user_id: int | None = None,
+        username: str | None = None,
+        action: str | None = None,
+        resource_type: str | None = None,
+        severity: str | None = None,
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
+        success: bool | None = None,
+        tenant_id: int | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> list[AuditLog]:
@@ -459,14 +459,14 @@ class AuditLogger:
 
     def count(
         self,
-        user_id: Optional[int] = None,
-        username: Optional[str] = None,
-        action: Optional[str] = None,
-        resource_type: Optional[str] = None,
-        severity: Optional[str] = None,
-        start_time: Optional[datetime] = None,
-        end_time: Optional[datetime] = None,
-        tenant_id: Optional[int] = None,
+        user_id: int | None = None,
+        username: str | None = None,
+        action: str | None = None,
+        resource_type: str | None = None,
+        severity: str | None = None,
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
+        tenant_id: int | None = None,
     ) -> int:
         """
         Count audit logs matching filters.
@@ -533,7 +533,7 @@ class AuditLogger:
             return 0
 
     def get_user_activity(
-        self, user_id: int, days: int = 30, tenant_id: Optional[int] = None
+        self, user_id: int, days: int = 30, tenant_id: int | None = None
     ) -> dict[str, Any]:
         """
         Get activity summary for a user.
@@ -595,10 +595,10 @@ class AuditLogger:
 
     def export_logs(
         self,
-        start_time: Optional[datetime] = None,
-        end_time: Optional[datetime] = None,
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
         format: str = "json",
-        tenant_id: Optional[int] = None,
+        tenant_id: int | None = None,
     ) -> str:
         """
         Export audit logs for compliance reporting.

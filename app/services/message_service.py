@@ -6,7 +6,6 @@ Business logic for message data operations.
 
 import logging
 from datetime import datetime
-from typing import Optional
 
 from app.repositories.message_repo import MessageRepository
 from app.utils.cache import cached
@@ -17,7 +16,7 @@ logger = logging.getLogger(__name__)
 class MessageService:
     """Service for message-related business logic."""
 
-    def __init__(self, message_repo: Optional[MessageRepository] = None):
+    def __init__(self, message_repo: MessageRepository | None = None):
         """
         Initialize service.
 
@@ -28,14 +27,14 @@ class MessageService:
 
     def get_messages(
         self,
-        date: Optional[str] = None,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
-        tool_name: Optional[str] = None,
-        host_name: Optional[str] = None,
-        sender_name: Optional[str] = None,
-        role: Optional[str] = None,
-        search: Optional[str] = None,
+        date: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        tool_name: str | None = None,
+        host_name: str | None = None,
+        sender_name: str | None = None,
+        role: str | None = None,
+        search: str | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> dict:
@@ -114,12 +113,12 @@ class MessageService:
 
     def get_conversation_history(
         self,
-        date: Optional[str] = None,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
-        tool_name: Optional[str] = None,
-        host_name: Optional[str] = None,
-        sender_name: Optional[str] = None,
+        date: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        tool_name: str | None = None,
+        host_name: str | None = None,
+        sender_name: str | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[dict]:
@@ -152,12 +151,12 @@ class MessageService:
 
     def count_conversations(
         self,
-        date: Optional[str] = None,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
-        tool_name: Optional[str] = None,
-        host_name: Optional[str] = None,
-        sender_name: Optional[str] = None,
+        date: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        tool_name: str | None = None,
+        host_name: str | None = None,
+        sender_name: str | None = None,
     ) -> int:
         """Count total conversations matching filters."""
         return self.message_repo.count_conversations(
@@ -172,7 +171,7 @@ class MessageService:
     def get_conversation_timeline(
         self,
         session_id: str,
-        limit: Optional[int] = None,
+        limit: int | None = None,
         offset: int = 0,
     ) -> list[dict]:
         """
@@ -190,7 +189,7 @@ class MessageService:
         """
         return self.message_repo.get_conversation_timeline(session_id, limit=limit, offset=offset)
 
-    def get_conversation_details(self, session_id: str) -> Optional[dict]:
+    def get_conversation_details(self, session_id: str) -> dict | None:
         """
         Get details of a conversation.
 
@@ -203,7 +202,7 @@ class MessageService:
         return self.message_repo.get_conversation_details(session_id)
 
     @cached(ttl=300, key_prefix="message", skip_args=[0])
-    def get_all_senders(self, host_name: Optional[str] = None) -> list[str]:
+    def get_all_senders(self, host_name: str | None = None) -> list[str]:
         """
         Get list of all senders.
 
@@ -217,14 +216,14 @@ class MessageService:
 
     def count_messages(
         self,
-        date: Optional[str] = None,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
-        tool_name: Optional[str] = None,
-        host_name: Optional[str] = None,
-        sender_name: Optional[str] = None,
-        role: Optional[str] = None,
-        search: Optional[str] = None,
+        date: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        tool_name: str | None = None,
+        host_name: str | None = None,
+        sender_name: str | None = None,
+        role: str | None = None,
+        search: str | None = None,
     ) -> int:
         """
         Count messages with filters.
@@ -260,25 +259,25 @@ class MessageService:
         message_id: str,
         role: str,
         host_name: str = "localhost",
-        parent_id: Optional[str] = None,
-        content: Optional[str] = None,
-        full_entry: Optional[str] = None,
+        parent_id: str | None = None,
+        content: str | None = None,
+        full_entry: str | None = None,
         tokens_used: int = 0,
         input_tokens: int = 0,
         output_tokens: int = 0,
-        model: Optional[str] = None,
-        timestamp: Optional[str] = None,
-        sender_id: Optional[str] = None,
-        sender_name: Optional[str] = None,
-        message_source: Optional[str] = None,
-        feishu_conversation_id: Optional[str] = None,
-        group_subject: Optional[str] = None,
-        is_group_chat: Optional[int] = None,
-        agent_session_id: Optional[str] = None,
-        conversation_id: Optional[str] = None,
-        user_id: Optional[int] = None,
-        project_path: Optional[str] = None,
-        tenant_id: Optional[int] = None,  # Issue #1852
+        model: str | None = None,
+        timestamp: str | None = None,
+        sender_id: str | None = None,
+        sender_name: str | None = None,
+        message_source: str | None = None,
+        feishu_conversation_id: str | None = None,
+        group_subject: str | None = None,
+        is_group_chat: int | None = None,
+        agent_session_id: str | None = None,
+        conversation_id: str | None = None,
+        user_id: int | None = None,
+        project_path: str | None = None,
+        tenant_id: int | None = None,  # Issue #1852
     ) -> bool:
         """
         Save a message.
