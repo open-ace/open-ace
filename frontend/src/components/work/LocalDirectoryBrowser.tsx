@@ -310,21 +310,44 @@ export const LocalDirectoryBrowser: React.FC<LocalDirectoryBrowserProps> = ({
   };
 
   const handleDownload = async (file: FileEntry) => {
+    // Guard: don't issue a request that DAC will reject anyway. The backend
+    // already reports per-file readability in is_readable (Issue #1902).
+    if (!file.is_readable) {
+      toast.error(
+        t('downloadFailed', language) || 'Download failed',
+        t('fileNotReadable', language) || 'You do not have permission to read this file'
+      );
+      return;
+    }
     setDownloadingPath(file.path);
     try {
       const blob = await fsApi.downloadFile(file.path);
       downloadBlob(blob, file.name);
     } catch (err) {
-      toast.error(
-        t('downloadFailed', language) || 'Download failed',
-        (err as Error)?.message ?? file.name
-      );
+      const msg = (err as Error)?.message ?? '';
+      // P2 (Issue #1902): surface a friendlier message for 403 / permission
+      // errors instead of raw backend text.
+      const friendly = /403|permission|forbidden/i.test(msg)
+        ? t('fileNotReadable', language) || 'You do not have permission to read this file'
+        : msg || file.name;
+      toast.error(t('downloadFailed', language) || 'Download failed', friendly);
     } finally {
       setDownloadingPath(null);
     }
   };
 
   const handleDelete = async (file: FileEntry) => {
+    // The delete button is only shown when the parent directory is writable,
+    // but we still gate on is_readable: an unreadable file (e.g. root-owned
+    // 0600 config dropped into the user's home) cannot be stat'd as the owner
+    // and would fail with a confusing "Not a file" (Issue #1902).
+    if (!file.is_readable) {
+      toast.error(
+        t('deleteFailed', language) || 'Delete failed',
+        t('fileNotReadable', language) || 'You do not have permission to access this file'
+      );
+      return;
+    }
     const ok = window.confirm(
       (t('confirmDeleteFile', language) as string) || `Delete "${file.name}"?`
     );
@@ -337,13 +360,18 @@ export const LocalDirectoryBrowser: React.FC<LocalDirectoryBrowserProps> = ({
         toast.success(t('deleteSuccess', language) || 'File deleted', file.name);
         await fetchDirectories(currentPath);
       } else {
-        toast.error(t('deleteFailed', language) || 'Delete failed', result.error ?? file.name);
+        const errText = result.error ?? '';
+        const friendly = /403|permission|forbidden/i.test(errText)
+          ? t('fileNotReadable', language) || 'You do not have permission to delete this file'
+          : errText || file.name;
+        toast.error(t('deleteFailed', language) || 'Delete failed', friendly);
       }
     } catch (err) {
-      toast.error(
-        t('deleteFailed', language) || 'Delete failed',
-        (err as Error)?.message ?? file.name
-      );
+      const msg = (err as Error)?.message ?? '';
+      const friendly = /403|permission|forbidden/i.test(msg)
+        ? t('fileNotReadable', language) || 'You do not have permission to delete this file'
+        : msg || file.name;
+      toast.error(t('deleteFailed', language) || 'Delete failed', friendly);
     } finally {
       setDeletingPath(null);
     }
@@ -586,9 +614,13 @@ export const LocalDirectoryBrowser: React.FC<LocalDirectoryBrowserProps> = ({
                       <button
                         type="button"
                         className="btn btn-sm btn-outline-secondary"
-                        title={t('downloadFile', language) || 'Download'}
+                        title={
+                          file.is_readable
+                            ? t('downloadFile', language) || 'Download'
+                            : t('fileNotReadable', language) || 'No read permission'
+                        }
                         onClick={() => void handleDownload(file)}
-                        disabled={downloadingPath === file.path}
+                        disabled={downloadingPath === file.path || !file.is_readable}
                       >
                         <i
                           className={`bi ${
@@ -600,9 +632,13 @@ export const LocalDirectoryBrowser: React.FC<LocalDirectoryBrowserProps> = ({
                         <button
                           type="button"
                           className="btn btn-sm btn-outline-danger"
-                          title={t('deleteFile', language) || 'Delete'}
+                          title={
+                            file.is_readable
+                              ? t('deleteFile', language) || 'Delete'
+                              : t('fileNotReadable', language) || 'No access permission'
+                          }
                           onClick={() => void handleDelete(file)}
-                          disabled={deletingPath === file.path}
+                          disabled={deletingPath === file.path || !file.is_readable}
                         >
                           <i
                             className={`bi ${

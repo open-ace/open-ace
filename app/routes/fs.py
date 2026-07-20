@@ -515,7 +515,11 @@ def api_browse_directory():
 
     # include_files is opt-in via ?include_files=1 so existing callers
     # (directory selector, remote workspace fallback) are unaffected.
-    include_files = request.args.get("include_files", "").lower() in ("1", "true", "yes")
+    include_files = request.args.get("include_files", "").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
 
     # Get path parameter
     path = request.args.get("path", "")
@@ -528,7 +532,10 @@ def api_browse_directory():
         base_dirs = get_workspace_base_dirs()
         if not is_valid_path(path, allowed_prefixes=base_dirs):
             allowed_paths = ", ".join(base_dirs)
-            return jsonify({"error": f"Path must be under one of: {allowed_paths}"}), 400
+            return (
+                jsonify({"error": f"Path must be under one of: {allowed_paths}"}),
+                400,
+            )
 
         path = os.path.realpath(path)
 
@@ -938,17 +945,26 @@ def api_create_directory():
                 }
             )
         else:
-            return jsonify({"success": False, "error": "Path exists but is not a directory"}), 400
+            return (
+                jsonify({"success": False, "error": "Path exists but is not a directory"}),
+                400,
+            )
 
     # Check if parent directory is writable
     parent = str(Path(dir_path).parent)
     parent_info = get_directory_info(parent, system_account)
 
     if not parent_info["exists"]:
-        return jsonify({"success": False, "error": "Parent directory does not exist"}), 400
+        return (
+            jsonify({"success": False, "error": "Parent directory does not exist"}),
+            400,
+        )
 
     if not parent_info["is_writable"]:
-        return jsonify({"success": False, "error": "Parent directory is not writable"}), 403
+        return (
+            jsonify({"success": False, "error": "Parent directory is not writable"}),
+            403,
+        )
 
     # Create the directory
     try:
@@ -960,7 +976,10 @@ def api_create_directory():
                 logger.error(f"Failed to create directory as {system_account}: {result.stderr}")
                 return (
                     jsonify(
-                        {"success": False, "error": f"Failed to create directory: {result.stderr}"}
+                        {
+                            "success": False,
+                            "error": f"Failed to create directory: {result.stderr}",
+                        }
                     ),
                     403,
                 )
@@ -983,7 +1002,10 @@ def api_create_directory():
         return jsonify({"success": False, "error": "Timeout creating directory"}), 500
     except Exception as e:
         logger.error(f"Error creating directory: {e}")
-        return jsonify({"success": False, "error": f"Failed to create directory: {e}"}), 500
+        return (
+            jsonify({"success": False, "error": f"Failed to create directory: {e}"}),
+            500,
+        )
 
 
 # ============================================================
@@ -1098,42 +1120,140 @@ def api_upload_file():
         return jsonify({"error": f"Upload failed: {e}"}), 500
 
 
-@fs_bp.route("/fs/download", methods=["GET"])
-def api_download_file():
-    """Stream a file from the user's home subtree as an attachment.
+def _is_direct_access(system_account: str | None) -> bool:
+    """Whether file ops can use direct os calls (no sudo needed).
 
-    Uses a 64KB-chunk generator so large files do not load fully into memory.
-    Root reads any path (bypassing DAC); single-user reads its own home.
+    True when the process is root (bypasses DAC) or already runs as the
+    target user (single-user mode). False for non-root multi-user, where
+    the process is a service account that cannot traverse the target
+    user's home directory and must delegate via ``sudo -u``.
     """
-    user = g.user
+    if os.geteuid() == 0:
+        return True
+    return get_effective_system_account(system_account) is None
 
-    raw_path = request.args.get("path", "")
-    target_path, _ = _resolve_file_in_home(raw_path, user)
-    if target_path is None:
-        return jsonify({"error": "Invalid path (must be a file in your home)"}), 400
 
-    if not os.path.isfile(target_path):
-        return jsonify({"error": "Not a file"}), 400
-    if not os.access(target_path, os.R_OK):
-        return jsonify({"error": "Permission denied"}), 403
+def _check_file_as_user(target_path: str, system_account: str | None, flag: str) -> bool:
+    """Run ``test <flag> <target_path>`` as the correct user.
 
-    filename = os.path.basename(target_path)
-    mime = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+    *flag* is one of ``-f`` (is regular file), ``-r`` (readable),
+    ``-w`` (writable). Uses direct ``os`` calls for root / single-user
+    (see ``_is_direct_access``) and ``sudo -u`` for non-root multi-user.
+
+    ``test`` is in the sudoers ``OPENACE_UTILS`` whitelist, so this works
+    in both Docker and package-method multi-user deployments.
+    """
+    if _is_direct_access(system_account):
+        if flag == "-f":
+            return os.path.isfile(target_path)
+        if flag == "-r":
+            return os.access(target_path, os.R_OK)
+        if flag == "-w":
+            return os.access(target_path, os.W_OK)
+        return False
+
+    effective = get_effective_system_account(system_account)
+    assert effective is not None  # _is_direct_access 为 False 时 effective 必定非 None
+    result = run_as_user(effective, ["test", flag, target_path])
+    return result.returncode == 0
+
+
+def _filesize_as_user(target_path: str, system_account: str | None) -> int | None:
+    """Get file size in bytes as the correct user, or None on failure."""
+    if _is_direct_access(system_account):
+        try:
+            return os.path.getsize(target_path)
+        except OSError:
+            return None
+
+    effective = get_effective_system_account(system_account)
+    assert effective is not None  # _is_direct_access 为 False 时 effective 必定非 None
+    result = run_as_user(effective, ["stat", "-c", "%s", target_path])
+    if result.returncode != 0:
+        return None
     try:
-        size = os.path.getsize(target_path)
-    except OSError as e:
-        return jsonify({"error": f"Cannot stat file: {e}"}), 500
+        return int(result.stdout.strip())
+    except (ValueError, TypeError):
+        return None
 
-    def generate():
+
+def _stream_file_as_user(target_path: str, system_account: str | None):
+    """Yield 64KB chunks of *target_path* read as the correct user.
+
+    Root / single-user: direct ``open()``. Non-root multi-user: stream
+    ``sudo -u <user> cat <path>`` stdout via Popen (``cat`` is in the
+    sudoers ``OPENACE_UTILS`` whitelist in package-method; Docker
+    multi-user runs as root so never hits this branch).
+    """
+    if _is_direct_access(system_account):
         with open(target_path, "rb") as f:
             while True:
                 chunk = f.read(64 * 1024)
                 if not chunk:
                     break
                 yield chunk
+        return
+
+    effective = get_effective_system_account(system_account)
+    assert effective is not None  # _is_direct_access 为 False 时 effective 必定非 None
+    # Don't use run_as_user() here — it uses subprocess.run with a 10s
+    # timeout and capture_output=True, which would buffer the whole file
+    # in memory and time out on large downloads. Popen lets us stream.
+    proc = subprocess.Popen(
+        ["sudo", "-u", effective, "cat", target_path],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        assert proc.stdout is not None
+        while True:
+            chunk = proc.stdout.read(64 * 1024)
+            if not chunk:
+                break
+            yield chunk
+    finally:
+        if proc.stdout:
+            proc.stdout.close()
+        proc.wait()
+        if proc.returncode != 0:
+            logger.warning(
+                f"cat stream for {target_path} as {effective} exited " f"with {proc.returncode}"
+            )
+
+
+@fs_bp.route("/fs/download", methods=["GET"])
+def api_download_file():
+    """Stream a file from the user's home subtree as an attachment.
+
+    Uses a 64KB-chunk generator so large files do not load fully into memory.
+    Root reads any path (bypassing DAC); single-user reads its own home;
+    non-root multi-user delegates to ``sudo -u <system_account>`` so the
+    file check and read execute as the file owner (Issue #1902).
+    """
+    user = g.user
+
+    raw_path = request.args.get("path", "")
+    target_path, system_account = _resolve_file_in_home(raw_path, user)
+    if target_path is None:
+        return jsonify({"error": "Invalid path (must be a file in your home)"}), 400
+
+    # Permission checks must run as the file owner: os.path.isfile() /
+    # os.access() use the process user's credentials and silently return
+    # False when it cannot traverse a 0700 home dir, producing a misleading
+    # "Not a file" error (Issue #1902).
+    if not _check_file_as_user(target_path, system_account, "-f"):
+        return jsonify({"error": "Not a file"}), 400
+    if not _check_file_as_user(target_path, system_account, "-r"):
+        return jsonify({"error": "Permission denied"}), 403
+
+    filename = os.path.basename(target_path)
+    mime = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+    size = _filesize_as_user(target_path, system_account)
+    if size is None:
+        return jsonify({"error": "Cannot stat file"}), 500
 
     return Response(
-        stream_with_context(generate()),
+        stream_with_context(_stream_file_as_user(target_path, system_account)),
         mimetype=mime,
         headers={
             "Content-Disposition": _content_disposition_filename(filename),
@@ -1149,20 +1269,43 @@ def api_delete_file():
 
     JSON body: ``{"path": "/abs/path"}``. Only files (not directories) are
     accepted — directory removal is intentionally out of scope.
+
+    The ``os.path.isfile()`` pre-check and the actual ``os.remove()`` must
+    both execute as the file owner in multi-user mode (Issue #1902).
     """
     user = g.user
 
     data = request.get_json(silent=True) or {}
     raw_path = data.get("path", "")
-    target_path, _ = _resolve_file_in_home(raw_path, user)
+    target_path, system_account = _resolve_file_in_home(raw_path, user)
     if target_path is None:
         return jsonify({"error": "Invalid path (must be a file in your home)"}), 400
 
-    if not os.path.isfile(target_path):
+    if not _check_file_as_user(target_path, system_account, "-f"):
         return jsonify({"error": "Not a file"}), 400
 
     try:
-        os.remove(target_path)
+        if _is_direct_access(system_account):
+            os.remove(target_path)
+        else:
+            effective = get_effective_system_account(system_account)
+            assert effective is not None  # _is_direct_access 为 False 时 effective 必定非 None
+            result = run_as_user(effective, ["rm", "--", target_path])
+            if result.returncode != 0:
+                stderr = (result.stderr or "").strip()
+                logger.warning(f"rm as {effective} failed for {target_path}: {stderr}")
+                # sudoers policy denial vs. filesystem permission error
+                if "not allowed" in stderr.lower() or "sudo" in stderr.lower():
+                    return (
+                        jsonify(
+                            {
+                                "error": "Cannot delete file as owner "
+                                "(sudoers policy missing 'rm' for this deployment)"
+                            }
+                        ),
+                        500,
+                    )
+                return jsonify({"error": "Permission denied"}), 403
         logger.info(f"Deleted file: {target_path}")
         return jsonify({"success": True, "path": target_path})
     except PermissionError:

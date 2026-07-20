@@ -972,3 +972,266 @@ class TestChownSudoFallbackFailure:
             patch("app.routes.fs.run_as_root_if_needed", return_value=ok),
         ):
             assert _chown_to_user("/p", "alice") is True
+
+
+class TestDownloadDeleteSudoBranch:
+    """Cover the non-root multi-user (sudo) branch of download/delete (Issue #1902).
+
+    In this mode the Flask process runs as a service account that cannot
+    traverse the target user's 0700 home directory. The endpoints must
+    delegate file checks and reads/removes to ``sudo -u <system_account>``
+    instead of using ``os.path.isfile`` / ``os.access`` (which silently
+    return False on EACCES and produce a misleading "Not a file" error).
+
+    We mock ``os.geteuid`` to a non-root uid and ``get_effective_system_account``
+    to return the target user so the sudo code path is taken, then stub
+    ``run_as_user`` and ``subprocess.Popen`` to fake ``test`` / ``stat`` /
+    ``cat`` / ``rm`` results.
+    """
+
+    @pytest.fixture
+    def sudo_client(self, workspace):
+        from flask import Flask, g
+
+        from app.routes.fs import fs_bp
+
+        ws_root, user_home = workspace
+        home_root = ws_root / "testuser"
+        home_root.mkdir(exist_ok=True)
+
+        app = Flask(__name__)
+        app.config["TESTING"] = True
+        app.register_blueprint(fs_bp, url_prefix="/api")
+        app.before_request_funcs["fs"] = []
+
+        @app.before_request
+        def _set_user():
+            g.user = {"id": 1, "username": "testuser", "system_account": "testuser"}
+
+        with (
+            patch("app.routes.fs.get_workspace_base_dir", return_value=str(ws_root)),
+            patch("app.routes.fs.get_workspace_base_dirs", return_value=[str(ws_root)]),
+            patch("app.routes.fs.get_home_directory", return_value=str(home_root)),
+            # Non-root process: forces the sudo code path.
+            patch("app.routes.fs.os.geteuid", return_value=1000),
+            patch("app.routes.fs.get_effective_system_account", return_value="testuser"),
+        ):
+            yield app.test_client()
+
+    def _mock_run_as_user(self, is_file=True, is_readable=True, size=11, rm_ok=True):
+        """Build a side_effect faking test/stat/rm calls from run_as_user."""
+        from subprocess import CompletedProcess
+
+        def fake_run(account, cmd):
+            # test -f <path>
+            if cmd[:2] == ["test", "-f"]:
+                return CompletedProcess(args=cmd, returncode=0 if is_file else 1)
+            # test -r <path>
+            if cmd[:2] == ["test", "-r"]:
+                return CompletedProcess(args=cmd, returncode=0 if is_readable else 1)
+            # stat -c %s <path>
+            if cmd[:2] == ["stat", "-c"]:
+                return CompletedProcess(args=cmd, returncode=0, stdout=str(size) + "\n")
+            # rm -- <path>
+            if cmd[:1] == ["rm"]:
+                return CompletedProcess(
+                    args=cmd,
+                    returncode=0 if rm_ok else 1,
+                    stderr="" if rm_ok else "Permission denied",
+                )
+            return CompletedProcess(args=cmd, returncode=1)
+
+        return fake_run
+
+    def test_download_streams_via_sudo_cat(self, sudo_client, workspace):
+        """Download in non-root multi-user mode streams via ``sudo -u cat``."""
+        _, user_home = workspace
+        target = user_home / "doc.txt"
+        target.write_bytes(b"file contents")  # 12 bytes
+
+        payload = b"file contents"
+
+        class _FakeProc:
+            def __init__(self, data):
+                self._data = data
+                self.stdout = self._FakeStream(data)
+                self.stderr = None
+                self.returncode = 0
+
+            class _FakeStream:
+                def __init__(self, data):
+                    self._data = data
+                    self._pos = 0
+
+                def read(self, n):
+                    chunk = self._data[self._pos : self._pos + n]
+                    self._pos += len(chunk)
+                    return chunk
+
+                def close(self):
+                    pass
+
+            def wait(self):
+                return 0
+
+        with (
+            patch(
+                "app.routes.fs.run_as_user",
+                side_effect=self._mock_run_as_user(size=len(payload)),
+            ),
+            patch(
+                "app.routes.fs.subprocess.Popen",
+                return_value=_FakeProc(payload),
+            ) as popen_mock,
+        ):
+            resp = sudo_client.get(f"/api/fs/download?path={target}")
+
+        assert resp.status_code == 200
+        assert resp.data == payload
+        assert resp.headers.get("Content-Length") == str(len(payload))
+        # Popen should have been invoked with sudo -u testuser cat <path>.
+        popen_args = popen_mock.call_args[0][0]
+        assert popen_args[:3] == ["sudo", "-u", "testuser"]
+        assert "cat" in popen_args
+        assert str(target) in popen_args
+
+    def test_download_not_a_file_uses_test_f(self, sudo_client, workspace):
+        """When ``test -f`` fails (returncode 1), return 400 Not a file — NOT
+        a misleading 500 or a silent 200 with empty body."""
+        _, user_home = workspace
+        target = user_home / "missing.txt"
+
+        with (
+            patch(
+                "app.routes.fs.run_as_user",
+                side_effect=self._mock_run_as_user(is_file=False),
+            ),
+            patch("app.routes.fs.subprocess.Popen") as popen_mock,
+        ):
+            resp = sudo_client.get(f"/api/fs/download?path={target}")
+
+        assert resp.status_code == 400
+        assert resp.get_json()["error"] == "Not a file"
+        # Must not have spawned cat at all.
+        popen_mock.assert_not_called()
+
+    def test_download_not_readable_returns_403(self, sudo_client, workspace):
+        """``test -r`` failing must surface as 403, not 'Not a file'."""
+        _, user_home = workspace
+        target = user_home / "secret.txt"
+
+        with (
+            patch(
+                "app.routes.fs.run_as_user",
+                side_effect=self._mock_run_as_user(is_readable=False),
+            ),
+            patch("app.routes.fs.subprocess.Popen") as popen_mock,
+        ):
+            resp = sudo_client.get(f"/api/fs/download?path={target}")
+
+        assert resp.status_code == 403
+        assert resp.get_json()["error"] == "Permission denied"
+        popen_mock.assert_not_called()
+
+    def test_delete_via_sudo_rm(self, sudo_client, workspace):
+        """Delete in non-root multi-user mode runs ``sudo -u rm``."""
+        _, user_home = workspace
+        target = user_home / "trash.txt"
+        target.write_bytes(b"x")
+
+        with (
+            patch(
+                "app.routes.fs.run_as_user",
+                side_effect=self._mock_run_as_user(rm_ok=True),
+            ) as run_mock,
+        ):
+            resp = sudo_client.post("/api/fs/delete-file", json={"path": str(target)})
+
+        assert resp.status_code == 200
+        assert resp.get_json()["success"] is True
+        # Verify the rm command was issued with the target path.
+        rm_calls = [c for c in run_mock.call_args_list if c[0][1][:1] == ["rm"]]
+        assert len(rm_calls) == 1
+        assert rm_calls[0][0][1][:2] == ["rm", "--"]
+
+    def test_delete_not_a_file_uses_test_f(self, sudo_client, workspace):
+        """Delete also benefits from the test -f check: a path that the
+        process user can't stat is reported as 'Not a file' via sudo test,
+        not via the misleading direct os.path.isfile (Issue #1902)."""
+        _, user_home = workspace
+        target = user_home / "ghost.txt"
+
+        with patch(
+            "app.routes.fs.run_as_user",
+            side_effect=self._mock_run_as_user(is_file=False),
+        ) as run_mock:
+            resp = sudo_client.post("/api/fs/delete-file", json={"path": str(target)})
+
+        assert resp.status_code == 400
+        assert resp.get_json()["error"] == "Not a file"
+        # Must not have attempted rm.
+        rm_calls = [c for c in run_mock.call_args_list if c[0][1][:1] == ["rm"]]
+        assert rm_calls == []
+
+    def test_delete_rm_failure_returns_403(self, sudo_client, workspace):
+        """If ``sudo -u rm`` fails with a filesystem permission error
+        (not a sudoers policy issue), surface as 403."""
+        _, user_home = workspace
+        target = user_home / "locked.txt"
+
+        with patch(
+            "app.routes.fs.run_as_user",
+            side_effect=self._mock_run_as_user(rm_ok=False),
+        ):
+            resp = sudo_client.post("/api/fs/delete-file", json={"path": str(target)})
+
+        assert resp.status_code == 403
+        assert resp.get_json()["error"] == "Permission denied"
+
+
+class TestDirectAccessHelper:
+    """Unit tests for _is_direct_access / _check_file_as_user helpers."""
+
+    def test_is_direct_access_root(self):
+        from app.routes.fs import _is_direct_access
+
+        with patch("app.routes.fs.os.geteuid", return_value=0):
+            assert _is_direct_access("alice") is True
+
+    def test_is_direct_access_single_user(self):
+        from app.routes.fs import _is_direct_access
+
+        with (
+            patch("app.routes.fs.os.geteuid", return_value=1000),
+            patch("app.routes.fs.get_effective_system_account", return_value=None),
+        ):
+            # No system_account or process == target → direct access.
+            assert _is_direct_access(None) is True
+
+    def test_is_direct_access_multi_user(self):
+        from app.routes.fs import _is_direct_access
+
+        with (
+            patch("app.routes.fs.os.geteuid", return_value=1000),
+            patch("app.routes.fs.get_effective_system_account", return_value="alice"),
+        ):
+            assert _is_direct_access("alice") is False
+
+    def test_check_file_as_user_uses_sudo_test(self):
+        from subprocess import CompletedProcess
+
+        from app.routes.fs import _check_file_as_user
+
+        with (
+            patch("app.routes.fs.os.geteuid", return_value=1000),
+            patch("app.routes.fs.get_effective_system_account", return_value="alice"),
+            patch(
+                "app.routes.fs.run_as_user",
+                return_value=CompletedProcess(args=[], returncode=0),
+            ) as run_mock,
+        ):
+            assert _check_file_as_user("/p/f.txt", "alice", "-f") is True
+        # Should have called sudo -u alice test -f /p/f.txt
+        call = run_mock.call_args[0]
+        assert call[0] == "alice"
+        assert call[1] == ["test", "-f", "/p/f.txt"]
