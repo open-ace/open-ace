@@ -1825,6 +1825,32 @@ install_run_as_wrapper() {
     return 0
 }
 
+# Install the cross-user file write wrapper (Issue #1916).
+# In Package non-root multi-user mode the service account cannot write to a
+# user's 0700 home directory, and cp/tee/mv are NOT in the sudoers OPENACE_UTILS
+# whitelist. This wrapper is invoked as root (via a dedicated sudoers rule) and
+# drops to the target user via runuser to write uploaded file content. Must run
+# BEFORE configure_sudoers so the sudoers rule (which keys off -x $wrapper_path)
+# sees it.
+install_write_as_wrapper() {
+    local install_dir="$1"
+    local src="$install_dir/scripts/openace-write-as.sh"
+    local dst="/usr/local/bin/openace-write-as"
+
+    if [ ! -f "$src" ]; then
+        print_warning "openace-write-as.sh not found at $src; skipping wrapper install"
+        return 1
+    fi
+    if ! cp "$src" "$dst" 2>/dev/null; then
+        print_warning "Failed to copy openace-write-as.sh to $dst (need root?)"
+        return 1
+    fi
+    chown root:root "$dst" 2>/dev/null || true
+    chmod 755 "$dst"
+    print_success "Installed write-as wrapper to $dst"
+    return 0
+}
+
 # Configure sudoers for multi-user workspace mode
 # Uses incremental update: only adds/modifies $run_user's rules, preserves other users' rules
 configure_sudoers() {
@@ -1904,6 +1930,16 @@ $run_user ALL=(root) NOPASSWD: /usr/bin/python3 $script_path *"
         wrapper_rule="$run_user ALL=(root) NOPASSWD: $wrapper_path *"
     fi
 
+    # 【修复 Issue #1916】跨用户文件写入 wrapper 权限。
+    # Package 非 root 多用户模式下，服务账号无法写入用户 0700 家目录，
+    # 且 cp/tee/mv 不在 OPENACE_UTILS 白名单。该 wrapper 以 root 身份运行，
+    # 内部用 runuser 切换到目标用户写文件。只授权 wrapper 本身。
+    local write_as_wrapper_path="/usr/local/bin/openace-write-as"
+    local write_as_wrapper_rule=""
+    if [ -x "$write_as_wrapper_path" ]; then
+        write_as_wrapper_rule="$run_user ALL=(root) NOPASSWD: $write_as_wrapper_path *"
+    fi
+
     # Build current user's complete rule block (avoid empty lines from empty variables)
     local current_user_rules="# Rules for $run_user (updated on $(date '+%Y-%m-%d %H:%M:%S'))
 $run_user ALL=(ALL) NOPASSWD: $webui_path *"
@@ -1923,6 +1959,12 @@ ${cli_rule}"
     if [ -n "$wrapper_rule" ]; then
         current_user_rules="${current_user_rules}
 ${wrapper_rule}"
+    fi
+
+    # Add write-as wrapper rule if the wrapper is installed (Issue #1916)
+    if [ -n "$write_as_wrapper_rule" ]; then
+        current_user_rules="${current_user_rules}
+${write_as_wrapper_rule}"
     fi
 
     # Only add fetch_rules if not empty
@@ -2059,6 +2101,18 @@ ${line}"
         if [ -x "$wrapper_path" ] && \
            ! grep -E "^${run_user} .*(NOPASSWD: )?${wrapper_path}( |\*|$)" "$sudoers_file" 2>/dev/null; then
             print_warning "Sudoers missing run-as wrapper rule for user '$run_user' (wrapper installed but not authorized)"
+            need_update=true
+        fi
+
+        # 【修复 Issue #1916】Check write-as wrapper rule.
+        # Mirrors the run-as probe above: the wrapper is installed before
+        # configure_sudoers, but incremental upgrades skip the rewrite when
+        # existing checks pass, leaving the new wrapper unauthorized. Match
+        # user+path on the same line so a foreign user's rule doesn't false-pass.
+        local write_as_wrapper_path="/usr/local/bin/openace-write-as"
+        if [ -x "$write_as_wrapper_path" ] && \
+           ! grep -E "^${run_user} .*(NOPASSWD: )?${write_as_wrapper_path}( |\*|$)" "$sudoers_file" 2>/dev/null; then
+            print_warning "Sudoers missing write-as wrapper rule for user '$run_user' (wrapper installed but not authorized)"
             need_update=true
         fi
 
@@ -3277,6 +3331,10 @@ install_local() {
         # Install the run-as wrapper BEFORE configure_sudoers (Issue #1395):
         # the sudoers rule keys off `[ -x /usr/local/bin/openace-run-as ]`.
         install_run_as_wrapper "$sudoers_install_dir"
+
+        # Install the write-as wrapper BEFORE configure_sudoers (Issue #1916):
+        # the sudoers rule keys off `[ -x /usr/local/bin/openace-write-as ]`.
+        install_write_as_wrapper "$sudoers_install_dir"
 
         configure_sudoers "$sudoers_run_user" "$sudoers_install_dir"
         if [ $? -ne 0 ]; then

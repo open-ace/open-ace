@@ -16,13 +16,14 @@ import re
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import IO, Any, cast
 
 from flask import Blueprint, Response, g, jsonify, request, stream_with_context
 
 from app.repositories.user_repo import UserRepository
 from app.utils.workspace import (
     OPENACE_CHOWN_WRAPPER,
+    OPENACE_WRITE_AS_WRAPPER,
     _is_wrapper_available,
     get_workspace_base_dir,
     get_workspace_base_dirs,
@@ -1024,6 +1025,11 @@ def api_create_directory():
 #   atomically rename. No sudo is involved — root uses kernel capabilities
 #   (os.chown / os.replace / os.remove) directly. This deliberately avoids
 #   the sudoers whitelist (which does not include cp/cat/rm/tee).
+# - Package non-root multi-user mode: the process is a service account that
+#   cannot traverse the target user's 0700 home. cp/tee/mv are NOT in the
+#   sudoers OPENACE_UTILS whitelist, so uploads delegate to the
+#   openace-write-as wrapper (root via a dedicated sudoers rule, drops to
+#   the target user via runuser). Content is streamed on stdin (Issue #1916).
 # - Single-user / non-root package mode: the process already owns its home
 #   tree, so we write/read/remove directly.
 # - os.chown is root-only; non-root uses the openace-chown wrapper as a
@@ -1111,6 +1117,67 @@ def api_upload_file():
             except Exception:
                 _safe_remove(tmp_path)
                 raise
+        elif not _is_direct_access(system_account):
+            # Package non-root multi-user: the process is a service account
+            # (e.g. openace) that cannot write to /home/<system_account>/...
+            # (0700). cp/tee/mv are NOT in the sudoers OPENACE_UTILS
+            # whitelist, so we cannot `sudo -u <user> cp` directly. Delegate
+            # to the openace-write-as wrapper, which runs as root via its
+            # own sudoers rule and drops to the target user via runuser
+            # (Issue #1916). Content is streamed to the wrapper's stdin.
+            if not _is_wrapper_available(OPENACE_WRITE_AS_WRAPPER):
+                return (
+                    jsonify(
+                        {
+                            "error": "Upload not available in multi-user mode "
+                            "(openace-write-as wrapper not installed)"
+                        }
+                    ),
+                    500,
+                )
+            effective = get_effective_system_account(system_account)
+            assert effective is not None  # _is_direct_access 为 False 时 effective 必定非 None
+            proc = subprocess.Popen(
+                ["sudo", "-n", OPENACE_WRITE_AS_WRAPPER, effective, target_path],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+            )
+            stdin = cast(IO[bytes], proc.stdin)
+            try:
+                # Stream uploaded content to the wrapper's stdin in chunks so
+                # large uploads don't buffer fully in memory.
+                while True:
+                    chunk = file.stream.read(64 * 1024)
+                    if not chunk:
+                        break
+                    try:
+                        stdin.write(chunk)
+                    except BrokenPipeError:
+                        # Wrapper exited early (e.g. path validation failure);
+                        # stop writing and let communicate() collect stderr.
+                        break
+                stdin.close()
+                _, stderr = proc.communicate(timeout=300)
+            except Exception:
+                proc.kill()
+                proc.wait()
+                raise
+            if proc.returncode != 0:
+                err = (stderr or b"").decode(errors="replace").strip()
+                logger.warning(f"openace-write-as failed for {target_path} as {effective}: {err}")
+                low = err.lower()
+                if "not allowed" in low or "sudo" in low or "a password is required" in low:
+                    return (
+                        jsonify(
+                            {
+                                "error": "Cannot upload file as owner "
+                                "(sudoers policy missing 'openace-write-as' for this deployment)"
+                            }
+                        ),
+                        500,
+                    )
+                return jsonify({"error": "Permission denied"}), 403
         else:
             # Single-user / non-root: write directly to the final path.
             file.save(target_path)
