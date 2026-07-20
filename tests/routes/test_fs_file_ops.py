@@ -211,7 +211,9 @@ class TestUpload:
             "file": (io.BytesIO(b"hello world"), "report.txt"),
             "path": str(user_home),
         }
-        resp = client.post("/api/fs/upload", data=data, content_type="multipart/form-data")
+        resp = client.post(
+            "/api/fs/upload", data=data, content_type="multipart/form-data"
+        )
         assert resp.status_code == 200
         body = resp.get_json()
         assert body["success"] is True
@@ -224,7 +226,9 @@ class TestUpload:
             "file": (io.BytesIO(b"x"), "a.txt"),
             "path": "/etc",
         }
-        resp = client.post("/api/fs/upload", data=data, content_type="multipart/form-data")
+        resp = client.post(
+            "/api/fs/upload", data=data, content_type="multipart/form-data"
+        )
         assert resp.status_code in (400, 403)
 
     def test_rejects_path_inside_workspace_but_outside_home(self, client, workspace):
@@ -238,7 +242,9 @@ class TestUpload:
             "file": (io.BytesIO(b"x"), "a.txt"),
             "path": str(other_home),
         }
-        resp = client.post("/api/fs/upload", data=data, content_type="multipart/form-data")
+        resp = client.post(
+            "/api/fs/upload", data=data, content_type="multipart/form-data"
+        )
         assert resp.status_code == 400
         assert "home directory" in resp.get_json()["error"]
 
@@ -257,7 +263,9 @@ class TestUpload:
                 "file": (io.BytesIO(b"x" * 10), "big.bin"),
                 "path": str(user_home),
             }
-            resp = client.post("/api/fs/upload", data=data, content_type="multipart/form-data")
+            resp = client.post(
+                "/api/fs/upload", data=data, content_type="multipart/form-data"
+            )
             assert resp.status_code == 413
             assert "too large" in resp.get_json()["error"].lower()
         finally:
@@ -278,7 +286,9 @@ class TestUpload:
             "file": (io.BytesIO(b"x"), ""),
             "path": str(user_home),
         }
-        resp = client.post("/api/fs/upload", data=data, content_type="multipart/form-data")
+        resp = client.post(
+            "/api/fs/upload", data=data, content_type="multipart/form-data"
+        )
         assert resp.status_code == 400
 
     def test_traversal_filename_neutralized(self, client, workspace):
@@ -289,7 +299,9 @@ class TestUpload:
             "file": (io.BytesIO(b"x"), "../../etc/passwd"),
             "path": str(user_home),
         }
-        resp = client.post("/api/fs/upload", data=data, content_type="multipart/form-data")
+        resp = client.post(
+            "/api/fs/upload", data=data, content_type="multipart/form-data"
+        )
         assert resp.status_code == 200
         # File landed inside the user home, not /etc.
         assert (user_home / "passwd").exists()
@@ -346,7 +358,9 @@ class TestDelete:
 
     def test_rejects_missing_file(self, client, workspace):
         _, user_home = workspace
-        resp = client.post("/api/fs/delete-file", json={"path": str(user_home / "nope.txt")})
+        resp = client.post(
+            "/api/fs/delete-file", json={"path": str(user_home / "nope.txt")}
+        )
         assert resp.status_code == 400
 
 
@@ -563,7 +577,9 @@ class TestUploadRootBranch:
             "file": (io.BytesIO(b"hello"), "f.txt"),
             "path": str(user_home),
         }
-        resp = root_client.post("/api/fs/upload", data=data, content_type="multipart/form-data")
+        resp = root_client.post(
+            "/api/fs/upload", data=data, content_type="multipart/form-data"
+        )
         assert resp.status_code == 200
         assert resp.get_json()["success"] is True
         assert (user_home / "f.txt").read_bytes() == b"hello"
@@ -609,7 +625,9 @@ class TestUploadRootBranch:
                 "file": (io.BytesIO(b"hello"), "f.txt"),
                 "path": str(home_root),
             }
-            resp = client.post("/api/fs/upload", data=data, content_type="multipart/form-data")
+            resp = client.post(
+                "/api/fs/upload", data=data, content_type="multipart/form-data"
+            )
         assert resp.status_code == 500
         assert "ownership" in resp.get_json()["error"].lower()
         # No leftover file (neither final nor .openace-upload- temp).
@@ -643,7 +661,9 @@ class TestContentLengthPrecheck:
                 "file": (io.BytesIO(b"x"), "x.txt"),
                 "path": str(user_home),
             }
-            resp = client.post("/api/fs/upload", data=data, content_type="multipart/form-data")
+            resp = client.post(
+                "/api/fs/upload", data=data, content_type="multipart/form-data"
+            )
             assert resp.status_code == 413
         finally:
             _fsm.MAX_UPLOAD_SIZE_MB = orig
@@ -777,7 +797,9 @@ class TestListSubdirectoriesSudoBranch:
             patch("app.routes.fs.get_effective_system_account", return_value="alice"),
             patch(
                 "app.routes.fs.run_as_user",
-                side_effect=self._mock_run_as_user(path, stat_lines, test_results=test_results),
+                side_effect=self._mock_run_as_user(
+                    path, stat_lines, test_results=test_results
+                ),
             ),
         ):
             result = list_subdirectories(path, "alice", include_files=True)
@@ -1033,9 +1055,7 @@ class TestDownloadDeleteSudoBranch:
                 return CompletedProcess(args=cmd, returncode=0 if is_readable else 1)
             # stat -c %s <path>
             if cmd[:2] == ["stat", "-c"]:
-                return CompletedProcess(
-                    args=cmd, returncode=0, stdout=str(size) + "\n"
-                )
+                return CompletedProcess(args=cmd, returncode=0, stdout=str(size) + "\n")
             # rm -- <path>
             if cmd[:1] == ["rm"]:
                 return CompletedProcess(
@@ -1207,9 +1227,7 @@ class TestDirectAccessHelper:
 
         with (
             patch("app.routes.fs.os.geteuid", return_value=1000),
-            patch(
-                "app.routes.fs.get_effective_system_account", return_value=None
-            ),
+            patch("app.routes.fs.get_effective_system_account", return_value=None),
         ):
             # No system_account or process == target → direct access.
             assert _is_direct_access(None) is True
@@ -1219,9 +1237,7 @@ class TestDirectAccessHelper:
 
         with (
             patch("app.routes.fs.os.geteuid", return_value=1000),
-            patch(
-                "app.routes.fs.get_effective_system_account", return_value="alice"
-            ),
+            patch("app.routes.fs.get_effective_system_account", return_value="alice"),
         ):
             assert _is_direct_access("alice") is False
 
@@ -1231,9 +1247,7 @@ class TestDirectAccessHelper:
 
         with (
             patch("app.routes.fs.os.geteuid", return_value=1000),
-            patch(
-                "app.routes.fs.get_effective_system_account", return_value="alice"
-            ),
+            patch("app.routes.fs.get_effective_system_account", return_value="alice"),
             patch(
                 "app.routes.fs.run_as_user",
                 return_value=CompletedProcess(args=[], returncode=0),
