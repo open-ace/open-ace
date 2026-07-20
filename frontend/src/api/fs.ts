@@ -41,6 +41,24 @@ export interface FileEntry {
   is_readable: boolean;
 }
 
+// Issue #1923: recursive name search result entry.
+export interface SearchEntry {
+  name: string;
+  path: string;
+  relative_path: string;
+  type: 'dir' | 'file';
+  size?: number;
+  is_readable: boolean;
+}
+
+export interface SearchResult {
+  query: string;
+  root: string;
+  results: SearchEntry[];
+  total: number;
+  truncated: boolean;
+}
+
 interface LocalDirectoryEntryApi {
   name: string;
   path: string;
@@ -223,6 +241,26 @@ export const fsApi = {
    */
   deleteFile(path: string): Promise<{ success: boolean; error?: string }> {
     return apiClient.post('/api/fs/delete-file', { path });
+  },
+
+  /**
+   * Recursively search directory and file *names* under a path (Issue #1923).
+   *
+   * Matching is case-insensitive substring with multi-keyword AND. Only
+   * readable entries are returned; the search root must be inside the user's
+   * home subtree (#1813 lock enforced server-side).
+   */
+  async searchFiles(
+    query: string,
+    rootPath?: string,
+    opts?: { maxResults?: number; maxDepth?: number; kind?: 'all' | 'dir' | 'file' }
+  ): Promise<SearchResult> {
+    const params: Record<string, string> = { q: query };
+    if (rootPath) params.path = rootPath;
+    if (opts?.maxResults) params.max_results = String(opts.maxResults);
+    if (opts?.maxDepth) params.max_depth = String(opts.maxDepth);
+    if (opts?.kind) params.kind = opts.kind;
+    return apiClient.get<SearchResult>('/api/fs/search', params);
   },
 
   // Remote directory browse (via HTTP proxy)

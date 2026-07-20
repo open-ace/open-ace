@@ -13,7 +13,13 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useLanguage, useAppStore } from '@/store';
 import { t } from '@/i18n';
-import { fsApi, type DirectoryEntry, type FileEntry, MAX_UPLOAD_SIZE_MB } from '@/api/fs';
+import {
+  fsApi,
+  type DirectoryEntry,
+  type FileEntry,
+  type SearchEntry,
+  MAX_UPLOAD_SIZE_MB,
+} from '@/api/fs';
 import { Loading, Button, EmptyState } from '@/components/common';
 import { useToast, useConfirm } from '@/components/common';
 import { downloadBlob, formatBytes } from '@/utils';
@@ -88,6 +94,16 @@ export const LocalDirectoryBrowser: React.FC<LocalDirectoryBrowserProps> = ({
   const [isCreating, setIsCreating] = useState(false);
   const [pathHistory, setPathHistory] = useState<string[]>([]);
   const [fallbackNote, setFallbackNote] = useState<string | null>(null);
+
+  // Issue #1923: recursive name search state. `searchQuery` is the input
+  // value; `searchResults` is null when NOT searching (normal listing shown)
+  // and an array (possibly empty) when a search has resolved.
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<SearchEntry[] | null>(null);
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [searchTruncated, setSearchTruncated] = useState(false);
+  const searchSeqRef = useRef(0);
 
   const isWindows = useMemo(() => {
     const pathForDetection = currentPath !== '' ? currentPath : (initialPath ?? '');
@@ -199,6 +215,57 @@ export const LocalDirectoryBrowser: React.FC<LocalDirectoryBrowserProps> = ({
     void fetchDirectories(initialPath);
   }, [initialPath, fetchDirectories]);
 
+  // Issue #1923: debounced recursive name search. Fires 300ms after the user
+  // stops typing; an empty query exits search mode and restores the normal
+  // listing. A monotonically increasing seq ref guards against stale responses
+  // (slow query resolving after a faster one).
+  useEffect(() => {
+    const q = searchQuery.trim();
+    if (!q) {
+      // Empty query → exit search mode.
+      searchSeqRef.current += 1;
+      setSearchResults(null);
+      setSearchError(null);
+      setSearchTruncated(false);
+      setIsSearching(false);
+      return;
+    }
+    setIsSearching(true);
+    setSearchError(null);
+    const seq = ++searchSeqRef.current;
+    const timer = setTimeout(() => {
+      fsApi
+        .searchFiles(q, currentPath)
+        .then((result) => {
+          if (seq !== searchSeqRef.current) return; // stale
+          setSearchResults(result.results);
+          setSearchTruncated(result.truncated);
+        })
+        .catch((err) => {
+          if (seq !== searchSeqRef.current) return;
+          setSearchError((err as Error)?.message ?? 'Search failed');
+          setSearchResults([]);
+          setSearchTruncated(false);
+        })
+        .finally(() => {
+          if (seq !== searchSeqRef.current) return;
+          setIsSearching(false);
+        });
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery, currentPath]);
+
+  const isSearchMode = searchResults !== null;
+
+  // Navigate to a search-result directory: fetch it and exit search mode so
+  // the user lands in a normal listing of that directory.
+  const handleNavigateToSearchResult = (entry: SearchEntry) => {
+    setSearchQuery('');
+    setSearchResults(null);
+    setSearchTruncated(false);
+    void fetchDirectories(entry.path);
+  };
+
   const handleNavigate = (dir: DirectoryEntry) => {
     void fetchDirectories(dir.path);
   };
@@ -213,6 +280,8 @@ export const LocalDirectoryBrowser: React.FC<LocalDirectoryBrowserProps> = ({
         return;
       }
     }
+    // Issue #1923: exit search mode when the user navigates via breadcrumbs.
+    setSearchQuery('');
     void fetchDirectories(path);
   };
 
@@ -222,6 +291,8 @@ export const LocalDirectoryBrowser: React.FC<LocalDirectoryBrowserProps> = ({
       return;
     }
     if (parentPath) {
+      // Issue #1923: exit search mode when navigating up.
+      setSearchQuery('');
       void fetchDirectories(parentPath);
     }
   };
@@ -481,6 +552,38 @@ export const LocalDirectoryBrowser: React.FC<LocalDirectoryBrowserProps> = ({
         </div>
       </div>
 
+      {/* Issue #1923: recursive name search (personal files only). Sits on its
+          own row so it doesn't crowd the Up / New Folder / Upload buttons. The
+          search root is the current directory; the backend enforces the
+          home-subtree lock so users can't search outside their own home. */}
+      {enableFileActions && (
+        <div className="mb-2">
+          <div className="input-group input-group-sm">
+            <span className="input-group-text bg-transparent">
+              <i className={`bi ${isSearching ? 'bi-arrow-repeat' : 'bi-search'}`} />
+            </span>
+            <input
+              type="text"
+              className="form-control"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder={t('searchFilesPlaceholder', language) || 'Search files and folders…'}
+              aria-label={t('searchFilesPlaceholder', language) || 'Search files and folders…'}
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                className="btn btn-outline-secondary"
+                onClick={() => setSearchQuery('')}
+                title={t('clearSearch', language) || 'Clear search'}
+              >
+                <i className="bi bi-x-lg" />
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       <div className="mb-2 d-flex gap-2">
         {/* Issue #1813: Hide Up button when lockToRoot is true */}
         {parentPath && !lockToRoot && (
@@ -575,7 +678,78 @@ export const LocalDirectoryBrowser: React.FC<LocalDirectoryBrowserProps> = ({
       )}
 
       <div className="directory-list" style={{ maxHeight: listMaxHeight, overflow: 'auto' }}>
-        {isLoading ? (
+        {isSearchMode ? (
+          isSearching ? (
+            <Loading size="sm" text={t('loading', language)} />
+          ) : searchError ? (
+            <div className="alert alert-danger small mb-2">
+              <i className="bi bi-exclamation-triangle me-1" />
+              {searchError}
+            </div>
+          ) : searchResults.length === 0 ? (
+            <EmptyState
+              icon="bi-search"
+              title={t('searchNoResults', language) || 'No matching files or folders'}
+              description={t('searchFilesPlaceholder', language) || 'Search files and folders…'}
+            />
+          ) : (
+            <>
+              {searchTruncated && (
+                <div className="alert alert-info small mb-2">
+                  <i className="bi bi-info-circle me-1" />
+                  {
+                    t('searchTruncated', language, {
+                      count: String(searchResults.length),
+                    }) as string
+                  }
+                </div>
+              )}
+              <div className="small text-muted mb-1">
+                {
+                  t('searchResultsCount', language, {
+                    count: String(searchResults.length),
+                  }) as string
+                }
+              </div>
+              <ul className="list-group">
+                {searchResults.map((entry) => (
+                  <li
+                    key={`${entry.type}-${entry.path}`}
+                    className={`list-group-item list-group-item-action d-flex justify-content-between align-items-center ${
+                      entry.type === 'dir' ? 'search-result-dir' : 'search-result-file'
+                    }`}
+                    onClick={
+                      entry.type === 'dir' ? () => handleNavigateToSearchResult(entry) : undefined
+                    }
+                    style={{ cursor: entry.type === 'dir' ? 'pointer' : 'default' }}
+                    title={entry.relative_path}
+                  >
+                    <div
+                      className="text-truncate d-flex align-items-center"
+                      style={{ minWidth: 0 }}
+                    >
+                      <i
+                        className={`bi ${entry.type === 'dir' ? 'bi-folder' : 'bi-file-earmark'} me-2`}
+                      />
+                      <span className="text-truncate">{entry.name}</span>
+                      {entry.type === 'file' && typeof entry.size === 'number' && (
+                        <span className="badge text-muted fw-normal ms-2 small">
+                          {formatBytes(entry.size)}
+                        </span>
+                      )}
+                    </div>
+                    <span
+                      className="text-muted small ms-2 text-truncate"
+                      style={{ maxWidth: '45%' }}
+                    >
+                      {entry.relative_path}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )
+        ) : isLoading ? (
           <Loading size="sm" text={t('loading', language)} />
         ) : directories.length === 0 && (!enableFileActions || files.length === 0) ? (
           <EmptyState

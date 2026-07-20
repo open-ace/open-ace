@@ -1322,6 +1322,300 @@ def api_delete_file():
         return jsonify({"error": f"Delete failed: {e}"}), 500
 
 
+# --- Recursive search (Issue #1923) -----------------------------------------
+# Personal-files page exposes a search box that recursively matches
+# directory and file *names* under the user's home subtree. Matching is
+# case-insensitive substring with multi-keyword AND (e.g. ``report 2025``
+# matches names containing both tokens). We do NOT pull in a fuzzy library —
+# substring + multi-keyword covers the vast majority of real-world cases and
+# works well for CJK filenames where character-level fuzzy adds little value.
+#
+# Security / scope:
+#   - Search root must pass the same checks as browse: is_valid_path() with
+#     workspace base_dirs prefix + the home subtree lock (#1813) via
+#     _resolve_user_owned_path(). Users cannot search outside their own home.
+#   - Only readable entries are returned. In direct-access mode os.access
+#     filters; in sudo mode ``find -readable`` filters. Unreadable files
+#     (e.g. root-owned 0600 configs) are hidden from results, consistent
+#     with the #1902 permission semantics.
+#   - Hidden entries (dotfiles) are skipped, except ``.qwen`` which the
+#     browse UI also surfaces — matching list_subdirectories behavior.
+#
+# Performance:
+#   - max_results caps the response (default 200, hard cap 500). ``truncated``
+#     is set when the cap is hit.
+#   - max_depth caps recursion (default 8, hard cap 20) so we don't descend
+#     into pathological trees (node_modules, .git) even when the caller asks
+#     for more.
+#   - Direct-access mode prunes hidden dirnames during os.walk so we never
+#     descend into them. Sudo mode uses a single ``find -readable -printf``
+#     call — one sudo exec for the whole search.
+
+SEARCH_DEFAULT_MAX_RESULTS = 200
+SEARCH_HARD_MAX_RESULTS = 500
+SEARCH_DEFAULT_MAX_DEPTH = 8
+SEARCH_HARD_MAX_DEPTH = 20
+
+
+def _build_name_matcher(query: str):
+    """Build a case-insensitive, multi-keyword AND name matcher.
+
+    Splits *query* on whitespace; a name matches only if it contains every
+    token as a case-insensitive substring. Returns ``None`` when the query
+    has no usable tokens (caller should 400 rather than return everything).
+    """
+    tokens = [t.lower() for t in (query or "").split() if t.strip()]
+    if not tokens:
+        return None
+
+    def match(name: str) -> bool:
+        lowered = name.lower()
+        return all(t in lowered for t in tokens)
+
+    return match
+
+
+def _entry_visible(name: str) -> bool:
+    """Same dotfile policy as list_subdirectories: skip hidden, keep .qwen."""
+    return name == ".qwen" or not name.startswith(".")
+
+
+def _search_tree_direct(root: str, matcher, max_depth: int, max_results: int, kind: str):
+    """Recursive search via os.walk (process user can read the tree directly).
+
+    Returns ``(results, truncated, error)`` — *error* is always None here
+    (kept in the tuple for parity with _search_tree_sudo).
+    """
+    results: list[dict[str, Any]] = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        rel = os.path.relpath(dirpath, root)
+        depth = 0 if rel == "." else rel.count(os.sep) + 1
+        if depth >= max_depth:
+            # Entries here would be at depth+1 > max_depth; stop descending.
+            dirnames[:] = []
+            continue
+        # Prune hidden dirs (except .qwen) so we never descend into .git etc.
+        dirnames[:] = [d for d in dirnames if _entry_visible(d)]
+
+        want_dirs = kind in ("all", "dir")
+        want_files = kind in ("all", "file")
+
+        for d in dirnames if want_dirs else []:
+            if len(results) >= max_results:
+                return results, True, None
+            if not matcher(d):
+                continue
+            full = os.path.join(dirpath, d)
+            if not os.access(full, os.R_OK):
+                continue
+            results.append(
+                {
+                    "name": d,
+                    "path": full,
+                    "relative_path": os.path.relpath(full, root),
+                    "type": "dir",
+                    "is_readable": True,
+                }
+            )
+
+        for f in filenames if want_files else []:
+            if not _entry_visible(f):
+                continue
+            if len(results) >= max_results:
+                return results, True, None
+            if not matcher(f):
+                continue
+            full = os.path.join(dirpath, f)
+            try:
+                if not os.access(full, os.R_OK):
+                    continue
+                size = os.path.getsize(full)
+            except OSError:
+                continue
+            results.append(
+                {
+                    "name": f,
+                    "path": full,
+                    "relative_path": os.path.relpath(full, root),
+                    "type": "file",
+                    "size": size,
+                    "is_readable": True,
+                }
+            )
+
+    return results, len(results) >= max_results, None
+
+
+def _search_tree_sudo(
+    root: str, matcher, max_depth: int, max_results: int, kind: str, effective: str
+):
+    """Recursive search via ``find -readable -printf`` as the target user.
+
+    A single sudo exec enumerates every readable entry under *root* (up to
+    *max_depth*); we then filter by name in Python. ``-readable`` is GNU find
+    and matches the same semantics as ``os.access(R_OK)`` in direct mode —
+    unreadable files/dirs are excluded, and unreadable dirs are not descended
+    into.
+
+    Returns ``(results, truncated, error)``. *error* is a short human-readable
+    string when the sudo ``find`` call itself fails (e.g. ``find`` is not in
+    the sudoers OPENACE_UTILS whitelist for this deployment); the caller
+    surfaces it as a 500 so the user sees a clear message instead of a silent
+    empty result.
+    """
+    results: list[dict[str, Any]] = []
+    # %y=type letter (f/d), %p=path, %s=size, \n=record separator.
+    cmd = [
+        "find",
+        root,
+        "-maxdepth",
+        str(max_depth),
+        "-readable",
+        "-printf",
+        "%y\t%p\t%s\n",
+    ]
+    proc = run_as_user(effective, cmd)
+    if proc.returncode != 0:
+        stderr = (proc.stderr or "").strip()
+        logger.warning(f"find as {effective} failed for {root}: {stderr}")
+        # Distinguish "find not in sudoers" (deployment config issue) from
+        # other failures so the operator knows what to fix.
+        if (
+            "password" in stderr.lower()
+            or "not allowed" in stderr.lower()
+            or "sudo" in stderr.lower()
+        ):
+            error = (
+                "Search unavailable: 'find' is not permitted via sudo on this "
+                "host. Add '/usr/bin/find *' to the OPENACE_UTILS sudoers alias "
+                "(see scripts/install-central/package-method/install.sh)."
+            )
+        else:
+            error = f"Search failed: {stderr or 'unknown error'}"
+        return results, False, error
+
+    want_dirs = kind in ("all", "dir")
+    want_files = kind in ("all", "file")
+
+    for line in proc.stdout.split("\n"):
+        if not line:
+            continue
+        parts = line.split("\t")
+        if len(parts) < 3:
+            continue
+        type_letter, entry_path, size_s = parts[0], parts[1], parts[2]
+        if entry_path == root:
+            continue
+        name = os.path.basename(entry_path)
+        if not _entry_visible(name):
+            continue
+        is_dir = type_letter == "d"
+        if is_dir and not want_dirs:
+            continue
+        if not is_dir and not want_files:
+            continue
+        if not matcher(name):
+            continue
+        try:
+            size = int(size_s)
+        except ValueError:
+            size = 0
+        if len(results) >= max_results:
+            return results, True, None
+        entry: dict[str, Any] = {
+            "name": name,
+            "path": entry_path,
+            "relative_path": os.path.relpath(entry_path, root),
+            "type": "dir" if is_dir else "file",
+            "is_readable": True,
+        }
+        if not is_dir:
+            entry["size"] = size
+        results.append(entry)
+
+    return results, len(results) >= max_results, None
+
+
+@fs_bp.route("/fs/search", methods=["GET"])
+def api_search_files():
+    """Recursively search directory/file names under a home-subtree path.
+
+    Query params:
+      - q: search query (required). Split on whitespace; every token must
+        appear in the entry name (case-insensitive substring).
+      - path: search root (optional, default = home dir). Must resolve inside
+        the user's home subtree (#1813 lock).
+      - max_results: cap on returned entries (optional, default 200, hard 500).
+      - max_depth: recursion cap (optional, default 8, hard 20).
+      - kind: "all" (default) | "dir" | "file".
+
+    Returns ``{query, root, results, total, truncated}``. Only readable
+    entries are included; unreadable matches are silently skipped.
+    """
+    user = g.user
+
+    query = (request.args.get("q", "") or "").strip()
+    matcher = _build_name_matcher(query)
+    if matcher is None:
+        return jsonify({"error": "Query (q) is required"}), 400
+
+    # Resolve + validate search root (home subtree lock, base_dirs prefix).
+    # Mirror api_browse_directory: bare "home" / empty → real home path before
+    # validation (is_valid_path rejects the literal "home" as non-absolute).
+    raw_root = request.args.get("path", "") or ""
+    if not raw_root or raw_root.lower() == "home":
+        raw_root = get_home_directory(user)
+    try:
+        root, sa = _resolve_user_owned_path(raw_root, user)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+    # Bounds on caps (defend against abusive callers).
+    try:
+        max_results = int(request.args.get("max_results", SEARCH_DEFAULT_MAX_RESULTS))
+    except ValueError:
+        max_results = SEARCH_DEFAULT_MAX_RESULTS
+    max_results = max(1, min(max_results, SEARCH_HARD_MAX_RESULTS))
+
+    try:
+        max_depth = int(request.args.get("max_depth", SEARCH_DEFAULT_MAX_DEPTH))
+    except ValueError:
+        max_depth = SEARCH_DEFAULT_MAX_DEPTH
+    max_depth = max(1, min(max_depth, SEARCH_HARD_MAX_DEPTH))
+
+    kind = (request.args.get("kind", "all") or "all").lower()
+    if kind not in ("all", "dir", "file"):
+        kind = "all"
+
+    dir_info = get_directory_info(root, sa)
+    if not dir_info["exists"] or not dir_info["is_dir"]:
+        return jsonify({"error": "Search root is not a directory"}), 400
+    if not dir_info["is_readable"]:
+        return jsonify({"error": "Permission denied"}), 403
+
+    if _is_direct_access(sa):
+        results, truncated, error = _search_tree_direct(root, matcher, max_depth, max_results, kind)
+    else:
+        effective = get_effective_system_account(sa)
+        assert effective is not None  # _is_direct_access False ⇒ effective set
+        results, truncated, error = _search_tree_sudo(
+            root, matcher, max_depth, max_results, kind, effective
+        )
+
+    if error:
+        return jsonify({"error": error}), 500
+
+    return jsonify(
+        {
+            "query": query,
+            "root": root,
+            "results": results,
+            "total": len(results),
+            "truncated": truncated,
+        }
+    )
+
+
 def _safe_remove(path: str) -> None:
     """Best-effort remove; ignore errors (used for temp file cleanup)."""
     try:
