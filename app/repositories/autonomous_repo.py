@@ -1,9 +1,10 @@
 # mypy: disable-error-code="return-value,arg-type"
 """
-Open ACE - Autonomous Workflow Repository
-
-Database operations for the AI autonomous development feature.
+Open ACE - Autonomous Workflow RepositoryDatabase operations for the AI autonomous development feature.
 """
+
+from __future__ import annotations
+
 
 import logging
 import uuid

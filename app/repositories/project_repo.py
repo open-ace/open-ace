@@ -1,8 +1,9 @@
 """
-Open ACE - Project Repository
-
-Repository for project data access operations.
+Open ACE - Project RepositoryRepository for project data access operations.
 """
+
+from __future__ import annotations
+
 
 import logging
 from datetime import datetime, timezone

@@ -57,6 +57,11 @@ Exit code: 1 if any violation is found, 0 otherwise.
 
 from __future__ import annotations
 
+
+from __future__ import annotations
+
+
+from __future__ import annotations
 import ast
 import re
 import sys

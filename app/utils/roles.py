@@ -27,6 +27,9 @@ re-introduce a split.
 
 from __future__ import annotations
 
+
+
+
 # Canonical message roles. All write paths should reference these instead of
 # bare string literals so role values can never drift.
 ROLE_USER = "user"

@@ -16,6 +16,13 @@ Only ``interactive`` (not ``subagent_child``) and non-archived sessions are
 synced, matching ``SessionSyncService._scan_and_sync_zcode_db``.
 """
 
+from __future__ import annotations
+
+
+from __future__ import annotations
+
+
+from __future__ import annotations
 import argparse
 import getpass
 import json

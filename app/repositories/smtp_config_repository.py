@@ -1,8 +1,9 @@
 """
-Open ACE - SMTP Config Repository
-
-Provides database access for SMTP configuration management.
+Open ACE - SMTP Config RepositoryProvides database access for SMTP configuration management.
 """
+
+from __future__ import annotations
+
 
 import logging
 from datetime import datetime, timezone

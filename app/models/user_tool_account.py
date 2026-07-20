@@ -1,9 +1,11 @@
 """
 Open ACE - User Tool Account Model
-
 Model for mapping users to their tool accounts (sender_name in different tools).
 Supports multi-source accounts: Slack, Feishu, DingTalk, Qwen, Claude, Openclaw, etc.
 """
+
+from __future__ import annotations
+
 
 from dataclasses import dataclass
 from datetime import datetime

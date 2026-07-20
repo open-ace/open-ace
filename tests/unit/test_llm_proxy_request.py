@@ -13,6 +13,8 @@ Coverage:
 - Parameter compatibility
 """
 
+from __future__ import annotations
+
 import os
 import socket
 import threading
@@ -21,6 +23,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import requests
+from flask import Flask
 
 from app.utils.llm_proxy_request import (
     _normalize_host_for_allowlist,
@@ -63,6 +66,14 @@ def mock_guard_mode(monkeypatch):
         monkeypatch.setenv("OPENACE_LLM_PROXY_URL_GUARD_MODE", mode)
 
     return _set
+
+
+@pytest.fixture
+def flask_app():
+    """Create a Flask app for testing."""
+    app = Flask(__name__)
+    app.config["TESTING"] = True
+    return app
 
 
 def _mock_resolver(*addresses):
@@ -206,117 +217,127 @@ class TestAllowlistCache:
 class TestUrlBlocking:
     """Tests for URL blocking behavior."""
 
-    def test_block_localhost(self):
+    def test_block_localhost(self, flask_app):
         """localhost should be blocked."""
-        response = safe_llm_proxy_request(
-            "GET",
-            "http://localhost:8080/test",
-            tenant_id=1,
-            provider="openai",
-        )
-        assert isinstance(response, tuple)
-        assert response[1] == 403
-        data = response[0].get_json()
-        assert data["error"]["code"] == "SSRF_BLOCKED"
+        with flask_app.app_context():
+            response = safe_llm_proxy_request(
+                "GET",
+                "http://localhost:8080/test",
+                tenant_id=1,
+                provider="openai",
+            )
+            assert isinstance(response, tuple)
+            assert response[1] == 403
+            data = response[0].get_json()
+            assert data["error"]["code"] == "SSRF_BLOCKED"
 
-    def test_block_127_0_0_1(self):
+    def test_block_127_0_0_1(self, flask_app):
         """127.0.0.1 should be blocked."""
-        response = safe_llm_proxy_request(
-            "GET",
-            "http://127.0.0.1:8080/test",
-            tenant_id=1,
-            provider="openai",
-        )
-        assert isinstance(response, tuple)
-        assert response[1] == 403
+        with flask_app.app_context():
+            response = safe_llm_proxy_request(
+                "GET",
+                "http://127.0.0.1:8080/test",
+                tenant_id=1,
+                provider="openai",
+            )
+            assert isinstance(response, tuple)
+            assert response[1] == 403
 
-    def test_block_ipv6_loopback(self):
+    def test_block_ipv6_loopback(self, flask_app):
         """::1 (IPv6 loopback) should be blocked."""
-        response = safe_llm_proxy_request(
-            "GET",
-            "http://[::1]:8080/test",
-            tenant_id=1,
-            provider="openai",
-        )
-        assert isinstance(response, tuple)
-        assert response[1] == 403
+        with flask_app.app_context():
+            response = safe_llm_proxy_request(
+                "GET",
+                "http://[::1]:8080/test",
+                tenant_id=1,
+                provider="openai",
+            )
+            assert isinstance(response, tuple)
+            assert response[1] == 403
 
-    def test_block_metadata_ip(self):
+    def test_block_metadata_ip(self, flask_app):
         """169.254.169.254 (cloud metadata) should be blocked."""
-        response = safe_llm_proxy_request(
-            "GET",
-            "http://169.254.169.254/latest/meta-data/",
-            tenant_id=1,
-            provider="openai",
-        )
-        assert isinstance(response, tuple)
-        assert response[1] == 403
+        with flask_app.app_context():
+            response = safe_llm_proxy_request(
+                "GET",
+                "http://169.254.169.254/latest/meta-data/",
+                tenant_id=1,
+                provider="openai",
+            )
+            assert isinstance(response, tuple)
+            assert response[1] == 403
 
-    def test_block_rfc1918_10(self):
+    def test_block_rfc1918_10(self, flask_app):
         """10.x.x.x (private network) should be blocked."""
-        response = safe_llm_proxy_request(
-            "GET",
-            "http://10.0.0.1/test",
-            tenant_id=1,
-            provider="openai",
-        )
-        assert isinstance(response, tuple)
-        assert response[1] == 403
+        with flask_app.app_context():
+            response = safe_llm_proxy_request(
+                "GET",
+                "http://10.0.0.1/test",
+                tenant_id=1,
+                provider="openai",
+            )
+            assert isinstance(response, tuple)
+            assert response[1] == 403
 
-    def test_block_rfc1918_172(self):
+    def test_block_rfc1918_172(self, flask_app):
         """172.16-31.x.x (private network) should be blocked."""
-        response = safe_llm_proxy_request(
-            "GET",
-            "http://172.16.0.1/test",
-            tenant_id=1,
-            provider="openai",
-        )
-        assert isinstance(response, tuple)
-        assert response[1] == 403
+        with flask_app.app_context():
+            response = safe_llm_proxy_request(
+                "GET",
+                "http://172.16.0.1/test",
+                tenant_id=1,
+                provider="openai",
+            )
+            assert isinstance(response, tuple)
+            assert response[1] == 403
 
-    def test_block_rfc1918_192(self):
+    def test_block_rfc1918_192(self, flask_app):
         """192.168.x.x (private network) should be blocked."""
-        response = safe_llm_proxy_request(
-            "GET",
-            "http://192.168.1.1/test",
-            tenant_id=1,
-            provider="openai",
-        )
-        assert isinstance(response, tuple)
-        assert response[1] == 403
+        with flask_app.app_context():
+            response = safe_llm_proxy_request(
+                "GET",
+                "http://192.168.1.1/test",
+                tenant_id=1,
+                provider="openai",
+            )
+            assert isinstance(response, tuple)
+            assert response[1] == 403
 
-    def test_block_ipv6_unique_local(self):
+    def test_block_ipv6_unique_local(self, flask_app):
         """fc00::/7 (IPv6 unique local) should be blocked."""
-        response = safe_llm_proxy_request(
-            "GET",
-            "http://[fc00::1]/test",
-            tenant_id=1,
-            provider="openai",
-        )
-        assert isinstance(response, tuple)
-        assert response[1] == 403
+        with flask_app.app_context():
+            response = safe_llm_proxy_request(
+                "GET",
+                "http://[fc00::1]/test",
+                tenant_id=1,
+                provider="openai",
+            )
+            assert isinstance(response, tuple)
+            assert response[1] == 403
 
-    def test_block_ipv6_link_local(self):
+    def test_block_ipv6_link_local(self, flask_app):
         """fe80::/10 (IPv6 link-local) should be blocked."""
-        response = safe_llm_proxy_request(
-            "GET",
-            "http://[fe80::1]/test",
-            tenant_id=1,
-            provider="openai",
-        )
-        assert isinstance(response, tuple)
-        assert response[1] == 403
+        with flask_app.app_context():
+            response = safe_llm_proxy_request(
+                "GET",
+                "http://[fe80::1]/test",
+                tenant_id=1,
+                provider="openai",
+            )
+            assert isinstance(response, tuple)
+            assert response[1] == 403
 
-    def test_block_nat64_metadata(self):
+    def test_block_nat64_metadata(self, flask_app):
         """NAT64-encoded metadata IP should be blocked."""
-        response = safe_llm_proxy_request(
-            "GET",
-            "http://[64:ff9b::169.254.169.254]/test",
-            tenant_id=1,
-            provider="openai",
-        )
-        assert isinstance(response, tuple)
-        assert response[1] == 403
+        with flask_app.app_context():
+            response = safe_llm_proxy_request(
+                "GET",
+                "http://[64:ff9b::169.254.169.254]/test",
+                tenant_id=1,
+                provider="openai",
+            )
+            assert isinstance(response, tuple)
+            assert response[1] == 403
 
 
 # ── Allowlist Bypass Tests ───────────────────────────────────────────────────
@@ -391,19 +412,20 @@ class TestGuardMode:
         # In log mode, should return the mock response (not blocked)
         assert not isinstance(response, tuple)
 
-    def test_enforce_mode_blocks(self, mock_guard_mode):
+    def test_enforce_mode_blocks(self, mock_guard_mode, flask_app):
         """Enforce mode should block requests."""
         mock_guard_mode("enforce")
 
-        response = safe_llm_proxy_request(
-            "GET",
-            "http://127.0.0.1/test",
-            tenant_id=1,
-            provider="openai",
-        )
+        with flask_app.app_context():
+            response = safe_llm_proxy_request(
+                "GET",
+                "http://127.0.0.1/test",
+                tenant_id=1,
+                provider="openai",
+            )
 
-        assert isinstance(response, tuple)
-        assert response[1] == 403
+            assert isinstance(response, tuple)
+            assert response[1] == 403
 
 
 # ── Storage Validation Tests ──────────────────────────────────────────────────
@@ -412,15 +434,16 @@ class TestGuardMode:
 class TestStorageValidation:
     """Tests for base_url storage validation."""
 
-    def test_validate_public_url_passes(self):
+    def test_validate_public_url_passes(self, flask_app):
         """Public URL should pass validation."""
-        is_valid, error = validate_base_url_for_storage(
-            "https://api.openai.com",
-            tenant_id=1,
-            provider="openai",
-        )
-        assert is_valid is True
-        assert error is None
+        with flask_app.app_context():
+            is_valid, error = validate_base_url_for_storage(
+                "https://api.openai.com",
+                tenant_id=1,
+                provider="openai",
+            )
+            assert is_valid is True
+            assert error is None
 
     def test_validate_private_url_fails(self):
         """Private URL should fail validation."""
@@ -517,25 +540,26 @@ class TestParameterCompatibility:
 class TestErrorResponseFormat:
     """Tests for error response format."""
 
-    def test_error_response_structure(self):
+    def test_error_response_structure(self, flask_app):
         """Error response should have correct structure."""
-        response = safe_llm_proxy_request(
-            "GET",
-            "http://127.0.0.1/test",
-            tenant_id=1,
-            provider="openai",
-        )
+        with flask_app.app_context():
+            response = safe_llm_proxy_request(
+                "GET",
+                "http://127.0.0.1/test",
+                tenant_id=1,
+                provider="openai",
+            )
 
-        assert isinstance(response, tuple)
-        flask_response, status = response
-        assert status == 403
+            assert isinstance(response, tuple)
+            flask_response, status = response
+            assert status == 403
 
-        data = flask_response.get_json()
-        assert "error" in data
-        assert data["error"]["type"] == "proxy_url_blocked"
-        assert data["error"]["code"] == "SSRF_BLOCKED"
-        # Should NOT expose the blocked IP
-        assert "127.0.0.1" not in str(data)
+            data = flask_response.get_json()
+            assert "error" in data
+            assert data["error"]["type"] == "proxy_url_blocked"
+            assert data["error"]["code"] == "SSRF_BLOCKED"
+            # Should NOT expose the blocked IP
+            assert "127.0.0.1" not in str(data)
 
 
 if __name__ == "__main__":

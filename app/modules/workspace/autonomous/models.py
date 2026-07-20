@@ -1,6 +1,5 @@
 """
 Open ACE - Autonomous Development Models
-
 Data models for the AI autonomous development workflow.
 
 These dataclass models serve as the canonical type definition for autonomous
@@ -10,6 +9,10 @@ compatibility, these models provide:
 - Validation via from_dict() / to_dict() roundtrips
 - A migration path toward typed ORM in future iterations
 """
+
+from __future__ import annotations
+
+
 
 from dataclasses import dataclass, field
 from datetime import datetime

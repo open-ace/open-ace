@@ -16,6 +16,13 @@ Usage:
   python3 scripts/manage.py --remote deploy  # Deploy to remote machine
 """
 
+from __future__ import annotations
+
+
+from __future__ import annotations
+
+
+from __future__ import annotations
 import argparse
 import json
 import os

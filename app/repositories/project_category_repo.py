@@ -1,8 +1,9 @@
 """
-Project Category Repository
-
-Issue #1278: Data access for project categories
+Project Category RepositoryIssue #1278: Data access for project categories
 """
+
+from __future__ import annotations
+
 
 import json
 import logging

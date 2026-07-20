@@ -1,6 +1,5 @@
 """
 Open ACE - Email Notification Service
-
 Handles email notification sending for alerts.
 Provides:
 - Asynchronous email sending
@@ -8,6 +7,10 @@ Provides:
 - Rate limiting
 - Email templates
 """
+
+from __future__ import annotations
+
+
 
 import logging
 import queue

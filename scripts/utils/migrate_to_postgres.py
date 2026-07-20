@@ -14,6 +14,13 @@ Prerequisites:
     3. Run alembic migrations first: alembic upgrade head
 """
 
+from __future__ import annotations
+
+
+from __future__ import annotations
+
+
+from __future__ import annotations
 import logging
 import os
 import sqlite3

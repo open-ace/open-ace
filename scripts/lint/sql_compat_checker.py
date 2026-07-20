@@ -34,6 +34,11 @@ Exit code: 1 if violations found (not in baseline), 0 otherwise.
 
 from __future__ import annotations
 
+
+from __future__ import annotations
+
+
+from __future__ import annotations
 import argparse
 import json
 import re

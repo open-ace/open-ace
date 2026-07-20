@@ -1,6 +1,5 @@
 """
 Open ACE - User Daily Stats Aggregator Service
-
 Provides background aggregation of user usage data from daily_messages
 to user_daily_stats table for optimized query performance.
 
@@ -9,6 +8,10 @@ This service should be called:
 2. Periodically (every hour) via cron or background task
 3. After new messages are saved (incremental update)
 """
+
+from __future__ import annotations
+
+
 
 import logging
 from datetime import datetime, timedelta, timezone

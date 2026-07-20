@@ -10,6 +10,12 @@ It includes:
 - Period reset functionality
 """
 
+from __future__ import annotations
+
+
+from __future__ import annotations
+
+from __future__ import annotations
 import calendar
 import json
 import logging

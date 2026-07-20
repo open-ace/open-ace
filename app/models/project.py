@@ -1,8 +1,10 @@
 """
 Open ACE - Project Models
-
 Data models for project management and statistics.
 """
+
+from __future__ import annotations
+
 
 from dataclasses import dataclass, field
 from datetime import datetime

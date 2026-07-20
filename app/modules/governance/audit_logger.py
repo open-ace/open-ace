@@ -1,6 +1,5 @@
 """
 Open ACE - Audit Logger Module
-
 Provides comprehensive audit logging for enterprise compliance and security.
 Records all user actions, system events, and data access for accountability.
 
@@ -19,6 +18,10 @@ Resource conventions (governance audit logging):
   NOT add audit_logs queries that bypass query()/from_dict — they would skip
   parsing and surface details as a raw string.
 """
+
+from __future__ import annotations
+
+
 
 import json
 import logging

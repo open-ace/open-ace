@@ -1,6 +1,5 @@
 """
 Open ACE - Tool Account Auto Mapping Service
-
 Service for automatic tool account mapping based on:
 1. Username/email matching in sender_name
 2. Custom mapping rules
@@ -8,6 +7,10 @@ Service for automatic tool account mapping based on:
 
 This service runs after data collection to auto-assign tool accounts to users.
 """
+
+from __future__ import annotations
+
+
 
 import logging
 from dataclasses import dataclass

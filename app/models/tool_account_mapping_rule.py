@@ -1,9 +1,11 @@
 """
 Open ACE - Tool Account Mapping Rule Model
-
 Model for automatic tool account mapping rules.
 Supports multiple match types: exact, prefix, suffix, contains, regex.
 """
+
+from __future__ import annotations
+
 
 import logging
 import re

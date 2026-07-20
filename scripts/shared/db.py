@@ -6,6 +6,12 @@ Provides database operations for the ai_token_usage project.
 Supports both SQLite (default) and PostgreSQL databases.
 """
 
+from __future__ import annotations
+
+
+from __future__ import annotations
+
+from __future__ import annotations
 import json
 import os
 import sqlite3

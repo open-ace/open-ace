@@ -1,8 +1,9 @@
 """
-Open ACE - Tenant Repository
-
-Data access layer for tenant management.
+Open ACE - Tenant RepositoryData access layer for tenant management.
 """
+
+from __future__ import annotations
+
 
 import contextlib
 import json

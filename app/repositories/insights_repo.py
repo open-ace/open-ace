@@ -1,8 +1,9 @@
 """
-Open ACE - Insights Report Repository
-
-Repository for insights report CRUD operations.
+Open ACE - Insights Report RepositoryRepository for insights report CRUD operations.
 """
+
+from __future__ import annotations
+
 
 import json
 import logging

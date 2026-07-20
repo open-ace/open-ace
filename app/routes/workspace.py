@@ -1,6 +1,5 @@
 """
 Open ACE - AI Computing Explorer - Workspace API Routes
-
 API endpoints for workspace functionality including:
 - Prompt templates
 - Session management
@@ -8,6 +7,10 @@ API endpoints for workspace functionality including:
 - State synchronization
 - Collaboration features
 """
+
+from __future__ import annotations
+
+
 
 import logging
 from datetime import datetime, timedelta, timezone

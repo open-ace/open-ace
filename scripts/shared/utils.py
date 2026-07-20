@@ -5,6 +5,12 @@ AI Token Usage - Utils Module
 Provides utility functions for the ai_token_usage project.
 """
 
+from __future__ import annotations
+
+
+from __future__ import annotations
+
+from __future__ import annotations
 import logging
 import os
 import re

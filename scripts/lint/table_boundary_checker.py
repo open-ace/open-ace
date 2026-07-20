@@ -33,6 +33,11 @@ Run:  python3 scripts/lint/table_boundary_checker.py [--baseline]
 
 from __future__ import annotations
 
+
+from __future__ import annotations
+
+
+from __future__ import annotations
 import argparse
 import ast
 import json

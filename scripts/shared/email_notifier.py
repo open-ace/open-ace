@@ -7,6 +7,10 @@ Provides email sending functionality for the ai_token_usage project.
 
 from __future__ import annotations
 
+
+from __future__ import annotations
+
+from __future__ import annotations
 import smtplib
 from datetime import datetime
 from email.mime.multipart import MIMEMultipart

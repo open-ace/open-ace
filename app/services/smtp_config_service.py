@@ -1,8 +1,11 @@
 """
 Open ACE - SMTP Config Service
-
 Provides SMTP configuration management and connection testing.
 """
+
+from __future__ import annotations
+
+
 
 import logging
 import smtplib

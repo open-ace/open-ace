@@ -1,9 +1,12 @@
 """
 Open ACE - AI Computing Explorer - Summary Service
-
 Service for managing pre-aggregated usage summary data.
 Provides fast dashboard queries by maintaining a summary table.
 """
+
+from __future__ import annotations
+
+
 
 import logging
 from datetime import datetime, timezone

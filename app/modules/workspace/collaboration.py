@@ -1,9 +1,12 @@
 """
 Open ACE - Collaboration Module
-
 Provides team collaboration features for shared sessions and knowledge base.
 Supports session sharing, team workspaces, and collaborative annotations.
 """
+
+from __future__ import annotations
+
+
 
 import json
 import logging

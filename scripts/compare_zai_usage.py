@@ -16,6 +16,11 @@ It then prints:
 
 from __future__ import annotations
 
+
+from __future__ import annotations
+
+
+from __future__ import annotations
 import argparse
 import importlib.util
 import sqlite3

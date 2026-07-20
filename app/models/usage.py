@@ -1,8 +1,10 @@
 """
 Open ACE - Usage Models
-
 Data models for usage tracking.
 """
+
+from __future__ import annotations
+
 
 from dataclasses import dataclass, field
 from datetime import datetime

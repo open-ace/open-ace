@@ -1,9 +1,12 @@
 """
 Open ACE - Insights Service
-
 Generates AI conversation insights reports by analyzing user conversation data.
 Calls GLM-5 model (OpenAI-compatible API) to produce structured analysis.
 """
+
+from __future__ import annotations
+
+
 
 import json
 import logging

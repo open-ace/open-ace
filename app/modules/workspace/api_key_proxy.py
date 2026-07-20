@@ -1,6 +1,5 @@
 """
 Open ACE - API Key Proxy Service
-
 Provides encrypted storage and proxy token management for LLM API keys.
 API keys never leave the server — remote agents receive short-lived proxy tokens
 that are exchanged for real keys by the server's LLM proxy endpoint.
@@ -10,6 +9,10 @@ Security Note (Issue #1894):
     and request time. Private network addresses are blocked by default.
     Use OPENACE_LLM_PROXY_ALLOWED_HOSTS to allow private model endpoints.
 """
+
+from __future__ import annotations
+
+
 
 import hashlib
 import json

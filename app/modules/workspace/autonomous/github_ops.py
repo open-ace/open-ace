@@ -1,10 +1,13 @@
 # mypy: disable-error-code="no-any-return,assignment,var-annotated"
 """
 Open ACE - GitHub Operations
-
 Wraps the `gh` CLI for repo, issue, branch, worktree, and PR operations.
 All methods invoke gh/git via subprocess and return parsed results.
 """
+
+from __future__ import annotations
+
+
 
 import json
 import logging

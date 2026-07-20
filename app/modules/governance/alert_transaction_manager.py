@@ -1,6 +1,5 @@
 """
 Open ACE - Alert Transaction Manager
-
 Provides transactional alert creation for quota alerts with:
 - Dual-write to both quota_alerts and alerts tables
 - Retry mechanism (up to 3 times)
@@ -9,6 +8,10 @@ Provides transactional alert creation for quota alerts with:
 
 Ensures data consistency across both tables.
 """
+
+from __future__ import annotations
+
+
 
 import json
 import logging

@@ -234,7 +234,7 @@ def get_quota_enforcement_config() -> dict:
     return default_config
 
 
-def get_secret_key() -> str | None:
+def get_secret_key() -> Optional[str]:
     """
     Get secret key with priority: environment variable > config file.
 
