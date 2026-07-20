@@ -20,7 +20,10 @@ Covers:
 """
 
 import os
+import re
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner
 from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
@@ -36,7 +39,7 @@ class TestEncodeProjectPathNormalizes:
         encoded = AutonomousAgentRunner._encode_project_path(raw)
         # realpath collapses the ".." — encoding must match what Claude CLI
         # writes, not the raw input.
-        expected = os.path.realpath(raw).replace("/", "-")
+        expected = re.sub(r"[^A-Za-z0-9]", "-", os.path.realpath(raw))
         assert encoded == expected
         assert ".." not in encoded
 
@@ -46,13 +49,29 @@ class TestEncodeProjectPathNormalizes:
         link_target = tmp_path / "real"
         link_target.mkdir()
         encoded = AutonomousAgentRunner._encode_project_path(str(link_target))
-        assert encoded == os.path.realpath(str(link_target)).replace("/", "-")
+        assert encoded == re.sub(r"[^A-Za-z0-9]", "-", os.path.realpath(str(link_target)))
 
     def test_already_canonical_unchanged(self):
         path = "/Users/rhuang/workspace/open-ace"
-        assert AutonomousAgentRunner._encode_project_path(path) == os.path.realpath(path).replace(
-            "/", "-"
+        assert AutonomousAgentRunner._encode_project_path(path) == re.sub(
+            r"[^A-Za-z0-9]", "-", os.path.realpath(path)
         )
+
+    @pytest.mark.parametrize(
+        ("path", "expected"),
+        [
+            (
+                "/Users/open_ace/repo name/.worktrees/workflow.v1",
+                "-Users-open-ace-repo-name--worktrees-workflow-v1",
+            ),
+            ("/Users/rhuang/open-ace", "-Users-rhuang-open-ace"),
+        ],
+    )
+    def test_matches_claude_code_non_alphanumeric_contract(self, path, expected):
+        # Fixed expected values intentionally do not reuse the implementation's
+        # regex. Claude Code 2.1.201 embeds the equivalent shell rule:
+        #   pwd | sed 's|[^a-zA-Z0-9]|-|g'
+        assert AutonomousAgentRunner._encode_project_path(path) == expected
 
     def test_empty_string_returns_empty(self):
         assert AutonomousAgentRunner._encode_project_path("") == ""
