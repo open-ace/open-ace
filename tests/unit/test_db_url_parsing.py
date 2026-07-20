@@ -6,8 +6,9 @@ Issue #1893: Production security hardening for Docker Compose.
 
 import os
 import secrets
-import pytest
 from urllib.parse import unquote
+
+import pytest
 
 
 def extract_db_password(database_url: str) -> str:

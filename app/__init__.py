@@ -288,6 +288,7 @@ def create_app(config=None):
                     password = auth_part.split(":", 1)[1]
                     # URL decode
                     from urllib.parse import unquote
+
                     password = unquote(password)
                     if password == "ace-secret":
                         warnings.append("default_db_password")
@@ -352,6 +353,7 @@ def create_app(config=None):
                 if ":" in auth_part:
                     password = auth_part.split(":", 1)[1]
                     from urllib.parse import unquote
+
                     password = unquote(password)
                     checks["db_password"] = "default_value" if password == "ace-secret" else "ok"
                 else:
