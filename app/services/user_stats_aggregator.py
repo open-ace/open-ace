@@ -12,7 +12,7 @@ This service should be called:
 
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Optional, cast
+from typing import cast
 
 from app.repositories.database import Database, escape_like, is_postgresql
 from app.repositories.user_repo import UserRepository
@@ -28,7 +28,7 @@ class UserDailyStatsAggregator:
     daily aggregations instead of computing them on-the-fly.
     """
 
-    def __init__(self, db: Optional[Database] = None):
+    def __init__(self, db: Database | None = None):
         """Initialize aggregator."""
         self.db = db or Database()
         self.user_repo = UserRepository()
@@ -64,7 +64,7 @@ class UserDailyStatsAggregator:
         return total_records
 
     def aggregate_user(
-        self, user_id: int, username: str, days: int = 30, system_account: Optional[str] = None
+        self, user_id: int, username: str, days: int = 30, system_account: str | None = None
     ) -> int:
         """
         Aggregate usage data for a specific user.
@@ -241,7 +241,7 @@ class UserDailyStatsAggregator:
             logger.error(f"Failed to aggregate user {username}: {e}")
             return 0
 
-    def aggregate_today(self, user_id: Optional[int] = None) -> int:
+    def aggregate_today(self, user_id: int | None = None) -> int:
         """
         Aggregate today's data for all users or a specific user.
 
@@ -293,7 +293,7 @@ class UserDailyStatsAggregator:
 
 
 # Singleton instance
-_aggregator: Optional[UserDailyStatsAggregator] = None
+_aggregator: UserDailyStatsAggregator | None = None
 
 
 def get_aggregator() -> UserDailyStatsAggregator:

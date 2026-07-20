@@ -30,7 +30,6 @@ SQLite: Uses regular CREATE INDEX (no CONCURRENTLY support)
 """
 
 import logging
-from typing import Union
 
 import sqlalchemy as sa
 from alembic import op
@@ -38,9 +37,9 @@ from alembic import op
 log = logging.getLogger(__name__)
 
 revision: str = "20260714_002_add_users_mapping_indexes"
-down_revision: Union[str, None] = "20260715_001_add_last_ci_failure_head_sha"
-branch_labels: Union[str, None] = None
-depends_on: Union[str, None] = None
+down_revision: str | None = "20260715_001_add_last_ci_failure_head_sha"
+branch_labels: str | None = None
+depends_on: str | None = None
 
 
 def _is_postgresql() -> bool:

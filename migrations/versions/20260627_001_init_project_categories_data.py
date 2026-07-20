@@ -18,14 +18,14 @@ Migration kept for alembic version chain continuity.
 """
 
 import logging
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 logger = logging.getLogger(__name__)
 
 revision: str = "20260627_001_init_project_categories"
-down_revision: Union[str, None] = "20260626_004_fix_tenant_quotas_overflow"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = "20260626_004_fix_tenant_quotas_overflow"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:

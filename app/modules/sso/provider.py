@@ -8,7 +8,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 
 class ProviderType(Enum):
@@ -29,17 +29,17 @@ class SSOProviderConfig:
     client_secret: str
     authorization_url: str
     token_url: str
-    userinfo_url: Optional[str] = None
-    redirect_uri: Optional[str] = None
+    userinfo_url: str | None = None
+    redirect_uri: str | None = None
     scope: list[str] = field(default_factory=lambda: ["openid", "profile", "email"])
-    issuer_url: Optional[str] = None
-    jwks_url: Optional[str] = None
+    issuer_url: str | None = None
+    jwks_url: str | None = None
 
     # Additional configuration
     extra_params: dict[str, Any] = field(default_factory=dict)
 
     # Tenant association
-    tenant_id: Optional[int] = None
+    tenant_id: int | None = None
 
     # Status
     is_active: bool = True
@@ -70,13 +70,13 @@ class SSOUser:
 
     provider: str
     provider_user_id: str
-    email: Optional[str] = None
-    username: Optional[str] = None
-    name: Optional[str] = None
-    first_name: Optional[str] = None
-    last_name: Optional[str] = None
-    picture: Optional[str] = None
-    locale: Optional[str] = None
+    email: str | None = None
+    username: str | None = None
+    name: str | None = None
+    first_name: str | None = None
+    last_name: str | None = None
+    picture: str | None = None
+    locale: str | None = None
     email_verified: bool = False
     raw_data: dict[str, Any] = field(default_factory=dict)
 
@@ -103,10 +103,10 @@ class SSOToken:
     access_token: str
     token_type: str = "Bearer"
     expires_in: int = 3600
-    refresh_token: Optional[str] = None
-    id_token: Optional[str] = None
-    scope: Optional[str] = None
-    expires_at: Optional[datetime] = None
+    refresh_token: str | None = None
+    id_token: str | None = None
+    scope: str | None = None
+    expires_at: datetime | None = None
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""
@@ -132,10 +132,10 @@ class SSOAuthResult:
     """Result of SSO authentication."""
 
     success: bool
-    user: Optional[SSOUser] = None
-    token: Optional[SSOToken] = None
-    error: Optional[str] = None
-    error_description: Optional[str] = None
+    user: SSOUser | None = None
+    token: SSOToken | None = None
+    error: str | None = None
+    error_description: str | None = None
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""
@@ -164,9 +164,9 @@ class SSOProvider(ABC):
     def get_authorization_url(
         self,
         state: str,
-        redirect_uri: Optional[str] = None,
-        code_challenge: Optional[str] = None,
-        nonce: Optional[str] = None,
+        redirect_uri: str | None = None,
+        code_challenge: str | None = None,
+        nonce: str | None = None,
     ) -> str:
         """
         Get the authorization URL for the OAuth flow.
@@ -184,7 +184,7 @@ class SSOProvider(ABC):
 
     @abstractmethod
     def exchange_code(
-        self, code: str, redirect_uri: Optional[str] = None, code_verifier: Optional[str] = None
+        self, code: str, redirect_uri: str | None = None, code_verifier: str | None = None
     ) -> SSOAuthResult:
         """
         Exchange authorization code for tokens.
@@ -200,7 +200,7 @@ class SSOProvider(ABC):
         pass
 
     @abstractmethod
-    def get_user_info(self, access_token: str) -> Optional[SSOUser]:
+    def get_user_info(self, access_token: str) -> SSOUser | None:
         """
         Get user information using access token.
 
@@ -213,7 +213,7 @@ class SSOProvider(ABC):
         pass
 
     @abstractmethod
-    def refresh_token(self, refresh_token: str) -> Optional[SSOToken]:
+    def refresh_token(self, refresh_token: str) -> SSOToken | None:
         """
         Refresh the access token.
 
@@ -226,7 +226,7 @@ class SSOProvider(ABC):
         pass
 
     def authenticate(
-        self, code: str, redirect_uri: Optional[str] = None, code_verifier: Optional[str] = None
+        self, code: str, redirect_uri: str | None = None, code_verifier: str | None = None
     ) -> SSOAuthResult:
         """
         Complete authentication flow.
@@ -331,7 +331,7 @@ PROVIDER_CONFIGS = {
 }
 
 
-def get_provider_config(provider_name: str) -> Optional[dict[str, Any]]:
+def get_provider_config(provider_name: str) -> dict[str, Any] | None:
     """
     Get predefined provider configuration.
 

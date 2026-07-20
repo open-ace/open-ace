@@ -21,10 +21,11 @@ import sqlite3
 import threading
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from enum import Enum
-from typing import Any, Callable, Optional, Union
+from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import requests
@@ -209,16 +210,16 @@ class Alert:
     severity: str
     title: str
     message: str
-    user_id: Optional[int] = None
-    username: Optional[str] = None
-    tool_name: Optional[str] = None
+    user_id: int | None = None
+    username: str | None = None
+    tool_name: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
     created_at: datetime = field(
         default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None)
     )
     read: bool = False
-    action_url: Optional[str] = None
-    action_text: Optional[str] = None
+    action_url: str | None = None
+    action_text: str | None = None
 
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
@@ -246,17 +247,17 @@ class NotificationPreference:
     user_id: int
     email_enabled: bool = True
     push_enabled: bool = True
-    webhook_url: Optional[str] = None
+    webhook_url: str | None = None
     alert_types: list[str] = field(default_factory=lambda: ["quota", "system", "security"])
     min_severity: str = "warning"  # info, warning, critical
-    notification_email: Optional[str] = None  # User's notification email address
+    notification_email: str | None = None  # User's notification email address
     email_verified: bool = False  # Whether email has been verified
 
 
 class AlertNotifier:
     """Real-time alert notification manager."""
 
-    def __init__(self, db_path: Optional[str] = None):
+    def __init__(self, db_path: str | None = None):
         """
         Initialize the alert notifier.
 
@@ -310,8 +311,8 @@ class AlertNotifier:
         return not is_public_address(ip)
 
     def validate_webhook_url(
-        self, webhook_url: Optional[str], resolve_dns: bool = True
-    ) -> tuple[bool, Optional[str]]:
+        self, webhook_url: str | None, resolve_dns: bool = True
+    ) -> tuple[bool, str | None]:
         """Validate a webhook URL for syntax and outbound safety."""
         if not webhook_url:
             return True, None
@@ -357,9 +358,7 @@ class AlertNotifier:
 
         return True, None
 
-    def _resolve_webhook_target_ips(
-        self, webhook_url: str
-    ) -> tuple[Optional[list[str]], Optional[str]]:
+    def _resolve_webhook_target_ips(self, webhook_url: str) -> tuple[list[str] | None, str | None]:
         """Resolve and validate a webhook URL, returning the verified public IPs.
 
         Returns ``(ips, error)``. ``ips`` is non-empty when the URL is safe. The
@@ -488,7 +487,7 @@ class AlertNotifier:
 
         return urlunparse(parsed._replace(query=urlencode(sanitized_items)))
 
-    def _sign_webhook_body(self, body: bytes) -> Optional[str]:
+    def _sign_webhook_body(self, body: bytes) -> str | None:
         """Return an HMAC-SHA256 hex signature of ``body`` using the configured
         generic webhook secret, or ``None`` if no secret is configured.
 
@@ -513,7 +512,7 @@ class AlertNotifier:
         # safely read it even when ``get_notification_preferences`` itself
         # raises (e.g. a DB error). Otherwise referencing ``prefs`` there would
         # raise UnboundLocalError and mask the real exception.
-        prefs: Optional[NotificationPreference] = None
+        prefs: NotificationPreference | None = None
         try:
             prefs = self.get_notification_preferences(user_id)
 
@@ -591,7 +590,7 @@ class AlertNotifier:
                 type(e).__name__,
             )
 
-    def _get_connection(self) -> Union[sqlite3.Connection, Any]:
+    def _get_connection(self) -> sqlite3.Connection | Any:
         """Get database connection (SQLite or PostgreSQL)."""
         if is_postgresql():
             try:
@@ -703,7 +702,7 @@ class AlertNotifier:
             self._subscribers.remove(callback)
 
     def register_websocket(
-        self, client_id: str, websocket: Any, user_id: Optional[int] = None
+        self, client_id: str, websocket: Any, user_id: int | None = None
     ) -> None:
         """
         Register a WebSocket client.
@@ -741,12 +740,12 @@ class AlertNotifier:
         severity: str,
         title: str,
         message: str,
-        user_id: Optional[int] = None,
-        username: Optional[str] = None,
-        tool_name: Optional[str] = None,
-        metadata: Optional[dict[str, Any]] = None,
-        action_url: Optional[str] = None,
-        action_text: Optional[str] = None,
+        user_id: int | None = None,
+        username: str | None = None,
+        tool_name: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        action_url: str | None = None,
+        action_text: str | None = None,
         language: str = "en",
     ) -> Alert:
         """
@@ -933,7 +932,7 @@ class AlertNotifier:
 
         return int(alert_id) if alert_id is not None else 0
 
-    async def broadcast(self, alert: Alert, target_user_id: Optional[int] = None) -> None:
+    async def broadcast(self, alert: Alert, target_user_id: int | None = None) -> None:
         """
         Broadcast alert to WebSocket clients.
 
@@ -970,9 +969,9 @@ class AlertNotifier:
 
     def get_alerts(
         self,
-        user_id: Optional[int] = None,
-        alert_type: Optional[str] = None,
-        severity: Optional[str] = None,
+        user_id: int | None = None,
+        alert_type: str | None = None,
+        severity: str | None = None,
         unread_only: bool = False,
         limit: int = 50,
         offset: int = 0,
@@ -1031,7 +1030,7 @@ class AlertNotifier:
 
         return [self._row_to_alert(row) for row in rows]
 
-    def get_unread_count(self, user_id: Optional[int] = None) -> int:
+    def get_unread_count(self, user_id: int | None = None) -> int:
         """
         Get count of unread alerts.
 
@@ -1139,7 +1138,7 @@ class AlertNotifier:
 
         return success
 
-    def mark_all_as_read(self, user_id: Optional[int] = None) -> int:
+    def mark_all_as_read(self, user_id: int | None = None) -> int:
         """
         Mark all alerts as read.
 
@@ -1372,10 +1371,10 @@ class AlertNotifier:
 
 
 # Global alert notifier instance
-_alert_notifier: Optional[AlertNotifier] = None
+_alert_notifier: AlertNotifier | None = None
 
 
-def get_alert_notifier(db_path: Optional[str] = None) -> AlertNotifier:
+def get_alert_notifier(db_path: str | None = None) -> AlertNotifier:
     """
     Get the global alert notifier instance.
 
@@ -1451,7 +1450,7 @@ def create_system_alert(
     title: str,
     message: str,
     severity: str = AlertSeverity.WARNING.value,
-    tool_name: Optional[str] = None,
+    tool_name: str | None = None,
     language: str = "en",
 ) -> Alert:
     """
@@ -1481,8 +1480,8 @@ def create_system_alert(
 def create_security_alert(
     title: str,
     message: str,
-    user_id: Optional[int] = None,
-    username: Optional[str] = None,
+    user_id: int | None = None,
+    username: str | None = None,
     severity: str = AlertSeverity.CRITICAL.value,
     language: str = "en",
 ) -> Alert:

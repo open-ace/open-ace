@@ -13,7 +13,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from enum import Enum
-from typing import Any, Optional, Union
+from typing import Any
 
 from app.repositories.database import (
     DB_PATH,
@@ -49,7 +49,7 @@ class TeamMember:
     user_id: int
     username: str
     role: str = TeamRole.MEMBER.value
-    joined_at: Optional[datetime] = None
+    joined_at: datetime | None = None
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""
@@ -65,15 +65,15 @@ class TeamMember:
 class Team:
     """A team for collaboration."""
 
-    id: Optional[int] = None
+    id: int | None = None
     team_id: str = ""
     name: str = ""
     description: str = ""
-    owner_id: Optional[int] = None
+    owner_id: int | None = None
     members: list[TeamMember] = field(default_factory=list)
     settings: dict[str, Any] = field(default_factory=dict)
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""
@@ -94,21 +94,21 @@ class Team:
 class SharedSession:
     """A session shared with users or teams."""
 
-    id: Optional[int] = None
+    id: int | None = None
     share_id: str = ""
     session_id: str = ""
-    shared_by: Optional[int] = None
+    shared_by: int | None = None
     shared_by_name: str = ""
     permission: str = SharePermission.VIEW.value
     share_type: str = "user"  # user, team, public
-    target_id: Optional[int] = None  # user_id or team_id
+    target_id: int | None = None  # user_id or team_id
     target_name: str = ""
-    expires_at: Optional[datetime] = None
+    expires_at: datetime | None = None
     allow_comments: bool = True
     allow_copy: bool = True
-    created_at: Optional[datetime] = None
+    created_at: datetime | None = None
     access_count: int = 0
-    last_accessed: Optional[datetime] = None
+    last_accessed: datetime | None = None
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""
@@ -165,18 +165,18 @@ class SharedSession:
 class Annotation:
     """An annotation on a shared session."""
 
-    id: Optional[int] = None
+    id: int | None = None
     annotation_id: str = ""
     session_id: str = ""
-    message_id: Optional[str] = None
-    user_id: Optional[int] = None
+    message_id: str | None = None
+    user_id: int | None = None
     username: str = ""
     content: str = ""
     annotation_type: str = "comment"  # comment, highlight, question
     position: dict[str, Any] = field(default_factory=dict)
-    parent_id: Optional[int] = None  # For threaded comments
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
+    parent_id: int | None = None  # For threaded comments
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""
@@ -200,19 +200,19 @@ class Annotation:
 class KnowledgeEntry:
     """An entry in the team knowledge base."""
 
-    id: Optional[int] = None
+    id: int | None = None
     entry_id: str = ""
-    team_id: Optional[str] = None
+    team_id: str | None = None
     title: str = ""
     content: str = ""
     category: str = "general"
     tags: list[str] = field(default_factory=list)
-    author_id: Optional[int] = None
+    author_id: int | None = None
     author_name: str = ""
     is_published: bool = False
     view_count: int = 0
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""
@@ -244,7 +244,7 @@ class CollaborationManager:
     - Knowledge base
     """
 
-    def __init__(self, db_path: Optional[str] = None):
+    def __init__(self, db_path: str | None = None):
         """
         Initialize the collaboration manager.
 
@@ -253,7 +253,7 @@ class CollaborationManager:
         """
         self.db_path = db_path or str(DB_PATH)
 
-    def _get_connection(self) -> Union[sqlite3.Connection, Any]:
+    def _get_connection(self) -> sqlite3.Connection | Any:
         """Get database connection (SQLite or PostgreSQL)."""
         if is_postgresql():
             try:
@@ -404,7 +404,7 @@ class CollaborationManager:
         name: str,
         owner_id: int,
         description: str = "",
-        settings: Optional[dict[str, Any]] = None,
+        settings: dict[str, Any] | None = None,
     ) -> Team:
         """
         Create a new team.
@@ -470,7 +470,7 @@ class CollaborationManager:
             updated_at=now,
         )
 
-    def get_team(self, team_id: str) -> Optional[Team]:
+    def get_team(self, team_id: str) -> Team | None:
         """
         Get a team by ID.
 
@@ -620,9 +620,9 @@ class CollaborationManager:
         shared_by_name: str,
         permission: str = SharePermission.VIEW.value,
         share_type: str = "user",
-        target_id: Optional[int] = None,
+        target_id: int | None = None,
         target_name: str = "",
-        expires_in_hours: Optional[int] = None,
+        expires_in_hours: int | None = None,
         allow_comments: bool = True,
         allow_copy: bool = True,
     ) -> SharedSession:
@@ -697,7 +697,7 @@ class CollaborationManager:
             created_at=now,
         )
 
-    def get_share(self, share_id: str) -> Optional[SharedSession]:
+    def get_share(self, share_id: str) -> SharedSession | None:
         """
         Get a share by ID.
 
@@ -768,7 +768,7 @@ class CollaborationManager:
 
         return [self._row_to_shared_session(row) for row in rows]
 
-    def revoke_share(self, share_id: str, user_id: Optional[int] = None) -> bool:
+    def revoke_share(self, share_id: str, user_id: int | None = None) -> bool:
         """
         Revoke a share.
 
@@ -835,10 +835,10 @@ class CollaborationManager:
         user_id: int,
         username: str,
         content: str,
-        message_id: Optional[str] = None,
+        message_id: str | None = None,
         annotation_type: str = "comment",
-        position: Optional[dict[str, Any]] = None,
-        parent_id: Optional[int] = None,
+        position: dict[str, Any] | None = None,
+        parent_id: int | None = None,
     ) -> Annotation:
         """
         Add an annotation to a session.
@@ -932,7 +932,7 @@ class CollaborationManager:
 
         return [self._row_to_annotation(row) for row in rows]
 
-    def delete_annotation(self, annotation_id: str, user_id: Optional[int] = None) -> bool:
+    def delete_annotation(self, annotation_id: str, user_id: int | None = None) -> bool:
         """
         Delete an annotation.
 
@@ -968,9 +968,9 @@ class CollaborationManager:
         content: str,
         author_id: int,
         author_name: str,
-        team_id: Optional[str] = None,
+        team_id: str | None = None,
         category: str = "general",
-        tags: Optional[list[str]] = None,
+        tags: list[str] | None = None,
         is_published: bool = False,
     ) -> KnowledgeEntry:
         """
@@ -1038,7 +1038,7 @@ class CollaborationManager:
             updated_at=now,
         )
 
-    def get_knowledge_entry(self, entry_id: str) -> Optional[KnowledgeEntry]:
+    def get_knowledge_entry(self, entry_id: str) -> KnowledgeEntry | None:
         """
         Get a knowledge entry by ID.
 
@@ -1061,8 +1061,8 @@ class CollaborationManager:
 
     def list_knowledge_entries(
         self,
-        team_id: Optional[str] = None,
-        category: Optional[str] = None,
+        team_id: str | None = None,
+        category: str | None = None,
         published_only: bool = True,
         page: int = 1,
         limit: int = 20,
@@ -1192,7 +1192,7 @@ class CollaborationManager:
 
 
 # Module-level singleton
-_instance: Optional[CollaborationManager] = None
+_instance: CollaborationManager | None = None
 _instance_lock = threading.Lock()
 
 

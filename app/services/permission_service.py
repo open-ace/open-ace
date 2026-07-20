@@ -7,7 +7,6 @@ Business logic for role-based access control (RBAC).
 import logging
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional
 
 from app.repositories.database import Database
 from app.repositories.user_repo import UserRepository
@@ -123,7 +122,7 @@ class PermissionService:
     - Permission checking and validation
     """
 
-    def __init__(self, db: Optional[Database] = None, user_repo: Optional[UserRepository] = None):
+    def __init__(self, db: Database | None = None, user_repo: UserRepository | None = None):
         """
         Initialize permission service.
 
@@ -204,7 +203,7 @@ class PermissionService:
                     )
                 self.roles[role_name].permissions.add(permission)
 
-    def get_role(self, role_name: str) -> Optional[Role]:
+    def get_role(self, role_name: str) -> Role | None:
         """
         Get role definition.
 
@@ -521,7 +520,7 @@ class PermissionService:
 
         return result
 
-    def get_permission_audit_log(self, user_id: Optional[int] = None) -> list[dict]:
+    def get_permission_audit_log(self, user_id: int | None = None) -> list[dict]:
         """
         Get audit log of permission changes.
 

@@ -8,7 +8,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from enum import Enum
-from typing import Any, Optional, cast
+from typing import Any, cast
 
 from app.repositories.database import Database, adapt_sql
 
@@ -90,7 +90,7 @@ class DataRetentionManager:
     }
 
     def __init__(
-        self, db: Optional[Database] = None, custom_rules: Optional[dict[str, RetentionRule]] = None
+        self, db: Database | None = None, custom_rules: dict[str, RetentionRule] | None = None
     ):
         """
         Initialize retention manager.
@@ -150,7 +150,7 @@ class DataRetentionManager:
         )
         logger.info(f"Set retention rule: {data_type} -> {retention_days} days ({action})")
 
-    def get_rule(self, data_type: str) -> Optional[RetentionRule]:
+    def get_rule(self, data_type: str) -> RetentionRule | None:
         """
         Get retention rule for a data type.
 
@@ -261,7 +261,7 @@ class DataRetentionManager:
         "daily_messages": "created_at",
     }
 
-    def _get_time_column(self, table_name: str) -> Optional[str]:
+    def _get_time_column(self, table_name: str) -> str | None:
         """Get the appropriate time column for a table."""
         return self.TABLE_TIME_COLUMNS.get(table_name)
 

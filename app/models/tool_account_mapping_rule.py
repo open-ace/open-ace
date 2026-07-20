@@ -10,7 +10,6 @@ import re
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -60,13 +59,13 @@ class ToolAccountMappingRule:
     user_id: int  # Target user to map to
     pattern: str  # Match pattern (supports * wildcard)
     match_type: str = "exact"  # exact, prefix, suffix, contains, regex
-    tool_type: Optional[str] = None  # Optional: limit to specific tool type
+    tool_type: str | None = None  # Optional: limit to specific tool type
     priority: int = 0  # Higher priority rules are applied first
     is_auto: bool = True  # Auto-apply vs requires admin confirmation
     is_active: bool = True  # Rule is enabled
-    description: Optional[str] = None
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
+    description: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""
@@ -105,7 +104,7 @@ class ToolAccountMappingRule:
             ),
         )
 
-    def matches(self, tool_account: str, tool_type: Optional[str] = None) -> bool:
+    def matches(self, tool_account: str, tool_type: str | None = None) -> bool:
         """Check if this rule matches a given tool account."""
         if not self.is_active:
             return False

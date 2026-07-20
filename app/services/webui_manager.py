@@ -21,7 +21,7 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Any, Optional, cast
+from typing import Any, cast
 
 import gevent
 from gevent import lock as gevent_lock
@@ -39,11 +39,11 @@ class WebUIInstance:
     user_id: int
     system_account: str
     port: int
-    pid: Optional[int] = None
+    pid: int | None = None
     token: str = ""
     allocated_at: datetime = field(default_factory=datetime.now)
     last_activity: datetime = field(default_factory=datetime.now)
-    process: Optional[subprocess.Popen] = None
+    process: subprocess.Popen | None = None
     url: str = ""
     session_model_pool: dict[str, Any] = field(default_factory=dict)
 
@@ -164,7 +164,7 @@ class WebUIManager:
     - Cross-platform support (Linux, macOS, Windows)
     """
 
-    def __init__(self, config: Optional[WorkspaceConfig] = None):
+    def __init__(self, config: WorkspaceConfig | None = None):
         """
         Initialize the WebUI manager.
 
@@ -175,7 +175,7 @@ class WebUIManager:
         self._instances: dict[int, WebUIInstance] = {}  # user_id -> instance
         self._port_allocations: dict[int, int] = {}  # port -> user_id
         self._lock = gevent_lock.RLock()  # gevent-safe reentrant lock
-        self._cleanup_greenlet: Optional[gevent.Greenlet] = None
+        self._cleanup_greenlet: gevent.Greenlet | None = None
         self._running = False
 
         # Generate token secret if not configured
@@ -459,7 +459,7 @@ class WebUIManager:
         ).hexdigest()[:16]
         return f"{user_id}:{port}:{random_part}:{signature}"
 
-    def validate_token(self, token: str) -> tuple[bool, Optional[int], Optional[str]]:
+    def validate_token(self, token: str) -> tuple[bool, int | None, str | None]:
         """
         Validate an authentication token.
 
@@ -495,7 +495,7 @@ class WebUIManager:
             return False, None, f"Token parse error: {e}"
 
     def get_user_webui_url(
-        self, user_id: int, system_account: str, host_url: Optional[str] = None
+        self, user_id: int, system_account: str, host_url: str | None = None
     ) -> tuple[str, str]:
         """
         Get or create the webui URL for a user.
@@ -566,7 +566,7 @@ class WebUIManager:
             return instance.url, instance.token
 
     def _start_instance_internal(
-        self, user_id: int, system_account: str, base_url: Optional[str] = None
+        self, user_id: int, system_account: str, base_url: str | None = None
     ) -> WebUIInstance:
         """
         Start a webui instance for a user (internal, must be called with lock).
@@ -726,7 +726,7 @@ class WebUIManager:
 
     def _launch_webui_process(
         self, user_id: int, system_account: str, port: int, base_url: str
-    ) -> tuple[Optional[subprocess.Popen], dict[str, Any]]:
+    ) -> tuple[subprocess.Popen | None, dict[str, Any]]:
         """
         Launch a webui process as the specified user.
 
@@ -923,7 +923,7 @@ class WebUIManager:
             logger.error(f"Failed to launch webui process: {e}")
             return None, model_pool
 
-    def _find_webui_executable(self) -> tuple[Optional[str], Optional[str]]:
+    def _find_webui_executable(self) -> tuple[str | None, str | None]:
         """
         Find the qwen-code-webui executable.
 
@@ -1073,7 +1073,7 @@ class WebUIManager:
         with self._lock:
             return sum(1 for i in self._instances.values() if i.is_alive())
 
-    def get_user_instance(self, user_id: int) -> Optional[WebUIInstance]:
+    def get_user_instance(self, user_id: int) -> WebUIInstance | None:
         """Get the instance for a specific user."""
         with self._lock:
             return self._instances.get(user_id)
@@ -1102,7 +1102,7 @@ class WebUIManager:
                 self._instances[user_id].update_activity()
 
     def prestart_user_instance_async(
-        self, user_id: int, system_account: str, host_url: Optional[str] = None
+        self, user_id: int, system_account: str, host_url: str | None = None
     ):
         """
         Pre-start a webui instance for a user in background thread.
@@ -1142,7 +1142,7 @@ class WebUIManager:
 
 
 # Global manager instance
-_manager: Optional[WebUIManager] = None
+_manager: WebUIManager | None = None
 
 
 def get_webui_manager() -> WebUIManager:

@@ -14,7 +14,6 @@ import platform
 import re
 import subprocess
 from pathlib import Path
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +97,7 @@ def _is_docker_multi_user_mode() -> bool:
     return is_docker_workspace and is_root
 
 
-def ensure_system_user(system_account: str, uid: Optional[int] = None) -> bool:
+def ensure_system_user(system_account: str, uid: int | None = None) -> bool:
     """确保系统用户存在，创建工作目录。
 
     此函数用于 Package 版 multi-user mode，当服务以非 root 用户运行时，

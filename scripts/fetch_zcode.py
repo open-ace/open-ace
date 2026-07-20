@@ -104,7 +104,7 @@ def find_all_zcode_db_paths() -> list[tuple[str, Path]]:
     return results
 
 
-def find_zcode_db_path() -> Optional[Path]:
+def find_zcode_db_path() -> Path | None:
     """Find the ZCode DB path for the current user."""
     db_path = Path.home() / ZCODE_DB_RELATIVE
     if db_path.is_file():
@@ -112,7 +112,7 @@ def find_zcode_db_path() -> Optional[Path]:
     return None
 
 
-def _ms_to_date(ms: Optional[int]) -> str:
+def _ms_to_date(ms: int | None) -> str:
     """Convert epoch milliseconds to a YYYY-MM-DD date string (local time)."""
     if not ms:
         return "unknown"
@@ -244,8 +244,8 @@ def process_zcode_session(
     session_id: str,
     db_path: Path,
     hostname: str = "localhost",
-    system_account: Optional[str] = None,
-) -> tuple[dict[str, dict[str, Any]], list[dict[str, Any]], Optional[str]]:
+    system_account: str | None = None,
+) -> tuple[dict[str, dict[str, Any]], list[dict[str, Any]], str | None]:
     """Parse one ZCode session into daily aggregates + fetch message dicts.
 
     Mirrors ``process_jsonl_file`` in fetch_codex.py: returns
@@ -423,7 +423,7 @@ def _dominant_date(dates: set[str], messages: list[dict[str, Any]]) -> str:
     return max(counts, key=lambda d: (counts[d], last_ts.get(d, "")))
 
 
-def _iso_to_ms(ts: Optional[str]) -> Optional[int]:
+def _iso_to_ms(ts: str | None) -> int | None:
     """Best-effort convert an ISO-8601 timestamp to epoch milliseconds."""
     if not ts:
         return None
@@ -434,7 +434,7 @@ def _iso_to_ms(ts: Optional[str]) -> Optional[int]:
         return None
 
 
-def _resolve_user_id_from_sender(cursor, sender_name: str, all_users_cache: list) -> Optional[int]:
+def _resolve_user_id_from_sender(cursor, sender_name: str, all_users_cache: list) -> int | None:
     """Resolve user_id from sender_name (format: {user}-{hostname}-{tool}).
 
     Identical to fetch_codex._resolve_user_id_from_sender: try rsplit first,
@@ -852,7 +852,7 @@ def _iter_candidate_sessions(db_path: Path, days: int, recent: bool) -> list[tup
 
 def fetch_and_save(
     days: int = 7,
-    hostname: Optional[str] = None,
+    hostname: str | None = None,
     multi_user_mode: bool = False,
     recent: bool = False,
 ) -> bool:
@@ -888,7 +888,7 @@ def fetch_and_save(
     all_messages: list[dict[str, Any]] = []
 
     # Discover ZCode DBs to scan.
-    db_targets: list[tuple[Optional[str], Path]] = []
+    db_targets: list[tuple[str | None, Path]] = []
     if multi_user_mode:
         print("Multi-user mode: scanning all users' ZCode databases...")
         db_targets = find_all_zcode_db_paths()

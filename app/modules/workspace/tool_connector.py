@@ -7,10 +7,11 @@ Supports tool registration, routing, and health monitoring.
 
 import logging
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Callable, Optional, cast
+from typing import Any, cast
 
 logger = logging.getLogger(__name__)
 
@@ -47,13 +48,13 @@ class ToolInfo:
     status: str = ToolStatus.UNKNOWN.value
     capabilities: list[str] = field(default_factory=list)
     models: list[str] = field(default_factory=list)
-    default_model: Optional[str] = None
+    default_model: str | None = None
     max_tokens: int = 4096
     supports_streaming: bool = False
     supports_vision: bool = False
     supports_tools: bool = False
     config: dict[str, Any] = field(default_factory=dict)
-    last_check: Optional[datetime] = None
+    last_check: datetime | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
@@ -109,7 +110,7 @@ class ToolAdapter(ABC):
 
     @abstractmethod
     async def send_message(
-        self, message: str, session_id: Optional[str] = None, model: Optional[str] = None, **kwargs
+        self, message: str, session_id: str | None = None, model: str | None = None, **kwargs
     ) -> dict[str, Any]:
         """
         Send a message to the tool.
@@ -153,7 +154,7 @@ class MockToolAdapter(ToolAdapter):
         self.tool_info = tool_info
 
     async def send_message(
-        self, message: str, session_id: Optional[str] = None, model: Optional[str] = None, **kwargs
+        self, message: str, session_id: str | None = None, model: str | None = None, **kwargs
     ) -> dict[str, Any]:
         """Send a mock message."""
         return {
@@ -277,7 +278,7 @@ class ToolConnector:
 
         logger.info(f"Registered {len(default_tools)} default tools")
 
-    def register_tool(self, tool_info: ToolInfo, adapter: Optional[ToolAdapter] = None) -> None:
+    def register_tool(self, tool_info: ToolInfo, adapter: ToolAdapter | None = None) -> None:
         """
         Register a new tool.
 
@@ -310,7 +311,7 @@ class ToolConnector:
             return True
         return False
 
-    def get_tool(self, tool_name: str) -> Optional[ToolInfo]:
+    def get_tool(self, tool_name: str) -> ToolInfo | None:
         """
         Get tool information.
 
@@ -322,9 +323,7 @@ class ToolConnector:
         """
         return self._tools.get(tool_name)
 
-    def list_tools(
-        self, tool_type: Optional[str] = None, status: Optional[str] = None
-    ) -> list[ToolInfo]:
+    def list_tools(self, tool_type: str | None = None, status: str | None = None) -> list[ToolInfo]:
         """
         List all registered tools.
 
@@ -371,8 +370,8 @@ class ToolConnector:
         self,
         tool_name: str,
         message: str,
-        session_id: Optional[str] = None,
-        model: Optional[str] = None,
+        session_id: str | None = None,
+        model: str | None = None,
         **kwargs,
     ) -> dict[str, Any]:
         """
@@ -489,7 +488,7 @@ class ToolConnector:
             results[tool_name] = await self.check_tool_health(tool_name)
         return results
 
-    def get_available_models(self, tool_name: Optional[str] = None) -> list[dict[str, Any]]:
+    def get_available_models(self, tool_name: str | None = None) -> list[dict[str, Any]]:
         """
         Get available models.
 
@@ -591,7 +590,7 @@ class ToolConnector:
 
 
 # Global tool connector instance
-_tool_connector: Optional[ToolConnector] = None
+_tool_connector: ToolConnector | None = None
 
 
 def get_tool_connector() -> ToolConnector:

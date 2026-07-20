@@ -6,7 +6,6 @@ Data models for project management and statistics.
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional
 
 from app.utils.helpers import parse_db_datetime
 
@@ -15,14 +14,14 @@ from app.utils.helpers import parse_db_datetime
 class Project:
     """Project data model."""
 
-    id: Optional[int] = None
-    tenant_id: Optional[int] = None
+    id: int | None = None
+    tenant_id: int | None = None
     path: str = ""
-    name: Optional[str] = None
-    description: Optional[str] = None
-    created_by: Optional[int] = None
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
+    name: str | None = None
+    description: str | None = None
+    created_by: int | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
     is_active: bool = True
     is_shared: bool = False
 
@@ -75,12 +74,12 @@ class Project:
 class UserProject:
     """User-Project relationship data model."""
 
-    id: Optional[int] = None
+    id: int | None = None
     user_id: int = 0
     project_id: int = 0
-    username: Optional[str] = None  # Populated by JOIN query with users table
-    first_access_at: Optional[datetime] = None
-    last_access_at: Optional[datetime] = None
+    username: str | None = None  # Populated by JOIN query with users table
+    first_access_at: datetime | None = None
+    last_access_at: datetime | None = None
     total_sessions: int = 0
     total_tokens: int = 0
     total_requests: int = 0
@@ -132,14 +131,14 @@ class ProjectStats:
 
     project_id: int
     project_path: str
-    project_name: Optional[str] = None
+    project_name: str | None = None
     total_users: int = 0
     total_sessions: int = 0
     total_tokens: int = 0
     total_requests: int = 0
     total_duration_seconds: int = 0
-    first_access: Optional[datetime] = None
-    last_access: Optional[datetime] = None
+    first_access: datetime | None = None
+    last_access: datetime | None = None
     user_stats: list[UserProject] = field(default_factory=list)
 
     def to_dict(self) -> dict:

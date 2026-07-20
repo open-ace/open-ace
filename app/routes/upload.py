@@ -8,7 +8,7 @@ import hmac
 import json
 import logging
 from functools import wraps
-from typing import Any, Optional
+from typing import Any
 
 from flask import Blueprint, jsonify, request
 
@@ -18,7 +18,7 @@ from app.utils.hostname_validator import sanitize_hostname
 from app.utils.security_env import get_upload_auth_key
 
 
-def _sanitize_host_name(host_name: Optional[str]) -> str:
+def _sanitize_host_name(host_name: str | None) -> str:
     """
     Sanitize host_name, replacing invalid values with empty string.
 

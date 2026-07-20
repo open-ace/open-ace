@@ -147,11 +147,16 @@ ignore = [
     "B904",  # raise without from inside except (compatibility)
     "SIM115", # open file without context handler (scripts)
     "UP031", # printf string formatting (migration risk)
+    "UP038", # deprecated: isinstance(x, A | B) is slower than isinstance(x, (A, B))
+    # TCH003 (move stdlib abc imports into TYPE_CHECKING block) is intentionally
+    # disabled repo-wide: it is a stylistic refactor out of scope for individual
+    # PRs and requires per-file verification (esp. in migrations/remote-agent).
+    "TCH003",
 ]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S101", "PLR2004", "F401", "F811", "TCH", "B017"]
-"scripts/*" = ["TCH", "F401", "I001"]
+"scripts/*" = ["TCH", "F401", "I001", "UP035"]
 "**/__init__.py" = ["F401"]
 
 # =============================================================================

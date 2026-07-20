@@ -9,7 +9,7 @@ import logging
 import os
 import sqlite3
 from contextlib import contextmanager, suppress
-from typing import Any, Optional, Union
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +49,7 @@ POOL_MIN_CONN = 1
 POOL_MAX_CONN = 10
 
 # Global connection pool for PostgreSQL
-_pg_pool: Optional[Any] = None
+_pg_pool: Any | None = None
 
 
 def _get_db_path() -> str:
@@ -126,7 +126,7 @@ def adapt_sql(query: str) -> str:
     return query
 
 
-def adapt_boolean_value(value: bool) -> Union[bool, int]:
+def adapt_boolean_value(value: bool) -> bool | int:
     """
     Convert boolean value for database compatibility.
 
@@ -196,7 +196,7 @@ def ensure_db_dir() -> None:
     os.makedirs(CONFIG_DIR, exist_ok=True)
 
 
-def get_connection() -> Union[sqlite3.Connection, Any]:
+def get_connection() -> sqlite3.Connection | Any:
     """
     Get a database connection.
 
@@ -314,7 +314,7 @@ def get_db_connection():
 class Database:
     """Database manager class for dependency injection."""
 
-    def __init__(self, db_url: Optional[str] = None):
+    def __init__(self, db_url: str | None = None):
         """
         Initialize database manager.
 
@@ -329,7 +329,7 @@ class Database:
         """Check if using PostgreSQL."""
         return self._is_postgresql
 
-    def get_connection(self) -> Union[sqlite3.Connection, Any]:
+    def get_connection(self) -> sqlite3.Connection | Any:
         """Get a database connection."""
         if self._is_postgresql:
             return self._get_postgresql_connection()
@@ -416,8 +416,8 @@ class Database:
             return cursor
 
     def fetch_one(
-        self, query: str, params: Union[tuple, list] = (), commit: bool = False
-    ) -> Optional[dict[str, Any]]:
+        self, query: str, params: tuple | list = (), commit: bool = False
+    ) -> dict[str, Any] | None:
         """
         Execute a query and return a single row.
 
@@ -452,7 +452,7 @@ class Database:
                 return row
             return dict(row)
 
-    def fetch_all(self, query: str, params: Union[tuple, list] = ()) -> list[dict[str, Any]]:
+    def fetch_all(self, query: str, params: tuple | list = ()) -> list[dict[str, Any]]:
         """
         Execute a query and return all rows.
 

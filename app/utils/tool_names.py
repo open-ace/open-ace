@@ -18,8 +18,6 @@ so NO prefix/fuzzy matching is performed — it would risk silently merging a
 future legitimately-distinct tool (e.g. ``qwen-<something>``) into ``qwen``.
 """
 
-from typing import Optional
-
 TOOL_NAME_ALIASES = {
     "qwen": ["qwen", "qwen-code", "qwen-code-cli"],
     "claude": ["claude", "claude-code"],
@@ -38,7 +36,7 @@ CANONICAL_TOOL_NAMES = {
 }
 
 
-def normalize_tool_name(name: Optional[str]) -> str:
+def normalize_tool_name(name: str | None) -> str:
     """Normalize a tool name to its canonical, lower-cased form.
 
     Args:

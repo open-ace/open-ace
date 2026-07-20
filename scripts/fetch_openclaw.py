@@ -42,7 +42,7 @@ import utils
 from shared import db
 
 
-def get_agent_session_id_from_path(project_path: str, tool_name: str = "openclaw") -> Optional[str]:
+def get_agent_session_id_from_path(project_path: str, tool_name: str = "openclaw") -> str | None:
     """
     Extract agent_session_id from project path.
 
@@ -112,7 +112,7 @@ def parse_timestamp(ts_str: str) -> str:
         return "unknown"
 
 
-def get_openclaw_gateway_token() -> Optional[str]:
+def get_openclaw_gateway_token() -> str | None:
     """
     Get OpenClaw gateway token from openclaw.json.
 
@@ -138,7 +138,7 @@ def get_openclaw_gateway_token() -> Optional[str]:
 # ============================================================================
 
 
-async def get_openclaw_usage(gateway_url: str, token: str, days: int = 7) -> Optional[dict]:
+async def get_openclaw_usage(gateway_url: str, token: str, days: int = 7) -> dict | None:
     """
     Fetch daily usage data from OpenClaw gateway.
 
@@ -357,9 +357,9 @@ def parse_usage_response(response: dict) -> dict:
 
 async def fetch_and_save_usage(
     days: int = 7,
-    gateway_url: Optional[str] = None,
-    token: Optional[str] = None,
-    hostname: Optional[str] = None,
+    gateway_url: str | None = None,
+    token: str | None = None,
+    hostname: str | None = None,
 ) -> bool:
     """
     Fetch OpenClaw usage via WebSocket API and save to database.
@@ -540,7 +540,7 @@ def find_all_openclaw_sessions_dirs() -> list:
     return results
 
 
-def find_openclaw_sessions_dir() -> Optional[Path]:
+def find_openclaw_sessions_dir() -> Path | None:
     """Find the OpenClaw sessions directory."""
     home = Path.home()
     agents_dir = home / ".openclaw" / "agents"
@@ -698,7 +698,7 @@ def extract_content_from_entry(entry: dict) -> tuple:
     return ("", None, None, "openclaw", None, None, None)
 
 
-def extract_user_message_metadata(text: str) -> Optional[dict]:
+def extract_user_message_metadata(text: str) -> dict | None:
     """Extract sender info and clean content from user message.
 
     OpenClaw user messages often contain metadata like:
@@ -994,7 +994,7 @@ def process_jsonl_file(
     filepath: Path,
     hostname: str = "localhost",
     tool_name: str = "openclaw",
-    system_account: Optional[str] = None,
+    system_account: str | None = None,
 ) -> tuple:
     """Process a single JSONL file and return daily token aggregates and messages.
 
@@ -1046,13 +1046,13 @@ def process_jsonl_file(
 
     # First pass: collect user message senders for assistant message attribution
     # Map: message_id -> (sender_id, sender_name)
-    user_senders: dict[str, tuple[Optional[str], Optional[str]]] = {}
+    user_senders: dict[str, tuple[str | None, str | None]] = {}
     # Also collect assistant senders for toolResult attribution
-    assistant_senders: dict[str, tuple[Optional[str], Optional[str]]] = {}
+    assistant_senders: dict[str, tuple[str | None, str | None]] = {}
     # Also collect toolResult senders for assistant attribution (multi-turn conversations)
-    toolResult_senders: dict[str, tuple[Optional[str], Optional[str]]] = {}
+    toolResult_senders: dict[str, tuple[str | None, str | None]] = {}
     # Also collect error senders for assistant attribution (error messages can have senders too)
-    error_senders: dict[str, tuple[Optional[str], Optional[str]]] = {}
+    error_senders: dict[str, tuple[str | None, str | None]] = {}
 
     with open(filepath, encoding="utf-8") as f:
         for line in f:
@@ -1708,8 +1708,8 @@ def update_agent_sessions_stats(messages: list, tool_name: str = "openclaw") -> 
 
 def fetch_and_save_messages(
     days: int = 7,
-    sessions_dir: Optional[Path] = None,
-    hostname: Optional[str] = None,
+    sessions_dir: Path | None = None,
+    hostname: str | None = None,
     tool_name: str = "openclaw",
     multi_user_mode: bool = False,
     recent: bool = False,

@@ -62,7 +62,7 @@ def print_error(text: str):
 
 def run_command(
     cmd: str, capture: bool = False, check: bool = True
-) -> Optional[subprocess.CompletedProcess]:
+) -> subprocess.CompletedProcess | None:
     """Run a shell command."""
     try:
         if capture:

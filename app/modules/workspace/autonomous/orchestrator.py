@@ -15,7 +15,6 @@ import threading
 import time
 import uuid
 from datetime import datetime, timezone
-from typing import Optional
 
 from app.modules.workspace.autonomous.agent_runner import (
     DEFAULT_TASK_TIMEOUT,
@@ -528,7 +527,7 @@ _TLDR_FORMAT_INSTRUCTIONS = {
 TLDR_INSTRUCTION = _TLDR_FORMAT_INSTRUCTIONS["zh"]
 
 
-def build_language_instruction(content_language: Optional[str]) -> str:
+def build_language_instruction(content_language: str | None) -> str:
     """Build the per-content_language directive + TL;DR format instruction.
 
     Returned string is appended to every agent prompt so AI-authored content is
@@ -557,7 +556,7 @@ _REVIEW_APPROVAL_PHRASES = {
 }
 
 
-def _extract_pr_number_from_error(error_text: str) -> Optional[int]:
+def _extract_pr_number_from_error(error_text: str) -> int | None:
     """Extract a PR number from a gh "already exists" error message.
 
     gh's already-exists message includes the PR URL, e.g.:
@@ -575,7 +574,7 @@ def _extract_pr_number_from_error(error_text: str) -> Optional[int]:
     return int(m.group(1)) if m else None
 
 
-def _review_approval_phrase(content_language: Optional[str]) -> str:
+def _review_approval_phrase(content_language: str | None) -> str:
     """Approval marker for PR review in the given content language."""
     return _REVIEW_APPROVAL_PHRASES.get(
         content_language, _REVIEW_APPROVAL_PHRASES[DEFAULT_CONTENT_LANGUAGE]
@@ -632,7 +631,7 @@ _GITHUB_TRUNCATION_NOTICES = {
 }
 
 
-def _github_truncation_notice(content_language: Optional[str]) -> str:
+def _github_truncation_notice(content_language: str | None) -> str:
     return _GITHUB_TRUNCATION_NOTICES.get(
         content_language, _GITHUB_TRUNCATION_NOTICES[DEFAULT_CONTENT_LANGUAGE]
     )
@@ -754,7 +753,7 @@ class AutonomousOrchestrator:
         self.repo = AutonomousWorkflowRepository(self.db)
         self.emitter = AutonomousEventEmitter.instance()
         self._workflow_id = workflow_id
-        self._current_session_id: Optional[str] = None
+        self._current_session_id: str | None = None
         self._session_lock = threading.Lock()
         self._cancel_requested = threading.Event()  # in-memory cancel signal
 
@@ -768,10 +767,10 @@ class AutonomousOrchestrator:
             on_pid_registered=self._on_pid_registered,
             on_pid_cleared=self._on_pid_cleared,
         )
-        self._gh: Optional[GitHubOps] = None
+        self._gh: GitHubOps | None = None
 
     @property
-    def workflow(self) -> Optional[dict]:
+    def workflow(self) -> dict | None:
         return self.repo.get_workflow(self._workflow_id)
 
     def _get_gh(self) -> GitHubOps:
@@ -857,7 +856,7 @@ class AutonomousOrchestrator:
         return self._gh
 
     @staticmethod
-    def _resolve_system_account(wf: Optional[dict]) -> Optional[str]:
+    def _resolve_system_account(wf: dict | None) -> str | None:
         """Resolve the workflow owner's system account, if any."""
         user_id = (wf or {}).get("user_id")
         if not user_id:
@@ -865,7 +864,7 @@ class AutonomousOrchestrator:
         user = UserRepository().get_user_by_id(user_id)
         return user.get("system_account") if user else None
 
-    def _resolve_effective_repo_context(self, wf: Optional[dict]) -> dict[str, str]:
+    def _resolve_effective_repo_context(self, wf: dict | None) -> dict[str, str]:
         """Resolve the authoritative repo path + branch for this workflow."""
         workflow = wf or self.workflow or {}
         strategy = (workflow.get("branch_strategy") or "new-branch").strip() or "new-branch"
@@ -882,7 +881,7 @@ class AutonomousOrchestrator:
             "expected_branch": (workflow.get("branch_name") or "").strip(),
         }
 
-    def _build_repo_execution_contract(self, wf: Optional[dict]) -> str:
+    def _build_repo_execution_contract(self, wf: dict | None) -> str:
         """Prompt contract that keeps all agent actions bound to one repo/branch."""
         ctx = self._resolve_effective_repo_context(wf)
         repo_path = ctx.get("repo_path", "")
@@ -904,7 +903,7 @@ class AutonomousOrchestrator:
         )
         return "\n".join(lines) + "\n"
 
-    def _capture_repo_state(self, repo_path: str, system_account: Optional[str]) -> dict[str, str]:
+    def _capture_repo_state(self, repo_path: str, system_account: str | None) -> dict[str, str]:
         """Capture the repo root, branch, and HEAD for post-run validation."""
         gh = GitHubOps(repo_path, system_account=system_account)
         top_level = gh._run_git(["rev-parse", "--show-toplevel"]).stdout.strip()
@@ -922,8 +921,8 @@ class AutonomousOrchestrator:
         }
 
     def _snapshot_repo_context(
-        self, wf: Optional[dict], workspace_type: str, system_account: Optional[str]
-    ) -> Optional[dict]:
+        self, wf: dict | None, workspace_type: str, system_account: str | None
+    ) -> dict | None:
         """Snapshot expected repo state before a local agent phase runs."""
         if workspace_type != "local":
             return None
@@ -949,7 +948,7 @@ class AutonomousOrchestrator:
             return None
 
     def _validate_repo_context_after_run(
-        self, before_state: Optional[dict], system_account: Optional[str]
+        self, before_state: dict | None, system_account: str | None
     ) -> str:
         """Verify the agent stayed on the workflow's intended repo + branch."""
         if not before_state:
@@ -1442,7 +1441,7 @@ class AutonomousOrchestrator:
         gh: GitHubOps,
         commit_before: str,
         attempt: int,
-        branch_name: Optional[str],
+        branch_name: str | None,
         pr_number: int,
     ) -> tuple[str, bool, str]:
         """Detect whether the CI repair agent produced changes and push them.
@@ -1801,7 +1800,7 @@ class AutonomousOrchestrator:
         return match.group(1).strip()[:200] if match else ""
 
     @staticmethod
-    def _artifact_visible_text(result: Optional[AgentTaskResult]) -> str:
+    def _artifact_visible_text(result: AgentTaskResult | None) -> str:
         """Return all user-visible assistant turns for a task result."""
         if not result:
             return ""
@@ -1812,7 +1811,7 @@ class AutonomousOrchestrator:
         return sanitize_artifact_text(text)
 
     @classmethod
-    def _artifact_text(cls, result: Optional[AgentTaskResult]) -> str:
+    def _artifact_text(cls, result: AgentTaskResult | None) -> str:
         """Return the milestone/comment artifact text for a task result."""
         if not result:
             return ""
@@ -1822,7 +1821,7 @@ class AutonomousOrchestrator:
         )
 
     @classmethod
-    def _artifact_tldr(cls, result: Optional[AgentTaskResult]) -> str:
+    def _artifact_tldr(cls, result: AgentTaskResult | None) -> str:
         """Prefer structured/extracted TL;DR over raw string slicing."""
         if not result:
             return ""
@@ -1832,7 +1831,7 @@ class AutonomousOrchestrator:
         return cls._extract_tldr(cls._artifact_visible_text(result) or result.response_text or "")
 
     @staticmethod
-    def _artifact_status_tag(result: Optional[AgentTaskResult], key: str) -> str:
+    def _artifact_status_tag(result: AgentTaskResult | None, key: str) -> str:
         """Read structured status tags extracted by the runner."""
         if not result:
             return ""
@@ -1841,7 +1840,7 @@ class AutonomousOrchestrator:
         return value.strip() if isinstance(value, str) else ""
 
     @staticmethod
-    def _primary_result_error(result: Optional[AgentTaskResult]) -> str:
+    def _primary_result_error(result: AgentTaskResult | None) -> str:
         """Return the first-class runner error that should win over heuristics."""
         if not result or result.success:
             return ""
@@ -2193,7 +2192,7 @@ class AutonomousOrchestrator:
         *,
         is_pr: bool = False,
         context: str = "",
-        content_language: Optional[str] = None,
+        content_language: str | None = None,
     ) -> None:
         """Post a comment to a GitHub issue or PR.
 
@@ -2229,7 +2228,7 @@ class AutonomousOrchestrator:
 
     def _find_existing_milestone(
         self, phase: str, milestone_type: str, dev_round: int = None, round_number: int = None
-    ) -> Optional[dict]:
+    ) -> dict | None:
         """Check if a milestone of this type already exists (idempotency guard)."""
         existing = self.repo.list_milestones(self._workflow_id, phase=phase, status="in_progress")
         # Also check completed ones

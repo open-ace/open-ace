@@ -12,7 +12,6 @@ Column:
 """
 
 import logging
-from typing import Union
 
 import sqlalchemy as sa
 from alembic import op
@@ -20,9 +19,9 @@ from alembic import op
 log = logging.getLogger(__name__)
 
 revision: str = "20260630_001_add_retry_count_column"
-down_revision: Union[str, None] = "20260629_001_add_workflow_lock_columns"
-branch_labels: Union[str, None] = None
-depends_on: Union[str, None] = None
+down_revision: str | None = "20260629_001_add_workflow_lock_columns"
+branch_labels: str | None = None
+depends_on: str | None = None
 
 
 def _column_exists(conn, table_name: str, column_name: str) -> bool:

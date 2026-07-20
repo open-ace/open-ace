@@ -8,7 +8,6 @@ Used by Work mode to check if user can continue using workspace.
 import logging
 import time
 from datetime import datetime
-from typing import Optional
 
 from flask import Blueprint, g, jsonify, request
 
@@ -58,7 +57,7 @@ def _get_cached_user_usage(user_id: int, start_date: str, end_date: str):
     return request_trend
 
 
-def _clear_user_usage_cache(user_id: Optional[int] = None):
+def _clear_user_usage_cache(user_id: int | None = None):
     """Clear usage cache for a specific user or all users."""
     global _usage_cache
     if user_id is None:

@@ -28,9 +28,9 @@ CACHE_FILE = CACHE_DIR / "dingtalk_groups.json"
 CACHE_TTL = 86400  # 24 hours
 
 
-def get_dingtalk_access_token(app_key: str, app_secret: str) -> Optional[str]:
+def get_dingtalk_access_token(app_key: str, app_secret: str) -> str | None:
     """Keep the historical helper available for callers and monkeypatch-based tests."""
-    return cast(Optional[str], _dingtalk_user_cache.get_dingtalk_access_token(app_key, app_secret))
+    return cast(str | None, _dingtalk_user_cache.get_dingtalk_access_token(app_key, app_secret))
 
 
 def ensure_cache_dir():
@@ -58,7 +58,7 @@ def save_cache(cache: dict):
         json.dump(cache, f, ensure_ascii=False, indent=2)
 
 
-def extract_chat_id(label: str) -> Optional[str]:
+def extract_chat_id(label: str) -> str | None:
     """Extract a DingTalk chat ID from a metadata label."""
     if not label:
         return None
@@ -74,13 +74,13 @@ def extract_chat_id(label: str) -> Optional[str]:
     return None
 
 
-def get_group_info(chat_id: str, app_key: str, app_secret: str) -> Optional[dict]:
+def get_group_info(chat_id: str, app_key: str, app_secret: str) -> dict | None:
     """Get group info from DingTalk API."""
     cache = load_cache()
     if chat_id in cache["groups"]:
         group_cache = cache["groups"][chat_id]
         if time.time() - group_cache.get("cached_at", 0) < CACHE_TTL:
-            return cast(Optional[dict], group_cache.get("data"))
+            return cast(dict | None, group_cache.get("data"))
 
     token = get_dingtalk_access_token(app_key, app_secret)
     if not token:
@@ -99,7 +99,7 @@ def get_group_info(chat_id: str, app_key: str, app_secret: str) -> Optional[dict
             group_info = data
             cache["groups"][chat_id] = {"data": group_info, "cached_at": time.time()}
             save_cache(cache)
-            return cast(Optional[dict], group_info)
+            return cast(dict | None, group_info)
     except Exception:
         # Never log the raw request: the access_token lives in the URL/headers.
         logger.exception("Error getting DingTalk group info for chatid %s", chat_id)
@@ -107,7 +107,7 @@ def get_group_info(chat_id: str, app_key: str, app_secret: str) -> Optional[dict
     return None
 
 
-def get_group_name(chat_id: str, app_key: str, app_secret: str) -> Optional[str]:
+def get_group_name(chat_id: str, app_key: str, app_secret: str) -> str | None:
     """Get group name from cache or DingTalk API."""
     if not chat_id:
         return None
@@ -116,19 +116,17 @@ def get_group_name(chat_id: str, app_key: str, app_secret: str) -> Optional[str]
     if not group_info:
         return None
 
-    return cast(Optional[str], group_info.get("name") or group_info.get("title"))
+    return cast(str | None, group_info.get("name") or group_info.get("title"))
 
 
-def get_group_name_from_conversation_label(
-    label: str, app_key: str, app_secret: str
-) -> Optional[str]:
+def get_group_name_from_conversation_label(label: str, app_key: str, app_secret: str) -> str | None:
     """Resolve group name using a conversation label that may embed chat ID."""
     cache = load_cache()
     if label in cache["groups"]:
         group_cache = cache["groups"][label]
         if time.time() - group_cache.get("cached_at", 0) < CACHE_TTL:
             data = group_cache.get("data", {})
-            return cast(Optional[str], data.get("name") or data.get("title"))
+            return cast(str | None, data.get("name") or data.get("title"))
 
     chat_id = extract_chat_id(label)
     if not chat_id:
@@ -140,7 +138,7 @@ def get_group_name_from_conversation_label(
 
     cache["groups"][label] = {"data": group_info, "cached_at": time.time()}
     save_cache(cache)
-    return cast(Optional[str], group_info.get("name") or group_info.get("title"))
+    return cast(str | None, group_info.get("name") or group_info.get("title"))
 
 
 def clear_cache():

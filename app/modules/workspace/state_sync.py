@@ -11,10 +11,11 @@ import logging
 import sqlite3
 import uuid
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from enum import Enum
-from typing import Any, Callable, Optional, Union
+from typing import Any
 
 from app.repositories.database import DB_PATH, get_database_url, is_postgresql
 
@@ -45,9 +46,9 @@ class SyncEvent:
     event_type: str
     timestamp: datetime
     source: str  # workspace, tool, system
-    session_id: Optional[str] = None
-    user_id: Optional[int] = None
-    tool_name: Optional[str] = None
+    session_id: str | None = None
+    user_id: int | None = None
+    tool_name: str | None = None
     data: dict[str, Any] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -102,8 +103,8 @@ class SyncState:
     connected_at: datetime
     last_activity: datetime
     subscriptions: set[str] = field(default_factory=set)
-    user_id: Optional[int] = None
-    session_id: Optional[str] = None
+    user_id: int | None = None
+    session_id: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
@@ -136,7 +137,7 @@ class StateSyncManager:
     - Activity tracking
     """
 
-    def __init__(self, db_path: Optional[str] = None):
+    def __init__(self, db_path: str | None = None):
         """
         Initialize the state sync manager.
 
@@ -149,7 +150,7 @@ class StateSyncManager:
         self._event_queue: asyncio.Queue = asyncio.Queue()
         self._running = False
 
-    def _get_connection(self) -> Union[sqlite3.Connection, Any]:
+    def _get_connection(self) -> sqlite3.Connection | Any:
         """Get database connection (SQLite or PostgreSQL)."""
         if is_postgresql():
             try:
@@ -221,9 +222,9 @@ class StateSyncManager:
 
     def register_client(
         self,
-        client_id: Optional[str] = None,
-        user_id: Optional[int] = None,
-        subscriptions: Optional[list[str]] = None,
+        client_id: str | None = None,
+        user_id: int | None = None,
+        subscriptions: list[str] | None = None,
     ) -> SyncState:
         """
         Register a new client connection.
@@ -389,10 +390,10 @@ class StateSyncManager:
 
     def get_events(
         self,
-        event_type: Optional[str] = None,
-        session_id: Optional[str] = None,
-        user_id: Optional[int] = None,
-        since: Optional[datetime] = None,
+        event_type: str | None = None,
+        session_id: str | None = None,
+        user_id: int | None = None,
+        since: datetime | None = None,
         limit: int = 100,
     ) -> list[SyncEvent]:
         """
@@ -474,7 +475,7 @@ class StateSyncManager:
             return True
         return False
 
-    def update_client_activity(self, client_id: str, session_id: Optional[str] = None) -> bool:
+    def update_client_activity(self, client_id: str, session_id: str | None = None) -> bool:
         """
         Update client activity timestamp.
 
@@ -493,7 +494,7 @@ class StateSyncManager:
             self._clients[client_id].session_id = session_id
         return True
 
-    def get_client_state(self, client_id: str) -> Optional[SyncState]:
+    def get_client_state(self, client_id: str) -> SyncState | None:
         """
         Get a client's sync state.
 
@@ -505,7 +506,7 @@ class StateSyncManager:
         """
         return self._clients.get(client_id)
 
-    def get_active_clients(self, user_id: Optional[int] = None) -> list[SyncState]:
+    def get_active_clients(self, user_id: int | None = None) -> list[SyncState]:
         """
         Get all active clients.
 
@@ -645,7 +646,7 @@ class StateSyncManager:
 
 
 # Global state sync manager instance
-_state_sync_manager: Optional[StateSyncManager] = None
+_state_sync_manager: StateSyncManager | None = None
 
 
 def get_state_sync_manager() -> StateSyncManager:

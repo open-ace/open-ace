@@ -7,7 +7,7 @@ API routes for authentication operations.
 import logging
 import os
 import uuid
-from typing import Optional, cast
+from typing import cast
 
 import bcrypt
 import filetype
@@ -36,7 +36,7 @@ user_repo = UserRepository()
 audit_logger = AuditLogger()
 
 
-def _validate_avatar_url(user_id: int, avatar_url: Optional[str]) -> Optional[str]:
+def _validate_avatar_url(user_id: int, avatar_url: str | None) -> str | None:
     """Return the avatar URL only if the file exists on disk.
 
     This is a read-only check — it does NOT mutate the database.
@@ -219,7 +219,7 @@ def api_profile():
 _AUTH_SESSION_REFRESH_THRESHOLD_MINUTES = 10
 
 
-def _refresh_auth_session(token: str) -> Optional[int]:
+def _refresh_auth_session(token: str) -> int | None:
     """Extend session expiry when close to expiration.
 
     Returns new timeout seconds if session was refreshed, None otherwise.
@@ -351,7 +351,7 @@ def api_change_password():
         return jsonify({"error": "Current password and new password required"}), 400
 
     user_id = int(g.user_id)
-    username = cast("Optional[str]", getattr(g, "user", {}).get("username"))
+    username = cast("str | None", getattr(g, "user", {}).get("username"))
 
     # Check if change-password is locked for this user
     is_locked, lockout_msg, remaining_minutes = _check_change_password_lockout(user_id)

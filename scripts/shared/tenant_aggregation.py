@@ -175,8 +175,8 @@ def release_aggregation_lock(conn):
 
 
 def check_quota_usage_quality(
-    start_date: Optional[str] = None, end_date: Optional[str] = None
-) -> Dict[str, Any]:
+    start_date: str | None = None, end_date: str | None = None
+) -> dict[str, Any]:
     """
     Check data quality of quota_usage table before aggregation.
 
@@ -495,10 +495,10 @@ def reset_expired_tenant_periods() -> int:
 
 
 def aggregate_tenant_usage_from_quota(
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-    quality_report: Optional[Dict] = None,
-) -> Tuple[int, Dict]:
+    start_date: str | None = None,
+    end_date: str | None = None,
+    quality_report: dict | None = None,
+) -> tuple[int, dict]:
     """
     Aggregate tenant usage from quota_usage table.
 
@@ -737,8 +737,8 @@ def record_aggregation_history(
     end_date: str,
     status: str,
     records_count: int = 0,
-    quality_report: Optional[Dict] = None,
-    error_message: Optional[str] = None,
+    quality_report: dict | None = None,
+    error_message: str | None = None,
 ) -> bool:
     """
     Record aggregation history.
@@ -794,9 +794,7 @@ def record_aggregation_history(
 # ============================================================================
 
 
-def run_tenant_aggregation(
-    start_date: Optional[str] = None, end_date: Optional[str] = None
-) -> Dict:
+def run_tenant_aggregation(start_date: str | None = None, end_date: str | None = None) -> dict:
     """
     Run complete tenant aggregation process.
 

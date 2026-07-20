@@ -16,7 +16,6 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import Optional
 
 from app.repositories.database import Database, adapt_sql, is_postgresql
 
@@ -111,10 +110,10 @@ class QuotaAlertData:
 class AlertCreationFailure:
     """Record of a failed alert creation."""
 
-    id: Optional[int] = None
+    id: int | None = None
     alert_data: str = ""  # JSON string of QuotaAlertData
     retry_count: int = 0
-    last_retry_at: Optional[datetime] = None
+    last_retry_at: datetime | None = None
     created_at: datetime = field(
         default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None)
     )
@@ -143,7 +142,7 @@ class AlertTransactionManager:
     - Deduplication across both tables
     """
 
-    def __init__(self, db: Optional[Database] = None):
+    def __init__(self, db: Database | None = None):
         """Initialize the transaction manager."""
         self.db = db or Database()
         self._ensure_failure_table()
@@ -184,7 +183,7 @@ class AlertTransactionManager:
     def create_quota_alert_transactional(
         self,
         alert_data: QuotaAlertData,
-    ) -> tuple[bool, Optional[str]]:
+    ) -> tuple[bool, str | None]:
         """
         Create a quota alert in both tables atomically.
 
@@ -458,10 +457,10 @@ class AlertTransactionManager:
 
 
 # Global instance
-_transaction_manager: Optional[AlertTransactionManager] = None
+_transaction_manager: AlertTransactionManager | None = None
 
 
-def get_transaction_manager(db: Optional[Database] = None) -> AlertTransactionManager:
+def get_transaction_manager(db: Database | None = None) -> AlertTransactionManager:
     """Get the global transaction manager instance."""
     global _transaction_manager
     if _transaction_manager is None:
@@ -478,7 +477,7 @@ def create_quota_alert_transactional(
     quota_limit: int = 0,
     threshold: float = 0.0,
     language: str = "en",
-) -> tuple[bool, Optional[str]]:
+) -> tuple[bool, str | None]:
     """
     Create a quota alert in both tables atomically.
 

@@ -12,7 +12,7 @@ import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Optional, Union
+from typing import Any
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
@@ -55,8 +55,8 @@ class ReportMetadata:
     generated_at: datetime
     period_start: datetime
     period_end: datetime
-    generated_by: Optional[int] = None
-    tenant_id: Optional[int] = None
+    generated_by: int | None = None
+    tenant_id: int | None = None
     filters: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
@@ -698,10 +698,10 @@ class ReportGenerator:
 
     def __init__(
         self,
-        db: Optional[Database] = None,
-        usage_repo: Optional[UsageRepository] = None,
-        user_repo: Optional[UserRepository] = None,
-        audit_logger: Optional[AuditLogger] = None,
+        db: Database | None = None,
+        usage_repo: UsageRepository | None = None,
+        user_repo: UserRepository | None = None,
+        audit_logger: AuditLogger | None = None,
     ):
         """
         Initialize report generator.
@@ -722,9 +722,9 @@ class ReportGenerator:
         report_type: str,
         period_start: datetime,
         period_end: datetime,
-        generated_by: Optional[int] = None,
-        tenant_id: Optional[int] = None,
-        filters: Optional[dict[str, Any]] = None,
+        generated_by: int | None = None,
+        tenant_id: int | None = None,
+        filters: dict[str, Any] | None = None,
     ) -> ComplianceReport:
         """
         Generate a compliance report.
@@ -788,7 +788,7 @@ class ReportGenerator:
         )
 
     def _generate_usage_summary(
-        self, period_start: datetime, period_end: datetime, tenant_id: Optional[int]
+        self, period_start: datetime, period_end: datetime, tenant_id: int | None
     ) -> tuple:
         """Generate usage summary report."""
         start_date = period_start.strftime("%Y-%m-%d")
@@ -865,7 +865,7 @@ class ReportGenerator:
         return summary, details
 
     def _generate_user_activity(
-        self, period_start: datetime, period_end: datetime, tenant_id: Optional[int]
+        self, period_start: datetime, period_end: datetime, tenant_id: int | None
     ) -> tuple:
         """Generate user activity report."""
         start_date = period_start.strftime("%Y-%m-%d")
@@ -920,7 +920,7 @@ class ReportGenerator:
         return summary, details
 
     def _generate_audit_trail(
-        self, period_start: datetime, period_end: datetime, tenant_id: Optional[int]
+        self, period_start: datetime, period_end: datetime, tenant_id: int | None
     ) -> tuple:
         """Generate audit trail report."""
         audit_logs = self.audit_logger.query(
@@ -933,7 +933,7 @@ class ReportGenerator:
         # Calculate summary
         action_counts: dict[str, int] = {}
         severity_counts: dict[str, int] = {}
-        user_actions: dict[Union[str, int], int] = {}
+        user_actions: dict[str | int, int] = {}
 
         for log in audit_logs:
             action = log.action
@@ -964,7 +964,7 @@ class ReportGenerator:
         return summary, details
 
     def _generate_data_access(
-        self, period_start: datetime, period_end: datetime, tenant_id: Optional[int]
+        self, period_start: datetime, period_end: datetime, tenant_id: int | None
     ) -> tuple:
         """Generate data access report."""
         # Get data access logs
@@ -1001,7 +1001,7 @@ class ReportGenerator:
         return summary, details
 
     def _generate_security_report(
-        self, period_start: datetime, period_end: datetime, tenant_id: Optional[int]
+        self, period_start: datetime, period_end: datetime, tenant_id: int | None
     ) -> tuple:
         """Generate security report."""
         # Get security-related audit logs
@@ -1071,7 +1071,7 @@ class ReportGenerator:
         return summary, details
 
     def _generate_quota_usage(
-        self, period_start: datetime, period_end: datetime, tenant_id: Optional[int]
+        self, period_start: datetime, period_end: datetime, tenant_id: int | None
     ) -> tuple:
         """Generate quota usage report."""
         # Get quota alerts
@@ -1108,7 +1108,7 @@ class ReportGenerator:
         return summary, details
 
     def _generate_comprehensive_report(
-        self, period_start: datetime, period_end: datetime, tenant_id: Optional[int]
+        self, period_start: datetime, period_end: datetime, tenant_id: int | None
     ) -> tuple:
         """Generate comprehensive compliance report.
 
@@ -1356,7 +1356,7 @@ class ReportGenerator:
             return False
 
     def get_saved_reports(
-        self, report_type: Optional[str] = None, tenant_id: Optional[int] = None, limit: int = 50
+        self, report_type: str | None = None, tenant_id: int | None = None, limit: int = 50
     ) -> list[dict[str, Any]]:
         """Get saved reports.
 
@@ -1391,7 +1391,7 @@ class ReportGenerator:
             logger.error(f"Failed to query saved reports: {e}")
             raise
 
-    def get_saved_report(self, report_id: str) -> Optional[ComplianceReport]:
+    def get_saved_report(self, report_id: str) -> ComplianceReport | None:
         """Get a saved report by ID.
 
         Handles backward compatibility for old format comprehensive reports

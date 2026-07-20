@@ -34,7 +34,7 @@ ROLE_TOOL = "tool"
 _TOOL_ROLE_ALIASES = {"tool", "toolresult", "tool_result"}
 
 
-def normalize_message_role(role: Optional[str]) -> str:
+def normalize_message_role(role: str | None) -> str:
     """Normalize a message role to its canonical form.
 
     Tool-result spellings (``toolResult``, ``tool_result``) collapse to the
@@ -88,7 +88,7 @@ def escape_like(value: str, escape_char: str = "\\") -> str:
     )
 
 
-def _execute(cursor, sql: str, params: Union[tuple, list] = ()) -> None:
+def _execute(cursor, sql: str, params: tuple | list = ()) -> None:
     """Execute SQL with automatic placeholder conversion for PostgreSQL."""
     cursor.execute(_convert_sql(sql), params)
 
@@ -103,7 +103,7 @@ def ensure_db_dir() -> None:
     os.makedirs(DB_DIR, exist_ok=True)
 
 
-def get_connection() -> Union[sqlite3.Connection, Any]:
+def get_connection() -> sqlite3.Connection | Any:
     """Get a database connection (SQLite or PostgreSQL)."""
     url = _get_db_url()
     if url.startswith("postgresql"):
@@ -356,7 +356,7 @@ def save_usage(
     output_tokens: int = 0,
     cache_tokens: int = 0,
     request_count: int = 0,
-    models_used: Optional[list[str]] = None,
+    models_used: list[str] | None = None,
     host_name: str = "localhost",
     tenant_id: int = 1,
 ) -> bool:
@@ -428,7 +428,7 @@ def save_usage(
 
 
 def get_usage_by_date(
-    date: str, tool_name: Optional[str] = None, host_name: Optional[str] = None
+    date: str, tool_name: str | None = None, host_name: str | None = None
 ) -> list[dict]:
     """Get usage data for a specific date, optionally filtered by tool and host."""
     conn = get_connection()
@@ -472,7 +472,7 @@ def get_usage_by_date(
 
 
 def get_usage_by_tool(
-    tool_name: str, days: int = 7, end_date: Optional[str] = None, host_name: Optional[str] = None
+    tool_name: str, days: int = 7, end_date: str | None = None, host_name: str | None = None
 ) -> list[dict]:
     """Get usage data for a specific tool over a date range."""
     conn = get_connection()
@@ -581,7 +581,7 @@ def get_all_hosts(active_only: bool = True) -> list[str]:
     return [row["host_name"] for row in rows]
 
 
-def get_summary_by_tool(host_name: Optional[str] = None) -> dict[str, dict]:
+def get_summary_by_tool(host_name: str | None = None) -> dict[str, dict]:
     """Get summary statistics grouped by tool, optionally filtered by host."""
     conn = get_connection()
     cursor = conn.cursor()
@@ -644,7 +644,7 @@ def get_summary_by_tool(host_name: Optional[str] = None) -> dict[str, dict]:
 
 
 def get_daily_range(
-    start_date: str, end_date: str, tool_name: Optional[str] = None, host_name: Optional[str] = None
+    start_date: str, end_date: str, tool_name: str | None = None, host_name: str | None = None
 ) -> list[dict]:
     """Get usage data within a date range."""
     conn = get_connection()
@@ -693,22 +693,22 @@ def save_message(
     message_id: str,
     role: str,
     content: str,
-    full_entry: Optional[str] = None,
+    full_entry: str | None = None,
     tokens_used: int = 0,
     input_tokens: int = 0,
     output_tokens: int = 0,
-    model: Optional[str] = None,
-    timestamp: Optional[str] = None,
-    parent_id: Optional[str] = None,
+    model: str | None = None,
+    timestamp: str | None = None,
+    parent_id: str | None = None,
     host_name: str = "localhost",
-    sender_id: Optional[str] = None,
-    sender_name: Optional[str] = None,
-    message_source: Optional[str] = None,
-    feishu_conversation_id: Optional[str] = None,
-    group_subject: Optional[str] = None,
-    is_group_chat: Optional[bool] = None,
-    agent_session_id: Optional[str] = None,
-    conversation_id: Optional[str] = None,
+    sender_id: str | None = None,
+    sender_name: str | None = None,
+    message_source: str | None = None,
+    feishu_conversation_id: str | None = None,
+    group_subject: str | None = None,
+    is_group_chat: bool | None = None,
+    agent_session_id: str | None = None,
+    conversation_id: str | None = None,
 ) -> bool:
     """Save an individual message to the database.
 
@@ -1138,13 +1138,13 @@ def save_messages_batch(messages: list[dict], batch_size: int = 1000) -> int:
 
 def get_messages_by_date(
     date: str,
-    tool_name: Optional[str] = None,
-    roles: Optional[list[str]] = None,
-    search: Optional[str] = None,
+    tool_name: str | None = None,
+    roles: list[str] | None = None,
+    search: str | None = None,
     page: int = 1,
     limit: int = 50,
-    host_name: Optional[str] = None,
-    sender: Optional[str] = None,
+    host_name: str | None = None,
+    sender: str | None = None,
 ) -> dict:
     """Get messages for a specific date with filters.
 
@@ -1264,7 +1264,7 @@ def get_hosts_by_tool(tool_name: str) -> list[str]:
 
 
 def get_unique_senders(
-    date: str, tool_name: Optional[str] = None, host_name: Optional[str] = None
+    date: str, tool_name: str | None = None, host_name: str | None = None
 ) -> list[str]:
     """Get unique sender names for a specific date.
 
@@ -1461,7 +1461,7 @@ def init_auth_database() -> None:
 def create_user(
     username: str,
     password_hash: str,
-    email: Optional[str] = None,
+    email: str | None = None,
     role: str = "user",
     daily_token_quota: int = 1000000,
     daily_request_quota: int = 1000,
@@ -1490,12 +1490,12 @@ def create_user(
 def create_user_with_is_active(
     username: str,
     password_hash: str,
-    email: Optional[str] = None,
+    email: str | None = None,
     role: str = "user",
     daily_token_quota: int = 1000000,
     daily_request_quota: int = 1000,
     is_active: bool = True,
-    system_account: Optional[str] = None,
+    system_account: str | None = None,
     must_change_password: bool = False,
 ) -> bool:
     """Create a new user with is_active and must_change_password flags."""
@@ -1535,7 +1535,7 @@ def create_user_with_is_active(
         conn.close()
 
 
-def get_user_by_username(username: str) -> Optional[dict]:
+def get_user_by_username(username: str) -> dict | None:
     """Get user by username."""
     conn = get_connection()
     cursor = conn.cursor()
@@ -1549,7 +1549,7 @@ def get_user_by_username(username: str) -> Optional[dict]:
     return None
 
 
-def get_user_by_id(user_id: int) -> Optional[dict]:
+def get_user_by_id(user_id: int) -> dict | None:
     """Get user by ID."""
     conn = get_connection()
     cursor = conn.cursor()
@@ -1672,7 +1672,7 @@ def get_user_quota_breakdown(start_date: str, end_date: str) -> list[dict]:
     return result
 
 
-def verify_password(username: str, password: str) -> Optional[dict]:
+def verify_password(username: str, password: str) -> dict | None:
     """Verify user password and return user info if valid."""
     import hashlib
 
@@ -1710,7 +1710,7 @@ def create_session(user_id: int, session_token: str, expires_at: datetime) -> bo
         conn.close()
 
 
-def get_session_by_token(session_token: str) -> Optional[dict]:
+def get_session_by_token(session_token: str) -> dict | None:
     """Get session by token if not expired."""
     conn = get_connection()
     cursor = conn.cursor()
@@ -1815,7 +1815,7 @@ def delete_user(user_id: int) -> bool:
 def save_quota_usage(
     user_id: int,
     date: str,
-    tool_name: Optional[str] = None,
+    tool_name: str | None = None,
     tokens_used: int = 0,
     requests_used: int = 0,
 ) -> bool:
@@ -1837,7 +1837,7 @@ def save_quota_usage(
 
 
 def aggregate_quota_usage_from_messages(
-    start_date: Optional[str] = None, end_date: Optional[str] = None
+    start_date: str | None = None, end_date: str | None = None
 ) -> int:
     """Aggregate quota usage from daily_messages table.
 
@@ -2200,7 +2200,7 @@ def get_quota_usage_by_day(user_id: int, start_date: str, end_date: str) -> list
 
 
 def get_hourly_usage_from_messages(
-    start_date: str, end_date: str, tool_name: Optional[str] = None, host_name: Optional[str] = None
+    start_date: str, end_date: str, tool_name: str | None = None, host_name: str | None = None
 ) -> list[dict]:
     """Get hourly usage statistics from daily_messages table.
 
@@ -2290,7 +2290,7 @@ def get_hourly_usage_from_messages(
 
 
 def get_daily_hourly_usage(
-    start_date: str, end_date: str, tool_name: Optional[str] = None, host_name: Optional[str] = None
+    start_date: str, end_date: str, tool_name: str | None = None, host_name: str | None = None
 ) -> list[dict]:
     """Get hourly usage statistics grouped by date (not day_of_week).
 
@@ -2384,8 +2384,8 @@ def get_user_activity_ranking(
     start_date: str,
     end_date: str,
     limit: int = 10,
-    tool_name: Optional[str] = None,
-    host_name: Optional[str] = None,
+    tool_name: str | None = None,
+    host_name: str | None = None,
 ) -> list[dict]:
     """Get user activity ranking.
 
@@ -2442,7 +2442,7 @@ def get_user_activity_ranking(
 
 
 def get_conversation_statistics(
-    start_date: str, end_date: str, tool_name: Optional[str] = None, host_name: Optional[str] = None
+    start_date: str, end_date: str, tool_name: str | None = None, host_name: str | None = None
 ) -> dict:
     """Get conversation statistics.
 
@@ -2562,8 +2562,8 @@ def get_conversation_statistics(
 def get_peak_usage_periods(
     start_date: str,
     end_date: str,
-    tool_name: Optional[str] = None,
-    host_name: Optional[str] = None,
+    tool_name: str | None = None,
+    host_name: str | None = None,
     limit: int = 10,
 ) -> list[dict]:
     """Get peak usage periods.
@@ -2638,7 +2638,7 @@ def get_peak_usage_periods(
 
 
 def get_user_segmentation(
-    start_date: str, end_date: str, tool_name: Optional[str] = None, host_name: Optional[str] = None
+    start_date: str, end_date: str, tool_name: str | None = None, host_name: str | None = None
 ) -> dict:
     """Get user segmentation by activity level.
 
@@ -2736,7 +2736,7 @@ def get_user_segmentation(
 
 
 def get_tool_comparison_metrics(
-    start_date: str, end_date: str, host_name: Optional[str] = None
+    start_date: str, end_date: str, host_name: str | None = None
 ) -> list[dict]:
     """Get comparison metrics for different tools.
 
@@ -2818,8 +2818,8 @@ def get_tool_comparison_metrics(
 def detect_usage_anomalies(
     start_date: str,
     end_date: str,
-    tool_name: Optional[str] = None,
-    host_name: Optional[str] = None,
+    tool_name: str | None = None,
+    host_name: str | None = None,
     threshold_std: float = 3.0,
 ) -> list[dict]:
     """Detect usage anomalies using statistical methods (3-sigma rule).
@@ -2927,9 +2927,9 @@ def detect_usage_anomalies(
 
 def get_key_metrics(
     start_date: str,
-    end_date: Optional[str] = None,
-    tool_name: Optional[str] = None,
-    host_name: Optional[str] = None,
+    end_date: str | None = None,
+    tool_name: str | None = None,
+    host_name: str | None = None,
 ) -> dict:
     """Get key metrics for dashboard.
 
@@ -3257,8 +3257,8 @@ def get_all_hosts_with_status() -> list[dict]:
 def get_conversation_history(
     start_date: str,
     end_date: str,
-    tool_name: Optional[str] = None,
-    host_name: Optional[str] = None,
+    tool_name: str | None = None,
+    host_name: str | None = None,
     page: int = 1,
     limit: int = 20,
     sort_by: str = "start_time",

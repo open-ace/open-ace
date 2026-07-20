@@ -7,7 +7,6 @@ Business logic for usage data operations.
 import json
 import logging
 from datetime import datetime
-from typing import Optional
 
 from app.repositories.usage_repo import UsageRepository
 from app.utils.cache import cached
@@ -19,7 +18,7 @@ logger = logging.getLogger(__name__)
 class UsageService:
     """Service for usage-related business logic."""
 
-    def __init__(self, usage_repo: Optional[UsageRepository] = None):
+    def __init__(self, usage_repo: UsageRepository | None = None):
         """
         Initialize service.
 
@@ -31,9 +30,9 @@ class UsageService:
     @cached(ttl=30, key_prefix="usage", skip_args=[0])
     def get_today_usage(
         self,
-        tool_name: Optional[str] = None,
-        host_name: Optional[str] = None,
-        tenant_id: Optional[int] = None,
+        tool_name: str | None = None,
+        host_name: str | None = None,
+        tenant_id: int | None = None,
     ) -> list[dict]:
         """
         Get today's usage data, aggregated from daily_usage table.
@@ -109,10 +108,10 @@ class UsageService:
     @cached(ttl=60, key_prefix="usage", skip_args=[0])
     def get_usage_summary(
         self,
-        host_name: Optional[str] = None,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
-        tenant_id: Optional[int] = None,
+        host_name: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        tenant_id: int | None = None,
     ) -> dict[str, dict]:
         """
         Get usage summary for all tools.
@@ -135,8 +134,8 @@ class UsageService:
         self,
         tool_name: str,
         days: int = 7,
-        host_name: Optional[str] = None,
-        tenant_id: Optional[int] = None,
+        host_name: str | None = None,
+        tenant_id: int | None = None,
     ) -> list[dict]:
         """
         Get usage data for a specific tool.
@@ -159,9 +158,9 @@ class UsageService:
     def get_date_usage(
         self,
         date: str,
-        tool_name: Optional[str] = None,
-        host_name: Optional[str] = None,
-        tenant_id: Optional[int] = None,
+        tool_name: str | None = None,
+        host_name: str | None = None,
+        tenant_id: int | None = None,
     ) -> list[dict]:
         """
         Get usage data for a specific date.
@@ -180,9 +179,9 @@ class UsageService:
         self,
         start_date: str,
         end_date: str,
-        tool_name: Optional[str] = None,
-        host_name: Optional[str] = None,
-        tenant_id: Optional[int] = None,
+        tool_name: str | None = None,
+        host_name: str | None = None,
+        tenant_id: int | None = None,
     ) -> list[dict]:
         """
         Get usage data for a date range.
@@ -205,7 +204,7 @@ class UsageService:
         )
 
     @cached(ttl=300, key_prefix="usage", skip_args=[0])
-    def get_all_tools(self, tenant_id: Optional[int] = None) -> list[str]:
+    def get_all_tools(self, tenant_id: int | None = None) -> list[str]:
         """
         Get list of all tools.
 
@@ -215,7 +214,7 @@ class UsageService:
         return self.usage_repo.get_all_tools(tenant_id=tenant_id)
 
     @cached(ttl=300, key_prefix="usage", skip_args=[0])
-    def get_all_hosts(self, tenant_id: Optional[int] = None) -> list[str]:
+    def get_all_hosts(self, tenant_id: int | None = None) -> list[str]:
         """
         Get list of all hosts.
 
@@ -233,9 +232,9 @@ class UsageService:
         output_tokens: int = 0,
         cache_tokens: int = 0,
         request_count: int = 0,
-        models_used: Optional[list[str]] = None,
+        models_used: list[str] | None = None,
         host_name: str = "localhost",
-        tenant_id: Optional[int] = None,
+        tenant_id: int | None = None,
     ) -> bool:
         """
         Save usage data.
@@ -272,8 +271,8 @@ class UsageService:
         self,
         start_date: str,
         end_date: str,
-        host_name: Optional[str] = None,
-        tenant_id: Optional[int] = None,
+        host_name: str | None = None,
+        tenant_id: int | None = None,
     ) -> list[dict]:
         """
         Get usage trend data aggregated by date and tool.

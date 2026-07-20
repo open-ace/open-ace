@@ -26,7 +26,7 @@ from app.services.autonomous_scheduler import (
 _QUOTA_PATH = "app.modules.governance.quota_manager.QuotaManager"
 
 
-def _quota(allowed: bool, reason: Optional[str] = None):
+def _quota(allowed: bool, reason: str | None = None):
     """Build a MagicMock QuotaManager whose check_quota returns *allowed*."""
     mock = MagicMock()
     mock.return_value.check_quota.return_value = {

@@ -6,7 +6,7 @@ Provides database access for email notification audit logs.
 
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional, Union
+from typing import Any
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 class EmailNotificationLogRepository:
     """Repository for email notification logs."""
 
-    def _get_connection(self) -> Union[Any, Any]:
+    def _get_connection(self) -> Any | Any:
         """Get database connection."""
         if is_postgresql():
             url = get_database_url()
@@ -38,10 +38,10 @@ class EmailNotificationLogRepository:
         user_id: int,
         recipient_email: str,
         subject: str,
-        alert_id: Optional[str] = None,
-        email_body: Optional[str] = None,
+        alert_id: str | None = None,
+        email_body: str | None = None,
         status: str = "pending",
-        error_message: Optional[str] = None,
+        error_message: str | None = None,
     ) -> int:
         """
         Create an email notification log entry.
@@ -114,9 +114,9 @@ class EmailNotificationLogRepository:
         self,
         log_id: int,
         status: str,
-        error_message: Optional[str] = None,
+        error_message: str | None = None,
         increment_retry: bool = False,
-        next_retry_at: Optional[datetime] = None,
+        next_retry_at: datetime | None = None,
     ) -> bool:
         """
         Update email log status.
@@ -324,7 +324,7 @@ class EmailNotificationLogRepository:
 
 
 # Global repository instance
-_email_log_repo: Optional[EmailNotificationLogRepository] = None
+_email_log_repo: EmailNotificationLogRepository | None = None
 
 
 def get_email_log_repository() -> EmailNotificationLogRepository:

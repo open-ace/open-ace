@@ -10,7 +10,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Optional, cast
+from typing import Any, cast
 
 from app.repositories.governance_repo import GovernanceRepository
 
@@ -49,10 +49,10 @@ class FilterResult:
     risk_level: str = "low"
     action: str = "none"  # none, warn, block, redact
     matched_rules: list[dict[str, Any]] = field(default_factory=list)
-    redacted_content: Optional[str] = None
-    original_content: Optional[str] = None  # For audit logging with redact
-    message: Optional[str] = None
-    suggestion: Optional[str] = None
+    redacted_content: str | None = None
+    original_content: str | None = None  # For audit logging with redact
+    message: str | None = None
+    suggestion: str | None = None
     timestamp: datetime = field(
         default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None)
     )
@@ -126,10 +126,10 @@ class ContentFilter:
 
     def __init__(
         self,
-        config: Optional[dict[str, Any]] = None,
-        custom_patterns: Optional[dict[str, str]] = None,
-        custom_keywords: Optional[list[str]] = None,
-        governance_repo: Optional[GovernanceRepository] = None,
+        config: dict[str, Any] | None = None,
+        custom_patterns: dict[str, str] | None = None,
+        custom_keywords: list[str] | None = None,
+        governance_repo: GovernanceRepository | None = None,
     ):
         """
         Initialize content filter.
@@ -152,7 +152,7 @@ class ContentFilter:
 
         # Database rules integration
         self.governance_repo = governance_repo
-        self._rules_cache: Optional[list[dict[str, Any]]] = None
+        self._rules_cache: list[dict[str, Any]] | None = None
         self._cache_valid: bool = False
 
         # Compile patterns
@@ -224,7 +224,7 @@ class ContentFilter:
         """
         self.invalidate_cache()
 
-    def check_content(self, content: str, context: Optional[dict[str, Any]] = None) -> FilterResult:
+    def check_content(self, content: str, context: dict[str, Any] | None = None) -> FilterResult:
         """
         Check content for sensitive information.
 

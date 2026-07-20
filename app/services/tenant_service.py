@@ -7,7 +7,7 @@ Business logic for multi-tenant management.
 import logging
 import re
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional
+from typing import Any
 
 from app.models.tenant import QuotaConfig, Tenant, TenantSettings, TenantUsage
 from app.repositories.tenant_repo import TenantRepository
@@ -57,8 +57,8 @@ class TenantService:
 
     def __init__(
         self,
-        tenant_repo: Optional[TenantRepository] = None,
-        user_repo: Optional[UserRepository] = None,
+        tenant_repo: TenantRepository | None = None,
+        user_repo: UserRepository | None = None,
     ):
         """
         Initialize tenant service.
@@ -73,12 +73,12 @@ class TenantService:
     def create_tenant(
         self,
         name: str,
-        slug: Optional[str] = None,
+        slug: str | None = None,
         plan: str = "standard",
         contact_email: str = "",
-        contact_name: Optional[str] = None,
-        trial_days: Optional[int] = None,
-    ) -> Optional[Tenant]:
+        contact_name: str | None = None,
+        trial_days: int | None = None,
+    ) -> Tenant | None:
         """
         Create a new tenant.
 
@@ -132,7 +132,7 @@ class TenantService:
 
         return None
 
-    def get_tenant(self, tenant_id: int) -> Optional[Tenant]:
+    def get_tenant(self, tenant_id: int) -> Tenant | None:
         """
         Get tenant by ID.
 
@@ -144,7 +144,7 @@ class TenantService:
         """
         return self.tenant_repo.get_by_id(tenant_id)
 
-    def get_tenant_by_slug(self, slug: str) -> Optional[Tenant]:
+    def get_tenant_by_slug(self, slug: str) -> Tenant | None:
         """
         Get tenant by slug.
 
@@ -158,8 +158,8 @@ class TenantService:
 
     def list_tenants(
         self,
-        status: Optional[str] = None,
-        plan: Optional[str] = None,
+        status: str | None = None,
+        plan: str | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> list[Tenant]:
@@ -312,7 +312,7 @@ class TenantService:
 
         logger.info("Cleared %d ROI cache entries for tenant_id=%s", cleared_count, tenant_id)
 
-    def suspend_tenant(self, tenant_id: int, reason: Optional[str] = None) -> bool:
+    def suspend_tenant(self, tenant_id: int, reason: str | None = None) -> bool:
         """
         Suspend a tenant.
 

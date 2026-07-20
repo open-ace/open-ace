@@ -13,7 +13,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from enum import Enum
-from typing import Any, Optional, Union
+from typing import Any
 
 from app.repositories.database import DB_PATH, escape_like, get_database_url, is_postgresql
 from app.utils.tool_names import normalize_tool_name
@@ -42,7 +42,7 @@ def _get_content_filter():
     return _content_filter_instance
 
 
-def _sanitize_text_value(text: Optional[str]) -> Optional[str]:
+def _sanitize_text_value(text: str | None) -> str | None:
     """Remove NUL / invalid UTF-8 surrogate data before persistence."""
     if text is None:
         return None
@@ -118,15 +118,15 @@ class SessionType(Enum):
 class SessionMessage:
     """A message within a session."""
 
-    id: Optional[int] = None
+    id: int | None = None
     session_id: str = ""
     tenant_id: int = 1
     role: str = ""  # user, assistant, system, tool
     content: str = ""
     tokens_used: int = 0
-    model: Optional[str] = None
-    timestamp: Optional[datetime] = None
-    source_timestamp: Optional[datetime] = None
+    model: str | None = None
+    timestamp: datetime | None = None
+    source_timestamp: datetime | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
     milestone_id: str = ""
     source: str = ""
@@ -197,16 +197,16 @@ def _format_dt(dt):
 class AgentSession:
     """Agent session data model for persistent AI conversations."""
 
-    id: Optional[int] = None
+    id: int | None = None
     session_id: str = ""
     session_type: str = SessionType.CHAT.value
     title: str = ""
     tool_name: str = ""
     host_name: str = "localhost"
     tenant_id: int = 1
-    user_id: Optional[int] = None
-    project_id: Optional[int] = None  # Project association for statistics
-    project_path: Optional[str] = None  # Project path for quick reference
+    user_id: int | None = None
+    project_id: int | None = None  # Project association for statistics
+    project_path: str | None = None  # Project path for quick reference
     status: str = SessionStatus.ACTIVE.value
     context: dict[str, Any] = field(default_factory=dict)
     settings: dict[str, Any] = field(default_factory=dict)
@@ -215,16 +215,16 @@ class AgentSession:
     total_output_tokens: int = 0
     message_count: int = 0
     request_count: int = 0  # Number of API requests (assistant messages only)
-    model: Optional[str] = None
+    model: str | None = None
     tags: list[str] = field(default_factory=list)
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
-    expires_at: Optional[datetime] = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    completed_at: datetime | None = None
+    expires_at: datetime | None = None
     messages: list[SessionMessage] = field(default_factory=list)
     workspace_type: str = "local"  # local or remote
-    remote_machine_id: Optional[str] = None
-    paused_at: Optional[datetime] = None
+    remote_machine_id: str | None = None
+    paused_at: datetime | None = None
     # Real CLI/sidebar session id for workflow-owned lines (Claude local). The
     # workflow row stores a stable tracking id; this column is the authoritative
     # resume target. Promoted out of context JSON so a partial context write
@@ -336,7 +336,7 @@ class AgentSession:
 class SessionManager:
     """Manager for agent sessions with persistence and recovery."""
 
-    def __init__(self, db_path: Optional[str] = None):
+    def __init__(self, db_path: str | None = None):
         """
         Initialize the session manager.
 
@@ -345,7 +345,7 @@ class SessionManager:
         """
         self.db_path = db_path or str(DB_PATH)
 
-    def _get_connection(self) -> Union[sqlite3.Connection, Any]:
+    def _get_connection(self) -> sqlite3.Connection | Any:
         """Get database connection (SQLite or PostgreSQL)."""
         if is_postgresql():
             try:
@@ -407,7 +407,7 @@ class SessionManager:
         return cursor.fetchone() is not None
 
     @staticmethod
-    def _normalize_tenant_id(value: Any) -> Optional[int]:
+    def _normalize_tenant_id(value: Any) -> int | None:
         """Normalize a tenant identifier to a positive integer when possible.
 
         ``GLOBAL_TENANT_SENTINEL`` is intentionally NOT normalized here — it is
@@ -429,8 +429,8 @@ class SessionManager:
         self,
         cursor: Any,
         *,
-        tenant_id: Optional[int] = None,
-        user_id: Optional[int] = None,
+        tenant_id: int | None = None,
+        user_id: int | None = None,
     ) -> int:
         """Resolve the effective tenant for a session write path."""
         normalized = self._normalize_tenant_id(tenant_id)
@@ -452,7 +452,7 @@ class SessionManager:
         self,
         cursor: Any,
         table: str,
-        tenant_id: Optional[int],
+        tenant_id: int | None,
         column_ref: str = "tenant_id",
         require_tenant: bool = False,
     ) -> tuple[str, list[Any]]:
@@ -501,7 +501,7 @@ class SessionManager:
         load_schema_from_file(db_url=db_url, dialect=dialect)
 
     @staticmethod
-    def _extract_external_message_id(metadata: Optional[dict[str, Any]]) -> str:
+    def _extract_external_message_id(metadata: dict[str, Any] | None) -> str:
         """Extract a stable external message identity from transcript metadata."""
         metadata = metadata or {}
         for identity_key in ("external_message_id", "message_id", "uuid"):
@@ -511,14 +511,14 @@ class SessionManager:
         return ""
 
     @staticmethod
-    def _extract_source(metadata: Optional[dict[str, Any]]) -> str:
+    def _extract_source(metadata: dict[str, Any] | None) -> str:
         """Extract the transcript producer identifier from metadata."""
         metadata = metadata or {}
         value = metadata.get("source")
         return str(value) if value else ""
 
     @staticmethod
-    def _extract_content_blocks(metadata: Optional[dict[str, Any]]) -> list[Any]:
+    def _extract_content_blocks(metadata: dict[str, Any] | None) -> list[Any]:
         """Extract structured content blocks from metadata."""
         metadata = metadata or {}
         value = metadata.get("content_blocks")
@@ -527,20 +527,20 @@ class SessionManager:
     def create_session(
         self,
         tool_name: str,
-        user_id: Optional[int] = None,
-        tenant_id: Optional[int] = None,
+        user_id: int | None = None,
+        tenant_id: int | None = None,
         session_type: str = SessionType.CHAT.value,
         title: str = "",
         host_name: str = "localhost",
-        context: Optional[dict[str, Any]] = None,
-        settings: Optional[dict[str, Any]] = None,
-        model: Optional[str] = None,
-        expires_in_hours: Optional[int] = None,
-        project_id: Optional[int] = None,
-        project_path: Optional[str] = None,
-        session_id: Optional[str] = None,
+        context: dict[str, Any] | None = None,
+        settings: dict[str, Any] | None = None,
+        model: str | None = None,
+        expires_in_hours: int | None = None,
+        project_id: int | None = None,
+        project_path: str | None = None,
+        session_id: str | None = None,
         workspace_type: str = "local",
-        remote_machine_id: Optional[str] = None,
+        remote_machine_id: str | None = None,
     ) -> AgentSession:
         """
         Create a new agent session.
@@ -704,9 +704,9 @@ class SessionManager:
         self,
         session_id: str,
         include_messages: bool = False,
-        message_milestone_id: Optional[str] = None,
-        tenant_id: Optional[int] = None,
-    ) -> Optional[AgentSession]:
+        message_milestone_id: str | None = None,
+        tenant_id: int | None = None,
+    ) -> AgentSession | None:
         """
         Get a session by ID.
 
@@ -897,7 +897,7 @@ class SessionManager:
         self,
         session_id: str,
         fields: dict[str, Any],
-        tenant_id: Optional[int] = None,
+        tenant_id: int | None = None,
         require_tenant: bool = False,
     ) -> bool:
         """
@@ -979,7 +979,7 @@ class SessionManager:
         total_input_delta: int = 0,
         total_output_delta: int = 0,
         message_delta: int = 0,
-        tenant_id: Optional[int] = None,
+        tenant_id: int | None = None,
         require_tenant: bool = False,
     ) -> bool:
         """Increment a session's cumulative usage counters by the given deltas.
@@ -1034,10 +1034,10 @@ class SessionManager:
     def get_messages(
         self,
         session_id: str,
-        limit: Optional[int] = None,
-        before_id: Optional[int] = None,
-        milestone_id: Optional[str] = None,
-        tenant_id: Optional[int] = None,
+        limit: int | None = None,
+        before_id: int | None = None,
+        milestone_id: str | None = None,
+        tenant_id: int | None = None,
     ) -> list[SessionMessage]:
         """
         Get messages for a session.
@@ -1087,7 +1087,7 @@ class SessionManager:
     MAX_MESSAGE_PAGE_SIZE = 500
 
     @staticmethod
-    def _raw_timestamp(value: Any) -> Optional[str]:
+    def _raw_timestamp(value: Any) -> str | None:
         """Return the canonical stored form of a timestamp column value.
 
         The cursor round-trips through the HTTP layer, so the timestamp must be
@@ -1124,11 +1124,11 @@ class SessionManager:
     def get_messages_page(
         self,
         session_id: str,
-        limit: Optional[int] = None,
-        before_timestamp: Optional[str] = None,
-        before_id: Optional[int] = None,
-        milestone_id: Optional[str] = None,
-        tenant_id: Optional[int] = None,
+        limit: int | None = None,
+        before_timestamp: str | None = None,
+        before_id: int | None = None,
+        milestone_id: str | None = None,
+        tenant_id: int | None = None,
     ) -> dict[str, Any]:
         """Return one page of session messages using composite-key keyset paging.
 
@@ -1216,8 +1216,8 @@ class SessionManager:
     def count_messages(
         self,
         session_id: str,
-        milestone_id: Optional[str] = None,
-        tenant_id: Optional[int] = None,
+        milestone_id: str | None = None,
+        tenant_id: int | None = None,
     ) -> int:
         """Count messages in a session, optionally scoped to a milestone.
 
@@ -1254,7 +1254,7 @@ class SessionManager:
         return int(value or 0)
 
     @staticmethod
-    def _normalize_message_timestamp(value: Optional[Union[datetime, str]]) -> Optional[datetime]:
+    def _normalize_message_timestamp(value: datetime | str | None) -> datetime | None:
         """Normalize message timestamps to naive UTC datetimes for storage."""
         if value is None:
             return None
@@ -1279,7 +1279,7 @@ class SessionManager:
 
     @staticmethod
     def _merge_message_metadata(
-        existing: Optional[dict[str, Any]], incoming: Optional[dict[str, Any]]
+        existing: dict[str, Any] | None, incoming: dict[str, Any] | None
     ) -> dict[str, Any]:
         """Merge transcript metadata without clobbering richer existing values."""
         merged = dict(existing or {})
@@ -1291,7 +1291,7 @@ class SessionManager:
         return merged
 
     @staticmethod
-    def _serialize_json(value: Any) -> Optional[str]:
+    def _serialize_json(value: Any) -> str | None:
         """Serialize JSON payloads, preserving NULL for empty structured fields."""
         if value in (None, "", [], {}):
             return None
@@ -1303,8 +1303,8 @@ class SessionManager:
         session_id: str,
         tenant_id: int,
         role: str,
-        metadata: Optional[dict[str, Any]],
-    ) -> Optional[SessionMessage]:
+        metadata: dict[str, Any] | None,
+    ) -> SessionMessage | None:
         """Find an existing transcript row for a stable external message identity."""
         metadata = metadata or {}
         has_message_tenant = self._column_exists(cursor, "session_messages", "tenant_id")
@@ -1367,13 +1367,13 @@ class SessionManager:
         role: str,
         content: str,
         tokens_used: int = 0,
-        model: Optional[str] = None,
-        metadata: Optional[dict[str, Any]] = None,
+        model: str | None = None,
+        metadata: dict[str, Any] | None = None,
         milestone_id: str = "",
-        timestamp: Optional[Union[datetime, str]] = None,
+        timestamp: datetime | str | None = None,
         source: str = "",
         external_message_id: str = "",
-    ) -> Optional[SessionMessage]:
+    ) -> SessionMessage | None:
         """Append a transcript row without incrementing request/token summary.
 
         This is the preferred writer for transcript-producing code paths
@@ -1404,13 +1404,13 @@ class SessionManager:
         role: str,
         content: str,
         tokens_used: int = 0,
-        model: Optional[str] = None,
-        metadata: Optional[dict[str, Any]] = None,
+        model: str | None = None,
+        metadata: dict[str, Any] | None = None,
         milestone_id: str = "",
         source: str = "",
         count_usage: bool = True,
-        timestamp: Optional[Union[datetime, str]] = None,
-    ) -> Optional[SessionMessage]:
+        timestamp: datetime | str | None = None,
+    ) -> SessionMessage | None:
         """
         Add a message to a session.
 
@@ -1672,7 +1672,7 @@ class SessionManager:
 
         return message
 
-    def complete_session(self, session_id: str, tenant_id: Optional[int] = None) -> bool:
+    def complete_session(self, session_id: str, tenant_id: int | None = None) -> bool:
         """
         Mark a session as completed and update project statistics.
 
@@ -1789,7 +1789,7 @@ class SessionManager:
             logger.info(f"Completed session: {session_id}")
         return success
 
-    def delete_session(self, session_id: str, tenant_id: Optional[int] = None) -> bool:
+    def delete_session(self, session_id: str, tenant_id: int | None = None) -> bool:
         """
         Delete a session and its messages.
 
@@ -1830,12 +1830,12 @@ class SessionManager:
 
     def list_sessions(
         self,
-        user_id: Optional[int] = None,
-        tenant_id: Optional[int] = None,
-        tool_name: Optional[str] = None,
-        status: Optional[str] = None,
-        session_type: Optional[str] = None,
-        search: Optional[str] = None,
+        user_id: int | None = None,
+        tenant_id: int | None = None,
+        tool_name: str | None = None,
+        status: str | None = None,
+        session_type: str | None = None,
+        search: str | None = None,
         page: int = 1,
         limit: int = 20,
     ) -> dict[str, Any]:
@@ -1923,7 +1923,7 @@ class SessionManager:
         }
 
     def get_active_sessions(
-        self, user_id: Optional[int] = None, tenant_id: Optional[int] = None
+        self, user_id: int | None = None, tenant_id: int | None = None
     ) -> list[AgentSession]:
         """
         Get all active sessions.
@@ -1962,9 +1962,7 @@ class SessionManager:
 
         return [self._row_to_session(row) for row in rows]
 
-    def recover_session(
-        self, session_id: str, tenant_id: Optional[int] = None
-    ) -> Optional[AgentSession]:
+    def recover_session(self, session_id: str, tenant_id: int | None = None) -> AgentSession | None:
         """
         Recover a paused or interrupted session.
 
@@ -2034,7 +2032,7 @@ class SessionManager:
         return len(session_ids)
 
     def get_session_stats(
-        self, user_id: Optional[int] = None, tenant_id: Optional[int] = None
+        self, user_id: int | None = None, tenant_id: int | None = None
     ) -> dict[str, Any]:
         """
         Get session statistics.
@@ -2103,7 +2101,7 @@ class SessionManager:
             "total_messages": row["total_messages"] or 0,
         }
 
-    def _row_to_session(self, row: Union[sqlite3.Row, dict]) -> AgentSession:
+    def _row_to_session(self, row: sqlite3.Row | dict) -> AgentSession:
         """Convert a database row to AgentSession."""
 
         # Handle both sqlite3.Row and dict (PostgreSQL)
@@ -2154,7 +2152,7 @@ class SessionManager:
             cli_session_id=get_value("cli_session_id") or "",
         )
 
-    def _row_to_message(self, row: Union[sqlite3.Row, dict]) -> SessionMessage:
+    def _row_to_message(self, row: sqlite3.Row | dict) -> SessionMessage:
         """Convert a database row to SessionMessage."""
 
         # Handle both sqlite3.Row and dict (PostgreSQL)
@@ -2204,7 +2202,7 @@ class SessionManager:
             return []
         return parsed if isinstance(parsed, list) else []
 
-    def _decode_message_metadata(self, row: Union[sqlite3.Row, dict]) -> dict[str, Any]:
+    def _decode_message_metadata(self, row: sqlite3.Row | dict) -> dict[str, Any]:
         """Decode metadata and rehydrate structured columns for API callers."""
 
         def get_value(key: str):
@@ -2233,7 +2231,7 @@ class SessionManager:
 
 
 # Module-level singleton
-_instance: Optional[SessionManager] = None
+_instance: SessionManager | None = None
 _instance_lock = threading.Lock()
 
 

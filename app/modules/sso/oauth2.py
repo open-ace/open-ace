@@ -10,7 +10,7 @@ import logging
 import secrets
 import urllib.parse
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional
+from typing import Any
 
 from app.modules.sso.provider import (
     SSOAuthResult,
@@ -53,9 +53,9 @@ class OAuth2Provider(SSOProvider):
     def get_authorization_url(
         self,
         state: str,
-        redirect_uri: Optional[str] = None,
-        code_challenge: Optional[str] = None,
-        nonce: Optional[str] = None,
+        redirect_uri: str | None = None,
+        code_challenge: str | None = None,
+        nonce: str | None = None,
     ) -> str:
         """
         Get the authorization URL for the OAuth flow.
@@ -87,7 +87,7 @@ class OAuth2Provider(SSOProvider):
         return f"{self.config.authorization_url}?{urllib.parse.urlencode(params)}"
 
     def exchange_code(
-        self, code: str, redirect_uri: Optional[str] = None, code_verifier: Optional[str] = None
+        self, code: str, redirect_uri: str | None = None, code_verifier: str | None = None
     ) -> SSOAuthResult:
         """
         Exchange authorization code for tokens.
@@ -184,7 +184,7 @@ class OAuth2Provider(SSOProvider):
                 error_description=ERROR_TOKEN_EXCHANGE_ERROR,
             )
 
-    def get_user_info(self, access_token: str) -> Optional[SSOUser]:
+    def get_user_info(self, access_token: str) -> SSOUser | None:
         """
         Get user information using access token.
 
@@ -226,7 +226,7 @@ class OAuth2Provider(SSOProvider):
             logger.error(f"Failed to get user info: {e}")
             return None
 
-    def refresh_token(self, refresh_token: str) -> Optional[SSOToken]:
+    def refresh_token(self, refresh_token: str) -> SSOToken | None:
         """
         Refresh the access token.
 
@@ -367,7 +367,7 @@ class GitHubProvider(OAuth2Provider):
             raw_data=data,
         )
 
-    def get_user_info(self, access_token: str) -> Optional[SSOUser]:
+    def get_user_info(self, access_token: str) -> SSOUser | None:
         """Get GitHub user info including emails."""
         user = super().get_user_info(access_token)
 
