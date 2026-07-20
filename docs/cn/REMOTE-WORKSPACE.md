@@ -284,7 +284,7 @@ curl -b cookies.txt -X POST http://<server>:19888/api/remote/api-keys \
 | | 环境变量密钥（如 `auth.env.OPENAI_API_KEY`） | 管理页面 API 密钥 |
 |---|---|---|
 | **用途** | 本地工作区（iframe 中的 qwen-code-webui） | 远程工作区（远程机器上的 Agent） |
-| **存储位置** | 服务器配置文件 / 环境变量 | 数据库 `api_key_store` 表（AES-256-GCM 加密） |
+| **存储位置** | 服务器配置文件 / 环境变量 | 数据库 `api_key_store` 表（Fernet 加密） |
 | **谁拿到真实 Key** | 本地 CLI 直接使用 | 只有服务器知道，远程 Agent 只拿短生命周期、可回收的代理令牌 |
 | **管理方式** | 修改配置文件，重启服务 | 管理页面 UI 操作，无需重启 |
 | **管理权限** | 服务器运维人员 | 系统管理员（Web 管理界面） |

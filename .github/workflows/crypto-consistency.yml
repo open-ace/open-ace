@@ -1,0 +1,108 @@
+name: Crypto Consistency Check
+
+on:
+  push:
+    paths:
+      - 'app/modules/workspace/api_key_proxy.py'
+      - 'app/modules/workspace/model_gateway/repository.py'
+      - 'app/utils/smtp_crypto.py'
+      - 'docs/cn/REMOTE-WORKSPACE.md'
+      - 'docs/en/REMOTE-WORKSPACE.md'
+      - 'docs/cn/KEY_MANAGEMENT.md'
+      - 'docs/en/KEY_MANAGEMENT.md'
+      - '.github/workflows/crypto-consistency.yml'
+  pull_request:
+    paths:
+      - 'app/modules/workspace/api_key_proxy.py'
+      - 'app/modules/workspace/model_gateway/repository.py'
+      - 'app/utils/smtp_crypto.py'
+      - 'docs/cn/REMOTE-WORKSPACE.md'
+      - 'docs/en/REMOTE-WORKSPACE.md'
+      - 'docs/cn/KEY_MANAGEMENT.md'
+      - 'docs/en/KEY_MANAGEMENT.md'
+      - '.github/workflows/crypto-consistency.yml'
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for AES-256-GCM drift in encryption context
+        run: |
+          echo "Checking for AES-256-GCM references in encryption context..."
+
+          # Files that document or implement secret encryption. Any new file
+          # touching encryption should be registered here so drift is caught.
+          FILES=(
+            "app/modules/workspace/api_key_proxy.py"
+            "app/modules/workspace/model_gateway/repository.py"
+            "app/utils/smtp_crypto.py"
+            "docs/cn/REMOTE-WORKSPACE.md"
+            "docs/en/REMOTE-WORKSPACE.md"
+            "docs/cn/KEY_MANAGEMENT.md"
+            "docs/en/KEY_MANAGEMENT.md"
+          )
+
+          FOUND_DRIFT=0
+
+          # Match AES-256-GCM on the same line as encrypt/加密 (allowing
+          # arbitrary separators between them, e.g. "AES-256-GCM encryption").
+          # Does NOT flag the version-mapping table row that merely lists
+          # AES-256-GCM as a *future* reserved algorithm (no encrypt/加密 on
+          # that line).
+          DRIFT_RE='AES-256-GCM[^[:cntrl:]]*(encrypt|加密)|(encrypt|加密)[^[:cntrl:]]*AES-256-GCM'
+
+          for file in "${FILES[@]}"; do
+            if [ -f "$file" ]; then
+              if grep -nE "$DRIFT_RE" "$file" > /dev/null 2>&1; then
+                echo "::error file=$file::Found AES-256-GCM reference in encryption context."
+                echo "API keys use Fernet (AES-128-CBC with HMAC-SHA256), not AES-256-GCM."
+                echo "Please update: $file"
+                FOUND_DRIFT=1
+              fi
+            fi
+          done
+
+          if [ $FOUND_DRIFT -eq 1 ]; then
+            echo ""
+            echo "ERROR: Encryption algorithm documentation drift detected."
+            echo "The implementation uses Fernet, but documentation claims AES-256-GCM."
+            echo "See Issue #1857 for details."
+            exit 1
+          fi
+
+          echo "✓ No AES-256-GCM drift detected in encryption context"
+
+      - name: Verify Fernet is documented
+        run: |
+          echo "Verifying Fernet is correctly documented..."
+
+          # Check api_key_proxy.py class docstring contains Fernet
+          if [ -f "app/modules/workspace/api_key_proxy.py" ]; then
+            if ! grep -q "Fernet" app/modules/workspace/api_key_proxy.py 2>/dev/null; then
+              echo "::warning file=app/modules/workspace/api_key_proxy.py::Fernet not mentioned in docstring"
+            else
+              echo "✓ Fernet mentioned in api_key_proxy.py"
+            fi
+          fi
+
+          # Check smtp_crypto.py mentions Fernet
+          if [ -f "app/utils/smtp_crypto.py" ]; then
+            if grep -q "Fernet" app/utils/smtp_crypto.py 2>/dev/null; then
+              echo "✓ Fernet mentioned in smtp_crypto.py"
+            fi
+          fi
+
+          echo "✓ Fernet documentation check passed"
+
+      - name: Verify KEY_MANAGEMENT.md exists
+        run: |
+          echo "Checking for key management documentation..."
+
+          if [ -f "docs/en/KEY_MANAGEMENT.md" ] && [ -f "docs/cn/KEY_MANAGEMENT.md" ]; then
+            echo "✓ Key management documentation exists (en + cn)"
+          else
+            echo "::warning::KEY_MANAGEMENT.md not found. Consider adding key management documentation."
+          fi
