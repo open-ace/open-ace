@@ -4,6 +4,8 @@ Open ACE - Session Manager Module
 Provides session persistence and recovery for AI interactions.
 Manages conversation history, state, and context across sessions.
 """
+from __future__ import annotations
+
 
 import json
 import logging

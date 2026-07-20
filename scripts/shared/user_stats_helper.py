@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """
+from __future__ import annotations
+
 Helper function to refresh user_daily_stats table.
 This is imported by scripts/shared/db.py
 """
+from __future__ import annotations
+
 
 import logging
 import os

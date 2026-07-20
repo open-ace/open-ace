@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """
+from __future__ import annotations
+
 Tenant Usage Aggregation Module
 
 This module provides functions to aggregate tenant usage statistics from quota_usage table.
@@ -9,6 +11,8 @@ It includes:
 - Billing cycle management
 - Period reset functionality
 """
+from __future__ import annotations
+
 
 import calendar
 import json

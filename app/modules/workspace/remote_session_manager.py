@@ -5,6 +5,8 @@ Manages remote workspace sessions: creation, message forwarding,
 output collection, and session lifecycle. Integrates with existing
 SessionManager for persistence and QuotaManager for enforcement.
 """
+from __future__ import annotations
+
 
 import contextlib
 import json

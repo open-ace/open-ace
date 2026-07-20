@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 # mypy: disable-error-code="no-any-return,assignment,var-annotated"
 """
 Open ACE - GitHub Operations

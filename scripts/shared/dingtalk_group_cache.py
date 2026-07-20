@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """
+from __future__ import annotations
+
 DingTalk Group Cache Module
 
 Caches DingTalk group information to avoid frequent API calls.
 Fetches group details from DingTalk APIs when needed.
 """
+from __future__ import annotations
+
 
 import importlib
 import json

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 #!/usr/bin/env python3
 """
 Open ACE - AI Computing Explorer - WebUI Manager Service

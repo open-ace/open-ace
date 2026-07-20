@@ -4,6 +4,8 @@ Open ACE - ROI Calculator Module
 Calculates Return on Investment for AI usage.
 Provides cost analysis, savings estimation, and productivity metrics.
 """
+from __future__ import annotations
+
 
 import json
 import logging

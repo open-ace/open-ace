@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """
+from __future__ import annotations
+
 Feishu User Cache Module
 
 Caches Feishu user information to avoid frequent API calls.
 Fetches user details from Feishu API when needed.
 """
+from __future__ import annotations
+
 
 import json
 import time

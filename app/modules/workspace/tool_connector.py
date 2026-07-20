@@ -4,6 +4,8 @@ Open ACE - Tool Connector Module
 Provides a unified interface for connecting to various AI tools.
 Supports tool registration, routing, and health monitoring.
 """
+from __future__ import annotations
+
 
 import logging
 from abc import ABC, abstractmethod

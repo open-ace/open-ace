@@ -3,6 +3,8 @@ Open ACE - ROI API Routes
 
 API endpoints for ROI analysis and cost optimization.
 """
+from __future__ import annotations
+
 
 import logging
 import math

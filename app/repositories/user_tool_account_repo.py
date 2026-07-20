@@ -3,6 +3,8 @@ Open ACE - User Tool Account Repository
 
 Repository for user_tool_accounts table operations.
 """
+from __future__ import annotations
+
 
 import logging
 from typing import Any

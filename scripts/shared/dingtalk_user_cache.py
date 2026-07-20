@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """
+from __future__ import annotations
+
 DingTalk User Cache Module
 
 Caches DingTalk user information to avoid frequent API calls.
 Fetches user details from DingTalk APIs when needed.
 """
+from __future__ import annotations
+
 
 import json
 import logging

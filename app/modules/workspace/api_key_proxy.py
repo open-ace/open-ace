@@ -5,6 +5,8 @@ Provides encrypted storage and proxy token management for LLM API keys.
 API keys never leave the server — remote agents receive short-lived proxy tokens
 that are exchanged for real keys by the server's LLM proxy endpoint.
 """
+from __future__ import annotations
+
 
 import hashlib
 import json

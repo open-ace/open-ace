@@ -3,6 +3,8 @@ Open ACE - AI Computing Explorer - Analysis Service
 
 Business logic for usage analysis and reporting.
 """
+from __future__ import annotations
+
 
 import logging
 import time

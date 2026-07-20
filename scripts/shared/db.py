@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """
+from __future__ import annotations
+
 AI Token Usage - Database Module
 
 Provides database operations for the ai_token_usage project.
 Supports both SQLite (default) and PostgreSQL databases.
 """
+from __future__ import annotations
+
 
 import json
 import os

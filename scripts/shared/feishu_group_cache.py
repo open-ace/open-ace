@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """
+from __future__ import annotations
+
 Feishu Group Cache Module
 
 Caches Feishu group/chatter information to avoid frequent API calls.
 Fetches group details from Feishu API when needed.
 """
+from __future__ import annotations
+
 
 import json
 import time

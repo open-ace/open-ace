@@ -5,6 +5,8 @@ Repository for governance data access operations:
 - Content filter rules
 - Security settings
 """
+from __future__ import annotations
+
 
 import json
 import logging

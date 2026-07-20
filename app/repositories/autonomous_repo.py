@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 # mypy: disable-error-code="return-value,arg-type"
 """
 Open ACE - Autonomous Workflow Repository
