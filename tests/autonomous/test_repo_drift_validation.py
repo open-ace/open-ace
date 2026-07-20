@@ -7,13 +7,19 @@ on shared dev machines. The guardrail distinguishes the two by requiring BOTH
 that main moved *forward* (``before`` is an ancestor of ``after``) AND that the
 new HEAD came from the remote (``after`` is an ancestor of ``origin/main``).
 
+Failure policy is fail-closed: once main HEAD has moved suspiciously, a probe
+that cannot give a definitive answer (git error on merge-base) defaults to
+block, and a failed fetch falls back to the existing origin/main ref rather
+than short-circuiting to allow.
+
 Covers:
   - External ``git pull`` (forward + on origin/main) → allowed.
   - Agent local commit on main (forward, NOT on origin/main) → blocked.
   - Main reset to an older remote commit (NOT forward, on origin/main) → blocked.
   - Non-fast-forward main rewrite (NOT forward, NOT on origin/main) → blocked.
   - Worktree HEAD also moved → allowed (pre-existing behaviour preserved).
-  - Benign-pull probe itself raises → conservatively allowed.
+  - Local escape commit + fetch failure → still blocked (fetch is best-effort).
+  - merge-base git error (exit 128) → fail-closed (blocked).
 """
 
 import os
@@ -90,17 +96,19 @@ def _install_fake_gh(
     effective_head=WORKTREE_HEAD,
     moved_forward=True,
     after_on_remote=True,
-    probe_raises=False,
+    fetch_fail=False,
+    git_error=False,
 ):
     """Patch GitHubOps so _capture_repo_state returns scripted heads.
 
     - Worktree repo (repo_path == WORKTREE) → effective_head, branch auto-dev/wf-drift.
     - Main repo (repo_path == MAIN_REPO) → after_main_head, branch main.
-    - ``fetch origin main`` → success (or raises when probe_raises).
-    - ``merge-base --is-ancestor before after`` → exit 0 iff moved_forward
-      (main moved forward; False for reset/rollback/rewrite).
-    - ``merge-base --is-ancestor after origin/main`` → exit 0 iff
-      after_on_remote (after came from the remote).
+    - ``fetch origin main`` → exit 0, or exit 1 when fetch_fail (best-effort:
+      fetch failure must NOT short-circuit; the probe falls back to the
+      existing origin/main ref).
+    - ``merge-base --is-ancestor before after`` → exit 0 iff moved_forward.
+    - ``merge-base --is-ancestor after origin/main`` → exit 0 iff after_on_remote.
+    - When git_error, both merge-base calls return 128 (git error) → fail-closed.
     """
 
     def factory(repo_path, system_account=None):
@@ -113,18 +121,11 @@ def _install_fake_gh(
             gh.get_current_commit.return_value = after_main_head
 
         def run_git(args, check=True):
-            # probe_raises only breaks the benign-pull probe (fetch +
-            # merge-base), NOT the rev-parse/branch/commit probes used by
-            # _capture_repo_state — otherwise the after-snapshot itself fails
-            # before the probe is ever reached.
-            if probe_raises and (
-                args[:3] == ["fetch", "origin", "main"]
-                or args[:2] == ["merge-base", "--is-ancestor"]
-            ):
-                raise RuntimeError("probe boom")
             if args[:3] == ["fetch", "origin", "main"]:
-                return MagicMock(returncode=0)
+                return MagicMock(returncode=1 if fetch_fail else 0)
             if args[:2] == ["merge-base", "--is-ancestor"]:
+                if git_error:
+                    return MagicMock(returncode=128)  # indeterminate → fail closed
                 # Distinguish the two probes by argument order:
                 #   before→after  (forward check)    args[2]=before, args[3]=after
                 #   after→origin  (remote check)     args[2]=after,  args[3]="origin/main"
@@ -176,9 +177,8 @@ class TestRepoDriftValidation:
         assert "Detected commits on the main repository" in err
 
     def test_main_reset_to_older_remote_commit_is_blocked(self, monkeypatch):
-        # The case the single remote-membership check missed: agent ran
-        # `reset --hard <older-remote-commit>`. The new HEAD IS on origin/main
-        # (it's an old remote commit) but main did NOT move forward — this is a
+        # Agent ran `reset --hard <older-remote-commit>`. The new HEAD IS on
+        # origin/main (an old remote commit) but main did NOT move forward — a
         # non-fast-forward rollback that must be blocked.
         _install_fake_gh(
             monkeypatch,
@@ -223,17 +223,36 @@ class TestRepoDriftValidation:
 
         assert o._validate_repo_context_after_run(before, system_account=None) == ""
 
-    def test_benign_pull_probe_failure_is_allowed(self, monkeypatch):
-        # If the fetch / merge-base probe itself raises (network, missing ref)
-        # we must NOT escalate a transient probe error into a workflow failure
-        # — conservatively allow.
+    def test_local_escape_with_fetch_failure_is_still_blocked(self, monkeypatch):
+        # fetch fails (network/auth), but the probe must NOT short-circuit to
+        # allow. It falls back to the existing origin/main ref, which still
+        # shows the local escape commit is NOT on the remote → blocked.
         _install_fake_gh(
             monkeypatch,
-            after_main_head=MAIN_AFTER_PULL,
+            after_main_head=MAIN_AFTER_LOCAL,
             effective_head=WORKTREE_HEAD,
-            probe_raises=True,
+            moved_forward=True,
+            after_on_remote=False,
+            fetch_fail=True,
         )
         o = _make_orchestrator()
         before = _before_state(MAIN_BEFORE)
 
-        assert o._validate_repo_context_after_run(before, system_account=None) == ""
+        err = o._validate_repo_context_after_run(before, system_account=None)
+        assert "Detected commits on the main repository" in err
+
+    def test_merge_base_git_error_fails_closed(self, monkeypatch):
+        # merge-base returns 128 (git error, e.g. missing object) → the probe
+        # is indeterminate. Since main HEAD has already moved suspiciously,
+        # the guardrail fails closed (block) rather than assuming benign.
+        _install_fake_gh(
+            monkeypatch,
+            after_main_head=MAIN_AFTER_PULL,
+            effective_head=WORKTREE_HEAD,
+            git_error=True,
+        )
+        o = _make_orchestrator()
+        before = _before_state(MAIN_BEFORE)
+
+        err = o._validate_repo_context_after_run(before, system_account=None)
+        assert "Detected commits on the main repository" in err

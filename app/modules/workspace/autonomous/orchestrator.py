@@ -920,6 +920,23 @@ class AutonomousOrchestrator:
             "head": head,
         }
 
+    def _ancestor_check(self, gh: "GitHubOps", a: str, b: str) -> bool | None:
+        """Return True if ``a`` is an ancestor of ``b``, False if not, None on
+        a git error.
+
+        ``git merge-base --is-ancestor`` exits 0 (yes), 1 (no), or 128+ (git
+        error such as a missing object). The 1-vs-error distinction matters:
+        a "no" is a definitive commit-graph answer we act on, a git error is
+        an indeterminate probe that must fail closed (see
+        ``_main_drift_is_benign_pull``).
+        """
+        rc = gh._run_git(["merge-base", "--is-ancestor", a, b], check=False).returncode
+        if rc == 0:
+            return True
+        if rc == 1:
+            return False
+        return None
+
     def _main_drift_is_benign_pull(
         self,
         repo_path: str,
@@ -930,56 +947,63 @@ class AutonomousOrchestrator:
         """Return True if main HEAD moving ``before`` → ``after`` is a benign
         external ``git pull`` (rather than an agent escaping the worktree).
 
-        Requires BOTH:
-          1. ``before`` is an ancestor of ``after`` — main moved *forward*.
-             A bare remote-membership check is not enough: ``reset --hard`` to
-             an older remote commit leaves ``after`` on origin/main but is a
-             non-fast-forward rollback that must be blocked.
-          2. ``after`` is an ancestor of ``origin/main`` — the new HEAD came
-             from the remote. A local escape ``git commit`` is a forward
-             descendant of ``before`` too, but is not yet pushed, so this
-             catches the common escape form.
+        Requires BOTH commit-graph conditions:
+          1. ``before`` is an ancestor of ``after`` — main moved *forward*
+             (rules out reset/rollback/history-rewrite).
+          2. ``after`` is an ancestor of ``origin/main`` — the new HEAD is a
+             remote-sourced commit (rules out a local, not-yet-pushed
+             ``git commit``).
 
-        Guarantee scope (this guardrail is commit-graph based and cannot prove
-        the *source* of an operation): it blocks an agent that runs ``git
-        commit`` / ``reset`` / ``checkout`` on the main repo without pushing.
-        It CANNOT block an agent that commits on main and then pushes to
-        ``origin/main`` — that forges the "remote-sourced" signal. Defending
-        against that requires main branch protection or revoking the agent's
-        push credentials, which is outside this guardrail's scope.
+        What this detects, stated as commit-graph states rather than as claims
+        about who ran which command: it blocks (a) a local un-pushed commit on
+        main (after is not on origin/main) and (b) a non-fast-forward change
+        (main did not move forward). It does NOT identify the operation's
+        source: an agent running ``git pull`` / ``reset --hard origin/main`` /
+        checking out a newer remote commit is graph-identical to an external
+        pull (forward + on remote) and is likewise allowed. That boundary is
+        inherent to a commit-graph check.
 
-        On any probe failure (network, missing ref) we conservatively return
-        True so a transient error cannot fail an otherwise-healthy workflow.
+        Failure policy is fail-closed. Reaching this method already means main
+        HEAD moved suspiciously during an agent run, so a probe that cannot
+        produce a definitive answer (a git error on merge-base) defaults to
+        "not proven benign" → block. ``fetch`` is best-effort (``check=False``):
+        a network/auth failure does not short-circuit — we fall back to the
+        existing origin/main ref, which a concurrent external pull has already
+        updated, so the two conditions remain distinguishable.
         """
         if not before or not after or before == after:
             return True
+        gh = GitHubOps(repo_path, system_account=system_account)
         try:
-            gh = GitHubOps(repo_path, system_account=system_account)
-            # Refresh origin/main so the membership check sees the latest
-            # remote tip. A concurrent `git pull` updates this ref too, but an
-            # explicit fetch closes the fetch↔merge race window.
-            gh._run_git(["fetch", "origin", "main"])
-            moved_forward = (
-                gh._run_git(["merge-base", "--is-ancestor", before, after], check=False).returncode
-                == 0
-            )
-            after_on_remote = (
-                gh._run_git(
-                    ["merge-base", "--is-ancestor", after, "origin/main"], check=False
-                ).returncode
-                == 0
-            )
+            # Best-effort refresh of origin/main. A concurrent external pull
+            # runs its own fetch and updates this ref, so even if this fetch
+            # fails the local ref is fresh enough to tell pull from local commit.
+            gh._run_git(["fetch", "origin", "main"], check=False)
+            moved_forward = self._ancestor_check(gh, before, after)
+            after_on_remote = self._ancestor_check(gh, after, "origin/main")
+            # A git error on either probe → cannot prove benign → fail closed.
+            if moved_forward is None or after_on_remote is None:
+                logger.warning(
+                    "Workflow %s: benign-pull probe indeterminate for main HEAD "
+                    "%s..%s (git error); failing closed.",
+                    self._workflow_id,
+                    before[:8],
+                    after[:8],
+                )
+                return False
             return moved_forward and after_on_remote
         except Exception as e:
+            # Unexpected exception (not a merge-base exit code). main HEAD has
+            # already moved suspiciously, so do not assume benign.
             logger.warning(
-                "Workflow %s: benign-pull probe failed for main HEAD %s..%s: %s; "
-                "assuming benign.",
+                "Workflow %s: benign-pull probe raised for main HEAD %s..%s: %s; "
+                "failing closed.",
                 self._workflow_id,
                 before[:8],
                 after[:8],
                 e,
             )
-            return True
+            return False
 
     def _snapshot_repo_context(
         self, wf: dict | None, workspace_type: str, system_account: str | None
