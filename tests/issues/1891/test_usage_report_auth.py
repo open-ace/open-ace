@@ -33,13 +33,66 @@ def _patch_db_compat():
 
 
 @pytest.fixture
-def app_context():
+def test_db(tmp_path):
+    """Create a temporary test database."""
+    import os
+    from app.repositories.database import Database
+    from app.repositories.schema_init import load_schema_from_file
+
+    with patch.object(db_mod, "is_postgresql", return_value=False):
+        orig = db_mod.adapt_sql
+        db_mod.adapt_sql = lambda q: q
+        try:
+            db_path = str(tmp_path / "test_usage_report.db")
+            db = Database(db_url=f"sqlite:///{db_path}")
+            conn = db.get_connection()
+            try:
+                # Create minimal tables for testing
+                cursor = conn.cursor()
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS users (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        username TEXT UNIQUE NOT NULL,
+                        email TEXT UNIQUE NOT NULL,
+                        password_hash TEXT NOT NULL,
+                        role TEXT DEFAULT 'user',
+                        tenant_id INTEGER,
+                        is_active INTEGER DEFAULT 1
+                    )
+                """)
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS tenants (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        name TEXT NOT NULL,
+                        slug TEXT UNIQUE NOT NULL,
+                        quota TEXT
+                    )
+                """)
+                # Load full schema
+                load_schema_from_file(db_url=db.db_url, dialect="sqlite")
+                conn.commit()
+            finally:
+                conn.close()
+            yield db
+        finally:
+            db_mod.adapt_sql = orig
+            try:
+                os.unlink(db_path)
+            except OSError:
+                pass
+
+
+@pytest.fixture
+def app_context(test_db):
     """Create Flask app context for testing."""
     from app import create_app
 
-    app = create_app(testing=True)
-    with app.test_request_context():
-        yield app
+    # Mock database to use test_db
+    with patch("app.repositories.database.Database") as mock_db_class:
+        mock_db_class.return_value = test_db
+        app = create_app({"TESTING": True, "DATABASE_URL": test_db.db_url})
+        with app.test_request_context():
+            yield app
 
 
 @pytest.fixture
