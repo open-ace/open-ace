@@ -193,9 +193,7 @@ class TestRouteTenantFailClosed(unittest.TestCase):
         with db.get_connection() as conn:
             cursor = conn.cursor()
             snapshot = cursor.execute("SELECT * FROM projects").fetchall()
-            cols = (
-                [d[0] for d in cursor.description] if cursor.description else []
-            )
+            cols = [d[0] for d in cursor.description] if cursor.description else []
             cursor.execute("DELETE FROM projects")
             cursor.execute(
                 "INSERT INTO projects (path, name, created_by, is_shared, tenant_id) "
