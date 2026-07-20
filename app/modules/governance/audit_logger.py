@@ -83,6 +83,11 @@ class AuditAction(Enum):
     AGENT_AUTH_FAILURE = "agent_auth_failure"
     AGENT_RECONNECT = "agent_reconnect"
 
+    # Usage report actions (Issue #1891)
+    USAGE_REPORT_ACCEPTED = "usage_report_accepted"
+    USAGE_REPORT_REJECTED = "usage_report_rejected"
+    USAGE_REPORT_AUTH_FAILURE = "usage_report_auth_failure"
+
 
 class AuditSeverity(Enum):
     """Severity levels for audit events."""
@@ -878,7 +883,7 @@ def get_action_categories() -> dict[str, dict[str, Any]]:
         "agent": {
             "label": "Agent",
             "i18n_key": "categoryAgent",
-            "resource_types": ["remote_machine", "agent_token"],
+            "resource_types": ["remote_machine", "agent_token", "usage_report"],
             "actions": [
                 {
                     "value": "agent_register",
@@ -904,6 +909,22 @@ def get_action_categories() -> dict[str, dict[str, Any]]:
                     "value": "agent_reconnect",
                     "label": "Agent Reconnect",
                     "i18n_key": "actionAgentReconnect",
+                },
+                # Usage report actions (Issue #1891)
+                {
+                    "value": "usage_report_accepted",
+                    "label": "Usage Report Accepted",
+                    "i18n_key": "actionUsageReportAccepted",
+                },
+                {
+                    "value": "usage_report_rejected",
+                    "label": "Usage Report Rejected",
+                    "i18n_key": "actionUsageReportRejected",
+                },
+                {
+                    "value": "usage_report_auth_failure",
+                    "label": "Usage Report Auth Failure",
+                    "i18n_key": "actionUsageReportAuthFailure",
                 },
             ],
         },

@@ -70,11 +70,11 @@ def load_user():
 
     # Skip auth for endpoints that use their own authentication (JWT, API keys)
     # or are public (agent install/uninstall scripts, agent file downloads)
+    # Note: /api/remote/usage-report removed from exempt list (Issue #1891)
     _exact_exempt = {
         "/api/remote/agent/register",
         "/api/remote/agent/ws",
         "/api/remote/agent/message",
-        "/api/remote/usage-report",
         "/api/remote/agent/install.sh",
         "/api/remote/agent/install.ps1",
         "/api/remote/agent/uninstall.sh",
@@ -2217,21 +2217,172 @@ def llm_proxy(path=""):
 
 @remote_bp.route("/usage-report", methods=["POST"])
 def usage_report():
-    """Receive usage report from a remote agent."""
+    """Receive usage report from a remote agent.
+
+    Requires Bearer token authentication with machine-session binding validation.
+    Issue #1891: Added authentication and validation to prevent unauthorized
+    usage data injection.
+    """
     data = request.get_json() or {}
+    machine_id = data.get("machine_id")
     session_id = data.get("session_id")
     tokens = data.get("tokens", {})
-    requests = data.get("requests", 1)
-    data.get("machine_id")
+    requests_count = data.get("requests", 1)
 
+    # 1. machine_id format validation
+    if not machine_id:
+        return jsonify({
+            "error": "machine_id is required",
+            "hint": "Please upgrade your agent to the latest version"
+        }), 400
+
+    if len(machine_id) > 64:
+        return jsonify({"error": "Invalid machine_id format"}), 400
+
+    # 2. Machine existence check
+    agent_mgr = get_remote_agent_manager()
+    machine = agent_mgr.get_machine(machine_id)
+    if not machine:
+        audit_logger.log(
+            action=AuditAction.USAGE_REPORT_REJECTED.value,
+            severity="warning",
+            resource_type="usage_report",
+            resource_id=None,
+            details={
+                "reason": "machine_not_found",
+                "machine_id": machine_id,
+            },
+            success=False,
+        )
+        return jsonify({"error": "Unknown machine_id"}), 404
+
+    # 3. Bearer token authentication (reuse existing logic)
+    is_legacy, legacy_error = _check_legacy_fallback(machine_id)
+    if legacy_error:
+        client_ip = get_client_ip_from_request()
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            _audit_auth_failure(auth_header[7:], "invalid_or_revoked", client_ip)
+        return legacy_error
+
+    if not is_legacy:
+        bearer_token, bearer_error = _validate_agent_bearer(machine_id)
+        if bearer_error:
+            client_ip = get_client_ip_from_request()
+            auth_header = request.headers.get("Authorization", "")
+            if auth_header.startswith("Bearer "):
+                _audit_auth_failure(
+                    auth_header[7:],
+                    bearer_error[0].get_json().get("error", "unknown"),
+                    client_ip,
+                )
+            return bearer_error
+
+    # 4. session_id validation
     if not session_id:
         return jsonify({"error": "session_id is required"}), 400
 
+    # 5. Session existence check
     session_mgr = get_remote_session_manager()
+    session = session_mgr._session_manager.get_session(session_id)
+    if not session:
+        return jsonify({"error": "Session not found"}), 404
+
+    # 6. Workspace type validation (must be "remote")
+    workspace_type = getattr(session, "workspace_type", None)
+    if workspace_type != "remote":
+        audit_logger.log(
+            action=AuditAction.USAGE_REPORT_REJECTED.value,
+            severity="warning",
+            resource_type="usage_report",
+            resource_id=session_id,
+            details={
+                "reason": "invalid_workspace_type",
+                "session_id": session_id,
+                "workspace_type": workspace_type,
+                "machine_id": machine_id,
+            },
+            success=False,
+        )
+        return jsonify({
+            "error": "Invalid workspace type",
+            "details": "Usage reports are only allowed for remote sessions"
+        }), 400
+
+    # 7. Session-Machine binding validation
+    remote_machine_id = getattr(session, "remote_machine_id", None)
+    if not remote_machine_id:
+        audit_logger.log(
+            action=AuditAction.USAGE_REPORT_REJECTED.value,
+            severity="warning",
+            resource_type="usage_report",
+            resource_id=session_id,
+            details={
+                "reason": "session_not_bound",
+                "session_id": session_id,
+                "machine_id": machine_id,
+            },
+            success=False,
+        )
+        return jsonify({"error": "Session not bound to any machine"}), 400
+
+    if remote_machine_id != machine_id:
+        audit_logger.log(
+            action=AuditAction.USAGE_REPORT_REJECTED.value,
+            severity="warning",
+            resource_type="usage_report",
+            resource_id=session_id,
+            details={
+                "reason": "session_machine_mismatch",
+                "session_id": session_id,
+                "session_machine": remote_machine_id,
+                "reported_machine": machine_id,
+            },
+            success=False,
+        )
+        return jsonify({"error": "Session not bound to this machine"}), 403
+
+    # 8. Tenant consistency validation
+    machine_tenant = machine.get("tenant_id")
+    session_tenant = getattr(session, "tenant_id", None)
+    if machine_tenant and session_tenant and machine_tenant != session_tenant:
+        audit_logger.log(
+            action=AuditAction.USAGE_REPORT_REJECTED.value,
+            severity="warning",
+            resource_type="usage_report",
+            resource_id=session_id,
+            details={
+                "reason": "tenant_mismatch",
+                "session_id": session_id,
+                "machine_tenant": machine_tenant,
+                "session_tenant": session_tenant,
+                "machine_id": machine_id,
+            },
+            success=False,
+        )
+        return jsonify({"error": "Tenant mismatch"}), 403
+
+    # 9. Process usage report
     session_mgr.process_usage_report(
         session_id=session_id,
         tokens=tokens,
-        requests=requests,
+        requests=requests_count,
+    )
+
+    # 10. Record audit log for successful processing
+    audit_logger.log(
+        action=AuditAction.USAGE_REPORT_ACCEPTED.value,
+        severity="info",
+        resource_type="usage_report",
+        resource_id=session_id,
+        details={
+            "session_id": session_id,
+            "machine_id": machine_id,
+            "tokens": tokens,
+            "requests": requests_count,
+            "auth_method": "legacy" if is_legacy else "bearer",
+        },
+        success=True,
     )
 
     return jsonify({"success": True})
