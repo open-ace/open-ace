@@ -21,10 +21,13 @@ from typing import Any
 from flask import Blueprint, Response, g, jsonify, request, stream_with_context
 
 from app.repositories.user_repo import UserRepository
-from app.utils.workspace import (OPENACE_CHOWN_WRAPPER, _is_wrapper_available,
-                                 get_workspace_base_dir,
-                                 get_workspace_base_dirs,
-                                 run_as_root_if_needed)
+from app.utils.workspace import (
+    OPENACE_CHOWN_WRAPPER,
+    _is_wrapper_available,
+    get_workspace_base_dir,
+    get_workspace_base_dirs,
+    run_as_root_if_needed,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -83,9 +86,12 @@ def _authenticate_user():
         return None
 
     # Try session token first
-    from app.auth.decorators import (_extract_token, _load_user_from_token,
-                                     enforce_password_change_requirement,
-                                     normalize_webui_token)
+    from app.auth.decorators import (
+        _extract_token,
+        _load_user_from_token,
+        enforce_password_change_requirement,
+        normalize_webui_token,
+    )
 
     token = _extract_token()
     if token:
@@ -372,9 +378,7 @@ def _chown_to_user(path: str, system_account: str | None) -> bool:
                 timeout=30,
             )
             if r.returncode != 0:
-                logger.warning(
-                    f"openace-chown failed for {path} -> {system_account}: {r.stderr}"
-                )
+                logger.warning(f"openace-chown failed for {path} -> {system_account}: {r.stderr}")
                 return False
             return True
         r = run_as_root_if_needed(["chown", f"{uid}:{gid}", path])
@@ -389,9 +393,7 @@ def _chown_to_user(path: str, system_account: str | None) -> bool:
         return False
 
 
-def _resolve_file_in_home(
-    raw_path: str, user
-) -> tuple[str, str | None] | tuple[None, None]:
+def _resolve_file_in_home(raw_path: str, user) -> tuple[str, str | None] | tuple[None, None]:
     """Validate that *raw_path* resolves to a file inside the user's home subtree.
 
     Single source of truth for download/delete file-path validation. Combines:
@@ -556,9 +558,7 @@ def api_browse_directory():
                     "directories": listing["directories"],
                     "files": listing["files"],
                     "homePath": home,
-                    "canCreate": get_directory_info(home, system_account).get(
-                        "is_writable", False
-                    ),
+                    "canCreate": get_directory_info(home, system_account).get("is_writable", False),
                 },
             }
         )
@@ -627,9 +627,7 @@ def list_subdirectories(
             # mostly root-owned .qwen configs / migrated files).
             ls_result = run_as_user(effective_system_account, ["ls", "-1", path])
             if ls_result.returncode != 0:
-                logger.warning(
-                    f"Permission denied accessing {path} as {system_account}"
-                )
+                logger.warning(f"Permission denied accessing {path} as {system_account}")
                 return {"directories": directories, "files": files}
 
             raw_entries = ls_result.stdout.split("\n") if ls_result.stdout else []
@@ -948,9 +946,7 @@ def api_create_directory():
             )
         else:
             return (
-                jsonify(
-                    {"success": False, "error": "Path exists but is not a directory"}
-                ),
+                jsonify({"success": False, "error": "Path exists but is not a directory"}),
                 400,
             )
 
@@ -977,9 +973,7 @@ def api_create_directory():
             # Use sudo to create directory as the specified user
             result = run_as_user(effective_system_account, ["mkdir", "-p", dir_path])
             if result.returncode != 0:
-                logger.error(
-                    f"Failed to create directory as {system_account}: {result.stderr}"
-                )
+                logger.error(f"Failed to create directory as {system_account}: {result.stderr}")
                 return (
                     jsonify(
                         {
@@ -1103,9 +1097,7 @@ def api_upload_file():
                     # or delete their own upload. Roll back and fail hard.
                     _safe_remove(tmp_path)
                     return (
-                        jsonify(
-                            {"error": "Failed to set file ownership for target user"}
-                        ),
+                        jsonify({"error": "Failed to set file ownership for target user"}),
                         500,
                     )
                 os.replace(tmp_path, target_path)
@@ -1141,9 +1133,7 @@ def _is_direct_access(system_account: str | None) -> bool:
     return get_effective_system_account(system_account) is None
 
 
-def _check_file_as_user(
-    target_path: str, system_account: str | None, flag: str
-) -> bool:
+def _check_file_as_user(target_path: str, system_account: str | None, flag: str) -> bool:
     """Run ``test <flag> <target_path>`` as the correct user.
 
     *flag* is one of ``-f`` (is regular file), ``-r`` (readable),
@@ -1227,8 +1217,7 @@ def _stream_file_as_user(target_path: str, system_account: str | None):
         proc.wait()
         if proc.returncode != 0:
             logger.warning(
-                f"cat stream for {target_path} as {effective} exited "
-                f"with {proc.returncode}"
+                f"cat stream for {target_path} as {effective} exited " f"with {proc.returncode}"
             )
 
 
@@ -1300,9 +1289,7 @@ def api_delete_file():
             os.remove(target_path)
         else:
             effective = get_effective_system_account(system_account)
-            assert (
-                effective is not None
-            )  # _is_direct_access 为 False 时 effective 必定非 None
+            assert effective is not None  # _is_direct_access 为 False 时 effective 必定非 None
             result = run_as_user(effective, ["rm", "--", target_path])
             if result.returncode != 0:
                 stderr = (result.stderr or "").strip()
