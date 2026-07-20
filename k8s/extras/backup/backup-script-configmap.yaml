@@ -151,13 +151,19 @@ data:
 
       REDIS_HOST="${REDIS_HOST:-redis}"
       REDIS_PORT="${REDIS_PORT:-6379}"
+      REDIS_PASSWORD="${REDIS_PASSWORD:-}"
+
+      # Issue #1895: Support Redis authentication via REDISCLI_AUTH
+      if [ -n "$REDIS_PASSWORD" ]; then
+        export REDISCLI_AUTH="$REDIS_PASSWORD"
+      fi
 
       # Note: Redis backup requires access to Redis PVC or sidecar container
       # This implementation only triggers BGSAVE; actual file copy needs sidecar
       if redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" BGSAVE 2>/dev/null; then
-        echo "${YELLOW}Redis BGSAVE initiated. Note: dump.rdb not copied - requires sidecar setup${NC}"
+        echo "${GREEN}Redis BGSAVE initiated. Note: dump.rdb not copied - requires sidecar setup${NC}"
       else
-        echo "${YELLOW}WARNING: Redis BGSAVE failed (Redis may not be available)${NC}"
+        echo "${YELLOW}WARNING: Redis BGSAVE failed (Redis may not be available or auth required)${NC}"
       fi
     else
       echo ""

@@ -229,9 +229,28 @@ class RedisCache(CacheBackend):
                     password=self.password,
                     decode_responses=False,
                 )
+                # Test connection to distinguish auth errors from connection errors
+                self._client.ping()
             except ImportError:
                 logger.warning("Redis package not installed, falling back to memory cache")
                 raise
+            except Exception as e:
+                # Re-raise with context for CacheManager to handle
+                # Check for authentication-related errors
+                error_str = str(e).lower()
+                if any(
+                    keyword in error_str
+                    for keyword in ["auth", "noauth", "wrong password", "authentication"]
+                ):
+                    # Authentication error: wrap as RuntimeError for CacheManager
+                    logger.error(f"Redis authentication failed: {e}")
+                    raise RuntimeError(
+                        f"Redis authentication failed: {e}. Check REDIS_PASSWORD."
+                    ) from e
+                else:
+                    # Connection error: let it propagate
+                    logger.warning(f"Redis connection error: {e}")
+                    raise
         return self._client
 
     def _make_key(self, key: str) -> str:
@@ -355,7 +374,25 @@ class CacheManager:
                 # Test connection
                 self._backend._get_client().ping()
                 logger.info("Using Redis cache backend")
+            except RuntimeError as e:
+                # Issue #1895: Distinguish authentication errors from connection errors
+                error_str = str(e).lower()
+                if "authentication" in error_str or "auth" in error_str:
+                    # Authentication failure: must not degrade to memory cache
+                    logger.error(f"Redis authentication failed: {e}")
+                    raise RuntimeError(
+                        "Redis authentication failed. Check REDIS_PASSWORD. "
+                        "Authentication errors must not be silently downgraded."
+                    ) from e
+                else:
+                    # Other RuntimeError: connection issue, can fall back
+                    logger.warning(f"Failed to connect to Redis: {e}, falling back to memory cache")
+                    self._backend = MemoryCache(
+                        max_size=kwargs.get("max_size", 1000),
+                        default_ttl=kwargs.get("default_ttl", 300),
+                    )
             except Exception as e:
+                # Connection failure: can fall back to memory cache
                 logger.warning(f"Failed to connect to Redis: {e}, falling back to memory cache")
                 self._backend = MemoryCache(
                     max_size=kwargs.get("max_size", 1000),

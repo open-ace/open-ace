@@ -54,4 +54,5 @@ stringData:
   UPLOAD_AUTH_KEY: "replace-with-random-upload-auth-key"
   DB_USER: "openace"
   DB_PASSWORD: "replace-with-random-database-password"
-  REDIS_PASSWORD: ""
+  # Issue #1895: Redis authentication password (required in production)
+  REDIS_PASSWORD: "replace-with-random-redis-password"

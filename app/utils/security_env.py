@@ -97,3 +97,35 @@ def get_upload_auth_key() -> str | None:
         return None
 
     return upload_auth_key
+
+
+def get_redis_password() -> str | None:
+    """Return validated Redis password, or None if Redis auth is disabled.
+
+    In production:
+    - Empty password is rejected (raises RuntimeError)
+    - Weak password is rejected (raises RuntimeError)
+
+    In development:
+    - Empty password returns None (allows no-auth local Redis)
+    - Strong password is returned for testing
+    """
+    password = os.environ.get("REDIS_PASSWORD", "")
+
+    # Empty password handling
+    if not password:
+        if is_production_environment():
+            raise RuntimeError(
+                "REDIS_PASSWORD must be set in production. "
+                "Redis authentication is mandatory for security."
+            )
+        return None  # Development allows empty password
+
+    # Weak password handling
+    if is_weak_secret_value(password):
+        logger.error("REDIS_PASSWORD uses weak value")
+        if is_production_environment():
+            raise RuntimeError("REDIS_PASSWORD must be strong in production")
+        logger.warning("Using weak REDIS_PASSWORD in development mode")
+
+    return password

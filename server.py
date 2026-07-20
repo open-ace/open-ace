@@ -44,6 +44,12 @@ secret_key = get_secret_key()
 if secret_key:
     os.environ["SECRET_KEY"] = secret_key
 
+# Issue #1895: Validate Redis password before creating app
+# Ensures production environment has strong Redis authentication
+from app.utils.security_env import get_redis_password
+
+_redis_password = get_redis_password()
+
 # Create the Flask application using the factory
 from app import create_app
 

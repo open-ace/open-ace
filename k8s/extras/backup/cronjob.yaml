@@ -126,6 +126,13 @@ spec:
                   value: "redis"
                 - name: REDIS_PORT
                   value: "6379"
+                # Issue #1895: Redis authentication password
+                - name: REDIS_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: open-ace-secrets
+                      key: REDIS_PASSWORD
+                      optional: true
 
               resources:
                 requests:

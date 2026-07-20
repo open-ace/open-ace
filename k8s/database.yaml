@@ -129,14 +129,23 @@ spec:
           ports:
             - containerPort: 6379
               name: redis
+          # Issue #1895: Use shell wrapper for password support via REDISCLI_AUTH env var
+          env:
+            - name: REDISCLI_AUTH
+              valueFrom:
+                secretKeyRef:
+                  name: open-ace-secrets
+                  key: REDIS_PASSWORD
+                  optional: true
           command:
-            - redis-server
-            - --appendonly
-            - "yes"
-            - --maxmemory
-            - "256mb"
-            - --maxmemory-policy
-            - "allkeys-lru"
+            - /bin/sh
+            - -c
+            - |
+              redis-server \
+                --appendonly yes \
+                --requirepass "$REDISCLI_AUTH" \
+                --maxmemory 256mb \
+                --maxmemory-policy allkeys-lru
           resources:
             requests:
               cpu: "50m"

@@ -35,8 +35,9 @@ metadata:
   labels:
     app.kubernetes.io/name: open-ace
 rules:
+  # Issue #1895: Removed secrets permission - app uses secretRef injection, not K8s API
   - apiGroups: [""]
-    resources: ["configmaps", "secrets"]
+    resources: ["configmaps"]
     verbs: ["get", "list", "watch"]
   - apiGroups: [""]
     resources: ["pods"]
