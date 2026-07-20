@@ -721,12 +721,13 @@ class GitHubOps:
         return json.loads(result.stdout.strip())
 
     def find_existing_pr(self, head_branch: str) -> Optional[dict]:
-        """Find an existing open PR for a head branch.
+        """Find an existing open PR for a head branch (scoped to base=main).
 
         Returns the first matching PR dict ({number, url, title, ...}) or None.
         Used by the PR-creation path to recover gracefully when gh pr create
         reports "already exists" (race between the github_pr_number guard and
-        the API call, or a re-entrant advance()).
+        the API call, or a re-entrant advance()). ``--base main`` avoids
+        matching PRs into other bases (fork / cross-repo).
         """
         if not head_branch:
             return None
@@ -736,6 +737,8 @@ class GitHubOps:
                 "list",
                 "--head",
                 head_branch,
+                "--base",
+                "main",
                 "--state",
                 "open",
                 "--json",

@@ -5138,6 +5138,15 @@ class AutonomousOrchestrator:
         # would call gh pr create again and hit "a pull request ... already
         # exists", failing the whole workflow (#1857). Checking github_pr_number
         # covers both re-entry and process-restart resume.
+        #
+        # Reads from both the passed-in wf dict AND self.workflow: self.workflow
+        # is a @property that re-queries the repo on every access, so once an
+        # earlier advance() persisted github_pr_number, a later advance()'s
+        # fallback (self.workflow.get) sees the fresh value even though the
+        # caller's wf snapshot is stale. This is what makes the guard reliable
+        # across re-entries (the test suite mocks get_workflow statically, so
+        # this property-refresh path is exercised in production but not in the
+        # PR-creation unit tests — see test_create_pr_already_exists_recovers).
         existing_pr_number = wf.get("github_pr_number") or self.workflow.get("github_pr_number")
         if round_num == 1 and not existing_pr_number:
             try:
@@ -5170,12 +5179,27 @@ class AutonomousOrchestrator:
                     }
                 )
             except GitHubOpsError as e:
-                # Graceful recovery: if gh reports a PR already exists for this
-                # branch (race between the guard above and the API call), look
-                # up the existing PR and reuse it instead of failing the
-                # workflow. Reaching here means github_pr_number wasn't set yet
-                # but the PR was created by a concurrent advance() call.
+                # Graceful recovery ONLY for the "already exists" case (race
+                # between the github_pr_number guard above and the API call, or
+                # a re-entrant advance()). Other GitHubOpsError causes (network
+                # / auth / body-too-long) must NOT be masked by reusing an
+                # unrelated leftover open PR on this branch — those still raise.
+                if "already exists" not in str(e).lower():
+                    self._create_milestone(
+                        phase="pr_review",
+                        milestone_type="pr_created",
+                        status="failed",
+                        title="PR creation failed",
+                        error_message=str(e),
+                    )
+                    raise
                 existing = gh.find_existing_pr(branch_name)
+                if not existing:
+                    # GitHub's PR list API is eventually consistent — the PR
+                    # that "already exists" may not be indexed yet right after
+                    # a concurrent create. One short retry covers that window.
+                    time.sleep(2)
+                    existing = gh.find_existing_pr(branch_name)
                 if existing:
                     pr_number = existing.get("number")
                     pr_url = existing.get("url", "")
