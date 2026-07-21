@@ -281,7 +281,8 @@ def _audit_usage_report_failure(
     if machine_verified and action == AuditAction.USAGE_REPORT_BINDING_MISMATCH.value:
         try:
             agent_mgr = get_remote_agent_manager()
-            audit_key = f"usage-binding-audit:{machine_id}:{client_ip}"
+            source_ip = request.remote_addr or client_ip
+            audit_key = f"usage-binding-audit:{machine_id}:{source_ip}"
             if not _check_usage_report_rate_limit(agent_mgr, audit_key, 5):
                 return
         except Exception:
@@ -2437,7 +2438,10 @@ def _check_usage_report_rate_limit(agent_mgr: Any, key: str, limit: int) -> bool
 def _should_audit_usage_auth_failure(agent_mgr: Any, client_ip: str) -> bool:
     """Bound usage-auth audit writes across workers without changing the 401."""
     try:
-        return _check_usage_report_rate_limit(agent_mgr, f"usage-auth-audit:{client_ip}", 5)
+        # Do not trust X-Forwarded-For for a pre-authentication limiter: a
+        # direct caller can spoof it and allocate unbounded rate/audit keys.
+        source_ip = request.remote_addr or client_ip
+        return _check_usage_report_rate_limit(agent_mgr, f"usage-auth-audit:{source_ip}", 5)
     except Exception:
         logger.exception("Failed to apply usage auth audit rate limit")
         return False
@@ -2635,7 +2639,7 @@ def _process_authenticated_usage_report(data: dict, machine_id: str, client_ip: 
     # invalid-binding traffic cannot amplify database or audit writes.
     for key, limit, label in (
         (f"machine:{machine_id}", 60, "this machine"),
-        (f"ip:{client_ip}", 120, "this client"),
+        (f"ip:{request.remote_addr or client_ip}", 120, "this client"),
     ):
         if not _check_usage_report_rate_limit(agent_mgr, key, limit):
             return jsonify({"error": f"Rate limit exceeded for {label}"}), 429

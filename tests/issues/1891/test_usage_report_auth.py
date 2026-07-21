@@ -807,7 +807,10 @@ class TestUsageReportHttpIntegration:
             client.post(
                 "/api/remote/usage-report",
                 json={**payload, "report_id": f"report-auth-limit-{index:04d}"},
-                headers={"Authorization": "Bearer invalid-token"},
+                headers={
+                    "Authorization": "Bearer invalid-token",
+                    "X-Forwarded-For": f"203.0.113.{index + 1}",
+                },
             )
             for index in range(8)
         ]
