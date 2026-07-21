@@ -1,8 +1,8 @@
 """Add sensitive keyword config to tenant_settings
 
-Revision ID: 20260720_002_add_sensitive_keyword_config
+Revision ID: 20260721_002_add_sensitive_keyword_config
 Revises: 20260721_001_add_ci_diagnostics_attempts
-Create Date: 2026-07-20
+Create Date: 2026-07-21
 
 Issue: #1904
 
@@ -18,7 +18,7 @@ from __future__ import annotations
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "20260720_002_add_sensitive_keyword_config"
+revision: str = "20260721_002_add_sensitive_keyword_config"
 down_revision: str | None = "20260721_001_add_ci_diagnostics_attempts"
 branch_labels: str | None = None
 depends_on: str | None = None

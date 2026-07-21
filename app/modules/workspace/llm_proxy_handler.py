@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import threading
-from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from flask import Response, g, jsonify, request, stream_with_context
@@ -21,12 +19,6 @@ logger = logging.getLogger(__name__)
 # Shared ContentFilter instance for performance (uses cached rules)
 _content_filter_instance = None
 
-# Tenant config cache for sensitive keyword settings
-# Structure: {tenant_id: {"config": dict, "expiry": datetime}}
-_tenant_config_cache: dict[int, dict[str, Any]] = {}
-_tenant_config_cache_lock = threading.Lock()
-_TENANT_CONFIG_CACHE_TTL = 300  # 5 minutes
-
 
 def _get_content_filter():
     """Get or create shared ContentFilter instance."""
@@ -40,9 +32,13 @@ def _get_content_filter():
     return _content_filter_instance
 
 
-def _get_tenant_sensitive_keyword_config(tenant_id: int | None) -> dict[str, Any]:
+# Import shared cache function
+from app.modules.workspace.tenant_config_cache import get_tenant_sensitive_keyword_config
+
+
+def _get_tenant_sensitive_keyword_config_wrapper(tenant_id: int | None) -> dict[str, Any]:
     """
-    Get tenant-specific sensitive keyword configuration with caching.
+    Wrapper for tenant-specific sensitive keyword configuration.
 
     Args:
         tenant_id: Tenant ID, or None for default behavior.
@@ -55,47 +51,7 @@ def _get_tenant_sensitive_keyword_config(tenant_id: int | None) -> dict[str, Any
             "block_sensitive_keyword": False,
             "sensitive_keyword_match_mode": "word_boundary",
         }
-
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
-
-    # Check cache first
-    with _tenant_config_cache_lock:
-        if tenant_id in _tenant_config_cache:
-            cached = _tenant_config_cache[tenant_id]
-            if cached["expiry"] > now:
-                return dict(cached["config"])
-
-    # Fetch from database
-    try:
-        from app.repositories.tenant_repo import TenantRepository
-
-        tenant_repo = TenantRepository()
-        tenant = tenant_repo.get_by_id(tenant_id)
-        if tenant and tenant.settings:
-            config = {
-                "block_sensitive_keyword": tenant.settings.block_sensitive_keyword,
-                "sensitive_keyword_match_mode": tenant.settings.sensitive_keyword_match_mode,
-            }
-        else:
-            config = {
-                "block_sensitive_keyword": False,
-                "sensitive_keyword_match_mode": "word_boundary",
-            }
-    except Exception as e:
-        logger.warning(f"Failed to fetch tenant config for tenant {tenant_id}: {e}")
-        config = {
-            "block_sensitive_keyword": False,
-            "sensitive_keyword_match_mode": "word_boundary",
-        }
-
-    # Update cache
-    with _tenant_config_cache_lock:
-        _tenant_config_cache[tenant_id] = {
-            "config": config,
-            "expiry": now + timedelta(seconds=_TENANT_CONFIG_CACHE_TTL),
-        }
-
-    return config
+    return get_tenant_sensitive_keyword_config(tenant_id)
 
 
 def _extract_requested_model() -> str | None:
@@ -649,7 +605,7 @@ def _check_content_filter(
         audit_logger = AuditLogger()
 
         # Get tenant-specific sensitive keyword config
-        tenant_config = _get_tenant_sensitive_keyword_config(tenant_id)
+        tenant_config = _get_tenant_sensitive_keyword_config_wrapper(tenant_id)
 
         result = content_filter.check_content(combined_content, tenant_config=tenant_config)
 
