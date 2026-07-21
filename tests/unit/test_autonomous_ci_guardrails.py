@@ -228,6 +228,39 @@ def test_agent_environment_binds_python_and_git_guards(monkeypatch, tmp_path):
     assert "GH_TOKEN" not in env
 
 
+def test_agent_guard_bin_falls_back_to_source_when_install_is_incomplete(monkeypatch, tmp_path):
+    from pathlib import Path
+
+    from app.modules.workspace.autonomous import agent_runner
+
+    incomplete_install = tmp_path / "agent-bin"
+    incomplete_install.mkdir()
+    for name in agent_runner._AGENT_GUARD_EXECUTABLES[:-1]:
+        (incomplete_install / name).write_text("#!/bin/sh\n", encoding="utf-8")
+    monkeypatch.setattr(agent_runner, "_OPENACE_AGENT_GUARD_BIN", str(incomplete_install))
+
+    resolved = agent_runner.AutonomousAgentRunner._resolve_agent_guard_bin()
+
+    assert resolved == str(Path(agent_runner.__file__).with_name("agent_bin"))
+
+
+def test_cross_user_launch_rejects_resolved_source_fallback(monkeypatch, tmp_path):
+    from app.modules.workspace.autonomous import agent_runner
+
+    missing_install = tmp_path / "missing-agent-bin"
+    monkeypatch.setattr(agent_runner, "_OPENACE_AGENT_GUARD_BIN", str(missing_install))
+    source_fallback = agent_runner.AutonomousAgentRunner._resolve_agent_guard_bin()
+    env = {"PATH": f"{source_fallback}:/usr/bin"}
+
+    with (
+        patch.object(agent_runner.AutonomousAgentRunner, "_is_cross_user", return_value=True),
+        pytest.raises(RuntimeError, match="packaged agent command guards"),
+    ):
+        agent_runner.AutonomousAgentRunner._wrap_agent_cmd(
+            ["/usr/bin/pre-commit"], "/private/repo", "openace-agent", env
+        )
+
+
 def test_cross_user_launch_preserves_nonsecret_guard_environment(monkeypatch, tmp_path):
     from app.modules.workspace.autonomous import agent_runner
 
