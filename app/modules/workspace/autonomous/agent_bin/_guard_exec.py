@@ -17,6 +17,7 @@ def main() -> None:
     if invoked == "git":
         command = next((arg.lower() for arg in args if not arg.startswith("-")), "")
         if command not in {
+            "check-attr",
             "diff",
             "grep",
             "log",

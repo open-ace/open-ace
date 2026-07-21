@@ -1126,6 +1126,10 @@ class AutonomousOrchestrator:
             return configured
         if account.pw_uid == 0:
             raise RuntimeError("Autonomous agent account must never have UID 0")
+        if account.pw_uid == os.getuid():
+            raise RuntimeError(
+                "Autonomous agent account must differ from the Open ACE service account"
+            )
         group_ids = set(os.getgrouplist(configured, account.pw_gid))
         group_names = set()
         for group_id in group_ids:
@@ -2110,6 +2114,11 @@ class AutonomousOrchestrator:
             return False, ""
 
         isolated_account = self._resolve_isolated_agent_account()
+        project_system_account = self._resolve_system_account(wf)
+        if project_system_account and isolated_account == project_system_account:
+            raise RuntimeError(
+                "Autonomous validation account must differ from the repository owner account"
+            )
         runtime_command, _ = self._select_project_python_runtime(project_path, gh)
         guard_bin = os.path.join(os.path.dirname(__file__), "agent_bin")
         env = {
