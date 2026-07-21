@@ -34,12 +34,26 @@ Options:
 - `--name` — Machine display name
 - `--install-cli` — Default CLI tool (default: qwen-code-cli)
 - `--dir` — Installation directory (default: `~/.open-ace-agent`)
+- `--ca-bundle PATH` — PEM CA bundle for a private or self-signed server
+- `--insecure-skip-tls-verify` — Explicitly disable TLS verification (dangerous)
+
+When the installer endpoint itself uses a private CA, bootstrap curl with the
+same bundle and pass it through to the installer:
+
+```bash
+curl --cacert /path/to/ca.pem -fsSL https://<server>/api/remote/agent/install.sh | \
+  bash -s -- --server https://<server> --token <agent-token> --ca-bundle /path/to/ca.pem
+```
 
 ### Windows
 
 ```powershell
-.\install.ps1 -ServerUrl https://your-server.com -Token <agent-token>
+.\install.ps1 -ServerUrl https://your-server.com -RegistrationToken <agent-token>
 ```
+
+For a private CA, add `-CaBundlePath C:\path\to\ca.pem`. The emergency
+`-InsecureSkipTlsVerify` switch is intentionally explicit and should only be
+used for short-lived testing.
 
 ### Requirements
 
@@ -59,9 +73,34 @@ Config file: `~/.open-ace-agent/config.json`
 | buffer_size | 4096 | Terminal output buffer |
 | max_sessions | 5 | Concurrent sessions |
 | log_level | INFO | Logging level |
-| skip_ssl_verify | true | Skip SSL verification |
+| skip_ssl_verify | false | Skip TLS verification; non-local HTTPS also requires an explicit CLI acknowledgement |
+| allow_insecure_tls | false | Administrator policy gate for the explicit insecure switch |
+| ca_bundle_path | null | PEM CA bundle for private/self-signed certificates |
 
-Environment variable overrides: `OPENACE_SERVER_URL`, `OPENACE_AGENT_TOKEN`, `OPENACE_MACHINE_ID`, `OPENACE_HEARTBEAT_INTERVAL`, `OPENACE_MAX_SESSIONS`, `OPENACE_LOG_LEVEL`, `OPENACE_SKIP_SSL_VERIFY`
+Environment variable overrides: `OPENACE_SERVER_URL`, `OPENACE_AGENT_TOKEN`, `OPENACE_MACHINE_ID`, `OPENACE_HEARTBEAT_INTERVAL`, `OPENACE_MAX_SESSIONS`, `OPENACE_LOG_LEVEL`, `OPENACE_SKIP_SSL_VERIFY`, `OPENACE_ALLOW_INSECURE_TLS`, `OPENACE_CA_BUNDLE_PATH`
+
+### TLS policy and migration
+
+New installations verify server certificates by default. For an internal CA,
+install with `--ca-bundle /path/to/ca.pem` (or `-CaBundlePath` on Windows), or
+set `ca_bundle_path` in `config.json`. The same CA is used by agent HTTP calls,
+terminal relay WebSockets, `openace login/menu/shell`, installer downloads, and
+registration.
+
+For a non-local HTTPS server, a legacy configuration containing
+`"skip_ssl_verify": true` no longer starts silently. Prefer replacing it with a
+CA bundle. If verification must be disabled temporarily, start the daemon with
+`python agent.py --insecure-skip-tls-verify`; the installer equivalents persist
+both `skip_ssl_verify=true` and the administrator approval
+`allow_insecure_tls=true`, then add the explicit service argument. Manual use
+requires the same two-step approval: policy plus CLI flag. Administrators can
+disable the escape hatch by leaving `allow_insecure_tls=false`. This mode prints
+a prominent warning and exposes credentials and commands to man-in-the-middle
+attacks.
+
+Use `python agent.py --ca-bundle /path/to/ca.pem` for a one-run CA override, and
+`openace login|menu|shell --ca-bundle /path/to/ca.pem` for a CLI override. Run
+`openace config-check` to inspect the persisted TLS configuration.
 
 ## Supported CLI Tools
 
@@ -80,11 +119,12 @@ The `openace` command-line tool is installed alongside the agent:
 
 | Command | Description |
 |---------|-------------|
-| `openace login [--token TOKEN]` | Authenticate to server |
+| `openace login [--token TOKEN] [--ca-bundle PATH]` | Authenticate to server |
 | `openace logout` | Remove stored credentials |
 | `openace status` | Show server URL, machine ID, login state |
-| `openace menu` | Start interactive AI tool selector |
-| `openace shell` | Start shell with proxy credentials |
+| `openace menu [--ca-bundle PATH]` | Start interactive AI tool selector |
+| `openace shell [--ca-bundle PATH]` | Start shell with proxy credentials |
+| `openace config-check` | Validate the persisted TLS configuration |
 
 ## Terminal Server
 

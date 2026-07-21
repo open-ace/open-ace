@@ -8,6 +8,7 @@ manages CLI subprocesses through the executor module, and sends heartbeats.
 
 from __future__ import annotations
 
+import argparse
 import json
 import logging
 import os
@@ -29,6 +30,7 @@ from cli_settings import apply_cli_settings, clear_codex_bearer_token
 from executor import ProcessExecutor
 from session_sync import SessionSyncService
 from system_info import get_capabilities
+from tls_config import print_tls_security_warning, print_tls_startup_rejection
 
 from config import AgentConfig
 
@@ -51,8 +53,18 @@ class RemoteAgent:
     manages CLI subprocesses, and reports output and status back.
     """
 
-    def __init__(self, config: AgentConfig | None = None):
+    def __init__(
+        self,
+        config: AgentConfig | None = None,
+        explicit_insecure: bool = False,
+        ca_bundle_path: str | None = None,
+    ):
         self.config = config or AgentConfig()
+        self._explicit_insecure = explicit_insecure
+        self._tls_config = self.config.get_tls_config(
+            explicit_insecure=explicit_insecure,
+            ca_bundle_path=ca_bundle_path,
+        )
         self._executor = ProcessExecutor(
             server_url=self.config.server_url,
             output_callback=self._on_session_output,
@@ -79,8 +91,6 @@ class RemoteAgent:
         self._terminal_info_dir = os.path.join(script_dir, ".terminal_sessions")
         # Session sync service
         self._session_sync = SessionSyncService(self._http_send, self.config)
-        # Restore terminal sessions from files
-        self._restore_terminal_sessions()
 
     def _restore_terminal_sessions(self) -> None:
         """Restore terminal session info from persisted files."""
@@ -192,12 +202,45 @@ class RemoteAgent:
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
 
+        # TLS Configuration Check
+        logger.info("Validating TLS configuration...")
+        warnings = self._tls_config.validate()
+        for warning in warnings:
+            logger.warning("TLS Warning: %s", warning)
+
+        if self._tls_config.ca_bundle_path and self._tls_config.ca_bundle_valid is False:
+            raise RuntimeError(
+                f"Invalid CA bundle; refusing to start: {self._tls_config.ca_bundle_path}"
+            )
+
+        # Production environment security check
+        if self._tls_config.should_reject_startup():
+            logger.error(
+                "Startup rejected: insecure TLS is not explicitly acknowledged or is disabled "
+                "by administrator policy"
+            )
+            print_tls_startup_rejection()
+            sys.exit(1)
+
+        # Print security warning if skip_verify in production
+        print_tls_security_warning(self._tls_config)
+
+        # Log TLS configuration (audit)
+        logger.info(
+            "TLS Configuration: %s",
+            json.dumps(self._tls_config.to_audit_dict()),
+        )
+
         logger.info(
             "Open ACE Remote Agent starting (machine_id=%s, server=%s)",
             self.config.machine_id[:8],
             self.config.server_url,
         )
         logger.info("Capabilities: %s", json.dumps(self._capabilities, indent=2))
+
+        # This may launch detached relay subprocesses, so it must happen only
+        # after the parent process has accepted the TLS policy.
+        self._restore_terminal_sessions()
 
         # Restore sessions from previous run (crash recovery)
         restored = self._executor.restore_sessions()
@@ -328,7 +371,7 @@ class RemoteAgent:
                 json=message,
                 headers=headers,
                 timeout=30,
-                verify=not self.config.skip_ssl_verify,
+                verify=self._tls_config.get_verify_context(),
             )
             if resp.status_code == 200:
                 return resp.json()
@@ -1790,6 +1833,8 @@ class RemoteAgent:
 
         env = os.environ.copy()
         env["OPEN_ACE_RELAY_TOKEN"] = token
+        # Pass TLS configuration to relay subprocess
+        env.update(self._tls_config.to_subprocess_env())
 
         try:
             proc = subprocess.Popen(
@@ -2078,8 +2123,26 @@ def setup_logging(level: str = "INFO") -> None:
         )
 
 
-def main() -> None:
+def build_arg_parser() -> argparse.ArgumentParser:
+    """Build command-line arguments for the remote agent daemon."""
+    parser = argparse.ArgumentParser(description="Open ACE Remote Agent")
+    tls_group = parser.add_mutually_exclusive_group()
+    tls_group.add_argument(
+        "--insecure-skip-tls-verify",
+        action="store_true",
+        help="Disable TLS certificate verification (dangerous; explicit acknowledgement required)",
+    )
+    tls_group.add_argument(
+        "--ca-bundle",
+        metavar="PATH",
+        help="Use a custom PEM CA bundle for the Open ACE server",
+    )
+    return parser
+
+
+def main(argv: list[str] | None = None) -> None:
     """Entry point for the remote agent daemon."""
+    args = build_arg_parser().parse_args(argv)
     config = AgentConfig()
 
     setup_logging(config.log_level)
@@ -2098,7 +2161,11 @@ def main() -> None:
     logger.info("=" * 60)
 
     try:
-        agent = RemoteAgent(config)
+        agent = RemoteAgent(
+            config,
+            explicit_insecure=args.insecure_skip_tls_verify,
+            ca_bundle_path=args.ca_bundle,
+        )
         agent.start()
     except Exception:
         logger.exception("Agent crashed with unhandled exception")

@@ -28,6 +28,7 @@ if str(AGENT_DIR) not in sys.path:
     sys.path.insert(0, str(AGENT_DIR))
 
 from cli_settings import apply_cli_settings, clear_codex_bearer_token
+from tls_config import TLSConfig
 
 AGENT_CONFIG_PATH = AGENT_DIR / "config.json"
 CLI_CONFIG_DIR = Path.home() / ".open-ace-cli"
@@ -35,6 +36,8 @@ CLI_CONFIG_PATH = CLI_CONFIG_DIR / "config.json"
 MENU_PATH = AGENT_DIR / "terminal_menu.py"
 ACTIVE_TERMINAL_PATH = AGENT_DIR / "active_terminal.json"
 logger = logging.getLogger("openace-cli")
+_TLS_EXPLICIT_INSECURE = False
+_TLS_CA_BUNDLE_OVERRIDE: str | None = None
 
 
 class CliError(Exception):
@@ -74,7 +77,9 @@ def _load_cli_config() -> dict[str, Any]:
 
 def _server_url() -> str:
     agent_config = _load_agent_config()
-    server_url = str(agent_config.get("server_url") or "").rstrip("/")
+    server_url = str(
+        os.environ.get("OPENACE_SERVER_URL") or agent_config.get("server_url") or ""
+    ).rstrip("/")
     if not server_url:
         raise CliError(f"server_url is missing from {AGENT_CONFIG_PATH}")
     return server_url
@@ -95,6 +100,73 @@ def _session_token() -> str:
     return token
 
 
+def _configure_tls_from_args(args: argparse.Namespace) -> None:
+    """Apply per-invocation TLS overrides parsed by a network command."""
+    global _TLS_EXPLICIT_INSECURE, _TLS_CA_BUNDLE_OVERRIDE
+    _TLS_EXPLICIT_INSECURE = bool(getattr(args, "insecure_skip_tls_verify", False))
+    _TLS_CA_BUNDLE_OVERRIDE = getattr(args, "ca_bundle", None)
+
+
+def _env_bool(name: str, fallback: bool) -> bool:
+    """Resolve a boolean environment override using AgentConfig semantics."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return fallback
+    return raw.lower() in ("true", "1", "yes")
+
+
+def _effective_tls_config() -> TLSConfig:
+    """Build and validate the TLS policy used by urllib request paths."""
+    agent_config = _load_agent_config()
+    configured_ca = os.environ.get("OPENACE_CA_BUNDLE_PATH") or agent_config.get("ca_bundle_path")
+    ca_bundle = _TLS_CA_BUNDLE_OVERRIDE or configured_ca
+    configured_skip = _env_bool(
+        "OPENACE_SKIP_SSL_VERIFY", bool(agent_config.get("skip_ssl_verify", False))
+    )
+    allow_insecure = _env_bool(
+        "OPENACE_ALLOW_INSECURE_TLS", bool(agent_config.get("allow_insecure_tls", False))
+    )
+    skip_verify = _TLS_EXPLICIT_INSECURE or (configured_skip and _TLS_CA_BUNDLE_OVERRIDE is None)
+    if _TLS_EXPLICIT_INSECURE:
+        ca_bundle = None
+
+    tls_config = TLSConfig(
+        skip_verify=skip_verify,
+        ca_bundle_path=str(ca_bundle) if ca_bundle else None,
+        is_explicit_insecure=_TLS_EXPLICIT_INSECURE,
+        allow_insecure_tls=allow_insecure,
+        config_source=(
+            "cli_param" if (_TLS_EXPLICIT_INSECURE or _TLS_CA_BUNDLE_OVERRIDE) else "config_file"
+        ),
+        server_url=_server_url(),
+    )
+    warnings = tls_config.validate()
+    if tls_config.ca_bundle_path and tls_config.ca_bundle_valid is False:
+        raise CliError("; ".join(warnings) or "Invalid custom CA bundle")
+    if tls_config.should_reject_startup():
+        if _TLS_EXPLICIT_INSECURE and not allow_insecure:
+            raise CliError(
+                "Insecure TLS is disabled by administrator policy. Configure a CA bundle, or "
+                "set allow_insecure_tls only for an approved temporary exception."
+            )
+        raise CliError(
+            "TLS verification is disabled for a non-local HTTPS server. Use "
+            "--insecure-skip-tls-verify together with administrator policy approval, or "
+            "configure --ca-bundle."
+        )
+    for warning in warnings:
+        print(f"TLS warning: {warning}", file=sys.stderr)
+    return tls_config
+
+
+def _urlopen(req: urllib.request.Request):
+    """Open a request using the same TLS policy as the remote agent."""
+    kwargs: dict[str, Any] = {"timeout": 30}
+    if req.full_url.startswith("https://"):
+        kwargs["context"] = _effective_tls_config().get_ssl_context()
+    return urllib.request.urlopen(req, **kwargs)
+
+
 def _login_with_password(server_url: str, username: str, password: str) -> str:
     if not server_url.startswith("https://"):
         print("Warning: Sending credentials over insecure connection.", file=sys.stderr)
@@ -109,7 +181,7 @@ def _login_with_password(server_url: str, username: str, password: str) -> str:
         },
     )
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with _urlopen(req) as resp:
             data = json.loads(resp.read().decode("utf-8"))
             if not data.get("success"):
                 raise CliError(str(data.get("error") or "Login failed"))
@@ -145,7 +217,7 @@ def _request_json(method: str, url: str, token: str, payload: dict[str, Any]) ->
         },
     )
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with _urlopen(req) as resp:
             return json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         raw = exc.read().decode("utf-8", errors="replace")
@@ -263,6 +335,7 @@ def _windows_shell_args() -> list[str]:
 
 
 def cmd_login(args: argparse.Namespace) -> int:
+    _configure_tls_from_args(args)
     server_url = _server_url()
     machine_id = _machine_id()
 
@@ -301,7 +374,80 @@ def cmd_status(_: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_config_check(_: argparse.Namespace) -> int:
+    """Check TLS configuration and security status."""
+    agent_config = _load_agent_config()
+    server_url = os.environ.get("OPENACE_SERVER_URL") or agent_config.get("server_url", "")
+
+    print("\nTLS Configuration Check:")
+    print("=" * 60)
+
+    # Check server URL
+    print(f"Server URL: {server_url}")
+
+    tls_config = TLSConfig(
+        skip_verify=_env_bool(
+            "OPENACE_SKIP_SSL_VERIFY", bool(agent_config.get("skip_ssl_verify", False))
+        ),
+        ca_bundle_path=os.environ.get("OPENACE_CA_BUNDLE_PATH")
+        or agent_config.get("ca_bundle_path"),
+        allow_insecure_tls=_env_bool(
+            "OPENACE_ALLOW_INSECURE_TLS", bool(agent_config.get("allow_insecure_tls", False))
+        ),
+        server_url=str(server_url),
+        config_source="config_file",
+    )
+    warnings = tls_config.validate()
+
+    # Check TLS verification status
+    skip_ssl_verify = tls_config.skip_verify
+    if skip_ssl_verify:
+        print("TLS Verification: DISABLED ⚠️")
+        print("  WARNING: TLS verification is disabled. This is not recommended for production.")
+    else:
+        print("TLS Verification: ENABLED ✓")
+
+    # Check CA bundle
+    ca_bundle = tls_config.ca_bundle_path
+    if ca_bundle:
+        if os.path.exists(ca_bundle):
+            if os.access(ca_bundle, os.R_OK):
+                print(f"CA Bundle: {ca_bundle} ✓")
+            else:
+                print(f"CA Bundle: {ca_bundle} ⚠️ (not readable)")
+        else:
+            print(f"CA Bundle: {ca_bundle} ✗ (not found)")
+    else:
+        print("CA Bundle: (using system default)")
+
+    is_production = tls_config.is_production_mode()
+
+    if is_production:
+        print("Production Mode: YES")
+        if skip_ssl_verify:
+            print("\n⚠️  CRITICAL: TLS verification disabled in production mode!")
+            print("   This exposes your agent token and data to MITM attacks.")
+            print("   Use --ca-bundle for private CAs or --insecure-skip-tls-verify explicitly.")
+    else:
+        print("Production Mode: NO")
+
+    print("\nRecommendations:")
+    if skip_ssl_verify and is_production:
+        print("  - Enable TLS verification in config.json")
+        print("  - Or use custom CA bundle for private certificates")
+    else:
+        print("  - Configuration looks good ✓")
+
+    for warning in warnings:
+        print(f"  - {warning}")
+    print(f"  - Explicit insecure mode allowed by policy: {tls_config.allow_insecure_tls}")
+
+    print("=" * 60 + "\n")
+    return 0
+
+
 def cmd_menu(args: argparse.Namespace) -> int:
+    _configure_tls_from_args(args)
     work_dir = os.path.abspath(args.work_dir or os.getcwd())
     terminal = _start_cli_terminal(work_dir)
     _apply_local_cli_settings(terminal)
@@ -325,6 +471,7 @@ def cmd_menu(args: argparse.Namespace) -> int:
 
 
 def cmd_shell(args: argparse.Namespace) -> int:
+    _configure_tls_from_args(args)
     work_dir = os.path.abspath(args.work_dir or os.getcwd())
     terminal = _start_cli_terminal(work_dir)
     _apply_local_cli_settings(terminal)
@@ -348,12 +495,28 @@ def cmd_shell(args: argparse.Namespace) -> int:
     return 0
 
 
+def _add_tls_arguments(parser: argparse.ArgumentParser) -> None:
+    """Add mutually exclusive TLS overrides to a network command."""
+    tls_group = parser.add_mutually_exclusive_group()
+    tls_group.add_argument(
+        "--ca-bundle",
+        metavar="PATH",
+        help="Use a custom PEM CA bundle for this command",
+    )
+    tls_group.add_argument(
+        "--insecure-skip-tls-verify",
+        action="store_true",
+        help="Disable TLS verification (dangerous; explicit acknowledgement required)",
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="openace", description="Open ACE remote CLI")
     sub = parser.add_subparsers(dest="command")
 
     login = sub.add_parser("login", help="Log in with username/password or a session token")
     login.add_argument("--token", help="Open ACE session token (skip username/password prompt)")
+    _add_tls_arguments(login)
     login.set_defaults(func=cmd_login)
 
     logout = sub.add_parser("logout", help="Remove stored Open ACE credentials")
@@ -364,11 +527,18 @@ def build_parser() -> argparse.ArgumentParser:
 
     menu = sub.add_parser("menu", help="Start the Open ACE AI tool menu")
     menu.add_argument("--work-dir", default="", help="Working directory for the session")
+    _add_tls_arguments(menu)
     menu.set_defaults(func=cmd_menu)
 
     shell = sub.add_parser("shell", help="Start a shell with Open ACE proxy credentials")
     shell.add_argument("--work-dir", default="", help="Working directory for the session")
+    _add_tls_arguments(shell)
     shell.set_defaults(func=cmd_shell)
+
+    config_check = sub.add_parser(
+        "config-check", help="Check TLS configuration and security status"
+    )
+    config_check.set_defaults(func=cmd_config_check)
 
     return parser
 
