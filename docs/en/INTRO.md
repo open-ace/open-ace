@@ -195,7 +195,7 @@ The workspace can be configured to connect to various AI tool services:
 
 | Layer | Technology |
 |-------|-----------|
-| **Backend** | Python 3.9+, Flask |
+| **Backend** | Python 3.10+, Flask |
 | **Frontend** | React 18, TypeScript, Bootstrap 5, Chart.js |
 | **Database** | SQLite (dev), PostgreSQL (production) |
 | **Build** | Vite, TypeScript |

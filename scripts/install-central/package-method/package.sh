@@ -451,7 +451,7 @@ if [ "$SKIP_DOWNLOAD" = false ] && [ -f "$PROJECT_DIR/requirements.txt" ]; then
 
     # Download dependencies
     # Note: --prefer-binary requires pip 20.3+, check version before using
-    # Note: We target Python 3.9 minimum (Open ACE requires Python >= 3.9)
+    # Note: We target Python 3.10 minimum (Open ACE requires Python >= 3.10)
     PIP_CMD=""
     PIP_VERSION=""
 
@@ -465,14 +465,14 @@ if [ "$SKIP_DOWNLOAD" = false ] && [ -f "$PROJECT_DIR/requirements.txt" ]; then
     fi
 
     if [ -n "$PIP_CMD" ]; then
-        # Download wheels for Python 3.9/3.10/3.11/3.12 to support all target versions.
+        # Download wheels for Python 3.10/3.11/3.12 to support all target versions.
         # pip install will automatically select the matching wheel during installation.
         # Note: This increases vendor directory size but ensures offline compatibility.
-        echo -e "${YELLOW}Downloading packages for Python 3.9/3.10/3.11/3.12...${NC}"
+        echo -e "${YELLOW}Downloading packages for Python 3.10/3.11/3.12...${NC}"
 
         # Supported Python versions (ABI tags)
-        PYTHON_VERSIONS=("3.9" "3.10" "3.11" "3.12")
-        ABI_TAGS=("cp39" "cp310" "cp311" "cp312")
+        PYTHON_VERSIONS=("3.10" "3.11" "3.12")
+        ABI_TAGS=("cp310" "cp311" "cp312")
 
         for i in "${!PYTHON_VERSIONS[@]}"; do
             py_ver="${PYTHON_VERSIONS[$i]}"
@@ -510,7 +510,7 @@ if [ "$SKIP_DOWNLOAD" = false ] && [ -f "$PROJECT_DIR/requirements.txt" ]; then
         done
 
         # Final pass: download pure Python wheels (py3-none-any) and any missing packages.
-        # These wheels are architecture-independent and work across all Python versions.
+        # These wheels are architecture-independent and work across all supported Python versions.
         # pip will skip already-downloaded files, so this only adds missing items.
         echo -e "${YELLOW}Downloading pure Python wheels...${NC}"
         $PIP_CMD download -r "$TEMP_REQ" -d "$VENDOR_DIR" \

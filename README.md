@@ -258,7 +258,7 @@ python3 server.py
 <td width="50%">
 
 ### 后端
-- **Python 3.9+**
+- **Python 3.10+**
 - **Flask** — Web 框架
 - **SQLAlchemy** — ORM
 - **PostgreSQL / SQLite** — 数据库
@@ -563,7 +563,7 @@ python3 server.py
 <td width="50%">
 
 ### Backend
-- **Python 3.9+**
+- **Python 3.10+**
 - **Flask** — Web Framework
 - **SQLAlchemy** — ORM
 - **PostgreSQL / SQLite** — Database
