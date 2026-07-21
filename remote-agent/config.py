@@ -27,7 +27,8 @@ DEFAULTS = {
     "output_buffer_size": 4096,
     "max_sessions": 5,
     "log_level": "INFO",
-    "skip_ssl_verify": True,
+    "skip_ssl_verify": False,  # Security: Default to verifying TLS certificates
+    "ca_bundle_path": None,  # Optional: Custom CA bundle for private certificates
 }
 
 CONFIG_DIR = Path.home() / ".open-ace-agent"
@@ -80,6 +81,7 @@ class AgentConfig:
                 "skip_ssl_verify",
                 lambda v: v.lower() in ("true", "1", "yes"),
             ),
+            "OPENACE_CA_BUNDLE_PATH": ("ca_bundle_path", str),
         }
 
         for env_key, (config_key, type_fn) in env_overrides.items():
