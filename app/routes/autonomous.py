@@ -1035,13 +1035,18 @@ def resume_workflow(workflow_id):
     phase = workflow.get("current_phase", "preparation")
     status = PHASE_TO_STATUS.get(phase, "pending")
 
-    _get_repo().update_workflow(
-        workflow_id,
-        {
-            "status": status,
-            "paused_at": None,
-        },
-    )
+    # Upstream allocation pauses are deliberately operator-resumable rather
+    # than automatically retried.  Once the operator resumes, remove the stale
+    # provider error so the active workflow is not displayed as still blocked.
+    from app.modules.workspace.autonomous.orchestrator import UPSTREAM_QUOTA_PAUSE_REASON_PREFIX
+
+    error_message = workflow.get("error_message") or ""
+
+    updates = {"status": status, "paused_at": None}
+    if error_message.startswith(UPSTREAM_QUOTA_PAUSE_REASON_PREFIX):
+        updates["error_message"] = ""
+
+    _get_repo().update_workflow(workflow_id, updates)
 
     _emit_event_safe(workflow_id, "status_change", {"status": status})
     return jsonify({"success": True})

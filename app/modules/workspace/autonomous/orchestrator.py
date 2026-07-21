@@ -43,6 +43,17 @@ from app.repositories.user_repo import UserRepository
 
 logger = logging.getLogger(__name__)
 
+UPSTREAM_QUOTA_PAUSE_REASON_PREFIX = "Upstream provider quota exhausted:"
+
+
+class WorkflowPaused(RuntimeError):
+    """Control-flow signal for a persisted workflow pause."""
+
+
+class UpstreamQuotaPaused(WorkflowPaused):
+    """Control-flow signal used after persisting a recoverable quota pause."""
+
+
 # Completion keywords to detect in issue comments
 COMPLETION_KEYWORDS = [
     "开发完成",
@@ -780,6 +791,9 @@ _TRANSIENT_API_ERROR_RE = re.compile(
     # "API Error: 429" / "API Error: 5xx". Only 429 among 4xx is transient;
     # 400/401/403/404/422 are permanent client errors and must NOT trigger retry.
     r"api\s*error:?\s*(?:429|5\d{2})"
+    # Claude may wrap the status later in the same short envelope:
+    # ``API Error: Request rejected (429)``.
+    r"|api\s*error[^\n]{0,80}\(\s*(?:429|5\d{2})\s*\)"
     # Bare "429" must have context that distinguishes a real API error from a
     # plan discussing HTTP status codes (e.g. "return 429" in a rate-limit
     # design). Require "status" or "error" nearby, not just the number alone.
@@ -789,6 +803,16 @@ _TRANSIENT_API_ERROR_RE = re.compile(
     r"|quota\s+exceeded|rate[\s-]?limit(?:ed)?|too\s+many\s+requests"
     r"|overloaded"  # "The service may be temporarily overloaded"
     r"|bad\s+gateway|service\s+unavailable|gateway\s+timeout|internal\s+server\s+error",
+    re.IGNORECASE,
+)
+
+# The proxy emits this explicit message only after the provider reports a
+# quota-exhaustion response.  Unlike burst rate limiting, retrying it for the
+# full 30-minute transient window cannot make progress and amplifies traffic.
+_UPSTREAM_QUOTA_EXHAUSTED_RE = re.compile(
+    r"platform\s+quota\s+exceeded"
+    r"|upstream\s+(?:provider\s+)?quota\s+(?:exceeded|exhausted)"
+    r"|usage\s+allocated\s+quota\s+exceeded",
     re.IGNORECASE,
 )
 
@@ -3268,10 +3292,58 @@ class AutonomousOrchestrator:
         plan/review text caused phrases such as "Rate Limit" to restart an
         otherwise successful phase (#1891).
         """
+        if cls._is_upstream_quota_exhausted(result):
+            return False
         if cls._is_transient_api_error(result.error or ""):
             return True
         return (result.total_tokens or 0) == 0 and cls._is_transient_api_error(
             result.response_text or ""
+        )
+
+    @staticmethod
+    def _is_upstream_quota_exhausted(result: AgentTaskResult) -> bool:
+        """Return whether a provider allocation is exhausted.
+
+        Error fields are authoritative.  Assistant text is considered only
+        for a zero-token envelope so a legitimate design discussion about
+        quota handling cannot pause a workflow.
+        """
+        if _UPSTREAM_QUOTA_EXHAUSTED_RE.search(result.error or ""):
+            return True
+        return (result.total_tokens or 0) == 0 and bool(
+            _UPSTREAM_QUOTA_EXHAUSTED_RE.search(result.response_text or "")
+        )
+
+    def _pause_for_upstream_quota(self, result: AgentTaskResult, milestone_id: str = "") -> None:
+        """Persist a non-spinning pause that an operator may resume later."""
+        message = (
+            f"{UPSTREAM_QUOTA_PAUSE_REASON_PREFIX} "
+            "the configured model provider rejected requests; resume after "
+            "provider allocation is restored"
+        )
+        result.success = False
+        result.error_code = "upstream_quota_exhausted"
+        result.error = message
+        if milestone_id:
+            self.repo.update_milestone(
+                milestone_id,
+                {
+                    "status": "failed",
+                    "session_id": result.session_id,
+                    "error_message": message,
+                },
+            )
+        self._update_workflow(
+            {
+                "status": "paused",
+                "error_message": message,
+                "paused_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+                "agent_pid": None,
+            }
+        )
+        self._emit(
+            "upstream_quota_paused",
+            {"reason": "upstream_quota_exhausted", "message": message},
         )
 
     @staticmethod
@@ -3504,12 +3576,37 @@ class AutonomousOrchestrator:
         _CANCEL_POLL_INTERVAL = 5  # seconds between cancel checks
         retry_start = time.monotonic()
         delay = API_RETRY_INITIAL_DELAY
+
+        def abort_paused_retry() -> None:
+            """Finalize retry bookkeeping before unwinding a manual pause."""
+            logger.info("API error retry aborted (workflow status=paused)")
+            if milestone_id:
+                self.repo.update_milestone(
+                    milestone_id,
+                    {
+                        "status": "cancelled",
+                        "session_id": result.session_id,
+                        "error_message": "Workflow paused during API error retry",
+                    },
+                )
+            self._write_phase_usage(milestone_id, result, retry_usage)
+            self._clear_session_usage_offsets(usage_session_ids)
+            with self._session_lock:
+                self._current_session_id = (
+                    tracking_session_id
+                    if field
+                    else (result.tracking_session_id or result.session_id or tracking_session_id)
+                )
+            raise WorkflowPaused("Workflow paused during API error retry")
+
         while (time.monotonic() - retry_start) < API_RETRY_TOTAL_TIMEOUT:
             # Re-check workflow status each iteration: a failure/cancellation
             # set on the row (by a concurrent path or a prior failure in this
             # advance()) must abort retries, otherwise we keep spawning agent
             # subprocesses on a dead workflow for the full 30-min window. #1029
             _status = (self.workflow or {}).get("status")
+            if _status == "paused":
+                abort_paused_retry()
             if _status in ("failed", "cancelled"):
                 logger.info("API error retry aborted (workflow status=%s)", _status)
                 self._synthesize_transient_failure(result)
@@ -3551,13 +3648,16 @@ class AutonomousOrchestrator:
                 },
             )
 
-            # Interruptible sleep: check for cancellation every 5s.
-            # Use in-memory flag instead of DB query to avoid overhead.
+            # Interruptible sleep: check cancellation and manual pause every
+            # five seconds so a long backoff cannot wake up and launch another
+            # agent after the workflow row was paused.
             slept = 0
             self._cancel_requested.clear()
             while slept < delay:
                 time.sleep(min(_CANCEL_POLL_INTERVAL, delay - slept))
                 slept += _CANCEL_POLL_INTERVAL
+                if (self.workflow or {}).get("status") == "paused":
+                    abort_paused_retry()
                 if self._cancel_requested.is_set():
                     logger.info("API error retry cancelled (cancel requested)")
                     self._synthesize_transient_failure(result)
@@ -3621,6 +3721,7 @@ class AutonomousOrchestrator:
         # gate avoids flagging a legitimate plan that merely mentions these
         # phrases. #1001. Centralized in a helper so the retry loop's early-exit
         # paths (status failed/cancelled, cancel-requested) apply it too. #1036.
+        upstream_quota_exhausted = self._is_upstream_quota_exhausted(result)
         self._synthesize_transient_failure(result)
         repo_validation_error = self._validate_repo_context_after_run(
             repo_state_before, project_system_account
@@ -3641,6 +3742,9 @@ class AutonomousOrchestrator:
                 if field
                 else (result.tracking_session_id or result.session_id or tracking_session_id)
             )
+        if upstream_quota_exhausted:
+            self._pause_for_upstream_quota(result, milestone_id)
+            raise UpstreamQuotaPaused(result.error)
         return result
 
     def _synthesize_transient_failure(self, result: AgentTaskResult) -> None:
@@ -3881,6 +3985,13 @@ class AutonomousOrchestrator:
             # blip starts fresh.
             if wf.get("transient_retry_count", 0):
                 self._update_workflow({"transient_retry_count": 0, "error_message": ""})
+        except WorkflowPaused as e:
+            logger.info(
+                "Workflow %s stopped advancing because it is paused: %s",
+                self._workflow_id[:8],
+                e,
+            )
+            return
         except Exception as e:
             err_str = str(e).lower()
             is_transient = isinstance(e, GitHubOpsError) and any(
