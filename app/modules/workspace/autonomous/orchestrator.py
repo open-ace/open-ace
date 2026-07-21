@@ -4242,7 +4242,40 @@ class AutonomousOrchestrator:
         tracking_session_id: str,
     ) -> None:
         """Persist an interrupted attempt and unwind without failing its workflow."""
+        if result.error_code == "repo_integrity_violation":
+            # Shutdown must never downgrade an already-detected security
+            # violation into a retryable cancellation. The protected .git
+            # entry may have been replaced, so a new process must not adopt
+            # that state as its trusted baseline.
+            self._persist_shutdown_usage(
+                milestone_id,
+                result,
+                retry_usage,
+                usage_session_ids,
+                tracking_session_id,
+            )
+            self._abort_on_repo_integrity_violation(result, milestone_id)
+            raise WorkflowPaused("Service shutdown observed a repository integrity violation")
+
         self._cancel_milestone_for_shutdown(milestone_id)
+        self._persist_shutdown_usage(
+            milestone_id,
+            result,
+            retry_usage,
+            usage_session_ids,
+            tracking_session_id,
+        )
+        raise WorkflowPaused("Service shutdown interrupted the current attempt")
+
+    def _persist_shutdown_usage(
+        self,
+        milestone_id: str,
+        result: AgentTaskResult,
+        retry_usage: dict[str, int],
+        usage_session_ids: set[str],
+        tracking_session_id: str,
+    ) -> None:
+        """Finalize usage/session bookkeeping for either shutdown outcome."""
         self._write_phase_usage(milestone_id, result, retry_usage)
         try:
             self.repo.refresh_workflow_usage_from_sessions(self._workflow_id)
@@ -4251,7 +4284,6 @@ class AutonomousOrchestrator:
         self._clear_session_usage_offsets(usage_session_ids)
         with self._session_lock:
             self._current_session_id = tracking_session_id
-        raise WorkflowPaused("Service shutdown interrupted the current attempt")
 
     def _cancel_milestone_for_shutdown(self, milestone_id: str) -> None:
         """Best-effort milestone cancellation that cannot fail the workflow."""
