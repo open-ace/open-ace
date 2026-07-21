@@ -48,6 +48,9 @@ export function getActivityHostMilestoneId(
   workflowDevRound: number,
   workflowStatus: string
 ): string | null {
+  const agentPhaseStatuses = ['planning', 'developing', 'pr_review'];
+  if (![...agentPhaseStatuses, 'merging'].includes(workflowStatus)) return null;
+
   // Forked workflows can retain a copied in-progress milestone from the
   // parent. Timeline order is oldest-first, so always choose the newest
   // in-progress AI step from the current branch/round.
@@ -65,7 +68,7 @@ export function getActivityHostMilestoneId(
   // actively run an agent. System-only phases (queue/preparation/report/wait)
   // must not impersonate an AI request, and merge shows a panel only while an
   // explicit AI repair/conflict milestone is in progress (handled above).
-  if (!['planning', 'developing', 'pr_review'].includes(workflowStatus)) return null;
+  if (!agentPhaseStatuses.includes(workflowStatus)) return null;
 
   const fallback = [...milestones]
     .reverse()

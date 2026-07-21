@@ -120,6 +120,32 @@ describe('WorkflowTimeline.utils', () => {
     expect(getActivityHostMilestoneId(forkMilestones, 1, 'developing')).toBe('child-development');
   });
 
+  it('ignores stale in-progress AI milestones outside an agent-running phase', () => {
+    const staleForkMilestones = [
+      {
+        milestone_id: 'copied-parent-plan',
+        milestone_type: 'plan_created',
+        status: 'in_progress',
+        dev_round: 1,
+      },
+    ];
+
+    for (const status of [
+      'queued',
+      'pending',
+      'preparing',
+      'reporting',
+      'waiting',
+      'paused',
+      'planning_timeout',
+      'failed',
+      'cancelled',
+      'completed',
+    ]) {
+      expect(getActivityHostMilestoneId(staleForkMilestones, 1, status), status).toBeNull();
+    }
+  });
+
   it('parses diff stats json', () => {
     expect(parseDiffStats('{"additions":100,"deletions":25,"files":3,"commits":2}')).toEqual({
       additions: 100,
