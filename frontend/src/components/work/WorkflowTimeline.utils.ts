@@ -43,6 +43,40 @@ export interface ActivityHostMilestoneLike {
   dev_round: number;
 }
 
+export interface TimelineActivityLike {
+  type: 'assistant' | 'tool_use' | 'usage' | 'system';
+  text?: string;
+}
+
+/**
+ * Ignore empty assistant placeholders. They carry no user-facing progress and
+ * otherwise render as a blank row (or a lone dash) in the activity panel.
+ * Tool, usage and system events remain useful even when they have no text.
+ */
+export function isDisplayableTimelineActivity(activity: TimelineActivityLike): boolean {
+  if (activity.type !== 'assistant') return true;
+  const text = activity.text?.trim() ?? '';
+  return text !== '' && text !== '-';
+}
+
+export interface WorkflowSessionLinesLike {
+  main_session_id?: string;
+  review_session_id?: string;
+  test_session_id?: string;
+}
+
+/** Return the stable session line that owns an in-flight AI milestone. */
+export function getWorkflowSessionIdForMilestone(
+  milestoneType: string,
+  workflow: WorkflowSessionLinesLike
+): string {
+  if (milestoneType === 'tests_run') return workflow.test_session_id?.trim() ?? '';
+  if (milestoneType === 'plan_reviewed' || milestoneType === 'pr_reviewed') {
+    return workflow.review_session_id?.trim() ?? '';
+  }
+  return workflow.main_session_id?.trim() ?? '';
+}
+
 export function getActivityHostMilestoneId(
   milestones: ActivityHostMilestoneLike[],
   workflowDevRound: number,
