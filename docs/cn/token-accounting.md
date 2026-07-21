@@ -84,11 +84,11 @@ tokens_used == 非 cache input_tokens + output_tokens + cache_tokens
 
 **字段映射**
 
-- `input_tokens` <- `input_tokens`
-- `output_tokens` <- `output_tokens`
-- `cache_read_tokens` <- `cache_read_input_tokens`
-- `cache_creation_tokens` <- `cache_creation_input_tokens`
-- `tokens_used` <- `input + output + cache_read + cache_creation`
+- `input_tokens` 来自 `input_tokens`
+- `output_tokens` 来自 `output_tokens`
+- `cache_read_tokens` 来自 `cache_read_input_tokens`
+- `cache_creation_tokens` 来自 `cache_creation_input_tokens`
+- `tokens_used` 按 `input + output + cache_read + cache_creation` 计算
 
 **为什么要 merge message id**
 
@@ -133,10 +133,10 @@ tokens_used == 非 cache input_tokens + output_tokens + cache_tokens
 
 **字段映射**
 
-- `tokens_used` <- `last_token_usage.total_tokens` 的逐事件累加值
-- `cache_tokens` <- `cached_input_tokens`
-- `input_tokens` <- `input_tokens - cached_input_tokens`
-- `output_tokens` <- `output_tokens`
+- `tokens_used` 来自 `last_token_usage.total_tokens` 的逐事件累加值
+- `cache_tokens` 来自 `cached_input_tokens`
+- `input_tokens` 按 `input_tokens - cached_input_tokens` 计算
+- `output_tokens` 来自 `output_tokens`
 - `thoughts_tokens` 只在抓取阶段参与日汇总，不单独入 `daily_messages`
 
 **重要语义**
@@ -180,10 +180,10 @@ tokens_used == 非 cache input_tokens + output_tokens + cache_tokens
 
 **字段映射**
 
-- `tokens_used` <- `computed_total_tokens`
-- `input_tokens` <- `turn_usage.input_tokens`
-- `output_tokens` <- `turn_usage.output_tokens`
-- `cache_tokens` <- `cache_creation_input_tokens + cache_read_input_tokens`
+- `tokens_used` 来自 `computed_total_tokens`
+- `input_tokens` 来自 `turn_usage.input_tokens`
+- `output_tokens` 来自 `turn_usage.output_tokens`
+- `cache_tokens` 按 `cache_creation_input_tokens + cache_read_input_tokens` 计算
 
 **为什么按 `turn_usage.started_at` 分日期**
 
@@ -220,11 +220,11 @@ tokens_used == 非 cache input_tokens + output_tokens + cache_tokens
 
 **字段映射**
 
-- `prompt_tokens` <- `promptTokenCount`
-- `candidates_tokens` <- `candidatesTokenCount`
-- `thoughts_tokens` <- `thoughtsTokenCount`
-- `cached_tokens` <- `cachedContentTokenCount`
-- `tokens_used` <- `totalTokenCount`
+- `prompt_tokens` 来自 `promptTokenCount`
+- `candidates_tokens` 来自 `candidatesTokenCount`
+- `thoughts_tokens` 来自 `thoughtsTokenCount`
+- `cached_tokens` 来自 `cachedContentTokenCount`
+- `tokens_used` 来自 `totalTokenCount`
 
 **重要语义**
 
