@@ -925,7 +925,9 @@ CREATE TABLE tenant_settings (
  branding_logo_url TEXT,
  auto_provision_users INTEGER DEFAULT 0,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
- updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+ updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+ block_sensitive_keyword INTEGER DEFAULT 0,
+ sensitive_keyword_match_mode TEXT DEFAULT 'word_boundary'
 );
 
 CREATE TABLE tenant_usage (

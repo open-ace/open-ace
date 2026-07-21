@@ -1143,7 +1143,7 @@ def api_upload_file():
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.PIPE,
             )
-            stdin = cast(IO[bytes], proc.stdin)
+            stdin = cast("IO[bytes]", proc.stdin)
             try:
                 # Stream uploaded content to the wrapper's stdin in chunks so
                 # large uploads don't buffer fully in memory.

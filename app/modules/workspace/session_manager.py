@@ -42,6 +42,12 @@ def _get_content_filter():
     return _content_filter_instance
 
 
+# Import shared cache function
+from app.modules.workspace.tenant_config_cache import (
+    get_tenant_sensitive_keyword_config as _get_tenant_sensitive_keyword_config,
+)
+
+
 def _sanitize_text_value(text: str | None) -> str | None:
     """Remove NUL / invalid UTF-8 surrogate data before persistence."""
     if text is None:
@@ -1501,7 +1507,10 @@ class SessionManager:
                 filter_session_row = cursor.fetchone()
                 filter_user_id = filter_session_row["user_id"] if filter_session_row else None
 
-                result = content_filter.check_content(content)
+                # Get tenant-specific sensitive keyword config
+                tenant_config = _get_tenant_sensitive_keyword_config(int(effective_tenant_id))
+
+                result = content_filter.check_content(content, tenant_config=tenant_config)
 
                 if result.action in ("block", "warn", "redact"):
                     audit_logger = AuditLogger()

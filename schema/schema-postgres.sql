@@ -1469,7 +1469,9 @@ CREATE TABLE tenant_settings (
     branding_logo_url character varying(500),
     auto_provision_users boolean DEFAULT false,
     created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
-    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    block_sensitive_keyword boolean DEFAULT false,
+    sensitive_keyword_match_mode character varying(50) DEFAULT 'word_boundary'::character varying
 );
 
 CREATE SEQUENCE tenant_settings_id_seq
