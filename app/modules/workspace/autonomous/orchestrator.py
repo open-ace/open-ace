@@ -1695,9 +1695,12 @@ class AutonomousOrchestrator:
         if not minimum:
             return [], ""
         required = (int(minimum.group(1)), int(minimum.group(2)))
-        system_account = getattr(gh, "system_account", None) if gh is not None else None
-        if sys.version_info[:2] >= required and not system_account:
-            return [sys.executable], ""
+        # Runtime commands are ultimately launched through the isolated
+        # wrapper, not through the repository owner's sudo allowlist.  Probe
+        # executable paths as the service account here.  Prefixing probes with
+        # ``sudo -u <repo-owner>`` both violates the narrow sudo policy and can
+        # make a compatible service interpreter look unavailable.  Preserve
+        # the normal preference for an accessible repository virtualenv.
         candidates = [
             os.path.join(project_path, ".venv", "bin", "python"),
             os.path.join(project_path, "venv", "bin", "python"),
@@ -1706,26 +1709,6 @@ class AutonomousOrchestrator:
             candidates.append(sys.executable)
         for minor in range(required[1], required[1] + 6):
             candidates.append(shutil.which(f"python{required[0]}.{minor}") or "")
-            if system_account:
-                try:
-                    located = subprocess.run(
-                        [
-                            "sudo",
-                            "-u",
-                            system_account,
-                            "sh",
-                            "-lc",
-                            f"command -v python{required[0]}.{minor}",
-                        ],
-                        capture_output=True,
-                        text=True,
-                        timeout=5,
-                        check=False,
-                    )
-                    if located.returncode == 0:
-                        candidates.append(located.stdout.strip())
-                except (OSError, subprocess.SubprocessError):
-                    pass
         for executable in candidates:
             if not executable:
                 continue
@@ -1735,8 +1718,6 @@ class AutonomousOrchestrator:
                     "-c",
                     "import sys; print(f'{sys.version_info[0]}.{sys.version_info[1]}')",
                 ]
-                if system_account:
-                    probe_command = ["sudo", "-u", system_account, *probe_command]
                 detected = subprocess.run(
                     probe_command,
                     capture_output=True,
@@ -1750,19 +1731,6 @@ class AutonomousOrchestrator:
             except (OSError, ValueError, subprocess.SubprocessError):
                 continue
         uv = shutil.which("uv")
-        if not uv and system_account:
-            try:
-                located_uv = subprocess.run(
-                    ["sudo", "-u", system_account, "sh", "-lc", "command -v uv"],
-                    capture_output=True,
-                    text=True,
-                    timeout=5,
-                    check=False,
-                )
-                if located_uv.returncode == 0:
-                    uv = located_uv.stdout.strip()
-            except (OSError, subprocess.SubprocessError):
-                pass
         if uv:
             return [
                 uv,

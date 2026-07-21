@@ -130,7 +130,14 @@ if [ "$isolated" = true ]; then
     # Recover safely after a previously interrupted wrapper before granting
     # this run access to anything. The registry is root-owned under /run.
     cleanup_isolated
-    trap cleanup_isolated EXIT HUP INT TERM
+    trap cleanup_isolated EXIT
+    # Bash services traps promptly while waiting for a background job. With a
+    # foreground external command it may defer the trap until that command
+    # exits, stranding this wrapper and its ACL lock after the parent sudo
+    # process is terminated.
+    trap 'exit 129' HUP
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
 
     # Record every path before the first ACL grant. If this wrapper is
     # interrupted at any later instruction, the next serialized invocation
@@ -164,7 +171,13 @@ if [ "$isolated" = true ]; then
         done
         setfacl -R -m "u:${target_user}:rX" "$metadata_dir"
     done
-    [ ! -e "$project_dir/.git" ] || setfacl -m "u:${target_user}:r" "$project_dir/.git"
+    # A linked worktree stores .git as a pointer file (read-only is enough),
+    # while a normal clone stores it as a directory and needs execute/traverse.
+    if [ -f "$project_dir/.git" ]; then
+        setfacl -m "u:${target_user}:r" "$project_dir/.git"
+    elif [ -d "$project_dir/.git" ]; then
+        setfacl -m "u:${target_user}:rX" "$project_dir/.git"
+    fi
 fi
 
 # Root can traverse any directory; chdir here so the CLI inherits the project
@@ -181,7 +194,11 @@ if [ "$isolated" = true ]; then
     set +e
     /usr/sbin/runuser -u "$target_user" -- /usr/bin/env -i \
         "HOME=$target_home" "USER=$target_user" "LOGNAME=$target_user" \
-        "LANG=${LANG:-C.UTF-8}" "LC_ALL=${LC_ALL:-}" "TMPDIR=/tmp" "$@"
+        "LANG=${LANG:-C.UTF-8}" "LC_ALL=${LC_ALL:-}" "TMPDIR=/tmp" \
+        "GIT_CONFIG_COUNT=1" "GIT_CONFIG_KEY_0=safe.directory" \
+        "GIT_CONFIG_VALUE_0=$project_dir" "$@" <&0 &
+    agent_child_pid=$!
+    wait "$agent_child_pid"
     child_status=$?
     set -e
     cleanup_isolated

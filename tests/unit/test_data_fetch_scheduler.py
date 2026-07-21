@@ -433,6 +433,37 @@ class TestDataFetchSchedulerEnforceUserQuota:
 
     @patch("app.modules.governance.alert_transaction_manager.create_quota_alert_transactional")
     @patch("app.modules.workspace.session_manager.SessionManager")
+    def test_enforce_defers_autonomous_workflow_sessions(self, mock_sm_cls, mock_alert):
+        s = DataFetchScheduler()
+        today = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
+        row = {
+            "user_id": 1,
+            "username": "testuser",
+            "today_requests": 100,
+            "today_tokens": 5000000,
+            "daily_request_quota": 50,
+            "daily_token_quota": 1,
+        }
+        workflow_session = MagicMock(
+            session_id="workflow-session",
+            session_type="workflow",
+            context={"workflow_id": "wf-123"},
+        )
+        regular_session = MagicMock(
+            session_id="regular-session",
+            session_type="agent",
+            context={},
+        )
+        mock_sm = MagicMock()
+        mock_sm.get_active_sessions.return_value = [workflow_session, regular_session]
+        mock_sm_cls.return_value = mock_sm
+
+        s._enforce_user_quota(row, today, "daily")
+
+        mock_sm.complete_session.assert_called_once_with("regular-session")
+
+    @patch("app.modules.governance.alert_transaction_manager.create_quota_alert_transactional")
+    @patch("app.modules.workspace.session_manager.SessionManager")
     def test_enforce_session_failure_continues(self, mock_sm_cls, mock_alert):
         s = DataFetchScheduler()
         today = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")

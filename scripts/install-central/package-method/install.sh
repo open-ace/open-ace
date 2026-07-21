@@ -1837,6 +1837,23 @@ install_run_as_wrapper() {
     chown root:root "$dst" 2>/dev/null || true
     chmod 755 "$dst"
 
+    local guard_src="$install_dir/app/modules/workspace/autonomous/agent_bin"
+    local guard_dst="/usr/local/libexec/openace-agent-bin"
+    if [ ! -d "$guard_src" ]; then
+        print_warning "Autonomous agent command guards not found at $guard_src"
+        return 1
+    fi
+    install -d -o root -g root -m 755 "$guard_dst" || return 1
+    local guard_name
+    for guard_name in _guard_exec.py git gh python python3 pytest; do
+        if [ ! -f "$guard_src/$guard_name" ]; then
+            print_warning "Missing autonomous agent command guard: $guard_name"
+            return 1
+        fi
+        install -o root -g root -m 755 "$guard_src/$guard_name" "$guard_dst/$guard_name" \
+            || return 1
+    done
+
     # The AI process must never share the repository owner's GitHub/SSH
     # credentials.  Provision a locked, non-login principal used only by the
     # isolated run-as path; the wrapper grants per-worktree ACLs at launch.
@@ -1900,10 +1917,11 @@ configure_autonomous_agent_remote() {
         ssh "$remote" "rm -f '$staged_wrapper'" 2>/dev/null || true
         return 1
     fi
-    if ! ssh "$remote" "bash -s -- '$staged_wrapper' '$DEPLOY_USER'" <<'REMOTE_AUTONOMOUS_SETUP'
+    if ! ssh "$remote" "bash -s -- '$staged_wrapper' '$DEPLOY_USER' '$target_path'" <<'REMOTE_AUTONOMOUS_SETUP'
 set -euo pipefail
 staged_wrapper="$1"
 deploy_user="$2"
+target_path="$3"
 rule_tmp=""
 cleanup_remote_setup() {
     rm -f "$staged_wrapper" "$rule_tmp"
@@ -1918,6 +1936,14 @@ as_root() {
 }
 
 as_root install -o root -g root -m 755 "$staged_wrapper" /usr/local/bin/openace-run-as
+guard_src="$target_path/app/modules/workspace/autonomous/agent_bin"
+guard_dst="/usr/local/libexec/openace-agent-bin"
+[ -d "$guard_src" ] || { echo "Missing autonomous agent command guards: $guard_src" >&2; exit 1; }
+as_root install -d -o root -g root -m 755 "$guard_dst"
+for guard_name in _guard_exec.py git gh python python3 pytest; do
+    [ -f "$guard_src/$guard_name" ] || { echo "Missing agent guard: $guard_name" >&2; exit 1; }
+    as_root install -o root -g root -m 755 "$guard_src/$guard_name" "$guard_dst/$guard_name"
+done
 if ! id openace-agent >/dev/null 2>&1; then
     nologin_shell="$(command -v nologin 2>/dev/null || echo /bin/false)"
     as_root useradd --system --create-home --home-dir /var/lib/openace-agent \
@@ -3988,6 +4014,16 @@ do_upgrade() {
             cp "$target_path/usage.db" "$backup_dir/"
         fi
 
+        # Backup frontend build artifacts if source doesn't have them (Issue #1943)
+        # static/js/dist is not tracked in git, so upgrading from git repo would lose it
+        local preserve_frontend=false
+        if [ -d "$target_path/static/js/dist" ] && [ ! -d "$SOURCE_DIR/static/js/dist" ]; then
+            print_info "Backing up frontend build artifacts (static/js/dist)..."
+            mkdir -p "$backup_dir/static/js"
+            cp -r "$target_path/static/js/dist" "$backup_dir/static/js/"
+            preserve_frontend=true
+        fi
+
         # Update files (preserve logs, data, and config)
         print_info "Updating files..."
         # Remove old files except logs, data, and config directory
@@ -4045,6 +4081,16 @@ do_upgrade() {
         # Set permissions
         chmod +x "$target_path/scripts/"*.py 2>/dev/null || true
         chmod +x "$target_path/scripts/"*.sh 2>/dev/null || true
+
+        # Restore frontend build artifacts if source didn't have them (Issue #1943)
+        if [ "$preserve_frontend" = true ]; then
+            print_info "Restoring frontend build artifacts (source directory lacks static/js/dist)..."
+            mkdir -p "$target_path/static/js"
+            cp -r "$backup_dir/static/js/dist" "$target_path/static/js/"
+            print_warning "Preserved existing frontend build artifacts"
+            print_warning "To rebuild frontend with latest code, run:"
+            print_warning "  cd $target_path/frontend && npm install && npm run build"
+        fi
     fi
 
     # Fix ownership if running as root and a different user is specified

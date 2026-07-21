@@ -16,6 +16,7 @@ import pwd
 import re
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import threading
@@ -148,6 +149,10 @@ _APPSERVER_TOOLS = frozenset({"zcode", "zcode-code"})
 # wrapper (root via a narrow sudoers rule) chdir's then drops to system_account
 # via runuser. See scripts/openace-run-as.sh.
 _OPENACE_RUN_AS = os.environ.get("OPENACE_RUN_AS", "/usr/local/bin/openace-run-as")
+_OPENACE_AGENT_GUARD_BIN = os.environ.get(
+    "OPENACE_AGENT_GUARD_BIN", "/usr/local/libexec/openace-agent-bin"
+)
+_AGENT_GUARD_EXECUTABLES = ("_guard_exec.py", "git", "gh", "python", "python3", "pytest")
 
 # Security wrapper paths (Issue #1855)
 _OPENACE_CAT_WRAPPER = os.environ.get("OPENACE_CAT_WRAPPER", "/usr/local/bin/openace-cat")
@@ -862,17 +867,15 @@ class AutonomousAgentRunner:
 
     @staticmethod
     def _ensure_project_dir(project_path: str, system_account: str | None) -> None:
-        """Ensure ``project_path`` exists, cross-user safe (Issue #1395).
+        """Ensure ``project_path`` is reachable by the selected agent account.
 
-        ``Path.mkdir`` stats/creates as the service user and raises
-        ``PermissionError`` when the path lives under a user-private parent
-        (e.g. a 0700 home). When ``system_account`` differs from the service
-        user, route through ``sudo -u <account> mkdir -p`` (``mkdir`` is
-        covered by the sudoers ``OPENACE_UTILS`` alias). Same-user skips sudo
-        to avoid failing under systemd ``NoNewPrivileges`` (mirrors
-        ``github_ops._needs_sudo``).
-
-        Issue #1855: 优先使用 openace-mkdir 安全 wrapper，wrapper 内部做路径校验和审计日志。
+        Trusted orchestration creates local worktrees as the repository owner
+        before an AI process starts.  A credentialless cross-user agent cannot
+        traverse the owner's 0700 home until ``openace-run-as --isolated``
+        grants its temporary ACLs, so probing with ``Path`` or asking that
+        account to run ``mkdir`` produces a false "missing directory" error.
+        Use the same root-owned launcher as the real process for the existence
+        check; it grants and revokes the scoped ACL in one short invocation.
         """
         same_user = False
         if system_account:
@@ -881,29 +884,28 @@ class AutonomousAgentRunner:
             except (KeyError, OverflowError):
                 same_user = False
         if system_account and not same_user:
-            # Issue #1855: 优先使用安全 wrapper
-            if os.path.isfile(_OPENACE_MKDIR_WRAPPER) and os.access(
-                _OPENACE_MKDIR_WRAPPER, os.X_OK
-            ):
-                result = subprocess.run(
-                    ["sudo", _OPENACE_MKDIR_WRAPPER, system_account, project_path],
-                    capture_output=True,
-                    text=True,
-                    timeout=30,
-                    check=False,
-                )
-            else:
-                # Fallback: 使用传统 sudo -u mkdir 命令
-                result = subprocess.run(
-                    ["sudo", "-u", system_account, "mkdir", "-p", project_path],
-                    capture_output=True,
-                    text=True,
-                    timeout=30,
-                    check=False,
-                )
+            result = subprocess.run(
+                [
+                    "sudo",
+                    "-n",
+                    "-u",
+                    "root",
+                    _OPENACE_RUN_AS,
+                    "--isolated",
+                    system_account,
+                    project_path,
+                    "/usr/bin/test",
+                    "-d",
+                    ".",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
             if result.returncode != 0:
                 raise PermissionError(
-                    f"Failed to create project dir {project_path} as "
+                    f"Failed to access project dir {project_path} as "
                     f"{system_account} (exit {result.returncode}): "
                     f"{result.stderr.strip()}"
                 )
@@ -944,6 +946,8 @@ class AutonomousAgentRunner:
         """
         if AutonomousAgentRunner._is_cross_user(system_account):
             assert system_account is not None  # _is_cross_user guarantees non-empty
+            if env:
+                AutonomousAgentRunner._validate_cross_user_guard_bin(env)
             guard_env = []
             for key in (
                 "PATH",
@@ -985,6 +989,47 @@ class AutonomousAgentRunner:
         return cmd, project_path
 
     @staticmethod
+    def _validate_cross_user_guard_bin(env: dict[str, str]) -> None:
+        """Fail closed unless cross-user command guards are safely installed.
+
+        A source-tree guard path under a 0700 service home is visible to the
+        service but not to ``openace-agent``.  PATH would then silently fall
+        through to unguarded system binaries.  Cross-user launches therefore
+        require the root-owned packaged guard directory installed by every
+        supported deployment path.
+        """
+        path_head = (env.get("PATH") or "").split(os.pathsep, 1)[0]
+        expected = os.path.realpath(_OPENACE_AGENT_GUARD_BIN)
+        if not path_head or os.path.realpath(path_head) != expected:
+            raise RuntimeError(
+                "Cross-user autonomous launch requires the packaged agent command guards"
+            )
+        try:
+            directory_stat = os.stat(expected, follow_symlinks=False)
+        except OSError as exc:
+            raise RuntimeError(f"Missing packaged agent guard directory: {expected}") from exc
+        if (
+            not stat.S_ISDIR(directory_stat.st_mode)
+            or directory_stat.st_uid != 0
+            or directory_stat.st_mode & 0o022
+            or directory_stat.st_mode & 0o555 != 0o555
+        ):
+            raise RuntimeError(f"Unsafe packaged agent guard directory: {expected}")
+        for name in _AGENT_GUARD_EXECUTABLES:
+            guard_path = os.path.join(expected, name)
+            try:
+                stat_result = os.stat(guard_path, follow_symlinks=False)
+            except OSError as exc:
+                raise RuntimeError(f"Missing packaged agent guard: {guard_path}") from exc
+            if (
+                not stat.S_ISREG(stat_result.st_mode)
+                or stat_result.st_uid != 0
+                or stat_result.st_mode & 0o022
+                or stat_result.st_mode & 0o555 != 0o555
+            ):
+                raise RuntimeError(f"Unsafe packaged agent guard: {guard_path}")
+
+    @staticmethod
     def _build_agent_env(
         adapter: Any,
         cli_tool: str,
@@ -1007,7 +1052,12 @@ class AutonomousAgentRunner:
         keeps working.
         """
         env = dict(os.environ)
-        guard_bin = str(Path(__file__).with_name("agent_bin"))
+        packaged_guard_bin = Path(_OPENACE_AGENT_GUARD_BIN)
+        guard_bin = (
+            str(packaged_guard_bin)
+            if all((packaged_guard_bin / name).is_file() for name in _AGENT_GUARD_EXECUTABLES)
+            else str(Path(__file__).with_name("agent_bin"))
+        )
         real_git = shutil.which("git", path=env.get("PATH"))
         real_gh = shutil.which("gh", path=env.get("PATH"))
         if real_git:
@@ -3072,6 +3122,39 @@ class AutonomousAgentRunner:
                                     "model": msg.get("model"),
                                 }
                             )
+                        # Current Claude stream-json embeds tool_use blocks in
+                        # the assistant message instead of emitting the legacy
+                        # top-level ``type=tool_use`` shape handled below.
+                        # Preserve both the invocation and its stable id so a
+                        # later user/tool_result block can prove which test
+                        # command actually completed.
+                        if isinstance(content, list):
+                            for block in content:
+                                if not isinstance(block, dict) or block.get("type") != "tool_use":
+                                    continue
+                                tool_info = {
+                                    "name": block.get("name", "unknown"),
+                                    "input": block.get("input", {}),
+                                    "id": block.get("id"),
+                                }
+                                session.tool_calls.append({"type": "tool_use", "tool": tool_info})
+                                session.event_log.append(
+                                    {
+                                        "type": "tool_use",
+                                        "tool_name": tool_info["name"],
+                                        "tool_input": tool_info["input"],
+                                        "tool_use_id": tool_info["id"],
+                                    }
+                                )
+                                if self._activity_callback:
+                                    self._activity_callback(
+                                        session.session_id,
+                                        {
+                                            "type": "tool_use",
+                                            "tool_name": tool_info["name"],
+                                            "tool_input": str(tool_info["input"])[:200],
+                                        },
+                                    )
                         # Emit activity for real-time frontend display
                         if self._activity_callback and text_delta:
                             self._activity_callback(
@@ -3171,6 +3254,17 @@ class AutonomousAgentRunner:
                         self._sync_sidebar_session_totals(
                             session, status="error" if session.error else "active"
                         )
+                        # ``--input-format stream-json`` keeps the CLI alive for
+                        # another turn until stdin reaches EOF. A result event is
+                        # terminal for this one-shot invocation, so close the
+                        # write side before waking the caller. Otherwise killing
+                        # only the sudo launcher can strand the isolated wrapper
+                        # while it still holds the per-agent ACL lock.
+                        try:
+                            if session.process and session.process.stdin:
+                                session.process.stdin.close()
+                        except (OSError, BrokenPipeError, AttributeError, ValueError):
+                            pass
                         session.completed.set()
                         # Emit usage activity for real-time token display
                         if self._activity_callback:

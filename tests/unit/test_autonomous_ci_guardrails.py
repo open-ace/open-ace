@@ -1,7 +1,10 @@
 """Regression tests for autonomous CI/development guardrails."""
 
 import json
+import sys
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from app.modules.workspace.autonomous.models import AgentTaskResult
 
@@ -142,14 +145,36 @@ def test_runtime_gate_blocks_incompatible_host_without_provisioner(tmp_path):
     assert "compatibility rewrites are blocked" in reason
 
 
-def test_agent_environment_binds_python_and_git_guards():
+def test_runtime_selection_uses_compatible_service_python_with_cross_user_repo(tmp_path):
+    from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nrequires-python = ">=3.10"\n', encoding="utf-8"
+    )
+    gh = MagicMock(system_account="repo-owner")
+
+    command, reason = AutonomousOrchestrator._select_project_python_runtime(str(tmp_path), gh)
+
+    assert command == [sys.executable]
+    assert reason == ""
+
+
+def test_agent_environment_binds_python_and_git_guards(monkeypatch, tmp_path):
     import json
 
-    from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner
+    from app.modules.workspace.autonomous import agent_runner
+
+    guard_dir = tmp_path / "agent-bin"
+    guard_dir.mkdir()
+    for name in agent_runner._AGENT_GUARD_EXECUTABLES:
+        guard = guard_dir / name
+        guard.write_text("#!/bin/sh\n", encoding="utf-8")
+        guard.chmod(0o755)
+    monkeypatch.setattr(agent_runner, "_OPENACE_AGENT_GUARD_BIN", str(guard_dir))
 
     adapter = MagicMock()
     adapter.get_env_vars.return_value = {}
-    env = AutonomousAgentRunner._build_agent_env(
+    env = agent_runner.AutonomousAgentRunner._build_agent_env(
         adapter,
         "claude-code",
         None,
@@ -159,32 +184,147 @@ def test_agent_environment_binds_python_and_git_guards():
     )
 
     assert json.loads(env["OPENACE_PYTHON_COMMAND"]) == ["/opt/python3.11/bin/python"]
-    assert env["PATH"].split(":", 1)[0].endswith("autonomous/agent_bin")
+    assert env["PATH"].split(":", 1)[0] == str(guard_dir)
     assert env["OPENACE_REAL_GIT"]
     assert env["GH_CONFIG_DIR"] == "/var/empty/openace-autonomous-gh"
     assert "GH_TOKEN" not in env
 
 
-def test_cross_user_launch_preserves_nonsecret_guard_environment():
-    from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner
+def test_cross_user_launch_preserves_nonsecret_guard_environment(monkeypatch, tmp_path):
+    from app.modules.workspace.autonomous import agent_runner
+
+    guard_dir = tmp_path / "agent-bin"
+    guard_dir.mkdir()
+    for name in agent_runner._AGENT_GUARD_EXECUTABLES:
+        guard = guard_dir / name
+        guard.write_text("#!/bin/sh\n", encoding="utf-8")
+        guard.chmod(0o755)
+    monkeypatch.setattr(agent_runner, "_OPENACE_AGENT_GUARD_BIN", str(guard_dir))
 
     env = {
-        "PATH": "/guard:/usr/bin",
+        "PATH": f"{guard_dir}:/usr/bin",
         "OPENACE_REAL_GIT": "/usr/bin/git",
         "OPENACE_PYTHON_COMMAND": '["/usr/bin/python3"]',
         "GH_CONFIG_DIR": "/var/empty/openace-autonomous-gh",
         "GIT_TERMINAL_PROMPT": "0",
     }
-    with patch.object(AutonomousAgentRunner, "_is_cross_user", return_value=True):
-        command, cwd = AutonomousAgentRunner._wrap_agent_cmd(
+    with (
+        patch.object(agent_runner.AutonomousAgentRunner, "_is_cross_user", return_value=True),
+        patch.object(
+            agent_runner.AutonomousAgentRunner,
+            "_validate_cross_user_guard_bin",
+        ),
+    ):
+        command, cwd = agent_runner.AutonomousAgentRunner._wrap_agent_cmd(
             ["/usr/bin/claude"], "/private/repo", "repo-user", env
         )
 
     assert cwd is None
     assert "--isolated" in command
     assert "/usr/bin/env" in command
-    assert "PATH=/guard:/usr/bin" in command
+    assert f"PATH={guard_dir}:/usr/bin" in command
     assert "OPENACE_REAL_GIT=/usr/bin/git" in command
+
+
+def test_terminal_result_closes_stream_json_stdin():
+    from types import SimpleNamespace
+
+    from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner, _LocalSession
+
+    class FakeStdout:
+        def __init__(self):
+            self.lines = [json.dumps({"type": "result", "session_id": "cli-session"}).encode()]
+
+        def readline(self):
+            return self.lines.pop(0) if self.lines else b""
+
+    class FakeStdin:
+        def __init__(self):
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+
+    runner = AutonomousAgentRunner.__new__(AutonomousAgentRunner)
+    runner._activity_callback = None
+    runner._capture_cli_session_id = lambda *_args: "cli-session"
+    runner._sync_sidebar_session_totals = lambda *_args, **_kwargs: None
+    runner._resolve_sidebar_session = lambda *_args, **_kwargs: "cli-session"
+    process = SimpleNamespace(stdout=FakeStdout(), stdin=FakeStdin(), returncode=None)
+    session = _LocalSession(session_id="tracking-session", process=process)
+
+    with patch(
+        "app.modules.workspace.autonomous.agent_runner._extract_stream_usage",
+        return_value=None,
+    ):
+        runner._read_stdout(session)
+
+    assert session.completed.is_set()
+    assert process.stdin.closed
+
+
+def test_cross_user_launch_rejects_source_tree_guard_path():
+    from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner
+
+    env = {"PATH": "/private/service/app/agent_bin:/usr/bin"}
+    with patch.object(AutonomousAgentRunner, "_is_cross_user", return_value=True):
+        with pytest.raises(RuntimeError, match="packaged agent command guards"):
+            AutonomousAgentRunner._wrap_agent_cmd(
+                ["/usr/bin/claude"], "/private/repo", "openace-agent", env
+            )
+
+
+def test_cross_user_guard_rejects_root_group_only_permissions(monkeypatch, tmp_path):
+    import stat
+    from types import SimpleNamespace
+
+    from app.modules.workspace.autonomous import agent_runner
+
+    guard_dir = tmp_path / "agent-bin"
+    guard_dir.mkdir(mode=0o750)
+    for name in agent_runner._AGENT_GUARD_EXECUTABLES:
+        guard = guard_dir / name
+        guard.write_text("#!/bin/sh\n", encoding="utf-8")
+        guard.chmod(0o750)
+    monkeypatch.setattr(agent_runner, "_OPENACE_AGENT_GUARD_BIN", str(guard_dir))
+    real_stat = agent_runner.os.stat
+
+    def root_owned_group_only(path, *, follow_symlinks=True):
+        result = real_stat(path, follow_symlinks=follow_symlinks)
+        kind = stat.S_IFDIR if stat.S_ISDIR(result.st_mode) else stat.S_IFREG
+        return SimpleNamespace(st_uid=0, st_mode=kind | 0o750)
+
+    monkeypatch.setattr(agent_runner.os, "stat", root_owned_group_only)
+
+    with pytest.raises(RuntimeError, match="Unsafe packaged agent guard directory"):
+        agent_runner.AutonomousAgentRunner._validate_cross_user_guard_bin(
+            {"PATH": f"{guard_dir}:/usr/bin"}
+        )
+
+
+def test_cross_user_guard_accepts_root_owned_world_executable_install(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    from app.modules.workspace.autonomous import agent_runner
+
+    guard_dir = tmp_path / "agent-bin"
+    guard_dir.mkdir(mode=0o755)
+    for name in agent_runner._AGENT_GUARD_EXECUTABLES:
+        guard = guard_dir / name
+        guard.write_text("#!/bin/sh\n", encoding="utf-8")
+        guard.chmod(0o755)
+    monkeypatch.setattr(agent_runner, "_OPENACE_AGENT_GUARD_BIN", str(guard_dir))
+    real_stat = agent_runner.os.stat
+
+    def root_owned(path, *, follow_symlinks=True):
+        result = real_stat(path, follow_symlinks=follow_symlinks)
+        return SimpleNamespace(st_uid=0, st_mode=result.st_mode)
+
+    monkeypatch.setattr(agent_runner.os, "stat", root_owned)
+
+    agent_runner.AutonomousAgentRunner._validate_cross_user_guard_bin(
+        {"PATH": f"{guard_dir}:/usr/bin"}
+    )
 
 
 def test_local_agent_fails_closed_without_trusted_repo_snapshot():
@@ -293,6 +433,60 @@ def test_runner_preserves_tool_result_for_test_evidence():
         "exit_code": None,
         "is_error": False,
     }
+
+
+def test_claude_embedded_tool_use_pairs_with_test_result():
+    from types import SimpleNamespace
+
+    from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner, _LocalSession
+    from app.modules.workspace.autonomous.orchestrator import _has_passing_test_tool_result
+
+    lines = [
+        {
+            "type": "assistant",
+            "message": {
+                "id": "msg-test",
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "tool-test",
+                        "name": "Bash",
+                        "input": {"command": "python -m pytest tests/issues/1891 -q"},
+                    }
+                ],
+            },
+        },
+        {
+            "type": "user",
+            "message": {
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "tool-test",
+                        "content": "65 passed in 3.2s",
+                        "is_error": False,
+                    }
+                ]
+            },
+        },
+    ]
+
+    class FakeStdout:
+        def __init__(self):
+            self.lines = [json.dumps(line).encode() for line in lines]
+
+        def readline(self):
+            return self.lines.pop(0) if self.lines else b""
+
+    runner = AutonomousAgentRunner.__new__(AutonomousAgentRunner)
+    runner._activity_callback = None
+    process = SimpleNamespace(stdout=FakeStdout(), returncode=None)
+    session = _LocalSession(session_id="test-session", process=process)
+
+    runner._read_stdout(session)
+
+    assert session.tool_calls[0]["tool"]["name"] == "Bash"
+    assert _has_passing_test_tool_result(session.event_log, "python")
 
 
 def test_codex_command_execution_normalizes_tool_evidence():
