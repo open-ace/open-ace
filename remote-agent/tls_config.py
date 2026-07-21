@@ -8,13 +8,14 @@ Provides validation, security checks, and subprocess environment propagation.
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import logging
 import os
-import socket
 import ssl
 import sys
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 logger = logging.getLogger("openace-agent.tls-config")
 
@@ -68,19 +69,25 @@ class TLSConfig:
         self._ca_bundle_valid: bool | None = None
 
     @classmethod
-    def from_config(cls, config: Any, explicit_insecure: bool = False) -> TLSConfig:
+    def from_config(
+        cls,
+        config: Any,
+        explicit_insecure: bool = False,
+        ca_bundle_path: str | None = None,
+    ) -> TLSConfig:
         """
         Create TLSConfig from AgentConfig.
 
         Args:
             config: AgentConfig instance
             explicit_insecure: Whether --insecure-skip-tls-verify CLI flag was used
+            ca_bundle_path: Optional CLI override for the custom CA bundle
 
         Returns:
             TLSConfig instance
         """
         # Determine configuration source
-        if explicit_insecure:
+        if explicit_insecure or ca_bundle_path is not None:
             source = "cli_param"
         elif os.environ.get("OPENACE_SKIP_SSL_VERIFY"):
             source = "env_var"
@@ -89,9 +96,18 @@ class TLSConfig:
         else:
             source = "default"
 
+        effective_ca_bundle = (
+            ca_bundle_path if ca_bundle_path is not None else config.ca_bundle_path
+        )
+        if explicit_insecure:
+            effective_ca_bundle = None
+
         return cls(
-            skip_verify=config.skip_ssl_verify,
-            ca_bundle_path=config.ca_bundle_path,
+            # The dangerous CLI switch is itself the explicit request to
+            # disable verification.  A config-file value still requires the
+            # switch for non-local HTTPS endpoints.
+            skip_verify=explicit_insecure or (config.skip_ssl_verify and ca_bundle_path is None),
+            ca_bundle_path=effective_ca_bundle,
             is_explicit_insecure=explicit_insecure,
             config_source=source,
             server_url=config.server_url,
@@ -143,41 +159,21 @@ class TLSConfig:
         if not self.server_url.startswith("https://"):
             return False
 
-        # Extract hostname
+        # Treat every non-local HTTPS endpoint as production-like.  Private
+        # model/control-plane addresses need the same explicit acknowledgement
+        # as public hosts; RFC1918 is not a safe proxy for "development".
         try:
-            # Remove protocol and path
-            url = self.server_url.replace("https://", "").split("/")[0]
-            hostname = url.split(":")[0]  # Remove port if present
-
-            # Check for localhost variants
-            localhost_variants = ["localhost", "127.0.0.1", "0.0.0.0", "::1"]
-            if hostname.lower() in localhost_variants:
+            hostname = (urlsplit(self.server_url).hostname or "").lower()
+            if hostname in {"localhost", "0.0.0.0"}:
                 return False
-
-            # Check for local/private IP ranges (might be development)
             try:
-                ip = socket.gethostbyname(hostname)
-                # Private IP ranges: 10.x.x.x, 172.16-31.x.x, 192.168.x.x
-                parts = ip.split(".")
-                if len(parts) == 4:
-                    first = int(parts[0])
-                    second = int(parts[1])
-                    # 10.0.0.0/8 - private
-                    if first == 10:
-                        return False
-                    # 172.16.0.0/12 - private
-                    if first == 172 and 16 <= second <= 31:
-                        return False
-                    # 192.168.0.0/16 - private
-                    if first == 192 and second == 168:
-                        return False
-            except (socket.gaierror, ValueError):
-                # Can't resolve, assume production
+                return not ipaddress.ip_address(hostname).is_loopback
+            except ValueError:
                 pass
-
-            return True
+            return bool(hostname)
         except Exception:
-            return False
+            # Fail closed for malformed non-local HTTPS URLs.
+            return True
 
     def should_reject_startup(self) -> bool:
         """
@@ -265,6 +261,11 @@ class TLSConfig:
                     self._ca_bundle_valid = False
                     return warnings
 
+                # Let OpenSSL parse the bundle now so a truncated or malformed
+                # PEM cannot pass startup and fail only on the first request.
+                context = ssl.create_default_context()
+                context.load_verify_locations(cafile=self.ca_bundle_path)
+
                 # Calculate hash for change detection
                 self._ca_bundle_hash = hashlib.sha256(ca_path.read_bytes()).hexdigest()
                 self._ca_bundle_valid = True
@@ -310,6 +311,11 @@ class TLSConfig:
                 return False
 
         return True
+
+    @property
+    def ca_bundle_valid(self) -> bool | None:
+        """Return the most recent custom CA validation result."""
+        return self._ca_bundle_valid
 
     def find_system_ca_bundle(self) -> str | None:
         """

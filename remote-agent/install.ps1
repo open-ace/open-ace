@@ -12,6 +12,9 @@
 #   -MachineName         Machine display name (default: $env:COMPUTERNAME)
 #   -InstallCli          CLI tool to install: qwen-code-cli, claude-code (default: qwen-code-cli)
 #   -InstallDir          Installation directory (default: $env:USERPROFILE\.open-ace-agent)
+#   -CaBundlePath        PEM CA bundle for a private/self-signed server
+#   -InsecureSkipTlsVerify
+#                       Disable TLS verification (dangerous, explicit only)
 
 param(
     [Parameter(Mandatory=$true)]
@@ -23,6 +26,8 @@ param(
     [string]$MachineName = $env:COMPUTERNAME,
     [string]$InstallCli = "qwen-code-cli",
     [string]$InstallDir = "$env:USERPROFILE\.open-ace-agent",
+    [string]$CaBundlePath = "",
+    [switch]$InsecureSkipTlsVerify,
     [switch]$SkipCodeServer
 )
 
@@ -44,6 +49,37 @@ Write-Host "Install dir: $InstallDir"
 Write-Host ""
 
 $ServerUrl = $ServerUrl.TrimEnd('/')
+
+if ($CaBundlePath -and $InsecureSkipTlsVerify) {
+    Write-Host "[ERROR] -CaBundlePath and -InsecureSkipTlsVerify are mutually exclusive" -ForegroundColor Red
+    exit 1
+}
+if ($CaBundlePath -and -not (Test-Path -Path $CaBundlePath -PathType Leaf)) {
+    Write-Host "[ERROR] CA bundle not found: $CaBundlePath" -ForegroundColor Red
+    exit 1
+}
+if ($CaBundlePath) { $CaBundlePath = (Resolve-Path -Path $CaBundlePath).Path }
+if ($InsecureSkipTlsVerify) {
+    Write-Host "[WARN] TLS certificate verification is explicitly disabled" -ForegroundColor Yellow
+}
+
+$curlPath = "$env:SYSTEMROOT\System32\curl.exe"
+$serverCurlTlsArgs = @("--ssl-no-revoke")
+if ($CaBundlePath) {
+    $serverCurlTlsArgs += @("--cacert", $CaBundlePath)
+} elseif ($InsecureSkipTlsVerify) {
+    $serverCurlTlsArgs += "--insecure"
+}
+
+function Invoke-ServerDownload {
+    param([string]$Source, [string]$Destination)
+    if ($CaBundlePath -or $InsecureSkipTlsVerify) {
+        & $curlPath -fsSL @serverCurlTlsArgs -o $Destination $Source
+        if ($LASTEXITCODE -ne 0) { throw "curl failed with exit code $LASTEXITCODE" }
+    } else {
+        Start-BitsTransfer -Source $Source -Destination $Destination -ErrorAction Stop | Out-Null
+    }
+}
 
 # Step 1: Check prerequisites
 Write-Host "[INFO] Checking prerequisites..." -ForegroundColor Cyan
@@ -97,7 +133,7 @@ foreach ($file in $files) {
     $downloaded = $false
     for ($retry = 1; $retry -le 3; $retry++) {
         try {
-            Start-BitsTransfer -Source "$agentUrl/$file" -Destination "$InstallDir\$file" -ErrorAction Stop | Out-Null
+            Invoke-ServerDownload -Source "$agentUrl/$file" -Destination "$InstallDir\$file"
             $downloaded = $true
             break
         } catch {
@@ -115,7 +151,7 @@ foreach ($file in $adapterFiles) {
     $downloaded = $false
     for ($retry = 1; $retry -le 3; $retry++) {
         try {
-            Start-BitsTransfer -Source "$agentUrl/cli_adapters/$file" -Destination "$InstallDir\cli_adapters\$file" -ErrorAction Stop | Out-Null
+            Invoke-ServerDownload -Source "$agentUrl/cli_adapters/$file" -Destination "$InstallDir\cli_adapters\$file"
             $downloaded = $true
             break
         } catch {
@@ -288,7 +324,10 @@ $config = @{
     cli_tool = $InstallCli
     heartbeat_interval = 60
     reconnect_backoff_max = 60
+    skip_ssl_verify = [bool]$InsecureSkipTlsVerify
+    ca_bundle_path = $null
 }
+if ($CaBundlePath) { $config.ca_bundle_path = $CaBundlePath }
 
 $config | ConvertTo-Json | Set-Content -Path "$InstallDir\config.json"
 Write-Host "[OK] Configuration saved" -ForegroundColor Green
@@ -343,8 +382,7 @@ try {
     $body | Out-File -FilePath $bodyFile -Encoding utf8 -NoNewline
 
     $responseFile = "$env:TEMP\agent_response_$([System.Guid]::NewGuid()).json"
-    $curlPath = "$env:SYSTEMROOT\System32\curl.exe"
-    & $curlPath -s --ssl-no-revoke -X POST -H "Content-Type: application/json" -d "@$bodyFile" -o $responseFile "$ServerUrl/api/remote/agent/register"
+    & $curlPath -s @serverCurlTlsArgs -X POST -H "Content-Type: application/json" -d "@$bodyFile" -o $responseFile "$ServerUrl/api/remote/agent/register"
 
     if (-not (Test-Path $responseFile)) {
         Write-Host "[ERROR] Registration failed: no response from server" -ForegroundColor Red
@@ -388,7 +426,9 @@ try {
 Write-Host "[INFO] Setting up auto-start..." -ForegroundColor Cyan
 try {
     $taskName = "OpenACEAgent"
-    $action = New-ScheduledTaskAction -Execute "python" -Argument "`"$InstallDir\agent.py`"" -WorkingDirectory $InstallDir
+    $agentArguments = "`"$InstallDir\agent.py`""
+    if ($InsecureSkipTlsVerify) { $agentArguments += " --insecure-skip-tls-verify" }
+    $action = New-ScheduledTaskAction -Execute "python" -Argument $agentArguments -WorkingDirectory $InstallDir
     $trigger = New-ScheduledTaskTrigger -AtLogOn
     $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Hours 0) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
     $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
@@ -401,7 +441,9 @@ try {
 
 # Step 9: Start the agent immediately
 Write-Host "[INFO] Starting Open ACE Remote Agent..." -ForegroundColor Cyan
-$agentProc = Start-Process -FilePath "python" -ArgumentList "`"$InstallDir\agent.py`"" -WorkingDirectory $InstallDir -WindowStyle Hidden -PassThru
+$agentStartArgs = @("`"$InstallDir\agent.py`"")
+if ($InsecureSkipTlsVerify) { $agentStartArgs += "--insecure-skip-tls-verify" }
+$agentProc = Start-Process -FilePath "python" -ArgumentList $agentStartArgs -WorkingDirectory $InstallDir -WindowStyle Hidden -PassThru
 if ($agentProc -and $agentProc.Id) {
     Write-Host "[OK] Agent started (PID: $($agentProc.Id))" -ForegroundColor Green
 } else {

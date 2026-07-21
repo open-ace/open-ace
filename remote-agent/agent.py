@@ -8,6 +8,7 @@ manages CLI subprocesses through the executor module, and sends heartbeats.
 
 from __future__ import annotations
 
+import argparse
 import json
 import logging
 import os
@@ -28,10 +29,7 @@ from cli_settings import apply_cli_settings, clear_codex_bearer_token
 from executor import ProcessExecutor
 from session_sync import SessionSyncService
 from system_info import get_capabilities
-from tls_config import (
-    print_tls_security_warning,
-    print_tls_startup_rejection,
-)
+from tls_config import print_tls_security_warning, print_tls_startup_rejection
 
 from config import AgentConfig
 
@@ -54,10 +52,18 @@ class RemoteAgent:
     manages CLI subprocesses, and reports output and status back.
     """
 
-    def __init__(self, config: AgentConfig | None = None, explicit_insecure: bool = False):
+    def __init__(
+        self,
+        config: AgentConfig | None = None,
+        explicit_insecure: bool = False,
+        ca_bundle_path: str | None = None,
+    ):
         self.config = config or AgentConfig()
         self._explicit_insecure = explicit_insecure
-        self._tls_config = self.config.get_tls_config(explicit_insecure=explicit_insecure)
+        self._tls_config = self.config.get_tls_config(
+            explicit_insecure=explicit_insecure,
+            ca_bundle_path=ca_bundle_path,
+        )
         self._executor = ProcessExecutor(
             server_url=self.config.server_url,
             output_callback=self._on_session_output,
@@ -202,6 +208,11 @@ class RemoteAgent:
         warnings = self._tls_config.validate()
         for warning in warnings:
             logger.warning("TLS Warning: %s", warning)
+
+        if self._tls_config.ca_bundle_path and self._tls_config.ca_bundle_valid is False:
+            raise RuntimeError(
+                f"Invalid CA bundle; refusing to start: {self._tls_config.ca_bundle_path}"
+            )
 
         # Production environment security check
         if self._tls_config.should_reject_startup():
@@ -2104,8 +2115,26 @@ def setup_logging(level: str = "INFO") -> None:
         )
 
 
-def main() -> None:
+def build_arg_parser() -> argparse.ArgumentParser:
+    """Build command-line arguments for the remote agent daemon."""
+    parser = argparse.ArgumentParser(description="Open ACE Remote Agent")
+    tls_group = parser.add_mutually_exclusive_group()
+    tls_group.add_argument(
+        "--insecure-skip-tls-verify",
+        action="store_true",
+        help="Disable TLS certificate verification (dangerous; explicit acknowledgement required)",
+    )
+    tls_group.add_argument(
+        "--ca-bundle",
+        metavar="PATH",
+        help="Use a custom PEM CA bundle for the Open ACE server",
+    )
+    return parser
+
+
+def main(argv: list[str] | None = None) -> None:
     """Entry point for the remote agent daemon."""
+    args = build_arg_parser().parse_args(argv)
     config = AgentConfig()
 
     setup_logging(config.log_level)
@@ -2124,7 +2153,11 @@ def main() -> None:
     logger.info("=" * 60)
 
     try:
-        agent = RemoteAgent(config)
+        agent = RemoteAgent(
+            config,
+            explicit_insecure=args.insecure_skip_tls_verify,
+            ca_bundle_path=args.ca_bundle,
+        )
         agent.start()
     except Exception:
         logger.exception("Agent crashed with unhandled exception")

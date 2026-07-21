@@ -257,16 +257,25 @@ class AgentConfig:
         safe = {k: v for k, v in self._data.items() if k != "agent_token"}
         return f"AgentConfig({safe})"
 
-    def get_tls_config(self, explicit_insecure: bool = False) -> Any:
+    def get_tls_config(
+        self,
+        explicit_insecure: bool = False,
+        ca_bundle_path: str | None = None,
+    ) -> Any:
         """
         Create TLSConfig from this configuration.
 
         Args:
             explicit_insecure: Whether --insecure-skip-tls-verify CLI flag was used
+            ca_bundle_path: Optional CLI override for the custom CA bundle
 
         Returns:
             TLSConfig instance
         """
         from tls_config import TLSConfig
 
-        return TLSConfig.from_config(self, explicit_insecure=explicit_insecure)
+        return TLSConfig.from_config(
+            self,
+            explicit_insecure=explicit_insecure,
+            ca_bundle_path=ca_bundle_path,
+        )

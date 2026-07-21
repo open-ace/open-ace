@@ -11,6 +11,9 @@
 #   --name NAME          Machine display name (default: hostname)
 #   --install-cli TOOL   Install a CLI tool: qwen-code-cli, claude-code (default: qwen-code-cli)
 #   --dir DIR            Installation directory (default: ~/.open-ace-agent)
+#   --ca-bundle PATH     PEM CA bundle for a private/self-signed server
+#   --insecure-skip-tls-verify
+#                        Disable TLS verification (dangerous, explicit only)
 #   --skip-code-server   Skip code-server installation
 #   --help               Show this help
 #
@@ -37,6 +40,8 @@ INSTALL_CLI="qwen-code-cli"
 INSTALL_DIR="$HOME/.open-ace-agent"
 AGENT_VERSION="1.0.0"
 SKIP_CODE_SERVER=false
+CA_BUNDLE_PATH=""
+INSECURE_SKIP_TLS_VERIFY=false
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -65,6 +70,14 @@ while [[ $# -gt 0 ]]; do
             SKIP_CODE_SERVER=true
             shift
             ;;
+        --ca-bundle)
+            CA_BUNDLE_PATH="$2"
+            shift 2
+            ;;
+        --insecure-skip-tls-verify)
+            INSECURE_SKIP_TLS_VERIFY=true
+            shift
+            ;;
         --help)
             head -20 "$0" | grep '^#' | sed 's/^# \?//'
             exit 0
@@ -85,6 +98,27 @@ fi
 if [[ -z "$REGISTRATION_TOKEN" ]]; then
     log_error "--token is required"
     exit 1
+fi
+
+if [[ -n "$CA_BUNDLE_PATH" && "$INSECURE_SKIP_TLS_VERIFY" == "true" ]]; then
+    log_error "--ca-bundle and --insecure-skip-tls-verify are mutually exclusive"
+    exit 1
+fi
+
+if [[ -n "$CA_BUNDLE_PATH" && ! -r "$CA_BUNDLE_PATH" ]]; then
+    log_error "CA bundle is not readable: $CA_BUNDLE_PATH"
+    exit 1
+fi
+if [[ -n "$CA_BUNDLE_PATH" ]]; then
+    CA_BUNDLE_PATH="$(cd "$(dirname "$CA_BUNDLE_PATH")" && pwd)/$(basename "$CA_BUNDLE_PATH")"
+fi
+
+SERVER_CURL_TLS_ARGS=()
+if [[ -n "$CA_BUNDLE_PATH" ]]; then
+    SERVER_CURL_TLS_ARGS+=(--cacert "$CA_BUNDLE_PATH")
+elif [[ "$INSECURE_SKIP_TLS_VERIFY" == "true" ]]; then
+    log_warn "TLS certificate verification is explicitly disabled"
+    SERVER_CURL_TLS_ARGS+=(--insecure)
 fi
 
 # Remove trailing slash from server URL
@@ -337,18 +371,18 @@ if [[ -f "${SCRIPT_DIR}/agent.py" ]]; then
 else
     # Download from server
     log_info "Downloading from server..."
-    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "${AGENT_URL}/agent.py" 2>/dev/null || echo "000")
+    HTTP_CODE=$(curl -s "${SERVER_CURL_TLS_ARGS[@]}" -o /dev/null -w "%{http_code}" "${AGENT_URL}/agent.py" 2>/dev/null || echo "000")
 
     if [[ "$HTTP_CODE" == "200" ]]; then
         for file in "${AGENT_FILES[@]}"; do
-            curl -fsSL "${AGENT_URL}/${file}" -o "${INSTALL_DIR}/${file}" 2>/dev/null || {
+            curl -fsSL "${SERVER_CURL_TLS_ARGS[@]}" "${AGENT_URL}/${file}" -o "${INSTALL_DIR}/${file}" 2>/dev/null || {
                 log_warn "Could not download ${file}"
             }
         done
         # Download CLI adapters
         mkdir -p "${INSTALL_DIR}/cli_adapters"
         for file in __init__.py base.py qwen_code.py claude_code.py codex_cli.py codex_jsonl_parser.py openclaw.py usage_parser.py zcode.py; do
-            curl -fsSL "${AGENT_URL}/cli_adapters/${file}" -o "${INSTALL_DIR}/cli_adapters/${file}" 2>/dev/null || {
+            curl -fsSL "${SERVER_CURL_TLS_ARGS[@]}" "${AGENT_URL}/cli_adapters/${file}" -o "${INSTALL_DIR}/cli_adapters/${file}" 2>/dev/null || {
                 log_warn "Could not download cli_adapters/${file}"
             }
         done
@@ -626,6 +660,7 @@ else
     log_info "Generated new machine_id: $MACHINE_ID"
 fi
 
+CA_BUNDLE_JSON=$("$PYTHON_PATH" -c 'import json,sys; print(json.dumps(sys.argv[1] or None))' "$CA_BUNDLE_PATH")
 cat > "${INSTALL_DIR}/config.json" << EOF
 {
     "server_url": "${SERVER_URL}",
@@ -635,7 +670,9 @@ cat > "${INSTALL_DIR}/config.json" << EOF
     "cli_tool": "${INSTALL_CLI}",
     "python_path": "${PYTHON_PATH}",
     "heartbeat_interval": 60,
-    "reconnect_backoff_max": 60
+    "reconnect_backoff_max": 60,
+    "skip_ssl_verify": ${INSECURE_SKIP_TLS_VERIFY},
+    "ca_bundle_path": ${CA_BUNDLE_JSON}
 }
 EOF
 
@@ -692,7 +729,7 @@ caps['has_code_server'] = shutil.which('code-server') is not None
 print(json.dumps(caps))
 " 2>/dev/null || echo "{}")
 
-REGISTER_RESPONSE=$(curl -s -X POST "${SERVER_URL}/api/remote/agent/register" \
+REGISTER_RESPONSE=$(curl -s "${SERVER_CURL_TLS_ARGS[@]}" -X POST "${SERVER_URL}/api/remote/agent/register" \
     -H "Content-Type: application/json" \
     -d "{
         \"registration_token\": \"${REGISTRATION_TOKEN}\",
@@ -760,6 +797,12 @@ detect_init_system() {
 }
 
 INIT_SYSTEM=$(detect_init_system)
+AGENT_INSECURE_ARG=""
+LAUNCHD_INSECURE_ARG=""
+if [[ "$INSECURE_SKIP_TLS_VERIFY" == "true" ]]; then
+    AGENT_INSECURE_ARG=" --insecure-skip-tls-verify"
+    LAUNCHD_INSECURE_ARG="        <string>--insecure-skip-tls-verify</string>"
+fi
 
 case "$INIT_SYSTEM" in
     systemd)
@@ -774,7 +817,7 @@ Wants=network-online.target
 Type=simple
 User=$(whoami)
 WorkingDirectory=${INSTALL_DIR}
-ExecStart=${PYTHON_PATH} ${INSTALL_DIR}/agent.py
+ExecStart=${PYTHON_PATH} ${INSTALL_DIR}/agent.py${AGENT_INSECURE_ARG}
 Restart=always
 RestartSec=10
 Environment=PYTHONUNBUFFERED=1
@@ -800,6 +843,7 @@ EOF
     <array>
         <string>${PYTHON_PATH}</string>
         <string>${INSTALL_DIR}/agent.py</string>
+${LAUNCHD_INSECURE_ARG}
     </array>
     <key>WorkingDirectory</key>
     <string>${INSTALL_DIR}</string>
@@ -827,7 +871,7 @@ EOF
         log_success "Installed as launchd service"
         ;;
     *)
-        log_warn "No init system detected. Run manually: python3 ${INSTALL_DIR}/agent.py"
+        log_warn "No init system detected. Run manually: python3 ${INSTALL_DIR}/agent.py${AGENT_INSECURE_ARG}"
         ;;
 esac
 

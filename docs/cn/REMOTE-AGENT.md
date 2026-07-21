@@ -34,12 +34,17 @@ curl -fsSL https://<server>/api/remote/agent/install.sh | bash -s -- \
 - `--name` — 机器显示名称
 - `--install-cli` — 默认 CLI 工具（默认：qwen-code-cli）
 - `--dir` — 安装目录（默认：`~/.open-ace-agent`）
+- `--ca-bundle PATH` — 私有 CA 或自签名证书使用的 PEM CA bundle
+- `--insecure-skip-tls-verify` — 显式关闭 TLS 验证（危险）
 
 ### Windows
 
 ```powershell
-.\install.ps1 -ServerUrl https://your-server.com -Token <agent-token>
+.\install.ps1 -ServerUrl https://your-server.com -RegistrationToken <agent-token>
 ```
+
+私有 CA 环境请增加 `-CaBundlePath C:\path\to\ca.pem`。应急参数
+`-InsecureSkipTlsVerify` 必须显式指定，只应用于短期测试。
 
 ### 系统要求
 
@@ -59,9 +64,27 @@ curl -fsSL https://<server>/api/remote/agent/install.sh | bash -s -- \
 | buffer_size | 4096 | 终端输出缓冲 |
 | max_sessions | 5 | 并发会话数 |
 | log_level | INFO | 日志级别 |
-| skip_ssl_verify | true | 跳过 SSL 验证 |
+| skip_ssl_verify | false | 跳过 TLS 验证；非本机 HTTPS 还必须通过 CLI 显式确认 |
+| ca_bundle_path | null | 私有 CA/自签名证书使用的 PEM CA bundle |
 
-环境变量覆盖：`OPENACE_SERVER_URL`、`OPENACE_AGENT_TOKEN`、`OPENACE_MACHINE_ID`、`OPENACE_HEARTBEAT_INTERVAL`、`OPENACE_MAX_SESSIONS`、`OPENACE_LOG_LEVEL`、`OPENACE_SKIP_SSL_VERIFY`
+环境变量覆盖：`OPENACE_SERVER_URL`、`OPENACE_AGENT_TOKEN`、`OPENACE_MACHINE_ID`、`OPENACE_HEARTBEAT_INTERVAL`、`OPENACE_MAX_SESSIONS`、`OPENACE_LOG_LEVEL`、`OPENACE_SKIP_SSL_VERIFY`、`OPENACE_CA_BUNDLE_PATH`
+
+### TLS 策略与旧配置迁移
+
+新安装默认验证服务端证书。内网 CA 环境请使用
+`--ca-bundle /path/to/ca.pem`（Windows 使用 `-CaBundlePath`），或在
+`config.json` 中设置 `ca_bundle_path`。Agent HTTP、终端 Relay WebSocket、
+`openace login/menu/shell`、安装文件下载和注册请求会使用同一 CA。
+
+对于非本机 HTTPS 服务，旧配置中的 `"skip_ssl_verify": true` 不再静默
+启动。首选做法是改用 CA bundle。仅在短期排障确需关闭验证时，使用
+`python agent.py --insecure-skip-tls-verify`；安装脚本的同名参数会保存配置
+并为系统服务增加显式参数。该模式会显示醒目警告，并存在中间人窃取凭据
+和篡改命令的风险。
+
+单次覆盖 CA 可使用 `python agent.py --ca-bundle /path/to/ca.pem`；CLI 可用
+`openace login|menu|shell --ca-bundle /path/to/ca.pem`。运行
+`openace config-check` 可检查持久化的 TLS 配置。
 
 ## 支持的 CLI 工具
 
@@ -80,11 +103,12 @@ curl -fsSL https://<server>/api/remote/agent/install.sh | bash -s -- \
 
 | 命令 | 说明 |
 |------|------|
-| `openace login [--token TOKEN]` | 登录到服务器 |
+| `openace login [--token TOKEN] [--ca-bundle PATH]` | 登录到服务器 |
 | `openace logout` | 删除存储的凭证 |
 | `openace status` | 显示服务器 URL、机器 ID、登录状态 |
-| `openace menu` | 启动交互式 AI 工具选择器 |
-| `openace shell` | 启动带代理凭证的 shell |
+| `openace menu [--ca-bundle PATH]` | 启动交互式 AI 工具选择器 |
+| `openace shell [--ca-bundle PATH]` | 启动带代理凭证的 shell |
+| `openace config-check` | 校验持久化的 TLS 配置 |
 
 ## 终端服务器
 
