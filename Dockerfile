@@ -179,8 +179,16 @@ RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 # chdir'ing as root then runuser -u <owner>. Owned by root so the sudoers rule
 # (ALL=(root) NOPASSWD) above can apply.
 COPY scripts/openace-run-as.sh /usr/local/bin/openace-run-as
-RUN chmod 755 /usr/local/bin/openace-run-as && \
+COPY app/modules/workspace/autonomous/agent_bin/ /usr/local/libexec/openace-agent-bin/
+RUN chmod 755 /usr/local/bin/openace-run-as \
+        /usr/local/libexec/openace-agent-bin/_guard_exec.py \
+        /usr/local/libexec/openace-agent-bin/git \
+        /usr/local/libexec/openace-agent-bin/gh \
+        /usr/local/libexec/openace-agent-bin/python \
+        /usr/local/libexec/openace-agent-bin/python3 \
+        /usr/local/libexec/openace-agent-bin/pytest && \
     chown root:root /usr/local/bin/openace-run-as && \
+    chown -R root:root /usr/local/libexec/openace-agent-bin && \
     printf '%s\n' \
         '# Credentialless autonomous agent launcher' \
         'open-ace ALL=(root) NOPASSWD: /usr/local/bin/openace-run-as --isolated *' \
