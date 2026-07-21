@@ -83,6 +83,10 @@ class AuditAction(Enum):
     AGENT_AUTH_FAILURE = "agent_auth_failure"
     AGENT_RECONNECT = "agent_reconnect"
 
+    # Usage report actions (Issue #1891)
+    USAGE_REPORT_AUTH_FAILURE = "usage_report_auth_failure"
+    USAGE_REPORT_BINDING_MISMATCH = "usage_report_binding_mismatch"
+
 
 class AuditSeverity(Enum):
     """Severity levels for audit events."""
