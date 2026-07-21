@@ -515,4 +515,3 @@ def start_background_services():
         logger.warning(f"Failed to start SSO auth state cleanup: {e}")
 
     logger.info("Background services started")
-
