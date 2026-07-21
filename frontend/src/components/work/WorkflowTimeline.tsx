@@ -52,6 +52,7 @@ import {
   formatTokens,
   getActivityHostMilestoneId,
   isAiMilestoneType,
+  isDisplayableTimelineActivity,
   parseDiffFiles,
   parseDiffStats,
   type ParsedDiffFileStatus,
@@ -1413,7 +1414,10 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
     );
     const isActivityHost = activityHostMilestoneId === milestone.milestone_id;
     const milestoneActivities = isActivityHost
-      ? activities.filter((activity) => milestoneSessionIds.has(activity.session_id))
+      ? activities.filter(
+          (activity) =>
+            milestoneSessionIds.has(activity.session_id) && isDisplayableTimelineActivity(activity)
+        )
       : [];
     const visibleMilestoneActivities = [...milestoneActivities]
       .sort((a, b) => {
@@ -1785,11 +1789,16 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                           );
                         })
                       ) : (
-                        <div className="timeline-milestone-activity-item">
-                          <span className="timeline-milestone-activity-time">--:--:--</span>
-                          <i className="bi bi-hourglass"></i>
-                          <span className="timeline-milestone-activity-text">
-                            {t('autoActivityWaiting', language)}
+                        <div className="timeline-milestone-activity-empty" role="status">
+                          <span
+                            className="timeline-milestone-activity-empty-icon"
+                            aria-hidden="true"
+                          >
+                            <i className="bi bi-hourglass-split"></i>
+                          </span>
+                          <span className="timeline-milestone-activity-empty-copy">
+                            <strong>{t('autoActivityWaiting', language)}</strong>
+                            <span>{t('autoActivityWaitingHint', language)}</span>
                           </span>
                         </div>
                       )}

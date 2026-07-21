@@ -43,6 +43,22 @@ export interface ActivityHostMilestoneLike {
   dev_round: number;
 }
 
+export interface TimelineActivityLike {
+  type: 'assistant' | 'tool_use' | 'usage' | 'system';
+  text?: string;
+}
+
+/**
+ * Ignore empty assistant placeholders. They carry no user-facing progress and
+ * otherwise render as a blank row (or a lone dash) in the activity panel.
+ * Tool, usage and system events remain useful even when they have no text.
+ */
+export function isDisplayableTimelineActivity(activity: TimelineActivityLike): boolean {
+  if (activity.type !== 'assistant') return true;
+  const text = activity.text?.trim() ?? '';
+  return text !== '' && text !== '-';
+}
+
 export function getActivityHostMilestoneId(
   milestones: ActivityHostMilestoneLike[],
   workflowDevRound: number,

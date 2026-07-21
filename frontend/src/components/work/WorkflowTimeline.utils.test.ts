@@ -4,11 +4,24 @@ import {
   findForkMilestoneIndex,
   getActivityHostMilestoneId,
   isAiMilestoneType,
+  isDisplayableTimelineActivity,
   parseDiffFiles,
   parseDiffStats,
 } from './WorkflowTimeline.utils';
 
 describe('WorkflowTimeline.utils', () => {
+  it('filters empty assistant placeholders without hiding real activity events', () => {
+    expect(isDisplayableTimelineActivity({ type: 'assistant' })).toBe(false);
+    expect(isDisplayableTimelineActivity({ type: 'assistant', text: '   ' })).toBe(false);
+    expect(isDisplayableTimelineActivity({ type: 'assistant', text: '-' })).toBe(false);
+    expect(isDisplayableTimelineActivity({ type: 'assistant', text: 'Reviewing files' })).toBe(
+      true
+    );
+    expect(isDisplayableTimelineActivity({ type: 'tool_use' })).toBe(true);
+    expect(isDisplayableTimelineActivity({ type: 'system' })).toBe(true);
+    expect(isDisplayableTimelineActivity({ type: 'usage' })).toBe(true);
+  });
+
   it('classifies AI-backed and system-only milestone cards', () => {
     for (const type of [
       'plan_created',

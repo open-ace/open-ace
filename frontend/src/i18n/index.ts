@@ -1561,6 +1561,8 @@ export const translations: Record<Language, Translations> = {
     autoSystemStep: 'System step',
     // Issue #1531: Activity summary & heartbeat
     autoActivityWaiting: 'Waiting…',
+    autoActivityWaitingHint:
+      'Preparing context or waiting for a response. New activity appears here automatically.',
     autoActivityExecuting: 'Executing {tool}…',
     autoActivityGenerating: 'Generating response…',
     autoActivityThinking: 'Thinking…',
@@ -3244,6 +3246,7 @@ export const translations: Record<Language, Translations> = {
     autoSystemStep: '系统步骤',
     // Issue #1531: Activity summary & heartbeat
     autoActivityWaiting: '等待中…',
+    autoActivityWaitingHint: '可能正在准备上下文或等待响应，收到新活动后会自动显示。',
     autoActivityExecuting: '正在执行 {tool}…',
     autoActivityGenerating: '正在生成回复…',
     autoActivityThinking: '正在思考…',
@@ -4710,6 +4713,8 @@ export const translations: Record<Language, Translations> = {
     autoSystemStep: 'システムステップ',
     // Issue #1531: Activity summary & heartbeat
     autoActivityWaiting: '待機中…',
+    autoActivityWaitingHint:
+      'コンテキストの準備中または応答待ちです。新しいアクティビティは自動的に表示されます。',
     autoActivityExecuting: '{tool}を実行中…',
     autoActivityGenerating: '応答生成中…',
     autoActivityThinking: '思考中…',
@@ -6262,6 +6267,8 @@ export const translations: Record<Language, Translations> = {
     autoSystemStep: '시스템 단계',
     // Issue #1531: Activity summary & heartbeat
     autoActivityWaiting: '대기 중…',
+    autoActivityWaitingHint:
+      '컨텍스트를 준비하거나 응답을 기다리는 중입니다. 새 활동은 자동으로 표시됩니다.',
     autoActivityExecuting: '{tool} 실행 중…',
     autoActivityGenerating: '응답 생성 중…',
     autoActivityThinking: '생각 중…',

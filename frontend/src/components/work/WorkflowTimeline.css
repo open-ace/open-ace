@@ -923,6 +923,48 @@
   word-break: break-word;
 }
 
+.timeline-milestone-activity-empty {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 52px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--color-primary) 4%, var(--bg-primary) 96%);
+}
+
+.timeline-milestone-activity-empty-icon {
+  display: inline-flex;
+  flex: 0 0 32px;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 12%, var(--bg-primary) 88%);
+}
+
+.timeline-milestone-activity-empty-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 0.76rem;
+  line-height: 1.45;
+}
+
+.timeline-milestone-activity-empty-copy strong {
+  color: var(--text-primary);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.timeline-milestone-activity-empty-copy > span {
+  color: var(--text-muted);
+}
+
 .timeline-content-modal {
   max-width: min(1040px, calc(100vw - 2rem));
 }
