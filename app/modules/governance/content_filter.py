@@ -206,20 +206,28 @@ class ContentFilter:
         if self.governance_repo is None:
             return []
 
+        # Fast path: check cache validity without lock
         if self._cache_valid and self._rules_cache is not None:
             return self._rules_cache
 
+        # Load rules from database (I/O operation outside lock)
         try:
             rules = self.governance_repo.get_filter_rules()
-            # Filter only enabled rules
             enabled_rules = [r for r in rules if r.get("is_enabled", True)]
-            self._rules_cache = enabled_rules
-            self._cache_valid = True
-            logger.debug(f"Loaded {len(enabled_rules)} filter rules from database")
-            return enabled_rules
         except Exception as e:
             logger.error(f"Failed to load filter rules from database: {e}")
             return []
+
+        # Update cache with lock protection
+        with self._cache_lock:
+            # Double-check: another thread may have updated while we were loading
+            if self._cache_valid and self._rules_cache is not None:
+                return self._rules_cache
+            self._rules_cache = enabled_rules
+            self._cache_valid = True
+
+        logger.debug(f"Loaded {len(enabled_rules)} filter rules from database")
+        return enabled_rules
 
     def _get_compiled_pattern(
         self, pattern: str, flags: int = re.IGNORECASE, rule_id: Any = None
@@ -227,7 +235,7 @@ class ContentFilter:
         """
         Get compiled regex pattern from cache or compile and cache it.
 
-        Uses LRU cache with configurable max size. Thread-safe with double-checked locking.
+        Uses LRU cache with configurable max size. Thread-safe with lock protection.
 
         Args:
             pattern: Regex pattern string to compile.
@@ -242,17 +250,10 @@ class ContentFilter:
 
         cache_key = (pattern, flags)
 
-        # First check without lock (fast path)
-        if cache_key in self._compiled_rules_cache:
-            # Move to end for LRU
-            self._compiled_rules_cache.move_to_end(cache_key)
-            self._cache_hits += 1
-            return self._compiled_rules_cache[cache_key]
-
-        # Need to compile - acquire lock
+        # All cache operations are protected by lock for thread safety
         with self._cache_lock:
-            # Double-check after acquiring lock
             if cache_key in self._compiled_rules_cache:
+                # Move to end for LRU
                 self._compiled_rules_cache.move_to_end(cache_key)
                 self._cache_hits += 1
                 return self._compiled_rules_cache[cache_key]
@@ -372,13 +373,9 @@ class ContentFilter:
                     # Apply redaction if action is redact
                     if rule_action == "redact":
                         if rule_type == "regex" or rule_type == "pii":
-                            # Reuse compiled pattern (already cached)
-                            if compiled is None:
-                                compiled = self._get_compiled_pattern(
-                                    rule_pattern, re.IGNORECASE, rule_id
-                                )
-                            if compiled is not None:
-                                redacted = compiled.sub("***", redacted)
+                            # compiled is guaranteed to be non-None (checked above)
+                            assert compiled is not None  # for type checker
+                            redacted = compiled.sub("***", redacted)
                         elif rule_type == "keyword":
                             # Redact keyword matches
                             compiled_keyword = self._get_compiled_pattern(
