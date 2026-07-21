@@ -296,9 +296,9 @@ CREATE TABLE autonomous_workflows (
  preferred_worktree_path text DEFAULT '',
  ci_repair_context text DEFAULT '',
  ci_repair_attempts integer DEFAULT 0,
- ci_diagnostics_attempts integer DEFAULT 0,
  last_ci_failure_signature text DEFAULT '',
- last_ci_failure_head_sha text DEFAULT ''
+ last_ci_failure_head_sha text DEFAULT '',
+ ci_diagnostics_attempts integer DEFAULT 0
 );
 
 CREATE TABLE compliance_reports (

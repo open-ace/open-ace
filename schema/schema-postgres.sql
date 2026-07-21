@@ -447,9 +447,9 @@ CREATE TABLE autonomous_workflows (
     preferred_worktree_path text DEFAULT ''::text,
     ci_repair_context text DEFAULT ''::text,
     ci_repair_attempts integer DEFAULT 0,
-    ci_diagnostics_attempts integer DEFAULT 0,
     last_ci_failure_signature text DEFAULT ''::text,
-    last_ci_failure_head_sha text DEFAULT ''::text
+    last_ci_failure_head_sha text DEFAULT ''::text,
+    ci_diagnostics_attempts integer DEFAULT 0
 );
 
 CREATE SEQUENCE autonomous_workflows_id_seq
