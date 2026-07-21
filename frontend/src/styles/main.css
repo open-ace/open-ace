@@ -2173,6 +2173,24 @@ table .latency-row:hover td {
 .modal-header {
   border-bottom: 1px solid var(--border-color);
   padding: var(--spacing-md) var(--spacing-lg);
+  gap: var(--spacing-md);
+}
+
+.modal-title {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.modal-header-actions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: var(--spacing-sm);
+  margin-inline-start: auto;
+}
+
+.modal-header-actions .btn-close {
+  margin: 0;
 }
 
 .modal-body {

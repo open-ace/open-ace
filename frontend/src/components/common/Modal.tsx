@@ -18,6 +18,7 @@ export const Modal: React.FC<ModalProps> = ({
   isOpen,
   onClose,
   title,
+  headerActions,
   size = 'md',
   children,
   footer,
@@ -124,7 +125,15 @@ export const Modal: React.FC<ModalProps> = ({
             {title && (
               <div className="modal-header">
                 <h5 className="modal-title">{title}</h5>
-                <button type="button" className="btn-close" onClick={onClose} aria-label="Close" />
+                <div className="modal-header-actions">
+                  {headerActions}
+                  <button
+                    type="button"
+                    className="btn-close"
+                    onClick={onClose}
+                    aria-label="Close"
+                  />
+                </div>
               </div>
             )}
             <div className="modal-body">{children}</div>

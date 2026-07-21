@@ -114,6 +114,44 @@ def test_cumulative_scope_guard_catches_multi_round_growth(monkeypatch):
     assert gh.get_changed_files.call_args_list[1].args == ("base", "head")
 
 
+def test_cumulative_scope_guard_derives_immutable_base_when_main_moved(monkeypatch):
+    import app.modules.workspace.autonomous.orchestrator as orchestrator_module
+
+    monkeypatch.setattr(orchestrator_module, "MAX_AUTONOMOUS_CHANGED_FILES", 3)
+    orch = orchestrator_module.AutonomousOrchestrator.__new__(
+        orchestrator_module.AutonomousOrchestrator
+    )
+    orch._update_workflow = MagicMock()
+    gh = MagicMock()
+    gh._run_git.return_value = MagicMock(returncode=0, stdout="branch-point\n")
+    gh.get_changed_files.side_effect = [
+        ["app/a.py"],
+        ["app/a.py", "app/b.py"],
+    ]
+
+    reason = orch._validate_autonomous_change_scope(gh, {}, "round-base", "head")
+
+    assert reason == ""
+    gh._run_git.assert_called_once_with(["merge-base", "head", "origin/main"], check=False)
+    assert gh.get_changed_files.call_args_list[1].args == ("branch-point", "head")
+    orch._update_workflow.assert_called_once_with({"base_commit_sha": "branch-point"})
+
+
+def test_cumulative_scope_guard_fails_closed_when_base_cannot_be_derived():
+    from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+    orch = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
+    orch._update_workflow = MagicMock()
+    gh = MagicMock()
+    gh._run_git.return_value = MagicMock(returncode=1, stdout="")
+
+    reason = orch._validate_autonomous_change_scope(gh, {}, "round-base", "head")
+
+    assert "missing immutable base commit" in reason
+    gh.get_changed_files.assert_not_called()
+    orch._update_workflow.assert_not_called()
+
+
 def test_ci_repair_scope_rejection_prevents_push():
     from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
 

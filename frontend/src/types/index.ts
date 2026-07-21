@@ -284,6 +284,8 @@ export interface ModalProps extends BaseComponentProps {
   isOpen: boolean;
   onClose: () => void;
   title?: string;
+  /** Controls rendered beside the title, before the close button. */
+  headerActions?: React.ReactNode;
   size?: 'sm' | 'md' | 'lg' | 'xl';
   children: React.ReactNode;
   footer?: React.ReactNode;

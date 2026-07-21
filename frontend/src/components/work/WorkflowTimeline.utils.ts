@@ -1,5 +1,23 @@
 import { formatTokens } from '@/utils';
 
+const AI_MILESTONE_TYPES = new Set([
+  'plan_created',
+  'plan_refined',
+  'plan_reviewed',
+  'plan_finalized',
+  'dev_started',
+  'tests_run',
+  'pr_reviewed',
+  'pr_review_summary',
+  'pr_updated',
+  'ci_repair_applied',
+  'conflicts_resolved',
+]);
+
+export function isAiMilestoneType(milestoneType: string): boolean {
+  return AI_MILESTONE_TYPES.has(milestoneType);
+}
+
 export type ParsedDiffFileStatus = 'added' | 'modified' | 'deleted';
 
 export interface ForkTimelineMilestoneLike {
@@ -16,6 +34,50 @@ export interface ParsedDiffFile {
   deletions: number;
   patch: string;
   commitLabel?: string;
+}
+
+export interface ActivityHostMilestoneLike {
+  milestone_id: string;
+  milestone_type: string;
+  status: string;
+  dev_round: number;
+}
+
+export function getActivityHostMilestoneId(
+  milestones: ActivityHostMilestoneLike[],
+  workflowDevRound: number,
+  workflowStatus: string
+): string | null {
+  const agentPhaseStatuses = ['planning', 'developing', 'pr_review'];
+  if (![...agentPhaseStatuses, 'merging'].includes(workflowStatus)) return null;
+
+  // Forked workflows can retain a copied in-progress milestone from the
+  // parent. Timeline order is oldest-first, so always choose the newest
+  // in-progress AI step from the current branch/round.
+  const active = [...milestones]
+    .reverse()
+    .find(
+      (milestone) =>
+        milestone.status === 'in_progress' &&
+        (milestone.dev_round || 1) === workflowDevRound &&
+        isAiMilestoneType(milestone.milestone_type)
+    );
+  if (active) return active.milestone_id;
+
+  // Preserve the panel only across short scheduler gaps in phases that
+  // actively run an agent. System-only phases (queue/preparation/report/wait)
+  // must not impersonate an AI request, and merge shows a panel only while an
+  // explicit AI repair/conflict milestone is in progress (handled above).
+  if (!agentPhaseStatuses.includes(workflowStatus)) return null;
+
+  const fallback = [...milestones]
+    .reverse()
+    .find(
+      (milestone) =>
+        (milestone.dev_round || 1) === workflowDevRound &&
+        isAiMilestoneType(milestone.milestone_type)
+    );
+  return fallback?.milestone_id ?? null;
 }
 
 export function parseDiffStats(
