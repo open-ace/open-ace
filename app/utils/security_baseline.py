@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Security Baseline Checker for Open ACE (Issue #1893)
 
@@ -15,7 +14,20 @@ import os
 import re
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional
+
+__all__ = [
+    "SecurityMode",
+    "CheckResult",
+    "detect_security_mode",
+    "is_forbidden_password",
+    "is_placeholder_password",
+    "check_database_password",
+    "check_secret_key",
+    "check_encryption_key",
+    "check_root_user",
+    "check_all",
+    "FORBIDDEN_DB_PASSWORDS",
+]
 
 
 class SecurityMode(Enum):
@@ -30,12 +42,14 @@ class CheckResult:
     """Result of a security check."""
     status: str  # "pass", "warning", "fail"
     message: str
-    recommendation: Optional[str] = None
+    recommendation: str | None = None
 
 
-# Forbidden database password values
+# Forbidden database password values (Issue #1893)
+# Includes development default password that must be changed for production
 FORBIDDEN_DB_PASSWORDS = frozenset([
     "ace-secret",
+    "dev-password-change-in-production",
     "change-me",
     "password",
     "admin",
@@ -103,13 +117,10 @@ def is_placeholder_password(password: str) -> bool:
         bool: True if password is a placeholder, False otherwise.
     """
     password_lower = password.lower()
-    for pattern in PLACEHOLDER_PATTERNS:
-        if re.match(pattern, password_lower):
-            return True
-    return False
+    return any(re.match(pattern, password_lower) for pattern in PLACEHOLDER_PATTERNS)
 
 
-def check_database_password(password: Optional[str], mode: SecurityMode) -> CheckResult:
+def check_database_password(password: str | None, mode: SecurityMode) -> CheckResult:
     """
     Check database password against security baseline.
 
@@ -159,7 +170,7 @@ def check_database_password(password: Optional[str], mode: SecurityMode) -> Chec
     return CheckResult(status="pass", message="Database password is acceptable.")
 
 
-def check_secret_key(key: Optional[str], mode: SecurityMode) -> CheckResult:
+def check_secret_key(key: str | None, mode: SecurityMode) -> CheckResult:
     """
     Check SECRET_KEY against security baseline.
 
@@ -199,7 +210,7 @@ def check_secret_key(key: Optional[str], mode: SecurityMode) -> CheckResult:
     return CheckResult(status="pass", message="SECRET_KEY is acceptable.")
 
 
-def check_encryption_key(key: Optional[str], mode: SecurityMode) -> CheckResult:
+def check_encryption_key(key: str | None, mode: SecurityMode) -> CheckResult:
     """
     Check OPENACE_ENCRYPTION_KEY against security baseline.
 

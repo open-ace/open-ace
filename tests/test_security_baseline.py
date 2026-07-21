@@ -77,6 +77,10 @@ class TestForbiddenPasswords:
         """Test that ace-secret is in forbidden list."""
         assert is_forbidden_password("ace-secret") is True
 
+    def test_dev_password_change_in_production_is_forbidden(self):
+        """Test that dev-password-change-in-production is in forbidden list."""
+        assert is_forbidden_password("dev-password-change-in-production") is True
+
     def test_change_me_is_forbidden(self):
         """Test that change-me is in forbidden list."""
         assert is_forbidden_password("change-me") is True
@@ -158,6 +162,17 @@ class TestCheckDatabasePassword:
         result = check_database_password("ace-secret", SecurityMode.PRODUCTION)
         assert result.status == "fail"
         assert "weak default" in result.message.lower()
+
+    def test_dev_default_password_production_fails(self):
+        """Test that dev-password-change-in-production fails in production mode."""
+        result = check_database_password("dev-password-change-in-production", SecurityMode.PRODUCTION)
+        assert result.status == "fail"
+        assert "weak default" in result.message.lower()
+
+    def test_dev_default_password_development_warning(self):
+        """Test that dev-password-change-in-production gives warning in development mode."""
+        result = check_database_password("dev-password-change-in-production", SecurityMode.DEVELOPMENT)
+        assert result.status == "warning"
 
     def test_forbidden_password_development_warning(self):
         """Test that forbidden password gives warning in development mode."""

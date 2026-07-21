@@ -73,8 +73,9 @@ detect_security_mode() {
     echo "development"
 }
 
-# Forbidden database password values
-FORBIDDEN_DB_PASSWORDS="ace-secret change-me password admin postgres 123456"
+# Forbidden database password values (Issue #1893)
+# Includes development default password that must be changed for production
+FORBIDDEN_DB_PASSWORDS="ace-secret dev-password-change-in-production change-me password admin postgres 123456"
 
 # Check if password is in forbidden list
 is_forbidden_password() {
@@ -617,7 +618,7 @@ generate_default_config() {
   "host_name": "$HOST_NAME",
   "database": {
     "type": "postgresql",
-    "url": "postgresql://${DB_USER:-ace}:${DB_PASSWORD:-}@postgres:5432/${DB_NAME:-ace}"
+    "url": "postgresql://${DB_USER:-ace}:${DB_PASSWORD:-dev-password-change-in-production}@postgres:5432/${DB_NAME:-ace}"
   },
   "server": {
     "upload_auth_key": "$UPLOAD_AUTH_KEY",
