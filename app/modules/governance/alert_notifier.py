@@ -1085,7 +1085,9 @@ class AlertNotifier:
 
         threshold = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=hours)
 
-        # PostgreSQL uses ->> for JSON extraction, SQLite uses json_extract
+        # ``alerts.metadata`` is TEXT in both schemas.  PostgreSQL therefore
+        # needs an explicit JSONB cast before using ``->>``; without it the
+        # upstream-quota alert path fails while trying to de-duplicate alerts.
         if is_postgresql():
             cursor.execute(
                 """
@@ -1093,7 +1095,7 @@ class AlertNotifier:
                 WHERE user_id = %s
                   AND alert_type = %s
                   AND created_at >= %s
-                  AND metadata->>'quota_type' = %s
+                  AND (metadata::jsonb)->>'quota_type' = %s
                 """,
                 (user_id, AlertType.QUOTA.value, threshold.isoformat(), quota_type),
             )
