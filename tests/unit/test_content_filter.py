@@ -403,8 +403,8 @@ class TestCompiledPatternCache:
         assert len(cf._compiled_rules_cache) == 2
         # Oldest should be evicted
         assert (r"\d+", re.IGNORECASE) not in cf._compiled_rules_cache
-        assert (r"[a-z]+", re.IGNORECASE) not in cf._compiled_rules_cache
-        # Newest should remain
+        # Second and newest should remain (LRU evicts only the oldest)
+        assert (r"[a-z]+", re.IGNORECASE) in cf._compiled_rules_cache
         assert (r"[A-Z]+", re.IGNORECASE) in cf._compiled_rules_cache
 
     def test_lru_access_moves_to_end(self):
