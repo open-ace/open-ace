@@ -63,7 +63,7 @@ def _get_tenant_sensitive_keyword_config(tenant_id: int | None) -> dict[str, Any
         if tenant_id in _tenant_config_cache:
             cached = _tenant_config_cache[tenant_id]
             if cached["expiry"] > now:
-                return cached["config"]
+                return dict(cached["config"])
 
     # Fetch from database
     try:

@@ -198,11 +198,11 @@ class ContentFilter:
         }
 
     def _build_keyword_pattern(self, keyword: str) -> re.Pattern:
-        """
+        r"""
         Build a regex pattern for a keyword with appropriate word boundaries.
 
         For keywords containing underscores or hyphens, use non-alphanumeric
-        boundaries instead of \\b (which treats underscore as word character).
+        boundaries instead of \b (which treats underscore as word character).
 
         Args:
             keyword: The keyword to build a pattern for.
@@ -250,7 +250,7 @@ class ContentFilter:
                 "sensitive_keyword_match_mode": self.sensitive_keyword_match_mode,
             }
 
-        validated = {}
+        validated: dict[str, Any] = {}
 
         # Validate block_sensitive_keyword
         block_value = tenant_config.get("block_sensitive_keyword")
