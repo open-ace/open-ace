@@ -32,6 +32,7 @@ __all__ = [
 
 class SecurityMode(Enum):
     """Security mode enumeration."""
+
     DEVELOPMENT = "development"
     PILOT = "pilot"
     PRODUCTION = "production"
@@ -40,6 +41,7 @@ class SecurityMode(Enum):
 @dataclass
 class CheckResult:
     """Result of a security check."""
+
     status: str  # "pass", "warning", "fail"
     message: str
     recommendation: str | None = None
@@ -47,15 +49,17 @@ class CheckResult:
 
 # Forbidden database password values (Issue #1893)
 # Includes development default password that must be changed for production
-FORBIDDEN_DB_PASSWORDS = frozenset([
-    "ace-secret",
-    "dev-password-change-in-production",
-    "change-me",
-    "password",
-    "admin",
-    "postgres",
-    "123456",
-])
+FORBIDDEN_DB_PASSWORDS = frozenset(
+    [
+        "ace-secret",
+        "dev-password-change-in-production",
+        "change-me",
+        "password",
+        "admin",
+        "postgres",
+        "123456",
+    ]
+)
 
 # Placeholder password patterns
 PLACEHOLDER_PATTERNS = [
@@ -137,12 +141,12 @@ def check_database_password(password: str | None, mode: SecurityMode) -> CheckRe
             return CheckResult(
                 status="fail",
                 message="Database password is required in production mode.",
-                recommendation="Generate a strong password: python3 -c \"import secrets; print(secrets.token_urlsafe(32))\""
+                recommendation='Generate a strong password: python3 -c "import secrets; print(secrets.token_urlsafe(32))"',
             )
         return CheckResult(
             status="warning",
             message="Database password not set. Auto-generated temporary password.",
-            recommendation="For production, set DB_PASSWORD in .env before deployment."
+            recommendation="For production, set DB_PASSWORD in .env before deployment.",
         )
 
     # Forbidden password
@@ -151,12 +155,12 @@ def check_database_password(password: str | None, mode: SecurityMode) -> CheckRe
             return CheckResult(
                 status="fail",
                 message=f'Database password "{password}" is a known weak default.',
-                recommendation="Generate a strong password: python3 -c \"import secrets; print(secrets.token_urlsafe(32))\""
+                recommendation='Generate a strong password: python3 -c "import secrets; print(secrets.token_urlsafe(32))"',
             )
         return CheckResult(
             status="warning",
             message=f'Database password "{password}" is a known weak default.',
-            recommendation="For production, use a strong password (>=9 characters)."
+            recommendation="For production, use a strong password (>=9 characters).",
         )
 
     # Password too short for production
@@ -164,7 +168,7 @@ def check_database_password(password: str | None, mode: SecurityMode) -> CheckRe
         return CheckResult(
             status="fail",
             message=f"Database password is too short ({len(password)} chars). Production requires at least 9 characters.",
-            recommendation="Generate a strong password: python3 -c \"import secrets; print(secrets.token_urlsafe(32))\""
+            recommendation='Generate a strong password: python3 -c "import secrets; print(secrets.token_urlsafe(32))"',
         )
 
     return CheckResult(status="pass", message="Database password is acceptable.")
@@ -186,12 +190,12 @@ def check_secret_key(key: str | None, mode: SecurityMode) -> CheckResult:
             return CheckResult(
                 status="fail",
                 message="SECRET_KEY is required in production mode.",
-                recommendation="Generate: python3 -c \"import secrets; print(secrets.token_hex(32))\""
+                recommendation='Generate: python3 -c "import secrets; print(secrets.token_hex(32))"',
             )
         return CheckResult(
             status="warning",
             message="SECRET_KEY not set. Will auto-generate.",
-            recommendation="For production, set SECRET_KEY explicitly in .env."
+            recommendation="For production, set SECRET_KEY explicitly in .env.",
         )
 
     if is_placeholder_password(key):
@@ -199,12 +203,12 @@ def check_secret_key(key: str | None, mode: SecurityMode) -> CheckResult:
             return CheckResult(
                 status="fail",
                 message="SECRET_KEY contains placeholder value.",
-                recommendation="Production requires a strong random key."
+                recommendation="Production requires a strong random key.",
             )
         return CheckResult(
             status="warning",
             message="SECRET_KEY appears to be a placeholder.",
-            recommendation="Use a strong random key for production."
+            recommendation="Use a strong random key for production.",
         )
 
     return CheckResult(status="pass", message="SECRET_KEY is acceptable.")
@@ -226,12 +230,12 @@ def check_encryption_key(key: str | None, mode: SecurityMode) -> CheckResult:
             return CheckResult(
                 status="fail",
                 message="OPENACE_ENCRYPTION_KEY is required in production mode.",
-                recommendation="Generate: python3 -c \"import secrets; print(secrets.token_hex(16))\""
+                recommendation='Generate: python3 -c "import secrets; print(secrets.token_hex(16))"',
             )
         return CheckResult(
             status="warning",
             message="OPENACE_ENCRYPTION_KEY not set. Will auto-generate.",
-            recommendation="For production, set OPENACE_ENCRYPTION_KEY explicitly in .env. WARNING: Key change makes existing encrypted data unreadable!"
+            recommendation="For production, set OPENACE_ENCRYPTION_KEY explicitly in .env. WARNING: Key change makes existing encrypted data unreadable!",
         )
 
     if is_placeholder_password(key):
@@ -239,21 +243,19 @@ def check_encryption_key(key: str | None, mode: SecurityMode) -> CheckResult:
             return CheckResult(
                 status="fail",
                 message="OPENACE_ENCRYPTION_KEY contains placeholder value.",
-                recommendation="Production requires a strong random key."
+                recommendation="Production requires a strong random key.",
             )
         return CheckResult(
             status="warning",
             message="OPENACE_ENCRYPTION_KEY appears to be a placeholder.",
-            recommendation="Use a strong random key for production."
+            recommendation="Use a strong random key for production.",
         )
 
     return CheckResult(status="pass", message="OPENACE_ENCRYPTION_KEY is acceptable.")
 
 
 def check_root_user(
-    is_root: bool,
-    multi_user_mode: bool,
-    allow_root_multi_user: bool
+    is_root: bool, multi_user_mode: bool, allow_root_multi_user: bool
 ) -> CheckResult:
     """
     Check root user authorization.
@@ -274,12 +276,11 @@ def check_root_user(
         return CheckResult(
             status="fail",
             message="Container running as root without proper authorization.",
-            recommendation="If you need multi-user workspace mode, set WORKSPACE_MULTI_USER_MODE=true and OPENACE_ALLOW_ROOT_MULTI_USER=1. For single-user mode, remove any --user 0 setting."
+            recommendation="If you need multi-user workspace mode, set WORKSPACE_MULTI_USER_MODE=true and OPENACE_ALLOW_ROOT_MULTI_USER=1. For single-user mode, remove any --user 0 setting.",
         )
 
     return CheckResult(
-        status="pass",
-        message="Running as root for multi-user workspace mode (authorized)."
+        status="pass", message="Running as root for multi-user workspace mode (authorized)."
     )
 
 
