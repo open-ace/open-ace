@@ -242,9 +242,7 @@ class TestBackwardCompatibility:
         content_filter = ContentFilter()
 
         # Should not raise any errors
-        result = content_filter.check_content(
-            "my password is xxx", context={"user_id": 1}
-        )
+        result = content_filter.check_content("my password is xxx", context={"user_id": 1})
 
         assert result.passed is True
 

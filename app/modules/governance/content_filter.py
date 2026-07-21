@@ -156,7 +156,9 @@ class ContentFilter:
         self.block_high_risk = self.config.get("block_high_risk", True)
         self.log_matches = self.config.get("log_matches", True)
         self.block_sensitive_keyword = self.config.get("block_sensitive_keyword", False)
-        self.sensitive_keyword_match_mode = self.config.get("sensitive_keyword_match_mode", "word_boundary")
+        self.sensitive_keyword_match_mode = self.config.get(
+            "sensitive_keyword_match_mode", "word_boundary"
+        )
 
         # Database rules integration
         self.governance_repo = governance_repo
@@ -455,8 +457,8 @@ class ContentFilter:
                     "keywords": list(keyword_matches),
                     "source": "builtin",
                     "match_mode": sensitive_keyword_match_mode,
-}
-        )
+                }
+            )
 
             # Update overall_risk
             if overall_risk not in ["critical", "high"]:

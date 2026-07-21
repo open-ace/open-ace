@@ -639,7 +639,9 @@ class TenantRepository:
                         sso_enabled=bool(settings_row.get("sso_enabled", 0)),
                         sso_provider=settings_row.get("sso_provider"),
                         auto_provision_users=bool(settings_row.get("auto_provision_users", 0)),
-                        block_sensitive_keyword=bool(settings_row.get("block_sensitive_keyword", 0)),
+                        block_sensitive_keyword=bool(
+                            settings_row.get("block_sensitive_keyword", 0)
+                        ),
                         sensitive_keyword_match_mode=match_mode,
                     )
             except Exception:

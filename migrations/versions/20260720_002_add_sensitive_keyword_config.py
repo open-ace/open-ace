@@ -41,12 +41,16 @@ def upgrade() -> None:
         if is_postgres:
             op.add_column(
                 "tenant_settings",
-                sa.Column("block_sensitive_keyword", sa.Boolean(), nullable=True, server_default="false"),
+                sa.Column(
+                    "block_sensitive_keyword", sa.Boolean(), nullable=True, server_default="false"
+                ),
             )
         else:
             op.add_column(
                 "tenant_settings",
-                sa.Column("block_sensitive_keyword", sa.Integer(), nullable=True, server_default="0"),
+                sa.Column(
+                    "block_sensitive_keyword", sa.Integer(), nullable=True, server_default="0"
+                ),
             )
 
     # Add sensitive_keyword_match_mode column
