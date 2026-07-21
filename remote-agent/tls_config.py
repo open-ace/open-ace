@@ -8,7 +8,6 @@ Provides validation, security checks, and subprocess environment propagation.
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
 import os
 import socket
@@ -69,7 +68,7 @@ class TLSConfig:
         self._ca_bundle_valid: bool | None = None
 
     @classmethod
-    def from_config(cls, config: Any, explicit_insecure: bool = False) -> "TLSConfig":
+    def from_config(cls, config: Any, explicit_insecure: bool = False) -> TLSConfig:
         """
         Create TLSConfig from AgentConfig.
 
@@ -99,7 +98,7 @@ class TLSConfig:
         )
 
     @classmethod
-    def from_env(cls) -> "TLSConfig":
+    def from_env(cls) -> TLSConfig:
         """
         Create TLSConfig from environment variables (for subprocess use).
 
@@ -108,7 +107,11 @@ class TLSConfig:
         """
         skip_verify = os.environ.get(ENV_TLS_SKIP_VERIFY, "false").lower() in ("true", "1", "yes")
         ca_bundle = os.environ.get(ENV_TLS_CA_BUNDLE)
-        explicit_insecure = os.environ.get(ENV_TLS_EXPLICIT_INSECURE, "false").lower() in ("true", "1", "yes")
+        explicit_insecure = os.environ.get(ENV_TLS_EXPLICIT_INSECURE, "false").lower() in (
+            "true",
+            "1",
+            "yes",
+        )
 
         return cls(
             skip_verify=skip_verify,
@@ -188,10 +191,7 @@ class TLSConfig:
             return False
 
         # Only reject if skip_verify is True without explicit CLI param
-        if self.skip_verify and not self.is_explicit_insecure:
-            return True
-
-        return False
+        return self.skip_verify and not self.is_explicit_insecure
 
     def get_verify_context(self) -> str | bool:
         """
@@ -259,7 +259,9 @@ class TLSConfig:
             try:
                 content = ca_path.read_text(encoding="utf-8", errors="ignore")
                 if "-----BEGIN CERTIFICATE-----" not in content:
-                    warnings.append(f"CA bundle file does not appear to be PEM format: {self.ca_bundle_path}")
+                    warnings.append(
+                        f"CA bundle file does not appear to be PEM format: {self.ca_bundle_path}"
+                    )
                     self._ca_bundle_valid = False
                     return warnings
 
@@ -273,9 +275,13 @@ class TLSConfig:
         # Production mode security check
         if self.is_production_mode() and self.skip_verify:
             if not self.is_explicit_insecure:
-                warnings.append("TLS verification disabled in production mode without explicit CLI parameter")
+                warnings.append(
+                    "TLS verification disabled in production mode without explicit CLI parameter"
+                )
             else:
-                warnings.append("TLS verification disabled in production mode (explicit CLI parameter)")
+                warnings.append(
+                    "TLS verification disabled in production mode (explicit CLI parameter)"
+                )
 
         return warnings
 
@@ -352,6 +358,7 @@ class TLSConfig:
         }
 
     def __repr__(self) -> str:
+        """Return string representation of TLSConfig."""
         return (
             f"TLSConfig(skip_verify={self.skip_verify}, "
             f"ca_bundle={self.ca_bundle_path}, "

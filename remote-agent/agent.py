@@ -28,6 +28,10 @@ from cli_settings import apply_cli_settings, clear_codex_bearer_token
 from executor import ProcessExecutor
 from session_sync import SessionSyncService
 from system_info import get_capabilities
+from tls_config import (
+    print_tls_security_warning,
+    print_tls_startup_rejection,
+)
 
 from config import AgentConfig
 
@@ -50,8 +54,10 @@ class RemoteAgent:
     manages CLI subprocesses, and reports output and status back.
     """
 
-    def __init__(self, config: AgentConfig | None = None):
+    def __init__(self, config: AgentConfig | None = None, explicit_insecure: bool = False):
         self.config = config or AgentConfig()
+        self._explicit_insecure = explicit_insecure
+        self._tls_config = self.config.get_tls_config(explicit_insecure=explicit_insecure)
         self._executor = ProcessExecutor(
             server_url=self.config.server_url,
             output_callback=self._on_session_output,
@@ -191,6 +197,29 @@ class RemoteAgent:
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
 
+        # TLS Configuration Check
+        logger.info("Validating TLS configuration...")
+        warnings = self._tls_config.validate()
+        for warning in warnings:
+            logger.warning("TLS Warning: %s", warning)
+
+        # Production environment security check
+        if self._tls_config.should_reject_startup():
+            logger.error(
+                "Startup rejected: TLS verification disabled in production without explicit confirmation"
+            )
+            print_tls_startup_rejection()
+            sys.exit(1)
+
+        # Print security warning if skip_verify in production
+        print_tls_security_warning(self._tls_config)
+
+        # Log TLS configuration (audit)
+        logger.info(
+            "TLS Configuration: %s",
+            json.dumps(self._tls_config.to_audit_dict()),
+        )
+
         logger.info(
             "Open ACE Remote Agent starting (machine_id=%s, server=%s)",
             self.config.machine_id[:8],
@@ -327,7 +356,7 @@ class RemoteAgent:
                 json=message,
                 headers=headers,
                 timeout=30,
-                verify=not self.config.skip_ssl_verify,
+                verify=self._tls_config.get_verify_context(),
             )
             if resp.status_code == 200:
                 return resp.json()
@@ -1785,6 +1814,8 @@ class RemoteAgent:
 
         env = os.environ.copy()
         env["OPEN_ACE_RELAY_TOKEN"] = token
+        # Pass TLS configuration to relay subprocess
+        env.update(self._tls_config.to_subprocess_env())
 
         try:
             proc = subprocess.Popen(

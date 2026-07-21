@@ -317,6 +317,7 @@ AGENT_FILES=(
     openace_cli.py
     cli_settings.py
     zcode_app_server.py
+    tls_config.py
     __init__.py
 )
 

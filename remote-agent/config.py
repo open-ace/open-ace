@@ -168,6 +168,11 @@ class AgentConfig:
         return self._data.get("skip_ssl_verify", DEFAULTS["skip_ssl_verify"])
 
     @property
+    def ca_bundle_path(self) -> str | None:
+        """Custom CA bundle path for private certificates."""
+        return self._data.get("ca_bundle_path", DEFAULTS["ca_bundle_path"])
+
+    @property
     def max_sessions(self) -> int:
         """Maximum concurrent sessions allowed on this agent."""
         return self._data.get("max_sessions", DEFAULTS["max_sessions"])
@@ -251,3 +256,17 @@ class AgentConfig:
         # Hide sensitive fields
         safe = {k: v for k, v in self._data.items() if k != "agent_token"}
         return f"AgentConfig({safe})"
+
+    def get_tls_config(self, explicit_insecure: bool = False) -> Any:
+        """
+        Create TLSConfig from this configuration.
+
+        Args:
+            explicit_insecure: Whether --insecure-skip-tls-verify CLI flag was used
+
+        Returns:
+            TLSConfig instance
+        """
+        from tls_config import TLSConfig
+
+        return TLSConfig.from_config(self, explicit_insecure=explicit_insecure)

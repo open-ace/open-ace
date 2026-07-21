@@ -301,6 +301,65 @@ def cmd_status(_: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_config_check(_: argparse.Namespace) -> int:
+    """Check TLS configuration and security status."""
+    agent_config = _load_agent_config()
+    server_url = agent_config.get("server_url", "")
+
+    print("\nTLS Configuration Check:")
+    print("=" * 60)
+
+    # Check server URL
+    print(f"Server URL: {server_url}")
+
+    # Check TLS verification status
+    skip_ssl_verify = agent_config.get("skip_ssl_verify", False)
+    if skip_ssl_verify:
+        print("TLS Verification: DISABLED ⚠️")
+        print("  WARNING: TLS verification is disabled. This is not recommended for production.")
+    else:
+        print("TLS Verification: ENABLED ✓")
+
+    # Check CA bundle
+    ca_bundle = agent_config.get("ca_bundle_path")
+    if ca_bundle:
+        if os.path.exists(ca_bundle):
+            if os.access(ca_bundle, os.R_OK):
+                print(f"CA Bundle: {ca_bundle} ✓")
+            else:
+                print(f"CA Bundle: {ca_bundle} ⚠️ (not readable)")
+        else:
+            print(f"CA Bundle: {ca_bundle} ✗ (not found)")
+    else:
+        print("CA Bundle: (using system default)")
+
+    # Check if production mode
+    is_production = False
+    if server_url.startswith("https://"):
+        hostname = server_url.replace("https://", "").split("/")[0].split(":")[0]
+        if hostname not in ["localhost", "127.0.0.1", "0.0.0.0", "::1"]:
+            is_production = True
+
+    if is_production:
+        print("Production Mode: YES")
+        if skip_ssl_verify:
+            print("\n⚠️  CRITICAL: TLS verification disabled in production mode!")
+            print("   This exposes your agent token and data to MITM attacks.")
+            print("   Use --ca-bundle for private CAs or --insecure-skip-tls-verify explicitly.")
+    else:
+        print("Production Mode: NO")
+
+    print("\nRecommendations:")
+    if skip_ssl_verify and is_production:
+        print("  - Enable TLS verification in config.json")
+        print("  - Or use custom CA bundle for private certificates")
+    else:
+        print("  - Configuration looks good ✓")
+
+    print("=" * 60 + "\n")
+    return 0
+
+
 def cmd_menu(args: argparse.Namespace) -> int:
     work_dir = os.path.abspath(args.work_dir or os.getcwd())
     terminal = _start_cli_terminal(work_dir)
@@ -369,6 +428,11 @@ def build_parser() -> argparse.ArgumentParser:
     shell = sub.add_parser("shell", help="Start a shell with Open ACE proxy credentials")
     shell.add_argument("--work-dir", default="", help="Working directory for the session")
     shell.set_defaults(func=cmd_shell)
+
+    config_check = sub.add_parser(
+        "config-check", help="Check TLS configuration and security status"
+    )
+    config_check.set_defaults(func=cmd_config_check)
 
     return parser
 
