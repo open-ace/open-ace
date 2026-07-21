@@ -130,7 +130,14 @@ if [ "$isolated" = true ]; then
     # Recover safely after a previously interrupted wrapper before granting
     # this run access to anything. The registry is root-owned under /run.
     cleanup_isolated
-    trap cleanup_isolated EXIT HUP INT TERM
+    trap cleanup_isolated EXIT
+    # Bash services traps promptly while waiting for a background job. With a
+    # foreground external command it may defer the trap until that command
+    # exits, stranding this wrapper and its ACL lock after the parent sudo
+    # process is terminated.
+    trap 'exit 129' HUP
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
 
     # Record every path before the first ACL grant. If this wrapper is
     # interrupted at any later instruction, the next serialized invocation
@@ -189,7 +196,9 @@ if [ "$isolated" = true ]; then
         "HOME=$target_home" "USER=$target_user" "LOGNAME=$target_user" \
         "LANG=${LANG:-C.UTF-8}" "LC_ALL=${LC_ALL:-}" "TMPDIR=/tmp" \
         "GIT_CONFIG_COUNT=1" "GIT_CONFIG_KEY_0=safe.directory" \
-        "GIT_CONFIG_VALUE_0=$project_dir" "$@"
+        "GIT_CONFIG_VALUE_0=$project_dir" "$@" <&0 &
+    agent_child_pid=$!
+    wait "$agent_child_pid"
     child_status=$?
     set -e
     cleanup_isolated

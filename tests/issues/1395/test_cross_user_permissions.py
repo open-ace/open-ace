@@ -429,6 +429,39 @@ def test_isolated_wrapper_scopes_git_safe_directory_to_worktree():
     assert "git config --global" not in wrapper
 
 
+def test_isolated_wrapper_can_handle_signals_while_waiting_for_agent():
+    from pathlib import Path
+
+    wrapper = Path("scripts/openace-run-as.sh").read_text(encoding="utf-8")
+
+    assert "trap cleanup_isolated EXIT" in wrapper
+    assert "trap 'exit 129' HUP" in wrapper
+    assert "trap 'exit 130' INT" in wrapper
+    assert "trap 'exit 143' TERM" in wrapper
+    assert '"GIT_CONFIG_VALUE_0=$project_dir" "$@" <&0 &' in wrapper
+    assert "agent_child_pid=$!" in wrapper
+    assert 'wait "$agent_child_pid"' in wrapper
+
+
+def test_background_wait_keeps_runner_stdin_until_eof():
+    import subprocess
+
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            '{ IFS= read -r line; printf "received=%s" "$line"; } <&0 & ' 'child=$!; wait "$child"',
+        ],
+        input="hello-from-runner\n",
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert result.stdout == "received=hello-from-runner"
+
+
 # ── _wrap_agent_cmd / _is_cross_user (agent launch) ─────────────────────
 
 
