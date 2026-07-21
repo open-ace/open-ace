@@ -448,7 +448,8 @@ CREATE TABLE autonomous_workflows (
     ci_repair_context text DEFAULT ''::text,
     ci_repair_attempts integer DEFAULT 0,
     last_ci_failure_signature text DEFAULT ''::text,
-    last_ci_failure_head_sha text DEFAULT ''::text
+    last_ci_failure_head_sha text DEFAULT ''::text,
+    ci_diagnostics_attempts integer DEFAULT 0
 );
 
 CREATE SEQUENCE autonomous_workflows_id_seq
@@ -1467,10 +1468,10 @@ CREATE TABLE tenant_settings (
     branding_name character varying(100),
     branding_logo_url character varying(500),
     auto_provision_users boolean DEFAULT false,
-    block_sensitive_keyword boolean DEFAULT false,
-    sensitive_keyword_match_mode character varying(50) DEFAULT 'word_boundary',
     created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
-    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    block_sensitive_keyword boolean DEFAULT false,
+    sensitive_keyword_match_mode character varying(50) DEFAULT 'word_boundary'::character varying
 );
 
 CREATE SEQUENCE tenant_settings_id_seq

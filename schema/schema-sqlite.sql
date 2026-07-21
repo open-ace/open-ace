@@ -297,7 +297,8 @@ CREATE TABLE autonomous_workflows (
  ci_repair_context text DEFAULT '',
  ci_repair_attempts integer DEFAULT 0,
  last_ci_failure_signature text DEFAULT '',
- last_ci_failure_head_sha text DEFAULT ''
+ last_ci_failure_head_sha text DEFAULT '',
+ ci_diagnostics_attempts integer DEFAULT 0
 );
 
 CREATE TABLE compliance_reports (
@@ -923,10 +924,10 @@ CREATE TABLE tenant_settings (
  branding_name TEXT,
  branding_logo_url TEXT,
  auto_provision_users INTEGER DEFAULT 0,
- block_sensitive_keyword INTEGER DEFAULT 0,
- sensitive_keyword_match_mode TEXT DEFAULT 'word_boundary',
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
- updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+ updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+ block_sensitive_keyword INTEGER DEFAULT 0,
+ sensitive_keyword_match_mode TEXT DEFAULT 'word_boundary'
 );
 
 CREATE TABLE tenant_usage (
