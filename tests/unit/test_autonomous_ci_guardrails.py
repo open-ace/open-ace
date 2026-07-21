@@ -226,6 +226,43 @@ def test_cross_user_launch_preserves_nonsecret_guard_environment(monkeypatch, tm
     assert "OPENACE_REAL_GIT=/usr/bin/git" in command
 
 
+def test_terminal_result_closes_stream_json_stdin():
+    from types import SimpleNamespace
+
+    from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner, _LocalSession
+
+    class FakeStdout:
+        def __init__(self):
+            self.lines = [json.dumps({"type": "result", "session_id": "cli-session"}).encode()]
+
+        def readline(self):
+            return self.lines.pop(0) if self.lines else b""
+
+    class FakeStdin:
+        def __init__(self):
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+
+    runner = AutonomousAgentRunner.__new__(AutonomousAgentRunner)
+    runner._activity_callback = None
+    runner._capture_cli_session_id = lambda *_args: "cli-session"
+    runner._sync_sidebar_session_totals = lambda *_args, **_kwargs: None
+    runner._resolve_sidebar_session = lambda *_args, **_kwargs: "cli-session"
+    process = SimpleNamespace(stdout=FakeStdout(), stdin=FakeStdin(), returncode=None)
+    session = _LocalSession(session_id="tracking-session", process=process)
+
+    with patch(
+        "app.modules.workspace.autonomous.agent_runner._extract_stream_usage",
+        return_value=None,
+    ):
+        runner._read_stdout(session)
+
+    assert session.completed.is_set()
+    assert process.stdin.closed
+
+
 def test_cross_user_launch_rejects_source_tree_guard_path():
     from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner
 

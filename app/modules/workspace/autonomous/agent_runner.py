@@ -3221,6 +3221,17 @@ class AutonomousAgentRunner:
                         self._sync_sidebar_session_totals(
                             session, status="error" if session.error else "active"
                         )
+                        # ``--input-format stream-json`` keeps the CLI alive for
+                        # another turn until stdin reaches EOF. A result event is
+                        # terminal for this one-shot invocation, so close the
+                        # write side before waking the caller. Otherwise killing
+                        # only the sudo launcher can strand the isolated wrapper
+                        # while it still holds the per-agent ACL lock.
+                        try:
+                            if session.process and session.process.stdin:
+                                session.process.stdin.close()
+                        except (OSError, BrokenPipeError, AttributeError, ValueError):
+                            pass
                         session.completed.set()
                         # Emit usage activity for real-time token display
                         if self._activity_callback:
