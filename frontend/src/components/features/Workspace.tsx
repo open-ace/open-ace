@@ -44,6 +44,7 @@ import { NewSessionModal } from '@/components/work/NewSessionModal';
 import { TerminalTab } from '@/components/features/TerminalTab';
 import { remoteApi } from '@/api/remote';
 import { cn } from '@/utils';
+import { buildProjectsPathSegment, injectProjectsPath } from '@/utils/urlUtils';
 
 /**
  * Extended WorkspaceTab for local use (includes URL which is generated at runtime)
@@ -552,6 +553,8 @@ export const Workspace: React.FC = () => {
   const getEffectiveUrl = useCallback(
     (
       restoreSessionId?: string,
+      /** @deprecated Name is misleading — this is the RAW project path, not encoded.
+       *  Renaming to `projectPath` planned in future refactor. */
       encodedProjectName?: string,
       toolName?: string,
       settings?: { model?: string; useWebUI?: boolean; permissionMode?: string },
@@ -585,28 +588,16 @@ export const Workspace: React.FC = () => {
       const isNewLocalProject =
         !!encodedProjectName && !restoreSessionId && remoteParams?.workspaceType !== 'remote';
 
-      // Build the "/projects/<encoded-segments>" path segment.
-      // Each path segment is encodeURIComponent'd so spaces / special chars
-      // survive the URL, while slashes are preserved as path separators
-      // (matching how ProjectSelector.navigate(`/projects${path}`) works).
+      // Build the "/projects/<encoded-segments>" path segment using the
+      // extracted utility function (urlUtils.ts). The raw project path is
+      // encoded segment-by-segment, preserving '/' as path separator.
       const projectsPathSegment = isNewLocalProject
-        ? 'projects' +
-          encodedProjectName
-            .split('/')
-            .map((seg) => encodeURIComponent(seg))
-            .join('/')
+        ? buildProjectsPathSegment(encodedProjectName)
         : '';
 
-      // Inject the projects path segment into a base URL (before any existing
-      // query string), e.g. "http://h:3100" → "http://h:3100/projects/home/u".
-      const injectProjectsPath = (base: string): string => {
-        if (!projectsPathSegment) return base;
-        const qIdx = base.indexOf('?');
-        const pathPart = qIdx === -1 ? base : base.slice(0, qIdx);
-        const queryPart = qIdx === -1 ? '' : base.slice(qIdx);
-        const glue = pathPart.endsWith('/') ? '' : '/';
-        return `${pathPart}${glue}${projectsPathSegment}${queryPart}`;
-      };
+      // Helper to inject projects path into base URL (uses imported utility)
+      const applyProjectsPath = (base: string): string =>
+        injectProjectsPath(base, projectsPathSegment);
 
       // Helper to append remote workspace parameters
       const appendRemoteParams = (url: string) => {
@@ -637,7 +628,7 @@ export const Workspace: React.FC = () => {
 
       // Multi-user mode: use user-specific URL with token and openace_url
       if (config.multi_user_mode && userWebUI?.success) {
-        const baseUrl = injectProjectsPath(userWebUI.url);
+        const baseUrl = applyProjectsPath(userWebUI.url);
         const token = userWebUI.token;
         const openaceUrl = userWebUI.openace_url;
         // Add token and openace_url as URL parameters
@@ -696,9 +687,7 @@ export const Workspace: React.FC = () => {
       // fetch throwing, which loadConfig swallows). Note the fallback is itself
       // the unreachable container address, so in those failure cases the iframe
       // stays blank; there is no better value available without user-url.
-      let url = injectProjectsPath(
-        userWebUI?.success && userWebUI.url ? userWebUI.url : config.url
-      );
+      let url = applyProjectsPath(userWebUI?.success && userWebUI.url ? userWebUI.url : config.url);
       // Add lang parameter for language sync
       const langSeparator = url.includes('?') ? '&' : '?';
       url = `${url}${langSeparator}lang=${encodeURIComponent(language)}&theme=${theme}`;
