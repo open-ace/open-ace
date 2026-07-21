@@ -132,8 +132,12 @@ class TestPrReviewSummaryBeforeCiCheck:
             orch._runner = MagicMock()
             orch._runner.run_agent_task.return_value = AgentTaskResult(
                 session_id="s",
-                response_text="代码审查通过",
-                visible_response_text="代码审查通过",
+                response_text=(
+                    '代码审查通过\nREVIEW_RESULT: {"verdict":"APPROVE",' '"blocking_findings":[]}'
+                ),
+                visible_response_text=(
+                    '代码审查通过\nREVIEW_RESULT: {"verdict":"APPROVE",' '"blocking_findings":[]}'
+                ),
                 success=True,
             )
 

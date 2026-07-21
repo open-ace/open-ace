@@ -1442,7 +1442,9 @@ class TestOrchestratorPrReview:
             "url": "https://github.com/user/repo/pull/99",
         }
         orch._gh.get_diff.return_value = "diff content here"
-        orch._runner.run_agent_task.return_value = _make_agent_result(text="Code review passed")
+        orch._runner.run_agent_task.return_value = _make_agent_result(
+            text='Code review passed\nREVIEW_RESULT: {"verdict":"APPROVE","blocking_findings":[]}'
+        )
 
         orch._do_pr_review(wf)
 
@@ -1466,7 +1468,9 @@ class TestOrchestratorPrReview:
         orch._runner = MagicMock()
         orch._gh.get_pr_diff.return_value = "diff --git a/feature.py b/feature.py\n+feature"
         orch._gh.get_diff.return_value = "diff --git a/unrelated.py b/unrelated.py\n-main"
-        orch._runner.run_agent_task.return_value = _make_agent_result(text="Code review passed")
+        orch._runner.run_agent_task.return_value = _make_agent_result(
+            text='Code review passed\nREVIEW_RESULT: {"verdict":"APPROVE","blocking_findings":[]}'
+        )
 
         orch._do_pr_review(wf)
 
@@ -1624,7 +1628,9 @@ class TestOrchestratorPrReview:
         orch._runner = MagicMock()
         orch._gh.get_diff.return_value = "diff"
         orch._runner.run_agent_task.side_effect = [
-            _make_agent_result(text="代码审查通过。没有遗留问题。"),
+            _make_agent_result(
+                text='代码审查通过。没有遗留问题。\nREVIEW_RESULT: {"verdict":"APPROVE","blocking_findings":[]}'
+            ),
             _make_agent_result(text="可以合并。"),
         ]
 
@@ -1654,7 +1660,7 @@ class TestOrchestratorPrReview:
         orch._runner = MagicMock()
         orch._gh.get_diff.return_value = "diff"
         orch._runner.run_agent_task.return_value = _make_agent_result(
-            text="代码审查通过。没有遗留问题。"
+            text='代码审查通过。没有遗留问题。\nREVIEW_RESULT: {"verdict":"APPROVE","blocking_findings":[]}'
         )
 
         orch._do_pr_review(wf)
