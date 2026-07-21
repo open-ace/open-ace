@@ -6229,7 +6229,7 @@ class AutonomousOrchestrator:
         Merge is retried across scheduler cycles instead of blocking on CI:
         if CI is still running we return (staying in 'merging') and the
         scheduler retries in ~10s. This avoids hogging a workflow thread for
-        the full CI duration (10+ min for Python 3.9) and naturally adapts
+        the full CI duration (10+ min for Python 3.10) and naturally adapts
         to variable CI times without --admin bypass or long polls.
 
         Note: an automatic CI repair attempt runs synchronously in this phase

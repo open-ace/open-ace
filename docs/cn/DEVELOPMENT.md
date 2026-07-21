@@ -8,7 +8,7 @@
 
 ### 前提条件
 
-- Python 3.9+
+- Python 3.10+
 - Git
 - 代码编辑器（VS Code、PyCharm 等）
 
