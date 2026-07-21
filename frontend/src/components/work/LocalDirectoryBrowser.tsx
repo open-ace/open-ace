@@ -433,7 +433,10 @@ export const LocalDirectoryBrowser: React.FC<LocalDirectoryBrowserProps> = ({
       return;
     }
     const ok = await confirm({
+      title: file.name,
       message: (t('confirmDeleteFile', language) as string) || `Delete "${file.name}"?`,
+      confirmText: (t('confirm', language) as string) || 'Confirm',
+      cancelText: (t('cancel', language) as string) || 'Cancel',
       variant: 'danger',
     });
     if (!ok) return;
