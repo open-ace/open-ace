@@ -7,6 +7,8 @@ Detects and filters sensitive information, PII, and prohibited content.
 
 import logging
 import re
+import threading
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
@@ -165,6 +167,13 @@ class ContentFilter:
         self._rules_cache: list[dict[str, Any]] | None = None
         self._cache_valid: bool = False
 
+        # Compiled regex cache for database rules (LRU cache)
+        self._compiled_rules_cache: OrderedDict[tuple[str, int], re.Pattern] = OrderedDict()
+        self._cache_lock = threading.Lock()
+        self._cache_hits: int = 0
+        self._cache_misses: int = 0
+        self._max_compiled_cache_size: int = self.config.get("max_compiled_cache_size", 100)
+
         # Compile patterns
         self.patterns = dict(self.DEFAULT_PII_PATTERNS)
         if custom_patterns:
@@ -290,28 +299,88 @@ class ContentFilter:
         if self.governance_repo is None:
             return []
 
+        # Fast path: check cache validity without lock
         if self._cache_valid and self._rules_cache is not None:
             return self._rules_cache
 
+        # Load rules from database (I/O operation outside lock)
         try:
             rules = self.governance_repo.get_filter_rules()
-            # Filter only enabled rules
             enabled_rules = [r for r in rules if r.get("is_enabled", True)]
-            self._rules_cache = enabled_rules
-            self._cache_valid = True
-            logger.debug(f"Loaded {len(enabled_rules)} filter rules from database")
-            return enabled_rules
         except Exception as e:
             logger.error(f"Failed to load filter rules from database: {e}")
             return []
+
+        # Update cache with lock protection
+        with self._cache_lock:
+            # Double-check: another thread may have updated while we were loading
+            if self._cache_valid and self._rules_cache is not None:
+                return self._rules_cache
+            self._rules_cache = enabled_rules
+            self._cache_valid = True
+
+        logger.debug(f"Loaded {len(enabled_rules)} filter rules from database")
+        return enabled_rules
+
+    def _get_compiled_pattern(
+        self, pattern: str, flags: int = re.IGNORECASE, rule_id: Any = None
+    ) -> re.Pattern | None:
+        """
+        Get compiled regex pattern from cache or compile and cache it.
+
+        Uses LRU cache with configurable max size. Thread-safe with lock protection.
+
+        Args:
+            pattern: Regex pattern string to compile.
+            flags: Regex flags (default: re.IGNORECASE).
+            rule_id: Optional rule ID for error logging.
+
+        Returns:
+            Compiled regex pattern, or None if pattern is invalid.
+        """
+        if not pattern:
+            return None
+
+        cache_key = (pattern, flags)
+
+        # All cache operations are protected by lock for thread safety
+        with self._cache_lock:
+            if cache_key in self._compiled_rules_cache:
+                # Move to end for LRU
+                self._compiled_rules_cache.move_to_end(cache_key)
+                self._cache_hits += 1
+                return self._compiled_rules_cache[cache_key]
+
+            # Track attempt before compiling (counts as miss regardless of validity)
+            self._cache_misses += 1
+
+            # Compile the pattern
+            try:
+                compiled = re.compile(pattern, flags)
+            except re.error as e:
+                logger.error(f"Invalid regex pattern in rule {rule_id}: {e}")
+                return None
+
+            # Cache the compiled pattern
+            self._compiled_rules_cache[cache_key] = compiled
+
+            # Check cache size and evict oldest if needed (LRU)
+            while len(self._compiled_rules_cache) > self._max_compiled_cache_size:
+                self._compiled_rules_cache.popitem(last=False)
+
+            return compiled
 
     def invalidate_cache(self) -> None:
         """
         Invalidate the rules cache.
         Call this after CRUD operations on filter rules.
         """
-        self._cache_valid = False
-        self._rules_cache = None
+        with self._cache_lock:
+            self._cache_valid = False
+            self._rules_cache = None
+            self._compiled_rules_cache.clear()
+            self._cache_hits = 0
+            self._cache_misses = 0
         logger.debug("Content filter rules cache invalidated")
 
     def refresh_rules(self) -> None:
@@ -370,17 +439,22 @@ class ContentFilter:
             if not rule_pattern:
                 continue
 
+            compiled = None  # Cache compiled pattern for reuse
             try:
                 if rule_type == "regex":
-                    # Compile regex pattern
-                    compiled = re.compile(rule_pattern, re.IGNORECASE)
+                    # Compile regex pattern with caching
+                    compiled = self._get_compiled_pattern(rule_pattern, re.IGNORECASE, rule_id)
+                    if compiled is None:
+                        continue  # Invalid pattern, skip this rule
                     matches = compiled.findall(content)
                 elif rule_type == "keyword":
                     # Keyword matching (case-insensitive substring)
                     matches = [rule_pattern] if rule_pattern.lower() in content.lower() else []
                 elif rule_type == "pii":
-                    # PII pattern matching
-                    compiled = re.compile(rule_pattern, re.IGNORECASE)
+                    # PII pattern matching with caching
+                    compiled = self._get_compiled_pattern(rule_pattern, re.IGNORECASE, rule_id)
+                    if compiled is None:
+                        continue  # Invalid pattern, skip this rule
                     matches = compiled.findall(content)
                 else:
                     continue
@@ -406,13 +480,16 @@ class ContentFilter:
                     # Apply redaction if action is redact
                     if rule_action == "redact":
                         if rule_type == "regex" or rule_type == "pii":
-                            compiled = re.compile(rule_pattern, re.IGNORECASE)
+                            # compiled is guaranteed to be non-None (checked above)
+                            assert compiled is not None  # for type checker
                             redacted = compiled.sub("***", redacted)
                         elif rule_type == "keyword":
                             # Redact keyword matches
-                            redacted = re.sub(
-                                re.compile(rule_pattern, re.IGNORECASE), "***", redacted
+                            compiled_keyword = self._get_compiled_pattern(
+                                rule_pattern, re.IGNORECASE, rule_id
                             )
+                            if compiled_keyword is not None:
+                                redacted = compiled_keyword.sub("***", redacted)
 
             except re.error as e:
                 logger.error(f"Invalid regex pattern in rule {rule_id}: {e}")
@@ -628,6 +705,8 @@ class ContentFilter:
 
     def get_stats(self) -> dict[str, Any]:
         """Get filter statistics."""
+        total_requests = self._cache_hits + self._cache_misses
+        hit_rate = (self._cache_hits / total_requests * 100) if total_requests > 0 else 0.0
         return {
             "enabled": self.enabled,
             "redact_pii": self.redact_pii,
@@ -635,4 +714,9 @@ class ContentFilter:
             "pattern_count": len(self.patterns),
             "keyword_count": len(self.keywords),
             "patterns": list(self.patterns.keys()),
+            "compiled_cache_size": len(self._compiled_rules_cache),
+            "compiled_cache_hits": self._cache_hits,
+            "compiled_cache_misses": self._cache_misses,
+            "compiled_cache_hit_rate": round(hit_rate, 2),
+            "compiled_cache_max_size": self._max_compiled_cache_size,
         }
