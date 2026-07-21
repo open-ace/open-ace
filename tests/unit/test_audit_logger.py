@@ -533,13 +533,13 @@ class TestGetActionCategories:
                 assert "label" in action
                 assert "i18n_key" in action
 
-    def test_get_action_categories_total_actions_is_32(self):
-        """Test that total number of actions is 32."""
+    def test_get_action_categories_total_actions_is_35(self):
+        """Test that total number of actions is 35."""
         from app.modules.governance.audit_logger import get_action_categories
 
         categories = get_action_categories()
         total_actions = sum(len(cat["actions"]) for cat in categories.values())
-        assert total_actions == 32, f"Expected 32 actions, got {total_actions}"
+        assert total_actions == 35, f"Expected 35 actions, got {total_actions}"
 
     def test_get_action_categories_matches_enum_values(self):
         """Test that all action values match AuditAction enum values."""
@@ -573,5 +573,9 @@ class TestGetActionCategories:
         assert categories["auth"]["resource_types"] == ["session"]
         assert categories["user_management"]["resource_types"] == ["user"]
         assert categories["data"]["resource_types"] == ["analytics_report", "analytics", "data"]
-        assert categories["agent"]["resource_types"] == ["remote_machine", "agent_token"]
+        assert categories["agent"]["resource_types"] == [
+            "remote_machine",
+            "agent_token",
+            "usage_report",
+        ]
         assert "security_settings" in categories["system"]["resource_types"]

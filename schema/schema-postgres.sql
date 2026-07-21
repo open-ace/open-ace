@@ -1576,6 +1576,28 @@ CREATE SEQUENCE tool_account_mapping_rules_id_seq
     CACHE 1;
 
 ALTER SEQUENCE tool_account_mapping_rules_id_seq OWNED BY tool_account_mapping_rules.id;
+CREATE TABLE usage_report_rate_limits (
+    rate_key character varying(512) NOT NULL,
+    window_started_at timestamp without time zone NOT NULL,
+    request_count integer DEFAULT 0 NOT NULL,
+    updated_at timestamp without time zone NOT NULL,
+    CONSTRAINT ck_usage_report_rate_limits_count CHECK ((request_count >= 0))
+);
+
+CREATE TABLE usage_report_receipts (
+    report_id character varying(128) NOT NULL,
+    session_id text NOT NULL,
+    machine_id text NOT NULL,
+    user_id integer NOT NULL,
+    tenant_id integer NOT NULL,
+    payload_hash character varying(64) NOT NULL,
+    status character varying(16) NOT NULL,
+    created_at timestamp without time zone NOT NULL,
+    updated_at timestamp without time zone NOT NULL,
+    processed_at timestamp without time zone,
+    CONSTRAINT ck_usage_report_receipts_status CHECK (((status)::text = ANY ((ARRAY['processing'::character varying, 'completed'::character varying, 'failed'::character varying])::text[])))
+);
+
 CREATE TABLE usage_summary (
     tool_name character varying(50) NOT NULL,
     host_name character varying(100),
@@ -2219,6 +2241,12 @@ ALTER TABLE ONLY user_daily_stats
 ALTER TABLE ONLY user_tool_accounts
     ADD CONSTRAINT uq_user_tool_account UNIQUE (tool_account);
 
+ALTER TABLE ONLY usage_report_rate_limits
+    ADD CONSTRAINT usage_report_rate_limits_pkey PRIMARY KEY (rate_key);
+
+ALTER TABLE ONLY usage_report_receipts
+    ADD CONSTRAINT usage_report_receipts_pkey PRIMARY KEY (report_id);
+
 ALTER TABLE ONLY user_daily_stats
     ADD CONSTRAINT user_daily_stats_pkey PRIMARY KEY (id);
 
@@ -2285,15 +2313,23 @@ CREATE INDEX idx_agent_sessions_project ON agent_sessions USING btree (project_i
 --
 --
 
+CREATE INDEX idx_agent_sessions_remote_machine_id ON agent_sessions USING btree (remote_machine_id);
+
 CREATE INDEX idx_agent_sessions_session_id ON agent_sessions USING btree (session_id);
+
+
+--
+--
 
 CREATE INDEX idx_agent_sessions_session_type ON agent_sessions USING btree (session_type);
 
-
---
---
-
 CREATE INDEX idx_agent_sessions_status ON agent_sessions USING btree (status);
+
+
+--
+--
+
+CREATE INDEX idx_agent_sessions_tenant_id ON agent_sessions USING btree (tenant_id);
 
 CREATE INDEX idx_agent_sessions_tenant_updated ON agent_sessions USING btree (tenant_id, updated_at);
 
@@ -2912,6 +2948,14 @@ CREATE INDEX idx_usage_date ON daily_usage USING btree (date);
 CREATE INDEX idx_usage_date_tool_host ON daily_usage USING btree (tenant_id, date, tool_name, host_name);
 
 CREATE INDEX idx_usage_host_name ON daily_usage USING btree (host_name);
+
+
+--
+--
+
+CREATE INDEX idx_usage_report_rate_limits_updated ON usage_report_rate_limits USING btree (updated_at);
+
+CREATE INDEX idx_usage_report_receipts_session ON usage_report_receipts USING btree (session_id, created_at);
 
 
 --
