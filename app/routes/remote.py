@@ -281,7 +281,7 @@ def _audit_usage_report_failure(
     if machine_verified and action == AuditAction.USAGE_REPORT_BINDING_MISMATCH.value:
         try:
             agent_mgr = get_remote_agent_manager()
-            source_ip = request.remote_addr or client_ip
+            source_ip = _transport_peer_ip()
             audit_key = f"usage-binding-audit:{machine_id}:{source_ip}"
             if not _check_usage_report_rate_limit(agent_mgr, audit_key, 5):
                 return
@@ -1240,6 +1240,25 @@ def get_client_ip_from_request() -> str:
         return str(real_ip).strip()
 
     return request.remote_addr or "127.0.0.1"
+
+
+def _transport_peer_ip() -> str:
+    """Return the original WSGI peer before ProxyFix rewrites REMOTE_ADDR.
+
+    ``create_app`` trusts one forwarded hop via ``ProxyFix(x_for=1)``.  Flask's
+    ``request.remote_addr`` is therefore client-controlled on a directly
+    reachable deployment. Werkzeug preserves the pre-rewrite value in
+    ``werkzeug.proxy_fix.orig``; pre-authentication limits must use that value.
+    """
+    proxy_orig = request.environ.get("werkzeug.proxy_fix.orig")
+    if isinstance(proxy_orig, dict):
+        original = proxy_orig.get("REMOTE_ADDR")
+        if isinstance(original, str) and original:
+            return original
+    raw = request.environ.get("REMOTE_ADDR")
+    if isinstance(raw, str) and raw:
+        return raw
+    return "unknown"
 
 
 @remote_bp.route("/agent/register", methods=["POST"])
@@ -2440,7 +2459,7 @@ def _should_audit_usage_auth_failure(agent_mgr: Any, client_ip: str) -> bool:
     try:
         # Do not trust X-Forwarded-For for a pre-authentication limiter: a
         # direct caller can spoof it and allocate unbounded rate/audit keys.
-        source_ip = request.remote_addr or client_ip
+        source_ip = _transport_peer_ip()
         return _check_usage_report_rate_limit(agent_mgr, f"usage-auth-audit:{source_ip}", 5)
     except Exception:
         logger.exception("Failed to apply usage auth audit rate limit")
@@ -2639,7 +2658,7 @@ def _process_authenticated_usage_report(data: dict, machine_id: str, client_ip: 
     # invalid-binding traffic cannot amplify database or audit writes.
     for key, limit, label in (
         (f"machine:{machine_id}", 60, "this machine"),
-        (f"ip:{request.remote_addr or client_ip}", 120, "this client"),
+        (f"ip:{_transport_peer_ip()}", 120, "this client"),
     ):
         if not _check_usage_report_rate_limit(agent_mgr, key, limit):
             return jsonify({"error": f"Rate limit exceeded for {label}"}), 429

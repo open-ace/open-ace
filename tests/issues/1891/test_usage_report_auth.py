@@ -14,6 +14,7 @@ from unittest.mock import patch
 
 import pytest
 from flask import Flask
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 import app.repositories.database as db_mod
 from app.modules.governance.audit_logger import AuditAction
@@ -531,6 +532,9 @@ def usage_http(manager):
     app = Flask(__name__)
     app.config.update(TESTING=True, SECRET_KEY="usage-report-test")
     app.register_blueprint(remote_routes.remote_bp, url_prefix="/api/remote")
+    # Match production create_app(): request.remote_addr is rewritten from XFF,
+    # while werkzeug.proxy_fix.orig retains the transport peer.
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1)
 
     with (
         patch.object(remote_routes, "get_remote_agent_manager", return_value=manager),
@@ -820,6 +824,11 @@ class TestUsageReportHttpIntegration:
             "SELECT COUNT(*) AS count FROM audit_logs " "WHERE action = 'usage_report_auth_failure'"
         )["count"]
         assert audit_count == 5
+        auth_limit_keys = manager.db.fetch_all(
+            "SELECT rate_key FROM usage_report_rate_limits "
+            "WHERE rate_key LIKE 'usage-auth-audit:%'"
+        )
+        assert [row["rate_key"] for row in auth_limit_keys] == ["usage-auth-audit:127.0.0.1"]
 
     @pytest.mark.parametrize("path", ["/api/remote/usage-report", "/api/remote/agent/message"])
     def test_report_id_less_agent_has_explicit_short_migration_window(self, usage_http, path):
