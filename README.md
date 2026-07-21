@@ -15,7 +15,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License">
-  <img src="https://img.shields.io/badge/Python-3.9%2B-green.svg" alt="Python">
+  <img src="https://img.shields.io/badge/Python-3.10%2B-green.svg" alt="Python">
   <img src="https://img.shields.io/badge/React-18.3-61DAFB.svg" alt="React">
   <img src="https://img.shields.io/badge/Flask-2.x-orange.svg" alt="Flask">
 </p>

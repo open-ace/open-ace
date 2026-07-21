@@ -1046,7 +1046,7 @@ class GitHubOps:
         Known limitation: `gh run list --json name` returns the WORKFLOW run
         name (the workflow YAML's top-level `name:`, defaulting to the repo
         name), while `check.name` is the JOB name inside the workflow (e.g.
-        "lint", "test (3.9)"). For an umbrella workflow (run name "CI",
+        "lint", "test (3.10)"). For an umbrella workflow (run name "CI",
         jobs "lint"/"test") the name match fails and we fall back to runs[0].
         If a commit triggers multiple workflows, runs[0] may belong to a
         different workflow and its failure log gets attributed to this check.
