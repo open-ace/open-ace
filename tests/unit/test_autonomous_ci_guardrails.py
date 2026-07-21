@@ -411,6 +411,20 @@ def test_isolated_agent_account_rejects_root(monkeypatch):
         raise AssertionError("UID 0 autonomous agent account was accepted")
 
 
+def test_isolated_agent_account_rejects_service_principal(monkeypatch):
+    from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+    monkeypatch.setenv("OPENACE_AUTONOMOUS_AGENT_ACCOUNT", "openace")
+    monkeypatch.setattr(
+        "app.modules.workspace.autonomous.orchestrator.pwd.getpwnam",
+        lambda _name: MagicMock(pw_uid=501, pw_gid=20),
+    )
+    monkeypatch.setattr("app.modules.workspace.autonomous.orchestrator.os.getuid", lambda: 501)
+
+    with pytest.raises(RuntimeError, match="must differ from the Open ACE service account"):
+        AutonomousOrchestrator._resolve_isolated_agent_account()
+
+
 def test_trusted_git_context_rejects_replaced_git_directory():
     from app.modules.workspace.autonomous.github_ops import GitHubOps, GitHubOpsError
 
@@ -442,6 +456,40 @@ def test_agent_command_policy_denies_push_and_mutating_pr_commands():
     assert _is_forbidden_autonomous_command("Bash", {"command": "gh pr merge 42"})
     assert _is_forbidden_autonomous_command("Bash", {"command": "/usr/bin/python3 -m pytest"})
     assert not _is_forbidden_autonomous_command("Bash", {"command": "git status"})
+
+
+def test_isolated_git_guard_allows_pre_commit_check_attr(tmp_path):
+    """pre-commit's large-file hook needs this read-only plumbing command."""
+    import os
+    import subprocess
+    from pathlib import Path
+
+    real_git = tmp_path / "real-git"
+    real_git.write_text(
+        f"#!{sys.executable}\nimport sys\nprint(' '.join(sys.argv[1:]))\n",
+        encoding="utf-8",
+    )
+    real_git.chmod(0o755)
+    guard = (
+        Path(__file__).parents[2]
+        / "app"
+        / "modules"
+        / "workspace"
+        / "autonomous"
+        / "agent_bin"
+        / "git"
+    )
+    result = subprocess.run(
+        [str(guard), "check-attr", "filter", "-z", "--stdin"],
+        input="",
+        capture_output=True,
+        text=True,
+        env={**os.environ, "OPENACE_REAL_GIT": str(real_git)},
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert result.stdout.strip() == "check-attr filter -z --stdin"
 
 
 def test_runner_preserves_tool_result_for_test_evidence():
@@ -784,6 +832,110 @@ def test_fresh_ci_repair_prompt_keeps_requirements_plan_and_diff():
     assert "APPROVED PLAN" in prompt
     assert "diff --git" in prompt
     assert "CI EXCERPT" in prompt
+    assert "pre-commit run --all-files" in prompt
+    assert "直到 exit 0" in prompt
+
+
+def test_pre_commit_detection_requires_log_evidence():
+    from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+    assert AutonomousOrchestrator._ci_failure_uses_pre_commit(
+        [
+            {
+                "name": "lint",
+                "failure_excerpt": "hook id: end-of-file-fixer\nfiles were modified by this hook",
+            }
+        ]
+    )
+    assert not AutonomousOrchestrator._ci_failure_uses_pre_commit(
+        [{"name": "lint", "failure_excerpt": "ruff: F401 unused import"}]
+    )
+
+
+def test_pre_commit_convergence_reruns_modified_hooks_as_isolated_agent():
+    from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner
+    from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+    orch = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
+    orch._resolve_isolated_agent_account = MagicMock(return_value="openace-agent")
+    orch._resolve_system_account = MagicMock(return_value="repo-owner")
+    orch._select_project_python_runtime = MagicMock(return_value=(["python3"], ""))
+    gh = MagicMock()
+    gh.path_exists_as_user.return_value = True
+    failed_checks = [
+        {
+            "name": "lint",
+            "failure_excerpt": "pre-commit hook(s) made changes",
+        }
+    ]
+    modified = MagicMock(
+        returncode=1,
+        stdout="files were modified by this hook\nFixing docker-compose.yml",
+        stderr="",
+    )
+    clean = MagicMock(returncode=0, stdout="All checks passed", stderr="")
+
+    with (
+        patch(
+            "app.modules.workspace.autonomous.orchestrator.shutil.which",
+            side_effect=["/usr/local/bin/pre-commit", "/usr/bin/git"],
+        ),
+        patch.object(
+            AutonomousAgentRunner,
+            "_wrap_agent_cmd",
+            return_value=(["isolated-wrapper", "pre-commit"], None),
+        ) as wrap,
+        patch(
+            "app.modules.workspace.autonomous.orchestrator.subprocess.run",
+            side_effect=[modified, clean],
+        ) as run,
+    ):
+        attempted, error = orch._converge_pre_commit_fixes(
+            {
+                "workspace_type": "local",
+                "worktree_path": "/private/repo",
+            },
+            gh,
+            failed_checks,
+        )
+
+    assert attempted
+    assert error == ""
+    assert run.call_count == 2
+    wrap.assert_called_once()
+    assert wrap.call_args.args[:3] == (
+        ["/usr/local/bin/pre-commit", "run", "--all-files"],
+        "/private/repo",
+        "openace-agent",
+    )
+    assert run.call_args.kwargs["cwd"] is None
+    assert run.call_args.kwargs["env"] is None
+
+
+def test_pre_commit_convergence_rejects_repository_owner_account():
+    from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+    orch = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
+    orch._resolve_isolated_agent_account = MagicMock(return_value="repo-owner")
+    orch._resolve_system_account = MagicMock(return_value="repo-owner")
+    gh = MagicMock()
+    gh.path_exists_as_user.return_value = True
+
+    with (
+        patch(
+            "app.modules.workspace.autonomous.orchestrator.shutil.which",
+            side_effect=["/usr/local/bin/pre-commit", "/usr/bin/git"],
+        ),
+        patch("app.modules.workspace.autonomous.orchestrator.subprocess.run") as run,
+        pytest.raises(RuntimeError, match="repository owner"),
+    ):
+        orch._converge_pre_commit_fixes(
+            {"workspace_type": "local", "worktree_path": "/private/repo", "user_id": 7},
+            gh,
+            [{"failure_excerpt": "pre-commit hook(s) made changes"}],
+        )
+
+    run.assert_not_called()
 
 
 def test_nonstandard_report_with_real_test_evidence_does_not_retry():
