@@ -15,7 +15,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License">
-  <img src="https://img.shields.io/badge/Python-3.9%2B-green.svg" alt="Python">
+  <img src="https://img.shields.io/badge/Python-3.10%2B-green.svg" alt="Python">
   <img src="https://img.shields.io/badge/React-18.3-61DAFB.svg" alt="React">
   <img src="https://img.shields.io/badge/Flask-2.x-orange.svg" alt="Flask">
 </p>
@@ -258,7 +258,7 @@ python3 server.py
 <td width="50%">
 
 ### 后端
-- **Python 3.9+**
+- **Python 3.10+**
 - **Flask** — Web 框架
 - **SQLAlchemy** — ORM
 - **PostgreSQL / SQLite** — 数据库
@@ -563,7 +563,7 @@ python3 server.py
 <td width="50%">
 
 ### Backend
-- **Python 3.9+**
+- **Python 3.10+**
 - **Flask** — Web Framework
 - **SQLAlchemy** — ORM
 - **PostgreSQL / SQLite** — Database
