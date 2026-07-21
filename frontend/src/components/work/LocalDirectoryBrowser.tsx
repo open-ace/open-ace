@@ -382,7 +382,13 @@ export const LocalDirectoryBrowser: React.FC<LocalDirectoryBrowserProps> = ({
     }
 
     // Refresh the listing so the uploaded file appears.
-    await fetchDirectories(currentPath);
+    // Issue #1959: wrap in try-catch to prevent unhandled exceptions,
+    // even though fetchDirectories has its own error handling (Issue #1912).
+    try {
+      await fetchDirectories(currentPath);
+    } catch (err) {
+      console.error('Failed to refresh directory listing after upload:', err);
+    }
   };
 
   const handleDownload = async (file: FileEntry) => {
