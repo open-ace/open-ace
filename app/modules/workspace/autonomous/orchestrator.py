@@ -51,7 +51,7 @@ class WorkflowPaused(RuntimeError):
 
 
 class UpstreamQuotaPaused(WorkflowPaused):
-    """Control-flow signal used after persisting a recoverable quota pause."""
+    """Control-flow signal used after persisting a hard-quota pause."""
 
 
 # Completion keywords to detect in issue comments
@@ -806,13 +806,11 @@ _TRANSIENT_API_ERROR_RE = re.compile(
     re.IGNORECASE,
 )
 
-# The proxy emits this explicit message only after the provider reports a
-# quota-exhaustion response.  Unlike burst rate limiting, retrying it for the
-# full 30-minute transient window cannot make progress and amplifies traffic.
-_UPSTREAM_QUOTA_EXHAUSTED_RE = re.compile(
-    r"platform\s+quota\s+exceeded"
-    r"|upstream\s+(?:provider\s+)?quota\s+(?:exceeded|exhausted)"
-    r"|usage\s+allocated\s+quota\s+exceeded",
+# Hard provider quota failures are distinct from Bailian Coding Plan's
+# ``usage allocated quota exceeded`` wording, which is a temporary allocation
+# rate limit and must remain on the transient retry path.
+_UPSTREAM_HARD_QUOTA_EXHAUSTED_RE = re.compile(
+    r"platform\s+quota\s+exceeded" r"|upstream\s+(?:provider\s+)?quota\s+(?:exceeded|exhausted)",
     re.IGNORECASE,
 )
 
@@ -2292,6 +2290,40 @@ class AutonomousOrchestrator:
         return "\n".join(result_parts)
 
     @staticmethod
+    def _get_pr_review_diff(gh: GitHubOps, pr_number: int | None, branch_name: str) -> str:
+        """Return only the changes introduced by the workflow branch.
+
+        A two-point ``git diff main branch`` includes unrelated changes that
+        landed on ``main`` after a long-running workflow branched. Prefer
+        GitHub's PR diff, whose semantics are based on the PR merge base. If
+        the PR API is temporarily unavailable, reproduce those semantics
+        locally by resolving the merge base explicitly.
+        """
+        if pr_number:
+            try:
+                pr_diff = gh.get_pr_diff(pr_number)
+                if pr_diff:
+                    return pr_diff
+            except Exception as exc:
+                logger.warning("Failed to load PR #%s diff for review: %s", pr_number, exc)
+
+        if not branch_name:
+            return ""
+
+        try:
+            merge_base = gh._run_git(["merge-base", "origin/main", branch_name]).stdout.strip()
+            if not merge_base:
+                return ""
+            return gh.get_diff(merge_base, branch_name)
+        except Exception as exc:
+            logger.warning(
+                "Failed to load merge-base diff for review branch %s: %s",
+                branch_name,
+                exc,
+            )
+            return ""
+
+    @staticmethod
     def _is_pre_existing_ci_failure(response: str) -> bool:
         """Whether the agent identified CI failures as pre-existing.
 
@@ -3292,7 +3324,7 @@ class AutonomousOrchestrator:
         plan/review text caused phrases such as "Rate Limit" to restart an
         otherwise successful phase (#1891).
         """
-        if cls._is_upstream_quota_exhausted(result):
+        if cls._is_upstream_hard_quota_exhausted(result):
             return False
         if cls._is_transient_api_error(result.error or ""):
             return True
@@ -3301,21 +3333,22 @@ class AutonomousOrchestrator:
         )
 
     @staticmethod
-    def _is_upstream_quota_exhausted(result: AgentTaskResult) -> bool:
-        """Return whether a provider allocation is exhausted.
+    def _is_upstream_hard_quota_exhausted(result: AgentTaskResult) -> bool:
+        """Return whether a provider reports a non-transient hard quota.
 
-        Error fields are authoritative.  Assistant text is considered only
-        for a zero-token envelope so a legitimate design discussion about
-        quota handling cannot pause a workflow.
+        Error fields are authoritative. Assistant text is considered only for
+        a zero-token envelope so prose discussing quota handling cannot pause
+        a workflow. Bailian's allocated-quota rate limit is intentionally not
+        part of the hard-quota pattern.
         """
-        if _UPSTREAM_QUOTA_EXHAUSTED_RE.search(result.error or ""):
+        if _UPSTREAM_HARD_QUOTA_EXHAUSTED_RE.search(result.error or ""):
             return True
         return (result.total_tokens or 0) == 0 and bool(
-            _UPSTREAM_QUOTA_EXHAUSTED_RE.search(result.response_text or "")
+            _UPSTREAM_HARD_QUOTA_EXHAUSTED_RE.search(result.response_text or "")
         )
 
     def _pause_for_upstream_quota(self, result: AgentTaskResult, milestone_id: str = "") -> None:
-        """Persist a non-spinning pause that an operator may resume later."""
+        """Persist a non-spinning hard-quota pause that an operator may resume."""
         message = (
             f"{UPSTREAM_QUOTA_PAUSE_REASON_PREFIX} "
             "the configured model provider rejected requests; resume after "
@@ -3721,7 +3754,6 @@ class AutonomousOrchestrator:
         # gate avoids flagging a legitimate plan that merely mentions these
         # phrases. #1001. Centralized in a helper so the retry loop's early-exit
         # paths (status failed/cancelled, cancel-requested) apply it too. #1036.
-        upstream_quota_exhausted = self._is_upstream_quota_exhausted(result)
         self._synthesize_transient_failure(result)
         repo_validation_error = self._validate_repo_context_after_run(
             repo_state_before, project_system_account
@@ -3731,6 +3763,7 @@ class AutonomousOrchestrator:
             result.success = False
             result.error_code = "repo_integrity_violation"
             result.error = repo_validation_error
+        upstream_hard_quota_exhausted = self._is_upstream_hard_quota_exhausted(result)
 
         # Attribute this call's own usage to its milestone (increment, not cumulative).
         self._write_phase_usage(milestone_id, result, retry_usage)
@@ -3742,7 +3775,7 @@ class AutonomousOrchestrator:
                 if field
                 else (result.tracking_session_id or result.session_id or tracking_session_id)
             )
-        if upstream_quota_exhausted:
+        if upstream_hard_quota_exhausted:
             self._pause_for_upstream_quota(result, milestone_id)
             raise UpstreamQuotaPaused(result.error)
         return result
@@ -6317,11 +6350,7 @@ class AutonomousOrchestrator:
         )
 
         # Get diff for review
-        diff_text = ""
-        try:
-            diff_text = gh.get_diff("main", branch_name)
-        except Exception:
-            pass
+        diff_text = self._get_pr_review_diff(gh, pr_number, branch_name)
 
         # Check CI status for the PR — poll until checks finish or timeout
         ci_checks: list = []
