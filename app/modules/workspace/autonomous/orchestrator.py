@@ -3108,6 +3108,8 @@ class AutonomousOrchestrator:
         deadline = time.monotonic() + CI_POLL_MAX_WAIT
         last_error = ""
         while True:
+            if AutonomousOrchestrator._is_shutdown_requested(self):
+                raise WorkflowPaused("Service shutdown interrupted CI polling")
             try:
                 checks = gh.get_pr_checks(pr_number)
             except Exception as e:
@@ -3118,7 +3120,7 @@ class AutonomousOrchestrator:
                         f"Failed to query CI checks for PR #{pr_number} within "
                         f"{CI_POLL_MAX_WAIT}s: {last_error}"
                     ) from e
-                time.sleep(CI_POLL_INTERVAL)
+                AutonomousOrchestrator._wait_for_ci_poll_or_shutdown(self)
                 continue
             if not checks:
                 # No checks configured — nothing to wait for.
@@ -3140,7 +3142,16 @@ class AutonomousOrchestrator:
                 len(pending),
                 CI_POLL_INTERVAL,
             )
+            AutonomousOrchestrator._wait_for_ci_poll_or_shutdown(self)
+
+    def _wait_for_ci_poll_or_shutdown(self) -> None:
+        """Wait one CI poll interval while remaining interruptible by shutdown."""
+        shutdown_event = getattr(self, "_shutdown_requested", None)
+        if shutdown_event is None:
             time.sleep(CI_POLL_INTERVAL)
+            return
+        if shutdown_event.wait(CI_POLL_INTERVAL):
+            raise WorkflowPaused("Service shutdown interrupted CI polling")
 
     def _start_ci_repair_round(self, wf: dict, pr_number: int, failed_checks: list[dict]) -> None:
         """Repair merge-phase CI failures in-place on the existing PR branch."""
@@ -4015,20 +4026,32 @@ class AutonomousOrchestrator:
             # agent after the workflow row was paused.
             slept = 0
             self._cancel_requested.clear()
+            # Shutdown may race exactly between the loop-top check and the
+            # clear above.  The shutdown event is monotonic and authoritative;
+            # re-check it directly so clearing the shared cancel event cannot
+            # consume SIGTERM and let a new retry dispatch.
+            if self._is_shutdown_requested():
+                self._abort_agent_run_for_shutdown(
+                    milestone_id,
+                    result,
+                    retry_usage,
+                    usage_session_ids,
+                    tracking_session_id,
+                )
             while slept < delay:
                 time.sleep(min(_CANCEL_POLL_INTERVAL, delay - slept))
                 slept += _CANCEL_POLL_INTERVAL
                 if (self.workflow or {}).get("status") == "paused":
                     abort_paused_retry()
+                if self._is_shutdown_requested():
+                    self._abort_agent_run_for_shutdown(
+                        milestone_id,
+                        result,
+                        retry_usage,
+                        usage_session_ids,
+                        tracking_session_id,
+                    )
                 if self._cancel_requested.is_set():
-                    if self._is_shutdown_requested():
-                        self._abort_agent_run_for_shutdown(
-                            milestone_id,
-                            result,
-                            retry_usage,
-                            usage_session_ids,
-                            tracking_session_id,
-                        )
                     logger.info("API error retry cancelled (cancel requested)")
                     self._synthesize_transient_failure(result)
                     self._write_phase_usage(milestone_id, result, retry_usage)
@@ -4219,7 +4242,22 @@ class AutonomousOrchestrator:
         tracking_session_id: str,
     ) -> None:
         """Persist an interrupted attempt and unwind without failing its workflow."""
-        if milestone_id:
+        self._cancel_milestone_for_shutdown(milestone_id)
+        self._write_phase_usage(milestone_id, result, retry_usage)
+        try:
+            self.repo.refresh_workflow_usage_from_sessions(self._workflow_id)
+        except Exception:
+            logger.warning("Failed to refresh workflow usage during shutdown", exc_info=True)
+        self._clear_session_usage_offsets(usage_session_ids)
+        with self._session_lock:
+            self._current_session_id = tracking_session_id
+        raise WorkflowPaused("Service shutdown interrupted the current attempt")
+
+    def _cancel_milestone_for_shutdown(self, milestone_id: str) -> None:
+        """Best-effort milestone cancellation that cannot fail the workflow."""
+        if not milestone_id:
+            return
+        try:
             self.repo.update_milestone(
                 milestone_id,
                 {
@@ -4229,11 +4267,12 @@ class AutonomousOrchestrator:
                     ),
                 },
             )
-        self._write_phase_usage(milestone_id, result, retry_usage)
-        self._clear_session_usage_offsets(usage_session_ids)
-        with self._session_lock:
-            self._current_session_id = tracking_session_id
-        raise WorkflowPaused("Service shutdown interrupted the current attempt")
+        except Exception:
+            # The process is intentionally winding down. A late DB failure
+            # must not escape as a generic orchestrator error and mark the
+            # still-active workflow failed; the replacement process can
+            # reconcile the stale in-progress milestone on retry.
+            logger.warning("Failed to cancel milestone during shutdown", exc_info=True)
 
     def _write_realtime_phase_usage(self, activity: dict) -> None:
         """Write the current call's running cumulative usage to the in-progress milestone.
@@ -6731,6 +6770,8 @@ class AutonomousOrchestrator:
             if pr_number:
                 try:
                     ci_checks_post = self._poll_ci_status(gh, pr_number)
+                except WorkflowPaused:
+                    raise
                 except Exception:
                     ci_checks_post = []
                 ci_fails_post = [c for c in ci_checks_post if c.get("bucket") == "fail"]
@@ -6772,6 +6813,9 @@ class AutonomousOrchestrator:
             try:
                 ci_checks = self._poll_ci_status(gh, pr_number)
                 ci_failures = [c for c in ci_checks if c.get("bucket") == "fail"]
+            except WorkflowPaused:
+                self._cancel_milestone_for_shutdown(review_ms.get("milestone_id", ""))
+                raise
             except Exception:
                 pass
 

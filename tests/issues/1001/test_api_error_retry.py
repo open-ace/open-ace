@@ -145,6 +145,30 @@ class TestRunAgentApiErrorRetry:
                 ),
             },
         )
+        o.repo.refresh_workflow_usage_from_sessions.assert_called_once_with("test-wf-1001")
+
+    def test_shutdown_milestone_write_failure_still_unwinds_as_pause(self):
+        o = _make_orchestrator(_make_workflow())
+        o._shutdown_requested.set()
+        o.repo.update_milestone.side_effect = RuntimeError("database is closing")
+
+        with pytest.raises(orch_module.WorkflowPaused, match="Service shutdown"):
+            o._run_agent(wf=_make_workflow(), milestone_id="ms-shutdown", prompt="x")
+
+        o._runner.run_agent_task.assert_not_called()
+        o._update_workflow.assert_not_called()
+
+    def test_shutdown_interrupts_ci_poll_wait(self):
+        o = _make_orchestrator(_make_workflow())
+        o._shutdown_requested.wait = MagicMock(return_value=True)
+        gh = MagicMock()
+        gh.get_pr_checks.return_value = [{"name": "lint", "bucket": "pending"}]
+
+        with pytest.raises(orch_module.WorkflowPaused, match="CI polling"):
+            o._poll_ci_status(gh, 1966)
+
+        gh.get_pr_checks.assert_called_once_with(1966)
+        o._shutdown_requested.wait.assert_called_once_with(orch_module.CI_POLL_INTERVAL)
 
     def test_shutdown_cancels_attempt_without_returning_failure(self):
         o = _make_orchestrator(_make_workflow())
@@ -177,6 +201,34 @@ class TestRunAgentApiErrorRetry:
         )
         o._write_phase_usage.assert_called_once()
         assert o._current_session_id == "sess-track"
+
+    def test_shutdown_racing_with_retry_cancel_clear_never_dispatches(self, monkeypatch):
+        monkeypatch.setattr("time.sleep", lambda *_args, **_kwargs: None)
+        o = _make_orchestrator(_make_workflow())
+        transient = AgentTaskResult(
+            session_id="sess-track",
+            tracking_session_id="sess-track",
+            response_text="API Error: 529 [overloaded]",
+            success=True,
+        )
+        o._runner.run_agent_task = MagicMock(return_value=transient)
+
+        class ShutdownDuringClear:
+            def clear(self):
+                # Reproduce SIGTERM after the retry loop checked shutdown but
+                # before it cleared the ordinary cancellation signal.
+                o._shutdown_requested.set()
+
+            def is_set(self):
+                return False
+
+        o._cancel_requested = ShutdownDuringClear()
+
+        with pytest.raises(orch_module.WorkflowPaused, match="Service shutdown"):
+            o._run_agent(wf=_make_workflow(), milestone_id="ms-shutdown", prompt="x")
+
+        o._runner.run_agent_task.assert_called_once()
+        o._write_phase_usage.assert_called_once()
 
     def test_no_retry_on_normal_response(self, monkeypatch):
         monkeypatch.setattr("time.sleep", lambda *a, **k: None)
