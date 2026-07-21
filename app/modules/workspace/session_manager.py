@@ -71,6 +71,27 @@ _WORKFLOW_ID_CONTEXT_MARKER = '"workflow_id"'
 _AUTONOMOUS_WORKFLOW_CONTEXT_PATTERN = "%" + escape_like(_WORKFLOW_ID_CONTEXT_MARKER) + "%"
 
 
+def is_autonomous_workflow_session(session: Any) -> bool:
+    """Return whether ``session`` is owned by the autonomous scheduler.
+
+    Autonomous workflow sessions have a separate lifecycle owner.  Quota
+    enforcement pauses their parent workflow between orchestrator cycles; a
+    generic session sweeper must not complete the backing session mid-agent,
+    because completion revokes its LLM proxy token while the process is still
+    running.
+    """
+    session_type = getattr(session, "session_type", None)
+    context = getattr(session, "context", None)
+    if isinstance(session, dict):
+        session_type = session.get("session_type")
+        context = session.get("context")
+    return (
+        session_type == SessionType.WORKFLOW.value
+        and isinstance(context, dict)
+        and bool(context.get("workflow_id"))
+    )
+
+
 def visible_session_clause(alias: str = "") -> tuple[str, list[Any]]:
     """Hide autonomous workflow tracking wrappers from user-facing listings.
 
