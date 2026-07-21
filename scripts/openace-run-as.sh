@@ -164,7 +164,13 @@ if [ "$isolated" = true ]; then
         done
         setfacl -R -m "u:${target_user}:rX" "$metadata_dir"
     done
-    [ ! -e "$project_dir/.git" ] || setfacl -m "u:${target_user}:r" "$project_dir/.git"
+    # A linked worktree stores .git as a pointer file (read-only is enough),
+    # while a normal clone stores it as a directory and needs execute/traverse.
+    if [ -f "$project_dir/.git" ]; then
+        setfacl -m "u:${target_user}:r" "$project_dir/.git"
+    elif [ -d "$project_dir/.git" ]; then
+        setfacl -m "u:${target_user}:rX" "$project_dir/.git"
+    fi
 fi
 
 # Root can traverse any directory; chdir here so the CLI inherits the project
@@ -181,7 +187,9 @@ if [ "$isolated" = true ]; then
     set +e
     /usr/sbin/runuser -u "$target_user" -- /usr/bin/env -i \
         "HOME=$target_home" "USER=$target_user" "LOGNAME=$target_user" \
-        "LANG=${LANG:-C.UTF-8}" "LC_ALL=${LC_ALL:-}" "TMPDIR=/tmp" "$@"
+        "LANG=${LANG:-C.UTF-8}" "LC_ALL=${LC_ALL:-}" "TMPDIR=/tmp" \
+        "GIT_CONFIG_COUNT=1" "GIT_CONFIG_KEY_0=safe.directory" \
+        "GIT_CONFIG_VALUE_0=$project_dir" "$@"
     child_status=$?
     set -e
     cleanup_isolated

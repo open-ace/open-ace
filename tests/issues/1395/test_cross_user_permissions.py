@@ -319,8 +319,8 @@ class TestPreparationWorktreeCleanup:
 
 
 class TestEnsureProjectDir:
-    def test_cross_user_mkdir_uses_sudo(self, monkeypatch, tmp_path):
-        # project_path under a user-private dir → mkdir goes through sudo.
+    def test_cross_user_directory_probe_uses_isolated_wrapper(self, monkeypatch, tmp_path):
+        # The isolated wrapper grants the ACL before checking the worktree.
         from app.modules.workspace.autonomous import agent_runner
 
         monkeypatch.setattr(agent_runner.pwd, "getpwuid", lambda _uid: MagicMock(pw_name="openace"))
@@ -336,7 +336,19 @@ class TestEnsureProjectDir:
 
         agent_runner.AutonomousAgentRunner._ensure_project_dir(target, "rhuang")
 
-        assert captured["cmd"] == ["sudo", "-u", "rhuang", "mkdir", "-p", target]
+        assert captured["cmd"] == [
+            "sudo",
+            "-n",
+            "-u",
+            "root",
+            agent_runner._OPENACE_RUN_AS,
+            "--isolated",
+            "rhuang",
+            target,
+            "/usr/bin/test",
+            "-d",
+            ".",
+        ]
         assert captured["kwargs"]["timeout"] == 30
 
     def test_same_user_mkdir_uses_path(self, monkeypatch, tmp_path):
@@ -363,8 +375,7 @@ class TestEnsureProjectDir:
         agent_runner.AutonomousAgentRunner._ensure_project_dir(str(target), None)
         assert target.is_dir()
 
-    def test_cross_user_existing_dir_still_sudo_mkdir_p(self, monkeypatch, tmp_path):
-        # mkdir -p is idempotent; even if the dir exists, sudo mkdir is fine.
+    def test_cross_user_existing_dir_still_uses_wrapper(self, monkeypatch, tmp_path):
         from app.modules.workspace.autonomous import agent_runner
 
         monkeypatch.setattr(agent_runner.pwd, "getpwuid", lambda _uid: MagicMock(pw_name="openace"))
@@ -378,7 +389,14 @@ class TestEnsureProjectDir:
 
         monkeypatch.setattr(agent_runner.subprocess, "run", fake_run)
         agent_runner.AutonomousAgentRunner._ensure_project_dir(str(target), "rhuang")
-        assert captured["cmd"][:3] == ["sudo", "-u", "rhuang"]
+        assert captured["cmd"][:6] == [
+            "sudo",
+            "-n",
+            "-u",
+            "root",
+            agent_runner._OPENACE_RUN_AS,
+            "--isolated",
+        ]
 
     def test_cross_user_mkdir_failure_raises(self, monkeypatch, tmp_path):
         # sudo/mkdir failure must raise (fail-fast) instead of being swallowed,
@@ -398,6 +416,17 @@ class TestEnsureProjectDir:
 
         with pytest.raises(PermissionError, match="Permission denied"):
             agent_runner.AutonomousAgentRunner._ensure_project_dir("/home/rhuang/no-perm", "rhuang")
+
+
+def test_isolated_wrapper_scopes_git_safe_directory_to_worktree():
+    from pathlib import Path
+
+    wrapper = Path("scripts/openace-run-as.sh").read_text(encoding="utf-8")
+
+    assert '"GIT_CONFIG_COUNT=1"' in wrapper
+    assert '"GIT_CONFIG_KEY_0=safe.directory"' in wrapper
+    assert '"GIT_CONFIG_VALUE_0=$project_dir"' in wrapper
+    assert "git config --global" not in wrapper
 
 
 # ── _wrap_agent_cmd / _is_cross_user (agent launch) ─────────────────────
