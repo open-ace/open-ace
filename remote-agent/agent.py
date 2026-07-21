@@ -20,6 +20,7 @@ import sys
 import tempfile
 import threading
 import time
+import uuid
 from datetime import datetime
 from typing import Any
 
@@ -457,6 +458,10 @@ class RemoteAgent:
         self._http_send(
             {
                 "type": "usage_report",
+                # The server persists this identifier before applying the
+                # delta.  A transport retry must reuse the same message (and
+                # therefore the same report_id) so it cannot double count.
+                "report_id": str(uuid.uuid4()),
                 "session_id": session_id,
                 "tokens": tokens,
                 "requests": requests,

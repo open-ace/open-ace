@@ -5,8 +5,8 @@ Revises: 20260721_001_add_ci_diagnostics_attempts
 Create Date: 2026-07-21
 
 Issue: #1891
-Adds last_usage_report_at column for idempotency protection and indexes
-for session-machine binding validation queries.
+Adds durable receipt and shared rate-limit tables plus indexes for
+session-machine binding validation queries.
 """
 
 import sqlalchemy as sa
@@ -19,20 +19,51 @@ depends_on: str | None = None
 
 
 def upgrade() -> None:
-    """Add last_usage_report_at column and performance indexes."""
+    """Add usage report replay protection and shared rate limiting."""
     connection = op.get_bind()
     inspector = sa.inspect(connection)
 
-    # Add last_usage_report_at column to agent_sessions if not exists
-    existing_columns = {col["name"] for col in inspector.get_columns("agent_sessions")}
-    if "last_usage_report_at" not in existing_columns:
-        op.add_column(
-            "agent_sessions",
-            sa.Column(
-                "last_usage_report_at",
-                sa.DateTime(),
-                nullable=True,
+    existing_tables = set(inspector.get_table_names())
+    if "usage_report_receipts" not in existing_tables:
+        op.create_table(
+            "usage_report_receipts",
+            sa.Column("report_id", sa.String(length=128), primary_key=True),
+            sa.Column("session_id", sa.Text(), nullable=False),
+            sa.Column("machine_id", sa.Text(), nullable=False),
+            sa.Column("user_id", sa.Integer(), nullable=False),
+            sa.Column("tenant_id", sa.Integer(), nullable=False),
+            sa.Column("payload_hash", sa.String(length=64), nullable=False),
+            sa.Column("status", sa.String(length=16), nullable=False),
+            sa.Column("created_at", sa.DateTime(), nullable=False),
+            sa.Column("updated_at", sa.DateTime(), nullable=False),
+            sa.Column("processed_at", sa.DateTime(), nullable=True),
+            sa.CheckConstraint(
+                "status IN ('processing', 'completed', 'failed')",
+                name="ck_usage_report_receipts_status",
             ),
+        )
+        op.create_index(
+            "idx_usage_report_receipts_session",
+            "usage_report_receipts",
+            ["session_id", "created_at"],
+        )
+
+    if "usage_report_rate_limits" not in existing_tables:
+        op.create_table(
+            "usage_report_rate_limits",
+            sa.Column("rate_key", sa.String(length=512), primary_key=True),
+            sa.Column("window_started_at", sa.DateTime(), nullable=False),
+            sa.Column("request_count", sa.Integer(), nullable=False, server_default="0"),
+            sa.Column("updated_at", sa.DateTime(), nullable=False),
+            sa.CheckConstraint(
+                "request_count >= 0",
+                name="ck_usage_report_rate_limits_count",
+            ),
+        )
+        op.create_index(
+            "idx_usage_report_rate_limits_updated",
+            "usage_report_rate_limits",
+            ["updated_at"],
         )
 
     # Add indexes for usage report binding validation queries
@@ -56,7 +87,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """Remove last_usage_report_at column and indexes."""
+    """Remove usage report replay protection and indexes."""
     connection = op.get_bind()
     inspector = sa.inspect(connection)
 
@@ -67,7 +98,8 @@ def downgrade() -> None:
     if "idx_agent_sessions_remote_machine_id" in existing_indexes:
         op.drop_index("idx_agent_sessions_remote_machine_id", table_name="agent_sessions")
 
-    # Drop column
-    existing_columns = {col["name"] for col in inspector.get_columns("agent_sessions")}
-    if "last_usage_report_at" in existing_columns:
-        op.drop_column("agent_sessions", "last_usage_report_at")
+    existing_tables = set(inspector.get_table_names())
+    if "usage_report_rate_limits" in existing_tables:
+        op.drop_table("usage_report_rate_limits")
+    if "usage_report_receipts" in existing_tables:
+        op.drop_table("usage_report_receipts")
