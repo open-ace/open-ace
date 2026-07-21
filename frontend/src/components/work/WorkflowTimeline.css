@@ -1188,7 +1188,7 @@
   }
 }
 
-@media (max-width: 960px) {
+@container workflow-timeline (max-width: 960px) {
   .timeline-header-top,
   .timeline-state-banner,
   .timeline-round-title,
@@ -1253,7 +1253,7 @@
   }
 }
 
-@media (max-width: 720px) {
+@container workflow-timeline (max-width: 720px) {
   .timeline-header {
     padding: 14px 14px 12px;
   }
@@ -1275,7 +1275,11 @@
   .timeline-body {
     padding: 14px;
   }
+}
 
+/* Content modals are portalled outside .timeline-shell, so their sizing must
+   remain tied to the viewport rather than the timeline container. */
+@media (max-width: 720px) {
   .timeline-content-modal {
     max-width: calc(100vw - 0.75rem);
   }
