@@ -899,6 +899,7 @@ def handle_llm_proxy_request(
         )
 
     exclude_key_ids: set[int] = set()
+    allocated_rate_limited_key_ids: set[int] = set()
     attempt = 0
 
     while True:
@@ -919,6 +920,21 @@ def handle_llm_proxy_request(
             )
 
         if not key_result:
+            if allocated_rate_limited_key_ids:
+                return (
+                    jsonify(
+                        {
+                            "error": {
+                                "message": (
+                                    "All available upstream keys are temporarily allocation "
+                                    "rate limited. Please retry later."
+                                ),
+                                "type": "rate_limit_error",
+                            }
+                        }
+                    ),
+                    429,
+                )
             if exclude_key_ids:
                 return (
                     jsonify(
@@ -1059,6 +1075,19 @@ def handle_llm_proxy_request(
 
                 # 检测上游 quota exceeded 错误并触发告警 (Issue #1060)
                 if resp.status_code == 429 and "quota exceeded" in error_text.lower():
+                    # Bailian Coding Plan uses this wording for a temporary
+                    # allocation rate limit, not for a depleted paid quota.
+                    # Keep it retryable and avoid a false platform-quota alert.
+                    allocated_rate_limited = "usage allocated quota exceeded" in error_text.lower()
+                    if allocated_rate_limited:
+                        logger.warning(
+                            "Upstream allocated rate limit reached for user %d; retry later",
+                            user_id,
+                        )
+                        allocated_rate_limited_key_ids.add(key_id)
+                        exclude_key_ids.add(key_id)
+                        continue
+
                     try:
                         from app.modules.governance.alert_notifier import (
                             create_quota_alert,
@@ -1089,7 +1118,6 @@ def handle_llm_proxy_request(
                     except Exception as alert_exc:
                         logger.error("Failed to create quota exceeded alert: %s", alert_exc)
 
-                    # 返回明确的 quota exceeded 错误
                     return (
                         jsonify(
                             {

@@ -1,4 +1,4 @@
-"""Regression tests for upstream provider quota exhaustion handling."""
+"""Regression tests for transient provider limits and manual pause handling."""
 
 import threading
 from unittest.mock import MagicMock, patch
@@ -7,7 +7,6 @@ import pytest
 
 from app.modules.workspace.autonomous.models import AgentTaskResult
 from app.modules.workspace.autonomous.orchestrator import (
-    UPSTREAM_QUOTA_PAUSE_REASON_PREFIX,
     AutonomousOrchestrator,
     UpstreamQuotaPaused,
     WorkflowPaused,
@@ -18,7 +17,7 @@ def _result(**updates) -> AgentTaskResult:
     values = {
         "session_id": "session-1",
         "success": False,
-        "error": "API Error: 429 · Platform quota exceeded. Please wait.",
+        "error": "API Error: 429 · usage allocated quota exceeded. Please try again later.",
     }
     values.update(updates)
     return AgentTaskResult(**values)
@@ -28,6 +27,7 @@ def _orchestrator_for_run(result: AgentTaskResult) -> AutonomousOrchestrator:
     orchestrator = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
     orchestrator._workflow_id = "workflow-1"
     orchestrator.repo = MagicMock()
+    orchestrator.repo.get_workflow.return_value = {"status": "developing"}
     orchestrator.emitter = MagicMock()
     orchestrator._runner = MagicMock()
     orchestrator._runner._uses_sidebar_session_source.return_value = True
@@ -51,14 +51,18 @@ def _orchestrator_for_run(result: AgentTaskResult) -> AutonomousOrchestrator:
     return orchestrator
 
 
-def test_provider_allocation_exhaustion_is_not_transient_retry():
-    result = _result()
+def test_provider_allocated_quota_limit_is_transient():
+    assert AutonomousOrchestrator._should_retry_transient_api_failure(_result())
 
-    assert AutonomousOrchestrator._is_upstream_quota_exhausted(result)
+
+def test_hard_platform_quota_is_not_transient():
+    result = _result(error="API Error: 429 · Platform quota exceeded. Please wait.")
+
+    assert AutonomousOrchestrator._is_upstream_hard_quota_exhausted(result)
     assert not AutonomousOrchestrator._should_retry_transient_api_failure(result)
 
 
-def test_zero_token_provider_envelope_is_detected():
+def test_zero_token_allocated_limit_envelope_is_transient():
     result = _result(
         success=True,
         error=None,
@@ -66,44 +70,53 @@ def test_zero_token_provider_envelope_is_detected():
         response_text="usage allocated quota exceeded. please try again later.",
     )
 
-    assert AutonomousOrchestrator._is_upstream_quota_exhausted(result)
+    assert AutonomousOrchestrator._should_retry_transient_api_failure(result)
 
 
-def test_token_bearing_design_text_does_not_pause():
+def test_token_bearing_design_text_does_not_retry():
     result = _result(
         success=True,
         error=None,
         total_tokens=120,
-        response_text="Handle 'Platform quota exceeded' by showing a banner.",
+        response_text="Handle 'usage allocated quota exceeded' with exponential backoff.",
     )
 
-    assert not AutonomousOrchestrator._is_upstream_quota_exhausted(result)
+    assert not AutonomousOrchestrator._should_retry_transient_api_failure(result)
 
 
-def test_pause_persists_workflow_milestone_and_event():
-    orchestrator = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
-    orchestrator._workflow_id = "workflow-1"
-    orchestrator.repo = MagicMock()
-    orchestrator.emitter = MagicMock()
-    result = _result()
+def test_run_agent_retries_allocated_limit_instead_of_pausing():
+    limited = _result()
+    recovered = _result(
+        success=True,
+        error=None,
+        response_text="completed",
+        total_tokens=20,
+        request_count=1,
+    )
+    orchestrator = _orchestrator_for_run(limited)
+    orchestrator._runner.run_agent_task.side_effect = [limited, recovered]
 
-    orchestrator._pause_for_upstream_quota(result, "milestone-1")
+    with patch("app.modules.workspace.autonomous.orchestrator.time.sleep"):
+        result = orchestrator._run_agent(
+            wf={"user_id": 1, "content_language": "en"},
+            session_line="main",
+            milestone_id="milestone-1",
+            workspace_type="remote",
+            project_path="/tmp/worktree",
+            prompt="do work",
+        )
 
-    milestone_update = orchestrator.repo.update_milestone.call_args.args[1]
-    assert milestone_update["status"] == "failed"
-    assert milestone_update["error_message"].startswith(UPSTREAM_QUOTA_PAUSE_REASON_PREFIX)
-
-    workflow_update = orchestrator.repo.update_workflow.call_args.args[1]
-    assert workflow_update["status"] == "paused"
-    assert workflow_update["agent_pid"] is None
-    assert workflow_update["error_message"].startswith(UPSTREAM_QUOTA_PAUSE_REASON_PREFIX)
-    assert result.error_code == "upstream_quota_exhausted"
-    emitted_types = [call.args[1] for call in orchestrator.emitter.emit.call_args_list]
-    assert emitted_types == ["workflow_updated", "upstream_quota_paused"]
+    assert result is recovered
+    assert orchestrator._runner.run_agent_task.call_count == 2
+    assert not any(
+        call.args[1].get("status") == "paused"
+        for call in orchestrator.repo.update_workflow.call_args_list
+    )
 
 
-def test_run_agent_pauses_immediately_without_retry():
-    orchestrator = _orchestrator_for_run(_result())
+def test_run_agent_pauses_only_for_hard_platform_quota():
+    hard_quota = _result(error="API Error: 429 · Platform quota exceeded. Please wait.")
+    orchestrator = _orchestrator_for_run(hard_quota)
 
     with pytest.raises(UpstreamQuotaPaused):
         orchestrator._run_agent(
@@ -116,15 +129,14 @@ def test_run_agent_pauses_immediately_without_retry():
         )
 
     orchestrator._runner.run_agent_task.assert_called_once()
-    updates = [call.args[1] for call in orchestrator.repo.update_workflow.call_args_list]
-    assert any(update.get("status") == "paused" for update in updates)
+    assert any(
+        call.args[1].get("status") == "paused"
+        for call in orchestrator.repo.update_workflow.call_args_list
+    )
 
 
 def test_manual_pause_interrupts_backoff_before_second_agent_attempt():
-    result = _result(
-        error="API Error: 503 Service unavailable",
-        response_text="",
-    )
+    result = _result(error="API Error: 503 Service unavailable", response_text="")
     orchestrator = _orchestrator_for_run(result)
     orchestrator.repo.get_workflow.side_effect = [
         {"status": "developing"},
@@ -147,7 +159,7 @@ def test_manual_pause_interrupts_backoff_before_second_agent_attempt():
     assert milestone_update["status"] == "cancelled"
 
 
-def test_advance_treats_quota_pause_as_control_flow():
+def test_advance_treats_manual_pause_as_control_flow():
     orchestrator = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
     orchestrator._workflow_id = "workflow-1"
     orchestrator.repo = MagicMock()
@@ -158,7 +170,7 @@ def test_advance_treats_quota_pause_as_control_flow():
         "worktree_path": "/tmp/worktree",
     }
     orchestrator._ensure_worktree = MagicMock()
-    orchestrator._do_development = MagicMock(side_effect=UpstreamQuotaPaused("provider quota"))
+    orchestrator._do_development = MagicMock(side_effect=WorkflowPaused("manual pause"))
 
     orchestrator.advance()
 
