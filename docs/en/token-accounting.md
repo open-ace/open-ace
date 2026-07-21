@@ -84,11 +84,11 @@ But provider-native semantics differ:
 
 **Field mapping**
 
-- `input_tokens` <- `input_tokens`
-- `output_tokens` <- `output_tokens`
-- `cache_read_tokens` <- `cache_read_input_tokens`
-- `cache_creation_tokens` <- `cache_creation_input_tokens`
-- `tokens_used` <- `input + output + cache_read + cache_creation`
+- `input_tokens` comes from `input_tokens`
+- `output_tokens` comes from `output_tokens`
+- `cache_read_tokens` comes from `cache_read_input_tokens`
+- `cache_creation_tokens` comes from `cache_creation_input_tokens`
+- `tokens_used` is computed as `input + output + cache_read + cache_creation`
 
 **Why message-id merge exists**
 
@@ -134,10 +134,10 @@ But provider-native semantics differ:
 
 **Field mapping**
 
-- `tokens_used` <- accumulated `last_token_usage.total_tokens`
-- `cache_tokens` <- `cached_input_tokens`
-- `input_tokens` <- `input_tokens - cached_input_tokens`
-- `output_tokens` <- `output_tokens`
+- `tokens_used` comes from accumulated `last_token_usage.total_tokens`
+- `cache_tokens` comes from `cached_input_tokens`
+- `input_tokens` is computed as `input_tokens - cached_input_tokens`
+- `output_tokens` comes from `output_tokens`
 - `thoughts_tokens` only participates in daily aggregation and is not stored separately in `daily_messages`
 
 **Important semantic note**
@@ -181,10 +181,10 @@ But provider-native semantics differ:
 
 **Field mapping**
 
-- `tokens_used` <- `computed_total_tokens`
-- `input_tokens` <- `turn_usage.input_tokens`
-- `output_tokens` <- `turn_usage.output_tokens`
-- `cache_tokens` <- `cache_creation_input_tokens + cache_read_input_tokens`
+- `tokens_used` comes from `computed_total_tokens`
+- `input_tokens` comes from `turn_usage.input_tokens`
+- `output_tokens` comes from `turn_usage.output_tokens`
+- `cache_tokens` is computed as `cache_creation_input_tokens + cache_read_input_tokens`
 
 **Why date grouping uses `turn_usage.started_at`**
 
@@ -221,11 +221,11 @@ But provider-native semantics differ:
 
 **Field mapping**
 
-- `prompt_tokens` <- `promptTokenCount`
-- `candidates_tokens` <- `candidatesTokenCount`
-- `thoughts_tokens` <- `thoughtsTokenCount`
-- `cached_tokens` <- `cachedContentTokenCount`
-- `tokens_used` <- `totalTokenCount`
+- `prompt_tokens` comes from `promptTokenCount`
+- `candidates_tokens` comes from `candidatesTokenCount`
+- `thoughts_tokens` comes from `thoughtsTokenCount`
+- `cached_tokens` comes from `cachedContentTokenCount`
+- `tokens_used` comes from `totalTokenCount`
 
 **Important semantic note**
 

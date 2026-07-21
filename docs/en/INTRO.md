@@ -1,546 +1,157 @@
-# Open ACE - Enterprise AI Work Platform
+# Open ACE - Self-Hosted Control Plane for AI Coding Agents
 
 > **ACE** = **AI Computing Explorer**
 
-This document provides a quick overview of Open ACE's positioning, core features, and how to get started.
+This guide explains what Open ACE is, which teams it is built for, and which parts of the product matter most when you evaluate it.
 
 ---
 
 ## Project Positioning
 
-Open ACE is an **enterprise-grade AI work platform** designed to help organizations efficiently track, analyze, manage, and govern AI tool usage. It's not just a token tracker—it's a comprehensive platform that bridges the gap between technical AI usage data and business decision-making.
-
-### Target Users
-
-| User Type | Primary Needs | Platform Features |
-|-----------|--------------|-------------------|
-| **Individual Developers** | Track personal usage, understand costs | Work mode dashboard, session management, prompt library |
-| **Team Leads** | Monitor team usage, optimize costs | Analytics, ROI analysis, quota management |
-| **IT Administrators** | User management, security, compliance | User/tenant management, SSO, audit logs, compliance controls |
-| **Executives** | Cost oversight, ROI measurement, strategic decisions | Usage analytics, trend analysis, ROI reports |
-
----
-
-## Core Capabilities
-
-### 1. Multi-Tool Token Tracking
-
-Supports major AI tools with automatic log parsing:
-
-| Tool | Data Collected |
-|------|----------------|
-| **Claude** | Token usage, requests, models, input/output breakdown |
-| **Qwen** | Token usage, requests, cache usage, models |
-| **OpenClaw** | Agent session data, tool calls, conversation history |
-
-**Key Features:**
-- Automatic data collection via scheduled scripts
-- Per-tool, per-host, per-user breakdown
-- Input/output token tracking for cost optimization
-- Request counting for API quota management
-
-### 2. Dual-Mode Interface
-
-Open ACE provides two distinct interfaces based on user role:
-
-#### Work Mode (`/work/*`) - For All Users
-- **Workspace**: Interactive AI tool interface
-- **Sessions**: View and manage conversation history
-- **Prompts**: Save, organize, and reuse prompt templates
-- **Dashboard**: Personal usage overview
-
-#### Manage Mode (`/manage/*`) - For Administrators
-- **Dashboard**: Team/organization-wide statistics
-- **Analysis**: Trend analysis, anomaly detection, ROI calculations
-- **Messages**: Advanced filtering and search
-- **User Management**: Create, edit, delete users
-- **Tenant Management**: Multi-tenant organization structure
-- **Audit Center**: Comprehensive audit logging and analysis
-- **Security Center**: Content filtering, access control
-- **Compliance**: Data retention, reporting
-
-### 3. Advanced Analytics
-
-#### Usage Analytics
-- Daily/weekly/monthly usage trends
-- Heatmaps showing usage patterns
-- Tool comparison charts
-- Model usage breakdown
-
-#### Anomaly Detection
-- Unusual usage patterns identification
-- Failed request rate monitoring
-- Off-hours activity alerts
-- Automated anomaly reporting
-
-#### ROI Analysis
-- Cost per conversation
-- Token efficiency metrics
-- Tool ROI calculation with visible, configurable assumptions
-- Budget vs actual spending
-- Planning estimate disclaimers for ROI interpretation
-
-### 4. Enterprise Governance
-
-#### Quota Management
-- Daily/monthly token quotas per user
-- Daily/monthly request quotas
-- Alert thresholds (80% warning, 95% critical)
-- Real-time quota status monitoring
-
-#### User & Tenant Management
-- Role-based access control (Admin, Manager, User)
-- Multi-tenant organization support
-- Team collaboration features
-- Permission granularization
-
-#### Security & Compliance
-- SSO integration (OIDC/OAuth2 and SAML 2.0)
-- Comprehensive audit logging
-- Content filtering
-- Data retention policies
-- GDPR-ready data export
-
-### 5. Workspace & Tool Integration
-
-#### Unified Tool Connector
-- **Tool Health Monitoring**: Real-time status of all AI tools
-- **Tool Registration**: Dynamic tool discovery and registration
-- **Capability Detection**: Automatic detection of tool features (streaming, vision, tools)
-- **Model Mapping**: Support for multiple models per tool
-
-#### State Synchronization
-- **Session Persistence**: Save and resume conversations
-- **State Recovery**: Automatically restore session state on reconnect
-- **Cross-Device Sync**: Continue work across different devices
-- **Tab Management**: Multiple conversation tabs within workspace
-
-#### Workspace Configuration
-The workspace can be configured to connect to various AI tool services:
-
-```json
-{
-  "workspace": {
-    "enabled": true,
-    "url": "http://localhost:3000",
-    "tool_urls": {
-      "openclaw": "http://localhost:3001",
-      "claude": "http://localhost:3002",
-      "qwen": "http://localhost:3003"
-    }
-  }
-}
-```
-
-#### Prompt Library
-- **Template Categories**: General, Coding, Writing, Analysis, Translation, Summarization
-- **Variable Support**: Template variables for dynamic content
-- **Tagging System**: Organize prompts with custom tags
-- **Usage Tracking**: See which prompts are used most
-- **Public/Private Sharing**: Share within team or keep private
-- **Featured Prompts**: Highlight recommended templates
-
-#### Collaboration Features
-- **Session Sharing**: Share conversations with team members
-- **Prompt Library**: Centralized prompt repository
-- **Team Workspaces**: Shared work environments
-- **Collaborative Annotations**: Add notes to conversations
-
----
-
-## Architecture Overview
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                      Data Collection Layer                   │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐         │
-│  │ fetch_claude│  │ fetch_qwen  │  │fetch_openclaw│         │
-│  │   (logs)    │  │   (logs)    │  │   (logs)    │         │
-│  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘         │
-│         │                │                │                 │
-│         └────────────────┼────────────────┘                 │
-│                          ▼                                  │
-│                  ┌─────────────────┐                        │
-│                  │   Database      │                        │
-│                  │ (SQLite/PostgreSQL)                     │
-│                  └─────────────────┘                        │
-└─────────────────────────────────────────────────────────────┘
-                          │
-                          ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    Application Layer                         │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐         │
-│  │   Routes    │  │  Services   │  │  Modules    │         │
-│  │  (API)      │  │ (Business)  │  │ (Core)      │         │
-│  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘         │
-│         │                │                │                 │
-│         └────────────────┼────────────────┘                 │
-│                          ▼                                  │
-│                  ┌─────────────────┐                        │
-│                  │   Flask App     │                        │
-│                  └─────────────────┘                        │
-└─────────────────────────────────────────────────────────────┘
-                          │
-                          ▼
-┌─────────────────────────────────────────────────────────────┐
-│                      Presentation Layer                      │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐         │
-│  │   Web UI    │  │    CLI      │  │   API       │         │
-│  │ (React)     │  │  (Python)   │  │ (REST)      │         │
-│  └─────────────┘  └─────────────┘  └─────────────┘         │
-└─────────────────────────────────────────────────────────────┘
-```
-
-### Technology Stack
-
-| Layer | Technology |
-|-------|-----------|
-| **Backend** | Python 3.10+, Flask |
-| **Frontend** | React 18, TypeScript, Bootstrap 5, Chart.js |
-| **Database** | SQLite (dev), PostgreSQL (production) |
-| **Build** | Vite, TypeScript |
-| **Testing** | pytest, Playwright, Vitest |
-| **Auth** | Session-based, OIDC, OAuth2 |
-
----
-
-## Quick Start
-
-### Installation
-
-```bash
-# Clone the repository
-git clone https://github.com/open-ace/open-ace.git
-cd open-ace
-
-# Install Python dependencies
-pip install -r requirements.txt
-
-# Initialize configuration
-python3 cli.py config init
-```
-
-### Configuration
-
-Edit `~/.open-ace/config.json`:
-
-```json
-{
-  "host_name": "my-server",
-  "tools": {
-    "claude": { "enabled": true, "log_path": "~/.claude/projects" },
-    "qwen": { "enabled": true, "log_path": "~/.qwen/projects" },
-    "openclaw": { "enabled": true, "log_path": "~/.openclaw/agents" }
-  },
-  "email": {
-    "smtp_host": "smtp.example.com",
-    "smtp_port": 587,
-    "sender": "noreply@example.com"
-  }
-}
-```
-
-### Start the Server
-
-```bash
-# Start web server
-python3 server.py
-
-# Visit http://localhost:19888
-# Default login: admin / admin123
-```
-
-### Collect Data
-
-```bash
-# Collect from all tools
-python3 scripts/fetch_claude.py
-python3 scripts/fetch_qwen.py
-python3 scripts/fetch_openclaw.py
-
-# Or set up cron for automatic collection
-crontab -e
-# Add: 30 0 * * * cd /path/to/open-ace && python3 scripts/fetch_*.py
-```
-
----
-
-## CLI Commands
-
-```bash
-# View usage statistics
-python3 cli.py today        # Today's usage
-python3 cli.py today --tool qwen   # Today's usage for specific tool
-python3 cli.py today --host myserver  # Usage from specific host
-
-python3 cli.py top          # Last 7 days usage
-python3 cli.py top --days 14  # Last 14 days
-python3 cli.py summary      # Total summary
-
-# Generate reports
-python3 cli.py report       # Generate email report
-python3 cli.py report --email user@example.com  # Email to specific address
-```
-
----
-
-## API Endpoints
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/summary` | Usage summary |
-| GET | `/api/today` | Today's usage |
-| GET | `/api/messages` | Messages with filters |
-| GET | `/api/analysis/trend` | Usage trends |
-| GET | `/api/analysis/anomaly` | Anomaly detection |
-| GET | `/api/analysis/roi` | ROI analysis |
-| GET | `/api/users` | User list (admin) |
-| POST | `/api/users` | Create user (admin) |
-| GET | `/api/tenants` | Tenant list (admin) |
-| GET | `/api/sessions` | Session list |
-| GET | `/api/prompts` | Prompt library |
-
----
-
-## Deployment Options
-
-### Single Machine (Personal/Small Team)
-
-```bash
-# All components on one machine
-python3 server.py          # Web server
-python3 cli.py config init  # Configuration
-crontab -e              # Scheduled data collection
-```
-
-### Docker (Production)
-
-```bash
-# Deploy with Docker Compose
-docker compose up -d
-
-# Manage services
-docker compose ps
-docker compose logs -f
-docker compose restart
-```
-
-### Central Server + Remote Collectors (Enterprise)
-
-```
-┌───────────────────────┐       ┌───────────────────────┐
-│   Central Server      │       │    Remote Machine     │
-│  ┌─────────────────┐  │       │  ┌─────────────────┐  │
-│  │   server.py        │  │       │  │ fetch_openclaw  │  │
-│  │   (Dashboard)   │  │       │  │                 │  │
-│  └────────┬────────┘  │       │  └────────┬────────┘  │
-│           │           │       │           │           │
-│           ▼           │       │           ▼           │
-│  ┌─────────────────┐  │       │  ┌─────────────────┐  │
-│  │   PostgreSQL    │◄─┼───────┼──│   SQLite        │  │
-│  │   (Central)     │  │Upload │  │   (Remote)      │  │
-│  └─────────────────┘  │       │  └─────────────────┘  │
-└───────────────────────┘       └───────────────────────┘
-```
-
----
-
-## Key Concepts
-
-| Concept | Description | Example |
-|---------|-------------|---------|
-| **Request** | Single API call to LLM | User message → 1 request |
-| **Message** | Individual message by role | user, assistant, toolResult |
-| **Conversation** | One round of dialogue | User sends → AI responds |
-| **Session** | Tool-level session | qwen code process lifetime |
-
-**Relationship**: Session → Conversations → Requests + Messages
-
----
-
-## Quick Reference
-
-### Default Login Credentials
-```
-Username: admin
-Password: admin123
-```
-**Important**: Change immediately after first login!
-
-### Default Ports
-| Service | Port | URL |
-|---------|------|-----|
-| Web Server | 19888 | http://localhost:19888 |
-| Workspace (if enabled) | 3000 | http://localhost:3000 |
-
-### Configuration Location
-- **Config File**: `~/.open-ace/config.json`
-- **Database**: `~/.open-ace/usage.db` (SQLite) or PostgreSQL
-- **Logs**: `~/logs/open-ace/`
-
----
-
-## Data Flow
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    User Actions                              │
-│  • Send message to AI tool                                  │
-│  • Use prompt template                                      │
-│  • Share session                                            │
-│  • Query usage data                                         │
-└──────────────────────┬──────────────────────────────────────┘
-                       │
-                       ▼
-┌─────────────────────────────────────────────────────────────┐
-│                  AI Tool Logs                                │
-│  • Claude: ~/.claude/projects/*.json                        │
-│  • Qwen: ~/.qwen/projects/*.json                            │
-│  • OpenClaw: ~/.openclaw/agents/*.json                      │
-└──────────────────────┬──────────────────────────────────────┘
-                       │
-                       ▼
-┌─────────────────────────────────────────────────────────────┐
-│              Data Collection (Scheduled)                     │
-│  • fetch_claude.py                                          │
-│  • fetch_qwen.py                                            │
-│  • fetch_openclaw.py                                        │
-└──────────────────────┬──────────────────────────────────────┘
-                       │
-                       ▼
-┌─────────────────────────────────────────────────────────────┐
-│                  Database Layer                              │
-│  • daily_usage: Aggregated token statistics                 │
-│  • daily_messages: Individual message records               │
-│  • sessions: Conversation sessions                          │
-│  • prompts: Prompt templates                                │
-│  • users: User accounts & quotas                            │
-│  • audit_logs: System activity logs                         │
-└──────────────────────┬──────────────────────────────────────┘
-                       │
-                       ▼
-┌─────────────────────────────────────────────────────────────┐
-│                  Application Layer                           │
-│  • API Routes: REST endpoints                               │
-│  • Services: Business logic                                 │
-│  • Modules: Core functionality                              │
-│  • Repositories: Data access                                │
-└──────────────────────┬──────────────────────────────────────┘
-                       │
-                       ▼
-┌─────────────────────────────────────────────────────────────┐
-│                  Presentation Layer                          │
-│  • Web UI: React dashboard                                  │
-│  • CLI: Command-line queries                                │
-│  • Email: Automated reports                                 │
-└─────────────────────────────────────────────────────────────┘
-```
-
----
-
-## Database Schema
-
-### Core Tables
-
-| Table | Purpose | Key Fields |
-|-------|---------|------------|
-| `daily_usage` | Token usage statistics | date, tool_name, host_name, tokens_used, input_tokens, output_tokens |
-| `daily_messages` | Individual messages | message_id, role, content, tokens_used, sender_id, conversation_id |
-| `sessions` | Conversation sessions | session_id, session_type, status, created_at, tool_name |
-| `prompts` | Prompt templates | name, category, content, variables, is_public, use_count |
-| `users` | User accounts | username, email, role, is_active, daily_token_quota |
-| `audit_logs` | System activity | action, user_id, timestamp, details |
-| `quotas` | Quota tracking | user_id, period, tokens_used, requests_made, quota_limit |
-| `teams` | Team collaboration | team_id, name, owner_id, members |
-
----
-
-## Feature Status
-
-### ✅ Implemented
-
-- Multi-tool token tracking (Claude, Qwen, OpenClaw)
-- Web dashboard with interactive visualizations
-- CLI tool for quick queries
-- Email report generation
-- User authentication & role-based access
-- Quota management & alerts
-- SSO integration (OIDC/OAuth2 and SAML 2.0)
-- Audit logging & compliance features
-- Tenant management
-- Prompt library & session management
-- Analytics & ROI analysis
+Open ACE is an open-source, self-hosted control plane for AI coding agents.
+
+It brings three layers together:
+
+1. A browser workspace where developers run AI coding sessions
+2. A remote execution layer for running agents on internal machines
+3. A governance plane for keys, quotas, audit, compliance, and cost visibility
+
+The project is aimed at teams that want more than a single-chat assistant. It is for organizations moving AI coding into real engineering workflows, where issues, repositories, credentials, remote machines, and reviewability all matter.
+
+## What Problems It Solves
+
+| Team problem | What Open ACE provides |
+|--------------|------------------------|
+| Multiple AI coding tools are used in parallel | One workspace and control plane for Claude Code, Qwen Code, Codex, OpenClaw, and ZCode |
+| Agents need to run on internal, staging, or GPU machines | Remote Agent executes CLI tools on controlled Linux, macOS, and Windows machines |
+| API keys should not be copied across laptops and remote boxes | API Key Proxy keeps real keys on the server and issues short-lived, revocable proxy tokens |
+| AI work needs to be inspectable after the fact | Autonomous workflow timelines, milestone summaries, final code changes, and run provenance keep execution visible |
+| Platform and security teams need governance | Quotas, anomalies, audit logs, compliance checks, multi-tenant controls, and SSO are built into the same system |
+
+## Core Product Layers
+
+### 1. Autonomous Development Workflows
+
+Open ACE can turn GitHub issues into structured AI development runs.
+
+Core workflow capabilities include:
+
+- Issue-driven runs with preparation, planning, development, review, reporting, and merge phases
+- Batch issue handling for operating on more than one GitHub issue from a single workflow
+- Pause, resume, retry, cancel, and auto-merge controls
+- Fork-from-here behavior at the milestone level
+- Final code-change summaries and milestone-level diff inspection
+- Timeline views that expose outputs, status changes, review results, and token usage
+
+This makes Open ACE more than a browser wrapper around an AI CLI. It becomes an operational surface for autonomous or semi-autonomous repository work.
+
+### 2. Workspace and Remote Execution
+
+Open ACE provides a browser-based workspace for both local and remote AI coding sessions.
+
+#### Work Mode
+
+Work Mode is the day-to-day surface for developers:
+
+- Browser workspace for AI coding sessions
+- Session history and recovery
+- Prompt library and reuse
+- Multiple workspace tabs
+- Conversation and execution visibility
+
+#### Remote Agent
+
+Remote Agent lets teams run AI coding tools on controlled machines instead of pushing all work onto a local laptop.
+
+Key capabilities include:
+
+- Token-based machine registration and remote identity management
+- CLI adapters with session resume and permission-mode handling
+- Browser terminal access
+- Remote file and project workflows
+- code-server / VSCode proxy access for in-browser development
+- Run Timeline APIs for persisted remote execution provenance
+
+### 3. Governance and Administration
+
+Open ACE also acts as a management plane for AI engineering usage.
+
+#### Manage Mode
+
+Manage Mode is for platform, IT, and governance teams:
+
+- Usage dashboards and trend analysis
+- Quota management and quota alerts
 - Anomaly detection
-- Multi-language support (English, Chinese)
+- Audit Center and Security Center
+- Compliance and retention workflows
+- Tenant, user, and permission management
+- ROI views with visible planning assumptions
 
-### 🔄 In Progress
+#### Security and Access
 
-- Advanced collaboration features
-- Real-time notifications
-- Mobile responsive improvements
+- API Key Proxy with encrypted server-side key storage
+- Short-lived, revocable proxy tokens for local and remote sessions
+- OIDC / OAuth2 / SAML 2.0 SSO support
+- Multi-tenant organization model
+- Content filtering and audit logging
+- Feishu and DingTalk integration paths for org sync and alerts
 
-### 📋 Planned
+## Supported AI Coding Tools
 
-- Kubernetes deployment
-- Advanced workflow automation
-- Custom reporting builder
-- AI-powered cost optimization suggestions
+| Tool | Support in Open ACE | Notes |
+|------|----------------------|-------|
+| Claude Code | Yes | Workspace sessions, remote execution, permission modes, session recovery |
+| Qwen Code | Yes | Workspace sessions, remote execution, session recovery, usage integration |
+| Codex | Yes | Workspace sessions and remote execution through CLI adapters |
+| OpenClaw | Yes | Workspace support plus session and message synchronization |
+| ZCode | Yes | Remote Agent support, session sync, and persistent `app-server` execution mode |
 
----
+## Why Teams Evaluate It
 
-## Documentation
+Open ACE is especially relevant when a team needs some combination of the following:
 
-| Document | Purpose |
-|----------|---------|
-| [INTRO.md](./INTRO.md) | **This file** - Quick overview & getting started |
-| [ARCHITECTURE.md](./ARCHITECTURE.md) | System architecture & data models |
-| [CONCEPTS.md](./CONCEPTS.md) | Core concepts & terminology |
-| [DEPLOYMENT.md](./DEPLOYMENT.md) | Deployment guides (local, Docker, enterprise) |
-| [DEVELOPMENT.md](./DEVELOPMENT.md) | Development setup & contribution guide |
-| [FEISHU_CONFIG.md](./FEISHU_CONFIG.md) | Feishu integration configuration |
-| [DINGTALK_CONFIG.md](./DINGTALK_CONFIG.md) | DingTalk integration configuration |
+- Self-hosted deployment inside a private network
+- Shared access to multiple AI coding agents
+- Remote execution on development, staging, or GPU machines
+- Centralized LLM credential handling
+- Explainable autonomous runs instead of opaque background automation
+- Governance visibility across token usage, cost, quotas, anomalies, and audits
 
----
+## Deployment and Integration Story
 
-## Summary
+Open ACE supports several deployment paths:
 
-Open ACE is a comprehensive enterprise AI work platform that provides:
+- Docker Compose quick start
+- Source installation for development
+- Package-based install workflows
+- Kubernetes reference deployment
+- Reverse proxy deployment with Nginx
 
-| Category | Features |
-|----------|----------|
-| **Tracking** | Multi-tool token usage, request counting, input/output breakdown |
-| **Analytics** | Trends, anomalies, ROI, heatmaps, comparisons |
-| **Management** | Users, tenants, quotas, roles, permissions |
-| **Governance** | Audit logs, security, compliance, retention |
-| **Collaboration** | Session sharing, prompt library, team workspaces |
-| **Integration** | OIDC/OAuth2/SAML 2.0 SSO, tool connector, state sync |
+The stack uses:
 
-**For individual developers**: Track personal usage and optimize costs
-**For teams**: Monitor usage, share prompts, collaborate on sessions
-**For enterprises**: Full governance, security, compliance, and multi-tenant support
+- **Backend**: Python 3.10+, Flask, SQLAlchemy, Alembic
+- **Frontend**: React 18, TypeScript, Vite, Bootstrap 5
+- **Database**: SQLite and PostgreSQL
+- **Remote execution**: Remote Agent with CLI adapters, terminal relay, and session sync
 
----
+## Who Should Read What Next
 
-## Getting Help
+Start with the guide that matches your evaluation path:
 
-1. **Documentation**: Check the docs directory for detailed guides
-2. **Issues**: Report bugs or request features on GitHub
-3. **Contributing**: See CONTRIBUTING.md for development guidelines
-4. **License**: Apache 2.0 - free for commercial use
+- [Deployment Guide](./DEPLOYMENT.md) - local and production setup
+- [Remote Agent Guide](./REMOTE-AGENT.md) - remote execution model, adapters, and machine registration
+- [Remote Workspace](./REMOTE-WORKSPACE.md) - browser workspace and server-side remote-session design
+- [Permission Model](./PERMISSION-MODEL.md) - roles, admin boundaries, and access model
+- [Architecture](./ARCHITECTURE.md) - backend, frontend, and runtime structure
 
----
+## Bottom Line
 
-## Why Open ACE?
+Open ACE is not just a usage dashboard and not just a browser shell around an AI CLI.
 
-| Feature | Open ACE | Custom Solution |
-|---------|----------|-----------------|
-| **Setup Time** | 15 minutes | 2-4 weeks |
-| **Multi-Tool** | Built-in | Custom coding |
-| **Analytics** | Out-of-box | From scratch |
-| **Governance** | Enterprise-ready | Complex to build |
-| **Maintenance** | Active community | Full team required |
-| **Cost** | Free (Apache 2.0) | High TCO |
+It is a self-hosted control plane for teams that want to:
 
----
-
-**Ready to get started?** → [Deployment Guide](./DEPLOYMENT.md)
+- run multiple AI coding agents in one place,
+- execute them on controlled machines,
+- automate issue-driven engineering work,
+- and keep the whole process observable, governable, and reviewable.

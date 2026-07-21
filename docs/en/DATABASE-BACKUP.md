@@ -353,4 +353,4 @@ kubectl scale deployment open-ace --replicas=3 -n open-ace
 ## Related Documentation
 
 - [KUBERNETES.md](./KUBERNETES.md) - Kubernetes deployment guide
-- [k8s/extras/backup/README.md](../../k8s/extras/backup/README.md) - Backup manifest details
+- [Backup manifest details](https://github.com/open-ace/open-ace/blob/main/k8s/extras/backup/README.md) - Kubernetes backup manifest reference

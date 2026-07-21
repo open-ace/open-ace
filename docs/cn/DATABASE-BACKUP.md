@@ -353,4 +353,4 @@ kubectl scale deployment open-ace --replicas=3 -n open-ace
 ## 相关文档
 
 - [KUBERNETES.md](./KUBERNETES.md) - Kubernetes 部署指南
-- [k8s/extras/backup/README.md](../../k8s/extras/backup/README.md) - 备份清单详情
+- [备份清单详情](https://github.com/open-ace/open-ace/blob/main/k8s/extras/backup/README.md) - Kubernetes 备份清单参考
