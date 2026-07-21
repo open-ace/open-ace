@@ -15,7 +15,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License">
-  <img src="https://img.shields.io/badge/Python-3.9%2B-green.svg" alt="Python">
+  <img src="https://img.shields.io/badge/Python-3.10%2B-green.svg" alt="Python">
   <img src="https://img.shields.io/badge/React-18.3-61DAFB.svg" alt="React">
   <img src="https://img.shields.io/badge/Flask-2.x-orange.svg" alt="Flask">
 </p>
@@ -34,21 +34,23 @@
 
 ## 🎯 这是什么？
 
-**Open ACE** 是一个开源的**自托管 AI Coding Agent 工作台与治理控制面**：开发者可以在浏览器里统一使用 Claude Code、Qwen Code、Codex、OpenClaw 等 AI 编码工具，并把它们运行在团队自己的远程机器上；管理员可以集中管理 API Key、权限、成本、配额、审计和合规。
+**Open ACE** 是一个开源的**自托管 AI Coding Agent 工作台、远程执行层与治理控制面**：开发者可以在浏览器里统一使用 Claude Code、Qwen Code、Codex、ZCode、OpenClaw 等 AI 编码工具，并把它们运行在团队自己的远程机器上；管理员可以集中管理 API Key、权限、成本、配额、审计和合规；团队还可以把 GitHub Issue 驱动的 AI 自主开发工作流纳入同一套平台。
 
 它适合已经把 AI Coding Agent 引入真实研发流程的组织，尤其适合需要私有化部署、内网远程机器、统一密钥代理、团队配额和可追溯审计的研发团队、IT 团队和 AI 平台团队。
 
 | 问题 | 解决方案 |
 |------|----------|
-| 🤖 **团队同时使用多个 AI Coding Agent** | 多 CLI 工作台统一 Claude Code、Qwen Code、Codex、OpenClaw 等工具 |
+| 🤖 **团队同时使用多个 AI Coding Agent** | 多 CLI 工作台统一 Claude Code、Qwen Code、Codex、ZCode、OpenClaw 等工具 |
 | 🖥️ **Agent 需要跑在内网、测试机或 GPU 机器上** | Remote Agent 让 AI CLI 直接在目标机器执行 |
 | 🔑 **API Key 不该散落在个人电脑和远程机器上** | API Key Proxy 把真实密钥留在服务端，只下发短生命周期、可回收的代理令牌 |
+| 🔄 **希望 AI 能围绕 Issue 持续开发，而不只是单次对话** | AI 自主开发工作流支持 Issue 解析、规划、执行、PR、评论与人工中断后继续 |
 | 📊 **成本、配额、风险和审计需要可见** | Manage 模式提供用量、成本、配额、异常、审计和合规视图 |
 
 **你可以用 Open ACE 做什么：**
 
 - 给团队一个统一入口，管理本地/远程 AI coding 会话、提示词、历史记录和项目上下文
-- 通过 Remote Agent 把 Claude Code、Qwen Code、Codex、OpenClaw 等 CLI 跑在团队自己的开发机、测试机或 GPU 机器上
+- 通过 Remote Agent 把 Claude Code、Qwen Code、Codex、ZCode、OpenClaw 等 CLI 跑在团队自己的开发机、测试机或 GPU 机器上
+- 围绕 GitHub Issue 创建 AI 自主开发任务，让工作流完成规划、编码、提交 PR、批注和人工接管/恢复
 - 加密保存 LLM API Key，通过短生命周期、可回收的代理令牌给本地和远程会话安全调用模型
 - 给管理者一套控制面板，查看 Token、成本、异常、配额、审计、合规报告和 ROI
 - 在自己的网络里部署，保留企业数据边界，并接入 OIDC/OAuth2/SAML SSO、飞书/钉钉同步和 Kubernetes
@@ -59,7 +61,8 @@
 |------|------------|
 | AI Coding Agent 控制面 | 把团队已在使用的多个 AI CLI 纳入统一入口、权限、成本和审计体系 |
 | 远程工作区与 Remote Agent | 用户在浏览器里选择远程机器，AI CLI 直接在目标机器运行，无需反复传 SSH 凭据 |
-| 多 CLI 适配器 | Claude Code、Qwen Code、Codex、OpenClaw 统一接入，包含会话恢复、权限模式和历史同步 |
+| 多 CLI 适配器 | Claude Code、Qwen Code、Codex、ZCode、OpenClaw 统一接入，包含会话恢复、权限模式和历史同步 |
+| AI 自主开发工作流 | 支持按 GitHub Issue 创建/排队工作流，自动推进规划、实现、PR、评论、暂停恢复与分叉 |
 | API Key 代理 | API Key 加密存储在服务器，远程 Agent 只拿短生命周期、可回收的代理令牌，统一配额和用量统计 |
 | 终端与 VSCode/code-server 代理 | 支持浏览器终端、远程目录浏览和 code-server/VSCode 访问，适合真实研发工作流 |
 | 合规与报表 | 支持审计追踪、配额检查、合规报告生成和 CSV 下载 |
@@ -76,8 +79,9 @@
 </p>
 
 **核心能力：**
-- 🤖 **多 AI 工具集成** — Claude Code、Qwen Code、Codex、OpenClaw 一个入口统一使用
+- 🤖 **多 AI 工具集成** — Claude Code、Qwen Code、Codex、ZCode、OpenClaw 一个入口统一使用
 - 🖥️ **远程工作区** — 在浏览器里选择远程机器，启动 AI 编码会话、终端和目录浏览
+- 🔄 **AI 自主开发** — 围绕 GitHub Issue 运行自治工作流，支持排队、暂停、恢复、分叉和批量推进
 - 💬 **智能会话管理** — 历史记录、会话恢复、上下文记忆和跨工具会话同步
 - 📝 **提示词库** — 团队共享优质提示词，最佳实践一键复用
 - 🔍 **快速检索** — 跨会话搜索历史对话，知识沉淀不丢失
@@ -108,8 +112,9 @@
 |------|------|
 | 🔒 **默认自托管** | 私有化部署，数据和 API Key 留在自己的网络与数据库里 |
 | 🎛️ **Agent 控制面** | 统一管理工具、用户、机器、密钥、配额、成本和审计，而不是替代每个 AI CLI |
-| 🌐 **多工具工作台** | Claude Code、Qwen Code、Codex、OpenClaw 统一入口、统一历史、统一治理 |
+| 🌐 **多工具工作台** | Claude Code、Qwen Code、Codex、ZCode、OpenClaw 统一入口、统一历史、统一治理 |
 | 🖥️ **远程执行** | Remote Agent 让 AI CLI 在目标机器运行，适合研发服务器、测试环境和 GPU 机器 |
+| 🔄 **自主开发闭环** | 从 GitHub Issue 到规划、实现、PR、评论和人工接管，形成可追踪的 AI 开发工作流 |
 | 📊 **治理可观测** | Token、成本、配额、异常、审计、合规和 ROI 统一分析 |
 | 🔌 **企业集成** | 支持 OIDC/OAuth2/SAML 2.0 SSO、飞书/钉钉组织同步、钉钉/飞书告警机器人、Kubernetes、反向代理和多租户权限模型 |
 | 🆓 **开放协作** | Apache 2.0 协议，Roadmap、贡献指南和 good first issue 已就位 |
@@ -216,10 +221,19 @@ python3 server.py
 | 功能 | 描述 |
 |------|------|
 | Remote Agent | 在 Linux/macOS/Windows 远程机器上运行 AI CLI 守护进程 |
-| CLI 适配器 | 支持 Claude Code、Qwen Code、Codex、OpenClaw 的启动、会话恢复和权限模式 |
+| CLI 适配器 | 支持 Claude Code、Qwen Code、Codex、ZCode、OpenClaw 的启动、会话恢复和权限模式 |
 | 浏览器终端 | 通过 WebSocket 访问远程 shell，Linux/macOS 使用 PTY，Windows 使用管道子进程，并支持断线后的屏幕恢复 |
 | VSCode/code-server | 代理远程 code-server/VSCode 路径，方便在浏览器中继续开发 |
 | API Key 代理 | 真实密钥只保存在服务器，远程会话通过短生命周期、可回收的代理令牌访问模型 |
+
+### 🔄 AI 自主开发
+
+| 功能 | 描述 |
+|------|------|
+| GitHub Issue 解析 | 支持 issue 编号、范围和 URL，批量创建自主开发任务 |
+| 工作流编排 | 排队、规划、编码、PR、评论、合并等阶段可视化推进 |
+| 人机协作 | 支持暂停、继续、插入反馈、从中间节点分叉新工作流 |
+| GitHub 操作集成 | 使用机器人账户令牌执行 issue、PR、评论等自动化操作 |
 
 ### 🔔 告警中心
 
@@ -316,6 +330,10 @@ open-ace/
 
 `docs/` 目录保存产品文档源代码；对外发布的 Docusaurus 文档站在独立仓库 `open-ace/open-ace-docs` 中构建和部署。
 
+- 文档站：<https://open-ace.github.io/open-ace-docs/docs/intro>
+- 文档站源码仓库：<https://github.com/open-ace/open-ace-docs>
+- 旧的 `https://open-ace.github.io/open-ace/` 入口将重定向到当前文档站，避免看到过期页面
+
 | 文档 | 说明 |
 |------|------|
 | [架构说明](docs/cn/ARCHITECTURE.md) | 系统架构与核心概念 |
@@ -363,21 +381,23 @@ open-ace/
 
 ## 🎯 What is This?
 
-**Open ACE** is an open-source **self-hosted workspace and control plane for AI coding agents**: developers can use Claude Code, Qwen Code, Codex, OpenClaw, and similar tools from one browser workspace while running them on the team's own remote machines; administrators can centralize API keys, access control, quotas, cost visibility, audit trails, and compliance.
+**Open ACE** is an open-source **self-hosted workspace, remote execution layer, and control plane for AI coding agents**: developers can use Claude Code, Qwen Code, Codex, ZCode, OpenClaw, and similar tools from one browser workspace while running them on the team's own remote machines; administrators can centralize API keys, access control, quotas, cost visibility, audit trails, and compliance; teams can also bring GitHub issue-driven autonomous development workflows onto the same platform.
 
 It is built for teams moving AI coding agents into real engineering workflows, especially organizations that need self-hosted deployment, private-network machines, centralized key proxying, team quotas, and traceable audit records.
 
 | Challenge | Solution |
 |-----------|----------|
-| 🤖 **Teams use multiple AI coding agents** | Multi-CLI workspace for Claude Code, Qwen Code, Codex, OpenClaw, and more |
+| 🤖 **Teams use multiple AI coding agents** | Multi-CLI workspace for Claude Code, Qwen Code, Codex, ZCode, OpenClaw, and more |
 | 🖥️ **Agents need to run on internal, staging, or GPU machines** | Remote Agent runs AI CLIs directly on target machines |
 | 🔑 **API keys should not spread across laptops and remote boxes** | API Key Proxy keeps real keys on the server and issues short-lived, revocable proxy tokens |
+| 🔄 **Teams want issue-driven execution, not just chat sessions** | Autonomous workflows can parse issues, plan, implement, open PRs, comment, and resume after human interruption |
 | 📊 **Cost, quotas, risk, and audit need visibility** | Manage Mode tracks usage, cost, quotas, anomalies, audit trails, and compliance |
 
 **What you can do with Open ACE:**
 
 - Give teams one place for local/remote AI coding sessions, prompts, history, and project context
-- Run Claude Code, Qwen Code, Codex, OpenClaw, and similar CLIs on your own development, staging, or GPU machines through the Remote Agent
+- Run Claude Code, Qwen Code, Codex, ZCode, OpenClaw, and similar CLIs on your own development, staging, or GPU machines through the Remote Agent
+- Create autonomous development tasks from GitHub issues and let workflows plan, implement, comment, open PRs, and continue with human guidance
 - Store LLM API keys centrally and issue short-lived, revocable proxy tokens to local and remote sessions
 - Give administrators a control plane for tokens, cost, anomalies, quotas, audits, compliance reports, and ROI
 - Deploy inside your own network while integrating OIDC/OAuth2/SAML SSO, Feishu/DingTalk sync, and Kubernetes
@@ -388,7 +408,8 @@ It is built for teams moving AI coding agents into real engineering workflows, e
 |------------|----------------|
 | AI coding agent control plane | Bring the team's existing AI CLIs under one access, key, quota, cost, and audit model |
 | Remote Workspace and Remote Agent | Users choose a remote machine in the browser and run AI CLIs there without repeatedly sharing SSH credentials |
-| Multi-CLI adapters | Claude Code, Qwen Code, Codex, and OpenClaw share one workspace with session recovery, permission modes, and history sync |
+| Multi-CLI adapters | Claude Code, Qwen Code, Codex, ZCode, and OpenClaw share one workspace with session recovery, permission modes, and history sync |
+| Autonomous development workflows | Queue GitHub issue-driven workflows that move through planning, implementation, PR creation, commenting, pause/resume, and forks |
 | API Key proxy | Keys are encrypted on the server; remote agents only receive short-lived, revocable proxy tokens with unified quota and usage tracking |
 | Terminal and VSCode/code-server proxy | Browser terminal, remote directory browsing, and code-server/VSCode access make the workspace useful for real development loops |
 | Compliance and reporting | Audit trails, quota checks, compliance reports, and CSV downloads are available for governance workflows |
@@ -405,8 +426,9 @@ It is built for teams moving AI coding agents into real engineering workflows, e
 </p>
 
 **Key Capabilities:**
-- 🤖 **Multi-AI Integration** — Claude Code, Qwen Code, Codex, and OpenClaw behind one workspace
+- 🤖 **Multi-AI Integration** — Claude Code, Qwen Code, Codex, ZCode, and OpenClaw behind one workspace
 - 🖥️ **Remote Workspace** — Choose a remote machine in the browser, then start AI coding sessions, terminals, and directory browsing
+- 🔄 **Autonomous Development** — Run issue-driven workflows with queueing, pause/resume, branching, and guided handoff points
 - 💬 **Smart Session Management** — History, session recovery, context memory, and cross-tool history sync
 - 📝 **Prompt Library** — Share best practices across your team with reusable prompts
 - 🔍 **Quick Search** — Search across all conversations, knowledge preserved
@@ -437,8 +459,9 @@ It is built for teams moving AI coding agents into real engineering workflows, e
 |---------|-------------|
 | 🔒 **Self-hosted by default** | Keep data and API keys inside your own network and database |
 | 🎛️ **Agent control plane** | Manage tools, users, machines, keys, quotas, cost, and audit trails without replacing every AI CLI |
-| 🌐 **Multi-tool workspace** | Claude Code, Qwen Code, Codex, and OpenClaw with unified access, history, and governance |
+| 🌐 **Multi-tool workspace** | Claude Code, Qwen Code, Codex, ZCode, and OpenClaw with unified access, history, and governance |
 | 🖥️ **Remote execution** | Remote Agent runs AI CLIs on development servers, staging boxes, or GPU machines |
+| 🔄 **Autonomous dev loop** | Move from GitHub issues to plans, implementation, PRs, comments, and human intervention in one traceable workflow |
 | 📊 **Governance observability** | Analyze tokens, cost, quotas, anomalies, audits, compliance, and ROI together |
 | 🔌 **Enterprise integration** | OIDC/OAuth2/SAML 2.0 SSO, Feishu/DingTalk org sync, Feishu/DingTalk alert bots, Kubernetes, reverse proxy, and multi-tenant permissions |
 | 🆓 **Open collaboration** | Apache 2.0, roadmap, contributor guide, and good first issues are ready |
@@ -521,10 +544,19 @@ python3 server.py
 | Feature | Description |
 |---------|-------------|
 | Remote Agent | Run AI CLI daemons on Linux/macOS/Windows remote machines |
-| CLI Adapters | Start, resume, and control permission modes for Claude Code, Qwen Code, Codex, and OpenClaw |
+| CLI Adapters | Start, resume, and control permission modes for Claude Code, Qwen Code, Codex, ZCode, and OpenClaw |
 | Browser Terminal | Access remote shells through WebSocket with PTY on Linux/macOS, a piped subprocess on Windows, and screen recovery after disconnects |
 | VSCode/code-server | Proxy remote code-server/VSCode paths so users can continue development in the browser |
 | API Key Proxy | Keep real keys on the server and let remote sessions call models through short-lived, revocable proxy tokens |
+
+### 🔄 Autonomous Development
+
+| Feature | Description |
+|---------|-------------|
+| GitHub Issue Parsing | Accept issue numbers, ranges, and URLs to create one or many autonomous tasks |
+| Workflow Orchestration | Visualize queued, planning, implementation, PR, comment, and merge stages |
+| Human-in-the-loop Control | Pause, resume, inject feedback, or fork a workflow from intermediate milestones |
+| GitHub Operations | Use bot-account tokens for issue, PR, and comment automation |
 
 ### 🔔 Alert Center
 
@@ -620,6 +652,10 @@ open-ace/
 ## 📚 Documentation
 
 The `docs/` directory is the source of truth for product documentation. The published Docusaurus docs site is built and deployed from the separate `open-ace/open-ace-docs` repository.
+
+- Docs site: <https://open-ace.github.io/open-ace-docs/docs/intro>
+- Docs source repository: <https://github.com/open-ace/open-ace-docs>
+- The legacy `https://open-ace.github.io/open-ace/` entry redirects to the current docs site to avoid stale content
 
 | Document | Description |
 |----------|-------------|

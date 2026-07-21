@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Open ACE Docs Redirect</title>
+    <meta
+      name="description"
+      content="Open ACE legacy GitHub Pages entry. Redirecting to the current documentation site."
+    >
+    <style>
+      body {
+        margin: 0;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: #0f172a;
+        color: #e2e8f0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+      }
+
+      main {
+        max-width: 680px;
+        padding: 32px 24px;
+      }
+
+      h1 {
+        margin: 0 0 12px;
+        font-size: 32px;
+      }
+
+      p {
+        margin: 0 0 12px;
+        line-height: 1.6;
+      }
+
+      a {
+        color: #93c5fd;
+      }
+    </style>
+    <script>
+      (function () {
+        var base = "https://open-ace.github.io/open-ace-docs";
+        var path = window.location.pathname.replace(/^\/open-ace/, "");
+        var targetPath = path && path !== "/" ? path : "/docs/intro";
+        var target = base + targetPath + window.location.search + window.location.hash;
+        window.location.replace(target);
+      })();
+    </script>
+  </head>
+  <body>
+    <main>
+      <h1>Open ACE Docs Moved</h1>
+      <p>The page you requested now lives on the current Open ACE documentation site.</p>
+      <p><a href="https://open-ace.github.io/open-ace-docs/docs/intro">Go to the current docs</a></p>
+    </main>
+  </body>
+</html>
