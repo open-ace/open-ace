@@ -8,7 +8,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -69,13 +69,13 @@ class TenantSettings:
     audit_log_retention_days: int = 90
     data_retention_days: int = 365
     sso_enabled: bool = False
-    sso_provider: Optional[str] = None
+    sso_provider: str | None = None
     auto_provision_users: bool = False
     custom_branding: bool = False
-    branding_name: Optional[str] = None
-    branding_logo_url: Optional[str] = None
+    branding_name: str | None = None
+    branding_logo_url: str | None = None
     # P1: Tenant-level ROI assumptions configuration
-    roi_assumptions: Optional[dict[str, Any]] = None
+    roi_assumptions: dict[str, Any] | None = None
     # Issue #1904: Sensitive keyword filtering configuration
     block_sensitive_keyword: bool = False
     sensitive_keyword_match_mode: str = "word_boundary"  # 'word_boundary' or 'substring'
@@ -147,7 +147,7 @@ class TenantSettings:
 class Tenant:
     """Tenant data model for multi-tenant support."""
 
-    id: Optional[int] = None
+    id: int | None = None
     name: str = ""
     slug: str = ""
     status: str = "active"
@@ -155,22 +155,22 @@ class Tenant:
 
     # Contact information
     contact_email: str = ""
-    contact_phone: Optional[str] = None
-    contact_name: Optional[str] = None
+    contact_phone: str | None = None
+    contact_name: str | None = None
 
     # Configuration
     quota: QuotaConfig = field(default_factory=QuotaConfig)
     settings: TenantSettings = field(default_factory=TenantSettings)
 
     # Metadata
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
-    trial_ends_at: Optional[datetime] = None
-    subscription_ends_at: Optional[datetime] = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    trial_ends_at: datetime | None = None
+    subscription_ends_at: datetime | None = None
 
     # Ephemeral runtime marker for concurrent-settings-update detection
     # (not persisted; reset to None on every load).
-    _last_settings_update: Optional[datetime] = None
+    _last_settings_update: datetime | None = None
 
     # Statistics
     user_count: int = 0

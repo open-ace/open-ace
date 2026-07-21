@@ -6,7 +6,6 @@ Common helper functions for the application.
 
 import re
 from datetime import datetime, timedelta
-from typing import Optional
 
 
 def format_tokens(tokens: int) -> str:
@@ -29,7 +28,7 @@ def format_tokens(tokens: int) -> str:
         return str(tokens)
 
 
-def parse_date(date_str: str) -> Optional[str]:
+def parse_date(date_str: str) -> str | None:
     """
     Validate and normalize a date string (YYYY-MM-DD).
 
@@ -72,7 +71,7 @@ def get_days_ago(days: int) -> str:
     return date.strftime("%Y-%m-%d")
 
 
-def get_date_range(days: int, end_date: Optional[str] = None) -> tuple:
+def get_date_range(days: int, end_date: str | None = None) -> tuple:
     """
     Get a date range for the past N days.
 
@@ -92,7 +91,7 @@ def get_date_range(days: int, end_date: Optional[str] = None) -> tuple:
     return start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")
 
 
-def parse_db_datetime(value) -> Optional[datetime]:
+def parse_db_datetime(value) -> datetime | None:
     """Parse a datetime value coming back from the database.
 
     Handles ``datetime`` instances, ISO 8601 strings (``YYYY-MM-DDTHH:MM:SS``),

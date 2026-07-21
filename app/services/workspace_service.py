@@ -5,7 +5,7 @@ Business logic layer for workspace operations.
 """
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from app.modules.workspace.collaboration import (
     Annotation,
@@ -41,11 +41,11 @@ class WorkspaceService:
 
     def __init__(self):
         """Initialize the workspace service."""
-        self._prompt_library: Optional[PromptLibrary] = None
-        self._session_manager: Optional[SessionManager] = None
-        self._tool_connector: Optional[ToolConnector] = None
-        self._state_sync: Optional[StateSyncManager] = None
-        self._collaboration: Optional[CollaborationManager] = None
+        self._prompt_library: PromptLibrary | None = None
+        self._session_manager: SessionManager | None = None
+        self._tool_connector: ToolConnector | None = None
+        self._state_sync: StateSyncManager | None = None
+        self._collaboration: CollaborationManager | None = None
 
     @property
     def prompts(self) -> PromptLibrary:
@@ -88,12 +88,12 @@ class WorkspaceService:
         self,
         name: str,
         content: str,
-        user_id: Optional[int] = None,
+        user_id: int | None = None,
         username: str = "",
         description: str = "",
         category: str = "general",
-        variables: Optional[list[dict[str, str]]] = None,
-        tags: Optional[list[str]] = None,
+        variables: list[dict[str, str]] | None = None,
+        tags: list[str] | None = None,
         is_public: bool = False,
     ) -> PromptTemplate:
         """
@@ -163,13 +163,13 @@ class WorkspaceService:
     def start_session(
         self,
         tool_name: str,
-        user_id: Optional[int] = None,
+        user_id: int | None = None,
         session_type: str = SessionType.CHAT.value,
         title: str = "",
-        model: Optional[str] = None,
-        context: Optional[dict[str, Any]] = None,
-        project_id: Optional[int] = None,
-        project_path: Optional[str] = None,
+        model: str | None = None,
+        context: dict[str, Any] | None = None,
+        project_id: int | None = None,
+        project_path: str | None = None,
     ) -> AgentSession:
         """
         Start a new agent session.
@@ -252,7 +252,7 @@ class WorkspaceService:
 
         return success
 
-    def recover_session(self, session_id: str) -> Optional[AgentSession]:
+    def recover_session(self, session_id: str) -> AgentSession | None:
         """
         Recover a paused or interrupted session.
 
@@ -280,7 +280,7 @@ class WorkspaceService:
         """
         return self.tools.list_tools()
 
-    def get_tool_info(self, tool_name: str) -> Optional[ToolInfo]:
+    def get_tool_info(self, tool_name: str) -> ToolInfo | None:
         """
         Get information about a specific tool.
 
@@ -296,8 +296,8 @@ class WorkspaceService:
         self,
         tool_name: str,
         message: str,
-        session_id: Optional[str] = None,
-        model: Optional[str] = None,
+        session_id: str | None = None,
+        model: str | None = None,
         **kwargs,
     ) -> dict[str, Any]:
         """
@@ -357,7 +357,7 @@ class WorkspaceService:
         shared_by_name: str,
         permission: str = "view",
         share_type: str = "user",
-        target_id: Optional[int] = None,
+        target_id: int | None = None,
         target_name: str = "",
     ) -> SharedSession:
         """
@@ -391,7 +391,7 @@ class WorkspaceService:
         user_id: int,
         username: str,
         content: str,
-        message_id: Optional[str] = None,
+        message_id: str | None = None,
         annotation_type: str = "comment",
     ) -> Annotation:
         """
@@ -423,9 +423,9 @@ class WorkspaceService:
         content: str,
         author_id: int,
         author_name: str,
-        team_id: Optional[str] = None,
+        team_id: str | None = None,
         category: str = "general",
-        tags: Optional[list[str]] = None,
+        tags: list[str] | None = None,
         is_published: bool = False,
     ) -> KnowledgeEntry:
         """
@@ -457,7 +457,7 @@ class WorkspaceService:
 
     # ==================== Statistics ====================
 
-    def get_workspace_stats(self, user_id: Optional[int] = None) -> dict[str, Any]:
+    def get_workspace_stats(self, user_id: int | None = None) -> dict[str, Any]:
         """
         Get workspace statistics.
 
@@ -475,7 +475,7 @@ class WorkspaceService:
 
 
 # Global workspace service instance
-_workspace_service: Optional[WorkspaceService] = None
+_workspace_service: WorkspaceService | None = None
 
 
 def get_workspace_service() -> WorkspaceService:

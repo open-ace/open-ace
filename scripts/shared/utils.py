@@ -35,7 +35,7 @@ def format_tokens(tokens: int) -> str:
         return str(tokens)
 
 
-def parse_date(date_str: str) -> Optional[str]:
+def parse_date(date_str: str) -> str | None:
     """Validate and normalize a date string (YYYY-MM-DD)."""
     if not date_str:
         return None
@@ -59,7 +59,7 @@ def _is_placeholder(value: str) -> bool:
     return bool(_PLACEHOLDER_PATTERN.match(value))
 
 
-def load_config(config_path: Optional[str] = None) -> dict:
+def load_config(config_path: str | None = None) -> dict:
     """Load configuration from JSON file."""
     import json
     import os
@@ -89,7 +89,7 @@ def load_config(config_path: Optional[str] = None) -> dict:
     return config
 
 
-def save_config(config: dict, config_path: Optional[str] = None) -> None:
+def save_config(config: dict, config_path: str | None = None) -> None:
     """Save configuration to JSON file."""
     import json
     import os
@@ -229,7 +229,7 @@ def warn_if_skipped_message_has_text(
         pass
 
 
-def update_session_last_seen(stats: dict, timestamp: Any, model: Optional[str]) -> None:
+def update_session_last_seen(stats: dict, timestamp: Any, model: str | None) -> None:
     """Advance a per-session stats entry's last-seen timestamp and model.
 
     Single source of truth for how every fetcher derives the model stored on

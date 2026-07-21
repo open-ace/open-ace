@@ -11,7 +11,6 @@ This service runs after data collection to auto-assign tool accounts to users.
 
 import logging
 from dataclasses import dataclass
-from typing import Optional
 
 from app.models.tool_account_mapping_rule import ToolAccountMappingRule
 from app.models.user import User
@@ -30,18 +29,18 @@ class AutoMappingResult:
     user_id: int
     username: str
     matched_by: str  # "email", "username", "rule", "system_account"
-    rule_id: Optional[int] = None
-    created_mapping_id: Optional[int] = None
+    rule_id: int | None = None
+    created_mapping_id: int | None = None
 
 
 class ToolAccountAutoMappingService:
     """Service for automatic tool account mapping."""
 
-    def __init__(self, db: Optional[Database] = None):
+    def __init__(self, db: Database | None = None):
         self.db = db or Database()
         self.rule_repo = ToolAccountMappingRuleRepository(db)
         self.mapping_repo = UserToolAccountRepository(db)
-        self._users_cache: Optional[dict[int, User]] = None  # Cache for N+1 optimization
+        self._users_cache: dict[int, User] | None = None  # Cache for N+1 optimization
 
     def _get_users_cache(self) -> dict[int, User]:
         """Get cached user dict (keyed by user_id) for N+1 optimization."""
@@ -76,7 +75,7 @@ class ToolAccountAutoMappingService:
 
     def try_match_by_username_or_email(
         self, tool_account: str, users: list[User]
-    ) -> Optional[AutoMappingResult]:
+    ) -> AutoMappingResult | None:
         """
         Try to match tool_account by username or email.
 
@@ -143,8 +142,8 @@ class ToolAccountAutoMappingService:
         return None
 
     def try_match_by_rules(
-        self, tool_account: str, tool_type: Optional[str] = None
-    ) -> Optional[AutoMappingResult]:
+        self, tool_account: str, tool_type: str | None = None
+    ) -> AutoMappingResult | None:
         """
         Try to match tool_account using custom rules.
 
@@ -171,8 +170,8 @@ class ToolAccountAutoMappingService:
         return None
 
     def auto_map_account(
-        self, tool_account: str, tool_type: Optional[str] = None
-    ) -> Optional[AutoMappingResult]:
+        self, tool_account: str, tool_type: str | None = None
+    ) -> AutoMappingResult | None:
         """
         Auto-map a single tool_account using all available methods.
 
@@ -201,7 +200,7 @@ class ToolAccountAutoMappingService:
 
         return None
 
-    def apply_mapping(self, result: AutoMappingResult) -> Optional[int]:
+    def apply_mapping(self, result: AutoMappingResult) -> int | None:
         """Apply the auto-mapping result by creating a tool account mapping."""
         mapping = self.mapping_repo.create(
             user_id=result.user_id,
@@ -252,7 +251,7 @@ class ToolAccountAutoMappingService:
 
         return results, still_unmapped
 
-    def _infer_tool_type(self, tool_account: str) -> Optional[str]:
+    def _infer_tool_type(self, tool_account: str) -> str | None:
         """Infer tool type from tool_account suffix."""
         known_tools = ["qwen", "claude", "openclaw", "codex", "zcode"]
         for tool in known_tools:

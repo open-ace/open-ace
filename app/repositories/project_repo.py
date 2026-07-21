@@ -6,7 +6,7 @@ Repository for project data access operations.
 
 import logging
 from datetime import datetime, timezone
-from typing import Any, Optional, cast
+from typing import Any, cast
 
 from app.models.project import Project, ProjectDailyStats, ProjectStats, UserProject
 from app.repositories.database import Database, adapt_boolean_value
@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 class ProjectRepository:
     """Repository for project data operations."""
 
-    def __init__(self, db: Optional[Database] = None):
+    def __init__(self, db: Database | None = None):
         """
         Initialize repository.
 
@@ -28,7 +28,7 @@ class ProjectRepository:
         self.db = db or Database()
 
     @staticmethod
-    def _normalize_tenant_id(value: Any) -> Optional[int]:
+    def _normalize_tenant_id(value: Any) -> int | None:
         """Normalize tenant identifiers to positive integers."""
         try:
             tenant_id = int(value)
@@ -36,9 +36,7 @@ class ProjectRepository:
             return None
         return tenant_id if tenant_id > 0 else None
 
-    def _resolve_tenant_id(
-        self, tenant_id: Optional[int] = None, user_id: Optional[int] = None
-    ) -> int:
+    def _resolve_tenant_id(self, tenant_id: int | None = None, user_id: int | None = None) -> int:
         """Resolve the effective tenant for project writes."""
         normalized = self._normalize_tenant_id(tenant_id)
         if normalized is not None:
@@ -56,12 +54,12 @@ class ProjectRepository:
     def create_project(
         self,
         path: str,
-        name: Optional[str] = None,
-        description: Optional[str] = None,
-        created_by: Optional[int] = None,
+        name: str | None = None,
+        description: str | None = None,
+        created_by: int | None = None,
         is_shared: bool = False,
-        tenant_id: Optional[int] = None,
-    ) -> Optional[int]:
+        tenant_id: int | None = None,
+    ) -> int | None:
         """
         Create a new project or restore a soft-deleted one.
 
@@ -196,9 +194,7 @@ class ProjectRepository:
             logger.error(f"Error creating project: {e}")
             return None
 
-    def get_project_by_id(
-        self, project_id: int, tenant_id: Optional[int] = None
-    ) -> Optional[Project]:
+    def get_project_by_id(self, project_id: int, tenant_id: int | None = None) -> Project | None:
         """
         Get project by ID.
 
@@ -218,7 +214,7 @@ class ProjectRepository:
         result = self.db.fetch_one(query, tuple(params))
         return Project.from_dict(result) if result else None
 
-    def get_project_by_path(self, path: str, tenant_id: Optional[int] = None) -> Optional[Project]:
+    def get_project_by_path(self, path: str, tenant_id: int | None = None) -> Project | None:
         """
         Get project by path.
 
@@ -241,8 +237,8 @@ class ProjectRepository:
     def get_all_projects(
         self,
         include_inactive: bool = False,
-        created_by: Optional[int] = None,
-        tenant_id: Optional[int] = None,
+        created_by: int | None = None,
+        tenant_id: int | None = None,
     ) -> list[Project]:
         """
         Get all projects.
@@ -275,7 +271,7 @@ class ProjectRepository:
         results = self.db.fetch_all(query, tuple(params))
         return [Project.from_dict(r) for r in results]
 
-    def get_user_projects(self, user_id: int, tenant_id: Optional[int] = None) -> list[Project]:
+    def get_user_projects(self, user_id: int, tenant_id: int | None = None) -> list[Project]:
         """
         Get projects accessible by a user.
 
@@ -302,10 +298,10 @@ class ProjectRepository:
     def update_project(
         self,
         project_id: int,
-        name: Optional[str] = None,
-        description: Optional[str] = None,
-        is_shared: Optional[bool] = None,
-        tenant_id: Optional[int] = None,
+        name: str | None = None,
+        description: str | None = None,
+        is_shared: bool | None = None,
+        tenant_id: int | None = None,
     ) -> bool:
         """
         Update project information.
@@ -358,7 +354,7 @@ class ProjectRepository:
             return False
 
     def delete_project(
-        self, project_id: int, soft_delete: bool = True, tenant_id: Optional[int] = None
+        self, project_id: int, soft_delete: bool = True, tenant_id: int | None = None
     ) -> bool:
         """
         Delete a project.
@@ -397,7 +393,7 @@ class ProjectRepository:
         self,
         user_id: int,
         project_id: int,
-    ) -> Optional[int]:
+    ) -> int | None:
         """
         Add a user-project relationship.
 
@@ -454,7 +450,7 @@ class ProjectRepository:
                         project_id,
                     ),
                 )
-                return cast("Optional[int]", cursor.lastrowid)
+                return cast("int | None", cursor.lastrowid)
         except Exception as e:
             logger.error(f"Error adding user project: {e}")
             return None
@@ -510,8 +506,8 @@ class ProjectRepository:
             return False
 
     def get_user_project(
-        self, user_id: int, project_id: int, tenant_id: Optional[int] = None
-    ) -> Optional[UserProject]:
+        self, user_id: int, project_id: int, tenant_id: int | None = None
+    ) -> UserProject | None:
         """
         Get user-project relationship.
 
@@ -537,9 +533,7 @@ class ProjectRepository:
         result = self.db.fetch_one(query, params)
         return UserProject.from_dict(result) if result else None
 
-    def get_project_users(
-        self, project_id: int, tenant_id: Optional[int] = None
-    ) -> list[UserProject]:
+    def get_project_users(self, project_id: int, tenant_id: int | None = None) -> list[UserProject]:
         """
         Get all users associated with a project.
 
@@ -571,8 +565,8 @@ class ProjectRepository:
         return [UserProject.from_dict(r) for r in results]
 
     def get_project_stats(
-        self, project_id: int, tenant_id: Optional[int] = None
-    ) -> Optional[ProjectStats]:
+        self, project_id: int, tenant_id: int | None = None
+    ) -> ProjectStats | None:
         """
         Get aggregated statistics for a project.
 
@@ -621,7 +615,7 @@ class ProjectRepository:
             user_stats=user_stats,
         )
 
-    def get_all_project_stats(self, tenant_id: Optional[int] = None) -> list[ProjectStats]:
+    def get_all_project_stats(self, tenant_id: int | None = None) -> list[ProjectStats]:
         """
         Get statistics for all active projects.
 
@@ -682,9 +676,9 @@ class ProjectRepository:
     def get_project_daily_stats(
         self,
         project_id: int,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
-        tenant_id: Optional[int] = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        tenant_id: int | None = None,
     ) -> list[ProjectDailyStats]:
         """
         Get daily statistics for a project from daily_stats table.

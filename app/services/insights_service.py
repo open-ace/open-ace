@@ -8,7 +8,7 @@ Calls GLM-5 model (OpenAI-compatible API) to produce structured analysis.
 import json
 import logging
 import os
-from typing import Optional, cast
+from typing import cast
 
 import requests
 
@@ -25,9 +25,9 @@ class InsightsService:
 
     def __init__(
         self,
-        user_repo: Optional[UserRepository] = None,
-        message_repo: Optional[MessageRepository] = None,
-        insights_repo: Optional[InsightsReportRepository] = None,
+        user_repo: UserRepository | None = None,
+        message_repo: MessageRepository | None = None,
+        insights_repo: InsightsReportRepository | None = None,
     ):
         self.user_repo = user_repo or UserRepository()
         self.message_repo = message_repo or MessageRepository()
@@ -43,7 +43,7 @@ class InsightsService:
             logger.warning(f"Could not load config.json: {e}")
             return {}
 
-    def _get_api_credentials(self, config: dict) -> tuple[str, str, Optional[str]]:
+    def _get_api_credentials(self, config: dict) -> tuple[str, str, str | None]:
         """
         Get API credentials from the api_key_store database.
 
@@ -73,7 +73,7 @@ class InsightsService:
         base_url = os.environ.get("OPENAI_BASE_URL", "https://coding.dashscope.aliyuncs.com/v1")
         return api_key, base_url, None
 
-    def _extract_model_from_cli_settings(self, cli_settings: Optional[str]) -> Optional[str]:
+    def _extract_model_from_cli_settings(self, cli_settings: str | None) -> str | None:
         """
         Extract default model from cli_settings JSON.
 
@@ -109,7 +109,7 @@ class InsightsService:
 
     def generate_insights(
         self, user_id: int, start_date: str, end_date: str, language: str = "zh"
-    ) -> tuple[Optional[dict], Optional[str]]:
+    ) -> tuple[dict | None, str | None]:
         """
         Generate insights report for a user's conversations.
 

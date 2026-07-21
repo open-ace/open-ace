@@ -8,7 +8,7 @@ import contextlib
 import json
 import logging
 from datetime import datetime, timezone
-from typing import Any, Optional, cast
+from typing import Any, cast
 
 from app.models.tenant import QuotaConfig, Tenant, TenantSettings, TenantUsage
 from app.repositories.database import Database, adapt_boolean_value
@@ -17,7 +17,7 @@ from app.utils.helpers import parse_db_datetime
 logger = logging.getLogger(__name__)
 
 
-def _parse_datetime(value: Any) -> Optional[datetime]:
+def _parse_datetime(value: Any) -> datetime | None:
     """Parse datetime value from database.
 
     Delegates to the shared :func:`parse_db_datetime` helper which handles both
@@ -30,7 +30,7 @@ def _parse_datetime(value: Any) -> Optional[datetime]:
 class TenantRepository:
     """Repository for tenant data access."""
 
-    def __init__(self, db: Optional[Database] = None):
+    def __init__(self, db: Database | None = None):
         """
         Initialize tenant repository.
 
@@ -40,7 +40,7 @@ class TenantRepository:
         self.db = db or Database()
         # Table structure managed by Alembic migrations
 
-    def create(self, tenant: Tenant) -> Optional[int]:
+    def create(self, tenant: Tenant) -> int | None:
         """
         Create a new tenant.
 
@@ -172,7 +172,7 @@ class TenantRepository:
             logger.error(f"Failed to create tenant: {e}")
             return None
 
-    def get_by_id(self, tenant_id: int, include_deleted: bool = False) -> Optional[Tenant]:
+    def get_by_id(self, tenant_id: int, include_deleted: bool = False) -> Tenant | None:
         """
         Get tenant by ID.
 
@@ -191,7 +191,7 @@ class TenantRepository:
         row = self.db.fetch_one(query, (tenant_id,))
         return self._row_to_tenant(row) if row else None
 
-    def get_by_slug(self, slug: str, include_deleted: bool = False) -> Optional[Tenant]:
+    def get_by_slug(self, slug: str, include_deleted: bool = False) -> Tenant | None:
         """
         Get tenant by slug.
 
@@ -212,8 +212,8 @@ class TenantRepository:
 
     def get_all(
         self,
-        status: Optional[str] = None,
-        plan: Optional[str] = None,
+        status: str | None = None,
+        plan: str | None = None,
         include_deleted: bool = False,
         limit: int = 100,
         offset: int = 0,
@@ -416,7 +416,7 @@ class TenantRepository:
             return False
 
     def record_usage(
-        self, tenant_id: int, tokens: int = 0, requests: int = 1, date: Optional[str] = None
+        self, tenant_id: int, tokens: int = 0, requests: int = 1, date: str | None = None
     ) -> bool:
         """
         Record usage for a tenant.
@@ -486,8 +486,8 @@ class TenantRepository:
     def get_usage(
         self,
         tenant_id: int,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
         limit: int = 30,
     ) -> list[TenantUsage]:
         """
@@ -578,7 +578,7 @@ class TenantRepository:
             logger.error(f"Failed to update user count: {e}")
             return False
 
-    def count(self, status: Optional[str] = None) -> int:
+    def count(self, status: str | None = None) -> int:
         """
         Count tenants.
 

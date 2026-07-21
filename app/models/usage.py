@@ -6,7 +6,6 @@ Data models for usage tracking.
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional
 
 
 @dataclass
@@ -21,9 +20,9 @@ class Usage:
     output_tokens: int = 0
     cache_tokens: int = 0
     request_count: int = 0
-    models_used: Optional[list[str]] = None
-    id: Optional[int] = None
-    created_at: Optional[datetime] = None
+    models_used: list[str] | None = None
+    id: int | None = None
+    created_at: datetime | None = None
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""

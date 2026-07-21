@@ -8,7 +8,7 @@ Ensures consistency when users acknowledge, delete, or clean up alerts.
 import json
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional
+from typing import Any
 
 from app.repositories.database import Database, adapt_boolean_value, adapt_sql, is_postgresql
 
@@ -26,14 +26,14 @@ class AlertStateSynchronizer:
     - Transaction guarantees
     """
 
-    def __init__(self, db: Optional[Database] = None):
+    def __init__(self, db: Database | None = None):
         """Initialize the synchronizer."""
         self.db = db or Database()
 
     def sync_acknowledge(
         self,
         alert_id: str,
-        user_id: Optional[int] = None,
+        user_id: int | None = None,
     ) -> bool:
         """
         Sync acknowledge/read state between tables.
@@ -170,7 +170,7 @@ class AlertStateSynchronizer:
     def sync_delete(
         self,
         alert_id: str,
-        user_id: Optional[int] = None,
+        user_id: int | None = None,
     ) -> bool:
         """
         Sync delete between tables.
@@ -288,7 +288,7 @@ class AlertStateSynchronizer:
     def sync_cleanup(
         self,
         days: int = 30,
-        user_id: Optional[int] = None,
+        user_id: int | None = None,
     ) -> dict:
         """
         Sync cleanup of old alerts between tables.
@@ -595,10 +595,10 @@ class AlertStateSynchronizer:
 
 
 # Global instance
-_synchronizer: Optional[AlertStateSynchronizer] = None
+_synchronizer: AlertStateSynchronizer | None = None
 
 
-def get_synchronizer(db: Optional[Database] = None) -> AlertStateSynchronizer:
+def get_synchronizer(db: Database | None = None) -> AlertStateSynchronizer:
     """Get the global synchronizer instance."""
     global _synchronizer
     if _synchronizer is None:
@@ -606,16 +606,16 @@ def get_synchronizer(db: Optional[Database] = None) -> AlertStateSynchronizer:
     return _synchronizer
 
 
-def sync_acknowledge(alert_id: str, user_id: Optional[int] = None) -> bool:
+def sync_acknowledge(alert_id: str, user_id: int | None = None) -> bool:
     """Convenience function to sync acknowledge state."""
     return get_synchronizer().sync_acknowledge(alert_id, user_id)
 
 
-def sync_delete(alert_id: str, user_id: Optional[int] = None) -> bool:
+def sync_delete(alert_id: str, user_id: int | None = None) -> bool:
     """Convenience function to sync delete."""
     return get_synchronizer().sync_delete(alert_id, user_id)
 
 
-def sync_cleanup(days: int = 30, user_id: Optional[int] = None) -> dict:
+def sync_cleanup(days: int = 30, user_id: int | None = None) -> dict:
     """Convenience function to sync cleanup."""
     return get_synchronizer().sync_cleanup(days, user_id)

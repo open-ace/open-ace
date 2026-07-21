@@ -4,8 +4,8 @@ During long LLM waits (api_retry from upstream overload, slow first-token),
 claude --print emits only ``system`` events (api_retry, thinking_tokens, init).
 _read_stdout previously forwarded only assistant/tool_use/usage events to
 _activity_callback, so the UI showed "no AI activity" for minutes until the
-first ``assistant`` event arrived. Now key system subtypes also trigger the
-callback so the workflow detail shows live progress throughout the wait.
+first ``assistant`` event arrived. Low-frequency lifecycle events still reach
+the UI, while high-frequency cumulative ``thinking_tokens`` events are ignored.
 """
 
 import json
@@ -75,7 +75,7 @@ class TestSystemEventActivityForwarding:
             {"type": "system", "subtype": "api_retry", "attempt": 3},
         )
 
-    def test_thinking_tokens_triggers_activity(self):
+    def test_thinking_tokens_is_not_forwarded(self):
         runner = _make_runner()
         session = _make_session(
             [
@@ -85,10 +85,7 @@ class TestSystemEventActivityForwarding:
             ]
         )
         runner._read_stdout(session)
-        runner._activity_callback.assert_called_once_with(
-            "sess-1",
-            {"type": "system", "subtype": "thinking_tokens", "estimated_tokens": 42},
-        )
+        runner._activity_callback.assert_not_called()
 
     def test_init_triggers_activity(self):
         runner = _make_runner()

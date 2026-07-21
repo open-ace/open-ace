@@ -14,7 +14,6 @@ import platform
 import re
 import subprocess
 from pathlib import Path
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +29,12 @@ __all__ = [
 OPENACE_USERADD_WRAPPER = "/usr/local/bin/openace-useradd"
 OPENACE_CHOWN_WRAPPER = "/usr/local/bin/openace-chown"
 OPENACE_MKDIR_WRAPPER = "/usr/local/bin/openace-mkdir"
+# Cross-user file write wrapper (Issue #1916): used by the upload endpoint in
+# Package non-root multi-user mode to write into a user's 0700 home directory.
+# cp/tee/mv are NOT in the sudoers OPENACE_UTILS whitelist, so uploads delegate
+# through this root-authorized wrapper (which drops to the target user via
+# runuser). Docker multi-user runs as root and never hits this path.
+OPENACE_WRITE_AS_WRAPPER = "/usr/local/bin/openace-write-as"
 
 
 def _is_wrapper_available(wrapper_path: str) -> bool:
@@ -98,7 +103,7 @@ def _is_docker_multi_user_mode() -> bool:
     return is_docker_workspace and is_root
 
 
-def ensure_system_user(system_account: str, uid: Optional[int] = None) -> bool:
+def ensure_system_user(system_account: str, uid: int | None = None) -> bool:
     """确保系统用户存在，创建工作目录。
 
     此函数用于 Package 版 multi-user mode，当服务以非 root 用户运行时，

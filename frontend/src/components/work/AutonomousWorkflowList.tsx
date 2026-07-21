@@ -461,7 +461,6 @@ export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
     const workflowDate = formatWorkflowDate(workflow.created_at);
     const itemClasses = [
       'list-group-item',
-      'list-group-item-action',
       'border-0',
       'px-3',
       'py-2',
@@ -476,24 +475,34 @@ export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
       .join(' ');
 
     return (
-      <div key={workflow.workflow_id} className={itemClasses} onClick={() => onSelect(workflow)}>
-        <div className="flex-grow-1 min-width-0">
+      <div key={workflow.workflow_id} className={itemClasses}>
+        <button
+          type="button"
+          className="flex-grow-1 auto-workflow-select-btn"
+          aria-current={isSelected ? 'true' : undefined}
+          aria-label={
+            workflow.title ||
+            workflow.requirements_text?.slice(0, 50) ||
+            `Workflow ${workflow.workflow_id.slice(0, 8)}`
+          }
+          onClick={() => onSelect(workflow)}
+        >
           {compact ? (
-            <div className="d-flex align-items-start justify-content-between gap-2">
-              <div className="min-width-0">
-                <div className="d-flex align-items-center gap-2 flex-wrap">
-                  <div className="auto-workflow-issue-label">
+            <span className="d-flex align-items-start justify-content-between gap-2">
+              <span className="d-block min-width-0">
+                <span className="d-flex align-items-center gap-2 flex-wrap">
+                  <span className="auto-workflow-issue-label">
                     {isForkChild && <i className="bi bi-diagram-3 text-info me-1"></i>}
                     {getIssueLabel(workflow)}
-                  </div>
+                  </span>
                   {workflow.batch_order && workflow.batch_total && (
                     <Badge variant="light">
                       {workflow.batch_order}/{workflow.batch_total}
                     </Badge>
                   )}
                   {workflow.dev_round > 1 && <Badge variant="light">R{workflow.dev_round}</Badge>}
-                </div>
-                <div className="d-flex align-items-center gap-1 mt-2 flex-wrap">
+                </span>
+                <span className="d-flex align-items-center gap-1 mt-2 flex-wrap">
                   <Badge
                     variant={
                       statusCfg.variant as
@@ -513,20 +522,20 @@ export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
                       {t('autoForkedFrom', language)}
                     </Badge>
                   )}
-                </div>
-              </div>
-            </div>
+                </span>
+              </span>
+            </span>
           ) : (
             <>
-              <div className="fw-semibold text-truncate auto-workflow-title">
+              <span className="d-block fw-semibold text-truncate auto-workflow-title">
                 {isForkChild && (
                   <i className="bi bi-diagram-3 text-info me-1" style={{ fontSize: '0.75rem' }}></i>
                 )}
                 {workflow.title ||
                   workflow.requirements_text?.slice(0, 50) ||
                   `Workflow ${workflow.workflow_id.slice(0, 8)}`}
-              </div>
-              <div className="d-flex align-items-center gap-1 mt-1 flex-wrap">
+              </span>
+              <span className="d-flex align-items-center gap-1 mt-1 flex-wrap">
                 <Badge
                   variant={
                     statusCfg.variant as
@@ -552,17 +561,17 @@ export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
                     {t('autoForkedFrom', language)}
                   </Badge>
                 )}
-              </div>
-              <div className="text-muted mt-1 auto-workflow-meta">
+              </span>
+              <span className="d-block text-muted mt-1 auto-workflow-meta">
                 <i
                   className={`bi ${workflow.workspace_type === 'remote' ? 'bi-cloud' : 'bi-laptop'} me-1`}
                 ></i>
                 {workflow.cli_tool}
                 {workflowDate && <span className="ms-2">{workflowDate}</span>}
-              </div>
+              </span>
             </>
           )}
-        </div>
+        </button>
         <div className="d-flex align-items-center gap-1 ms-2">
           {isActive && (
             <span className="spinner-border spinner-border-sm text-primary" role="status">
@@ -571,8 +580,10 @@ export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
           )}
           {!isActive && (
             <button
+              type="button"
               className={`btn btn-sm border-0 p-0 auto-workflow-delete-btn ${isConfirming ? 'btn-outline-danger' : 'btn-outline-secondary'}`}
               title={t('autoDeleteWorkflow', language)}
+              aria-label={t('autoDeleteWorkflow', language)}
               disabled={deleteMutation.isPending}
               onClick={(e) => handleDeleteClick(e, workflow.workflow_id)}
             >
@@ -690,8 +701,10 @@ export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
               )}
               {!hasActiveWorkflow && (
                 <button
+                  type="button"
                   className={`btn btn-sm border-0 p-0 auto-workflow-delete-btn ${confirmDeleteId === batchDeleteConfirmKey ? 'btn-outline-danger' : 'btn-outline-secondary'}`}
                   title={t('autoDeleteWorkflow', language)}
+                  aria-label={t('autoDeleteWorkflow', language)}
                   disabled={deleteBatchMutation.isPending}
                   onClick={(event) => handleBatchDeleteClick(event, entry.batchId)}
                 >
@@ -727,6 +740,7 @@ export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
           <input
             className="form-control"
             placeholder={t('autoSearchWorkflows', language)}
+            aria-label={t('autoSearchWorkflows', language)}
             value={searchInput}
             onChange={(e) => handleSearchChange(e.target.value)}
           />
@@ -746,6 +760,7 @@ export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
         {STATUS_FILTER_TABS.map((tab) => (
           <button
             key={tab.key}
+            type="button"
             className={`btn btn-sm px-2 py-1 border-0 rounded-0 ${statusFilter === tab.key ? 'fw-bold text-primary border-bottom border-2 border-primary' : 'text-muted'}`}
             style={{ borderBottomWidth: '2px' }}
             onClick={() => handleStatusFilterChange(tab.key)}

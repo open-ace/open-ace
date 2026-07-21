@@ -10,6 +10,7 @@ Covers:
 from __future__ import annotations
 
 import json
+import threading
 from unittest.mock import MagicMock, call, patch
 
 import pytest
@@ -212,6 +213,67 @@ class TestOrchestratorActivityForwarding:
         )
 
         orch.repo.refresh_workflow_usage_from_sessions.assert_not_called()
+
+    def test_drops_thinking_token_activity(self):
+        from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+        orch = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
+        orch._workflow_id = "wf-123"
+        orch.emitter = MagicMock()
+        orch.repo = MagicMock()
+
+        orch._on_agent_activity(
+            "sess-456",
+            {
+                "type": "system",
+                "subtype": "thinking_tokens",
+                "estimated_tokens": 245,
+            },
+        )
+
+        orch.emitter.emit.assert_not_called()
+        orch.repo.refresh_workflow_usage_from_sessions.assert_not_called()
+
+    def test_usage_event_includes_prior_retry_offset(self):
+        from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+        orch = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
+        orch._workflow_id = "wf-123"
+        orch._session_lock = threading.Lock()
+        orch._session_usage_offsets = {
+            "sess-456": {
+                "total_tokens": 100,
+                "total_input_tokens": 80,
+                "total_output_tokens": 20,
+                "request_count": 1,
+            }
+        }
+        orch.emitter = MagicMock()
+        orch.repo = MagicMock()
+        orch._write_realtime_phase_usage = MagicMock()
+
+        orch._on_agent_activity(
+            "sess-456",
+            {
+                "type": "usage",
+                "total_tokens": 200,
+                "total_input_tokens": 150,
+                "total_output_tokens": 50,
+                "request_count": 2,
+            },
+        )
+
+        expected = {
+            "type": "usage",
+            "total_tokens": 300,
+            "total_input_tokens": 230,
+            "total_output_tokens": 70,
+            "request_count": 3,
+        }
+        orch.emitter.emit.assert_called_once_with(
+            "wf-123", "agent_activity", {"session_id": "sess-456", **expected}
+        )
+        orch._write_realtime_phase_usage.assert_called_once_with(expected)
 
 
 class TestLinkSessionToMilestone:

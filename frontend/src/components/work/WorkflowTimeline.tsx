@@ -230,9 +230,6 @@ function getActivitySummary(
     case 'assistant':
       return { icon: 'bi-chat-text', text: t('autoActivityGenerating', language) };
     case 'system':
-      if (activity.subtype === 'thinking_tokens') {
-        return { icon: 'bi-lightbulb', text: t('autoActivityThinking', language) };
-      }
       if (activity.subtype === 'api_retry') {
         return { icon: 'bi-arrow-repeat', text: t('autoActivityRetrying', language) };
       }
@@ -768,7 +765,6 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
     tool_input?: string;
     total_tokens?: number;
     subtype?: string;
-    estimated_tokens?: number;
     attempt?: number;
   }) => {
     const timestamp = formatMilestoneTime(activity.timestamp ?? null) || '--:--:--';
@@ -800,18 +796,6 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
 
     if (activity.type === 'system') {
       const sub = activity.subtype ?? '';
-      if (sub === 'thinking_tokens') {
-        return {
-          icon: 'bi-lightbulb text-secondary',
-          timestamp,
-          content: (
-            <>
-              <span className="opacity-75">thinking…</span>{' '}
-              {activity.estimated_tokens ? `~${activity.estimated_tokens} tokens` : ''}
-            </>
-          ),
-        };
-      }
       if (sub === 'api_retry') {
         return {
           icon: 'bi-arrow-repeat text-warning',

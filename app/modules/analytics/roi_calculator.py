@@ -30,7 +30,7 @@ AssumptionSource = Literal["tenant_config", "environment_vars", "request_params"
 _executor = ThreadPoolExecutor(max_workers=4)
 
 
-def _normalize_tenant_id(value: object) -> Optional[int]:
+def _normalize_tenant_id(value: object) -> int | None:
     """Normalize a tenant identifier to a positive integer.
 
     Mirrors ``usage_repo.UsageRepository._normalize_tenant_id``. ``None``/0/blank
@@ -106,10 +106,10 @@ class ROIAssumptions:
     def with_overrides(
         self,
         *,
-        hourly_labor_cost: Optional[float] = None,
-        productivity_multiplier: Optional[float] = None,
-        avg_time_saved_per_request: Optional[float] = None,
-        currency: Optional[str] = None,
+        hourly_labor_cost: float | None = None,
+        productivity_multiplier: float | None = None,
+        avg_time_saved_per_request: float | None = None,
+        currency: str | None = None,
     ) -> "ROIAssumptions":
         """Return a copy with per-request overrides applied."""
         normalized_currency = self.currency
@@ -220,7 +220,7 @@ class ROIMetrics:
     input_cost: float = 0.0
     output_cost: float = 0.0
     efficiency_score: float = 0.0
-    assumptions: Optional[ROIAssumptions] = None
+    assumptions: ROIAssumptions | None = None
     # P0: Estimation labeling fields
     is_estimated: bool = True
     estimation_type: str = "assumptions_based"
@@ -342,8 +342,8 @@ class ROICalculator:
 
     def __init__(
         self,
-        db: Optional[Database] = None,
-        assumptions: Optional[ROIAssumptions] = None,
+        db: Database | None = None,
+        assumptions: ROIAssumptions | None = None,
         assumption_source: AssumptionSource = "defaults",
     ):
         """
@@ -566,10 +566,10 @@ class ROICalculator:
         self,
         start_date: str,
         end_date: str,
-        user_id: Optional[int] = None,
-        tool_name: Optional[str] = None,
-        tenant_id: Optional[int] = None,
-    ) -> Optional[ROIMetrics]:
+        user_id: int | None = None,
+        tool_name: str | None = None,
+        tenant_id: int | None = None,
+    ) -> ROIMetrics | None:
         """
         Calculate ROI for a period.
 
@@ -683,8 +683,8 @@ class ROICalculator:
     def get_roi_trend(
         self,
         months: int = 6,
-        user_id: Optional[int] = None,
-        tenant_id: Optional[int] = None,
+        user_id: int | None = None,
+        tenant_id: int | None = None,
     ) -> list[ROIMetrics]:
         """
         Get ROI trend over months.
@@ -835,7 +835,7 @@ class ROICalculator:
         self,
         start_date: str,
         end_date: str,
-        tenant_id: Optional[int] = None,
+        tenant_id: int | None = None,
     ) -> dict[str, ROIMetrics]:
         """
         Get ROI breakdown by tool.
@@ -944,7 +944,7 @@ class ROICalculator:
         self,
         start_date: str,
         end_date: str,
-        tenant_id: Optional[int] = None,
+        tenant_id: int | None = None,
     ) -> dict[str, ROIMetrics]:
         """
         Get ROI breakdown by user (via host_name grouping).
@@ -1068,8 +1068,8 @@ class ROICalculator:
         self,
         start_date: str,
         end_date: str,
-        user_id: Optional[int] = None,
-        tenant_id: Optional[int] = None,
+        user_id: int | None = None,
+        tenant_id: int | None = None,
     ) -> list[CostBreakdown]:
         """
         Get detailed cost breakdown.
@@ -1153,8 +1153,8 @@ class ROICalculator:
         self,
         start_date: str,
         end_date: str,
-        user_id: Optional[int] = None,
-        tenant_id: Optional[int] = None,
+        user_id: int | None = None,
+        tenant_id: int | None = None,
     ) -> list[dict[str, Any]]:
         """
         Get daily cost data for charting.
@@ -1232,8 +1232,8 @@ class ROICalculator:
         self,
         start_date: str,
         end_date: str,
-        user_id: Optional[int] = None,
-        tenant_id: Optional[int] = None,
+        user_id: int | None = None,
+        tenant_id: int | None = None,
     ) -> dict[str, Any]:
         """
         Get summary statistics for the period.

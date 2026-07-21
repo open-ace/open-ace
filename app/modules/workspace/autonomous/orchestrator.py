@@ -15,7 +15,6 @@ import threading
 import time
 import uuid
 from datetime import datetime, timezone
-from typing import Optional
 
 from app.modules.workspace.autonomous.agent_runner import (
     DEFAULT_TASK_TIMEOUT,
@@ -528,7 +527,7 @@ _TLDR_FORMAT_INSTRUCTIONS = {
 TLDR_INSTRUCTION = _TLDR_FORMAT_INSTRUCTIONS["zh"]
 
 
-def build_language_instruction(content_language: Optional[str]) -> str:
+def build_language_instruction(content_language: str | None) -> str:
     """Build the per-content_language directive + TL;DR format instruction.
 
     Returned string is appended to every agent prompt so AI-authored content is
@@ -557,7 +556,7 @@ _REVIEW_APPROVAL_PHRASES = {
 }
 
 
-def _extract_pr_number_from_error(error_text: str) -> Optional[int]:
+def _extract_pr_number_from_error(error_text: str) -> int | None:
     """Extract a PR number from a gh "already exists" error message.
 
     gh's already-exists message includes the PR URL, e.g.:
@@ -575,7 +574,7 @@ def _extract_pr_number_from_error(error_text: str) -> Optional[int]:
     return int(m.group(1)) if m else None
 
 
-def _review_approval_phrase(content_language: Optional[str]) -> str:
+def _review_approval_phrase(content_language: str | None) -> str:
     """Approval marker for PR review in the given content language."""
     return _REVIEW_APPROVAL_PHRASES.get(
         content_language, _REVIEW_APPROVAL_PHRASES[DEFAULT_CONTENT_LANGUAGE]
@@ -632,7 +631,7 @@ _GITHUB_TRUNCATION_NOTICES = {
 }
 
 
-def _github_truncation_notice(content_language: Optional[str]) -> str:
+def _github_truncation_notice(content_language: str | None) -> str:
     return _GITHUB_TRUNCATION_NOTICES.get(
         content_language, _GITHUB_TRUNCATION_NOTICES[DEFAULT_CONTENT_LANGUAGE]
     )
@@ -641,7 +640,8 @@ def _github_truncation_notice(content_language: Optional[str]) -> str:
 REVIEW_SESSION_MILESTONE_TYPES = {"plan_reviewed", "pr_reviewed"}
 
 # Session lines that span multiple milestones via --resume. Each maps to a
-# workflow column holding the real CLI session id once the line is established.
+# workflow column holding one stable tracking id; the provider/CLI resume id is
+# stored on that agent_sessions row in ``cli_session_id``.
 #   main:   plan_created → plan_refined → plan_finalized → dev_started →
 #           pr_updated → pr_review_summary
 #   review: plan_reviewed → pr_reviewed
@@ -754,8 +754,12 @@ class AutonomousOrchestrator:
         self.repo = AutonomousWorkflowRepository(self.db)
         self.emitter = AutonomousEventEmitter.instance()
         self._workflow_id = workflow_id
-        self._current_session_id: Optional[str] = None
+        self._current_session_id: str | None = None
         self._session_lock = threading.Lock()
+        # Usage consumed by earlier transient-error attempts in the same
+        # milestone. Live milestone totals apply this runtime offset when the
+        # stable main/review/test session starts its next provider request.
+        self._session_usage_offsets: dict[str, dict[str, int]] = {}
         self._cancel_requested = threading.Event()  # in-memory cancel signal
 
         # Wire session_manager so agent sessions are persisted to DB
@@ -768,10 +772,10 @@ class AutonomousOrchestrator:
             on_pid_registered=self._on_pid_registered,
             on_pid_cleared=self._on_pid_cleared,
         )
-        self._gh: Optional[GitHubOps] = None
+        self._gh: GitHubOps | None = None
 
     @property
-    def workflow(self) -> Optional[dict]:
+    def workflow(self) -> dict | None:
         return self.repo.get_workflow(self._workflow_id)
 
     def _get_gh(self) -> GitHubOps:
@@ -857,7 +861,7 @@ class AutonomousOrchestrator:
         return self._gh
 
     @staticmethod
-    def _resolve_system_account(wf: Optional[dict]) -> Optional[str]:
+    def _resolve_system_account(wf: dict | None) -> str | None:
         """Resolve the workflow owner's system account, if any."""
         user_id = (wf or {}).get("user_id")
         if not user_id:
@@ -865,7 +869,7 @@ class AutonomousOrchestrator:
         user = UserRepository().get_user_by_id(user_id)
         return user.get("system_account") if user else None
 
-    def _resolve_effective_repo_context(self, wf: Optional[dict]) -> dict[str, str]:
+    def _resolve_effective_repo_context(self, wf: dict | None) -> dict[str, str]:
         """Resolve the authoritative repo path + branch for this workflow."""
         workflow = wf or self.workflow or {}
         strategy = (workflow.get("branch_strategy") or "new-branch").strip() or "new-branch"
@@ -882,7 +886,7 @@ class AutonomousOrchestrator:
             "expected_branch": (workflow.get("branch_name") or "").strip(),
         }
 
-    def _build_repo_execution_contract(self, wf: Optional[dict]) -> str:
+    def _build_repo_execution_contract(self, wf: dict | None) -> str:
         """Prompt contract that keeps all agent actions bound to one repo/branch."""
         ctx = self._resolve_effective_repo_context(wf)
         repo_path = ctx.get("repo_path", "")
@@ -904,7 +908,7 @@ class AutonomousOrchestrator:
         )
         return "\n".join(lines) + "\n"
 
-    def _capture_repo_state(self, repo_path: str, system_account: Optional[str]) -> dict[str, str]:
+    def _capture_repo_state(self, repo_path: str, system_account: str | None) -> dict[str, str]:
         """Capture the repo root, branch, and HEAD for post-run validation."""
         gh = GitHubOps(repo_path, system_account=system_account)
         top_level = gh._run_git(["rev-parse", "--show-toplevel"]).stdout.strip()
@@ -921,9 +925,98 @@ class AutonomousOrchestrator:
             "head": head,
         }
 
+    def _ancestor_check(self, gh: "GitHubOps", a: str, b: str) -> bool | None:
+        """Return True if ``a`` is an ancestor of ``b``, False if not, None on
+        a git error.
+
+        ``git merge-base --is-ancestor`` exits 0 (yes), 1 (no), or 128+ (git
+        error such as a missing object). The 1-vs-error distinction matters:
+        a "no" is a definitive commit-graph answer we act on, a git error is
+        an indeterminate probe that must fail closed (see
+        ``_main_drift_is_benign_pull``).
+        """
+        rc = gh._run_git(["merge-base", "--is-ancestor", a, b], check=False).returncode
+        if rc == 0:
+            return True
+        if rc == 1:
+            return False
+        return None
+
+    def _main_drift_is_benign_pull(
+        self,
+        repo_path: str,
+        before: str,
+        after: str,
+        system_account: str | None,
+    ) -> bool:
+        """Return True if main HEAD moving ``before`` → ``after`` is a benign
+        external ``git pull`` (rather than an agent escaping the worktree).
+
+        Requires BOTH commit-graph conditions:
+          1. ``before`` is an ancestor of ``after`` — main moved *forward*
+             (rules out reset/rollback/history-rewrite).
+          2. ``after`` is an ancestor of ``origin/main`` — the new HEAD is a
+             remote-sourced commit (rules out a local, not-yet-pushed
+             ``git commit``).
+
+        What this detects, stated as commit-graph states rather than as claims
+        about who ran which command: it blocks (a) a local un-pushed commit on
+        main (after is not on origin/main) and (b) a non-fast-forward change
+        (main did not move forward). It does NOT identify the operation's
+        source: an agent running ``git pull`` / ``reset --hard origin/main`` /
+        checking out a newer remote commit is graph-identical to an external
+        pull (forward + on remote) and is likewise allowed. That boundary is
+        inherent to a commit-graph check.
+
+        Failure policy is fail-closed. Reaching this method already means main
+        HEAD moved suspiciously during an agent run, so a probe that cannot
+        produce a definitive answer (a git error on merge-base) defaults to
+        "not proven benign" → block. ``fetch`` is best-effort (``check=False``):
+        a network/auth failure does not short-circuit — we fall back to the
+        existing origin/main ref, which a concurrent external pull has already
+        updated, so the two conditions remain distinguishable.
+        """
+        if not before or not after or before == after:
+            # Defensive: the sole caller (_validate_repo_context_after_run)
+            # only reaches this method when before_main != after_main, so
+            # before == after is currently unreachable. Kept so a future caller
+            # gets the correct "no drift → benign" answer instead of a probe.
+            return True
+        gh = GitHubOps(repo_path, system_account=system_account)
+        try:
+            # Best-effort refresh of origin/main. A concurrent external pull
+            # runs its own fetch and updates this ref, so even if this fetch
+            # fails the local ref is fresh enough to tell pull from local commit.
+            gh._run_git(["fetch", "origin", "main"], check=False)
+            moved_forward = self._ancestor_check(gh, before, after)
+            after_on_remote = self._ancestor_check(gh, after, "origin/main")
+            # A git error on either probe → cannot prove benign → fail closed.
+            if moved_forward is None or after_on_remote is None:
+                logger.warning(
+                    "Workflow %s: benign-pull probe indeterminate for main HEAD "
+                    "%s..%s (git error); failing closed.",
+                    self._workflow_id,
+                    before[:8],
+                    after[:8],
+                )
+                return False
+            return moved_forward and after_on_remote
+        except Exception as e:
+            # Unexpected exception (not a merge-base exit code). main HEAD has
+            # already moved suspiciously, so do not assume benign.
+            logger.warning(
+                "Workflow %s: benign-pull probe raised for main HEAD %s..%s: %s; "
+                "failing closed.",
+                self._workflow_id,
+                before[:8],
+                after[:8],
+                e,
+            )
+            return False
+
     def _snapshot_repo_context(
-        self, wf: Optional[dict], workspace_type: str, system_account: Optional[str]
-    ) -> Optional[dict]:
+        self, wf: dict | None, workspace_type: str, system_account: str | None
+    ) -> dict | None:
         """Snapshot expected repo state before a local agent phase runs."""
         if workspace_type != "local":
             return None
@@ -949,7 +1042,7 @@ class AutonomousOrchestrator:
             return None
 
     def _validate_repo_context_after_run(
-        self, before_state: Optional[dict], system_account: Optional[str]
+        self, before_state: dict | None, system_account: str | None
     ) -> str:
         """Verify the agent stayed on the workflow's intended repo + branch."""
         if not before_state:
@@ -990,6 +1083,26 @@ class AutonomousOrchestrator:
                 and before_main.get("head") != after_main.get("head")
                 and before_effective.get("head") == after_effective.get("head")
             ):
+                # main HEAD moved but the worktree did not. This is either an
+                # agent operating on the main repo, or an external `git pull`
+                # moving HEAD to a remote commit during the agent run. Allow
+                # only when the move is a forward update to a remote-sourced
+                # commit (a benign pull); a local escape commit (not pushed),
+                # a reset/rollback, or a non-fast-forward rewrite is blocked.
+                if self._main_drift_is_benign_pull(
+                    ctx.get("project_path", ""),
+                    before_main.get("head"),
+                    after_main.get("head"),
+                    system_account,
+                ):
+                    logger.info(
+                        "Workflow %s: main repo HEAD moved %s..%s during agent run "
+                        "(benign external pull); allowing.",
+                        self._workflow_id,
+                        before_main.get("head", "")[:8],
+                        after_main.get("head", "")[:8],
+                    )
+                    return ""
                 return (
                     "Detected commits on the main repository while the workflow worktree "
                     "HEAD did not move; the agent likely executed git commands outside "
@@ -1442,7 +1555,7 @@ class AutonomousOrchestrator:
         gh: GitHubOps,
         commit_before: str,
         attempt: int,
-        branch_name: Optional[str],
+        branch_name: str | None,
         pr_number: int,
     ) -> tuple[str, bool, str]:
         """Detect whether the CI repair agent produced changes and push them.
@@ -1801,7 +1914,7 @@ class AutonomousOrchestrator:
         return match.group(1).strip()[:200] if match else ""
 
     @staticmethod
-    def _artifact_visible_text(result: Optional[AgentTaskResult]) -> str:
+    def _artifact_visible_text(result: AgentTaskResult | None) -> str:
         """Return all user-visible assistant turns for a task result."""
         if not result:
             return ""
@@ -1812,7 +1925,7 @@ class AutonomousOrchestrator:
         return sanitize_artifact_text(text)
 
     @classmethod
-    def _artifact_text(cls, result: Optional[AgentTaskResult]) -> str:
+    def _artifact_text(cls, result: AgentTaskResult | None) -> str:
         """Return the milestone/comment artifact text for a task result."""
         if not result:
             return ""
@@ -1822,7 +1935,7 @@ class AutonomousOrchestrator:
         )
 
     @classmethod
-    def _artifact_tldr(cls, result: Optional[AgentTaskResult]) -> str:
+    def _artifact_tldr(cls, result: AgentTaskResult | None) -> str:
         """Prefer structured/extracted TL;DR over raw string slicing."""
         if not result:
             return ""
@@ -1832,7 +1945,7 @@ class AutonomousOrchestrator:
         return cls._extract_tldr(cls._artifact_visible_text(result) or result.response_text or "")
 
     @staticmethod
-    def _artifact_status_tag(result: Optional[AgentTaskResult], key: str) -> str:
+    def _artifact_status_tag(result: AgentTaskResult | None, key: str) -> str:
         """Read structured status tags extracted by the runner."""
         if not result:
             return ""
@@ -1841,7 +1954,7 @@ class AutonomousOrchestrator:
         return value.strip() if isinstance(value, str) else ""
 
     @staticmethod
-    def _primary_result_error(result: Optional[AgentTaskResult]) -> str:
+    def _primary_result_error(result: AgentTaskResult | None) -> str:
         """Return the first-class runner error that should win over heuristics."""
         if not result or result.success:
             return ""
@@ -2193,7 +2306,7 @@ class AutonomousOrchestrator:
         *,
         is_pr: bool = False,
         context: str = "",
-        content_language: Optional[str] = None,
+        content_language: str | None = None,
     ) -> None:
         """Post a comment to a GitHub issue or PR.
 
@@ -2229,7 +2342,7 @@ class AutonomousOrchestrator:
 
     def _find_existing_milestone(
         self, phase: str, milestone_type: str, dev_round: int = None, round_number: int = None
-    ) -> Optional[dict]:
+    ) -> dict | None:
         """Check if a milestone of this type already exists (idempotency guard)."""
         existing = self.repo.list_milestones(self._workflow_id, phase=phase, status="in_progress")
         # Also check completed ones
@@ -2479,15 +2592,42 @@ class AutonomousOrchestrator:
 
     def _on_agent_activity(self, session_id: str, activity: dict):
         """Forward agent activity to the SSE event stream and refresh usage."""
+        # A thinking-token event is a high-frequency cumulative estimate, not
+        # a discrete activity or authoritative usage. Keep it out of SSE even
+        # when a runner other than the local Claude path emits one.
+        if activity.get("type") == "system" and activity.get("subtype") == "thinking_tokens":
+            return
+
+        emitted_activity = activity
+        if activity.get("type") == "usage":
+            offsets = getattr(self, "_session_usage_offsets", {})
+            session_lock = getattr(self, "_session_lock", None)
+            if session_lock is None:
+                offset = dict(offsets.get(session_id, {}))
+            else:
+                with session_lock:
+                    offset = dict(offsets.get(session_id, {}))
+            emitted_activity = {
+                **activity,
+                "total_tokens": int(activity.get("total_tokens", 0) or 0)
+                + int(offset.get("total_tokens", 0) or 0),
+                "total_input_tokens": int(activity.get("total_input_tokens", 0) or 0)
+                + int(offset.get("total_input_tokens", 0) or 0),
+                "total_output_tokens": int(activity.get("total_output_tokens", 0) or 0)
+                + int(offset.get("total_output_tokens", 0) or 0),
+                "request_count": int(activity.get("request_count", 0) or 0)
+                + int(offset.get("request_count", 0) or 0),
+            }
+
         self.emitter.emit(
             self._workflow_id,
             "agent_activity",
             {
                 "session_id": session_id,
-                **activity,
+                **emitted_activity,
             },
         )
-        activity_type = activity.get("type")
+        activity_type = emitted_activity.get("type")
         if activity_type == "session_resolved":
             try:
                 self._link_session_to_current_milestone(session_id)
@@ -2501,7 +2641,7 @@ class AutonomousOrchestrator:
                 # freezing until the call returns. phase_* is overwritten per
                 # event (session totals are cumulative within the call) and
                 # finalized by _write_phase_usage at _run_agent return.
-                self._write_realtime_phase_usage(activity)
+                self._write_realtime_phase_usage(emitted_activity)
                 self.repo.refresh_workflow_usage_from_sessions(self._workflow_id)
             except Exception:
                 logger.warning("Failed to refresh workflow tokens in real-time", exc_info=True)
@@ -2642,6 +2782,22 @@ class AutonomousOrchestrator:
             return False
         return bool(_TRANSIENT_API_ERROR_RE.search(response))
 
+    @classmethod
+    def _should_retry_transient_api_failure(cls, result: AgentTaskResult) -> bool:
+        """Return whether *result* represents a real transient API failure.
+
+        Explicit runner errors are always eligible. Some Claude versions put
+        an upstream error envelope in assistant text, but that fallback is
+        safe only when the call produced no tokens. Scanning token-bearing
+        plan/review text caused phrases such as "Rate Limit" to restart an
+        otherwise successful phase (#1891).
+        """
+        if cls._is_transient_api_error(result.error or ""):
+            return True
+        return (result.total_tokens or 0) == 0 and cls._is_transient_api_error(
+            result.response_text or ""
+        )
+
     @staticmethod
     def _is_context_overflow(result: AgentTaskResult) -> bool:
         """True if the agent call failed because the resumed session context
@@ -2673,6 +2829,7 @@ class AutonomousOrchestrator:
             milestone_id: Milestone to attribute this call's phase usage to.
         """
         workflow_data = wf or self.workflow
+        field = SESSION_LINE_FIELDS.get(session_line)
 
         # Resolve the session line: resume an established session or start new.
         session_id, resume_session_id, resume = self._resolve_session_line(
@@ -2684,6 +2841,13 @@ class AutonomousOrchestrator:
         if milestone_id:
             kwargs["milestone_id"] = milestone_id
         tracking_session_id = session_id
+        retry_usage = {
+            "total_tokens": 0,
+            "total_input_tokens": 0,
+            "total_output_tokens": 0,
+            "request_count": 0,
+        }
+        usage_session_ids = {tracking_session_id}
         if "user_id" not in kwargs and workflow_data:
             kwargs["user_id"] = workflow_data.get("user_id")
 
@@ -2704,6 +2868,7 @@ class AutonomousOrchestrator:
 
         with self._session_lock:
             self._current_session_id = tracking_session_id
+            self._session_usage_offsets[tracking_session_id] = dict(retry_usage)
 
         should_prelink_tracking_session = not self._runner._uses_sidebar_session_source(
             kwargs.get("cli_tool", ""),
@@ -2732,31 +2897,39 @@ class AutonomousOrchestrator:
 
         result = self._runner.run_agent_task(**kwargs)
         if result.session_id:
+            # The runner is authoritative for the tracking id it actually
+            # persisted (notably app-server adapters that create sessions
+            # after dispatch). Adopt it once, then keep it stable for every
+            # retry on this named line.
+            resolved_tracking_session_id = result.tracking_session_id or result.session_id
+            if resolved_tracking_session_id != tracking_session_id:
+                with self._session_lock:
+                    offset = self._session_usage_offsets.pop(tracking_session_id, retry_usage)
+                    self._session_usage_offsets[resolved_tracking_session_id] = offset
+                    self._current_session_id = resolved_tracking_session_id
+                usage_session_ids.add(resolved_tracking_session_id)
+                tracking_session_id = resolved_tracking_session_id
+
             # Workflow milestones must keep the stable session-line tracking id
             # (main/review/test), not the provider's real CLI id. The timeline
             # resolves the actual transcript session at read time via
             # agent_sessions.cli_session_id, which keeps DB identity stable
             # while still letting the UI open the real transcript.
             link_session_id = (
-                (result.tracking_session_id or result.session_id)
-                if self._runner._uses_sidebar_session_source(
-                    kwargs.get("cli_tool", ""),
-                    kwargs.get("workspace_type", "local"),
-                )
-                else result.session_id
+                tracking_session_id if field else (result.tracking_session_id or result.session_id)
             )
             self._link_session_to_current_milestone(link_session_id)
             # Persist the stable tracking id for this line. Fresh lines write
             # their first tracking id here; established lines keep reusing the
             # same wrapper row across milestones so timeline/session identity
             # does not drift with every resume attempt.
-            field = SESSION_LINE_FIELDS.get(session_line)
             if field:
-                self._update_workflow({field: result.session_id})
+                self._update_workflow({field: tracking_session_id})
                 # Keep the in-memory wf dict in sync so the next _resolve_session_line
                 # call in the same phase (e.g. planning → finalize) sees the updated
                 # line identity and resumes it instead of rotating wrappers.
-                wf[field] = result.session_id
+                if workflow_data is not None:
+                    workflow_data[field] = tracking_session_id
 
         # Transient API error retry (429 / 5xx / overload) — exponential
         # backoff, max 30 minutes total. Interruptible sleep (cancel check
@@ -2773,26 +2946,33 @@ class AutonomousOrchestrator:
             if _status in ("failed", "cancelled"):
                 logger.info("API error retry aborted (workflow status=%s)", _status)
                 self._synthesize_transient_failure(result)
-                self._write_phase_usage(milestone_id, result)
+                self._write_phase_usage(milestone_id, result, retry_usage)
+                self._clear_session_usage_offsets(usage_session_ids)
                 with self._session_lock:
-                    self._current_session_id = result.session_id
+                    self._current_session_id = (
+                        tracking_session_id
+                        if field
+                        else (
+                            result.tracking_session_id or result.session_id or tracking_session_id
+                        )
+                    )
                 return result
 
-            response_text = result.response_text or ""
-            error_text = result.error or ""
-            if not (
-                self._is_transient_api_error(response_text)
-                or self._is_transient_api_error(error_text)
-            ):
+            if not self._should_retry_transient_api_failure(result):
                 break  # Not a transient API error, no retry needed
 
             elapsed = int(time.monotonic() - retry_start)
+            retry_source = (
+                "result.error"
+                if self._is_transient_api_error(result.error or "")
+                else "zero-token response"
+            )
             logger.warning(
-                "Transient API error detected, retrying in %ds (elapsed: %ds / %ds): %s",
+                "Transient API retry in %ds (elapsed=%ds/%ds, source=%s)",
                 delay,
                 elapsed,
                 API_RETRY_TOTAL_TIMEOUT,
-                (response_text or error_text)[:160],
+                retry_source,
             )
             self._emit(
                 "api_error_retry",
@@ -2800,6 +2980,7 @@ class AutonomousOrchestrator:
                     "delay": delay,
                     "elapsed": elapsed,
                     "total_timeout": API_RETRY_TOTAL_TIMEOUT,
+                    "source": retry_source,
                 },
             )
 
@@ -2813,21 +2994,59 @@ class AutonomousOrchestrator:
                 if self._cancel_requested.is_set():
                     logger.info("API error retry cancelled (cancel requested)")
                     self._synthesize_transient_failure(result)
-                    self._write_phase_usage(milestone_id, result)
+                    self._write_phase_usage(milestone_id, result, retry_usage)
+                    self._clear_session_usage_offsets(usage_session_ids)
                     with self._session_lock:
-                        self._current_session_id = result.session_id
+                        self._current_session_id = (
+                            tracking_session_id
+                            if field
+                            else (
+                                result.tracking_session_id
+                                or result.session_id
+                                or tracking_session_id
+                            )
+                        )
                     return result
 
             delay = min(delay * 2, API_RETRY_MAX_DELAY)
 
-            # Rotate tracking id only; resume_session_id stays so the line holds.
-            kwargs["session_id"] = str(uuid.uuid4())
+            # AgentTaskResult's runner contract is usage for one
+            # run_agent_task invocation: Claude reports per-request values and
+            # cumulative-result adapters difference turns before building the
+            # result. Any provider that replays pre-resume history must
+            # normalize that in its adapter; the orchestrator sums only these
+            # per-invocation deltas.
+            for key in retry_usage:
+                retry_usage[key] += int(getattr(result, key, 0) or 0)
+
+            # Strict main/review/test topology: retries reuse the line's stable
+            # tracking id and, when possible, the provider transcript created
+            # by the preceding attempt. One-off "fresh" calls may rotate.
+            retry_session_id = tracking_session_id if field else str(uuid.uuid4())
+            kwargs["session_id"] = retry_session_id
+            if field:
+                resume_target = result.source_session_id or kwargs.get("resume_session_id")
+                if not resume_target and not self._runner._uses_sidebar_session_source(
+                    kwargs.get("cli_tool", ""), kwargs.get("workspace_type", "local")
+                ):
+                    resume_target = tracking_session_id
+                if resume_target:
+                    kwargs["resume"] = True
+                    kwargs["resume_session_id"] = resume_target
+            usage_session_ids.add(retry_session_id)
             with self._session_lock:
-                self._current_session_id = kwargs["session_id"]
-            self._link_session_to_current_milestone(kwargs["session_id"])
+                self._current_session_id = retry_session_id
+                self._session_usage_offsets[retry_session_id] = dict(retry_usage)
+            self._link_session_to_current_milestone(
+                tracking_session_id if field else retry_session_id
+            )
             result = self._runner.run_agent_task(**kwargs)
             if result.session_id:
-                self._link_session_to_current_milestone(result.session_id)
+                self._link_session_to_current_milestone(
+                    tracking_session_id
+                    if field
+                    else (result.tracking_session_id or result.session_id)
+                )
 
         # A transient-error body (e.g. a 529 "overloaded" returned as
         # assistant_text with no tokens generated) must not be handed back as a
@@ -2846,10 +3065,15 @@ class AutonomousOrchestrator:
                 result.error = repo_validation_error
 
         # Attribute this call's own usage to its milestone (increment, not cumulative).
-        self._write_phase_usage(milestone_id, result)
+        self._write_phase_usage(milestone_id, result, retry_usage)
+        self._clear_session_usage_offsets(usage_session_ids)
 
         with self._session_lock:
-            self._current_session_id = result.tracking_session_id or result.session_id
+            self._current_session_id = (
+                tracking_session_id
+                if field
+                else (result.tracking_session_id or result.session_id or tracking_session_id)
+            )
         return result
 
     def _synthesize_transient_failure(self, result: AgentTaskResult) -> None:
@@ -2863,9 +3087,7 @@ class AutonomousOrchestrator:
         path AND its early-exit paths (status failed/cancelled, cancel-requested)
         all apply it consistently. #1001, #1036.
         """
-        if not (result.success and self._is_transient_api_error(result.response_text or "")):
-            return
-        if (result.total_tokens or 0) != 0:
+        if not (result.success and self._should_retry_transient_api_failure(result)):
             return
         err_snippet = (result.response_text or "")[:200]
         logger.warning(
@@ -2880,22 +3102,39 @@ class AutonomousOrchestrator:
         result.visible_response_text = ""
         result.structured_tags = {}
 
-    def _write_phase_usage(self, milestone_id: str, result: AgentTaskResult) -> None:
+    def _write_phase_usage(
+        self,
+        milestone_id: str,
+        result: AgentTaskResult,
+        prior_usage: dict[str, int] | None = None,
+    ) -> None:
         """Write this call's token/request increment to its milestone."""
         if not milestone_id:
             return
+        prior_usage = prior_usage or {}
         try:
             self.repo.update_milestone(
                 milestone_id,
                 {
-                    "phase_total_tokens": result.total_tokens or 0,
-                    "phase_input_tokens": result.total_input_tokens or 0,
-                    "phase_output_tokens": result.total_output_tokens or 0,
-                    "phase_request_count": result.request_count or 0,
+                    "phase_total_tokens": int(prior_usage.get("total_tokens", 0) or 0)
+                    + int(result.total_tokens or 0),
+                    "phase_input_tokens": int(prior_usage.get("total_input_tokens", 0) or 0)
+                    + int(result.total_input_tokens or 0),
+                    "phase_output_tokens": int(prior_usage.get("total_output_tokens", 0) or 0)
+                    + int(result.total_output_tokens or 0),
+                    "phase_request_count": int(prior_usage.get("request_count", 0) or 0)
+                    + int(result.request_count or 0),
                 },
             )
         except Exception:
             logger.warning("Failed to write phase usage to milestone", exc_info=True)
+
+    def _clear_session_usage_offsets(self, session_ids: set[str]) -> None:
+        """Discard runtime-only retry usage state after an agent call ends."""
+        with self._session_lock:
+            offsets = getattr(self, "_session_usage_offsets", {})
+            for session_id in session_ids:
+                offsets.pop(session_id, None)
 
     def _write_realtime_phase_usage(self, activity: dict) -> None:
         """Write the current call's running cumulative usage to the in-progress milestone.

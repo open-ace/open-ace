@@ -13,9 +13,15 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useLanguage, useAppStore } from '@/store';
 import { t } from '@/i18n';
-import { fsApi, type DirectoryEntry, type FileEntry, MAX_UPLOAD_SIZE_MB } from '@/api/fs';
+import {
+  fsApi,
+  type DirectoryEntry,
+  type FileEntry,
+  type SearchEntry,
+  MAX_UPLOAD_SIZE_MB,
+} from '@/api/fs';
 import { Loading, Button, EmptyState } from '@/components/common';
-import { useToast } from '@/components/common';
+import { useToast, useConfirm } from '@/components/common';
 import { downloadBlob, formatBytes } from '@/utils';
 
 interface LocalDirectoryBrowserProps {
@@ -88,6 +94,16 @@ export const LocalDirectoryBrowser: React.FC<LocalDirectoryBrowserProps> = ({
   const [isCreating, setIsCreating] = useState(false);
   const [pathHistory, setPathHistory] = useState<string[]>([]);
   const [fallbackNote, setFallbackNote] = useState<string | null>(null);
+
+  // Issue #1923: recursive name search state. `searchQuery` is the input
+  // value; `searchResults` is null when NOT searching (normal listing shown)
+  // and an array (possibly empty) when a search has resolved.
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<SearchEntry[] | null>(null);
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [searchTruncated, setSearchTruncated] = useState(false);
+  const searchSeqRef = useRef(0);
 
   const isWindows = useMemo(() => {
     const pathForDetection = currentPath !== '' ? currentPath : (initialPath ?? '');
@@ -182,17 +198,73 @@ export const LocalDirectoryBrowser: React.FC<LocalDirectoryBrowserProps> = ({
           setFallbackNote(result.fallback_note);
         }
       } catch (err) {
-        setError((err as Error)?.message || 'Failed to browse directory');
+        const msg = (err as Error)?.message || 'Failed to browse directory';
+        setError(msg);
+        // Issue #1912: Also surface the error as a toast so a failed
+        // navigation into a subdirectory is not missed (the inline alert
+        // can be overlooked when the list state visually does not change).
+        toast.error(t('browseDirectory', language) || 'Browse Directory', msg);
       } finally {
         setIsLoading(false);
       }
     },
-    [enableFileActions]
+    [enableFileActions, toast, language]
   );
 
   useEffect(() => {
     void fetchDirectories(initialPath);
   }, [initialPath, fetchDirectories]);
+
+  // Issue #1923: debounced recursive name search. Fires 300ms after the user
+  // stops typing; an empty query exits search mode and restores the normal
+  // listing. A monotonically increasing seq ref guards against stale responses
+  // (slow query resolving after a faster one).
+  useEffect(() => {
+    const q = searchQuery.trim();
+    if (!q) {
+      // Empty query → exit search mode.
+      searchSeqRef.current += 1;
+      setSearchResults(null);
+      setSearchError(null);
+      setSearchTruncated(false);
+      setIsSearching(false);
+      return;
+    }
+    setIsSearching(true);
+    setSearchError(null);
+    const seq = ++searchSeqRef.current;
+    const timer = setTimeout(() => {
+      fsApi
+        .searchFiles(q, currentPath)
+        .then((result) => {
+          if (seq !== searchSeqRef.current) return; // stale
+          setSearchResults(result.results);
+          setSearchTruncated(result.truncated);
+        })
+        .catch((err) => {
+          if (seq !== searchSeqRef.current) return;
+          setSearchError((err as Error)?.message ?? 'Search failed');
+          setSearchResults([]);
+          setSearchTruncated(false);
+        })
+        .finally(() => {
+          if (seq !== searchSeqRef.current) return;
+          setIsSearching(false);
+        });
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery, currentPath]);
+
+  const isSearchMode = searchResults !== null;
+
+  // Navigate to a search-result directory: fetch it and exit search mode so
+  // the user lands in a normal listing of that directory.
+  const handleNavigateToSearchResult = (entry: SearchEntry) => {
+    setSearchQuery('');
+    setSearchResults(null);
+    setSearchTruncated(false);
+    void fetchDirectories(entry.path);
+  };
 
   const handleNavigate = (dir: DirectoryEntry) => {
     void fetchDirectories(dir.path);
@@ -208,6 +280,8 @@ export const LocalDirectoryBrowser: React.FC<LocalDirectoryBrowserProps> = ({
         return;
       }
     }
+    // Issue #1923: exit search mode when the user navigates via breadcrumbs.
+    setSearchQuery('');
     void fetchDirectories(path);
   };
 
@@ -217,6 +291,8 @@ export const LocalDirectoryBrowser: React.FC<LocalDirectoryBrowserProps> = ({
       return;
     }
     if (parentPath) {
+      // Issue #1923: exit search mode when navigating up.
+      setSearchQuery('');
       void fetchDirectories(parentPath);
     }
   };
@@ -310,24 +386,56 @@ export const LocalDirectoryBrowser: React.FC<LocalDirectoryBrowserProps> = ({
   };
 
   const handleDownload = async (file: FileEntry) => {
+    // Guard: don't issue a request that DAC will reject anyway. The backend
+    // already reports per-file readability in is_readable (Issue #1902).
+    if (!file.is_readable) {
+      toast.error(
+        t('downloadFailed', language) || 'Download failed',
+        t('fileNotReadable', language) || 'You do not have permission to read this file'
+      );
+      return;
+    }
     setDownloadingPath(file.path);
     try {
       const blob = await fsApi.downloadFile(file.path);
       downloadBlob(blob, file.name);
     } catch (err) {
-      toast.error(
-        t('downloadFailed', language) || 'Download failed',
-        (err as Error)?.message ?? file.name
-      );
+      const msg = (err as Error)?.message ?? '';
+      // P2 (Issue #1902): surface a friendlier message for 403 / permission
+      // errors instead of raw backend text.
+      const friendly = /403|permission|forbidden/i.test(msg)
+        ? t('fileNotReadable', language) || 'You do not have permission to read this file'
+        : msg || file.name;
+      toast.error(t('downloadFailed', language) || 'Download failed', friendly);
     } finally {
       setDownloadingPath(null);
     }
   };
 
+  // Issue #1917: use the app's rendered confirm modal instead of the native
+  // `window.confirm()`. The native dialog can be silently suppressed in
+  // sandboxed/iframe contexts (resolving without ever showing a UI), which
+  // previously caused files to be deleted immediately on click with no
+  // confirmation. `useConfirm()` is the project-wide standard for destructive
+  // actions and is already used by Prompts/Sessions/UserManagement/etc.
+  const confirm = useConfirm();
+
   const handleDelete = async (file: FileEntry) => {
-    const ok = window.confirm(
-      (t('confirmDeleteFile', language) as string) || `Delete "${file.name}"?`
-    );
+    // The delete button is only shown when the parent directory is writable,
+    // but we still gate on is_readable: an unreadable file (e.g. root-owned
+    // 0600 config dropped into the user's home) cannot be stat'd as the owner
+    // and would fail with a confusing "Not a file" (Issue #1902).
+    if (!file.is_readable) {
+      toast.error(
+        t('deleteFailed', language) || 'Delete failed',
+        t('fileNotReadable', language) || 'You do not have permission to access this file'
+      );
+      return;
+    }
+    const ok = await confirm({
+      message: (t('confirmDeleteFile', language) as string) || `Delete "${file.name}"?`,
+      variant: 'danger',
+    });
     if (!ok) return;
 
     setDeletingPath(file.path);
@@ -337,13 +445,18 @@ export const LocalDirectoryBrowser: React.FC<LocalDirectoryBrowserProps> = ({
         toast.success(t('deleteSuccess', language) || 'File deleted', file.name);
         await fetchDirectories(currentPath);
       } else {
-        toast.error(t('deleteFailed', language) || 'Delete failed', result.error ?? file.name);
+        const errText = result.error ?? '';
+        const friendly = /403|permission|forbidden/i.test(errText)
+          ? t('fileNotReadable', language) || 'You do not have permission to delete this file'
+          : errText || file.name;
+        toast.error(t('deleteFailed', language) || 'Delete failed', friendly);
       }
     } catch (err) {
-      toast.error(
-        t('deleteFailed', language) || 'Delete failed',
-        (err as Error)?.message ?? file.name
-      );
+      const msg = (err as Error)?.message ?? '';
+      const friendly = /403|permission|forbidden/i.test(msg)
+        ? t('fileNotReadable', language) || 'You do not have permission to delete this file'
+        : msg || file.name;
+      toast.error(t('deleteFailed', language) || 'Delete failed', friendly);
     } finally {
       setDeletingPath(null);
     }
@@ -439,6 +552,38 @@ export const LocalDirectoryBrowser: React.FC<LocalDirectoryBrowserProps> = ({
         </div>
       </div>
 
+      {/* Issue #1923: recursive name search (personal files only). Sits on its
+          own row so it doesn't crowd the Up / New Folder / Upload buttons. The
+          search root is the current directory; the backend enforces the
+          home-subtree lock so users can't search outside their own home. */}
+      {enableFileActions && (
+        <div className="mb-2">
+          <div className="input-group input-group-sm">
+            <span className="input-group-text bg-transparent">
+              <i className={`bi ${isSearching ? 'bi-arrow-repeat' : 'bi-search'}`} />
+            </span>
+            <input
+              type="text"
+              className="form-control"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder={t('searchFilesPlaceholder', language) || 'Search files and folders…'}
+              aria-label={t('searchFilesPlaceholder', language) || 'Search files and folders…'}
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                className="btn btn-outline-secondary"
+                onClick={() => setSearchQuery('')}
+                title={t('clearSearch', language) || 'Clear search'}
+              >
+                <i className="bi bi-x-lg" />
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       <div className="mb-2 d-flex gap-2">
         {/* Issue #1813: Hide Up button when lockToRoot is true */}
         {parentPath && !lockToRoot && (
@@ -533,7 +678,78 @@ export const LocalDirectoryBrowser: React.FC<LocalDirectoryBrowserProps> = ({
       )}
 
       <div className="directory-list" style={{ maxHeight: listMaxHeight, overflow: 'auto' }}>
-        {isLoading ? (
+        {isSearchMode ? (
+          isSearching ? (
+            <Loading size="sm" text={t('loading', language)} />
+          ) : searchError ? (
+            <div className="alert alert-danger small mb-2">
+              <i className="bi bi-exclamation-triangle me-1" />
+              {searchError}
+            </div>
+          ) : searchResults.length === 0 ? (
+            <EmptyState
+              icon="bi-search"
+              title={t('searchNoResults', language) || 'No matching files or folders'}
+              description={t('searchFilesPlaceholder', language) || 'Search files and folders…'}
+            />
+          ) : (
+            <>
+              {searchTruncated && (
+                <div className="alert alert-info small mb-2">
+                  <i className="bi bi-info-circle me-1" />
+                  {
+                    t('searchTruncated', language, {
+                      count: String(searchResults.length),
+                    }) as string
+                  }
+                </div>
+              )}
+              <div className="small text-muted mb-1">
+                {
+                  t('searchResultsCount', language, {
+                    count: String(searchResults.length),
+                  }) as string
+                }
+              </div>
+              <ul className="list-group">
+                {searchResults.map((entry) => (
+                  <li
+                    key={`${entry.type}-${entry.path}`}
+                    className={`list-group-item list-group-item-action d-flex justify-content-between align-items-center ${
+                      entry.type === 'dir' ? 'search-result-dir' : 'search-result-file'
+                    }`}
+                    onClick={
+                      entry.type === 'dir' ? () => handleNavigateToSearchResult(entry) : undefined
+                    }
+                    style={{ cursor: entry.type === 'dir' ? 'pointer' : 'default' }}
+                    title={entry.relative_path}
+                  >
+                    <div
+                      className="text-truncate d-flex align-items-center"
+                      style={{ minWidth: 0 }}
+                    >
+                      <i
+                        className={`bi ${entry.type === 'dir' ? 'bi-folder' : 'bi-file-earmark'} me-2`}
+                      />
+                      <span className="text-truncate">{entry.name}</span>
+                      {entry.type === 'file' && typeof entry.size === 'number' && (
+                        <span className="badge text-muted fw-normal ms-2 small">
+                          {formatBytes(entry.size)}
+                        </span>
+                      )}
+                    </div>
+                    <span
+                      className="text-muted small ms-2 text-truncate"
+                      style={{ maxWidth: '45%' }}
+                    >
+                      {entry.relative_path}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )
+        ) : isLoading ? (
           <Loading size="sm" text={t('loading', language)} />
         ) : directories.length === 0 && (!enableFileActions || files.length === 0) ? (
           <EmptyState
@@ -553,18 +769,28 @@ export const LocalDirectoryBrowser: React.FC<LocalDirectoryBrowserProps> = ({
                   key={dir.path}
                   className="list-group-item list-group-item-action d-flex justify-content-between align-items-center"
                   onClick={() => handleNavigate(dir)}
+                  onDoubleClick={() => handleNavigate(dir)}
+                  title={t('doubleClickToOpen', language) || 'Double-click to open'}
                   style={{ cursor: 'pointer' }}
                 >
-                  <div>
-                    <i className="bi bi-folder me-2" />
-                    <span>{dir.name}</span>
+                  <div className="d-flex align-items-center text-truncate">
+                    <i
+                      className="bi bi-folder-fill me-2"
+                      role="img"
+                      aria-label={t('folder', language) || 'Folder'}
+                    />
+                    <span className="text-truncate">{dir.name}</span>
                   </div>
-                  {dir.is_writable && (
-                    <span className="badge bg-success-subtle text-success small">
-                      <i className="bi bi-pencil me-1" />
-                      {t('writable', language) || 'Writable'}
-                    </span>
-                  )}
+                  <div className="d-flex align-items-center gap-1 flex-shrink-0">
+                    {dir.is_writable && (
+                      <span className="badge bg-success-subtle text-success small">
+                        <i className="bi bi-pencil me-1" />
+                        {t('writable', language) || 'Writable'}
+                      </span>
+                    )}
+                    {/* Issue #1912: visual affordance that the row enters a subdirectory */}
+                    <i className="bi bi-chevron-right text-muted small" aria-hidden="true" />
+                  </div>
                 </li>
               ))}
             </ul>
@@ -576,7 +802,11 @@ export const LocalDirectoryBrowser: React.FC<LocalDirectoryBrowserProps> = ({
                     className="list-group-item file-list-item d-flex justify-content-between align-items-center"
                   >
                     <div className="text-truncate">
-                      <i className="bi bi-file-earmark me-2" />
+                      <i
+                        className="bi bi-file-earmark me-2"
+                        role="img"
+                        aria-label={t('file', language) || 'File'}
+                      />
                       <span className="text-truncate">{file.name}</span>
                       <span className="badge text-muted fw-normal ms-2 small">
                         {formatBytes(file.size)}
@@ -586,9 +816,13 @@ export const LocalDirectoryBrowser: React.FC<LocalDirectoryBrowserProps> = ({
                       <button
                         type="button"
                         className="btn btn-sm btn-outline-secondary"
-                        title={t('downloadFile', language) || 'Download'}
+                        title={
+                          file.is_readable
+                            ? t('downloadFile', language) || 'Download'
+                            : t('fileNotReadable', language) || 'No read permission'
+                        }
                         onClick={() => void handleDownload(file)}
-                        disabled={downloadingPath === file.path}
+                        disabled={downloadingPath === file.path || !file.is_readable}
                       >
                         <i
                           className={`bi ${
@@ -600,9 +834,13 @@ export const LocalDirectoryBrowser: React.FC<LocalDirectoryBrowserProps> = ({
                         <button
                           type="button"
                           className="btn btn-sm btn-outline-danger"
-                          title={t('deleteFile', language) || 'Delete'}
+                          title={
+                            file.is_readable
+                              ? t('deleteFile', language) || 'Delete'
+                              : t('fileNotReadable', language) || 'No access permission'
+                          }
                           onClick={() => void handleDelete(file)}
-                          disabled={deletingPath === file.path}
+                          disabled={deletingPath === file.path || !file.is_readable}
                         >
                           <i
                             className={`bi ${
@@ -643,11 +881,19 @@ export const LocalDirectoryBrowser: React.FC<LocalDirectoryBrowserProps> = ({
       )}
 
       {/* Issue #1813: Always show Select button when manual input is hidden */}
+      {/* Issue #1912: Rename to "Open Session Here" + show the path that will be used, */}
+      {/* so the button's behaviour matches its label (it opens a new session in currentPath). */}
       {hideManualInput && (
-        <div className="mt-3">
+        <div className="mt-3 d-flex flex-column gap-2 align-items-start">
+          {currentPath && (
+            <span className="small text-muted text-break">
+              <i className="bi bi-folder2-open me-1" aria-hidden="true" />
+              {t('willUsePath', language, { path: currentPath }) || `Will use: ${currentPath}`}
+            </span>
+          )}
           <Button variant="primary" onClick={handleSelect}>
-            <i className="bi bi-check-lg me-1" />
-            {t('select', language) || 'Select'}
+            <i className="bi bi-folder-plus me-1" />
+            {t('openSessionHere', language) || 'Open Session Here'}
           </Button>
         </div>
       )}

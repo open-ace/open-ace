@@ -5,7 +5,7 @@ Repository for message data access operations.
 """
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from app.repositories.database import Database, escape_like
 from app.utils.cache import cached
@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 class MessageRepository:
     """Repository for message data operations."""
 
-    def __init__(self, db: Optional[Database] = None):
+    def __init__(self, db: Database | None = None):
         """
         Initialize repository.
 
@@ -35,25 +35,25 @@ class MessageRepository:
         message_id: str,
         role: str,
         host_name: str = "localhost",
-        parent_id: Optional[str] = None,
-        content: Optional[str] = None,
-        full_entry: Optional[str] = None,
+        parent_id: str | None = None,
+        content: str | None = None,
+        full_entry: str | None = None,
         tokens_used: int = 0,
         input_tokens: int = 0,
         output_tokens: int = 0,
-        model: Optional[str] = None,
-        timestamp: Optional[str] = None,
-        sender_id: Optional[str] = None,
-        sender_name: Optional[str] = None,
-        message_source: Optional[str] = None,
-        feishu_conversation_id: Optional[str] = None,
-        group_subject: Optional[str] = None,
-        is_group_chat: Optional[int] = None,
-        agent_session_id: Optional[str] = None,
-        conversation_id: Optional[str] = None,
-        user_id: Optional[int] = None,
-        project_path: Optional[str] = None,
-        tenant_id: Optional[int] = None,
+        model: str | None = None,
+        timestamp: str | None = None,
+        sender_id: str | None = None,
+        sender_name: str | None = None,
+        message_source: str | None = None,
+        feishu_conversation_id: str | None = None,
+        group_subject: str | None = None,
+        is_group_chat: int | None = None,
+        agent_session_id: str | None = None,
+        conversation_id: str | None = None,
+        user_id: int | None = None,
+        project_path: str | None = None,
+        tenant_id: int | None = None,
     ) -> bool:
         """
         Save a message to the database.
@@ -226,14 +226,14 @@ class MessageRepository:
     def get_messages_by_date(
         self,
         date: str,
-        tool_name: Optional[str] = None,
-        host_name: Optional[str] = None,
-        role: Optional[str] = None,
-        sender_name: Optional[str] = None,
-        search: Optional[str] = None,
-        limit: Optional[int] = None,
+        tool_name: str | None = None,
+        host_name: str | None = None,
+        role: str | None = None,
+        sender_name: str | None = None,
+        search: str | None = None,
+        limit: int | None = None,
         offset: int = 0,
-        tenant_id: Optional[int] = None,
+        tenant_id: int | None = None,
     ) -> list[dict]:
         """
         Get messages for a specific date.
@@ -302,14 +302,14 @@ class MessageRepository:
         self,
         start_date: str,
         end_date: str,
-        tool_name: Optional[str] = None,
-        host_name: Optional[str] = None,
-        role: Optional[str] = None,
-        sender_name: Optional[str] = None,
-        search: Optional[str] = None,
-        limit: Optional[int] = None,
+        tool_name: str | None = None,
+        host_name: str | None = None,
+        role: str | None = None,
+        sender_name: str | None = None,
+        search: str | None = None,
+        limit: int | None = None,
         offset: int = 0,
-        tenant_id: Optional[int] = None,
+        tenant_id: int | None = None,
     ) -> list[dict]:
         """
         Get messages for a date range.
@@ -376,15 +376,15 @@ class MessageRepository:
 
     def get_conversation_history(
         self,
-        date: Optional[str] = None,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
-        tool_name: Optional[str] = None,
-        host_name: Optional[str] = None,
-        sender_name: Optional[str] = None,
+        date: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        tool_name: str | None = None,
+        host_name: str | None = None,
+        sender_name: str | None = None,
         limit: int = 50,
         offset: int = 0,
-        tenant_id: Optional[int] = None,
+        tenant_id: int | None = None,
     ) -> list[dict]:
         """
         Get conversation history with aggregated statistics.
@@ -484,13 +484,13 @@ class MessageRepository:
 
     def count_conversations(
         self,
-        date: Optional[str] = None,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
-        tool_name: Optional[str] = None,
-        host_name: Optional[str] = None,
-        sender_name: Optional[str] = None,
-        tenant_id: Optional[int] = None,
+        date: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        tool_name: str | None = None,
+        host_name: str | None = None,
+        sender_name: str | None = None,
+        tenant_id: int | None = None,
     ) -> int:
         """
         Count total conversations matching filters.
@@ -564,7 +564,7 @@ class MessageRepository:
     def get_conversation_timeline(
         self,
         session_id: str,
-        limit: Optional[int] = None,
+        limit: int | None = None,
         offset: int = 0,
     ) -> list[dict]:
         """
@@ -609,7 +609,7 @@ class MessageRepository:
 
         return self.db.fetch_all(query, tuple(params))
 
-    def get_conversation_details(self, session_id: str) -> Optional[dict]:
+    def get_conversation_details(self, session_id: str) -> dict | None:
         """
         Get details of a conversation.
 
@@ -643,7 +643,7 @@ class MessageRepository:
         return self.db.fetch_one(query, (session_id,))
 
     def get_all_senders(
-        self, host_name: Optional[str] = None, tenant_id: Optional[int] = None
+        self, host_name: str | None = None, tenant_id: int | None = None
     ) -> list[str]:
         """
         Get list of all senders.
@@ -683,14 +683,14 @@ class MessageRepository:
 
     def count_messages(
         self,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
-        tool_name: Optional[str] = None,
-        host_name: Optional[str] = None,
-        sender_name: Optional[str] = None,
-        role: Optional[str] = None,
-        search: Optional[str] = None,
-        tenant_id: Optional[int] = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        tool_name: str | None = None,
+        host_name: str | None = None,
+        sender_name: str | None = None,
+        role: str | None = None,
+        search: str | None = None,
+        tenant_id: int | None = None,
     ) -> int:
         """
         Count messages matching filters.
@@ -760,10 +760,10 @@ class MessageRepository:
 
     def get_user_token_totals(
         self,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
-        host_name: Optional[str] = None,
-        tenant_id: Optional[int] = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        host_name: str | None = None,
+        tenant_id: int | None = None,
     ) -> list[dict]:
         """
         Get total tokens per user for segmentation analysis.
@@ -828,10 +828,10 @@ class MessageRepository:
 
     def get_hourly_usage(
         self,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
-        host_name: Optional[str] = None,
-        tenant_id: Optional[int] = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        host_name: str | None = None,
+        tenant_id: int | None = None,
     ) -> list[dict]:
         """
         Get hourly usage patterns from message timestamps.
@@ -923,10 +923,10 @@ class MessageRepository:
 
     def get_daily_token_totals(
         self,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
-        host_name: Optional[str] = None,
-        tenant_id: Optional[int] = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        host_name: str | None = None,
+        tenant_id: int | None = None,
     ) -> list[dict]:
         """
         Get total tokens per day for trend analysis.
@@ -979,10 +979,10 @@ class MessageRepository:
 
     def get_daily_tool_totals(
         self,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
-        host_name: Optional[str] = None,
-        tenant_id: Optional[int] = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        host_name: str | None = None,
+        tenant_id: int | None = None,
     ) -> list[dict]:
         """
         Get total tokens per day per tool.
@@ -1054,10 +1054,10 @@ class MessageRepository:
 
     def get_tool_token_totals(
         self,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
-        host_name: Optional[str] = None,
-        tenant_id: Optional[int] = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        host_name: str | None = None,
+        tenant_id: int | None = None,
     ) -> list[dict]:
         """
         Get total tokens per tool for comparison analysis.
@@ -1126,10 +1126,10 @@ class MessageRepository:
     @cached(ttl=300, key_prefix="conv_summary", skip_args=[0])
     def get_conversation_stats_summary(
         self,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
-        host_name: Optional[str] = None,
-        tenant_id: Optional[int] = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        host_name: str | None = None,
+        tenant_id: int | None = None,
     ) -> dict:
         """
         Get conversation statistics summary without fetching full history.
@@ -1268,7 +1268,7 @@ class MessageRepository:
         }
 
     def get_daily_range_lightweight(
-        self, start_date: str, end_date: str, host_name: Optional[str] = None
+        self, start_date: str, end_date: str, host_name: str | None = None
     ) -> list[dict]:
         """
         Get lightweight daily range data for batch analysis.
@@ -1306,7 +1306,7 @@ class MessageRepository:
         return self.db.fetch_all(query, tuple(params))
 
     def get_batch_analysis_aggregates(
-        self, start_date: str, end_date: str, host_name: Optional[str] = None
+        self, start_date: str, end_date: str, host_name: str | None = None
     ) -> dict:
         """
         Get all aggregates needed for batch analysis in a single query.

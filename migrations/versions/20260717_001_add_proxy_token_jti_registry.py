@@ -10,15 +10,13 @@ session stop / rotation and optional single-use replay protection for
 high-sensitivity flows.
 """
 
-from typing import Union
-
 import sqlalchemy as sa
 from alembic import op
 
 revision: str = "20260717_001_add_proxy_token_jti_registry"
-down_revision: Union[str, None] = "20260714_002_add_users_mapping_indexes"
-branch_labels: Union[str, None] = None
-depends_on: Union[str, None] = None
+down_revision: str | None = "20260714_002_add_users_mapping_indexes"
+branch_labels: str | None = None
+depends_on: str | None = None
 
 
 def upgrade() -> None:

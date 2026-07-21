@@ -7,7 +7,6 @@ Data models for user management.
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Optional
 
 
 class UserRole(Enum):
@@ -30,30 +29,30 @@ class Permission:
 class User:
     """User data model."""
 
-    id: Optional[int] = None
+    id: int | None = None
     username: str = ""
     email: str = ""
     password_hash: str = ""
     role: str = "user"
     is_active: bool = True
-    created_at: Optional[datetime] = None
-    last_login: Optional[datetime] = None
+    created_at: datetime | None = None
+    last_login: datetime | None = None
     permissions: list[Permission] = field(default_factory=list)
 
     # Multi-tenant support
-    tenant_id: Optional[int] = None
+    tenant_id: int | None = None
 
     # Quota fields
-    daily_token_quota: Optional[int] = None
-    monthly_token_quota: Optional[int] = None
-    daily_request_quota: Optional[int] = None
-    monthly_request_quota: Optional[int] = None
+    daily_token_quota: int | None = None
+    monthly_token_quota: int | None = None
+    daily_request_quota: int | None = None
+    monthly_request_quota: int | None = None
 
     # Password change requirement
     must_change_password: bool = False
 
     # Avatar
-    avatar_url: Optional[str] = None
+    avatar_url: str | None = None
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""
@@ -120,10 +119,10 @@ class UserQuota:
     date: str
     tokens_used: int = 0
     requests_made: int = 0
-    daily_token_quota: Optional[int] = None
-    monthly_token_quota: Optional[int] = None
-    daily_request_quota: Optional[int] = None
-    monthly_request_quota: Optional[int] = None
+    daily_token_quota: int | None = None
+    monthly_token_quota: int | None = None
+    daily_request_quota: int | None = None
+    monthly_request_quota: int | None = None
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""

@@ -8,7 +8,7 @@ import json
 import logging
 from datetime import datetime, timedelta
 from functools import lru_cache
-from typing import Any, Optional, cast
+from typing import Any, cast
 
 from app.repositories.database import Database, escape_like, is_postgresql
 from app.utils.hostname_validator import get_hostname_filter_sql, is_valid_hostname
@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 # Cache for JSON parsing to avoid repeated parsing of same strings
 @lru_cache(maxsize=256)
-def _parse_json_cached(json_str: Optional[str]) -> Optional[list[str]]:
+def _parse_json_cached(json_str: str | None) -> list[str] | None:
     """
     Parse JSON string with caching for performance.
 
@@ -40,7 +40,7 @@ def _parse_json_cached(json_str: Optional[str]) -> Optional[list[str]]:
 class UsageRepository:
     """Repository for usage data operations."""
 
-    def __init__(self, db: Optional[Database] = None):
+    def __init__(self, db: Database | None = None):
         """
         Initialize repository.
 
@@ -50,7 +50,7 @@ class UsageRepository:
         self.db = db or Database()
 
     @staticmethod
-    def _normalize_tenant_id(value: object) -> Optional[int]:
+    def _normalize_tenant_id(value: object) -> int | None:
         """Normalize a tenant identifier to a positive integer."""
         if value in (None, "", 0, "0"):
             return None
@@ -74,9 +74,9 @@ class UsageRepository:
         output_tokens: int = 0,
         cache_tokens: int = 0,
         request_count: int = 0,
-        models_used: Optional[list[str]] = None,
+        models_used: list[str] | None = None,
         host_name: str = "localhost",
-        tenant_id: Optional[int] = None,
+        tenant_id: int | None = None,
     ) -> bool:
         """
         Save or update usage data for a specific date and tool.
@@ -162,9 +162,9 @@ class UsageRepository:
     def get_usage_rows_by_date(
         self,
         date: str,
-        tool_name: Optional[str] = None,
-        host_name: Optional[str] = None,
-        tenant_id: Optional[int] = None,
+        tool_name: str | None = None,
+        host_name: str | None = None,
+        tenant_id: int | None = None,
     ) -> list[dict]:
         """
         Get raw usage rows from daily_usage for a specific date.
@@ -216,9 +216,9 @@ class UsageRepository:
     def get_usage_by_date(
         self,
         date: str,
-        tool_name: Optional[str] = None,
-        host_name: Optional[str] = None,
-        tenant_id: Optional[int] = None,
+        tool_name: str | None = None,
+        host_name: str | None = None,
+        tenant_id: int | None = None,
     ) -> list[dict]:
         """
         Get usage data for a specific date from daily_messages joined with daily_usage.
@@ -291,9 +291,9 @@ class UsageRepository:
         self,
         tool_name: str,
         days: int = 7,
-        end_date: Optional[str] = None,
-        host_name: Optional[str] = None,
-        tenant_id: Optional[int] = None,
+        end_date: str | None = None,
+        host_name: str | None = None,
+        tenant_id: int | None = None,
     ) -> list[dict]:
         """
         Get usage data for a specific tool over a date range.
@@ -350,9 +350,9 @@ class UsageRepository:
         self,
         start_date: str,
         end_date: str,
-        tool_name: Optional[str] = None,
-        host_name: Optional[str] = None,
-        tenant_id: Optional[int] = None,
+        tool_name: str | None = None,
+        host_name: str | None = None,
+        tenant_id: int | None = None,
     ) -> list[dict]:
         """
         Get usage data for a date range.
@@ -404,10 +404,10 @@ class UsageRepository:
 
     def get_summary_by_tool(
         self,
-        host_name: Optional[str] = None,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
-        tenant_id: Optional[int] = None,
+        host_name: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        tenant_id: int | None = None,
     ) -> dict[str, dict]:
         """
         Get summary statistics for all tools.
@@ -488,7 +488,7 @@ class UsageRepository:
 
         return results
 
-    def get_all_tools(self, tenant_id: Optional[int] = None) -> list[str]:
+    def get_all_tools(self, tenant_id: int | None = None) -> list[str]:
         """
         Get list of all tools.
 
@@ -519,7 +519,7 @@ class UsageRepository:
         rows = self.db.fetch_all(query, tuple(params)) if params else self.db.fetch_all(query)
         return sorted({normalize_tool_name(row["tool_name"]) for row in rows})
 
-    def get_all_hosts(self, tenant_id: Optional[int] = None) -> list[str]:
+    def get_all_hosts(self, tenant_id: int | None = None) -> list[str]:
         """
         Get list of all hosts.
 
@@ -569,8 +569,8 @@ class UsageRepository:
         self,
         start_date: str,
         end_date: str,
-        host_name: Optional[str] = None,
-        tenant_id: Optional[int] = None,
+        host_name: str | None = None,
+        tenant_id: int | None = None,
     ) -> list[dict]:
         """
         Get usage data aggregated by date for trend charts.
@@ -633,8 +633,8 @@ class UsageRepository:
         self,
         start_date: str,
         end_date: str,
-        host_name: Optional[str] = None,
-        tenant_id: Optional[int] = None,
+        host_name: str | None = None,
+        tenant_id: int | None = None,
     ) -> list[dict]:
         """
         Get usage data aggregated by date and tool for trend charts.
@@ -698,8 +698,8 @@ class UsageRepository:
         self,
         start_date: str,
         end_date: str,
-        host_name: Optional[str] = None,
-        tenant_id: Optional[int] = None,
+        host_name: str | None = None,
+        tenant_id: int | None = None,
     ) -> int:
         """
         Get total request count from daily_usage table.
@@ -744,8 +744,8 @@ class UsageRepository:
         self,
         start_date: str,
         end_date: str,
-        host_name: Optional[str] = None,
-        tenant_id: Optional[int] = None,
+        host_name: str | None = None,
+        tenant_id: int | None = None,
     ) -> list[dict]:
         """
         Get request count trend data aggregated by date.
@@ -808,8 +808,8 @@ class UsageRepository:
         self,
         start_date: str,
         end_date: str,
-        host_name: Optional[str] = None,
-        tenant_id: Optional[int] = None,
+        host_name: str | None = None,
+        tenant_id: int | None = None,
     ) -> list[dict]:
         """
         Get request count trend data aggregated by date and tool.
@@ -874,7 +874,7 @@ class UsageRepository:
         return list(results.values())
 
     def get_today_request_stats(
-        self, host_name: Optional[str] = None, tenant_id: Optional[int] = None
+        self, host_name: str | None = None, tenant_id: int | None = None
     ) -> dict:
         """
         Get today's request statistics.
@@ -937,10 +937,10 @@ class UsageRepository:
 
     def get_request_stats_by_user(
         self,
-        date: Optional[str] = None,
-        host_name: Optional[str] = None,
-        user_name: Optional[str] = None,
-        tenant_id: Optional[int] = None,
+        date: str | None = None,
+        host_name: str | None = None,
+        user_name: str | None = None,
+        tenant_id: int | None = None,
     ) -> list[dict]:
         """
         Get request statistics grouped by user (sender_name).
@@ -1066,8 +1066,8 @@ class UsageRepository:
         user_name: str,
         start_date: str,
         end_date: str,
-        host_name: Optional[str] = None,
-        tenant_id: Optional[int] = None,
+        host_name: str | None = None,
+        tenant_id: int | None = None,
     ) -> list[dict]:
         """
         Get request trend for a specific user.
@@ -1240,9 +1240,9 @@ class UsageRepository:
         self,
         year: int,
         month: int,
-        host_name: Optional[str] = None,
-        user_name: Optional[str] = None,
-        tenant_id: Optional[int] = None,
+        host_name: str | None = None,
+        user_name: str | None = None,
+        tenant_id: int | None = None,
     ) -> list[dict]:
         """
         Get monthly request statistics grouped by user.

@@ -15,7 +15,6 @@ Columns mirror the former runtime DDL exactly so existing rows keep working.
 """
 
 import logging
-from typing import Union
 
 import sqlalchemy as sa
 from alembic import op
@@ -23,9 +22,9 @@ from alembic import op
 log = logging.getLogger(__name__)
 
 revision: str = "20260703_002_add_sso_auth_states"
-down_revision: Union[str, None] = "20260703_001_add_require_full_review_rounds"
-branch_labels: Union[str, None] = None
-depends_on: Union[str, None] = None
+down_revision: str | None = "20260703_001_add_require_full_review_rounds"
+branch_labels: str | None = None
+depends_on: str | None = None
 
 
 def _table_exists(conn, table_name: str) -> bool:

@@ -8,7 +8,7 @@ This guide covers setting up a development environment and contributing to Open 
 
 ### Prerequisites
 
-- Python 3.9+
+- Python 3.10+
 - Git
 - A code editor (VS Code, PyCharm, etc.)
 

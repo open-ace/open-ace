@@ -178,7 +178,7 @@ class TestSMTPConnectionModes(unittest.TestCase):
 
         # Mock SMTP to raise timeout
         with patch("smtplib.SMTP") as mock_smtp:
-            mock_smtp.side_effect = socket.timeout("Connection timed out")
+            mock_smtp.side_effect = TimeoutError("Connection timed out")
 
             # Test connection with port 587
             result = service.test_connection(
@@ -368,7 +368,7 @@ class TestEmailNotificationServiceSendEmail(unittest.TestCase):
         }
 
         with patch("smtplib.SMTP") as mock_smtp:
-            mock_smtp.side_effect = socket.timeout("Timeout")
+            mock_smtp.side_effect = TimeoutError("Timeout")
 
             result = queue._send_email(config, email_data)
 

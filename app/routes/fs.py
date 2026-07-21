@@ -16,13 +16,14 @@ import re
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import IO, Any, cast
 
 from flask import Blueprint, Response, g, jsonify, request, stream_with_context
 
 from app.repositories.user_repo import UserRepository
 from app.utils.workspace import (
     OPENACE_CHOWN_WRAPPER,
+    OPENACE_WRITE_AS_WRAPPER,
     _is_wrapper_available,
     get_workspace_base_dir,
     get_workspace_base_dirs,
@@ -515,7 +516,11 @@ def api_browse_directory():
 
     # include_files is opt-in via ?include_files=1 so existing callers
     # (directory selector, remote workspace fallback) are unaffected.
-    include_files = request.args.get("include_files", "").lower() in ("1", "true", "yes")
+    include_files = request.args.get("include_files", "").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
 
     # Get path parameter
     path = request.args.get("path", "")
@@ -528,7 +533,10 @@ def api_browse_directory():
         base_dirs = get_workspace_base_dirs()
         if not is_valid_path(path, allowed_prefixes=base_dirs):
             allowed_paths = ", ".join(base_dirs)
-            return jsonify({"error": f"Path must be under one of: {allowed_paths}"}), 400
+            return (
+                jsonify({"error": f"Path must be under one of: {allowed_paths}"}),
+                400,
+            )
 
         path = os.path.realpath(path)
 
@@ -701,7 +709,14 @@ def list_subdirectories(
                 if not st:
                     # stat failed for this entry (e.g. broken symlink) — skip.
                     continue
-                is_dir = st["type"] == "directory"
+                # %F (st["type"]) is locale-dependent — under non-C locales
+                # stat emits a translated string (e.g. "目录" under zh_CN),
+                # which would misclassify every directory as a non-directory
+                # and break PersonalFiles navigation (Issue #1912). The %A
+                # perm string is always ASCII ("drwxr-xr-x" / "-rw-r--r--"),
+                # so its first char is a locale-independent type marker.
+                perm = st.get("perm") or ""
+                is_dir = perm[:1] == "d"
 
                 if full_path in access_cache:
                     # owner != system_account: use the accurate access check.
@@ -938,17 +953,26 @@ def api_create_directory():
                 }
             )
         else:
-            return jsonify({"success": False, "error": "Path exists but is not a directory"}), 400
+            return (
+                jsonify({"success": False, "error": "Path exists but is not a directory"}),
+                400,
+            )
 
     # Check if parent directory is writable
     parent = str(Path(dir_path).parent)
     parent_info = get_directory_info(parent, system_account)
 
     if not parent_info["exists"]:
-        return jsonify({"success": False, "error": "Parent directory does not exist"}), 400
+        return (
+            jsonify({"success": False, "error": "Parent directory does not exist"}),
+            400,
+        )
 
     if not parent_info["is_writable"]:
-        return jsonify({"success": False, "error": "Parent directory is not writable"}), 403
+        return (
+            jsonify({"success": False, "error": "Parent directory is not writable"}),
+            403,
+        )
 
     # Create the directory
     try:
@@ -960,7 +984,10 @@ def api_create_directory():
                 logger.error(f"Failed to create directory as {system_account}: {result.stderr}")
                 return (
                     jsonify(
-                        {"success": False, "error": f"Failed to create directory: {result.stderr}"}
+                        {
+                            "success": False,
+                            "error": f"Failed to create directory: {result.stderr}",
+                        }
                     ),
                     403,
                 )
@@ -983,7 +1010,10 @@ def api_create_directory():
         return jsonify({"success": False, "error": "Timeout creating directory"}), 500
     except Exception as e:
         logger.error(f"Error creating directory: {e}")
-        return jsonify({"success": False, "error": f"Failed to create directory: {e}"}), 500
+        return (
+            jsonify({"success": False, "error": f"Failed to create directory: {e}"}),
+            500,
+        )
 
 
 # ============================================================
@@ -995,6 +1025,11 @@ def api_create_directory():
 #   atomically rename. No sudo is involved — root uses kernel capabilities
 #   (os.chown / os.replace / os.remove) directly. This deliberately avoids
 #   the sudoers whitelist (which does not include cp/cat/rm/tee).
+# - Package non-root multi-user mode: the process is a service account that
+#   cannot traverse the target user's 0700 home. cp/tee/mv are NOT in the
+#   sudoers OPENACE_UTILS whitelist, so uploads delegate to the
+#   openace-write-as wrapper (root via a dedicated sudoers rule, drops to
+#   the target user via runuser). Content is streamed on stdin (Issue #1916).
 # - Single-user / non-root package mode: the process already owns its home
 #   tree, so we write/read/remove directly.
 # - os.chown is root-only; non-root uses the openace-chown wrapper as a
@@ -1082,6 +1117,67 @@ def api_upload_file():
             except Exception:
                 _safe_remove(tmp_path)
                 raise
+        elif not _is_direct_access(system_account):
+            # Package non-root multi-user: the process is a service account
+            # (e.g. openace) that cannot write to /home/<system_account>/...
+            # (0700). cp/tee/mv are NOT in the sudoers OPENACE_UTILS
+            # whitelist, so we cannot `sudo -u <user> cp` directly. Delegate
+            # to the openace-write-as wrapper, which runs as root via its
+            # own sudoers rule and drops to the target user via runuser
+            # (Issue #1916). Content is streamed to the wrapper's stdin.
+            if not _is_wrapper_available(OPENACE_WRITE_AS_WRAPPER):
+                return (
+                    jsonify(
+                        {
+                            "error": "Upload not available in multi-user mode "
+                            "(openace-write-as wrapper not installed)"
+                        }
+                    ),
+                    500,
+                )
+            effective = get_effective_system_account(system_account)
+            assert effective is not None  # _is_direct_access 为 False 时 effective 必定非 None
+            proc = subprocess.Popen(
+                ["sudo", "-n", OPENACE_WRITE_AS_WRAPPER, effective, target_path],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+            )
+            stdin = cast(IO[bytes], proc.stdin)
+            try:
+                # Stream uploaded content to the wrapper's stdin in chunks so
+                # large uploads don't buffer fully in memory.
+                while True:
+                    chunk = file.stream.read(64 * 1024)
+                    if not chunk:
+                        break
+                    try:
+                        stdin.write(chunk)
+                    except BrokenPipeError:
+                        # Wrapper exited early (e.g. path validation failure);
+                        # stop writing and let communicate() collect stderr.
+                        break
+                stdin.close()
+                _, stderr = proc.communicate(timeout=300)
+            except Exception:
+                proc.kill()
+                proc.wait()
+                raise
+            if proc.returncode != 0:
+                err = (stderr or b"").decode(errors="replace").strip()
+                logger.warning(f"openace-write-as failed for {target_path} as {effective}: {err}")
+                low = err.lower()
+                if "not allowed" in low or "sudo" in low or "a password is required" in low:
+                    return (
+                        jsonify(
+                            {
+                                "error": "Cannot upload file as owner "
+                                "(sudoers policy missing 'openace-write-as' for this deployment)"
+                            }
+                        ),
+                        500,
+                    )
+                return jsonify({"error": "Permission denied"}), 403
         else:
             # Single-user / non-root: write directly to the final path.
             file.save(target_path)
@@ -1098,42 +1194,140 @@ def api_upload_file():
         return jsonify({"error": f"Upload failed: {e}"}), 500
 
 
-@fs_bp.route("/fs/download", methods=["GET"])
-def api_download_file():
-    """Stream a file from the user's home subtree as an attachment.
+def _is_direct_access(system_account: str | None) -> bool:
+    """Whether file ops can use direct os calls (no sudo needed).
 
-    Uses a 64KB-chunk generator so large files do not load fully into memory.
-    Root reads any path (bypassing DAC); single-user reads its own home.
+    True when the process is root (bypasses DAC) or already runs as the
+    target user (single-user mode). False for non-root multi-user, where
+    the process is a service account that cannot traverse the target
+    user's home directory and must delegate via ``sudo -u``.
     """
-    user = g.user
+    if os.geteuid() == 0:
+        return True
+    return get_effective_system_account(system_account) is None
 
-    raw_path = request.args.get("path", "")
-    target_path, _ = _resolve_file_in_home(raw_path, user)
-    if target_path is None:
-        return jsonify({"error": "Invalid path (must be a file in your home)"}), 400
 
-    if not os.path.isfile(target_path):
-        return jsonify({"error": "Not a file"}), 400
-    if not os.access(target_path, os.R_OK):
-        return jsonify({"error": "Permission denied"}), 403
+def _check_file_as_user(target_path: str, system_account: str | None, flag: str) -> bool:
+    """Run ``test <flag> <target_path>`` as the correct user.
 
-    filename = os.path.basename(target_path)
-    mime = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+    *flag* is one of ``-f`` (is regular file), ``-r`` (readable),
+    ``-w`` (writable). Uses direct ``os`` calls for root / single-user
+    (see ``_is_direct_access``) and ``sudo -u`` for non-root multi-user.
+
+    ``test`` is in the sudoers ``OPENACE_UTILS`` whitelist, so this works
+    in both Docker and package-method multi-user deployments.
+    """
+    if _is_direct_access(system_account):
+        if flag == "-f":
+            return os.path.isfile(target_path)
+        if flag == "-r":
+            return os.access(target_path, os.R_OK)
+        if flag == "-w":
+            return os.access(target_path, os.W_OK)
+        return False
+
+    effective = get_effective_system_account(system_account)
+    assert effective is not None  # _is_direct_access 为 False 时 effective 必定非 None
+    result = run_as_user(effective, ["test", flag, target_path])
+    return result.returncode == 0
+
+
+def _filesize_as_user(target_path: str, system_account: str | None) -> int | None:
+    """Get file size in bytes as the correct user, or None on failure."""
+    if _is_direct_access(system_account):
+        try:
+            return os.path.getsize(target_path)
+        except OSError:
+            return None
+
+    effective = get_effective_system_account(system_account)
+    assert effective is not None  # _is_direct_access 为 False 时 effective 必定非 None
+    result = run_as_user(effective, ["stat", "-c", "%s", target_path])
+    if result.returncode != 0:
+        return None
     try:
-        size = os.path.getsize(target_path)
-    except OSError as e:
-        return jsonify({"error": f"Cannot stat file: {e}"}), 500
+        return int(result.stdout.strip())
+    except (ValueError, TypeError):
+        return None
 
-    def generate():
+
+def _stream_file_as_user(target_path: str, system_account: str | None):
+    """Yield 64KB chunks of *target_path* read as the correct user.
+
+    Root / single-user: direct ``open()``. Non-root multi-user: stream
+    ``sudo -u <user> cat <path>`` stdout via Popen (``cat`` is in the
+    sudoers ``OPENACE_UTILS`` whitelist in package-method; Docker
+    multi-user runs as root so never hits this branch).
+    """
+    if _is_direct_access(system_account):
         with open(target_path, "rb") as f:
             while True:
                 chunk = f.read(64 * 1024)
                 if not chunk:
                     break
                 yield chunk
+        return
+
+    effective = get_effective_system_account(system_account)
+    assert effective is not None  # _is_direct_access 为 False 时 effective 必定非 None
+    # Don't use run_as_user() here — it uses subprocess.run with a 10s
+    # timeout and capture_output=True, which would buffer the whole file
+    # in memory and time out on large downloads. Popen lets us stream.
+    proc = subprocess.Popen(
+        ["sudo", "-u", effective, "cat", target_path],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        assert proc.stdout is not None
+        while True:
+            chunk = proc.stdout.read(64 * 1024)
+            if not chunk:
+                break
+            yield chunk
+    finally:
+        if proc.stdout:
+            proc.stdout.close()
+        proc.wait()
+        if proc.returncode != 0:
+            logger.warning(
+                f"cat stream for {target_path} as {effective} exited " f"with {proc.returncode}"
+            )
+
+
+@fs_bp.route("/fs/download", methods=["GET"])
+def api_download_file():
+    """Stream a file from the user's home subtree as an attachment.
+
+    Uses a 64KB-chunk generator so large files do not load fully into memory.
+    Root reads any path (bypassing DAC); single-user reads its own home;
+    non-root multi-user delegates to ``sudo -u <system_account>`` so the
+    file check and read execute as the file owner (Issue #1902).
+    """
+    user = g.user
+
+    raw_path = request.args.get("path", "")
+    target_path, system_account = _resolve_file_in_home(raw_path, user)
+    if target_path is None:
+        return jsonify({"error": "Invalid path (must be a file in your home)"}), 400
+
+    # Permission checks must run as the file owner: os.path.isfile() /
+    # os.access() use the process user's credentials and silently return
+    # False when it cannot traverse a 0700 home dir, producing a misleading
+    # "Not a file" error (Issue #1902).
+    if not _check_file_as_user(target_path, system_account, "-f"):
+        return jsonify({"error": "Not a file"}), 400
+    if not _check_file_as_user(target_path, system_account, "-r"):
+        return jsonify({"error": "Permission denied"}), 403
+
+    filename = os.path.basename(target_path)
+    mime = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+    size = _filesize_as_user(target_path, system_account)
+    if size is None:
+        return jsonify({"error": "Cannot stat file"}), 500
 
     return Response(
-        stream_with_context(generate()),
+        stream_with_context(_stream_file_as_user(target_path, system_account)),
         mimetype=mime,
         headers={
             "Content-Disposition": _content_disposition_filename(filename),
@@ -1149,20 +1343,43 @@ def api_delete_file():
 
     JSON body: ``{"path": "/abs/path"}``. Only files (not directories) are
     accepted — directory removal is intentionally out of scope.
+
+    The ``os.path.isfile()`` pre-check and the actual ``os.remove()`` must
+    both execute as the file owner in multi-user mode (Issue #1902).
     """
     user = g.user
 
     data = request.get_json(silent=True) or {}
     raw_path = data.get("path", "")
-    target_path, _ = _resolve_file_in_home(raw_path, user)
+    target_path, system_account = _resolve_file_in_home(raw_path, user)
     if target_path is None:
         return jsonify({"error": "Invalid path (must be a file in your home)"}), 400
 
-    if not os.path.isfile(target_path):
+    if not _check_file_as_user(target_path, system_account, "-f"):
         return jsonify({"error": "Not a file"}), 400
 
     try:
-        os.remove(target_path)
+        if _is_direct_access(system_account):
+            os.remove(target_path)
+        else:
+            effective = get_effective_system_account(system_account)
+            assert effective is not None  # _is_direct_access 为 False 时 effective 必定非 None
+            result = run_as_user(effective, ["rm", "--", target_path])
+            if result.returncode != 0:
+                stderr = (result.stderr or "").strip()
+                logger.warning(f"rm as {effective} failed for {target_path}: {stderr}")
+                # sudoers policy denial vs. filesystem permission error
+                if "not allowed" in stderr.lower() or "sudo" in stderr.lower():
+                    return (
+                        jsonify(
+                            {
+                                "error": "Cannot delete file as owner "
+                                "(sudoers policy missing 'rm' for this deployment)"
+                            }
+                        ),
+                        500,
+                    )
+                return jsonify({"error": "Permission denied"}), 403
         logger.info(f"Deleted file: {target_path}")
         return jsonify({"success": True, "path": target_path})
     except PermissionError:
@@ -1170,6 +1387,300 @@ def api_delete_file():
     except OSError as e:
         logger.error(f"Delete failed for {target_path}: {e}")
         return jsonify({"error": f"Delete failed: {e}"}), 500
+
+
+# --- Recursive search (Issue #1923) -----------------------------------------
+# Personal-files page exposes a search box that recursively matches
+# directory and file *names* under the user's home subtree. Matching is
+# case-insensitive substring with multi-keyword AND (e.g. ``report 2025``
+# matches names containing both tokens). We do NOT pull in a fuzzy library —
+# substring + multi-keyword covers the vast majority of real-world cases and
+# works well for CJK filenames where character-level fuzzy adds little value.
+#
+# Security / scope:
+#   - Search root must pass the same checks as browse: is_valid_path() with
+#     workspace base_dirs prefix + the home subtree lock (#1813) via
+#     _resolve_user_owned_path(). Users cannot search outside their own home.
+#   - Only readable entries are returned. In direct-access mode os.access
+#     filters; in sudo mode ``find -readable`` filters. Unreadable files
+#     (e.g. root-owned 0600 configs) are hidden from results, consistent
+#     with the #1902 permission semantics.
+#   - Hidden entries (dotfiles) are skipped, except ``.qwen`` which the
+#     browse UI also surfaces — matching list_subdirectories behavior.
+#
+# Performance:
+#   - max_results caps the response (default 200, hard cap 500). ``truncated``
+#     is set when the cap is hit.
+#   - max_depth caps recursion (default 8, hard cap 20) so we don't descend
+#     into pathological trees (node_modules, .git) even when the caller asks
+#     for more.
+#   - Direct-access mode prunes hidden dirnames during os.walk so we never
+#     descend into them. Sudo mode uses a single ``find -readable -printf``
+#     call — one sudo exec for the whole search.
+
+SEARCH_DEFAULT_MAX_RESULTS = 200
+SEARCH_HARD_MAX_RESULTS = 500
+SEARCH_DEFAULT_MAX_DEPTH = 8
+SEARCH_HARD_MAX_DEPTH = 20
+
+
+def _build_name_matcher(query: str):
+    """Build a case-insensitive, multi-keyword AND name matcher.
+
+    Splits *query* on whitespace; a name matches only if it contains every
+    token as a case-insensitive substring. Returns ``None`` when the query
+    has no usable tokens (caller should 400 rather than return everything).
+    """
+    tokens = [t.lower() for t in (query or "").split() if t.strip()]
+    if not tokens:
+        return None
+
+    def match(name: str) -> bool:
+        lowered = name.lower()
+        return all(t in lowered for t in tokens)
+
+    return match
+
+
+def _entry_visible(name: str) -> bool:
+    """Same dotfile policy as list_subdirectories: skip hidden, keep .qwen."""
+    return name == ".qwen" or not name.startswith(".")
+
+
+def _search_tree_direct(root: str, matcher, max_depth: int, max_results: int, kind: str):
+    """Recursive search via os.walk (process user can read the tree directly).
+
+    Returns ``(results, truncated, error)`` — *error* is always None here
+    (kept in the tuple for parity with _search_tree_sudo).
+    """
+    results: list[dict[str, Any]] = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        rel = os.path.relpath(dirpath, root)
+        depth = 0 if rel == "." else rel.count(os.sep) + 1
+        if depth >= max_depth:
+            # Entries here would be at depth+1 > max_depth; stop descending.
+            dirnames[:] = []
+            continue
+        # Prune hidden dirs (except .qwen) so we never descend into .git etc.
+        dirnames[:] = [d for d in dirnames if _entry_visible(d)]
+
+        want_dirs = kind in ("all", "dir")
+        want_files = kind in ("all", "file")
+
+        for d in dirnames if want_dirs else []:
+            if len(results) >= max_results:
+                return results, True, None
+            if not matcher(d):
+                continue
+            full = os.path.join(dirpath, d)
+            if not os.access(full, os.R_OK):
+                continue
+            results.append(
+                {
+                    "name": d,
+                    "path": full,
+                    "relative_path": os.path.relpath(full, root),
+                    "type": "dir",
+                    "is_readable": True,
+                }
+            )
+
+        for f in filenames if want_files else []:
+            if not _entry_visible(f):
+                continue
+            if len(results) >= max_results:
+                return results, True, None
+            if not matcher(f):
+                continue
+            full = os.path.join(dirpath, f)
+            try:
+                if not os.access(full, os.R_OK):
+                    continue
+                size = os.path.getsize(full)
+            except OSError:
+                continue
+            results.append(
+                {
+                    "name": f,
+                    "path": full,
+                    "relative_path": os.path.relpath(full, root),
+                    "type": "file",
+                    "size": size,
+                    "is_readable": True,
+                }
+            )
+
+    return results, len(results) >= max_results, None
+
+
+def _search_tree_sudo(
+    root: str, matcher, max_depth: int, max_results: int, kind: str, effective: str
+):
+    """Recursive search via ``find -readable -printf`` as the target user.
+
+    A single sudo exec enumerates every readable entry under *root* (up to
+    *max_depth*); we then filter by name in Python. ``-readable`` is GNU find
+    and matches the same semantics as ``os.access(R_OK)`` in direct mode —
+    unreadable files/dirs are excluded, and unreadable dirs are not descended
+    into.
+
+    Returns ``(results, truncated, error)``. *error* is a short human-readable
+    string when the sudo ``find`` call itself fails (e.g. ``find`` is not in
+    the sudoers OPENACE_UTILS whitelist for this deployment); the caller
+    surfaces it as a 500 so the user sees a clear message instead of a silent
+    empty result.
+    """
+    results: list[dict[str, Any]] = []
+    # %y=type letter (f/d), %p=path, %s=size, \n=record separator.
+    cmd = [
+        "find",
+        root,
+        "-maxdepth",
+        str(max_depth),
+        "-readable",
+        "-printf",
+        "%y\t%p\t%s\n",
+    ]
+    proc = run_as_user(effective, cmd)
+    if proc.returncode != 0:
+        stderr = (proc.stderr or "").strip()
+        logger.warning(f"find as {effective} failed for {root}: {stderr}")
+        # Distinguish "find not in sudoers" (deployment config issue) from
+        # other failures so the operator knows what to fix.
+        if (
+            "password" in stderr.lower()
+            or "not allowed" in stderr.lower()
+            or "sudo" in stderr.lower()
+        ):
+            error = (
+                "Search unavailable: 'find' is not permitted via sudo on this "
+                "host. Add '/usr/bin/find *' to the OPENACE_UTILS sudoers alias "
+                "(see scripts/install-central/package-method/install.sh)."
+            )
+        else:
+            error = f"Search failed: {stderr or 'unknown error'}"
+        return results, False, error
+
+    want_dirs = kind in ("all", "dir")
+    want_files = kind in ("all", "file")
+
+    for line in proc.stdout.split("\n"):
+        if not line:
+            continue
+        parts = line.split("\t")
+        if len(parts) < 3:
+            continue
+        type_letter, entry_path, size_s = parts[0], parts[1], parts[2]
+        if entry_path == root:
+            continue
+        name = os.path.basename(entry_path)
+        if not _entry_visible(name):
+            continue
+        is_dir = type_letter == "d"
+        if is_dir and not want_dirs:
+            continue
+        if not is_dir and not want_files:
+            continue
+        if not matcher(name):
+            continue
+        try:
+            size = int(size_s)
+        except ValueError:
+            size = 0
+        if len(results) >= max_results:
+            return results, True, None
+        entry: dict[str, Any] = {
+            "name": name,
+            "path": entry_path,
+            "relative_path": os.path.relpath(entry_path, root),
+            "type": "dir" if is_dir else "file",
+            "is_readable": True,
+        }
+        if not is_dir:
+            entry["size"] = size
+        results.append(entry)
+
+    return results, len(results) >= max_results, None
+
+
+@fs_bp.route("/fs/search", methods=["GET"])
+def api_search_files():
+    """Recursively search directory/file names under a home-subtree path.
+
+    Query params:
+      - q: search query (required). Split on whitespace; every token must
+        appear in the entry name (case-insensitive substring).
+      - path: search root (optional, default = home dir). Must resolve inside
+        the user's home subtree (#1813 lock).
+      - max_results: cap on returned entries (optional, default 200, hard 500).
+      - max_depth: recursion cap (optional, default 8, hard 20).
+      - kind: "all" (default) | "dir" | "file".
+
+    Returns ``{query, root, results, total, truncated}``. Only readable
+    entries are included; unreadable matches are silently skipped.
+    """
+    user = g.user
+
+    query = (request.args.get("q", "") or "").strip()
+    matcher = _build_name_matcher(query)
+    if matcher is None:
+        return jsonify({"error": "Query (q) is required"}), 400
+
+    # Resolve + validate search root (home subtree lock, base_dirs prefix).
+    # Mirror api_browse_directory: bare "home" / empty → real home path before
+    # validation (is_valid_path rejects the literal "home" as non-absolute).
+    raw_root = request.args.get("path", "") or ""
+    if not raw_root or raw_root.lower() == "home":
+        raw_root = get_home_directory(user)
+    try:
+        root, sa = _resolve_user_owned_path(raw_root, user)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+    # Bounds on caps (defend against abusive callers).
+    try:
+        max_results = int(request.args.get("max_results", SEARCH_DEFAULT_MAX_RESULTS))
+    except ValueError:
+        max_results = SEARCH_DEFAULT_MAX_RESULTS
+    max_results = max(1, min(max_results, SEARCH_HARD_MAX_RESULTS))
+
+    try:
+        max_depth = int(request.args.get("max_depth", SEARCH_DEFAULT_MAX_DEPTH))
+    except ValueError:
+        max_depth = SEARCH_DEFAULT_MAX_DEPTH
+    max_depth = max(1, min(max_depth, SEARCH_HARD_MAX_DEPTH))
+
+    kind = (request.args.get("kind", "all") or "all").lower()
+    if kind not in ("all", "dir", "file"):
+        kind = "all"
+
+    dir_info = get_directory_info(root, sa)
+    if not dir_info["exists"] or not dir_info["is_dir"]:
+        return jsonify({"error": "Search root is not a directory"}), 400
+    if not dir_info["is_readable"]:
+        return jsonify({"error": "Permission denied"}), 403
+
+    if _is_direct_access(sa):
+        results, truncated, error = _search_tree_direct(root, matcher, max_depth, max_results, kind)
+    else:
+        effective = get_effective_system_account(sa)
+        assert effective is not None  # _is_direct_access False ⇒ effective set
+        results, truncated, error = _search_tree_sudo(
+            root, matcher, max_depth, max_results, kind, effective
+        )
+
+    if error:
+        return jsonify({"error": error}), 500
+
+    return jsonify(
+        {
+            "query": query,
+            "root": root,
+            "results": results,
+            "total": len(results),
+            "truncated": truncated,
+        }
+    )
 
 
 def _safe_remove(path: str) -> None:

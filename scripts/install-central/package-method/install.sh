@@ -58,41 +58,35 @@ DEPLOY_PATH=""        # Will be set based on DEPLOY_USER
 # Python Version Check
 # ============================================================================
 
-# Check Python version (Open ACE requires Python >= 3.9)
+# Check Python version (Open ACE requires Python >= 3.10)
 check_python_version() {
     if ! command -v python3 &>/dev/null; then
         print_error "Python 3 is not installed"
-        print_info "Open ACE requires Python 3.9 or later"
+        print_info "Open ACE requires Python 3.10 or later"
         print_info ""
-        print_info "On CentOS/RHEL 7, you can install Python 3.9 via:"
-        print_info "  yum install rh-python39 rh-python39-python-pip"
-        print_info "  source /opt/rh/rh-python39/enable"
+        print_info "On CentOS/RHEL 7, install Python 3.10 manually or use a newer OS release"
         print_info ""
         print_info "On Ubuntu/Debian:"
-        print_info "  apt install python3.9 python3.9-venv python3.9-dev"
+        print_info "  apt install python3.10 python3.10-venv python3.10-dev"
         exit 1
     fi
 
     local python_version=$(python3 -c "import sys; print(sys.version_info.major * 100 + sys.version_info.minor)")
 
-    if [ "$python_version" -lt 309 ]; then
+    if [ "$python_version" -lt 310 ]; then
         local actual_version=$(python3 --version 2>&1 | head -1)
         print_error "Python version too old: $actual_version"
-        print_error "Open ACE requires Python 3.9 or later"
+        print_error "Open ACE requires Python 3.10 or later"
         print_info ""
-        print_info "On CentOS/RHEL 7, you can install Python 3.9 via Software Collections:"
-        print_info "  yum install centos-release-scl"
-        print_info "  yum install rh-python39 rh-python39-python-pip"
-        print_info "  source /opt/rh/rh-python39/enable  # Activate Python 3.9"
-        print_info "  Then run this install script again"
+        print_info "On CentOS/RHEL 7, install Python 3.10 manually or use a newer OS release"
         print_info ""
         print_info "On Rocky Linux 8/9 or RHEL 8/9:"
-        print_info "  dnf install python39 python39-pip"
-        print_info "  alternatives --set python3 /usr/bin/python3.9"
+        print_info "  dnf install python3.10 python3.10-pip"
+        print_info "  alternatives --set python3 /usr/bin/python3.10"
         print_info ""
         print_info "On Ubuntu/Debian:"
-        print_info "  apt install python3.9 python3.9-venv python3.9-dev"
-        print_info "  update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.9 1"
+        print_info "  apt install python3.10 python3.10-venv python3.10-dev"
+        print_info "  update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.10 1"
         exit 1
     fi
 
@@ -106,16 +100,16 @@ check_python_version_remote() {
 
     if ! ssh "$remote" "command -v python3 &>/dev/null"; then
         print_error "Python 3 is not installed on $remote"
-        print_info "Open ACE requires Python 3.9 or later"
+        print_info "Open ACE requires Python 3.10 or later"
         return 1
     fi
 
     local python_version=$(ssh "$remote" "python3 -c \"import sys; print(sys.version_info.major * 100 + sys.version_info.minor)\"")
 
-    if [ "$python_version" -lt 309 ]; then
+    if [ "$python_version" -lt 310 ]; then
         local actual_version=$(ssh "$remote" "python3 --version 2>&1 | head -1")
         print_error "Python version too old on $remote: $actual_version"
-        print_error "Open ACE requires Python 3.9 or later"
+        print_error "Open ACE requires Python 3.10 or later"
         return 1
     fi
 
@@ -1825,6 +1819,32 @@ install_run_as_wrapper() {
     return 0
 }
 
+# Install the cross-user file write wrapper (Issue #1916).
+# In Package non-root multi-user mode the service account cannot write to a
+# user's 0700 home directory, and cp/tee/mv are NOT in the sudoers OPENACE_UTILS
+# whitelist. This wrapper is invoked as root (via a dedicated sudoers rule) and
+# drops to the target user via runuser to write uploaded file content. Must run
+# BEFORE configure_sudoers so the sudoers rule (which keys off -x $wrapper_path)
+# sees it.
+install_write_as_wrapper() {
+    local install_dir="$1"
+    local src="$install_dir/scripts/openace-write-as.sh"
+    local dst="/usr/local/bin/openace-write-as"
+
+    if [ ! -f "$src" ]; then
+        print_warning "openace-write-as.sh not found at $src; skipping wrapper install"
+        return 1
+    fi
+    if ! cp "$src" "$dst" 2>/dev/null; then
+        print_warning "Failed to copy openace-write-as.sh to $dst (need root?)"
+        return 1
+    fi
+    chown root:root "$dst" 2>/dev/null || true
+    chmod 755 "$dst"
+    print_success "Installed write-as wrapper to $dst"
+    return 0
+}
+
 # Configure sudoers for multi-user workspace mode
 # Uses incremental update: only adds/modifies $run_user's rules, preserves other users' rules
 configure_sudoers() {
@@ -1904,6 +1924,16 @@ $run_user ALL=(root) NOPASSWD: /usr/bin/python3 $script_path *"
         wrapper_rule="$run_user ALL=(root) NOPASSWD: $wrapper_path *"
     fi
 
+    # 【修复 Issue #1916】跨用户文件写入 wrapper 权限。
+    # Package 非 root 多用户模式下，服务账号无法写入用户 0700 家目录，
+    # 且 cp/tee/mv 不在 OPENACE_UTILS 白名单。该 wrapper 以 root 身份运行，
+    # 内部用 runuser 切换到目标用户写文件。只授权 wrapper 本身。
+    local write_as_wrapper_path="/usr/local/bin/openace-write-as"
+    local write_as_wrapper_rule=""
+    if [ -x "$write_as_wrapper_path" ]; then
+        write_as_wrapper_rule="$run_user ALL=(root) NOPASSWD: $write_as_wrapper_path *"
+    fi
+
     # Build current user's complete rule block (avoid empty lines from empty variables)
     local current_user_rules="# Rules for $run_user (updated on $(date '+%Y-%m-%d %H:%M:%S'))
 $run_user ALL=(ALL) NOPASSWD: $webui_path *"
@@ -1923,6 +1953,12 @@ ${cli_rule}"
     if [ -n "$wrapper_rule" ]; then
         current_user_rules="${current_user_rules}
 ${wrapper_rule}"
+    fi
+
+    # Add write-as wrapper rule if the wrapper is installed (Issue #1916)
+    if [ -n "$write_as_wrapper_rule" ]; then
+        current_user_rules="${current_user_rules}
+${write_as_wrapper_rule}"
     fi
 
     # Only add fetch_rules if not empty
@@ -1958,7 +1994,10 @@ Defaults secure_path = /usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin"
 # Commands must have '*' suffix to allow arguments (Issue #1262)
 # useradd/id: for creating system users in Package multi-user mode (uid >= 1000 validated in code)
 # git/gh: for autonomous development workflows (Issue #1395)
-Cmnd_Alias OPENACE_UTILS = /usr/bin/test *, /usr/bin/ls *, /usr/bin/cat *, /usr/bin/stat *, /usr/bin/mkdir *, /usr/bin/chown *, /usr/bin/useradd *, /usr/bin/id *, /usr/bin/git *, /usr/bin/gh *, /usr/local/bin/git *, /usr/local/bin/gh *
+# cat/rm: for personal-files download/delete as the file owner (Issue #1902).
+#   sudo -u <owner> cat|rm <path> — DAC constrains operations to files the
+#   target user already owns/can access.
+Cmnd_Alias OPENACE_UTILS = /usr/bin/test *, /usr/bin/ls *, /usr/bin/cat *, /usr/bin/stat *, /usr/bin/mkdir *, /usr/bin/chown *, /usr/bin/useradd *, /usr/bin/id *, /usr/bin/rm *, /usr/bin/find *, /usr/bin/git *, /usr/bin/gh *, /usr/local/bin/git *, /usr/local/bin/gh *
 
 # Autonomous development CLI tools (Issue #1395)
 # Allow running qwen-code/codex/etc. as target user for permission isolation
@@ -2056,6 +2095,18 @@ ${line}"
         if [ -x "$wrapper_path" ] && \
            ! grep -E "^${run_user} .*(NOPASSWD: )?${wrapper_path}( |\*|$)" "$sudoers_file" 2>/dev/null; then
             print_warning "Sudoers missing run-as wrapper rule for user '$run_user' (wrapper installed but not authorized)"
+            need_update=true
+        fi
+
+        # 【修复 Issue #1916】Check write-as wrapper rule.
+        # Mirrors the run-as probe above: the wrapper is installed before
+        # configure_sudoers, but incremental upgrades skip the rewrite when
+        # existing checks pass, leaving the new wrapper unauthorized. Match
+        # user+path on the same line so a foreign user's rule doesn't false-pass.
+        local write_as_wrapper_path="/usr/local/bin/openace-write-as"
+        if [ -x "$write_as_wrapper_path" ] && \
+           ! grep -E "^${run_user} .*(NOPASSWD: )?${write_as_wrapper_path}( |\*|$)" "$sudoers_file" 2>/dev/null; then
+            print_warning "Sudoers missing write-as wrapper rule for user '$run_user' (wrapper installed but not authorized)"
             need_update=true
         fi
 
@@ -3097,7 +3148,7 @@ configure_deploy_remaining() {
 install_local() {
     print_header "Installing on Local Machine"
 
-    # Check Python version first (Open ACE requires Python >= 3.9)
+    # Check Python version first (Open ACE requires Python >= 3.10)
     check_python_version
 
     # Validate source directory first
@@ -3275,6 +3326,10 @@ install_local() {
         # the sudoers rule keys off `[ -x /usr/local/bin/openace-run-as ]`.
         install_run_as_wrapper "$sudoers_install_dir"
 
+        # Install the write-as wrapper BEFORE configure_sudoers (Issue #1916):
+        # the sudoers rule keys off `[ -x /usr/local/bin/openace-write-as ]`.
+        install_write_as_wrapper "$sudoers_install_dir"
+
         configure_sudoers "$sudoers_run_user" "$sudoers_install_dir"
         if [ $? -ne 0 ]; then
             print_warning "Sudoers configuration failed, multi-user mode may not work properly"
@@ -3315,7 +3370,7 @@ install_deploy() {
     local remote="$DEPLOY_USER@$DEPLOY_HOST"
     local target_path="$DEPLOY_PATH"
 
-    # Check Python version on remote system (Open ACE requires Python >= 3.9)
+    # Check Python version on remote system (Open ACE requires Python >= 3.10)
     check_python_version_remote "$remote" || exit 1
 
     # Test SSH connection

@@ -7,7 +7,7 @@ used by autonomous workflows.
 """
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from app.repositories.database import Database, adapt_sql
 
@@ -37,7 +37,7 @@ def _mask_token(token: str) -> str:
 class AiAgentSettingsRepo:
     """Repository for AI agent settings."""
 
-    def __init__(self, db: Optional[Database] = None):
+    def __init__(self, db: Database | None = None):
         self.db = db or Database()
 
     def get_ai_agent_settings(self, mask_token: bool = True) -> dict[str, Any]:
@@ -99,7 +99,7 @@ class AiAgentSettingsRepo:
             logger.error("Failed to update AI agent settings: %s", e)
             return False
 
-    def get_ai_github_env(self) -> Optional[dict[str, str]]:
+    def get_ai_github_env(self) -> dict[str, str] | None:
         """Return env overrides for the AI GitHub account, or None if not configured.
 
         This method reads the **unmasked** token directly from the database

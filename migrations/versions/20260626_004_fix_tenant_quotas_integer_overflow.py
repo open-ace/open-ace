@@ -14,7 +14,7 @@ to bigint, supporting larger quota values for enterprise-tier tenants.
 
 from __future__ import annotations
 
-from typing import Sequence
+from collections.abc import Sequence
 
 from alembic import op
 

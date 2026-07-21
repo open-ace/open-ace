@@ -12,7 +12,7 @@ import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Optional, Union
+from typing import Any
 
 from app.repositories.database import (
     DB_PATH,
@@ -42,20 +42,20 @@ class PromptCategory(Enum):
 class PromptTemplate:
     """Prompt template data model."""
 
-    id: Optional[int] = None
+    id: int | None = None
     name: str = ""
     description: str = ""
     category: str = PromptCategory.GENERAL.value
     content: str = ""
     variables: list[dict[str, Any]] = field(default_factory=list)
     tags: list[str] = field(default_factory=list)
-    author_id: Optional[int] = None
+    author_id: int | None = None
     author_name: str = ""
     is_public: bool = False
     is_featured: bool = False
     use_count: int = 0
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""
@@ -124,7 +124,7 @@ class PromptTemplate:
 class PromptLibrary:
     """Prompt template library manager."""
 
-    def __init__(self, db_path: Optional[str] = None):
+    def __init__(self, db_path: str | None = None):
         """
         Initialize the prompt library.
 
@@ -133,7 +133,7 @@ class PromptLibrary:
         """
         self.db_path = db_path or str(DB_PATH)
 
-    def _get_connection(self) -> Union[sqlite3.Connection, Any]:
+    def _get_connection(self) -> sqlite3.Connection | Any:
         """Get database connection (SQLite or PostgreSQL)."""
         if is_postgresql():
             try:
@@ -284,7 +284,7 @@ class PromptLibrary:
         logger.info(f"Created prompt template: {template.name} (ID: {template_id})")
         return int(str(template_id or 0))
 
-    def get_template(self, template_id: int) -> Optional[PromptTemplate]:
+    def get_template(self, template_id: int) -> PromptTemplate | None:
         """
         Get a prompt template by ID.
 
@@ -354,7 +354,7 @@ class PromptLibrary:
             logger.info(f"Updated prompt template: {template.name} (ID: {template.id})")
         return success
 
-    def delete_template(self, template_id: int, user_id: Optional[int] = None) -> bool:
+    def delete_template(self, template_id: int, user_id: int | None = None) -> bool:
         """
         Delete a prompt template.
 
@@ -386,11 +386,11 @@ class PromptLibrary:
 
     def list_templates(
         self,
-        category: Optional[str] = None,
-        user_id: Optional[int] = None,
+        category: str | None = None,
+        user_id: int | None = None,
         include_public: bool = True,
-        search: Optional[str] = None,
-        tags: Optional[list[str]] = None,
+        search: str | None = None,
+        tags: list[str] | None = None,
         page: int = 1,
         limit: int = 20,
     ) -> dict[str, Any]:
@@ -543,7 +543,7 @@ class PromptLibrary:
 
         return [self._row_to_template(row) for row in rows]
 
-    def get_categories(self, user_id: Optional[int] = None) -> list[dict[str, Any]]:
+    def get_categories(self, user_id: int | None = None) -> list[dict[str, Any]]:
         """
         Get all categories with template counts.
 
@@ -799,7 +799,7 @@ class PromptLibrary:
 
 
 # Module-level singleton
-_instance: Optional[PromptLibrary] = None
+_instance: PromptLibrary | None = None
 _instance_lock = threading.Lock()
 
 

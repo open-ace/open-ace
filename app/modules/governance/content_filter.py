@@ -10,7 +10,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Optional, cast
+from typing import Any, cast
 
 from app.repositories.governance_repo import GovernanceRepository
 
@@ -49,10 +49,10 @@ class FilterResult:
     risk_level: str = "low"
     action: str = "none"  # none, warn, block, redact
     matched_rules: list[dict[str, Any]] = field(default_factory=list)
-    redacted_content: Optional[str] = None
-    original_content: Optional[str] = None  # For audit logging with redact
-    message: Optional[str] = None
-    suggestion: Optional[str] = None
+    redacted_content: str | None = None
+    original_content: str | None = None  # For audit logging with redact
+    message: str | None = None
+    suggestion: str | None = None
     timestamp: datetime = field(
         default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None)
     )
@@ -98,6 +98,10 @@ class ContentFilter:
     - Configurable severity levels
     """
 
+    # Priority mappings for risk levels and actions (used by static helper methods)
+    _RISK_PRIORITY = {"critical": 4, "high": 3, "medium": 2, "low": 1}
+    _ACTION_PRIORITY = {"block": 3, "warn": 2, "redact": 1, "none": 0}
+
     # Default PII patterns
     DEFAULT_PII_PATTERNS = {
         "pii_email": r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}",
@@ -126,10 +130,10 @@ class ContentFilter:
 
     def __init__(
         self,
-        config: Optional[dict[str, Any]] = None,
-        custom_patterns: Optional[dict[str, str]] = None,
-        custom_keywords: Optional[list[str]] = None,
-        governance_repo: Optional[GovernanceRepository] = None,
+        config: dict[str, Any] | None = None,
+        custom_patterns: dict[str, str] | None = None,
+        custom_keywords: list[str] | None = None,
+        governance_repo: GovernanceRepository | None = None,
     ):
         """
         Initialize content filter.
@@ -156,7 +160,7 @@ class ContentFilter:
 
         # Database rules integration
         self.governance_repo = governance_repo
-        self._rules_cache: Optional[list[dict[str, Any]]] = None
+        self._rules_cache: list[dict[str, Any]] | None = None
         self._cache_valid: bool = False
 
         # Compile patterns
@@ -228,7 +232,7 @@ class ContentFilter:
             # Always compile word_boundary pattern
             self._keyword_patterns[keyword] = self._build_keyword_pattern(keyword)
 
-    def _validate_tenant_config(self, tenant_config: Optional[dict[str, Any]]) -> dict[str, Any]:
+    def _validate_tenant_config(self, tenant_config: dict[str, Any] | None) -> dict[str, Any]:
         """
         Validate and normalize tenant configuration.
 
@@ -318,8 +322,8 @@ class ContentFilter:
     def check_content(
         self,
         content: str,
-        context: Optional[dict[str, Any]] = None,
-        tenant_config: Optional[dict[str, Any]] = None,
+        context: dict[str, Any] | None = None,
+        tenant_config: dict[str, Any] | None = None,
     ) -> FilterResult:
         """
         Check content for sensitive information.
@@ -393,21 +397,9 @@ class ContentFilter:
                         }
                     )
 
-                    # Update overall risk
-                    if rule_severity == "critical":
-                        overall_risk = "critical"
-                    elif rule_severity == "high" and overall_risk not in ["critical"]:
-                        overall_risk = "high"
-                    elif rule_severity == "medium" and overall_risk not in ["critical", "high"]:
-                        overall_risk = "medium"
-
-                    # Update overall action (block takes precedence over warn/redact)
-                    if rule_action == "block":
-                        overall_action = "block"
-                    elif rule_action == "warn" and overall_action not in ["block"]:
-                        overall_action = "warn"
-                    elif rule_action == "redact" and overall_action not in ["block", "warn"]:
-                        overall_action = "redact"
+                    # Update overall risk and action
+                    overall_risk = self._update_risk_level(overall_risk, rule_severity)
+                    overall_action = self._update_action(overall_action, rule_action)
 
                     # Apply redaction if action is redact
                     if rule_action == "redact":
@@ -440,20 +432,13 @@ class ContentFilter:
                 )
 
                 # Update overall risk
-                if risk == "critical":
-                    overall_risk = "critical"
-                elif risk == "high" and overall_risk not in ["critical"]:
-                    overall_risk = "high"
-                elif risk == "medium" and overall_risk not in ["critical", "high"]:
-                    overall_risk = "medium"
+                overall_risk = self._update_risk_level(overall_risk, risk)
 
                 # For built-in PII, use block_high_risk config for action
                 if self.block_high_risk and risk in ["high", "critical"]:
-                    if overall_action not in ["block"]:
-                        overall_action = "block"
+                    overall_action = self._update_action(overall_action, "block")
                 elif self.redact_pii:
-                    if overall_action not in ["block", "warn"]:
-                        overall_action = "redact"
+                    overall_action = self._update_action(overall_action, "redact")
 
                 # Redact if enabled
                 if self.redact_pii:
@@ -470,8 +455,8 @@ class ContentFilter:
                     "keywords": list(keyword_matches),
                     "source": "builtin",
                     "match_mode": sensitive_keyword_match_mode,
-                }
-            )
+}
+        )
 
             # Update overall_risk
             if overall_risk not in ["critical", "high"]:
@@ -547,6 +532,44 @@ class ContentFilter:
                     found.add(keyword)
 
         return found
+
+    @staticmethod
+    def _update_risk_level(current: str, new_risk: str) -> str:
+        """
+        Return the higher of two risk levels.
+
+        Invalid risk levels are treated as priority 0 (lowest) and will not
+        override any valid level.
+
+        Args:
+            current: Current overall risk level.
+            new_risk: Newly detected risk level.
+
+        Returns:
+            The higher severity level.
+        """
+        current_priority = ContentFilter._RISK_PRIORITY.get(current, 0)
+        new_priority = ContentFilter._RISK_PRIORITY.get(new_risk, 0)
+        return new_risk if new_priority > current_priority else current
+
+    @staticmethod
+    def _update_action(current: str, new_action: str) -> str:
+        """
+        Return the more severe of two actions.
+
+        Invalid actions are treated as priority 0 (lowest) and will not
+        override any valid action.
+
+        Args:
+            current: Current overall action.
+            new_action: Newly detected action.
+
+        Returns:
+            The more severe action.
+        """
+        current_priority = ContentFilter._ACTION_PRIORITY.get(current, 0)
+        new_priority = ContentFilter._ACTION_PRIORITY.get(new_action, 0)
+        return new_action if new_priority > current_priority else current
 
     def _redact_matches(self, content: str, pattern: re.Pattern, pattern_name: str) -> str:
         """Redact matched patterns in content using predefined templates."""

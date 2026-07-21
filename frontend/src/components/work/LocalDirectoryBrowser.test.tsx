@@ -21,8 +21,12 @@ const toastMock = {
   warning: vi.fn(),
   info: vi.fn(),
 };
+// Issue #1917: handleDelete uses the app's useConfirm() hook instead of
+// window.confirm(). Tests drive this mock to resolve true/false per case.
+const confirmMock = vi.fn<(opts?: any) => Promise<boolean>>();
 vi.mock('@/components/common', () => ({
   useToast: () => toastMock,
+  useConfirm: () => confirmMock,
   Loading: ({ text }: any) => <div>{text}</div>,
   Button: ({ children, onClick, disabled, variant, size }: any) => (
     <button onClick={onClick} disabled={disabled} data-variant={variant} data-size={size}>
@@ -58,6 +62,7 @@ const browseDirectoryMock = vi.fn();
 const uploadFileMock = vi.fn();
 const downloadFileMock = vi.fn();
 const deleteFileMock = vi.fn();
+const searchFilesMock = vi.fn();
 
 vi.mock('@/api/fs', () => ({
   fsApi: {
@@ -66,6 +71,7 @@ vi.mock('@/api/fs', () => ({
     downloadFile: (...args: any[]) => downloadFileMock(...args),
     deleteFile: (...args: any[]) => deleteFileMock(...args),
     createDirectory: vi.fn(),
+    searchFiles: (...args: any[]) => searchFilesMock(...args),
   },
   MAX_UPLOAD_SIZE_MB: 100,
 }));
@@ -152,7 +158,7 @@ describe('LocalDirectoryBrowser', () => {
   });
 
   it('calls fsApi.deleteFile on delete click after confirm', async () => {
-    window.confirm = vi.fn(() => true);
+    confirmMock.mockResolvedValue(true);
     deleteFileMock.mockResolvedValue({ success: true });
     browseDirectoryMock.mockResolvedValue(
       browseResponse({
@@ -174,10 +180,13 @@ describe('LocalDirectoryBrowser', () => {
       expect(deleteFileMock).toHaveBeenCalledWith('/home/alice/trash.txt');
     });
     expect(toastMock.success).toHaveBeenCalledWith('deleteSuccess', 'trash.txt');
+    // Issue #1917: the app confirm modal (not window.confirm) must be invoked
+    // with the danger variant before the delete fires.
+    expect(confirmMock).toHaveBeenCalledWith({ message: 'confirmDeleteFile', variant: 'danger' });
   });
 
   it('aborts delete when confirm dialog is cancelled', async () => {
-    window.confirm = vi.fn(() => false);
+    confirmMock.mockResolvedValue(false);
     deleteFileMock.mockResolvedValue({ success: true });
     browseDirectoryMock.mockResolvedValue(
       browseResponse({
@@ -248,5 +257,306 @@ describe('LocalDirectoryBrowser', () => {
     expect(screen.queryByTitle('deleteFile')).not.toBeInTheDocument();
     // Upload button hidden too (only shown when isWritable)
     expect(screen.queryByText('uploadFile')).not.toBeInTheDocument();
+  });
+
+  // ---- Issue #1923: recursive name search ----
+
+  it('does NOT render search input when enableFileActions is false', async () => {
+    render(<LocalDirectoryBrowser initialPath="/home/alice" onSelectPath={() => {}} />);
+
+    await waitFor(() => {
+      expect(browseDirectoryMock).toHaveBeenCalled();
+    });
+    expect(screen.queryByPlaceholderText('searchFilesPlaceholder')).not.toBeInTheDocument();
+  });
+
+  it('renders search input when enableFileActions=true', async () => {
+    render(
+      <LocalDirectoryBrowser initialPath="/home/alice" onSelectPath={() => {}} enableFileActions />
+    );
+
+    await waitFor(() => {
+      expect(browseDirectoryMock).toHaveBeenCalled();
+    });
+    expect(await screen.findByPlaceholderText('searchFilesPlaceholder')).toBeInTheDocument();
+  });
+
+  it('fires searchFiles after debounce and renders directory + file results', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      browseDirectoryMock.mockResolvedValue(browseResponse());
+      searchFilesMock.mockResolvedValue({
+        query: 'report',
+        root: '/home/alice',
+        results: [
+          {
+            name: 'projects',
+            path: '/home/alice/projects',
+            relative_path: 'projects',
+            type: 'dir',
+            is_readable: true,
+          },
+          {
+            name: 'report-2025.txt',
+            path: '/home/alice/report-2025.txt',
+            relative_path: 'report-2025.txt',
+            type: 'file',
+            size: 42,
+            is_readable: true,
+          },
+        ],
+        total: 2,
+        truncated: false,
+      });
+
+      render(
+        <LocalDirectoryBrowser
+          initialPath="/home/alice"
+          onSelectPath={() => {}}
+          enableFileActions
+        />
+      );
+
+      // Wait for initial browse to resolve.
+      await waitFor(() => expect(browseDirectoryMock).toHaveBeenCalled());
+
+      const input = await screen.findByPlaceholderText('searchFilesPlaceholder');
+      fireEvent.change(input, { target: { value: 'report' } });
+
+      // Advance past the 300ms debounce.
+      await vi.advanceTimersByTimeAsync(350);
+
+      await waitFor(() => {
+        expect(searchFilesMock).toHaveBeenCalledWith('report', '/home/alice');
+      });
+
+      // Both results render. Name and relative_path both contain the text for
+      // top-level entries, so use getAllByText and assert at least one match.
+      expect(screen.getAllByText('projects').length).toBeGreaterThan(0);
+      expect(screen.getAllByText('report-2025.txt').length).toBeGreaterThan(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('clicking a directory result navigates to it and exits search mode', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      browseDirectoryMock.mockResolvedValue(browseResponse());
+      searchFilesMock.mockResolvedValue({
+        query: 'proj',
+        root: '/home/alice',
+        results: [
+          {
+            name: 'projects',
+            path: '/home/alice/projects',
+            relative_path: 'projects',
+            type: 'dir',
+            is_readable: true,
+          },
+        ],
+        total: 1,
+        truncated: false,
+      });
+
+      render(
+        <LocalDirectoryBrowser
+          initialPath="/home/alice"
+          onSelectPath={() => {}}
+          enableFileActions
+        />
+      );
+
+      await waitFor(() => expect(browseDirectoryMock).toHaveBeenCalled());
+      const input = await screen.findByPlaceholderText('searchFilesPlaceholder');
+      fireEvent.change(input, { target: { value: 'proj' } });
+      await vi.advanceTimersByTimeAsync(350);
+
+      await waitFor(() => expect(searchFilesMock).toHaveBeenCalled());
+
+      // Click the directory result (name + relative_path both render "projects",
+      // so click the enclosing <li>).
+      const matches = screen.getAllByText('projects');
+      fireEvent.click(matches[0].closest('li')!);
+
+      // browseDirectory is called again to navigate into the result, and the
+      // search input is cleared.
+      await waitFor(() => {
+        expect(browseDirectoryMock).toHaveBeenCalledWith('/home/alice/projects', {
+          includeFiles: true,
+        });
+      });
+      expect(input).toHaveValue('');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('shows empty state when search returns no results', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      browseDirectoryMock.mockResolvedValue(browseResponse());
+      searchFilesMock.mockResolvedValue({
+        query: 'zzz',
+        root: '/home/alice',
+        results: [],
+        total: 0,
+        truncated: false,
+      });
+
+      render(
+        <LocalDirectoryBrowser
+          initialPath="/home/alice"
+          onSelectPath={() => {}}
+          enableFileActions
+        />
+      );
+
+      await waitFor(() => expect(browseDirectoryMock).toHaveBeenCalled());
+      const input = await screen.findByPlaceholderText('searchFilesPlaceholder');
+      fireEvent.change(input, { target: { value: 'zzz' } });
+      await vi.advanceTimersByTimeAsync(350);
+
+      await waitFor(() => expect(searchFilesMock).toHaveBeenCalled());
+      expect(screen.getByText('searchNoResults')).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('clear button empties the query and exits search mode', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      browseDirectoryMock.mockResolvedValue(
+        browseResponse({
+          files: [
+            { name: 'report.txt', path: '/home/alice/report.txt', size: 1, is_readable: true },
+          ],
+        })
+      );
+      searchFilesMock.mockResolvedValue({
+        query: 'report',
+        root: '/home/alice',
+        results: [
+          {
+            name: 'report.txt',
+            path: '/home/alice/report.txt',
+            relative_path: 'report.txt',
+            type: 'file',
+            size: 1,
+            is_readable: true,
+          },
+        ],
+        total: 1,
+        truncated: false,
+      });
+
+      render(
+        <LocalDirectoryBrowser
+          initialPath="/home/alice"
+          onSelectPath={() => {}}
+          enableFileActions
+        />
+      );
+
+      await waitFor(() => expect(browseDirectoryMock).toHaveBeenCalled());
+      const input = await screen.findByPlaceholderText('searchFilesPlaceholder');
+      fireEvent.change(input, { target: { value: 'report' } });
+      await vi.advanceTimersByTimeAsync(350);
+
+      await waitFor(() => expect(searchFilesMock).toHaveBeenCalled());
+      // In search mode (name + relative_path both render the text).
+      expect(screen.getAllByText('report.txt').length).toBeGreaterThan(0);
+
+      // Click clear (the x-lg button).
+      const clearBtn = screen.getByTitle('clearSearch');
+      fireEvent.click(clearBtn);
+
+      expect(input).toHaveValue('');
+      // Exits search mode → normal listing's report.txt still shows.
+      await waitFor(() => expect(screen.getAllByText('report.txt').length).toBeGreaterThan(0));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // Issue #1912: double-clicking a directory should also navigate into it
+  // (matches desktop file-manager muscle memory).
+  it('navigates into a subdirectory on double-click', async () => {
+    browseDirectoryMock.mockResolvedValue(
+      browseResponse({
+        directories: [{ name: 'subdir', path: '/home/alice/subdir', is_writable: true }],
+      })
+    );
+
+    render(
+      <LocalDirectoryBrowser initialPath="/home/alice" onSelectPath={() => {}} enableFileActions />
+    );
+
+    const row = await screen.findByText('subdir');
+    fireEvent.doubleClick(row);
+    await waitFor(() => {
+      expect(browseDirectoryMock).toHaveBeenCalledWith('/home/alice/subdir', {
+        includeFiles: true,
+      });
+    });
+  });
+
+  // Issue #1912: a failed browseDirectory should surface a toast so the
+  // error is not missed when the list visually does not change.
+  it('surfaces a toast error when browseDirectory fails', async () => {
+    browseDirectoryMock.mockRejectedValue(new Error('boom'));
+
+    render(
+      <LocalDirectoryBrowser initialPath="/home/alice" onSelectPath={() => {}} enableFileActions />
+    );
+
+    await waitFor(() => {
+      expect(toastMock.error).toHaveBeenCalledWith(
+        'browseDirectory',
+        expect.stringContaining('boom')
+      );
+    });
+  });
+
+  // Issue #1912: when manual input is hidden (PersonalFiles use case), the
+  // action button should read "Open Session Here" and show the path that
+  // will be used, instead of the misleading "Select" label.
+  it('renders "Open Session Here" button and path preview when hideManualInput=true', async () => {
+    browseDirectoryMock.mockResolvedValue(browseResponse({ path: '/home/alice' }));
+
+    render(
+      <LocalDirectoryBrowser initialPath="/home/alice" onSelectPath={() => {}} hideManualInput />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('openSessionHere')).toBeInTheDocument();
+    });
+    // Path preview label present (only rendered in the hideManualInput branch)
+    expect(screen.getByText(/willUsePath/)).toBeInTheDocument();
+    // Legacy "Select" label absent
+    expect(screen.queryByText('select')).not.toBeInTheDocument();
+  });
+
+  // Issue #1912: directories and files must be visually distinguishable —
+  // directories use the solid filled folder icon, files use the file-earmark.
+  it('uses bi-folder-fill for directories and bi-file-earmark for files', async () => {
+    browseDirectoryMock.mockResolvedValue(
+      browseResponse({
+        directories: [{ name: 'subdir', path: '/home/alice/subdir', is_writable: true }],
+        files: [{ name: 'note.txt', path: '/home/alice/note.txt', size: 4, is_readable: true }],
+      })
+    );
+
+    const { container } = render(
+      <LocalDirectoryBrowser initialPath="/home/alice" onSelectPath={() => {}} enableFileActions />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('subdir')).toBeInTheDocument();
+    });
+
+    expect(container.querySelector('.bi-folder-fill')).not.toBeNull();
+    expect(container.querySelector('.bi-file-earmark')).not.toBeNull();
   });
 });

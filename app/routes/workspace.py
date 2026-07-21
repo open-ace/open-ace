@@ -11,7 +11,7 @@ API endpoints for workspace functionality including:
 
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional
+from typing import Any
 
 from flask import Blueprint, abort, g, jsonify, request
 
@@ -66,7 +66,7 @@ def format_datetime(dt):
     return dt
 
 
-def _current_tenant_id() -> Optional[int]:
+def _current_tenant_id() -> int | None:
     """Return the current authenticated tenant id, if any."""
     if not hasattr(g, "user") or not g.user:
         return None
@@ -86,7 +86,7 @@ def _tenant_scope_required() -> bool:
     return bool(current_role != "admin")
 
 
-def _session_lookup_tenant_id() -> Optional[int]:
+def _session_lookup_tenant_id() -> int | None:
     """Return tenant scope for session lookups; system admins stay global.
 
     Fail closed for non-admins whose tenant cannot be resolved: returning None
@@ -1043,7 +1043,7 @@ def _check_session_access(session, *, require_owner: bool = True):
     return None
 
 
-def _messages_total(manager, session, milestone_id: Optional[str]) -> int:
+def _messages_total(manager, session, milestone_id: str | None) -> int:
     """Milestone-aware message total for the pagination indicator.
 
     ``agent_sessions.message_count`` is session-level; when a milestone filter
@@ -1068,10 +1068,10 @@ def _get_messages_page_for_session(
     manager,
     session,
     *,
-    limit: Optional[int] = None,
-    before_timestamp: Optional[str] = None,
-    before_id: Optional[int] = None,
-    milestone_id: Optional[str] = None,
+    limit: int | None = None,
+    before_timestamp: str | None = None,
+    before_id: int | None = None,
+    milestone_id: str | None = None,
 ):
     """Call SessionManager.get_messages_page with a tenant-aware fallback."""
     kwargs: dict[str, Any] = {}

@@ -186,7 +186,7 @@ def fetch_all_tools(hostname: str, days: int) -> dict:
     return results
 
 
-def get_new_messages_count(hostname: str, last_sync_time: Optional[str] = None) -> int:
+def get_new_messages_count(hostname: str, last_sync_time: str | None = None) -> int:
     """Get count of messages created after last sync time."""
     conn = get_connection()
     cursor = conn.cursor()
@@ -218,7 +218,7 @@ def get_new_messages_count(hostname: str, last_sync_time: Optional[str] = None) 
 
 
 def upload_incremental(
-    server_url: str, auth_key: str, hostname: str, last_sync_time: Optional[str] = None
+    server_url: str, auth_key: str, hostname: str, last_sync_time: str | None = None
 ) -> tuple:
     """
     Upload only new messages since last sync.
@@ -365,7 +365,7 @@ def sync_data(
     return success
 
 
-def load_config(config_path: Optional[str] = None) -> dict:
+def load_config(config_path: str | None = None) -> dict:
     """Load configuration from config.json."""
     if config_path is None:
         config_path = str(Path(__file__).parent / "config.json")
@@ -377,12 +377,12 @@ def load_config(config_path: Optional[str] = None) -> dict:
 
 
 def run_daemon(
-    server_url: Optional[str] = None,
-    auth_key: Optional[str] = None,
-    hostname: Optional[str] = None,
+    server_url: str | None = None,
+    auth_key: str | None = None,
+    hostname: str | None = None,
     interval: int = 300,
     days: int = 1,
-    config_path: Optional[str] = None,
+    config_path: str | None = None,
 ):
     """Run as daemon, syncing data at specified interval."""
     # Load config file for any missing parameters

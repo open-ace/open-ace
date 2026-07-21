@@ -25,8 +25,6 @@ roles are returned stripped and lower-cased so future case drift cannot
 re-introduce a split.
 """
 
-from typing import Optional
-
 # Canonical message roles. All write paths should reference these instead of
 # bare string literals so role values can never drift.
 ROLE_USER = "user"
@@ -43,7 +41,7 @@ _TOOL_ROLE_ALIASES = {
 }
 
 
-def normalize_message_role(role: Optional[str]) -> str:
+def normalize_message_role(role: str | None) -> str:
     """Normalize a message role to its canonical form.
 
     Tool-result spellings (``toolResult``, ``tool_result``) collapse to the

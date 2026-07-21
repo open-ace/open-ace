@@ -25,7 +25,7 @@ def get_default_sender_name(tool: str = "qwen") -> str:
     return f"{user}-{hostname}-{tool}"
 
 
-def extract_system_account_from_sender_name(sender_name: str) -> Optional[str]:
+def extract_system_account_from_sender_name(sender_name: str) -> str | None:
     """
     Extract system_account from sender_name.
 
@@ -134,7 +134,7 @@ from shared import db
 from shared.utils import update_session_last_seen, warn_if_skipped_message_has_text
 
 
-def get_agent_session_id_from_path(project_path: str) -> Optional[str]:
+def get_agent_session_id_from_path(project_path: str) -> str | None:
     """
     Extract agent_session_id from project path.
 
@@ -232,7 +232,7 @@ def extract_tokens_from_entry(entry: dict) -> dict:
     return result
 
 
-def extract_content_from_entry(entry: dict) -> Optional[str]:
+def extract_content_from_entry(entry: dict) -> str | None:
     """Extract content from a Qwen log entry."""
     entry_type = entry.get("type")
 
@@ -302,7 +302,7 @@ def extract_content_from_entry(entry: dict) -> Optional[str]:
 
 
 def extract_content_blocks_from_entry(
-    entry: dict, function_call_indices: Optional[dict[str, int]] = None
+    entry: dict, function_call_indices: dict[str, int] | None = None
 ) -> list[dict]:
     """Extract structured content_blocks from a Qwen log entry.
 
@@ -407,7 +407,7 @@ def extract_content_blocks_from_entry(
 
 
 def process_jsonl_file(
-    filepath: Path, hostname: str = "localhost", system_account: Optional[str] = None
+    filepath: Path, hostname: str = "localhost", system_account: str | None = None
 ) -> tuple:
     """Process a single JSONL file and return daily token aggregates and messages.
 
@@ -482,7 +482,7 @@ def process_jsonl_file(
 
     # Build conversation_id mapping: each root message defines a conversation
     # All descendants of a root message belong to the same conversation
-    def find_root(uuid: str) -> Optional[str]:
+    def find_root(uuid: str) -> str | None:
         """Find the root message uuid for a given message uuid (iterative to avoid recursion limit)."""
         visited = set()
         current_uuid = uuid
@@ -668,7 +668,7 @@ def process_jsonl_file(
     return dict(daily), messages
 
 
-def find_qwen_project_dir() -> Optional[Path]:
+def find_qwen_project_dir() -> Path | None:
     """Find the Qwen project directory.
 
     Returns the projects directory if there are multiple subdirectories with jsonl files,
@@ -730,7 +730,7 @@ def find_qwen_project_dir() -> Optional[Path]:
 def _process_projects_dir(
     project_dir: Path,
     hostname: str,
-    system_account: Optional[str],
+    system_account: str | None,
     aggregated: dict,
     all_messages: list,
     recent: bool = False,
@@ -1162,8 +1162,8 @@ def update_agent_sessions_stats(messages: list) -> int:
 
 def fetch_and_save(
     days: int = 7,
-    project_dir: Optional[Path] = None,
-    hostname: Optional[str] = None,
+    project_dir: Path | None = None,
+    hostname: str | None = None,
     multi_user_mode: bool = False,
     recent: bool = False,
 ) -> bool:

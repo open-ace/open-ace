@@ -7,7 +7,6 @@ Data models for message tracking.
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -21,22 +20,22 @@ class Message:
     message_id: str
     role: str
     host_name: str = "localhost"
-    parent_id: Optional[str] = None
-    content: Optional[str] = None
-    full_entry: Optional[str] = None
+    parent_id: str | None = None
+    content: str | None = None
+    full_entry: str | None = None
     tokens_used: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
-    model: Optional[str] = None
-    timestamp: Optional[datetime] = None
-    sender_id: Optional[str] = None
-    sender_name: Optional[str] = None
-    message_source: Optional[str] = None
-    feishu_conversation_id: Optional[str] = None
-    group_subject: Optional[str] = None
-    is_group_chat: Optional[bool] = None
-    id: Optional[int] = None
-    created_at: Optional[datetime] = None
+    model: str | None = None
+    timestamp: datetime | None = None
+    sender_id: str | None = None
+    sender_name: str | None = None
+    message_source: str | None = None
+    feishu_conversation_id: str | None = None
+    group_subject: str | None = None
+    is_group_chat: bool | None = None
+    id: int | None = None
+    created_at: datetime | None = None
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""
@@ -164,10 +163,10 @@ class Conversation:
     total_tokens: int = 0
     total_input_tokens: int = 0
     total_output_tokens: int = 0
-    first_message_time: Optional[str] = None
-    last_message_time: Optional[str] = None
-    sender_name: Optional[str] = None
-    sender_id: Optional[str] = None
+    first_message_time: str | None = None
+    last_message_time: str | None = None
+    sender_name: str | None = None
+    sender_id: str | None = None
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""

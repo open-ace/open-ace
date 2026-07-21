@@ -9,7 +9,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from enum import Enum
-from typing import Any, Optional, cast
+from typing import Any, cast
 
 from app.repositories.database import (
     Database,
@@ -48,7 +48,7 @@ class QuotaPeriod(Enum):
 class QuotaAlert:
     """Quota alert data model."""
 
-    id: Optional[int] = None
+    id: int | None = None
     user_id: int = 0
     alert_type: str = "warning"
     quota_type: str = "tokens"  # tokens or requests
@@ -62,8 +62,8 @@ class QuotaAlert:
         default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None)
     )
     acknowledged: bool = False
-    acknowledged_at: Optional[datetime] = None
-    acknowledged_by: Optional[int] = None
+    acknowledged_at: datetime | None = None
+    acknowledged_by: int | None = None
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""
@@ -146,9 +146,9 @@ class QuotaManager:
 
     def __init__(
         self,
-        db: Optional[Database] = None,
-        user_repo: Optional[UserRepository] = None,
-        thresholds: Optional[list[float]] = None,
+        db: Database | None = None,
+        user_repo: UserRepository | None = None,
+        thresholds: list[float] | None = None,
     ):
         """
         Initialize quota manager.
@@ -164,7 +164,7 @@ class QuotaManager:
         # Table structure managed by Alembic migrations
 
     def record_usage(
-        self, user_id: int, tokens: int = 0, requests: int = 1, date: Optional[str] = None
+        self, user_id: int, tokens: int = 0, requests: int = 1, date: str | None = None
     ) -> bool:
         """
         Record usage for a user.

@@ -1,21 +1,20 @@
 # Core dependencies
-flask>=2.0.0,<3.0.0
-aiohttp>=3.9.0,<4.0.0
+flask>=3.1.3,<4.0.0
+aiohttp>=3.14.1,<4.0.0
 websockets>=13.0,<17.0
-requests>=2.32.5,<3.0.0
+requests>=2.33.0,<3.0.0
 bcrypt>=4.0.0,<6.0.0
 PyJWT>=2.12.1,<3.0.0
-cryptography>=43.0.0,<44.0.0
+cryptography>=44.0.0,<50.0.0
 signxml>=4.2.2,<5.0.0
 filetype>=1.2.0,<2.0.0
-tomli>=2.4.1,<3.0.0; python_version < "3.11"
 
 # Production server
 gunicorn>=23.0.0,<24.0.0
 
 # WebSocket support
-gevent>=22.10.0,<27.0.0
-werkzeug>=2.3,<4.0.0
+gevent>=23.9.1,<25.0.0
+werkzeug>=3.1.3,<4.0.0
 
 # Database
 sqlalchemy>=2.0.49,<3.0.0

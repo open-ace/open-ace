@@ -3,9 +3,9 @@
  * Provides offline support and caching for PWA
  */
 
-const CACHE_NAME = 'open-ace-v5';
-const STATIC_CACHE_NAME = 'open-ace-static-v5';
-const API_CACHE_NAME = 'open-ace-api-v5';
+const CACHE_NAME = 'open-ace-v6';
+const STATIC_CACHE_NAME = 'open-ace-static-v6';
+const API_CACHE_NAME = 'open-ace-api-v6';
 
 // Static assets to cache immediately
 const STATIC_ASSETS = ['/', '/app', '/login', '/static/js/dist/index.html'];
@@ -78,7 +78,17 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Handle static assets
+  // Navigation requests (HTML pages) MUST be network-first so that new
+  // deploys (new index.html referencing new content-hashed JS/CSS chunks)
+  // are picked up immediately. A cache-first strategy here would freeze
+  // users on the stale app shell from a previous deploy, defeating the
+  // purpose of content-hashed assets. Issue #1912.
+  if (request.mode === 'navigate') {
+    event.respondWith(handleNavigationRequest(request));
+    return;
+  }
+
+  // Handle static assets (content-hashed, immutable) — cache-first is safe.
   event.respondWith(handleStaticRequest(request));
 });
 
@@ -114,6 +124,36 @@ async function handleApiRequest(request) {
       status: 503,
       headers: { 'Content-Type': 'application/json' },
     });
+  }
+}
+
+/**
+ * Handle navigation requests with network-first strategy.
+ *
+ * Always try the network first so new deploys are visible immediately; fall
+ * back to the cached app shell only when offline. The fetched response is
+ * cloned into the static cache so subsequent offline loads work.
+ */
+async function handleNavigationRequest(request) {
+  try {
+    const response = await fetch(request);
+    if (response.ok && response.type === 'basic') {
+      const cache = await caches.open(STATIC_CACHE_NAME);
+      cache.put(request, response.clone());
+    }
+    return response;
+  } catch (error) {
+    const cachedResponse = await caches.match(request);
+    if (cachedResponse) {
+      return cachedResponse;
+    }
+    // Last-resort fallbacks for offline navigation.
+    const fallback =
+      (await caches.match('/app')) || (await caches.match('/static/js/dist/index.html'));
+    if (fallback) {
+      return fallback;
+    }
+    return new Response('Offline', { status: 503 });
   }
 }
 

@@ -6,7 +6,7 @@ Provides database access for SMTP configuration management.
 
 import logging
 from datetime import datetime, timezone
-from typing import Any, Optional, Union
+from typing import Any
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -24,7 +24,7 @@ class SMTPConfigRepository:
         """Initialize repository."""
         self.password_manager = get_password_manager()
 
-    def _get_connection(self) -> Union[Any, Any]:
+    def _get_connection(self) -> Any | Any:
         """Get database connection."""
         if is_postgresql():
             url = get_database_url()
@@ -38,7 +38,7 @@ class SMTPConfigRepository:
             conn.row_factory = sqlite3.Row
             return conn
 
-    def get_config(self) -> Optional[dict[str, Any]]:
+    def get_config(self) -> dict[str, Any] | None:
         """
         Get SMTP configuration (only one config per system).
 
@@ -84,7 +84,7 @@ class SMTPConfigRepository:
 
         return config
 
-    def get_config_with_password(self) -> Optional[dict[str, Any]]:
+    def get_config_with_password(self) -> dict[str, Any] | None:
         """
         Get SMTP configuration with decrypted password (for sending emails).
 
@@ -133,10 +133,10 @@ class SMTPConfigRepository:
         smtp_host: str,
         smtp_port: int,
         from_address: str,
-        smtp_user: Optional[str] = None,
-        smtp_password: Optional[str] = None,
+        smtp_user: str | None = None,
+        smtp_password: str | None = None,
         use_tls: bool = True,
-        created_by: Optional[int] = None,
+        created_by: int | None = None,
     ) -> dict[str, Any]:
         """
         Save SMTP configuration.
@@ -285,7 +285,7 @@ class SMTPConfigRepository:
 
 
 # Global repository instance
-_smtp_config_repo: Optional[SMTPConfigRepository] = None
+_smtp_config_repo: SMTPConfigRepository | None = None
 
 
 def get_smtp_config_repository() -> SMTPConfigRepository:

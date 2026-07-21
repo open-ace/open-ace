@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from enum import Enum
-from typing import Any, Optional, cast
+from typing import Any, cast
 
 from app.repositories.database import Database
 from app.utils.cache import cached
@@ -18,7 +18,7 @@ from app.utils.cache import cached
 logger = logging.getLogger(__name__)
 
 
-def _normalize_tenant_id(value: object) -> Optional[int]:
+def _normalize_tenant_id(value: object) -> int | None:
     """Normalize a tenant identifier to a positive integer.
 
     Mirrors ``roi_calculator._normalize_tenant_id``. ``None``/0/blank
@@ -159,7 +159,7 @@ class CostOptimizer:
     HIGH_COST_USER_THRESHOLD = 100.0  # USD
     LOW_USAGE_THRESHOLD = 0.2  # 20% of average
 
-    def __init__(self, db: Optional[Database] = None):
+    def __init__(self, db: Database | None = None):
         """
         Initialize Cost Optimizer.
 
@@ -169,9 +169,7 @@ class CostOptimizer:
         self.db = db or Database()
 
     @cached(ttl=120, key_prefix="cost", skip_args=[0])
-    def analyze(
-        self, days: int = 30, tenant_id: Optional[int] = None
-    ) -> list[OptimizationSuggestion]:
+    def analyze(self, days: int = 30, tenant_id: int | None = None) -> list[OptimizationSuggestion]:
         """
         Analyze usage and generate optimization suggestions.
 
@@ -206,7 +204,7 @@ class CostOptimizer:
         return suggestions
 
     def _get_usage_data(
-        self, start_date: str, end_date: str, tenant_id: Optional[int] = None
+        self, start_date: str, end_date: str, tenant_id: int | None = None
     ) -> dict[str, Any]:
         """Get comprehensive usage data.
 
@@ -493,7 +491,7 @@ class CostOptimizer:
         model_lower = model.lower() if model else ""
         return any(e in model_lower for e in expensive_models)
 
-    def _find_cheaper_alternative(self, model: str) -> Optional[str]:
+    def _find_cheaper_alternative(self, model: str) -> str | None:
         """Find a cheaper alternative model."""
         model_lower = model.lower() if model else ""
 
@@ -529,9 +527,7 @@ class CostOptimizer:
         return (savings / cost * 100) if cost > 0 else 0
 
     @cached(ttl=60, key_prefix="cost", skip_args=[0])
-    def get_cost_trend(
-        self, days: int = 30, tenant_id: Optional[int] = None
-    ) -> list[dict[str, Any]]:
+    def get_cost_trend(self, days: int = 30, tenant_id: int | None = None) -> list[dict[str, Any]]:
         """
         Get daily cost trend.
 
@@ -779,9 +775,7 @@ class CostOptimizer:
         return recommendations
 
     @cached(ttl=120, key_prefix="cost", skip_args=[0])
-    def get_efficiency_report(
-        self, days: int = 30, tenant_id: Optional[int] = None
-    ) -> dict[str, Any]:
+    def get_efficiency_report(self, days: int = 30, tenant_id: int | None = None) -> dict[str, Any]:
         """
         Get efficiency analysis report.
 

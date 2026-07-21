@@ -9,7 +9,6 @@ Reference: RFC 1123 hostname specification
 
 import logging
 import re
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +42,7 @@ MIN_HOSTNAME_LENGTH = 1
 MAX_HOSTNAME_LENGTH = 253
 
 
-def is_valid_hostname(name: Optional[str], whitelist: Optional[set[str]] = None) -> bool:
+def is_valid_hostname(name: str | None, whitelist: set[str] | None = None) -> bool:
     """
     Validate if a string is a valid hostname.
 
@@ -132,8 +131,8 @@ def _validate_rfc1123(name: str) -> bool:
 
 
 def sanitize_hostname(
-    name: Optional[str],
-    whitelist: Optional[set[str]] = None,
+    name: str | None,
+    whitelist: set[str] | None = None,
     log_warnings: bool = True,
 ) -> str:
     """

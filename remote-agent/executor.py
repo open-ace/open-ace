@@ -19,8 +19,9 @@ import signal
 import subprocess
 import threading
 import uuid
+from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any
 
 from cli_adapters import get_adapter
 from cli_adapters.base import collect_custom_envkeys

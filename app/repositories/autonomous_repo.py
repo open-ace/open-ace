@@ -8,7 +8,7 @@ Database operations for the AI autonomous development feature.
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional
+from typing import Any
 
 from app.repositories.database import Database, adapt_sql, escape_like, is_postgresql
 
@@ -124,7 +124,7 @@ class AutonomousWorkflowRepository:
         "updated_at",
     }
 
-    def __init__(self, db: Optional[Database] = None):
+    def __init__(self, db: Database | None = None):
         self.db = db or Database()
 
     # ── Agent PID helpers ──────────────────────────────────────────
@@ -343,14 +343,14 @@ class AutonomousWorkflowRepository:
             created["content_language"] = "en"
         return created
 
-    def get_workflow(self, workflow_id: str) -> Optional[dict]:
+    def get_workflow(self, workflow_id: str) -> dict | None:
         """Get a workflow by workflow_id."""
         return self.db.fetch_one(
             "SELECT * FROM autonomous_workflows WHERE workflow_id = ?",
             (workflow_id,),
         )
 
-    def get_workflow_by_session(self, session_id: str) -> Optional[dict]:
+    def get_workflow_by_session(self, session_id: str) -> dict | None:
         """Get a workflow that has a milestone with the given session_id."""
         return self.db.fetch_one(
             """
@@ -364,9 +364,9 @@ class AutonomousWorkflowRepository:
 
     def list_workflows(
         self,
-        user_id: Optional[int] = None,
-        status: Optional[str] = None,
-        search: Optional[str] = None,
+        user_id: int | None = None,
+        status: str | None = None,
+        search: str | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list:
@@ -386,9 +386,9 @@ class AutonomousWorkflowRepository:
 
     def count_workflows(
         self,
-        user_id: Optional[int] = None,
-        status: Optional[str] = None,
-        search: Optional[str] = None,
+        user_id: int | None = None,
+        status: str | None = None,
+        search: str | None = None,
     ) -> int:
         """Count workflows with the same filters used by list_workflows."""
         where, params = self._build_workflow_list_filters(
@@ -404,9 +404,9 @@ class AutonomousWorkflowRepository:
 
     def _build_workflow_list_filters(
         self,
-        user_id: Optional[int] = None,
-        status: Optional[str] = None,
-        search: Optional[str] = None,
+        user_id: int | None = None,
+        status: str | None = None,
+        search: str | None = None,
     ) -> tuple[str, list[Any]]:
         """Build WHERE conditions for workflow list/count queries."""
         conditions: list[str] = []
@@ -541,8 +541,8 @@ class AutonomousWorkflowRepository:
             conn.close()
 
     def update_workflow(
-        self, workflow_id: str, updates: dict, expected_values: Optional[dict] = None
-    ) -> Optional[dict]:
+        self, workflow_id: str, updates: dict, expected_values: dict | None = None
+    ) -> dict | None:
         """Update a workflow's fields. Returns updated record.
 
         **Phase 1 Enhancement (P0)**: Optional optimistic lock support.
@@ -703,7 +703,7 @@ class AutonomousWorkflowRepository:
         )
 
     def get_milestone_usage_summary(
-        self, workflow_id: str, milestones: Optional[list[dict]] = None
+        self, workflow_id: str, milestones: list[dict] | None = None
     ) -> dict[str, dict[str, Any]]:
         """Return per-milestone usage from each milestone's own phase_* columns.
 
@@ -1006,7 +1006,7 @@ class AutonomousWorkflowRepository:
             )
             return self.get_milestone(milestone_id)
 
-    def get_milestone(self, milestone_id: str) -> Optional[dict]:
+    def get_milestone(self, milestone_id: str) -> dict | None:
         """Get a milestone by milestone_id."""
         return self.db.fetch_one(
             "SELECT * FROM workflow_milestones WHERE milestone_id = ?",
@@ -1016,9 +1016,9 @@ class AutonomousWorkflowRepository:
     def list_milestones(
         self,
         workflow_id: str,
-        phase: Optional[str] = None,
-        dev_round: Optional[int] = None,
-        status: Optional[str] = None,
+        phase: str | None = None,
+        dev_round: int | None = None,
+        status: str | None = None,
     ) -> list:
         """List milestones for a workflow."""
         conditions = ["workflow_id = ?"]
@@ -1040,7 +1040,7 @@ class AutonomousWorkflowRepository:
             tuple(params),
         )
 
-    def update_milestone(self, milestone_id: str, updates: dict) -> Optional[dict]:
+    def update_milestone(self, milestone_id: str, updates: dict) -> dict | None:
         """Update a milestone's fields."""
         if not updates:
             return self.get_milestone(milestone_id)
