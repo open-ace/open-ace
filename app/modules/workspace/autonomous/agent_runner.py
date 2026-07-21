@@ -989,6 +989,24 @@ class AutonomousAgentRunner:
         return cmd, project_path
 
     @staticmethod
+    def _resolve_agent_guard_bin() -> str:
+        """Return the installed guard directory, with a source-tree fallback.
+
+        Cross-user launches require the root-owned packaged directory because
+        the isolated agent cannot traverse the service account's private home.
+        Same-user development can still use the guards shipped beside this
+        module when the package has not been installed system-wide.
+        """
+        # Freeze a canonical path before checking its contents. Returning a
+        # configured symlink would let PATH traverse that link after the
+        # cross-user ownership validation, creating a check/use race if the
+        # link were replaced in between.
+        packaged_guard_bin = Path(os.path.realpath(_OPENACE_AGENT_GUARD_BIN))
+        if all((packaged_guard_bin / name).is_file() for name in _AGENT_GUARD_EXECUTABLES):
+            return str(packaged_guard_bin)
+        return str(Path(__file__).with_name("agent_bin"))
+
+    @staticmethod
     def _validate_cross_user_guard_bin(env: dict[str, str]) -> None:
         """Fail closed unless cross-user command guards are safely installed.
 
@@ -1052,12 +1070,7 @@ class AutonomousAgentRunner:
         keeps working.
         """
         env = dict(os.environ)
-        packaged_guard_bin = Path(_OPENACE_AGENT_GUARD_BIN)
-        guard_bin = (
-            str(packaged_guard_bin)
-            if all((packaged_guard_bin / name).is_file() for name in _AGENT_GUARD_EXECUTABLES)
-            else str(Path(__file__).with_name("agent_bin"))
-        )
+        guard_bin = AutonomousAgentRunner._resolve_agent_guard_bin()
         real_git = shutil.which("git", path=env.get("PATH"))
         real_gh = shutil.which("gh", path=env.get("PATH"))
         if real_git:
