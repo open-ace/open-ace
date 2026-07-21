@@ -50,6 +50,8 @@ import type { Language } from '@/types';
 import {
   findForkMilestoneIndex,
   formatTokens,
+  getActivityHostMilestoneId,
+  isAiMilestoneType,
   parseDiffFiles,
   parseDiffStats,
   type ParsedDiffFileStatus,
@@ -181,6 +183,7 @@ function formatDiffSummaryCount(value: number): string {
 }
 
 function getActivityStableKey(activity: {
+  activity_id?: string;
   session_id: string;
   type: 'assistant' | 'tool_use' | 'usage' | 'system';
   timestamp?: string;
@@ -189,6 +192,7 @@ function getActivityStableKey(activity: {
   subtype?: string;
   attempt?: number;
 }): string {
+  if (activity.activity_id) return activity.activity_id;
   return [
     activity.session_id,
     activity.type,
@@ -253,7 +257,10 @@ function getHeartbeatInfo(lastActivityTime: Date | null): HeartbeatInfo {
   const lastTime = lastActivityTime ? lastActivityTime.getTime() : 0;
   const secondsAgo = Math.floor((now - lastTime) / 1000);
 
-  if (!lastActivityTime || secondsAgo > 120) {
+  // Long first-token waits are normal for large planning/review prompts. Do
+  // not label a healthy model call as stuck after only two minutes; reserve the
+  // stale state for a genuinely long silence while still showing elapsed time.
+  if (!lastActivityTime || secondsAgo > 600) {
     return {
       status: 'stale',
       color: 'var(--color-danger)',
@@ -1104,7 +1111,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
       // deliberately opening a different one. Otherwise the auto-expand
       // effect would immediately re-open the active card and prevent the
       // user from reviewing any other milestone while the workflow runs.
-      if (currentActiveMilestoneId && milestoneId !== currentActiveMilestoneId) {
+      if (activityHostMilestoneId && milestoneId !== activityHostMilestoneId) {
         userCollapsedActiveMilestone.current = true;
       } else if (willCollapse) {
         userCollapsedActiveMilestone.current = true;
@@ -1121,9 +1128,9 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
     // This is a deliberate user action (header "view latest milestone"
     // button). If it targets a non-active card, opt out of the auto-expand
     // so the effect doesn't immediately yank back to the active card.
-    // (currentActiveMilestoneId is declared further down; this closure only
+    // (activityHostMilestoneId is declared further down; this closure only
     // runs on click, so the late binding resolves correctly at call time.)
-    if (currentActiveMilestoneId && milestoneId !== currentActiveMilestoneId) {
+    if (activityHostMilestoneId && milestoneId !== activityHostMilestoneId) {
       userCollapsedActiveMilestone.current = true;
     }
     setExpandedMilestone(milestoneId);
@@ -1193,14 +1200,12 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
         ].join(':')
       : '';
 
-  // The milestone currently being executed (in_progress on the active round),
-  // mirroring the isCurrentActiveMilestone check inside renderMilestoneCard.
-  const currentActiveMilestoneId = useMemo(() => {
-    const found = milestones.find(
-      (m) => m.status === 'in_progress' && (m.dev_round || 1) === workflow.dev_round
-    );
-    return found?.milestone_id ?? null;
-  }, [milestones, workflow.dev_round]);
+  // Keep one stable host card for workflow-level live activity. During the
+  // short scheduler gap between milestones there may be no in_progress row;
+  // keep the panel on the latest card instead of unmounting and flashing away.
+  const activityHostMilestoneId = useMemo(() => {
+    return getActivityHostMilestoneId(milestones, workflow.dev_round, isWorkflowActive);
+  }, [isWorkflowActive, milestones, workflow.dev_round]);
 
   // Track whether the user has manually collapsed the current active card, so
   // the auto-expand below doesn't fight a deliberate collapse. Reset whenever
@@ -1208,20 +1213,20 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
   const userCollapsedActiveMilestone = useRef(false);
   useEffect(() => {
     userCollapsedActiveMilestone.current = false;
-  }, [currentActiveMilestoneId]);
+  }, [activityHostMilestoneId]);
 
   // Auto-expand the active milestone card so its live AI activity is visible
   // alongside the auto-scroll-to-bottom behavior. Only fires when a *new*
   // active milestone appears; respects a manual collapse within the same card.
   useEffect(() => {
     if (
-      currentActiveMilestoneId &&
+      activityHostMilestoneId &&
       !userCollapsedActiveMilestone.current &&
-      expandedMilestone !== currentActiveMilestoneId
+      expandedMilestone !== activityHostMilestoneId
     ) {
-      setExpandedMilestone(currentActiveMilestoneId);
+      setExpandedMilestone(activityHostMilestoneId);
     }
-  }, [currentActiveMilestoneId, expandedMilestone]);
+  }, [activityHostMilestoneId, expandedMilestone]);
 
   useEffect(() => {
     setShouldAutoScroll(true);
@@ -1395,14 +1400,21 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
       milestone.session_id;
     const llmTotalTokens = milestone.llm_total_tokens ?? 0;
     const llmRequestCount = milestone.llm_request_count ?? 0;
-    const showUsageMetrics = !!llmSessionId || llmTotalTokens > 0 || llmRequestCount > 0;
+    const isAiMilestone = isAiMilestoneType(milestone.milestone_type);
+    const showUsageMetrics =
+      isAiMilestone || !!llmSessionId || llmTotalTokens > 0 || llmRequestCount > 0;
+    const isZeroUsageSummary =
+      milestone.milestone_type === 'plan_finalized' &&
+      !!llmSessionId &&
+      llmTotalTokens === 0 &&
+      llmRequestCount === 0;
     const milestoneSessionIds = new Set(
       [llmSessionId, milestone.session_id, milestone.review_session_id].filter(Boolean)
     );
-    const milestoneActivities =
-      milestone.status === 'in_progress'
-        ? activities.filter((activity) => milestoneSessionIds.has(activity.session_id))
-        : [];
+    const isActivityHost = activityHostMilestoneId === milestone.milestone_id;
+    const milestoneActivities = isActivityHost
+      ? activities.filter((activity) => milestoneSessionIds.has(activity.session_id))
+      : [];
     const visibleMilestoneActivities = [...milestoneActivities]
       .sort((a, b) => {
         const rawATime = a.timestamp ? new Date(a.timestamp).getTime() : 0;
@@ -1437,7 +1449,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
       (milestone.status === 'completed' || milestone.status === 'in_progress');
     const canCancel =
       !compact && allowMilestoneActions && showForkCancel && milestone.status !== 'cancelled';
-    const canExpand = hasLiveActivity || !!milestone.error_message;
+    const canExpand = isActivityHost || !!milestone.error_message;
     const isCurrentActiveMilestone =
       milestone.status === 'in_progress' && (milestone.dev_round || 1) === workflow.dev_round;
     const rawSummary = (
@@ -1497,7 +1509,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
         ? formatDuration(milestone.started_at, milestone.completed_at ?? milestone.updated_at)
         : '';
     const showDetailSections = isExpanded && canExpand;
-    const showLiveActivitySection = milestone.status === 'in_progress' && hasLiveActivity;
+    const showLiveActivitySection = isActivityHost;
     const showInlinePreview = !compact && milestoneSummary;
     const showInlineSessionButton = !compact && !!llmSessionId;
     const showInlineActionGroup =
@@ -1551,14 +1563,14 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
               )}
               <div className="timeline-milestone-meta-row">
                 {/* Issue #1531: Live activity summary & heartbeat for in-progress milestones */}
-                {milestone.status === 'in_progress' && hasLiveActivity && (
-                  <div className="timeline-milestone-live-summary">
+                {isActivityHost && (
+                  <div className="timeline-milestone-live-summary" aria-live="polite">
                     {(() => {
                       const latestActivity = visibleMilestoneActivities[0];
                       const summary = getActivitySummary(latestActivity, language);
-                      const lastActivityTime = latestActivity?.timestamp
-                        ? new Date(latestActivity.timestamp)
-                        : null;
+                      const heartbeatSource =
+                        latestActivity?.timestamp ?? milestone.started_at ?? milestone.updated_at;
+                      const lastActivityTime = heartbeatSource ? new Date(heartbeatSource) : null;
                       const heartbeat = getHeartbeatInfo(lastActivityTime);
                       const timeAgo = formatTimeAgo(heartbeat.secondsAgo, language);
 
@@ -1591,12 +1603,32 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                   {showUsageMetrics && (
                     <>
                       <span className="timeline-chip timeline-chip--neutral">
-                        {llmTotalTokens > 0 ? formatTokens(llmTotalTokens) : '--'}
+                        {formatTokens(llmTotalTokens)}
                       </span>
                       <span className="timeline-chip timeline-chip--neutral">
-                        {llmRequestCount > 0 ? llmRequestCount : '--'} {t('requests', language)}
+                        {llmRequestCount} {t('requests', language)}
                       </span>
                     </>
+                  )}
+                  {isZeroUsageSummary && (
+                    <span className="timeline-chip timeline-chip--subtle">
+                      <i className="bi bi-link-45deg"></i>
+                      {t('autoNoNewAiUsage', language)}
+                    </span>
+                  )}
+                  {isAiMilestone && !llmSessionId && (
+                    <span className="timeline-chip timeline-chip--subtle">
+                      <i className="bi bi-hourglass-split"></i>
+                      {milestone.status === 'in_progress'
+                        ? t('autoConnectingAiSession', language)
+                        : t('autoNoAiSession', language)}
+                    </span>
+                  )}
+                  {!isAiMilestone && !llmSessionId && (
+                    <span className="timeline-chip timeline-chip--subtle">
+                      <i className="bi bi-gear"></i>
+                      {t('autoSystemStep', language)}
+                    </span>
                   )}
                   {diffStats && !compact && (
                     <span className="timeline-chip timeline-chip--neutral">
@@ -1733,22 +1765,34 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                       <span className="timeline-live-dot"></span>
                       {t('autoAiActivity', language)}
                     </div>
-                    <div className="timeline-milestone-activity-list">
-                      {visibleMilestoneActivities.map((activity) => {
-                        const line = formatLiveActivityLine(activity);
-                        return (
-                          <div
-                            key={`${milestone.milestone_id}-live-${getActivityStableKey(activity)}`}
-                            className="timeline-milestone-activity-item"
-                          >
-                            <span className="timeline-milestone-activity-time">
-                              {line.timestamp}
-                            </span>
-                            <i className={`bi ${line.icon}`}></i>
-                            <span className="timeline-milestone-activity-text">{line.content}</span>
-                          </div>
-                        );
-                      })}
+                    <div className="timeline-milestone-activity-list" aria-live="polite">
+                      {hasLiveActivity ? (
+                        visibleMilestoneActivities.map((activity) => {
+                          const line = formatLiveActivityLine(activity);
+                          return (
+                            <div
+                              key={`${milestone.milestone_id}-live-${getActivityStableKey(activity)}`}
+                              className="timeline-milestone-activity-item"
+                            >
+                              <span className="timeline-milestone-activity-time">
+                                {line.timestamp}
+                              </span>
+                              <i className={`bi ${line.icon}`}></i>
+                              <span className="timeline-milestone-activity-text">
+                                {line.content}
+                              </span>
+                            </div>
+                          );
+                        })
+                      ) : (
+                        <div className="timeline-milestone-activity-item">
+                          <span className="timeline-milestone-activity-time">--:--:--</span>
+                          <i className="bi bi-hourglass"></i>
+                          <span className="timeline-milestone-activity-text">
+                            {t('autoActivityWaiting', language)}
+                          </span>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>

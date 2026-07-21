@@ -1,5 +1,23 @@
 import { formatTokens } from '@/utils';
 
+const AI_MILESTONE_TYPES = new Set([
+  'plan_created',
+  'plan_refined',
+  'plan_reviewed',
+  'plan_finalized',
+  'dev_started',
+  'tests_run',
+  'pr_reviewed',
+  'pr_review_summary',
+  'pr_updated',
+  'ci_repair_applied',
+  'conflicts_resolved',
+]);
+
+export function isAiMilestoneType(milestoneType: string): boolean {
+  return AI_MILESTONE_TYPES.has(milestoneType);
+}
+
 export type ParsedDiffFileStatus = 'added' | 'modified' | 'deleted';
 
 export interface ForkTimelineMilestoneLike {
@@ -16,6 +34,26 @@ export interface ParsedDiffFile {
   deletions: number;
   patch: string;
   commitLabel?: string;
+}
+
+export interface ActivityHostMilestoneLike {
+  milestone_id: string;
+  status: string;
+  dev_round: number;
+}
+
+export function getActivityHostMilestoneId(
+  milestones: ActivityHostMilestoneLike[],
+  workflowDevRound: number,
+  isWorkflowActive: boolean
+): string | null {
+  const active = milestones.find(
+    (milestone) =>
+      milestone.status === 'in_progress' && (milestone.dev_round || 1) === workflowDevRound
+  );
+  if (active) return active.milestone_id;
+  if (!isWorkflowActive || milestones.length === 0) return null;
+  return milestones[milestones.length - 1].milestone_id;
 }
 
 export function parseDiffStats(

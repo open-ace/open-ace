@@ -4,10 +4,10 @@
 }
 
 .timeline-header {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 16px 18px 14px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px 10px;
+  padding: 10px 14px 9px;
   border-bottom: 1px solid var(--border-color);
   background: linear-gradient(
     180deg,
@@ -17,17 +17,21 @@
 }
 
 .timeline-header--active {
-  gap: 12px;
+  gap: 8px 10px;
 }
 
 .timeline-header-top {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  gap: 14px;
+  gap: 12px;
+  grid-column: 1 / -1;
 }
 
 .timeline-header-main {
+  display: flex;
+  align-items: center;
+  gap: 12px;
   min-width: 0;
   flex: 1;
 }
@@ -37,6 +41,7 @@
   align-items: center;
   gap: 10px;
   min-width: 0;
+  flex: 0 1 30rem;
 }
 
 .timeline-header-fork-icon {
@@ -47,7 +52,7 @@
 
 .timeline-header-title {
   margin: 0;
-  font-size: 1.72rem;
+  font-size: 1.38rem;
   font-weight: 700;
   line-height: 1.15;
   white-space: nowrap;
@@ -58,15 +63,17 @@
 .timeline-header-badges {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 10px;
+  gap: 6px;
+  margin-top: 0;
+  min-width: 0;
+  flex: 1;
 }
 
 .timeline-header-actions {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 8px;
+  gap: 6px;
   flex-shrink: 0;
 }
 
@@ -76,8 +83,8 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  min-height: 32px;
-  padding: 0 12px;
+  min-height: 28px;
+  padding: 0 10px;
   border-radius: 999px;
   border: 1px solid var(--border-color);
   background: var(--bg-primary);
@@ -96,6 +103,14 @@
   color: var(--color-primary);
   border-color: color-mix(in srgb, var(--color-primary) 28%, var(--border-color) 72%);
   background: color-mix(in srgb, var(--color-primary) 4%, var(--bg-primary) 96%);
+}
+
+.timeline-pill-link:focus-visible,
+.timeline-pill-button:focus-visible,
+.timeline-inline-link:focus-visible,
+.timeline-milestone-chevron:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
 }
 
 .timeline-chip--neutral {
@@ -139,8 +154,8 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  min-height: 34px;
-  padding: 0 14px;
+  min-height: 30px;
+  padding: 0 11px;
   border-radius: 999px;
   border: 1px solid var(--border-color);
   background: var(--bg-primary);
@@ -210,26 +225,26 @@
 
 .timeline-header-meta-grid {
   display: grid;
-  grid-template-columns: repeat(12, minmax(0, 1fr));
-  gap: 8px;
-  margin-top: 2px;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+  min-width: 0;
 }
 
 .timeline-meta-item {
   display: flex;
-  flex-direction: column;
-  gap: 3px;
+  align-items: baseline;
+  gap: 6px;
   min-width: 0;
-  padding: 9px 11px;
+  padding: 6px 8px;
   border: 1px solid var(--border-color);
   border-radius: var(--border-radius);
   background: color-mix(in srgb, var(--bg-primary) 88%, var(--bg-secondary) 12%);
-  grid-column: span 2;
+  grid-column: auto;
 }
 
 .timeline-meta-item__label {
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -237,7 +252,7 @@
 
 .timeline-meta-item__value {
   color: var(--text-primary);
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-note);
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -246,11 +261,11 @@
 
 .timeline-meta-item--phase {
   background: color-mix(in srgb, var(--color-primary) 4%, var(--bg-primary) 96%);
-  grid-column: span 2;
+  grid-column: auto;
 }
 
 .timeline-meta-item--start {
-  grid-column: span 3;
+  grid-column: auto;
 }
 
 .timeline-meta-item__value--phase {
@@ -262,18 +277,19 @@
 
 .timeline-progress-note {
   display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  padding: 12px 14px;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
   border: 1px solid var(--border-color);
-  border-radius: 16px;
+  border-radius: 10px;
   background: color-mix(in srgb, var(--bg-secondary) 70%, var(--bg-primary) 30%);
+  grid-column: 1 / -1;
 }
 
 .timeline-progress-note__indicator {
   width: 10px;
   height: 10px;
-  margin-top: 5px;
+  margin-top: 0;
   border-radius: 999px;
   flex-shrink: 0;
   background: currentColor;
@@ -282,6 +298,9 @@
 }
 
 .timeline-progress-note__copy {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
   min-width: 0;
 }
 
@@ -293,10 +312,13 @@
 }
 
 .timeline-progress-note__message {
-  margin-top: 2px;
+  margin-top: 0;
   color: var(--text-secondary);
   font-size: var(--font-size-note);
-  line-height: 1.55;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .timeline-progress-note--info {
@@ -327,7 +349,8 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-  margin-top: 2px;
+  margin-top: 0;
+  align-self: center;
 }
 
 .timeline-output-rail__label {
@@ -341,15 +364,15 @@
 .timeline-output-rail__buttons {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
 }
 
 .timeline-output-btn {
   display: inline-flex;
   align-items: center;
   flex-wrap: wrap;
-  min-height: 38px;
-  padding-inline: 0.9rem;
+  min-height: 32px;
+  padding-inline: 0.75rem;
   border-radius: 999px;
   font-size: var(--font-size-note);
 }
@@ -369,6 +392,7 @@
   border: 1px solid var(--border-color);
   border-left-width: 4px;
   border-radius: var(--border-radius);
+  grid-column: 1 / -1;
 }
 
 .timeline-state-banner--error {
@@ -1077,6 +1101,17 @@
   }
 }
 
+@media (max-width: 1200px) {
+  .timeline-header {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .timeline-header-meta-grid,
+  .timeline-output-rail {
+    grid-column: 1;
+  }
+}
+
 @media (max-width: 960px) {
   .timeline-header-top,
   .timeline-state-banner,
@@ -1084,6 +1119,24 @@
   .timeline-section-title {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .timeline-header-main {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .timeline-header-title-row {
+    flex-basis: auto;
+  }
+
+  .timeline-progress-note__copy {
+    display: block;
+  }
+
+  .timeline-progress-note__message {
+    margin-top: 2px;
+    white-space: normal;
   }
 
   .timeline-header-actions {
@@ -1166,6 +1219,14 @@
 
   .timeline-content-modal__document {
     padding: 0.25rem 0.75rem 0.75rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .timeline-status-pill--live .timeline-status-pill__icon i,
+  .timeline-progress-note__indicator,
+  .timeline-live-dot {
+    animation: none;
   }
 }
 

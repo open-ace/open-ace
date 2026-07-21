@@ -5,7 +5,11 @@ import threading
 import time
 from unittest.mock import patch
 
-from app.modules.workspace.autonomous.event_emitter import AutonomousEventEmitter
+from app.modules.workspace.autonomous.event_emitter import (
+    ACTIVITY_HISTORY_MAX_ITEMS,
+    ACTIVITY_HISTORY_TTL_SECONDS,
+    AutonomousEventEmitter,
+)
 
 
 class TestEventEmitter:
@@ -49,6 +53,55 @@ class TestEventEmitter:
         emitter = AutonomousEventEmitter.instance()
         # Should not raise
         emitter.emit("wf-nonexistent", "orphan", {})
+
+    def test_late_subscriber_replays_recent_agent_activity(self):
+        """A page opened mid-run receives recent activity immediately."""
+        emitter = AutonomousEventEmitter.instance()
+        emitter.emit("wf-1", "agent_activity", {"session_id": "s-1", "type": "assistant"})
+
+        q = emitter.subscribe("wf-1")
+        event = q.get_nowait()
+
+        assert event["event_type"] == "agent_activity"
+        assert event["data"]["activity_id"]
+        assert event["data"]["timestamp"].endswith("+00:00")
+
+    def test_replay_excludes_non_activity_events(self):
+        emitter = AutonomousEventEmitter.instance()
+        emitter.emit("wf-1", "workflow_updated", {"status": "planning"})
+
+        q = emitter.subscribe("wf-1")
+
+        assert q.empty()
+
+    def test_activity_replay_is_bounded(self):
+        emitter = AutonomousEventEmitter.instance()
+        for i in range(ACTIVITY_HISTORY_MAX_ITEMS + 5):
+            emitter.emit(
+                "wf-1",
+                "agent_activity",
+                {"session_id": "s-1", "type": "assistant", "text": str(i)},
+            )
+
+        q = emitter.subscribe("wf-1")
+        replayed = [q.get_nowait() for _ in range(q.qsize())]
+
+        assert len(replayed) == ACTIVITY_HISTORY_MAX_ITEMS
+        assert replayed[0]["data"]["text"] == "5"
+
+    def test_expired_activity_is_not_replayed(self):
+        emitter = AutonomousEventEmitter.instance()
+        emitter.emit("wf-1", "agent_activity", {"session_id": "s-1", "type": "assistant"})
+        with emitter._emit_lock:
+            emitted_at, payload = emitter._activity_history["wf-1"][0]
+            emitter._activity_history["wf-1"][0] = (
+                emitted_at - ACTIVITY_HISTORY_TTL_SECONDS - 1,
+                payload,
+            )
+
+        q = emitter.subscribe("wf-1")
+
+        assert q.empty()
 
     def test_unsubscribe(self):
         emitter = AutonomousEventEmitter.instance()

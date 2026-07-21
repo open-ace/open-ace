@@ -5004,6 +5004,10 @@ class AutonomousOrchestrator:
                 milestone_type="plan_finalized",
                 status="in_progress",
                 title="Plan Finalized",
+                # Finalization is a zero-cost summary marker, not another LLM
+                # call. Link it to the stable main session so the timeline can
+                # still open the conversation while its own usage remains 0.
+                session_id=(wf.get("main_session_id") or "").strip(),
             )
             self.repo.update_milestone(
                 plan_final_ms.get("milestone_id", ""),

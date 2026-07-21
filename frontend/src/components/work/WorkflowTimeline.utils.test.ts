@@ -1,8 +1,59 @@
 import { describe, expect, it } from 'vitest';
 
-import { findForkMilestoneIndex, parseDiffFiles, parseDiffStats } from './WorkflowTimeline.utils';
+import {
+  findForkMilestoneIndex,
+  getActivityHostMilestoneId,
+  isAiMilestoneType,
+  parseDiffFiles,
+  parseDiffStats,
+} from './WorkflowTimeline.utils';
 
 describe('WorkflowTimeline.utils', () => {
+  it('classifies AI-backed and system-only milestone cards', () => {
+    for (const type of [
+      'plan_created',
+      'plan_refined',
+      'plan_reviewed',
+      'plan_finalized',
+      'dev_started',
+      'tests_run',
+      'pr_reviewed',
+      'pr_review_summary',
+      'pr_updated',
+      'ci_repair_applied',
+      'conflicts_resolved',
+    ]) {
+      expect(isAiMilestoneType(type), type).toBe(true);
+    }
+    for (const type of [
+      'issue_linked',
+      'branch_created',
+      'pr_created',
+      'dev_completed',
+      'progress_reported',
+      'round_completed',
+      'merged',
+      'cleaned_up',
+    ]) {
+      expect(isAiMilestoneType(type), type).toBe(false);
+    }
+  });
+
+  it('keeps an activity host through the scheduler gap between milestones', () => {
+    const milestones = [
+      { milestone_id: 'old-round', status: 'completed', dev_round: 1 },
+      { milestone_id: 'current', status: 'in_progress', dev_round: 2 },
+    ];
+    expect(getActivityHostMilestoneId(milestones, 2, true)).toBe('current');
+
+    const betweenMilestones = milestones.map((milestone) => ({
+      ...milestone,
+      status: 'completed',
+    }));
+    expect(getActivityHostMilestoneId(betweenMilestones, 2, true)).toBe('current');
+    expect(getActivityHostMilestoneId(betweenMilestones, 2, false)).toBeNull();
+  });
+
   it('parses diff stats json', () => {
     expect(parseDiffStats('{"additions":100,"deletions":25,"files":3,"commits":2}')).toEqual({
       additions: 100,
