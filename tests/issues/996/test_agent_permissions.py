@@ -7,7 +7,7 @@ Verifies:
     didn't commit, so review fixes actually reach the PR.
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 from app.modules.workspace.autonomous.models import AgentTaskResult
 from app.modules.workspace.autonomous.orchestrator import (
@@ -93,6 +93,7 @@ def _make_orchestrator(wf):
     orch._poll_ci_status = MagicMock(return_value=[])
     orch._smart_truncate_diff = MagicMock(return_value="DIFF_TEXT")
     orch._clean_agent_text = MagicMock(side_effect=lambda x: x or "")
+    orch._validate_autonomous_change_scope = MagicMock(return_value="")
     orch._create_milestone = MagicMock(return_value={"milestone_id": "ms-x"})
     orch._update_workflow = MagicMock()
     orch._accumulate_tokens = MagicMock()
@@ -183,7 +184,8 @@ class TestFixPhasePermissionsAndFallback:
         gh.git_add_all.assert_called_once()
         gh.git_commit.assert_called_once()
         assert gh.git_commit.call_args.kwargs.get("no_verify") is True
-        gh.git_push.assert_called()  # pushed after salvage
+        expected_push = call(branch=wf["branch_name"], force_with_lease=True)
+        gh.git_push.assert_has_calls([expected_push, expected_push])
 
     def test_fix_no_salvage_when_no_uncommitted_changes(self):
         wf = _make_workflow()

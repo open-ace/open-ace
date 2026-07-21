@@ -6905,7 +6905,7 @@ class AutonomousOrchestrator:
                 logger.error("Review fix scope rejected before push: %s", push_error_msg)
             try:
                 if not push_failed:
-                    gh.git_push(force_with_lease=True)
+                    gh.git_push(branch=wf.get("branch_name"), force_with_lease=True)
             except Exception as e:
                 # Distinguish transient vs non-transient to enable Layer-2 retry
                 # (Issue #1814).

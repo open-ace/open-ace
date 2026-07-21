@@ -1450,6 +1450,11 @@ class GitHubOps:
                     f"force_with_lease refused on non-auto-dev branch '{target}' "
                     "(only auto-dev/* workflow branches may be force-pushed)"
                 )
+            # Never leave a validated force-push target implicit. An auto-dev
+            # worktree can inherit ``main`` as its upstream, and
+            # ``push.default=simple`` then rejects a plain ``git push`` even
+            # though the current local branch is safe and was validated above.
+            branch = target
         args = ["push", remote]
         if branch:
             args.append(branch)

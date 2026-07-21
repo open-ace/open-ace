@@ -66,9 +66,11 @@ class TestGitPushForceWithLease:
         mock_run.return_value = MagicMock(returncode=0, stdout="")
         self.gh.git_push(force_with_lease=True)
         mock_branch.assert_called_once()
-        # The push cmd must carry --force-with-lease.
+        # The validated current branch must be explicit. Otherwise an
+        # inherited upstream (often main) makes push.default=simple reject it.
         push_cmd = mock_run.call_args[0][0]
         assert "--force-with-lease" in push_cmd
+        assert "auto-dev/def67890" in push_cmd
 
     @patch("app.modules.workspace.autonomous.github_ops.subprocess.run")
     @patch.object(GitHubOps, "get_current_branch", return_value="main")
