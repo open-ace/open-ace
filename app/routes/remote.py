@@ -1645,6 +1645,8 @@ def agent_message():
 
                 # Mirror messages to daily_messages for ConversationHistory visibility
                 synced_message_delta = 0
+                synced_input_tokens = 0
+                synced_output_tokens = 0
                 for msg in messages:
                     role = msg.get("role", "")
                     content = msg.get("content", "")
@@ -1700,6 +1702,8 @@ def agent_message():
                         )
                         if getattr(stored, "_was_inserted", False):
                             synced_message_delta += 1
+                            synced_input_tokens += input_tokens
+                            synced_output_tokens += output_tokens
                     except Exception as e:
                         logger.debug("Failed to add session_message: %s", e)
 
@@ -1801,10 +1805,29 @@ def agent_message():
                 # (count_usage=False), so the session owner must advance
                 # message_count itself — otherwise remote-synced sessions
                 # never reflect their imported messages (#1128).
-                if synced_message_delta:
+                if synced_message_delta or synced_input_tokens or synced_output_tokens:
                     sync_session_mgr.increment_session_usage(
-                        session_id, message_delta=synced_message_delta
+                        session_id,
+                        message_delta=synced_message_delta,
+                        total_tokens_delta=synced_input_tokens + synced_output_tokens,
+                        total_input_delta=synced_input_tokens,
+                        total_output_delta=synced_output_tokens,
                     )
+
+                    # Record usage in QuotaManager for quota tracking
+                    if sync_user_id and (synced_input_tokens or synced_output_tokens):
+                        try:
+                            from app.modules.governance.quota_manager import QuotaManager
+
+                            quota_mgr = QuotaManager()
+                            quota_mgr.record_usage(
+                                user_id=sync_user_id,
+                                tokens=synced_input_tokens + synced_output_tokens,
+                                requests=1,  # Each session_sync counts as 1 request
+                            )
+                        except Exception as e:
+                            logger.error("Failed to record quota usage: %s", e)
+
             except Exception as e:
                 logger.debug("Failed to mirror messages: %s", e)
 
