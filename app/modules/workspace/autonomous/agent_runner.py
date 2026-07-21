@@ -997,7 +997,11 @@ class AutonomousAgentRunner:
         Same-user development can still use the guards shipped beside this
         module when the package has not been installed system-wide.
         """
-        packaged_guard_bin = Path(_OPENACE_AGENT_GUARD_BIN)
+        # Freeze a canonical path before checking its contents. Returning a
+        # configured symlink would let PATH traverse that link after the
+        # cross-user ownership validation, creating a check/use race if the
+        # link were replaced in between.
+        packaged_guard_bin = Path(os.path.realpath(_OPENACE_AGENT_GUARD_BIN))
         if all((packaged_guard_bin / name).is_file() for name in _AGENT_GUARD_EXECUTABLES):
             return str(packaged_guard_bin)
         return str(Path(__file__).with_name("agent_bin"))

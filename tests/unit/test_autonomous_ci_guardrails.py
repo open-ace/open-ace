@@ -244,6 +244,24 @@ def test_agent_guard_bin_falls_back_to_source_when_install_is_incomplete(monkeyp
     assert resolved == str(Path(agent_runner.__file__).with_name("agent_bin"))
 
 
+def test_agent_guard_bin_canonicalizes_packaged_directory_symlink(monkeypatch, tmp_path):
+    from app.modules.workspace.autonomous import agent_runner
+
+    installed_guard_dir = tmp_path / "installed-agent-bin"
+    installed_guard_dir.mkdir()
+    for name in agent_runner._AGENT_GUARD_EXECUTABLES:
+        guard = installed_guard_dir / name
+        guard.write_text("#!/bin/sh\n", encoding="utf-8")
+        guard.chmod(0o755)
+    configured_link = tmp_path / "configured-agent-bin"
+    configured_link.symlink_to(installed_guard_dir, target_is_directory=True)
+    monkeypatch.setattr(agent_runner, "_OPENACE_AGENT_GUARD_BIN", str(configured_link))
+
+    resolved = agent_runner.AutonomousAgentRunner._resolve_agent_guard_bin()
+
+    assert resolved == str(installed_guard_dir.resolve())
+
+
 def test_cross_user_launch_rejects_resolved_source_fallback(monkeypatch, tmp_path):
     from app.modules.workspace.autonomous import agent_runner
 
