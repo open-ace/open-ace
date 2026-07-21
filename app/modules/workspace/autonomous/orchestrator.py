@@ -988,6 +988,10 @@ class AutonomousOrchestrator:
         # stable main/review/test session starts its next provider request.
         self._session_usage_offsets: dict[str, dict[str, int]] = {}
         self._cancel_requested = threading.Event()  # in-memory cancel signal
+        # Set only by the application shutdown path. Unlike a user stop, this
+        # interrupts the current attempt without changing the workflow's active
+        # phase/status, so the next process can retry it automatically.
+        self._shutdown_requested = threading.Event()
 
         # Wire session_manager so agent sessions are persisted to DB
         from app.modules.workspace.session_manager import SessionManager
@@ -3713,6 +3717,18 @@ class AutonomousOrchestrator:
             "request_count": 0,
         }
         usage_session_ids = {tracking_session_id}
+        if self._is_shutdown_requested():
+            self._abort_agent_run_for_shutdown(
+                milestone_id,
+                AgentTaskResult(
+                    session_id=tracking_session_id,
+                    tracking_session_id=tracking_session_id,
+                    success=False,
+                ),
+                retry_usage,
+                usage_session_ids,
+                tracking_session_id,
+            )
         if "user_id" not in kwargs and workflow_data:
             kwargs["user_id"] = workflow_data.get("user_id")
 
@@ -3851,6 +3867,18 @@ class AutonomousOrchestrator:
                 + build_language_instruction(content_language)
             )
 
+        if self._is_shutdown_requested():
+            self._abort_agent_run_for_shutdown(
+                milestone_id,
+                AgentTaskResult(
+                    session_id=tracking_session_id,
+                    tracking_session_id=tracking_session_id,
+                    success=False,
+                ),
+                retry_usage,
+                usage_session_ids,
+                tracking_session_id,
+            )
         result = self._runner.run_agent_task(**kwargs)
         if result.session_id:
             # The runner is authoritative for the tracking id it actually
@@ -3887,6 +3915,15 @@ class AutonomousOrchestrator:
                 if workflow_data is not None:
                     workflow_data[field] = tracking_session_id
 
+        if self._is_shutdown_requested():
+            self._abort_agent_run_for_shutdown(
+                milestone_id,
+                result,
+                retry_usage,
+                usage_session_ids,
+                tracking_session_id,
+            )
+
         # Transient API error retry (429 / 5xx / overload) — exponential
         # backoff, max 30 minutes total. Interruptible sleep (cancel check
         # every 5s) so the orchestrator can be paused/stopped during a wait.
@@ -3917,6 +3954,14 @@ class AutonomousOrchestrator:
             raise WorkflowPaused("Workflow paused during API error retry")
 
         while (time.monotonic() - retry_start) < API_RETRY_TOTAL_TIMEOUT:
+            if self._is_shutdown_requested():
+                self._abort_agent_run_for_shutdown(
+                    milestone_id,
+                    result,
+                    retry_usage,
+                    usage_session_ids,
+                    tracking_session_id,
+                )
             # Re-check workflow status each iteration: a failure/cancellation
             # set on the row (by a concurrent path or a prior failure in this
             # advance()) must abort retries, otherwise we keep spawning agent
@@ -3976,6 +4021,14 @@ class AutonomousOrchestrator:
                 if (self.workflow or {}).get("status") == "paused":
                     abort_paused_retry()
                 if self._cancel_requested.is_set():
+                    if self._is_shutdown_requested():
+                        self._abort_agent_run_for_shutdown(
+                            milestone_id,
+                            result,
+                            retry_usage,
+                            usage_session_ids,
+                            tracking_session_id,
+                        )
                     logger.info("API error retry cancelled (cancel requested)")
                     self._synthesize_transient_failure(result)
                     self._write_phase_usage(milestone_id, result, retry_usage)
@@ -4042,6 +4095,14 @@ class AutonomousOrchestrator:
         repo_validation_error = self._validate_repo_context_after_run(
             repo_state_before, project_system_account
         )
+        if self._is_shutdown_requested():
+            self._abort_agent_run_for_shutdown(
+                milestone_id,
+                result,
+                retry_usage,
+                usage_session_ids,
+                tracking_session_id,
+            )
         if repo_validation_error:
             logger.error("Workflow repo validation failed: %s", repo_validation_error)
             result.success = False
@@ -4143,6 +4204,36 @@ class AutonomousOrchestrator:
             offsets = getattr(self, "_session_usage_offsets", {})
             for session_id in session_ids:
                 offsets.pop(session_id, None)
+
+    def _is_shutdown_requested(self) -> bool:
+        """Support lightweight test/legacy instances constructed without ``__init__``."""
+        event = getattr(self, "_shutdown_requested", None)
+        return bool(event and event.is_set())
+
+    def _abort_agent_run_for_shutdown(
+        self,
+        milestone_id: str,
+        result: AgentTaskResult,
+        retry_usage: dict[str, int],
+        usage_session_ids: set[str],
+        tracking_session_id: str,
+    ) -> None:
+        """Persist an interrupted attempt and unwind without failing its workflow."""
+        if milestone_id:
+            self.repo.update_milestone(
+                milestone_id,
+                {
+                    "status": "cancelled",
+                    "error_message": (
+                        "Service shutdown interrupted this attempt; it will retry automatically"
+                    ),
+                },
+            )
+        self._write_phase_usage(milestone_id, result, retry_usage)
+        self._clear_session_usage_offsets(usage_session_ids)
+        with self._session_lock:
+            self._current_session_id = tracking_session_id
+        raise WorkflowPaused("Service shutdown interrupted the current attempt")
 
     def _write_realtime_phase_usage(self, activity: dict) -> None:
         """Write the current call's running cumulative usage to the in-progress milestone.
@@ -4259,6 +4350,26 @@ class AutonomousOrchestrator:
                 logger.warning("Failed to stop session %s: %s", session_id[:8], e)
             with self._session_lock:
                 self._current_session_id = None
+
+    def prepare_for_shutdown(self):
+        """Interrupt the current attempt so a replacement process can retry it."""
+        self._shutdown_requested.set()
+        self._cancel_requested.set()
+        with self._session_lock:
+            session_id = self._current_session_id
+        if session_id:
+            logger.info(
+                "Stopping agent task for service shutdown session=%s",
+                session_id[:8],
+            )
+            try:
+                self._runner.stop_session(session_id)
+            except Exception as e:
+                logger.warning(
+                    "Failed to stop shutdown session %s: %s",
+                    session_id[:8],
+                    e,
+                )
 
     def advance(self):
         """Advance the workflow one step. Called by the scheduler."""

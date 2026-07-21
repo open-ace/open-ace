@@ -51,6 +51,27 @@ def _make_orchestrator(wf):
     o.emitter = MagicMock()
     # Stub _run_agent's collaborators so we test IT, not its dependencies.
     o._resolve_session_line = MagicMock(return_value=("sess-track", None, False))
+    o._snapshot_repo_context = MagicMock(
+        return_value={
+            "context": {
+                "repo_path": wf["worktree_path"],
+                "project_path": wf["project_path"],
+                "strategy": "worktree",
+                "expected_branch": "auto-dev/test",
+            },
+            "effective": {
+                "repo_path": wf["worktree_path"],
+                "top_level": wf["worktree_path"],
+                "git_dir": f"{wf['worktree_path']}/.git",
+                "git_identity": "1:1",
+                "common_dir": f"{wf['worktree_path']}/.git",
+                "common_identity": "1:1",
+                "origin": "git@github.com:open-ace/open-ace.git",
+            },
+        }
+    )
+    o._validate_repo_context_after_run = MagicMock(return_value="")
+    o._get_gh = MagicMock()
     o._link_session_to_current_milestone = MagicMock()
     o._write_phase_usage = MagicMock()
     o._update_workflow = MagicMock()
@@ -107,6 +128,56 @@ class TestIsTransientApiError:
 
 
 class TestRunAgentApiErrorRetry:
+    def test_shutdown_before_dispatch_does_not_launch_agent(self):
+        o = _make_orchestrator(_make_workflow())
+        o._shutdown_requested.set()
+
+        with pytest.raises(orch_module.WorkflowPaused, match="Service shutdown"):
+            o._run_agent(wf=_make_workflow(), milestone_id="ms-shutdown", prompt="x")
+
+        o._runner.run_agent_task.assert_not_called()
+        o.repo.update_milestone.assert_called_with(
+            "ms-shutdown",
+            {
+                "status": "cancelled",
+                "error_message": (
+                    "Service shutdown interrupted this attempt; it will retry automatically"
+                ),
+            },
+        )
+
+    def test_shutdown_cancels_attempt_without_returning_failure(self):
+        o = _make_orchestrator(_make_workflow())
+        result = AgentTaskResult(
+            session_id="sess-track",
+            tracking_session_id="sess-track",
+            response_text="partial result",
+            total_tokens=500,
+            success=False,
+            error="stopped",
+        )
+
+        def stop_during_run(**_kwargs):
+            o._shutdown_requested.set()
+            return result
+
+        o._runner.run_agent_task = MagicMock(side_effect=stop_during_run)
+
+        with pytest.raises(orch_module.WorkflowPaused, match="Service shutdown"):
+            o._run_agent(wf=_make_workflow(), milestone_id="ms-shutdown", prompt="x")
+
+        o.repo.update_milestone.assert_called_with(
+            "ms-shutdown",
+            {
+                "status": "cancelled",
+                "error_message": (
+                    "Service shutdown interrupted this attempt; it will retry automatically"
+                ),
+            },
+        )
+        o._write_phase_usage.assert_called_once()
+        assert o._current_session_id == "sess-track"
+
     def test_no_retry_on_normal_response(self, monkeypatch):
         monkeypatch.setattr("time.sleep", lambda *a, **k: None)
         o = _make_orchestrator(_make_workflow())

@@ -119,11 +119,22 @@ class AutonomousScheduler:
         logger.info("Autonomous scheduler started")
 
     def stop(self):
-        """Stop the scheduler."""
+        """Stop scheduling and drain active orchestrators before interpreter exit."""
         self._stop_event.set()
+        with self._orchestrator_lock:
+            orchestrators = list(self._running_orchestrators.values())
+        for orchestrator in orchestrators:
+            try:
+                orchestrator.prepare_for_shutdown()
+            except Exception:
+                logger.warning("Failed to prepare autonomous workflow for shutdown", exc_info=True)
         if self._thread:
-            self._thread.join(timeout=10)
-        logger.info("Autonomous scheduler stopped")
+            self._thread.join(timeout=20)
+            if self._thread.is_alive():
+                logger.warning("Autonomous scheduler did not drain before shutdown timeout")
+        logger.info(
+            "Autonomous scheduler stopped (%d active attempts interrupted)", len(orchestrators)
+        )
 
     def get_running_orchestrator(self, workflow_id: str):
         """Get the currently running orchestrator for a workflow, if any."""
@@ -294,6 +305,12 @@ class AutonomousScheduler:
             orchestrator = AutonomousOrchestrator(workflow_id)
             with self._orchestrator_lock:
                 self._running_orchestrators[workflow_id] = orchestrator
+            # stop() may race with this worker after its orchestrator snapshot.
+            # Register first, then re-check the event so no new agent task can
+            # start after graceful shutdown has begun.
+            if self._stop_event.is_set():
+                orchestrator.prepare_for_shutdown()
+                return workflow_id
             orchestrator.advance()
         except Exception as e:
             logger.error(
