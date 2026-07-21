@@ -2120,7 +2120,7 @@ class AutonomousOrchestrator:
                 "Autonomous validation account must differ from the repository owner account"
             )
         runtime_command, _ = self._select_project_python_runtime(project_path, gh)
-        guard_bin = os.path.join(os.path.dirname(__file__), "agent_bin")
+        guard_bin = AutonomousAgentRunner._resolve_agent_guard_bin()
         env = {
             "PATH": guard_bin + os.pathsep + os.environ.get("PATH", ""),
             "OPENACE_REAL_GIT": real_git,

@@ -885,6 +885,11 @@ def test_pre_commit_convergence_reruns_modified_hooks_as_isolated_agent():
             "_wrap_agent_cmd",
             return_value=(["isolated-wrapper", "pre-commit"], None),
         ) as wrap,
+        patch.object(
+            AutonomousAgentRunner,
+            "_resolve_agent_guard_bin",
+            return_value="/usr/local/libexec/openace-agent-bin",
+        ),
         patch(
             "app.modules.workspace.autonomous.orchestrator.subprocess.run",
             side_effect=[modified, clean],
@@ -908,6 +913,7 @@ def test_pre_commit_convergence_reruns_modified_hooks_as_isolated_agent():
         "/private/repo",
         "openace-agent",
     )
+    assert wrap.call_args.args[3]["PATH"].split(":", 1)[0] == "/usr/local/libexec/openace-agent-bin"
     assert run.call_args.kwargs["cwd"] is None
     assert run.call_args.kwargs["env"] is None
 
