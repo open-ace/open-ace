@@ -8,6 +8,50 @@ import pytest
 from app.modules.workspace.autonomous.models import AgentTaskResult
 
 
+@pytest.fixture(autouse=True)
+def _trusted_repo_boundary_for_state_machine_tests(monkeypatch):
+    """Keep legacy state-machine fixtures focused on phase transitions.
+
+    Production local runs fail closed when they cannot snapshot a real Git
+    repository. These tests intentionally use synthetic ``/tmp`` paths, so
+    provide a trusted boundary here; dedicated guardrail tests exercise the
+    fail-closed and inode-validation behavior itself.
+    """
+    from app.modules.workspace.autonomous.github_ops import GitHubOps
+    from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+    def snapshot(orchestrator, wf, workspace_type, system_account):
+        if workspace_type != "local":
+            return None
+        context = orchestrator._resolve_effective_repo_context(wf)
+        repo_path = context.get("repo_path", "/tmp/test-project")
+        return {
+            "context": context,
+            "effective": {
+                "repo_path": repo_path,
+                "top_level": repo_path,
+                "git_dir": f"{repo_path}/.git",
+                "git_identity": "1:1",
+                "common_dir": f"{repo_path}/.git",
+                "common_identity": "1:1",
+                "origin": "git@github.com:open-ace/open-ace.git",
+            },
+        }
+
+    monkeypatch.setattr(AutonomousOrchestrator, "_snapshot_repo_context", snapshot)
+    monkeypatch.setattr(
+        AutonomousOrchestrator,
+        "_validate_repo_context_after_run",
+        lambda self, before_state, system_account: "",
+    )
+    monkeypatch.setattr(
+        GitHubOps,
+        "register_trusted_git_context",
+        classmethod(lambda cls, *args, **kwargs: None),
+    )
+    monkeypatch.setattr(GitHubOps, "bind_trusted_git_context", lambda self, *args, **kwargs: None)
+
+
 def _make_workflow(**overrides):
     """Create a minimal workflow dict for testing."""
     base = {
@@ -160,7 +204,6 @@ class TestOrchestratorRunAgentContract:
         orch._runner._uses_sidebar_session_source.return_value = False
         orch._runner.run_agent_task.return_value = _make_agent_result()
         orch._link_session_to_current_milestone = MagicMock()
-        orch._snapshot_repo_context = MagicMock(return_value=None)
         return orch
 
     def test_run_agent_binds_prompt_and_project_to_worktree(self):
@@ -1072,9 +1115,29 @@ class TestOrchestratorDevelopment:
         )
         orch, mock_repo = self._make_orchestrator(wf, milestones=[plan_ms])
         orch._runner = MagicMock()
-        orch._runner.run_agent_task.return_value = _make_agent_result(
-            success=True, text="Development complete\nAll tests passed (5 passed)"
-        )
+        test_result = _make_agent_result(success=True, text="5 passed")
+        test_result.tool_calls = [
+            {"tool": {"name": "Bash", "input": {"command": "pytest"}, "id": "test-1"}}
+        ]
+        test_result.event_log = [
+            {
+                "type": "tool_use",
+                "tool_name": "Bash",
+                "tool_input": {"command": "pytest"},
+                "tool_use_id": "test-1",
+            },
+            {
+                "type": "tool_result",
+                "tool_use_id": "test-1",
+                "text": "5 passed in 0.2s",
+                "exit_code": 0,
+                "is_error": False,
+            },
+        ]
+        orch._runner.run_agent_task.side_effect = [
+            _make_agent_result(success=True, text="Development complete"),
+            test_result,
+        ]
         orch._gh.get_current_commit.side_effect = ["abc1234", "def5678"]
         orch._gh.get_diff_stats.return_value = {"additions": 50, "deletions": 10, "files": 3}
 

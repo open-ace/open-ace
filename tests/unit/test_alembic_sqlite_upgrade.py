@@ -139,6 +139,7 @@ def test_alembic_upgrade_head_succeeds_for_fresh_sqlite(tmp_path, monkeypatch):
     assert "preferred_worktree_path" in aw_columns
     assert "ci_repair_context" in aw_columns
     assert "ci_repair_attempts" in aw_columns
+    assert "ci_diagnostics_attempts" in aw_columns
     assert "last_ci_failure_signature" in aw_columns
     assert "last_ci_failure_head_sha" in aw_columns
 

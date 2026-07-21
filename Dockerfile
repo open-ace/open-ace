@@ -83,9 +83,11 @@ RUN echo "deb http://mirrors.aliyun.com/debian/ trixie main" > /etc/apt/sources.
     ca-certificates \
     gnupg \
     procps \
+    util-linux \
     openssh-client \
     sshpass \
     git \
+    acl \
     && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     # === Node.js Installation Verification (Issue #1006) ===
@@ -135,6 +137,8 @@ RUN echo "deb http://mirrors.aliyun.com/debian/ trixie main" > /etc/apt/sources.
 # run, so `mkdir -p`/config generation won't hit Permission denied under uid 1000.
 RUN groupadd -g 1000 open-ace && \
     useradd -u 1000 -g open-ace -d /home/open-ace -s /bin/bash -c "Open ACE user" open-ace && \
+    useradd --system --create-home --home-dir /var/lib/openace-agent \
+        --shell /usr/sbin/nologin openace-agent && \
     mkdir -p /home/open-ace/.open-ace && \
     chown -R open-ace:open-ace /home/open-ace
 
@@ -175,7 +179,14 @@ RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 # chdir'ing as root then runuser -u <owner>. Owned by root so the sudoers rule
 # (ALL=(root) NOPASSWD) above can apply.
 COPY scripts/openace-run-as.sh /usr/local/bin/openace-run-as
-RUN chmod 755 /usr/local/bin/openace-run-as && chown root:root /usr/local/bin/openace-run-as
+RUN chmod 755 /usr/local/bin/openace-run-as && \
+    chown root:root /usr/local/bin/openace-run-as && \
+    printf '%s\n' \
+        '# Credentialless autonomous agent launcher' \
+        'open-ace ALL=(root) NOPASSWD: /usr/local/bin/openace-run-as --isolated *' \
+        > /etc/sudoers.d/open-ace-autonomous-agent && \
+    chmod 440 /etc/sudoers.d/open-ace-autonomous-agent && \
+    visudo -c -f /etc/sudoers.d/open-ace-autonomous-agent
 
 # Install security wrappers for multi-user mode (Issue #1855)
 # These wrappers enforce path validation, UID range checks, and audit logging

@@ -760,8 +760,8 @@ except Exception as e:
         WRAPPER_PATH="/usr/local/bin/openace-run-as"
         WRAPPER_RULE=""
         if [ -x "$WRAPPER_PATH" ]; then
-            WRAPPER_RULE="open-ace ALL=(root) NOPASSWD: ${WRAPPER_PATH} *
-openace ALL=(root) NOPASSWD: ${WRAPPER_PATH} *"
+            WRAPPER_RULE="open-ace ALL=(root) NOPASSWD: ${WRAPPER_PATH} --isolated *
+openace ALL=(root) NOPASSWD: ${WRAPPER_PATH} --isolated *"
         fi
 
         # 【安全加固 Issue #1855】安全 wrapper 脚本 sudoers 规则
@@ -918,6 +918,10 @@ SUDOERS_EOF
 
         # Validate sudoers syntax
         if visudo -c -f /etc/sudoers.d/open-ace-webui &>/dev/null; then
+            if [ -f /etc/sudoers.d/openace-run-as ] && grep -qF "$WRAPPER_PATH" /etc/sudoers.d/openace-run-as; then
+                mv /etc/sudoers.d/openace-run-as "/etc/sudoers.d/openace-run-as.disabled.$(date +%s)"
+                echo "Disabled legacy broad autonomous-agent sudoers rule"
+            fi
             echo "Sudoers configured for qwen-code-webui at: $WEBUI_PATH"
             echo "  git path: $GIT_PATH"
             echo "  gh path: $GH_PATH"

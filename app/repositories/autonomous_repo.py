@@ -88,6 +88,7 @@ class AutonomousWorkflowRepository:
         "system_account",
         "ci_repair_context",
         "ci_repair_attempts",
+        "ci_diagnostics_attempts",
         "last_ci_failure_signature",
         "last_ci_failure_head_sha",
     }
@@ -215,9 +216,9 @@ class AutonomousWorkflowRepository:
                      max_plan_rounds, max_pr_review_rounds, require_full_review_rounds,
                      parent_workflow_id, fork_milestone_id, user_feedback,
                      original_branch_name, content_language, system_account,
-                     ci_repair_context, ci_repair_attempts, last_ci_failure_signature,
+                     ci_repair_context, ci_repair_attempts, ci_diagnostics_attempts, last_ci_failure_signature,
                      last_ci_failure_head_sha, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 RETURNING *
                 """,
                 (
@@ -259,6 +260,7 @@ class AutonomousWorkflowRepository:
                     data.get("system_account", ""),
                     data.get("ci_repair_context", ""),
                     data.get("ci_repair_attempts", 0),
+                    data.get("ci_diagnostics_attempts", 0),
                     data.get("last_ci_failure_signature", ""),
                     data.get("last_ci_failure_head_sha", ""),
                     now,
@@ -281,9 +283,9 @@ class AutonomousWorkflowRepository:
                      max_plan_rounds, max_pr_review_rounds, require_full_review_rounds,
                      parent_workflow_id, fork_milestone_id, user_feedback,
                      original_branch_name, content_language, system_account,
-                     ci_repair_context, ci_repair_attempts, last_ci_failure_signature,
+                     ci_repair_context, ci_repair_attempts, ci_diagnostics_attempts, last_ci_failure_signature,
                      last_ci_failure_head_sha, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     workflow_id,
@@ -324,6 +326,7 @@ class AutonomousWorkflowRepository:
                     data.get("system_account", ""),
                     data.get("ci_repair_context", ""),
                     data.get("ci_repair_attempts", 0),
+                    data.get("ci_diagnostics_attempts", 0),
                     data.get("last_ci_failure_signature", ""),
                     data.get("last_ci_failure_head_sha", ""),
                     now,

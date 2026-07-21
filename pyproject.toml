@@ -69,6 +69,16 @@ openace = "cli:main"
 [tool.setuptools.packages.find]
 include = ["app*", "scripts*"]
 
+[tool.setuptools.package-data]
+"app.modules.workspace.autonomous" = [
+    "agent_bin/_guard_exec.py",
+    "agent_bin/gh",
+    "agent_bin/git",
+    "agent_bin/pytest",
+    "agent_bin/python",
+    "agent_bin/python3",
+]
+
 [project.urls]
 Homepage = "https://www.open-ace.com"
 Documentation = "https://github.com/open-ace/open-ace#readme"

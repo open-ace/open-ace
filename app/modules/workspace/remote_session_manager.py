@@ -1049,7 +1049,7 @@ class RemoteSessionManager:
                 if block_type in ("text", "tool_use", "thinking", "tool_result"):
                     structured_blocks.append(block)
 
-            if text_parts:
+            if text_parts or structured_blocks:
                 combined = "".join(text_parts)
                 with self._buffer_lock:
                     buf = self._assistant_text_buffer.get(session_id, "")
@@ -1082,13 +1082,32 @@ class RemoteSessionManager:
                                 text_parts.append(text)
                         if block_type in ("text", "tool_use", "thinking", "tool_result"):
                             structured_blocks.append(block)
-                    if text_parts:
+                    if text_parts or structured_blocks:
                         with self._buffer_lock:
                             buf = self._assistant_text_buffer.get(session_id, "")
                             self._assistant_text_buffer[session_id] = buf + "".join(text_parts)
                             blocks_buf = self._content_blocks_buffer.get(session_id, [])
                             blocks_buf.extend(structured_blocks)
                             self._content_blocks_buffer[session_id] = blocks_buf
+
+        elif msg_type == "user":
+            # Claude stream-json reports command results as user-message
+            # ``tool_result`` blocks. Keep them with the current turn so the
+            # autonomous runner can verify real test execution on remote
+            # workspaces instead of relying on the model's prose summary.
+            message = parsed.get("message", {})
+            content = message.get("content", []) if isinstance(message, dict) else []
+            if isinstance(content, list):
+                result_blocks = [
+                    block
+                    for block in content
+                    if isinstance(block, dict) and block.get("type") == "tool_result"
+                ]
+                if result_blocks:
+                    with self._buffer_lock:
+                        blocks_buf = self._content_blocks_buffer.get(session_id, [])
+                        blocks_buf.extend(result_blocks)
+                        self._content_blocks_buffer[session_id] = blocks_buf
 
         elif msg_type == "system":
             # System messages (e.g., init) are stored directly, not accumulated
@@ -1193,7 +1212,7 @@ class RemoteSessionManager:
             text = self._assistant_text_buffer.pop(session_id, "")
             blocks = self._content_blocks_buffer.pop(session_id, [])
 
-        if text.strip():
+        if text.strip() or blocks:
             metadata = {}
             if blocks:
                 metadata["content_blocks"] = blocks
