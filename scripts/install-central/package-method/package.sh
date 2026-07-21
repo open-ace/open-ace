@@ -510,7 +510,7 @@ if [ "$SKIP_DOWNLOAD" = false ] && [ -f "$PROJECT_DIR/requirements.txt" ]; then
         done
 
         # Final pass: download pure Python wheels (py3-none-any) and any missing packages.
-        # These wheels are architecture-independent and work across all Python versions.
+        # These wheels are architecture-independent and work across all supported Python versions.
         # pip will skip already-downloaded files, so this only adds missing items.
         echo -e "${YELLOW}Downloading pure Python wheels...${NC}"
         $PIP_CMD download -r "$TEMP_REQ" -d "$VENDOR_DIR" \
