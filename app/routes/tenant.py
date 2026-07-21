@@ -253,7 +253,7 @@ def update_tenant_settings(tenant_id: int):
 
     # Invalidate tenant config cache for sensitive keyword settings
     try:
-        from app.modules.workspace.session_manager import invalidate_tenant_config_cache
+        from app.modules.workspace.tenant_config_cache import invalidate_tenant_config_cache
 
         invalidate_tenant_config_cache(tenant_id)
     except ImportError:

@@ -7,7 +7,7 @@ across multiple modules.
 
 import logging
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -65,7 +65,7 @@ def get_tenant_sensitive_keyword_config(tenant_id: int) -> dict[str, Any]:
     with _tenant_config_cache_lock:
         _tenant_config_cache[tenant_id] = {
             "config": config,
-            "expiry": now + _TENANT_CONFIG_CACHE_TTL,
+            "expiry": now + timedelta(seconds=_TENANT_CONFIG_CACHE_TTL),
         }
 
     return config

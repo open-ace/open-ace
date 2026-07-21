@@ -42,10 +42,9 @@ def _get_content_filter():
     return _content_filter_instance
 
 
-# Import shared cache functions
+# Import shared cache function
 from app.modules.workspace.tenant_config_cache import (
     get_tenant_sensitive_keyword_config as _get_tenant_sensitive_keyword_config,
-    invalidate_tenant_config_cache,
 )
 
 
