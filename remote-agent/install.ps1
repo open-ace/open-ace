@@ -325,6 +325,7 @@ $config = @{
     heartbeat_interval = 60
     reconnect_backoff_max = 60
     skip_ssl_verify = [bool]$InsecureSkipTlsVerify
+    allow_insecure_tls = [bool]$InsecureSkipTlsVerify
     ca_bundle_path = $null
 }
 if ($CaBundlePath) { $config.ca_bundle_path = $CaBundlePath }

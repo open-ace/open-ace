@@ -672,6 +672,7 @@ cat > "${INSTALL_DIR}/config.json" << EOF
     "heartbeat_interval": 60,
     "reconnect_backoff_max": 60,
     "skip_ssl_verify": ${INSECURE_SKIP_TLS_VERIFY},
+    "allow_insecure_tls": ${INSECURE_SKIP_TLS_VERIFY},
     "ca_bundle_path": ${CA_BUNDLE_JSON}
 }
 EOF

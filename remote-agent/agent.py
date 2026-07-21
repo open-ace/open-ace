@@ -90,8 +90,6 @@ class RemoteAgent:
         self._terminal_info_dir = os.path.join(script_dir, ".terminal_sessions")
         # Session sync service
         self._session_sync = SessionSyncService(self._http_send, self.config)
-        # Restore terminal sessions from files
-        self._restore_terminal_sessions()
 
     def _restore_terminal_sessions(self) -> None:
         """Restore terminal session info from persisted files."""
@@ -217,7 +215,8 @@ class RemoteAgent:
         # Production environment security check
         if self._tls_config.should_reject_startup():
             logger.error(
-                "Startup rejected: TLS verification disabled in production without explicit confirmation"
+                "Startup rejected: insecure TLS is not explicitly acknowledged or is disabled "
+                "by administrator policy"
             )
             print_tls_startup_rejection()
             sys.exit(1)
@@ -237,6 +236,10 @@ class RemoteAgent:
             self.config.server_url,
         )
         logger.info("Capabilities: %s", json.dumps(self._capabilities, indent=2))
+
+        # This may launch detached relay subprocesses, so it must happen only
+        # after the parent process has accepted the TLS policy.
+        self._restore_terminal_sessions()
 
         # Restore sessions from previous run (crash recovery)
         restored = self._executor.restore_sessions()

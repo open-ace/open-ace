@@ -77,7 +77,9 @@ def _load_cli_config() -> dict[str, Any]:
 
 def _server_url() -> str:
     agent_config = _load_agent_config()
-    server_url = str(agent_config.get("server_url") or "").rstrip("/")
+    server_url = str(
+        os.environ.get("OPENACE_SERVER_URL") or agent_config.get("server_url") or ""
+    ).rstrip("/")
     if not server_url:
         raise CliError(f"server_url is missing from {AGENT_CONFIG_PATH}")
     return server_url
@@ -105,12 +107,25 @@ def _configure_tls_from_args(args: argparse.Namespace) -> None:
     _TLS_CA_BUNDLE_OVERRIDE = getattr(args, "ca_bundle", None)
 
 
+def _env_bool(name: str, fallback: bool) -> bool:
+    """Resolve a boolean environment override using AgentConfig semantics."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return fallback
+    return raw.lower() in ("true", "1", "yes")
+
+
 def _effective_tls_config() -> TLSConfig:
     """Build and validate the TLS policy used by urllib request paths."""
     agent_config = _load_agent_config()
-    configured_ca = agent_config.get("ca_bundle_path")
+    configured_ca = os.environ.get("OPENACE_CA_BUNDLE_PATH") or agent_config.get("ca_bundle_path")
     ca_bundle = _TLS_CA_BUNDLE_OVERRIDE or configured_ca
-    configured_skip = bool(agent_config.get("skip_ssl_verify", False))
+    configured_skip = _env_bool(
+        "OPENACE_SKIP_SSL_VERIFY", bool(agent_config.get("skip_ssl_verify", False))
+    )
+    allow_insecure = _env_bool(
+        "OPENACE_ALLOW_INSECURE_TLS", bool(agent_config.get("allow_insecure_tls", False))
+    )
     skip_verify = _TLS_EXPLICIT_INSECURE or (configured_skip and _TLS_CA_BUNDLE_OVERRIDE is None)
     if _TLS_EXPLICIT_INSECURE:
         ca_bundle = None
@@ -119,6 +134,7 @@ def _effective_tls_config() -> TLSConfig:
         skip_verify=skip_verify,
         ca_bundle_path=str(ca_bundle) if ca_bundle else None,
         is_explicit_insecure=_TLS_EXPLICIT_INSECURE,
+        allow_insecure_tls=allow_insecure,
         config_source=(
             "cli_param" if (_TLS_EXPLICIT_INSECURE or _TLS_CA_BUNDLE_OVERRIDE) else "config_file"
         ),
@@ -128,9 +144,15 @@ def _effective_tls_config() -> TLSConfig:
     if tls_config.ca_bundle_path and tls_config.ca_bundle_valid is False:
         raise CliError("; ".join(warnings) or "Invalid custom CA bundle")
     if tls_config.should_reject_startup():
+        if _TLS_EXPLICIT_INSECURE and not allow_insecure:
+            raise CliError(
+                "Insecure TLS is disabled by administrator policy. Configure a CA bundle, or "
+                "set allow_insecure_tls only for an approved temporary exception."
+            )
         raise CliError(
-            "TLS verification is disabled for a non-local HTTPS server. "
-            "Use --insecure-skip-tls-verify to acknowledge the risk, or configure --ca-bundle."
+            "TLS verification is disabled for a non-local HTTPS server. Use "
+            "--insecure-skip-tls-verify together with administrator policy approval, or "
+            "configure --ca-bundle."
         )
     for warning in warnings:
         print(f"TLS warning: {warning}", file=sys.stderr)
@@ -355,7 +377,7 @@ def cmd_status(_: argparse.Namespace) -> int:
 def cmd_config_check(_: argparse.Namespace) -> int:
     """Check TLS configuration and security status."""
     agent_config = _load_agent_config()
-    server_url = agent_config.get("server_url", "")
+    server_url = os.environ.get("OPENACE_SERVER_URL") or agent_config.get("server_url", "")
 
     print("\nTLS Configuration Check:")
     print("=" * 60)
@@ -364,8 +386,14 @@ def cmd_config_check(_: argparse.Namespace) -> int:
     print(f"Server URL: {server_url}")
 
     tls_config = TLSConfig(
-        skip_verify=bool(agent_config.get("skip_ssl_verify", False)),
-        ca_bundle_path=agent_config.get("ca_bundle_path"),
+        skip_verify=_env_bool(
+            "OPENACE_SKIP_SSL_VERIFY", bool(agent_config.get("skip_ssl_verify", False))
+        ),
+        ca_bundle_path=os.environ.get("OPENACE_CA_BUNDLE_PATH")
+        or agent_config.get("ca_bundle_path"),
+        allow_insecure_tls=_env_bool(
+            "OPENACE_ALLOW_INSECURE_TLS", bool(agent_config.get("allow_insecure_tls", False))
+        ),
         server_url=str(server_url),
         config_source="config_file",
     )
@@ -412,6 +440,7 @@ def cmd_config_check(_: argparse.Namespace) -> int:
 
     for warning in warnings:
         print(f"  - {warning}")
+    print(f"  - Explicit insecure mode allowed by policy: {tls_config.allow_insecure_tls}")
 
     print("=" * 60 + "\n")
     return 0

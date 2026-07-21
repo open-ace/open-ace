@@ -37,6 +37,13 @@ curl -fsSL https://<server>/api/remote/agent/install.sh | bash -s -- \
 - `--ca-bundle PATH` — 私有 CA 或自签名证书使用的 PEM CA bundle
 - `--insecure-skip-tls-verify` — 显式关闭 TLS 验证（危险）
 
+如果安装端点本身使用私有 CA，请让 curl 与安装器使用同一个 CA：
+
+```bash
+curl --cacert /path/to/ca.pem -fsSL https://<server>/api/remote/agent/install.sh | \
+  bash -s -- --server https://<server> --token <agent-token> --ca-bundle /path/to/ca.pem
+```
+
 ### Windows
 
 ```powershell
@@ -65,9 +72,10 @@ curl -fsSL https://<server>/api/remote/agent/install.sh | bash -s -- \
 | max_sessions | 5 | 并发会话数 |
 | log_level | INFO | 日志级别 |
 | skip_ssl_verify | false | 跳过 TLS 验证；非本机 HTTPS 还必须通过 CLI 显式确认 |
+| allow_insecure_tls | false | 管理员是否允许显式 insecure 开关 |
 | ca_bundle_path | null | 私有 CA/自签名证书使用的 PEM CA bundle |
 
-环境变量覆盖：`OPENACE_SERVER_URL`、`OPENACE_AGENT_TOKEN`、`OPENACE_MACHINE_ID`、`OPENACE_HEARTBEAT_INTERVAL`、`OPENACE_MAX_SESSIONS`、`OPENACE_LOG_LEVEL`、`OPENACE_SKIP_SSL_VERIFY`、`OPENACE_CA_BUNDLE_PATH`
+环境变量覆盖：`OPENACE_SERVER_URL`、`OPENACE_AGENT_TOKEN`、`OPENACE_MACHINE_ID`、`OPENACE_HEARTBEAT_INTERVAL`、`OPENACE_MAX_SESSIONS`、`OPENACE_LOG_LEVEL`、`OPENACE_SKIP_SSL_VERIFY`、`OPENACE_ALLOW_INSECURE_TLS`、`OPENACE_CA_BUNDLE_PATH`
 
 ### TLS 策略与旧配置迁移
 
@@ -79,8 +87,10 @@ curl -fsSL https://<server>/api/remote/agent/install.sh | bash -s -- \
 对于非本机 HTTPS 服务，旧配置中的 `"skip_ssl_verify": true` 不再静默
 启动。首选做法是改用 CA bundle。仅在短期排障确需关闭验证时，使用
 `python agent.py --insecure-skip-tls-verify`；安装脚本的同名参数会保存配置
-并为系统服务增加显式参数。该模式会显示醒目警告，并存在中间人窃取凭据
-和篡改命令的风险。
+中的 `skip_ssl_verify=true` 和管理员批准项 `allow_insecure_tls=true`，并为
+系统服务增加显式参数。手工运行也必须同时具备策略批准与 CLI 参数；管理员
+保持 `allow_insecure_tls=false` 即可禁用该逃生开关。该模式会显示醒目警告，
+并存在中间人窃取凭据和篡改命令的风险。
 
 单次覆盖 CA 可使用 `python agent.py --ca-bundle /path/to/ca.pem`；CLI 可用
 `openace login|menu|shell --ca-bundle /path/to/ca.pem`。运行

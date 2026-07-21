@@ -12,6 +12,7 @@ import urllib.request
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from cryptography import x509
@@ -46,6 +47,7 @@ def _config(tmp_path: Path, **values) -> AgentConfig:
 def test_new_install_default_verifies_tls(tmp_path):
     """Built-in and file-backed defaults must keep certificate checks on."""
     assert DEFAULTS["skip_ssl_verify"] is False
+    assert DEFAULTS["allow_insecure_tls"] is False
     tls = _config(tmp_path, server_url="https://ace.example").get_tls_config()
     assert tls.skip_verify is False
     assert tls.get_verify_context() is True
@@ -71,12 +73,26 @@ def test_non_local_https_requires_explicit_acknowledgement(url, production_like)
 
 def test_explicit_insecure_flag_really_disables_verification(tmp_path):
     """The dangerous switch changes behavior as well as audit metadata."""
-    config = _config(tmp_path, server_url="https://192.168.31.159")
+    config = _config(
+        tmp_path,
+        server_url="https://192.168.31.159",
+        allow_insecure_tls=True,
+    )
     tls = config.get_tls_config(explicit_insecure=True)
     assert tls.skip_verify is True
     assert tls.is_explicit_insecure is True
     assert tls.should_reject_startup() is False
     assert tls.get_verify_context() is False
+
+
+def test_administrator_can_disable_explicit_insecure_mode(tmp_path):
+    """The CLI flag cannot bypass the default-deny administrator policy."""
+    config = _config(tmp_path, server_url="https://192.168.31.159")
+    tls = config.get_tls_config(explicit_insecure=True)
+    assert tls.skip_verify is True
+    assert tls.is_explicit_insecure is True
+    assert tls.allow_insecure_tls is False
+    assert tls.should_reject_startup() is True
 
 
 def test_ca_bundle_cli_override_reenables_verification(monkeypatch, tmp_path):
@@ -121,7 +137,7 @@ def test_custom_ca_is_loaded_into_ssl_context(monkeypatch, tmp_path):
     assert loaded == [str(ca_file)]
 
 
-def test_self_signed_https_round_trip_with_custom_ca(tmp_path):
+def test_self_signed_https_round_trip_with_custom_ca(monkeypatch, tmp_path):
     """A self-signed server is reachable when its certificate is the configured CA."""
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "127.0.0.1")])
@@ -173,6 +189,20 @@ def test_self_signed_https_round_trip_with_custom_ca(tmp_path):
         url = f"https://127.0.0.1:{server.server_port}/"
         with urllib.request.urlopen(url, context=tls.get_ssl_context(), timeout=5) as response:
             assert response.read() == b"secure"
+
+        # The installed openace CLI must honor the environment-variable CA,
+        # not just a ca_bundle_path persisted in config.json.
+        cli = _load_agent_module("openace_cli.py", "openace_cli_env_ca_issue_1892")
+        config_path = tmp_path / "cli-agent-config.json"
+        config_path.write_text(
+            json.dumps({"server_url": url, "machine_id": "machine-1892"}),
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(cli, "AGENT_CONFIG_PATH", config_path)
+        monkeypatch.setenv("OPENACE_CA_BUNDLE_PATH", str(cert_path))
+        request = urllib.request.Request(url)
+        with cli._urlopen(request) as response:
+            assert response.read() == b"secure"
     finally:
         server.shutdown()
         server.server_close()
@@ -190,6 +220,37 @@ def test_agent_daemon_exposes_mutually_exclusive_tls_flags():
         agent.build_arg_parser().parse_args(
             ["--ca-bundle", "/tmp/ca.pem", "--insecure-skip-tls-verify"]
         )
+
+
+def test_terminal_restore_waits_until_tls_policy_is_accepted(tmp_path):
+    """A rejected daemon startup must not launch restored relay subprocesses."""
+    agent_module = _load_agent_module("agent.py", "remote_agent_restore_issue_1892")
+    config = _config(
+        tmp_path,
+        server_url="https://192.168.31.159",
+        machine_id="machine-1892",
+        skip_ssl_verify=True,
+    )
+    with patch.object(agent_module.RemoteAgent, "_restore_terminal_sessions") as restore:
+        remote_agent = agent_module.RemoteAgent(config=config)
+        restore.assert_not_called()
+        with patch.object(agent_module.signal, "signal"):
+            with pytest.raises(SystemExit):
+                remote_agent.start()
+        restore.assert_not_called()
+
+
+def test_terminal_relay_env_cannot_bypass_admin_policy(monkeypatch):
+    """The relay's propagated policy requires both explicit and admin approval."""
+    monkeypatch.setenv("OPEN_ACE_TLS_SKIP_VERIFY", "true")
+    monkeypatch.setenv("OPEN_ACE_TLS_EXPLICIT_INSECURE", "true")
+    monkeypatch.setenv("OPEN_ACE_TLS_ALLOW_INSECURE", "false")
+    tls = TLSConfig.from_env(server_url="https://192.168.31.159")
+    assert tls.should_reject_startup() is True
+
+    monkeypatch.setenv("OPEN_ACE_TLS_ALLOW_INSECURE", "true")
+    approved = TLSConfig.from_env(server_url="https://192.168.31.159")
+    assert approved.should_reject_startup() is False
 
 
 def test_openace_network_commands_expose_tls_flags():
@@ -231,11 +292,13 @@ def test_installers_persist_and_use_tls_options():
     assert "--ca-bundle" in shell
     assert "SERVER_CURL_TLS_ARGS" in shell
     assert '"skip_ssl_verify": ${INSECURE_SKIP_TLS_VERIFY}' in shell
+    assert '"allow_insecure_tls": ${INSECURE_SKIP_TLS_VERIFY}' in shell
     assert "agent.py${AGENT_INSECURE_ARG}" in shell
 
     assert "[string]$CaBundlePath" in powershell
     assert "$serverCurlTlsArgs" in powershell
     assert "skip_ssl_verify = [bool]$InsecureSkipTlsVerify" in powershell
+    assert "allow_insecure_tls = [bool]$InsecureSkipTlsVerify" in powershell
     assert 'agentArguments += " --insecure-skip-tls-verify"' in powershell
 
 
@@ -245,5 +308,6 @@ def test_remote_agent_docs_describe_secure_default_and_migration():
         content = (REPO_ROOT / relative_path).read_text(encoding="utf-8")
         assert "| skip_ssl_verify | false |" in content
         assert "ca_bundle_path" in content
+        assert "allow_insecure_tls" in content
         assert "--insecure-skip-tls-verify" in content
         assert "--ca-bundle" in content

@@ -26,6 +26,8 @@ except ImportError:
     print("Install with: pip install 'websockets>=13.0,<17.0'", file=sys.stderr)
     sys.exit(1)
 
+from tls_config import TLSConfig
+
 logger = logging.getLogger("openace-terminal-relay")
 
 # Globals from CLI args
@@ -171,13 +173,24 @@ def main() -> None:
         print("Error: OPEN_ACE_RELAY_TOKEN environment variable is required", file=sys.stderr)
         sys.exit(1)
 
-    # Read TLS configuration from environment variables (set by agent.py)
-    TLS_SKIP_VERIFY = os.environ.get("OPEN_ACE_TLS_SKIP_VERIFY", "false").lower() in (
-        "true",
-        "1",
-        "yes",
-    )
-    TLS_CA_BUNDLE = os.environ.get("OPEN_ACE_TLS_CA_BUNDLE")
+    # Re-validate the propagated policy in this independently executable
+    # subprocess.  This prevents a direct or restored relay from bypassing the
+    # daemon's production insecure-mode policy.
+    tls_config = TLSConfig.from_env(server_url=BACKEND_URL)
+    warnings = tls_config.validate()
+    for warning in warnings:
+        print(f"TLS warning: {warning}", file=sys.stderr)
+    if tls_config.ca_bundle_path and tls_config.ca_bundle_valid is False:
+        print("Error: invalid TLS CA bundle", file=sys.stderr)
+        sys.exit(1)
+    if tls_config.should_reject_startup():
+        print(
+            "Error: insecure TLS relay is not explicitly acknowledged or is disabled by policy",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    TLS_SKIP_VERIFY = tls_config.skip_verify
+    TLS_CA_BUNDLE = tls_config.ca_bundle_path
 
     # Set up logging
     log_file = os.path.join(tempfile.gettempdir(), f"terminal_relay_{TERMINAL_ID[:8]}.log")

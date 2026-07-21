@@ -23,6 +23,7 @@ logger = logging.getLogger("openace-agent.tls-config")
 ENV_TLS_SKIP_VERIFY = "OPEN_ACE_TLS_SKIP_VERIFY"
 ENV_TLS_CA_BUNDLE = "OPEN_ACE_TLS_CA_BUNDLE"
 ENV_TLS_EXPLICIT_INSECURE = "OPEN_ACE_TLS_EXPLICIT_INSECURE"
+ENV_TLS_ALLOW_INSECURE = "OPEN_ACE_TLS_ALLOW_INSECURE"
 
 # System default CA bundle paths (common locations)
 SYSTEM_CA_PATHS = [
@@ -47,6 +48,7 @@ class TLSConfig:
         skip_verify: bool = False,
         ca_bundle_path: str | None = None,
         is_explicit_insecure: bool = False,
+        allow_insecure_tls: bool = False,
         config_source: str = "default",
         server_url: str = "",
     ):
@@ -57,12 +59,14 @@ class TLSConfig:
             skip_verify: Whether to skip TLS certificate verification
             ca_bundle_path: Path to custom CA bundle file
             is_explicit_insecure: Whether skip_verify was set via explicit CLI param
+            allow_insecure_tls: Whether administrator policy permits the dangerous mode
             config_source: Source of configuration (default/env_var/config_file/cli_param)
             server_url: Server URL for production mode detection
         """
         self.skip_verify = skip_verify
         self.ca_bundle_path = ca_bundle_path
         self.is_explicit_insecure = is_explicit_insecure
+        self.allow_insecure_tls = allow_insecure_tls
         self.config_source = config_source
         self.server_url = server_url
         self._ca_bundle_hash: str | None = None
@@ -109,12 +113,13 @@ class TLSConfig:
             skip_verify=explicit_insecure or (config.skip_ssl_verify and ca_bundle_path is None),
             ca_bundle_path=effective_ca_bundle,
             is_explicit_insecure=explicit_insecure,
+            allow_insecure_tls=config.allow_insecure_tls,
             config_source=source,
             server_url=config.server_url,
         )
 
     @classmethod
-    def from_env(cls) -> TLSConfig:
+    def from_env(cls, server_url: str = "") -> TLSConfig:
         """
         Create TLSConfig from environment variables (for subprocess use).
 
@@ -128,12 +133,19 @@ class TLSConfig:
             "1",
             "yes",
         )
+        allow_insecure = os.environ.get(ENV_TLS_ALLOW_INSECURE, "false").lower() in (
+            "true",
+            "1",
+            "yes",
+        )
 
         return cls(
             skip_verify=skip_verify,
             ca_bundle_path=ca_bundle if ca_bundle else None,
             is_explicit_insecure=explicit_insecure,
+            allow_insecure_tls=allow_insecure,
             config_source="subprocess_env",
+            server_url=server_url,
         )
 
     def is_production_mode(self) -> bool:
@@ -186,8 +198,9 @@ class TLSConfig:
         if not self.is_production_mode():
             return False
 
-        # Only reject if skip_verify is True without explicit CLI param
-        return self.skip_verify and not self.is_explicit_insecure
+        # Non-local insecure mode requires both a per-run acknowledgement and
+        # an administrator policy opt-in.
+        return self.skip_verify and (not self.is_explicit_insecure or not self.allow_insecure_tls)
 
     def get_verify_context(self) -> str | bool:
         """
@@ -279,6 +292,10 @@ class TLSConfig:
                 warnings.append(
                     "TLS verification disabled in production mode without explicit CLI parameter"
                 )
+            elif not self.allow_insecure_tls:
+                warnings.append(
+                    "TLS verification disabled in production mode but blocked by administrator policy"
+                )
             else:
                 warnings.append(
                     "TLS verification disabled in production mode (explicit CLI parameter)"
@@ -339,6 +356,7 @@ class TLSConfig:
         env = {
             ENV_TLS_SKIP_VERIFY: "true" if self.skip_verify else "false",
             ENV_TLS_EXPLICIT_INSECURE: "true" if self.is_explicit_insecure else "false",
+            ENV_TLS_ALLOW_INSECURE: "true" if self.allow_insecure_tls else "false",
         }
 
         if self.ca_bundle_path:
@@ -358,6 +376,7 @@ class TLSConfig:
             "skip_verify": self.skip_verify,
             "ca_bundle_path": self.ca_bundle_path,
             "is_explicit_insecure": self.is_explicit_insecure,
+            "allow_insecure_tls": self.allow_insecure_tls,
             "config_source": self.config_source,
             "is_production_mode": self.is_production_mode(),
             "ca_bundle_valid": self._ca_bundle_valid,
@@ -369,6 +388,7 @@ class TLSConfig:
             f"TLSConfig(skip_verify={self.skip_verify}, "
             f"ca_bundle={self.ca_bundle_path}, "
             f"explicit_insecure={self.is_explicit_insecure}, "
+            f"allow_insecure_tls={self.allow_insecure_tls}, "
             f"source={self.config_source})"
         )
 
@@ -420,6 +440,7 @@ def print_tls_startup_rejection() -> None:
         "╠══════════════════════════════════════════════════════════════════╣\n"
         "║  To start the agent in production with TLS disabled:            ║\n"
         "║                                                                  ║\n"
+        "║    Set 'allow_insecure_tls': true in config.json, then           ║\n"
         "║    python agent.py --insecure-skip-tls-verify                    ║\n"
         "║                                                                  ║\n"
         "║  WARNING: Only use this if you understand the security risks.   ║\n"
