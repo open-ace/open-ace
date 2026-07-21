@@ -52,8 +52,15 @@ services:
       - SECRET_KEY=${SECRET_KEY:-}
       - OPENACE_ENCRYPTION_KEY=${OPENACE_ENCRYPTION_KEY:-}
       - UPLOAD_AUTH_KEY=${UPLOAD_AUTH_KEY:-}
-      # Database
-      - DATABASE_URL=postgresql://${DB_USER:-ace}:${DB_PASSWORD:-ace-secret}@postgres:5432/${DB_NAME:-ace}
+      # Security mode (Issue #1893): development | pilot | production
+      # - development: Allow empty passwords with warnings (default for trial)
+      # - pilot: Allow empty passwords with strong warnings
+      # - production: Reject empty/default passwords, fail-fast on security issues
+      - OPENACE_SECURITY_MODE=${OPENACE_SECURITY_MODE:-}
+      # Database (Issue #1893): DB_PASSWORD no longer has default value.
+      # Development mode allows empty password (auto-generates temporary).
+      # Production mode requires explicit strong password.
+      - DATABASE_URL=postgresql://${DB_USER:-ace}:${DB_PASSWORD:-}@postgres:5432/${DB_NAME:-ace}
       # Multi-user Workspace
       - WORKSPACE_MULTI_USER_MODE=${WORKSPACE_MULTI_USER_MODE:-false}
       # Workspace base directory (users' projects stored under /workspace/<username>/)
@@ -112,7 +119,9 @@ services:
     restart: unless-stopped
     environment:
       - POSTGRES_USER=${DB_USER:-ace}
-      - POSTGRES_PASSWORD=${DB_PASSWORD:-ace-secret}
+      # Issue #1893: No default password. Development mode auto-generates temporary
+      # password; production mode requires explicit strong password.
+      - POSTGRES_PASSWORD=${DB_PASSWORD:-}
       - POSTGRES_DB=${DB_NAME:-ace}
     volumes:
       - postgres-data:/var/lib/postgresql/data

@@ -1,0 +1,51 @@
+# Open ACE - Multi-User Workspace Docker Compose Configuration
+# Extension of docker-compose.yml for multi-user workspace mode
+#
+# IMPORTANT: This configuration runs containers as root (user: "0")
+# Multi-user workspace mode requires root to:
+#   - Create system users (useradd)
+#   - Change file ownership (chown)
+#   - Run processes as different users (sudo -u)
+#
+# SECURITY REQUIREMENTS (Issue #1893):
+#   1. Set WORKSPACE_MULTI_USER_MODE=true
+#   2. Set OPENACE_ALLOW_ROOT_MULTI_USER=1 (explicit opt-in)
+#   3. Set strong DB_PASSWORD (NOT ace-secret or other defaults)
+#   4. Set SECRET_KEY, OPENACE_ENCRYPTION_KEY, UPLOAD_AUTH_KEY in production
+#
+# Usage:
+#   # Create users via admin API, then:
+#   docker compose -f docker-compose.yml -f docker-compose.multi-user.yml up -d
+#
+# Alternative using environment variables:
+#   WORKSPACE_MULTI_USER_MODE=true \
+#   OPENACE_ALLOW_ROOT_MULTI_USER=1 \
+#   docker compose -f docker-compose.yml -f docker-compose.multi-user.yml up -d
+#
+# Config persistence for multi-user mode:
+#   Mount config volume to /root/.open-ace (not /home/open-ace/.open-ace)
+#   Or set OPENACE_CONFIG_DIR to your preferred path
+
+services:
+  open-ace:
+    # Override user for multi-user workspace mode
+    # Required for: useradd, chown, sudo -u operations
+    user: "0"
+
+    environment:
+      # Multi-user workspace mode (required)
+      - WORKSPACE_MULTI_USER_MODE=true
+      # Explicit root opt-in (Issue #1893)
+      - OPENACE_ALLOW_ROOT_MULTI_USER=1
+      # Security mode - recommend production for actual deployments
+      - OPENACE_SECURITY_MODE=${OPENACE_SECURITY_MODE:-production}
+
+    # Note: Config directory changes to /root/.open-ace when running as root
+    # If you need persistent config, add:
+    # volumes:
+    #   - config-data-root:/root/.open-ace
+
+# Optional: Add named volume for root config if needed
+# volumes:
+#   config-data-root:
+#     driver: local
