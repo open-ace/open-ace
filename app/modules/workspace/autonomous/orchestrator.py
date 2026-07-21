@@ -2311,7 +2311,7 @@ class AutonomousOrchestrator:
             return ""
 
         try:
-            merge_base = gh._run_git(["merge-base", "main", branch_name]).stdout.strip()
+            merge_base = gh._run_git(["merge-base", "origin/main", branch_name]).stdout.strip()
             if not merge_base:
                 return ""
             return gh.get_diff(merge_base, branch_name)
