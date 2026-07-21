@@ -9,6 +9,7 @@ Uses RemoteAgentManager directly with a temporary SQLite database.
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 import pytest
@@ -593,7 +594,10 @@ class TestUsageReportHttpIntegration:
 
         assert response.status_code == 401
         assert (
-            manager.db.fetch_one("SELECT COUNT(*) AS count FROM usage_report_rate_limits")["count"]
+            manager.db.fetch_one(
+                "SELECT COUNT(*) AS count FROM usage_report_rate_limits "
+                "WHERE rate_key LIKE 'session:%' OR rate_key LIKE 'machine:%'"
+            )["count"]
             == 0
         )
         assert _session_usage(manager, session_id)["total_tokens"] == 0
@@ -648,15 +652,14 @@ class TestUsageReportHttpIntegration:
         assert _session_usage(manager, "session-http-b")["total_tokens"] == 0
 
     @pytest.mark.parametrize(
-        ("session_tenant", "session_user", "expected_error"),
-        [(2, 1, "Tenant mismatch"), (1, 2, "not assigned")],
+        ("session_tenant", "session_user"),
+        [(2, 1), (1, 2)],
     )
     def test_cross_tenant_and_cross_user_are_rejected(
         self,
         usage_http,
         session_tenant,
         session_user,
-        expected_error,
     ):
         client, manager = usage_http
         machine_id = f"machine-http-bind-{session_tenant}-{session_user}"
@@ -677,7 +680,7 @@ class TestUsageReportHttpIntegration:
         )
 
         assert response.status_code == 403
-        assert expected_error in response.get_json()["error"]
+        assert response.get_json()["error"] == "Usage report binding rejected"
         assert _session_usage(manager, session_id)["total_tokens"] == 0
 
     def test_duplicate_report_is_idempotent_and_conflicting_replay_is_rejected(self, usage_http):
@@ -711,3 +714,155 @@ class TestUsageReportHttpIntegration:
             (payload["report_id"],),
         )
         assert receipt["status"] == "completed"
+
+    def test_binding_failures_are_uniform_rate_limited_and_do_not_leak_victim_ids(self, usage_http):
+        client, manager = usage_http
+        attacker_machine = "machine-http-attacker"
+        victim_machine = "machine-http-victim"
+        victim_session = "session-http-victim-secret"
+        token = _register_http_machine(manager, attacker_machine, tenant_id=1)
+        _register_http_machine(manager, victim_machine, tenant_id=2, user_id=2)
+        _create_session_in_db(
+            manager.db_path,
+            victim_session,
+            victim_machine,
+            tenant_id=2,
+            user_id=2,
+        )
+        headers = {"Authorization": f"Bearer {token}"}
+
+        missing = client.post(
+            "/api/remote/agent/message",
+            json=_usage_payload(attacker_machine, "session-does-not-exist", "report-oracle-0001"),
+            headers=headers,
+        )
+        cross_tenant = client.post(
+            "/api/remote/agent/message",
+            json=_usage_payload(attacker_machine, victim_session, "report-oracle-0002"),
+            headers=headers,
+        )
+        for index in range(6):
+            client.post(
+                "/api/remote/agent/message",
+                json=_usage_payload(
+                    attacker_machine,
+                    f"missing-session-{index}",
+                    f"report-oracle-{index + 10:04d}",
+                ),
+                headers=headers,
+            )
+
+        assert missing.status_code == cross_tenant.status_code == 403
+        assert (
+            missing.get_json()
+            == cross_tenant.get_json()
+            == {"error": "Usage report binding rejected"}
+        )
+        rows = manager.db.fetch_all(
+            "SELECT resource_id, tenant_id, session_id, details FROM audit_logs "
+            "WHERE action = 'usage_report_binding_mismatch'"
+        )
+        assert len(rows) == 5
+        assert all(row["resource_id"] == attacker_machine for row in rows)
+        assert all(row["tenant_id"] == 1 for row in rows)
+        assert all(row["session_id"] is None for row in rows)
+        serialized = " ".join(str(row["details"]) for row in rows)
+        assert victim_session not in serialized
+        assert victim_machine not in serialized
+
+    def test_invalid_binding_hits_machine_limit_before_more_db_or_audit_work(self, usage_http):
+        client, manager = usage_http
+        machine_id = "machine-http-binding-limit"
+        token = _register_http_machine(manager, machine_id)
+        headers = {"Authorization": f"Bearer {token}"}
+
+        responses = [
+            client.post(
+                "/api/remote/agent/message",
+                json=_usage_payload(
+                    machine_id,
+                    f"missing-binding-{index}",
+                    f"report-binding-limit-{index:04d}",
+                ),
+                headers=headers,
+            )
+            for index in range(61)
+        ]
+
+        assert all(response.status_code == 403 for response in responses[:60])
+        assert responses[60].status_code == 429
+        audit_count = manager.db.fetch_one(
+            "SELECT COUNT(*) AS count FROM audit_logs "
+            "WHERE action = 'usage_report_binding_mismatch'"
+        )["count"]
+        assert audit_count == 5
+
+    def test_invalid_token_audit_is_shared_and_bounded(self, usage_http):
+        client, manager = usage_http
+        machine_id = "machine-http-auth-audit-limit"
+        _register_http_machine(manager, machine_id)
+        payload = _usage_payload(machine_id, "session-auth-audit-limit")
+
+        responses = [
+            client.post(
+                "/api/remote/usage-report",
+                json={**payload, "report_id": f"report-auth-limit-{index:04d}"},
+                headers={"Authorization": "Bearer invalid-token"},
+            )
+            for index in range(8)
+        ]
+
+        assert all(response.status_code == 401 for response in responses)
+        audit_count = manager.db.fetch_one(
+            "SELECT COUNT(*) AS count FROM audit_logs " "WHERE action = 'usage_report_auth_failure'"
+        )["count"]
+        assert audit_count == 5
+
+    @pytest.mark.parametrize("path", ["/api/remote/usage-report", "/api/remote/agent/message"])
+    def test_report_id_less_agent_has_explicit_short_migration_window(self, usage_http, path):
+        client, manager = usage_http
+        suffix = "legacy-direct" if path.endswith("usage-report") else "legacy-message"
+        machine_id = f"machine-http-{suffix}"
+        session_id = f"session-http-{suffix}"
+        token = _register_http_machine(manager, machine_id)
+        _create_session_in_db(manager.db_path, session_id, machine_id)
+        payload = _usage_payload(machine_id, session_id)
+        payload.pop("report_id")
+
+        with patch(
+            "app.routes.remote._legacy_usage_report_deadline",
+            return_value=datetime.now(timezone.utc) + timedelta(days=1),
+        ):
+            response = client.post(
+                path,
+                json=payload,
+                headers={"Authorization": f"Bearer {token}"},
+            )
+
+        assert response.status_code == 200
+        assert response.get_json()["legacy_report_id_generated"] is True
+        assert response.get_json()["report_id"].startswith("legacy-")
+        assert _session_usage(manager, session_id)["total_tokens"] == 150
+
+    def test_report_id_less_agent_is_rejected_after_migration_deadline(self, usage_http):
+        client, manager = usage_http
+        machine_id = "machine-http-legacy-expired"
+        session_id = "session-http-legacy-expired"
+        token = _register_http_machine(manager, machine_id)
+        _create_session_in_db(manager.db_path, session_id, machine_id)
+        payload = _usage_payload(machine_id, session_id)
+        payload.pop("report_id")
+
+        with patch(
+            "app.routes.remote._legacy_usage_report_deadline",
+            return_value=datetime.now(timezone.utc) - timedelta(seconds=1),
+        ):
+            response = client.post(
+                "/api/remote/agent/message",
+                json=payload,
+                headers={"Authorization": f"Bearer {token}"},
+            )
+
+        assert response.status_code == 400
+        assert "migration window has expired" in response.get_json()["error"]
+        assert _session_usage(manager, session_id)["total_tokens"] == 0

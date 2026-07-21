@@ -263,6 +263,7 @@ def _audit_usage_report_failure(
     *,
     user_id: int | None = None,
     tenant_id: int | None = None,
+    machine_verified: bool = False,
 ) -> None:
     """Record a usage report audit event for auth failure or binding mismatch.
 
@@ -275,10 +276,20 @@ def _audit_usage_report_failure(
         details: Optional additional details to include
         user_id: User attributable to the authenticated machine, if known.
         tenant_id: Tenant attributable to the authenticated machine, if known.
+        machine_verified: Whether machine_id names an authenticated database row.
     """
+    if machine_verified and action == AuditAction.USAGE_REPORT_BINDING_MISMATCH.value:
+        try:
+            agent_mgr = get_remote_agent_manager()
+            audit_key = f"usage-binding-audit:{machine_id}:{client_ip}"
+            if not _check_usage_report_rate_limit(agent_mgr, audit_key, 5):
+                return
+        except Exception:
+            logger.exception("Failed to apply usage binding audit rate limit")
+            return
+
     audit_details = {
         "machine_id": machine_id,
-        "session_id": session_id[:8] if session_id else "unknown",
         "client_ip": client_ip,
         "error_reason": error_reason,
     }
@@ -288,13 +299,15 @@ def _audit_usage_report_failure(
     audit_logger.log(
         action=action,
         severity="warning",
-        resource_type="usage_report",
-        resource_id=session_id,
+        resource_type="remote_machine" if machine_verified else "usage_report",
+        resource_id=machine_id if machine_verified else None,
         details=audit_details,
         user_id=user_id,
         tenant_id=tenant_id,
         ip_address=client_ip,
-        session_id=session_id or None,
+        # A caller-controlled or cross-tenant session identifier must never be
+        # persisted until the full machine/tenant/user binding succeeds.
+        session_id=None,
         success=False,
         error_message=error_reason,
     )
@@ -329,16 +342,19 @@ def _validate_usage_report_binding(
     machine_tenant_id = machine.get("tenant_id")
     machine_owner_id = machine.get("created_by")
 
-    # 1. Query agent_sessions table
+    # Query only inside the authenticated machine+tenant scope.  A missing,
+    # cross-machine, and cross-tenant session all produce the same response and
+    # audit shape, preventing session-existence and cross-tenant oracles.
     try:
         with agent_mgr.db.connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
                 adapt_sql(
                     "SELECT session_id, remote_machine_id, tenant_id, user_id, status "
-                    "FROM agent_sessions WHERE session_id = ?"
+                    "FROM agent_sessions "
+                    "WHERE session_id = ? AND remote_machine_id = ? AND tenant_id = ?"
                 ),
-                (session_id,),
+                (session_id, machine_id, machine_tenant_id),
             )
             row = cursor.fetchone()
     except Exception as e:
@@ -351,11 +367,12 @@ def _validate_usage_report_binding(
             session_id,
             machine_id,
             client_ip,
-            "session_not_found",
+            "binding_rejected",
             user_id=machine_owner_id,
             tenant_id=machine_tenant_id,
+            machine_verified=True,
         )
-        return None, (jsonify({"error": "Session not found"}), 404)
+        return None, (jsonify({"error": "Usage report binding rejected"}), 403)
 
     # Extract session data
     session_data = (
@@ -370,40 +387,7 @@ def _validate_usage_report_binding(
         }
     )
 
-    # 2. Validate session.remote_machine_id == machine_id
-    session_machine_id = session_data.get("remote_machine_id")
-    if session_machine_id != machine_id:
-        _audit_usage_report_failure(
-            AuditAction.USAGE_REPORT_BINDING_MISMATCH.value,
-            session_id,
-            machine_id,
-            client_ip,
-            "cross_machine",
-            {"expected_machine_id": session_machine_id or "none"},
-            user_id=machine_owner_id,
-            tenant_id=machine_tenant_id,
-        )
-        return None, (jsonify({"error": "Session does not belong to this machine"}), 403)
-
-    # 4. Validate tenant_id consistency.
-    session_tenant_id = session_data.get("tenant_id")
-    if session_tenant_id != machine_tenant_id:
-        _audit_usage_report_failure(
-            AuditAction.USAGE_REPORT_BINDING_MISMATCH.value,
-            session_id,
-            machine_id,
-            client_ip,
-            "cross_tenant",
-            {
-                "session_tenant_id": session_tenant_id,
-                "machine_tenant_id": machine_tenant_id,
-            },
-            user_id=machine_owner_id,
-            tenant_id=machine_tenant_id,
-        )
-        return None, (jsonify({"error": "Tenant mismatch"}), 403)
-
-    # 5. A machine token is allowed to report only for a user assigned to that
+    # A machine token is allowed to report only for a user assigned to that
     # machine. Registration always assigns created_by as an administrator; this
     # explicit lookup also supports sessions owned by delegated users.
     session_user_id = session_data.get("user_id")
@@ -414,14 +398,11 @@ def _validate_usage_report_binding(
             machine_id,
             client_ip,
             "cross_user",
-            {
-                "session_user_id": session_user_id,
-                "machine_owner_id": machine_owner_id,
-            },
             user_id=machine_owner_id,
             tenant_id=machine_tenant_id,
+            machine_verified=True,
         )
-        return None, (jsonify({"error": "Session user is not assigned to this machine"}), 403)
+        return None, (jsonify({"error": "Usage report binding rejected"}), 403)
 
     return session_data, None
 
@@ -1390,7 +1371,9 @@ def agent_message():
             # Not legacy and no Bearer → try extracting for audit
             auth_header = request.headers.get("Authorization", "")
             client_ip = get_client_ip_from_request()
-            if auth_header.startswith("Bearer "):
+            if auth_header.startswith("Bearer ") and (
+                msg_type != "usage_report" or _should_audit_usage_auth_failure(agent_mgr, client_ip)
+            ):
                 failed_token = auth_header[7:]
                 _audit_auth_failure(failed_token, "invalid_or_revoked", client_ip)
             return legacy_error
@@ -1401,7 +1384,10 @@ def agent_message():
             if bearer_error:
                 client_ip = get_client_ip_from_request()
                 auth_header = request.headers.get("Authorization", "")
-                if auth_header.startswith("Bearer "):
+                if auth_header.startswith("Bearer ") and (
+                    msg_type != "usage_report"
+                    or _should_audit_usage_auth_failure(agent_mgr, client_ip)
+                ):
                     _audit_auth_failure(
                         auth_header[7:],
                         bearer_error[0].get_json().get("error", "unknown"),
@@ -2386,6 +2372,7 @@ def llm_proxy(path=""):
 
 _USAGE_REPORT_RATE_LIMIT_WINDOW = 60  # seconds
 _USAGE_REPORT_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$")
+_USAGE_REPORT_LEGACY_DEADLINE_DEFAULT = "2026-08-04T00:00:00+00:00"
 
 # Constants for input validation (Issue #1891)
 _MAX_TOKENS_PER_REPORT = 10**9  # 1 billion tokens per report
@@ -2445,6 +2432,50 @@ def _check_usage_report_rate_limit(agent_mgr: Any, key: str, limit: int) -> bool
 
     count = row["request_count"] if isinstance(row, dict) else row[0]
     return bool(count <= limit)
+
+
+def _should_audit_usage_auth_failure(agent_mgr: Any, client_ip: str) -> bool:
+    """Bound usage-auth audit writes across workers without changing the 401."""
+    try:
+        return _check_usage_report_rate_limit(agent_mgr, f"usage-auth-audit:{client_ip}", 5)
+    except Exception:
+        logger.exception("Failed to apply usage auth audit rate limit")
+        return False
+
+
+def _legacy_usage_report_deadline() -> datetime:
+    """Return the explicit rollout deadline for report_id-less Agents."""
+    raw = os.environ.get(
+        "OPENACE_USAGE_REPORT_LEGACY_DEADLINE",
+        _USAGE_REPORT_LEGACY_DEADLINE_DEFAULT,
+    )
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        logger.error("Invalid OPENACE_USAGE_REPORT_LEGACY_DEADLINE=%r; disabling fallback", raw)
+        return datetime.min.replace(tzinfo=timezone.utc)
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def _normalize_usage_report_id(data: dict) -> tuple[dict, bool, str | None]:
+    """Validate report_id or apply the short, explicitly bounded rollout fallback."""
+    report_id = data.get("report_id")
+    if isinstance(report_id, str) and _USAGE_REPORT_ID_RE.fullmatch(report_id):
+        return data, False, None
+    if report_id is not None:
+        return data, False, "A valid report_id is required"
+
+    deadline = _legacy_usage_report_deadline()
+    if datetime.now(timezone.utc) >= deadline:
+        return data, False, "report_id is required; the legacy migration window has expired"
+
+    normalized = dict(data)
+    normalized["report_id"] = f"legacy-{uuid.uuid4()}"
+    logger.warning(
+        "Accepted report_id-less usage payload during migration window ending %s",
+        deadline.isoformat(),
+    )
+    return normalized, True, None
 
 
 def _usage_report_payload_hash(data: dict) -> str:
@@ -2599,6 +2630,17 @@ def _validate_usage_report_input(tokens: dict, requests: int) -> tuple[str | Non
 def _process_authenticated_usage_report(data: dict, machine_id: str, client_ip: str):
     """Validate and apply one usage delta after machine-token authentication."""
     agent_mgr = get_remote_agent_manager()
+    # A valid machine token is known at this boundary.  Apply machine/IP limits
+    # before parsing or binding the caller-controlled session identifier so
+    # invalid-binding traffic cannot amplify database or audit writes.
+    for key, limit, label in (
+        (f"machine:{machine_id}", 60, "this machine"),
+        (f"ip:{client_ip}", 120, "this client"),
+    ):
+        if not _check_usage_report_rate_limit(agent_mgr, key, limit):
+            return jsonify({"error": f"Rate limit exceeded for {label}"}), 429
+
+    data, legacy_report_id, report_id_error = _normalize_usage_report_id(data)
     session_id = data.get("session_id")
     report_id = data.get("report_id")
     tokens = data.get("tokens", {})
@@ -2606,8 +2648,9 @@ def _process_authenticated_usage_report(data: dict, machine_id: str, client_ip: 
 
     if not session_id:
         return jsonify({"error": "session_id is required"}), 400
-    if not isinstance(report_id, str) or not _USAGE_REPORT_ID_RE.fullmatch(report_id):
-        return jsonify({"error": "A valid report_id is required"}), 400
+    if report_id_error:
+        return jsonify({"error": report_id_error}), 400
+    assert isinstance(report_id, str)
 
     input_error, _ = _validate_usage_report_input(tokens, requests_count)
     if input_error:
@@ -2618,15 +2661,8 @@ def _process_authenticated_usage_report(data: dict, machine_id: str, client_ip: 
         return binding_error
     assert session_data is not None
 
-    # Counters are allocated only for an authenticated and fully bound subject.
-    limits = (
-        (f"session:{session_id}", 10, "this session"),
-        (f"machine:{machine_id}", 60, "this machine"),
-        (f"ip:{client_ip}", 120, "this client"),
-    )
-    for key, limit, label in limits:
-        if not _check_usage_report_rate_limit(agent_mgr, key, limit):
-            return jsonify({"error": f"Rate limit exceeded for {label}"}), 429
+    if not _check_usage_report_rate_limit(agent_mgr, f"session:{session_id}", 10):
+        return jsonify({"error": "Rate limit exceeded for this session"}), 429
 
     user_id = int(session_data["user_id"])
     tenant_id = int(session_data["tenant_id"])
@@ -2654,6 +2690,7 @@ def _process_authenticated_usage_report(data: dict, machine_id: str, client_ip: 
             {"report_id": report_id},
             user_id=user_id,
             tenant_id=tenant_id,
+            machine_verified=True,
         )
         return jsonify({"error": "report_id was already used for different content"}), 409
 
@@ -2684,10 +2721,22 @@ def _process_authenticated_usage_report(data: dict, machine_id: str, client_ip: 
             "session_id": session_id,
             "requests": requests_count,
             "total_tokens": tokens.get("input", 0) + tokens.get("output", 0),
+            "legacy_report_id_generated": legacy_report_id,
+            "idempotency_protected": not legacy_report_id,
+            "legacy_deadline": (
+                _legacy_usage_report_deadline().isoformat() if legacy_report_id else None
+            ),
         },
         success=True,
     )
-    return jsonify({"success": True, "duplicate": False, "report_id": report_id})
+    return jsonify(
+        {
+            "success": True,
+            "duplicate": False,
+            "report_id": report_id,
+            "legacy_report_id_generated": legacy_report_id,
+        }
+    )
 
 
 @remote_bp.route("/usage-report", methods=["POST"])
@@ -2701,13 +2750,14 @@ def usage_report():
     agent_mgr = get_remote_agent_manager()
     machine = agent_mgr.get_machine(machine_id)
     if not machine:
-        _audit_usage_report_failure(
-            AuditAction.USAGE_REPORT_AUTH_FAILURE.value,
-            data.get("session_id") or "",
-            machine_id,
-            client_ip,
-            "unknown_machine",
-        )
+        if _should_audit_usage_auth_failure(agent_mgr, client_ip):
+            _audit_usage_report_failure(
+                AuditAction.USAGE_REPORT_AUTH_FAILURE.value,
+                data.get("session_id") or "",
+                machine_id,
+                client_ip,
+                "unknown_machine",
+            )
         return jsonify({"error": "Unknown machine"}), 401
 
     auth_header = request.headers.get("Authorization", "")
@@ -2715,16 +2765,18 @@ def usage_report():
         _, bearer_error = _validate_agent_bearer(machine_id)
         if bearer_error:
             token = auth_header[7:]
-            _audit_usage_report_failure(
-                AuditAction.USAGE_REPORT_AUTH_FAILURE.value,
-                data.get("session_id") or "",
-                machine_id,
-                client_ip,
-                "invalid_token",
-                {"token_hash_prefix": token_hash_prefix(token)},
-                user_id=machine.get("created_by"),
-                tenant_id=machine.get("tenant_id"),
-            )
+            if _should_audit_usage_auth_failure(agent_mgr, client_ip):
+                _audit_usage_report_failure(
+                    AuditAction.USAGE_REPORT_AUTH_FAILURE.value,
+                    data.get("session_id") or "",
+                    machine_id,
+                    client_ip,
+                    "invalid_token",
+                    {"token_hash_prefix": token_hash_prefix(token)},
+                    user_id=machine.get("created_by"),
+                    tenant_id=machine.get("tenant_id"),
+                    machine_verified=True,
+                )
             return bearer_error
         if agent_mgr.is_legacy_machine(machine_id):
             agent_mgr.clear_legacy_mode(machine_id)
@@ -2732,15 +2784,17 @@ def usage_report():
     else:
         _, legacy_error = _check_legacy_fallback(machine_id)
         if legacy_error:
-            _audit_usage_report_failure(
-                AuditAction.USAGE_REPORT_AUTH_FAILURE.value,
-                data.get("session_id") or "",
-                machine_id,
-                client_ip,
-                "missing_token_or_legacy_expired",
-                user_id=machine.get("created_by"),
-                tenant_id=machine.get("tenant_id"),
-            )
+            if _should_audit_usage_auth_failure(agent_mgr, client_ip):
+                _audit_usage_report_failure(
+                    AuditAction.USAGE_REPORT_AUTH_FAILURE.value,
+                    data.get("session_id") or "",
+                    machine_id,
+                    client_ip,
+                    "missing_token_or_legacy_expired",
+                    user_id=machine.get("created_by"),
+                    tenant_id=machine.get("tenant_id"),
+                    machine_verified=True,
+                )
             return legacy_error
         logger.warning(
             "Usage report accepted for legacy machine %s (no Bearer token)",
