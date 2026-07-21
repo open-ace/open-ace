@@ -59,15 +59,63 @@ def _make_orchestrator(wf_data, milestones=None):
         orch.repo = mock_repo
         orch.emitter = MagicMock()
         orch._gh = MagicMock()
+        # These tests exercise session wiring, not the privileged git-context
+        # guard. Keep repository validation deterministic and in scope.
+        orch._snapshot_repo_context = MagicMock(
+            return_value={"effective": {"repo_path": "/tmp/p"}, "main": {}}
+        )
+        orch._validate_repo_context_after_run = MagicMock(return_value="")
         return orch, mock_repo
 
 
 class TestMilestoneTracksWorkflowSession:
+    def test_sidebar_session_is_linked_before_blocking_runner_starts(self):
+        """Live activity has a milestone owner throughout a Claude call."""
+        from app.modules.workspace.autonomous.models import AgentTaskResult
+
+        wf = _make_workflow(main_session_id="main-wrapper")
+        orch, mock_repo = _make_orchestrator(wf)
+        orch._runner = MagicMock()
+        orch._runner._uses_sidebar_session_source.return_value = True
+
+        def run_agent_task(**_kwargs):
+            mock_repo.update_milestone.assert_any_call("ms-active", {"session_id": "main-wrapper"})
+            return AgentTaskResult(
+                session_id="main-wrapper",
+                tracking_session_id="main-wrapper",
+                source_session_id="real-cli-session",
+                response_text="done",
+                visible_response_text="done",
+                success=True,
+            )
+
+        orch._runner.run_agent_task.side_effect = run_agent_task
+        mock_repo.list_milestones.return_value = [
+            {
+                "milestone_id": "ms-active",
+                "milestone_type": "pr_updated",
+                "status": "in_progress",
+            }
+        ]
+
+        orch._run_agent(
+            wf=wf,
+            workflow_id=wf["workflow_id"],
+            cli_tool="claude-code",
+            model="m",
+            project_path="/tmp/p",
+            prompt="do it",
+            workspace_type="local",
+            session_line="main",
+            milestone_id="ms-active",
+        )
+        orch._runner.run_agent_task.assert_called_once()
+
     def test_sidebar_sessions_link_milestone_to_tracking_id(self):
         """Claude workflow milestones keep the stable tracking session id."""
         from app.modules.workspace.autonomous.models import AgentTaskResult
 
-        wf = _make_workflow()
+        wf = _make_workflow(main_session_id="wrapper-uuid-1")
         orch, mock_repo = _make_orchestrator(wf)
         orch._runner = MagicMock()
         orch._runner._uses_sidebar_session_source.return_value = True
@@ -117,7 +165,7 @@ class TestMilestoneTracksWorkflowSession:
         """If provider resolution is missing, milestone still keeps tracking id."""
         from app.modules.workspace.autonomous.models import AgentTaskResult
 
-        wf = _make_workflow()
+        wf = _make_workflow(main_session_id="wrapper-uuid-2")
         orch, mock_repo = _make_orchestrator(wf)
         orch._runner = MagicMock()
         orch._runner._uses_sidebar_session_source.return_value = True

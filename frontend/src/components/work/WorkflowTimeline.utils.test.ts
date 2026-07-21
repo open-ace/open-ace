@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   findForkMilestoneIndex,
   getActivityHostMilestoneId,
+  getWorkflowSessionIdForMilestone,
   isAiMilestoneType,
   isDisplayableTimelineActivity,
   parseDiffFiles,
@@ -20,6 +21,20 @@ describe('WorkflowTimeline.utils', () => {
     expect(isDisplayableTimelineActivity({ type: 'tool_use' })).toBe(true);
     expect(isDisplayableTimelineActivity({ type: 'system' })).toBe(true);
     expect(isDisplayableTimelineActivity({ type: 'usage' })).toBe(true);
+  });
+
+  it('maps in-flight milestones to the strict main/review/test session lines', () => {
+    const workflow = {
+      main_session_id: 'main-session',
+      review_session_id: 'review-session',
+      test_session_id: 'test-session',
+    };
+
+    expect(getWorkflowSessionIdForMilestone('pr_updated', workflow)).toBe('main-session');
+    expect(getWorkflowSessionIdForMilestone('plan_finalized', workflow)).toBe('main-session');
+    expect(getWorkflowSessionIdForMilestone('pr_reviewed', workflow)).toBe('review-session');
+    expect(getWorkflowSessionIdForMilestone('plan_reviewed', workflow)).toBe('review-session');
+    expect(getWorkflowSessionIdForMilestone('tests_run', workflow)).toBe('test-session');
   });
 
   it('classifies AI-backed and system-only milestone cards', () => {

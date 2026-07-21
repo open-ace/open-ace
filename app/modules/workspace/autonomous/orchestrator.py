@@ -3673,12 +3673,21 @@ class AutonomousOrchestrator:
             self._current_session_id = tracking_session_id
             self._session_usage_offsets[tracking_session_id] = dict(retry_usage)
 
-        should_prelink_tracking_session = not self._runner._uses_sidebar_session_source(
-            kwargs.get("cli_tool", ""),
-            kwargs.get("workspace_type", "local"),
-        )
-        if should_prelink_tracking_session:
-            self._link_session_to_current_milestone(tracking_session_id)
+        # The tracking id is the stable UI identity for every session line and
+        # is known before the blocking runner call starts. Link the exact
+        # milestone now, including Claude/sidebar runs, so live activity can be
+        # attributed from the first event instead of only after process exit.
+        if milestone_id and tracking_session_id:
+            milestone_session_field = (
+                "review_session_id" if session_line == "review" else "session_id"
+            )
+            try:
+                self.repo.update_milestone(
+                    milestone_id,
+                    {milestone_session_field: tracking_session_id},
+                )
+            except Exception:
+                logger.warning("Failed to pre-link session to milestone", exc_info=True)
 
         # Inject per-workflow timeout if specified
         if "timeout" not in kwargs:

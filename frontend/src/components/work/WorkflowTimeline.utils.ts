@@ -59,6 +59,24 @@ export function isDisplayableTimelineActivity(activity: TimelineActivityLike): b
   return text !== '' && text !== '-';
 }
 
+export interface WorkflowSessionLinesLike {
+  main_session_id?: string;
+  review_session_id?: string;
+  test_session_id?: string;
+}
+
+/** Return the stable session line that owns an in-flight AI milestone. */
+export function getWorkflowSessionIdForMilestone(
+  milestoneType: string,
+  workflow: WorkflowSessionLinesLike
+): string {
+  if (milestoneType === 'tests_run') return workflow.test_session_id?.trim() ?? '';
+  if (milestoneType === 'plan_reviewed' || milestoneType === 'pr_reviewed') {
+    return workflow.review_session_id?.trim() ?? '';
+  }
+  return workflow.main_session_id?.trim() ?? '';
+}
+
 export function getActivityHostMilestoneId(
   milestones: ActivityHostMilestoneLike[],
   workflowDevRound: number,

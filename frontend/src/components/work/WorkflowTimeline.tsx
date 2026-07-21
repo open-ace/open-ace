@@ -51,6 +51,7 @@ import {
   findForkMilestoneIndex,
   formatTokens,
   getActivityHostMilestoneId,
+  getWorkflowSessionIdForMilestone,
   isAiMilestoneType,
   isDisplayableTimelineActivity,
   parseDiffFiles,
@@ -1394,11 +1395,20 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
     };
     const diffStats = parseDiffStats(milestone.diff_stats);
     const milestoneTime = formatMilestoneTime(getMilestoneAnchorTime(milestone));
+    const isActivityHost = activityHostMilestoneId === milestone.milestone_id;
+    const persistedLlmSessionId = [
+      milestone.actual_llm_session_id,
+      milestone.llm_session_id,
+      milestone.review_session_id,
+      milestone.session_id,
+    ].find((sessionId) => sessionId?.trim());
+    // A resumed Claude session can emit activity before the orchestrator has
+    // persisted its id on the new milestone. Use the workflow's stable
+    // three-line topology during that brief window so the panel is live from
+    // the first event instead of appearing stuck on "Waiting".
     const llmSessionId =
-      milestone.actual_llm_session_id ??
-      milestone.llm_session_id ??
-      milestone.review_session_id ??
-      milestone.session_id;
+      persistedLlmSessionId ??
+      (isActivityHost ? getWorkflowSessionIdForMilestone(milestone.milestone_type, workflow) : '');
     const llmTotalTokens = milestone.llm_total_tokens ?? 0;
     const llmRequestCount = milestone.llm_request_count ?? 0;
     const isAiMilestone = isAiMilestoneType(milestone.milestone_type);
@@ -1412,7 +1422,6 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
     const milestoneSessionIds = new Set(
       [llmSessionId, milestone.session_id, milestone.review_session_id].filter(Boolean)
     );
-    const isActivityHost = activityHostMilestoneId === milestone.milestone_id;
     const milestoneActivities = isActivityHost
       ? activities.filter(
           (activity) =>
