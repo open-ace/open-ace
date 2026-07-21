@@ -66,7 +66,7 @@ def _get_effective_system_account(system_account: str | None) -> str | None:
 def _run_as_user(system_account: str, command: list) -> subprocess.CompletedProcess:
     """Run a command as a specific user using sudo."""
     sudo_cmd = ["sudo", "-u", system_account] + command
-    return subprocess.run(sudo_cmd, capture_output=True, text=True, timeout=10)
+    return subprocess.run(sudo_cmd, capture_output=True, text=True, timeout=10, cwd="/tmp")
 
 
 def _get_repo() -> AutonomousWorkflowRepository:
