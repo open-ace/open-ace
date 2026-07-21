@@ -942,6 +942,8 @@ _CONTEXT_OVERFLOW_RE = re.compile(
 MAX_TEST_RETRIES = 2  # max retries when test agent itself fails
 MAX_DEV_RETRIES_ON_TEST_FAIL = 2  # max dev round retries for unfixable test failures
 MAX_CI_REPAIR_ATTEMPTS = 3  # max automatic dev-round retries for merge-phase CI failures
+MAX_PRE_COMMIT_CONVERGENCE_PASSES = 3
+PRE_COMMIT_CONVERGENCE_TIMEOUT = 600
 MAX_CI_DIAGNOSTICS_ATTEMPTS = 6  # bound scheduler polls when failed job logs stay unavailable
 try:
     MAX_AUTONOMOUS_CHANGED_FILES = int(os.environ.get("AUTONOMOUS_MAX_CHANGED_FILES", "60"))
@@ -2035,9 +2037,12 @@ class AutonomousOrchestrator:
             "1. 保持在当前工作分支上修复，不要创建新的 PR，不要切换到其他分支。\n"
             "2. 不要进入新的代码审查、进度汇报或等待流程；当前唯一目标是让现有 PR 的 CI 通过。\n"
             "3. 必须优先根据 CI 工作流、失败日志摘录和仓库脚本定位问题，复现 CI 真实执行的命令。\n"
-            "4. 修复后重新运行对应命令，以及你改动涉及到的必要相关测试。\n"
-            "5. 不要执行 git add、git commit 或 git push；编排器会在范围校验通过后统一提交并推送。\n"
-            "6. 结束时请明确说明：你复现了哪些命令、修复了什么、还剩什么风险。\n"
+            "4. 修复后必须重新运行 CI 的完整对应命令，而不是只运行单个 hook、单个文件或你认为相关的子集。\n"
+            "5. 如果命令中的 formatter / pre-commit hook 自动修改了文件并以非零状态退出，这只是修复过程，"
+            "不代表验证完成；必须保留这些修改并重复运行同一完整命令，直到 exit 0 或确认存在不可自动修复的错误。\n"
+            "6. 对 `pre-commit run --all-files` 这类全仓检查，必须原样保留 `--all-files`，并在结束前取得一次干净的 exit 0。\n"
+            "7. 不要执行 git add、git commit 或 git push；编排器会在范围校验通过后统一提交并推送。\n"
+            "8. 结束时请明确说明：你复现了哪些完整命令、最终 exit code、修复了什么、还剩什么风险。\n"
         )
         # Runtime contract is already embedded in ci_repair_context; do not
         # duplicate it in the fresh-session prompt.
@@ -2054,6 +2059,110 @@ class AutonomousOrchestrator:
         if include_prior_failures:
             prompt += self._build_prior_repair_failures_prompt()
         return prompt
+
+    @staticmethod
+    def _ci_failure_uses_pre_commit(failed_checks: list[dict]) -> bool:
+        """Whether collected CI evidence identifies a pre-commit failure."""
+        evidence = "\n".join(
+            str(check.get("failure_excerpt") or "") for check in failed_checks
+        ).lower()
+        return any(
+            marker in evidence
+            for marker in (
+                "pre-commit",
+                "pre_commit",
+                "hook id:",
+                "files were modified by this hook",
+            )
+        )
+
+    def _converge_pre_commit_fixes(
+        self,
+        wf: dict,
+        gh: GitHubOps,
+        failed_checks: list[dict],
+    ) -> tuple[bool, str]:
+        """Run the CI's full pre-commit command under the isolated agent account.
+
+        Some hooks intentionally modify files and return 1 on their first pass.
+        A repair agent can mistake that for completion and push a still-red
+        branch. Re-run the full command until it is clean, while preserving the
+        same credentialless OS boundary used for all autonomous repository code.
+
+        Returns ``(attempted, remaining_error)``. A remaining error is reported
+        in the repair summary but does not discard safe hook edits: the next CI
+        run remains the authoritative check and can feed a subsequent repair.
+        """
+        if wf.get("workspace_type") == "remote" or not self._ci_failure_uses_pre_commit(
+            failed_checks
+        ):
+            return False, ""
+
+        project_path = wf.get("worktree_path") or wf.get("project_path", "")
+        config_path = os.path.join(project_path, ".pre-commit-config.yaml")
+        if not project_path or not gh.path_exists_as_user(config_path, file_only=True):
+            return False, ""
+
+        pre_commit = shutil.which("pre-commit")
+        real_git = shutil.which("git")
+        if not pre_commit or not real_git:
+            logger.warning("Skipping isolated pre-commit convergence: executable unavailable")
+            return False, ""
+
+        isolated_account = self._resolve_isolated_agent_account()
+        runtime_command, _ = self._select_project_python_runtime(project_path, gh)
+        guard_bin = os.path.join(os.path.dirname(__file__), "agent_bin")
+        env = {
+            "PATH": guard_bin + os.pathsep + os.environ.get("PATH", ""),
+            "OPENACE_REAL_GIT": real_git,
+            "OPENACE_PYTHON_COMMAND": json.dumps(runtime_command or [sys.executable]),
+            "GH_CONFIG_DIR": "/var/empty/openace-autonomous-gh",
+            "GIT_TERMINAL_PROMPT": "0",
+        }
+        command, cwd = AutonomousAgentRunner._wrap_agent_cmd(
+            [pre_commit, "run", "--all-files"],
+            project_path,
+            isolated_account,
+            env,
+        )
+        last_output = ""
+        passes_run = 0
+        for pass_number in range(1, MAX_PRE_COMMIT_CONVERGENCE_PASSES + 1):
+            passes_run = pass_number
+            try:
+                result = subprocess.run(
+                    command,
+                    cwd=cwd,
+                    env=None if cwd is None else {**os.environ, **env},
+                    capture_output=True,
+                    text=True,
+                    timeout=PRE_COMMIT_CONVERGENCE_TIMEOUT,
+                    check=False,
+                )
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                return True, f"isolated pre-commit validation could not run: {exc}"
+
+            last_output = "\n".join(part for part in (result.stdout, result.stderr) if part).strip()
+            if result.returncode == 0:
+                logger.info("Isolated pre-commit convergence passed on run %d", pass_number)
+                return True, ""
+
+            hooks_modified_files = any(
+                marker in last_output.lower()
+                for marker in (
+                    "files were modified by this hook",
+                    "fixing ",
+                    "reformatted ",
+                )
+            )
+            if not hooks_modified_files:
+                break
+
+        concise_output = last_output[-4000:] if last_output else "no output"
+        return True, (
+            "isolated `pre-commit run --all-files` did not reach exit 0 after "
+            f"{passes_run} pass(es):\n{concise_output}"
+        )
 
     @staticmethod
     def _detect_and_push_ci_repair_changes(
@@ -2252,6 +2361,20 @@ class AutonomousOrchestrator:
         if wf.get("user_feedback", "").strip():
             self._update_workflow({"user_feedback": ""})
 
+        pre_commit_attempted = False
+        pre_commit_error = ""
+        try:
+            pre_commit_attempted, pre_commit_error = self._converge_pre_commit_fixes(
+                wf, gh, failed_checks
+            )
+        except Exception as exc:
+            # The isolated validation is defense-in-depth. Preserve the agent's
+            # edits and let GitHub CI remain authoritative if the local wrapper
+            # itself is unavailable or misconfigured.
+            pre_commit_attempted = True
+            pre_commit_error = f"isolated pre-commit validation failed to start: {exc}"
+            logger.warning(pre_commit_error, exc_info=True)
+
         self._accumulate_tokens(repair_result)
 
         commit_sha, sha_changed, push_error = self._detect_and_push_ci_repair_changes(
@@ -2277,6 +2400,11 @@ class AutonomousOrchestrator:
             commit_sha,
             repair_result.success or salvaged,
         )
+        if pre_commit_attempted:
+            validation_summary = (
+                pre_commit_error or "isolated `pre-commit run --all-files` converged with exit 0"
+            )
+            summary = f"{summary}\n\nValidation: {validation_summary}".strip()
 
         milestone_updates = {
             "status": "completed" if (repair_result.success or salvaged) else "failed",

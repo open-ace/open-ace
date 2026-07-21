@@ -784,6 +784,83 @@ def test_fresh_ci_repair_prompt_keeps_requirements_plan_and_diff():
     assert "APPROVED PLAN" in prompt
     assert "diff --git" in prompt
     assert "CI EXCERPT" in prompt
+    assert "pre-commit run --all-files" in prompt
+    assert "直到 exit 0" in prompt
+
+
+def test_pre_commit_detection_requires_log_evidence():
+    from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+    assert AutonomousOrchestrator._ci_failure_uses_pre_commit(
+        [
+            {
+                "name": "lint",
+                "failure_excerpt": "hook id: end-of-file-fixer\nfiles were modified by this hook",
+            }
+        ]
+    )
+    assert not AutonomousOrchestrator._ci_failure_uses_pre_commit(
+        [{"name": "lint", "failure_excerpt": "ruff: F401 unused import"}]
+    )
+
+
+def test_pre_commit_convergence_reruns_modified_hooks_as_isolated_agent():
+    from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner
+    from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+    orch = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
+    orch._resolve_isolated_agent_account = MagicMock(return_value="openace-agent")
+    orch._select_project_python_runtime = MagicMock(return_value=(["python3"], ""))
+    gh = MagicMock()
+    gh.path_exists_as_user.return_value = True
+    failed_checks = [
+        {
+            "name": "lint",
+            "failure_excerpt": "pre-commit hook(s) made changes",
+        }
+    ]
+    modified = MagicMock(
+        returncode=1,
+        stdout="files were modified by this hook\nFixing docker-compose.yml",
+        stderr="",
+    )
+    clean = MagicMock(returncode=0, stdout="All checks passed", stderr="")
+
+    with (
+        patch(
+            "app.modules.workspace.autonomous.orchestrator.shutil.which",
+            side_effect=["/usr/local/bin/pre-commit", "/usr/bin/git"],
+        ),
+        patch.object(
+            AutonomousAgentRunner,
+            "_wrap_agent_cmd",
+            return_value=(["isolated-wrapper", "pre-commit"], None),
+        ) as wrap,
+        patch(
+            "app.modules.workspace.autonomous.orchestrator.subprocess.run",
+            side_effect=[modified, clean],
+        ) as run,
+    ):
+        attempted, error = orch._converge_pre_commit_fixes(
+            {
+                "workspace_type": "local",
+                "worktree_path": "/private/repo",
+            },
+            gh,
+            failed_checks,
+        )
+
+    assert attempted
+    assert error == ""
+    assert run.call_count == 2
+    wrap.assert_called_once()
+    assert wrap.call_args.args[:3] == (
+        ["/usr/local/bin/pre-commit", "run", "--all-files"],
+        "/private/repo",
+        "openace-agent",
+    )
+    assert run.call_args.kwargs["cwd"] is None
+    assert run.call_args.kwargs["env"] is None
 
 
 def test_nonstandard_report_with_real_test_evidence_does_not_retry():
