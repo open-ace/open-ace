@@ -79,6 +79,11 @@ def _before_state(main_head, effective_head=WORKTREE_HEAD):
             "top_level": WORKTREE,
             "branch": "auto-dev/wf-drift",
             "head": effective_head,
+            "origin": "",
+            "git_dir": f"{WORKTREE}/.git",
+            "common_dir": f"{WORKTREE}/.git",
+            "git_identity": "1:1",
+            "common_identity": "1:1",
         },
         "main": {
             "repo_path": MAIN_REPO,
@@ -113,6 +118,7 @@ def _install_fake_gh(
 
     def factory(repo_path, system_account=None):
         gh = MagicMock()
+        gh.get_path_identity.return_value = "1:1"
         if os.path.realpath(repo_path) == os.path.realpath(WORKTREE):
             gh.get_current_branch.return_value = "auto-dev/wf-drift"
             gh.get_current_commit.return_value = effective_head
@@ -132,9 +138,12 @@ def _install_fake_gh(
                 if len(args) >= 4 and args[3] == "origin/main":
                     return MagicMock(returncode=0 if after_on_remote else 1)
                 return MagicMock(returncode=0 if moved_forward else 1)
-            # rev-parse --show-toplevel used by _capture_repo_state
-            if args and args[0] == "rev-parse":
+            if args == ["rev-parse", "--show-toplevel"]:
                 return MagicMock(stdout=repo_path)
+            if args == ["rev-parse", "--absolute-git-dir"]:
+                return MagicMock(stdout=f"{repo_path}/.git")
+            if args == ["rev-parse", "--path-format=absolute", "--git-common-dir"]:
+                return MagicMock(stdout=f"{repo_path}/.git")
             return MagicMock(stdout="", returncode=0)
 
         gh._run_git.side_effect = run_git

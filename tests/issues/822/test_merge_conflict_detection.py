@@ -317,7 +317,14 @@ class TestDoMergeDeferredRetry:
             wf,
             mock_gh,
             1103,
-            [{"name": "test (3.9)", "bucket": "fail", "state": "failure"}],
+            [
+                {
+                    "name": "test (3.9)",
+                    "bucket": "fail",
+                    "state": "failure",
+                    "failure_excerpt": "pytest failed",
+                }
+            ],
         )
 
     def test_start_ci_repair_round_fails_when_signature_repeats(self):

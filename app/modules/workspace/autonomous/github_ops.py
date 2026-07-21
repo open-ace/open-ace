@@ -14,11 +14,12 @@ import re
 import subprocess
 import time
 from pathlib import Path
+from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
-_GITHUB_ACTIONS_JOB_URL_RE = re.compile(
-    r"https://github\.com/[^/]+/[^/]+/actions/runs/(?P<run_id>\d+)/job/(?P<job_id>\d+)"
+_GITHUB_ACTIONS_JOB_PATH_RE = re.compile(
+    r"^/[^/]+/[^/]+/actions/runs/(?P<run_id>\d+)/job/(?P<job_id>\d+)(?:/|$)"
 )
 _ANSI_ESCAPE_RE = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
 
@@ -108,6 +109,11 @@ class GitHubOps:
 
     # Class-level cache: track which system_accounts have safe.directory configured
     _safe_directory_configured: set[str] = set()
+    # Trusted Git contexts are captured by the orchestrator before an
+    # untrusted agent starts.  Subsequent GitHubOps instances for that
+    # worktree bypass the replaceable ``.git`` directory entry and address the
+    # original gitdir directly, preventing confused-deputy pushes.
+    _trusted_git_contexts: dict[str, dict[str, str]] = {}
 
     def __init__(self, repo_path: str, system_account: str | None = None):
         """
@@ -118,6 +124,12 @@ class GitHubOps:
         """
         self.repo_path = repo_path
         self.system_account = system_account
+        trusted = self._trusted_git_contexts.get(os.path.realpath(repo_path))
+        self._trusted_git_dir = trusted.get("git_dir", "") if trusted else ""
+        self._trusted_work_tree = trusted.get("work_tree", "") if trusted else ""
+        self._trusted_git_identity = trusted.get("git_identity", "") if trusted else ""
+        self._trusted_common_dir = trusted.get("common_dir", "") if trusted else ""
+        self._trusted_common_identity = trusted.get("common_identity", "") if trusted else ""
         # Cached owner/repo (e.g. "open-ace/open-ace", or "host/owner/repo" for
         # GHES) resolved from the local repo's origin remote, used to target gh
         # under a sudo wrapper where gh can no longer infer the repo from cwd.
@@ -134,6 +146,85 @@ class GitHubOps:
         # Tracks whether _resolve_owner_repo has been attempted, so None can
         # distinguish "tried and failed" from "not yet tried".
         self._owner_repo_resolved: bool = False
+
+    @classmethod
+    def register_trusted_git_context(
+        cls,
+        repo_path: str,
+        git_dir: str,
+        git_identity: str,
+        common_dir: str,
+        common_identity: str,
+    ) -> None:
+        """Pin future git commands for ``repo_path`` to a pre-agent gitdir."""
+        real_repo = os.path.realpath(repo_path)
+        real_git_dir = os.path.realpath(git_dir)
+        if not real_repo or not real_git_dir or not os.path.isabs(real_git_dir):
+            raise GitHubOpsError("Cannot register an invalid trusted Git context")
+        if not git_identity or not common_identity:
+            raise GitHubOpsError("Cannot register Git context without filesystem identity")
+        cls._trusted_git_contexts[real_repo] = {
+            "git_dir": real_git_dir,
+            "work_tree": real_repo,
+            "git_identity": git_identity,
+            "common_dir": os.path.realpath(common_dir),
+            "common_identity": common_identity,
+        }
+
+    @classmethod
+    def clear_trusted_git_context(cls, repo_path: str) -> None:
+        cls._trusted_git_contexts.pop(os.path.realpath(repo_path), None)
+
+    def bind_trusted_git_context(
+        self,
+        git_dir: str,
+        git_identity: str,
+        common_dir: str,
+        common_identity: str,
+    ) -> None:
+        """Pin this already-created instance and all future instances."""
+        self.register_trusted_git_context(
+            self.repo_path, git_dir, git_identity, common_dir, common_identity
+        )
+        trusted = self._trusted_git_contexts[os.path.realpath(self.repo_path)]
+        self._trusted_git_dir = trusted["git_dir"]
+        self._trusted_work_tree = trusted["work_tree"]
+        self._trusted_git_identity = trusted["git_identity"]
+        self._trusted_common_dir = trusted["common_dir"]
+        self._trusted_common_identity = trusted["common_identity"]
+        # Re-resolve the repository slug from the now-trusted origin.
+        self._owner_repo = None
+        self._repo_slug = None
+        self._repo_host = None
+        self._owner_repo_resolved = False
+
+    def get_path_identity(self, path: str) -> str:
+        """Return device+inode for ``path`` using the repository owner identity."""
+        kwargs = self._build_subprocess_kwargs()
+        kwargs.pop("cwd", None)
+        kwargs["timeout"] = 10
+        command = ["stat", "-Lc", "%d:%i", path]
+        if self._needs_sudo():
+            account = self.system_account
+            assert account is not None  # _needs_sudo() guarantees non-empty
+            command = ["sudo", "-n", "-u", account, *command]
+        result = subprocess.run(command, **kwargs)
+        if result.returncode != 0 or not result.stdout.strip():
+            raise GitHubOpsError(
+                f"Cannot verify protected Git path {path}: {result.stderr.strip()}"
+            )
+        return result.stdout.strip()
+
+    def _verify_trusted_git_context(self) -> None:
+        """Fail closed if an agent replaced either pinned Git directory."""
+        if not self._trusted_git_dir:
+            return
+        if self.get_path_identity(self._trusted_git_dir) != self._trusted_git_identity:
+            raise GitHubOpsError("Protected Git directory identity changed after agent execution")
+        if self.get_path_identity(self._trusted_common_dir) != self._trusted_common_identity:
+            raise GitHubOpsError(
+                "Protected Git common-directory identity changed after agent execution"
+            )
 
     def _get_env(self) -> dict[str, str] | None:
         """Get environment overrides for AI GitHub account.
@@ -261,6 +352,7 @@ class GitHubOps:
                 sudo path runs plain ``gh`` without repo context (they don't need
                 an existing-repo context anyway).
         """
+        self._verify_trusted_git_context()
         kwargs = self._build_subprocess_kwargs()
         account = self.system_account
         if self._needs_sudo():
@@ -282,7 +374,10 @@ class GitHubOps:
         else:
             # Same-user (or no system_account): run gh directly with cwd so it
             # infers owner/repo from the working directory as before.
-            cmd = ["gh"] + args
+            owner_repo = (
+                self._resolve_owner_repo() if repo_scoped and self._trusted_git_dir else None
+            )
+            cmd = ["gh", "-R", owner_repo, *args] if owner_repo else ["gh", *args]
         last_error: GitHubOpsError | None = None
         for attempt in range(GIT_NETWORK_RETRY_COUNT):
             try:
@@ -368,19 +463,47 @@ class GitHubOps:
 
     def _run_git(self, args: list[str], check: bool = True) -> subprocess.CompletedProcess:
         """Run a git command with transient-network-error retry."""
+        self._verify_trusted_git_context()
         # Ensure safe.directory is configured for Docker volume mounts
         self._ensure_safe_directory()
         kwargs = self._build_subprocess_kwargs()
         account = self.system_account
+        trusted_args: list[str] = []
+        if self._trusted_git_dir:
+            trusted_args = [
+                f"--git-dir={self._trusted_git_dir}",
+                f"--work-tree={self._trusted_work_tree or os.path.realpath(self.repo_path)}",
+            ]
         if self._needs_sudo():
             # git supports `-C <path>` (unlike gh), so we use it to set the
             # working directory under a sudo wrapper where cwd would trigger a
             # Python permission check as the service user (Issue #1421).
             assert account is not None  # _needs_sudo() guarantees non-empty
-            cmd: list[str] = ["sudo", "-u", account, "git", "-C", self.repo_path] + args
+            cmd: list[str] = (
+                [
+                    "sudo",
+                    "-u",
+                    account,
+                    "git",
+                    *trusted_args,
+                    "-c",
+                    "core.hooksPath=/dev/null",
+                    "-c",
+                    "core.fsmonitor=false",
+                ]
+                + ([] if trusted_args else ["-C", self.repo_path])
+                + args
+            )
             kwargs.pop("cwd", None)  # Remove cwd to avoid Python permission check
         else:
-            cmd = ["git"] + args
+            cmd = [
+                "git",
+                *trusted_args,
+                "-c",
+                "core.hooksPath=/dev/null",
+                "-c",
+                "core.fsmonitor=false",
+            ] + args
         last_error: GitHubOpsError | None = None
         for attempt in range(GIT_NETWORK_RETRY_COUNT):
             try:
@@ -623,6 +746,7 @@ class GitHubOps:
 
     def create_worktree(self, path: str, branch: str, base: str = "HEAD") -> dict:
         """Create a git worktree with a new branch."""
+        self.clear_trusted_git_context(path)
         self._run_git(["worktree", "add", "-b", branch, path, base])
         logger.info("Created worktree at %s on branch %s", path, branch)
         return {"worktree_path": path, "branch": branch}
@@ -634,6 +758,7 @@ class GitHubOps:
         the PR branch without touching the main repo's index/HEAD. For a
         remote-only branch git auto-creates a local tracking branch.
         """
+        self.clear_trusted_git_context(path)
         self._run_git(["worktree", "add", path, branch])
         logger.info("Added worktree at %s for existing branch %s", path, branch)
         return {"worktree_path": path, "branch": branch}
@@ -641,6 +766,7 @@ class GitHubOps:
     def remove_worktree(self, path: str) -> dict:
         """Remove a git worktree."""
         self._run_git(["worktree", "remove", path, "--force"])
+        self.clear_trusted_git_context(path)
         logger.info("Removed worktree at %s", path)
         return {"removed": path}
 
@@ -1010,7 +1136,10 @@ class GitHubOps:
         """Extract GitHub Actions run/job ids from a check details URL."""
         if not url:
             return None
-        match = _GITHUB_ACTIONS_JOB_URL_RE.match(url.strip())
+        parsed = urlparse(url.strip())
+        if parsed.scheme != "https" or not parsed.hostname:
+            return None
+        match = _GITHUB_ACTIONS_JOB_PATH_RE.match(parsed.path)
         if not match:
             return None
         return match.group("run_id"), match.group("job_id")
@@ -1124,6 +1253,40 @@ class GitHubOps:
         parsed = self._parse_github_actions_job_url(str(check.get("link") or ""))
         if parsed:
             run_id, job_id = parsed
+            # Fetch the job log through the REST endpoint first.  ``gh run
+            # view --log-failed`` downloads a run-level zip into gh's shared
+            # cache.  In a multi-user deployment that cache can be owned by a
+            # different account (for example root), which made every repair
+            # prompt lose its real failure output with ``permission denied``.
+            # The job endpoint returns decoded log text directly and does not
+            # use the run-log cache.
+            self._resolve_owner_repo()
+            link_host = (urlparse(str(check.get("link") or "")).hostname or "").lower()
+            repo_host = (self._repo_host or "github.com").lower()
+            if link_host != repo_host:
+                logger.warning(
+                    "Ignoring Actions job URL on unexpected host '%s' (repository host '%s')",
+                    link_host,
+                    repo_host,
+                )
+                return self._fetch_log_excerpt_via_run_list(check, max_lines, max_chars)
+            elif self._repo_slug:
+                api_args = ["api"]
+                if self._repo_host and self._repo_host != "github.com":
+                    api_args += ["--hostname", self._repo_host]
+                api_args.append(f"repos/{self._repo_slug}/actions/jobs/{job_id}/logs")
+                api_result = self._run_gh(api_args, check=False, repo_scoped=False)
+                if api_result.returncode == 0 and (api_result.stdout or "").strip():
+                    return self._clean_log_to_excerpt(api_result.stdout or "", max_lines, max_chars)
+                logger.warning(
+                    "REST job-log fetch failed for check '%s' (run=%s job=%s), "
+                    "falling back to gh run view: %s",
+                    check.get("name") or "unknown",
+                    run_id,
+                    job_id,
+                    (api_result.stderr or api_result.stdout or "").strip()[:200],
+                )
+
             result = self._run_gh(
                 ["run", "view", run_id, "--job", job_id, "--log-failed"],
                 check=False,

@@ -220,6 +220,7 @@ class TestPreparationWorktreeCleanup:
         mock_gh.create_issue.return_value = {"number": 1395, "url": "x"}
         mock_gh.list_worktrees.return_value = list_worktrees
         mock_gh.create_worktree.return_value = {"worktree_path": "/home/rhuang/auto-dev-wf-1395"}
+        mock_gh.get_current_branch.return_value = "auto-dev/wf-1395"
         mock_gh_cls.return_value = mock_gh
         return mock_gh
 
@@ -417,17 +418,18 @@ class TestWrapAgentCmd:
 
         cmd, cwd = agent_runner.AutonomousAgentRunner._wrap_agent_cmd(base_cmd, project, "rhuang")
 
-        # Wrapper invocation: sudo -n -u root <wrapper> <user> <dir> <cmd...>
-        assert cmd[:6] == [
+        # Wrapper invocation: sudo -n -u root <wrapper> --isolated <user> <dir> <cmd...>
+        assert cmd[:7] == [
             "sudo",
             "-n",
             "-u",
             "root",
             agent_runner._OPENACE_RUN_AS,
+            "--isolated",
             "rhuang",
         ]
-        assert cmd[6] == project  # project dir passed to wrapper
-        assert cmd[7:] == base_cmd  # original command appended verbatim
+        assert cmd[7] == project  # project dir passed to wrapper
+        assert cmd[8:] == base_cmd  # original command appended verbatim
         # cwd must be None — the wrapper chdir's internally; a non-None cwd
         # would make Popen chdir as the service user and re-trigger [Errno 13].
         assert cwd is None
@@ -463,7 +465,7 @@ class TestWrapAgentCmd:
         cmd, cwd = agent_runner.AutonomousAgentRunner._wrap_agent_cmd(
             base_cmd, "/home/rhuang/p", "rhuang"
         )
-        assert cmd[7:] == base_cmd
+        assert cmd[8:] == base_cmd
         assert cwd is None
 
 

@@ -7,10 +7,15 @@ through its phases: preparation -> planning -> development ->
 pr_review -> report -> wait -> (loop or merge).
 """
 
+import grp
 import json
 import logging
 import os
+import pwd
 import re
+import shutil
+import subprocess
+import sys
 import threading
 import time
 import uuid
@@ -268,8 +273,8 @@ def _has_test_tool_call(tool_calls: list, framework_type: str) -> bool:
             return True
 
         # Then check Bash/run_shell_command for test commands
-        if tool_name in ("Bash", "run_shell_command"):
-            cmd = tool_input.get("command", "")
+        if tool_name in ("Bash", "Shell", "run_shell_command", "exec_command"):
+            cmd = tool_input.get("command") or tool_input.get("cmd") or ""
             if not cmd or any(flag in cmd for flag in exclude_flags):
                 continue
             for pattern in patterns_to_check:
@@ -279,13 +284,100 @@ def _has_test_tool_call(tool_calls: list, framework_type: str) -> bool:
     return False
 
 
+def _has_passing_test_tool_result(event_log: list, framework_type: str) -> bool:
+    """Require conclusive success for every distinct test command in this run.
+
+    A later successful retry only supersedes an earlier failure when it reruns
+    the same normalized command.  This deliberately prevents a failing full
+    suite followed by one passing targeted test from opening a PR.
+    """
+    test_tools: dict[str, str] = {}
+    anonymous_test_calls: list[str] = []
+    for event in event_log or []:
+        if not isinstance(event, dict) or event.get("type") != "tool_use":
+            continue
+        as_tool_call = {
+            "tool": {
+                "name": event.get("tool_name", ""),
+                "input": event.get("tool_input", {}),
+            }
+        }
+        if _has_test_tool_call([as_tool_call], framework_type):
+            tool_id = str(event.get("tool_use_id") or "")
+            tool_input = event.get("tool_input") or {}
+            command = ""
+            if isinstance(tool_input, dict):
+                command = str(
+                    tool_input.get("command")
+                    or tool_input.get("cmd")
+                    or tool_input.get("args")
+                    or ""
+                )
+            command_key = " ".join(command.split()) or f"tool:{event.get('tool_name', '')}"
+            if tool_id:
+                test_tools[tool_id] = command_key
+            else:
+                anonymous_test_calls.append(command_key)
+
+    states: dict[str, bool] = {}
+    anonymous_index = 0
+    for event in event_log or []:
+        if not isinstance(event, dict) or event.get("type") != "tool_result":
+            continue
+        tool_id = str(event.get("tool_use_id") or "")
+        if tool_id:
+            command_key = test_tools.get(tool_id)
+            if not command_key:
+                continue
+        else:
+            if anonymous_index >= len(anonymous_test_calls):
+                continue
+            command_key = anonymous_test_calls[anonymous_index]
+            anonymous_index += 1
+        text = str(event.get("text") or "")
+        exit_code = event.get("exit_code")
+        explicit_error = bool(event.get("is_error")) or (
+            isinstance(exit_code, int) and exit_code != 0
+        )
+        # Positive-number failure summaries are failures; zero-valued summaries
+        # ("42 passed, 0 failed", Maven "Failures: 0") are not.
+        has_failure = any(
+            re.search(pattern, text, re.IGNORECASE | re.MULTILINE)
+            for pattern in (
+                r"\b[1-9]\d*\s+failed\b",
+                r"(?:^|\n)FAILED(?:\s|$)",
+                r"\btest result:\s*FAILED\b",
+                r"\bFailures?:\s*[1-9]\d*\b",
+                r"\bErrors?:\s*[1-9]\d*\b",
+                r"\bBUILD FAILURE\b",
+            )
+        )
+        has_pass = any(
+            re.search(pattern, text, re.IGNORECASE | re.MULTILINE)
+            for pattern in (
+                r"\b[1-9]\d*\s+passed\b",
+                r"\btest result:\s*ok\b",
+                r"^ok\s+\S+(?:\s+\S+)?$",  # Go test
+                r"\bRan\s+[1-9]\d*\s+tests?\b[\s\S]*?^OK\s*$",  # unittest
+                r"\bTests run:\s*[1-9]\d*\b[\s\S]*?\bFailures:\s*0\b[\s\S]*?\bErrors:\s*0\b",
+                r"\bBUILD SUCCESS(?:FUL)?\b",  # Maven / Gradle test command
+            )
+        )
+        states[command_key] = not explicit_error and not has_failure and has_pass
+
+    expected_commands = set(test_tools.values()) | set(anonymous_test_calls)
+    return bool(expected_commands) and all(
+        states.get(command) is True for command in expected_commands
+    )
+
+
 # Prefix added to all prompts to inform the agent it is running autonomously
 AUTONOMOUS_CONTEXT = (
     "## 重要提示\n"
     "你正在无人值守的自动化工作流中运行。请遵守以下规则：\n"
     "1. 不要请求人类确认或等待权限批准，如果操作被阻止请跳过并继续\n"
     "2. 不要使用需要交互式确认的 gh CLI 命令（如 gh pr create）\n"
-    "3. 直接执行文件修改、git 操作等，不要仅输出方案文本\n"
+    "3. 直接执行文件修改和验证，不要仅输出方案文本；不要执行 git add/commit/push，编排器负责提交和推送\n"
     "4. 遇到权限问题时跳过该步骤继续执行其他任务\n\n"
 )
 
@@ -723,6 +815,12 @@ _CONTEXT_OVERFLOW_RE = re.compile(
 MAX_TEST_RETRIES = 2  # max retries when test agent itself fails
 MAX_DEV_RETRIES_ON_TEST_FAIL = 2  # max dev round retries for unfixable test failures
 MAX_CI_REPAIR_ATTEMPTS = 3  # max automatic dev-round retries for merge-phase CI failures
+MAX_CI_DIAGNOSTICS_ATTEMPTS = 6  # bound scheduler polls when failed job logs stay unavailable
+try:
+    MAX_AUTONOMOUS_CHANGED_FILES = int(os.environ.get("AUTONOMOUS_MAX_CHANGED_FILES", "60"))
+except ValueError:
+    logger.warning("Invalid AUTONOMOUS_MAX_CHANGED_FILES; using default 60")
+    MAX_AUTONOMOUS_CHANGED_FILES = 60
 
 # Sentinel digest used by _ci_failure_fingerprint when get_check_failure_excerpt
 # returns empty (old gh CLI / token / REST-API URL-format issues). Deliberately
@@ -869,6 +967,47 @@ class AutonomousOrchestrator:
         user = UserRepository().get_user_by_id(user_id)
         return user.get("system_account") if user else None
 
+    @staticmethod
+    def _resolve_isolated_agent_account() -> str:
+        """Return the credentialless OS principal used for local AI agents.
+
+        The account is intentionally distinct from both the service principal
+        and repository owner.  Installers provision it without sudo or GitHub
+        credentials; ``openace-run-as --isolated`` grants only scoped worktree
+        ACLs and a clean allow-listed environment.
+        """
+        configured = os.environ.get("OPENACE_AUTONOMOUS_AGENT_ACCOUNT", "").strip()
+        if not configured:
+            try:
+                from app.utils.config import get_config_value
+
+                configured = str(
+                    get_config_value("autonomous", "agent_system_account", "openace-agent") or ""
+                ).strip()
+            except Exception:
+                configured = "openace-agent"
+        if not re.fullmatch(r"[a-z_][a-z0-9_-]{0,31}", configured):
+            raise RuntimeError("Invalid autonomous.agent_system_account configuration")
+        try:
+            account = pwd.getpwnam(configured)
+        except KeyError:
+            # The root-owned launcher performs the authoritative account check;
+            # keeping the name here lets installations surface its clear error
+            # when provisioning was skipped.
+            return configured
+        if account.pw_uid == 0:
+            raise RuntimeError("Autonomous agent account must never have UID 0")
+        group_ids = set(os.getgrouplist(configured, account.pw_gid))
+        group_names = set()
+        for group_id in group_ids:
+            try:
+                group_names.add(grp.getgrgid(group_id).gr_name)
+            except KeyError:
+                continue
+        if 0 in group_ids or group_names.intersection({"root", "wheel", "sudo", "admin"}):
+            raise RuntimeError("Autonomous agent account must not belong to an admin group")
+        return configured
+
     def _resolve_effective_repo_context(self, wf: dict | None) -> dict[str, str]:
         """Resolve the authoritative repo path + branch for this workflow."""
         workflow = wf or self.workflow or {}
@@ -914,6 +1053,13 @@ class AutonomousOrchestrator:
         top_level = gh._run_git(["rev-parse", "--show-toplevel"]).stdout.strip()
         branch = gh.get_current_branch()
         head = gh.get_current_commit()
+        origin = gh._run_git(["remote", "get-url", "origin"], check=False).stdout.strip()
+        git_dir = gh._run_git(["rev-parse", "--absolute-git-dir"]).stdout.strip()
+        common_dir = gh._run_git(
+            ["rev-parse", "--path-format=absolute", "--git-common-dir"]
+        ).stdout.strip()
+        git_identity = gh.get_path_identity(git_dir)
+        common_identity = gh.get_path_identity(common_dir)
         if not isinstance(top_level, str) or not top_level.startswith(os.sep):
             raise RuntimeError(f"unsupported repo root probe: {top_level!r}")
         if not isinstance(branch, str) or not isinstance(head, str):
@@ -923,6 +1069,11 @@ class AutonomousOrchestrator:
             "top_level": os.path.realpath(top_level) if top_level else "",
             "branch": branch,
             "head": head,
+            "origin": origin,
+            "git_dir": os.path.realpath(git_dir),
+            "common_dir": os.path.realpath(common_dir),
+            "git_identity": git_identity,
+            "common_identity": common_identity,
         }
 
     def _ancestor_check(self, gh: "GitHubOps", a: str, b: str) -> bool | None:
@@ -1005,8 +1156,7 @@ class AutonomousOrchestrator:
             # Unexpected exception (not a merge-base exit code). main HEAD has
             # already moved suspiciously, so do not assume benign.
             logger.warning(
-                "Workflow %s: benign-pull probe raised for main HEAD %s..%s: %s; "
-                "failing closed.",
+                "Workflow %s: benign-pull probe raised for main HEAD %s..%s: %s; failing closed.",
                 self._workflow_id,
                 before[:8],
                 after[:8],
@@ -1069,6 +1219,21 @@ class AutonomousOrchestrator:
                 "Agent changed the workflow branch unexpectedly: "
                 f"expected {expected_branch}, actual {after_effective.get('branch', '')}"
             )
+        before_origin = before_state.get("effective", {}).get("origin", "")
+        after_origin = after_effective.get("origin", "")
+        if before_origin != after_origin:
+            return (
+                "Agent changed the workflow repository origin unexpectedly: "
+                f"expected {before_origin!r}, actual {after_origin!r}"
+            )
+        for metadata_key in ("git_dir", "common_dir"):
+            expected_metadata = before_state.get("effective", {}).get(metadata_key, "")
+            actual_metadata = after_effective.get(metadata_key, "")
+            if expected_metadata != actual_metadata:
+                return (
+                    "Agent changed protected Git metadata unexpectedly: "
+                    f"{metadata_key} expected {expected_metadata!r}, actual {actual_metadata!r}"
+                )
 
         before_main = before_state.get("main")
         before_effective = before_state.get("effective", {})
@@ -1329,10 +1494,13 @@ class AutonomousOrchestrator:
             if check.get("bucket") != "fail":
                 continue
             name = str(check.get("name") or "").strip()
-            try:
-                excerpt = gh.get_check_failure_excerpt(check)
-            except Exception:
-                excerpt = ""
+            if "failure_excerpt" in check:
+                excerpt = str(check.get("failure_excerpt") or "")
+            else:
+                try:
+                    excerpt = gh.get_check_failure_excerpt(check)
+                except Exception:
+                    excerpt = ""
             # Normalize: strip volatile bits (timestamps, absolute paths,
             # run/job ids) so the hash is stable across re-runs of the same
             # error but differs when the error set changes.
@@ -1417,16 +1585,19 @@ class AutonomousOrchestrator:
             if link:
                 lines.append(f"- 链接: {link}")
 
-            try:
-                excerpt = gh.get_check_failure_excerpt(check)
-            except Exception as exc:
-                logger.warning(
-                    "Failed to fetch CI failure excerpt for check '%s' in PR #%s: %s",
-                    name,
-                    pr_number,
-                    exc,
-                )
-                excerpt = ""
+            if "failure_excerpt" in check:
+                excerpt = str(check.get("failure_excerpt") or "")
+            else:
+                try:
+                    excerpt = gh.get_check_failure_excerpt(check)
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to fetch CI failure excerpt for check '%s' in PR #%s: %s",
+                        name,
+                        pr_number,
+                        exc,
+                    )
+                    excerpt = ""
             if excerpt:
                 lines.append("- 失败摘录:")
                 lines.append("```text")
@@ -1442,7 +1613,208 @@ class AutonomousOrchestrator:
                 "4. 只有在确实产生新代码提交后，才能宣布 CI 修复完成；如果没有代码改动，必须明确说明为什么 CI 会自动恢复。",
             ]
         )
+        runtime_contract = self._project_runtime_contract(
+            wf.get("worktree_path") or wf.get("project_path", ""), gh
+        )
+        if runtime_contract:
+            lines.append(str(runtime_contract))
         return "\n".join(lines).strip()
+
+    @staticmethod
+    def _project_runtime_contract(project_path: str, gh: GitHubOps | None = None) -> str:
+        """Describe the repository runtime without treating the service host
+        interpreter as a compatibility target.
+
+        Autonomous agents previously saw the Open ACE service's Python 3.9 and
+        rewrote Python 3.10+ repositories across hundreds of files.  Surface
+        the declared requirement and make the distinction explicit in every
+        code-writing/test prompt.
+        """
+        if not project_path:
+            return ""
+        declared = ""
+        pyproject = os.path.join(project_path, "pyproject.toml")
+        pyproject_text = ""
+        try:
+            with open(pyproject, encoding="utf-8") as handle:
+                pyproject_text = handle.read()
+        except OSError:
+            # Multi-user worktrees may be unreadable by the service account.
+            # GitHubOps routes git through the workflow owner and can still
+            # read the committed file without weakening filesystem isolation.
+            if gh is not None:
+                try:
+                    result = gh._run_git(["show", "HEAD:pyproject.toml"], check=False)
+                    if result.returncode == 0:
+                        pyproject_text = result.stdout or ""
+                except Exception:
+                    pass
+        match = re.search(
+            r'^\s*requires-python\s*=\s*["\']([^"\']+)["\']',
+            pyproject_text,
+            re.MULTILINE,
+        )
+        if match:
+            declared = match.group(1).strip()
+        if not declared:
+            return ""
+        host = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+        return (
+            "\n\n## 项目运行时契约\n"
+            f"- 项目声明的 Python 版本：`{declared}`\n"
+            f"- Open ACE 服务进程使用的 Python：`{host}`\n"
+            "- 服务进程版本不代表目标项目的兼容范围。必须使用满足项目声明/CI matrix "
+            "的解释器执行验证；如果当前解释器不满足要求，应切换解释器或明确报告环境不匹配，"
+            "绝对不能通过全仓改写类型注解、添加 future import 等方式让项目迁就宿主版本。\n"
+            "- 编排器会把 `python`、`python3`、`pytest` 绑定到已选择的兼容运行时；"
+            "不要调用绝对路径或带版本后缀的 Python 来绕过该绑定。\n"
+        )
+
+    @staticmethod
+    def _runtime_environment_gate(project_path: str, gh: GitHubOps | None = None) -> str:
+        """Return a blocking error if a Python minimum cannot be satisfied.
+
+        The gate deliberately recognizes a compatible interpreter already on
+        PATH or ``uv`` (which can provision the declared interpreter). This
+        makes environment mismatch a deterministic workflow decision instead
+        of inviting repository-wide compatibility rewrites.
+        """
+        _, error = AutonomousOrchestrator._select_project_python_runtime(project_path, gh)
+        return error
+
+    @staticmethod
+    def _select_project_python_runtime(
+        project_path: str, gh: GitHubOps | None = None
+    ) -> tuple[list[str], str]:
+        """Select the command that autonomous Python/pytest shims must use."""
+        contract = AutonomousOrchestrator._project_runtime_contract(project_path, gh)
+        match = re.search(r"项目声明的 Python 版本：`([^`]+)`", contract)
+        if not match:
+            return [], ""
+        minimum = re.search(r">=\s*(\d+)\.(\d+)", match.group(1))
+        if not minimum:
+            return [], ""
+        required = (int(minimum.group(1)), int(minimum.group(2)))
+        system_account = getattr(gh, "system_account", None) if gh is not None else None
+        if sys.version_info[:2] >= required and not system_account:
+            return [sys.executable], ""
+        candidates = [
+            os.path.join(project_path, ".venv", "bin", "python"),
+            os.path.join(project_path, "venv", "bin", "python"),
+        ]
+        if sys.version_info[:2] >= required:
+            candidates.append(sys.executable)
+        for minor in range(required[1], required[1] + 6):
+            candidates.append(shutil.which(f"python{required[0]}.{minor}") or "")
+            if system_account:
+                try:
+                    located = subprocess.run(
+                        [
+                            "sudo",
+                            "-u",
+                            system_account,
+                            "sh",
+                            "-lc",
+                            f"command -v python{required[0]}.{minor}",
+                        ],
+                        capture_output=True,
+                        text=True,
+                        timeout=5,
+                        check=False,
+                    )
+                    if located.returncode == 0:
+                        candidates.append(located.stdout.strip())
+                except (OSError, subprocess.SubprocessError):
+                    pass
+        for executable in candidates:
+            if not executable:
+                continue
+            try:
+                probe_command = [
+                    executable,
+                    "-c",
+                    "import sys; print(f'{sys.version_info[0]}.{sys.version_info[1]}')",
+                ]
+                if system_account:
+                    probe_command = ["sudo", "-u", system_account, *probe_command]
+                detected = subprocess.run(
+                    probe_command,
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                    check=False,
+                )
+                major, found_minor = (int(part) for part in detected.stdout.strip().split(".")[:2])
+                if detected.returncode == 0 and (major, found_minor) >= required:
+                    return [executable], ""
+            except (OSError, ValueError, subprocess.SubprocessError):
+                continue
+        uv = shutil.which("uv")
+        if not uv and system_account:
+            try:
+                located_uv = subprocess.run(
+                    ["sudo", "-u", system_account, "sh", "-lc", "command -v uv"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                    check=False,
+                )
+                if located_uv.returncode == 0:
+                    uv = located_uv.stdout.strip()
+            except (OSError, subprocess.SubprocessError):
+                pass
+        if uv:
+            return [
+                uv,
+                "run",
+                "--python",
+                f"{required[0]}.{required[1]}",
+                "python",
+            ], ""
+        return [], (
+            f"Environment mismatch: project requires Python >= {required[0]}.{required[1]}, "
+            f"service has {sys.version_info.major}.{sys.version_info.minor}, and no compatible "
+            "interpreter or uv provisioner is available. Repository compatibility rewrites are blocked."
+        )
+
+    @staticmethod
+    def _scope_violation(changed_files: list[str]) -> str:
+        """Return a blocking reason when one autonomous round explodes in scope."""
+        limit = MAX_AUTONOMOUS_CHANGED_FILES
+        normalized = sorted({path for path in changed_files if path})
+        if limit > 0 and len(normalized) > limit:
+            sample = ", ".join(normalized[:8])
+            return (
+                f"Autonomous change scope exceeded: {len(normalized)} files changed "
+                f"(limit {limit}). Sample: {sample}"
+            )
+        return ""
+
+    def _validate_autonomous_change_scope(
+        self,
+        gh: GitHubOps,
+        wf: dict,
+        commit_before: str,
+        commit_after: str,
+    ) -> str:
+        """Fail closed on both per-round and cumulative branch scope."""
+        if not commit_before or not commit_after:
+            return "Autonomous change scope could not be verified: missing commit boundary"
+        ranges = [("current round", commit_before)]
+        cumulative_base = (wf.get("base_commit_sha") or "").strip()
+        if not cumulative_base:
+            cumulative_base = "origin/main"
+        if cumulative_base != commit_before:
+            ranges.append(("cumulative branch", cumulative_base))
+        for label, base in ranges:
+            try:
+                changed_files = gh.get_changed_files(base, commit_after)
+            except Exception as exc:
+                return f"Autonomous {label} scope could not be verified; refusing to push: {exc}"
+            violation = self._scope_violation(changed_files)
+            if violation:
+                return f"{label.capitalize()} {violation}"
+        return ""
 
     def _get_ci_repair_prompt(self, wf: dict) -> str:
         """Return merge-phase CI repair context, or empty."""
@@ -1508,6 +1880,7 @@ class AutonomousOrchestrator:
         pr_number: int,
         failed_checks: list[dict],
         *,
+        gh: GitHubOps | None = None,
         include_prior_failures: bool = False,
     ) -> str:
         """Assemble the CI repair agent prompt.
@@ -1527,15 +1900,33 @@ class AutonomousOrchestrator:
                 f"本任务关联 GitHub Issue #{issue_number}。\n"
                 f"修复时请确保修改继续满足 Issue #{issue_number} 的所有需求。\n\n"
             )
+        requirements = str(wf.get("requirements_text") or "").strip()
+        if requirements:
+            prompt += f"## 原始需求（截断至 6000 字符）\n{requirements[:6000]}\n\n"
+        final_plan = str(self._get_latest_final_plan(wf) or "").strip()
+        if final_plan and final_plan != requirements:
+            prompt += f"## 审定方案（截断至 6000 字符）\n{final_plan[:6000]}\n\n"
+        if gh is not None:
+            try:
+                pr_diff = gh.get_pr_diff(pr_number)
+            except Exception as exc:
+                logger.warning("Failed to load PR #%s diff for repair context: %s", pr_number, exc)
+                pr_diff = ""
+            if pr_diff:
+                prompt += (
+                    f"## 当前 PR diff（截断至 12000 字符）\n```diff\n{pr_diff[:12000]}\n```\n\n"
+                )
         prompt += (
             "## 重要约束\n"
             "1. 保持在当前工作分支上修复，不要创建新的 PR，不要切换到其他分支。\n"
             "2. 不要进入新的代码审查、进度汇报或等待流程；当前唯一目标是让现有 PR 的 CI 通过。\n"
             "3. 必须优先根据 CI 工作流、失败日志摘录和仓库脚本定位问题，复现 CI 真实执行的命令。\n"
             "4. 修复后重新运行对应命令，以及你改动涉及到的必要相关测试。\n"
-            "5. 只有在确实产生代码或配置修改后，才能提交 git commit 并推送到当前 PR 分支。\n"
+            "5. 不要执行 git add、git commit 或 git push；编排器会在范围校验通过后统一提交并推送。\n"
             "6. 结束时请明确说明：你复现了哪些命令、修复了什么、还剩什么风险。\n"
         )
+        # Runtime contract is already embedded in ci_repair_context; do not
+        # duplicate it in the fresh-session prompt.
         prompt += self._get_ci_repair_prompt(wf)
         if failed_checks:
             failure_list = "\n".join(
@@ -1557,6 +1948,7 @@ class AutonomousOrchestrator:
         attempt: int,
         branch_name: str | None,
         pr_number: int,
+        scope_validator=None,
     ) -> tuple[str, bool, str]:
         """Detect whether the CI repair agent produced changes and push them.
 
@@ -1587,6 +1979,10 @@ class AutonomousOrchestrator:
 
         push_error = ""
         if sha_changed:
+            if scope_validator is not None:
+                push_error = str(scope_validator(commit_before, commit_sha) or "")
+                if push_error:
+                    return commit_sha, sha_changed, push_error
             try:
                 gh.git_push(branch=branch_name, force_with_lease=True)
             except Exception as e:
@@ -1610,6 +2006,24 @@ class AutonomousOrchestrator:
         dev_round = int(wf.get("dev_round", 1) or 1)
         attempt = int(wf.get("ci_repair_attempts", 0) or 0)
         branch_name = wf.get("branch_name", "")
+        project_path = wf.get("worktree_path") or wf.get("project_path", "")
+        runtime_error = (
+            ""
+            if wf.get("workspace_type") == "remote"
+            else self._runtime_environment_gate(project_path, gh)
+        )
+        if runtime_error:
+            self._create_milestone(
+                phase="merge",
+                dev_round=dev_round,
+                round_number=attempt,
+                milestone_type="ci_repair_environment_mismatch",
+                status="failed",
+                title="CI repair environment is incompatible",
+                error_message=runtime_error,
+            )
+            self._update_workflow({"status": "failed", "error_message": runtime_error})
+            return
 
         repair_ms = self._create_milestone(
             phase="merge",
@@ -1620,7 +2034,9 @@ class AutonomousOrchestrator:
             title=f"CI repair attempt {attempt} for PR #{pr_number}",
         )
 
-        repair_prompt = self._build_merge_ci_repair_agent_prompt(wf, pr_number, failed_checks)
+        repair_prompt = self._build_merge_ci_repair_agent_prompt(
+            wf, pr_number, failed_checks, gh=gh, include_prior_failures=True
+        )
 
         # Capture the PR's remote head SHA (not the local worktree HEAD) as the
         # baseline. If a prior repair round committed locally but didn't push
@@ -1646,6 +2062,10 @@ class AutonomousOrchestrator:
             except Exception:
                 pass
 
+        # CI repair is deliberately a one-shot session.  Resuming the main
+        # plan/development conversation at merge time routinely exceeds the
+        # provider context window and adds no useful signal: the exact PR diff
+        # and CI excerpts are already present in the prompt.
         repair_result = self._run_agent(
             wf=wf,
             workflow_id=self._workflow_id,
@@ -1657,52 +2077,41 @@ class AutonomousOrchestrator:
             remote_machine_id=wf.get("remote_machine_id"),
             permission_mode=wf.get("permission_mode", "auto-edit"),
             allowed_tools=AUTONOMOUS_DEV_ALLOWED_TOOLS.get(wf.get("cli_tool", "claude-code"), []),
-            session_line="main",
+            session_line="fresh",
             timeout=int(wf.get("task_timeout") or DEFAULT_TASK_TIMEOUT),
             milestone_id=repair_ms.get("milestone_id", ""),
         )
 
-        # Context-overflow recovery: the resumed main session can exceed the
-        # model's input-token limit by merge time (plan + every dev/review
-        # round accumulate on `main`). The agent then produces nothing (400
-        # on the first API call). Retry the SAME repair attempt on a fresh
-        # minimal-context session (no --resume), injecting prior CI repair
-        # failures so the agent doesn't repeat failed approaches. Does NOT
-        # increment ci_repair_attempts — this is in-round recovery for the
-        # current attempt, not a new attempt. (#1816)
-        if self._is_context_overflow(repair_result):
-            logger.warning(
-                "CI repair attempt %d hit context overflow on main session; "
-                "retrying on fresh session with prior-failure context",
-                attempt,
+        if repair_result.error_code == "repo_integrity_violation":
+            self._accumulate_tokens(repair_result)
+            self._abort_on_repo_integrity_violation(
+                repair_result, repair_ms.get("milestone_id", "")
             )
-            # Discard any half-applied changes from the aborted main run so the
-            # fresh agent starts from a clean worktree.
+            return
+
+        if self._is_context_overflow(repair_result):
+            # A fresh prompt cannot be made smaller by replaying the same
+            # request with added history. Discard any partial edits and fail
+            # this bounded repair attempt without pushing uncertain code.
+            self._accumulate_tokens(repair_result)
             try:
                 gh.reset_hard_to_head()
-            except Exception as e:
-                logger.warning("Failed to reset worktree before fresh CI repair: %s", e)
-
-            fresh_prompt = self._build_merge_ci_repair_agent_prompt(
-                wf, pr_number, failed_checks, include_prior_failures=True
+            except Exception as exc:
+                logger.warning("Failed to discard partial overflow edits: %s", exc)
+            message = (
+                "CI repair failed: context overflow - "
+                f"{repair_result.error or repair_result.response_text}"
             )
-            repair_result = self._run_agent(
-                wf=wf,
-                workflow_id=self._workflow_id,
-                cli_tool=wf.get("cli_tool", "claude-code"),
-                model=wf.get("model", ""),
-                project_path=wf.get("worktree_path") or wf.get("project_path", ""),
-                prompt=fresh_prompt,
-                workspace_type=wf.get("workspace_type", "local"),
-                remote_machine_id=wf.get("remote_machine_id"),
-                permission_mode=wf.get("permission_mode", "auto-edit"),
-                allowed_tools=AUTONOMOUS_DEV_ALLOWED_TOOLS.get(
-                    wf.get("cli_tool", "claude-code"), []
-                ),
-                session_line="fresh",
-                timeout=int(wf.get("task_timeout") or DEFAULT_TASK_TIMEOUT),
-                milestone_id=repair_ms.get("milestone_id", ""),
+            self.repo.update_milestone(
+                repair_ms.get("milestone_id", ""),
+                {
+                    "status": "failed",
+                    "session_id": repair_result.session_id,
+                    "error_message": message,
+                },
             )
+            self._update_workflow({"status": "failed", "error_message": message})
+            return
 
         self._gh = None
         gh = self._get_gh()
@@ -1732,7 +2141,14 @@ class AutonomousOrchestrator:
         self._accumulate_tokens(repair_result)
 
         commit_sha, sha_changed, push_error = self._detect_and_push_ci_repair_changes(
-            gh, commit_before, attempt, branch_name or None, pr_number
+            gh,
+            commit_before,
+            attempt,
+            branch_name or None,
+            pr_number,
+            scope_validator=lambda before, after: self._validate_autonomous_change_scope(
+                gh, wf, before, after
+            ),
         )
 
         try:
@@ -1795,9 +2211,7 @@ class AutonomousOrchestrator:
         self._update_workflow({"current_phase": "merge", "status": "merging", "error_message": ""})
 
         repair_comment = (
-            f"## 🔧 CI Repair Attempt {attempt}\n\n"
-            f"- PR: #{pr_number}\n"
-            f"- Branch: `{branch_name}`\n"
+            f"## 🔧 CI Repair Attempt {attempt}\n\n- PR: #{pr_number}\n- Branch: `{branch_name}`\n"
         )
         if commit_sha:
             repair_comment += f"- Commit: `{commit_sha[:8]}`\n"
@@ -2476,6 +2890,99 @@ class AutonomousOrchestrator:
             self._update_workflow({"status": "failed", "error_message": message})
             return
 
+        # Resolve log evidence before consuming an attempt.  A repair agent
+        # that only knows "lint failed" can at best guess and historically
+        # burned all three rounds fixing one superficial layer at a time.
+        # Keep completed/cancelled jobs out of the actionable set and cache the
+        # excerpts on the check dict so fingerprint/context construction does
+        # not download each log twice.
+        enriched_checks: list[dict] = []
+        actionable_count = 0
+        excerpt_count = 0
+        for raw_check in failed_checks:
+            check = dict(raw_check)
+            if check.get("bucket") == "fail" and str(check.get("state") or "").lower() not in {
+                "cancelled",
+                "canceled",
+            }:
+                actionable_count += 1
+                try:
+                    check["failure_excerpt"] = gh.get_check_failure_excerpt(check)
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to collect CI diagnostics for PR #%s check '%s': %s",
+                        pr_number,
+                        check.get("name") or "unknown",
+                        exc,
+                    )
+                    check["failure_excerpt"] = ""
+                if check["failure_excerpt"]:
+                    excerpt_count += 1
+            enriched_checks.append(check)
+
+        if actionable_count and excerpt_count < actionable_count:
+            diagnostics_attempt = int(wf.get("ci_diagnostics_attempts", 0) or 0) + 1
+            message = (
+                f"PR #{pr_number} CI diagnostics incomplete "
+                f"({excerpt_count}/{actionable_count} failed checks have logs; "
+                f"poll {diagnostics_attempt}/{MAX_CI_DIAGNOSTICS_ATTEMPTS})"
+            )
+            pending_ms = self._create_milestone(
+                phase="merge",
+                dev_round=dev_round,
+                round_number=previous_attempts,
+                milestone_type="ci_diagnostics_pending",
+                status="in_progress",
+                title="Waiting for actionable CI failure logs",
+                error_message=message,
+            )
+            if diagnostics_attempt >= MAX_CI_DIAGNOSTICS_ATTEMPTS:
+                terminal = (
+                    f"{message}. Automatic repair stopped because complete failure logs "
+                    "could not be collected; verify GitHub token Actions-log permissions "
+                    "and check provider URLs."
+                )
+                self.repo.update_milestone(
+                    pending_ms.get("milestone_id", ""),
+                    {"status": "failed", "error_message": terminal},
+                )
+                self._update_workflow(
+                    {
+                        "status": "failed",
+                        "error_message": terminal,
+                        "ci_diagnostics_attempts": diagnostics_attempt,
+                    }
+                )
+                return
+            self._update_workflow(
+                {
+                    "current_phase": "merge",
+                    "status": "merging",
+                    "error_message": message,
+                    "ci_diagnostics_attempts": diagnostics_attempt,
+                }
+            )
+            return
+
+        failed_checks = enriched_checks
+        pending_ms = self._find_existing_milestone(
+            phase="merge",
+            milestone_type="ci_diagnostics_pending",
+            dev_round=dev_round,
+            round_number=previous_attempts,
+        )
+        if pending_ms and pending_ms.get("status") == "in_progress":
+            self.repo.update_milestone(
+                pending_ms.get("milestone_id", ""),
+                {
+                    "status": "completed",
+                    "error_message": "",
+                    "result_summary": (
+                        f"Collected actionable logs for all {actionable_count} failed checks"
+                    ),
+                },
+            )
+
         # Fine-grained fingerprint: check name + the specific error lines from
         # the CI log excerpt. A name-only signature is too coarse for Actions
         # jobs that bundle multiple tools (one ``lint`` job runs
@@ -2533,6 +3040,7 @@ class AutonomousOrchestrator:
             "agent_session_id": "",
             "error_message": "",
             "ci_repair_attempts": next_attempt,
+            "ci_diagnostics_attempts": 0,
             "ci_repair_context": context,
             "last_ci_failure_signature": signature,
             "last_ci_failure_head_sha": current_head_sha,
@@ -2810,10 +3318,19 @@ class AutonomousOrchestrator:
         permanent client error (NOT transient), so it deliberately does not
         match ``_TRANSIENT_API_ERROR_RE`` and won't trigger the backoff loop.
         """
-        if result.success:
-            return False
         body = f"{result.error or ''}\n{result.response_text or ''}"
-        return bool(_CONTEXT_OVERFLOW_RE.search(body))
+        if not _CONTEXT_OVERFLOW_RE.search(body):
+            return False
+        if not result.success:
+            return True
+
+        # Some Claude-compatible providers emit a terminal ``API Error`` text
+        # envelope but the CLI process still exits zero.  Treat that exact
+        # provider envelope as failure while avoiding broad scans of otherwise
+        # successful, token-bearing prose (which previously caused false
+        # retries when an agent merely discussed rate limits).
+        visible = (result.response_text or "").strip()
+        return bool(re.match(r"^API Error:\s*400\b", visible, re.IGNORECASE))
 
     def _run_agent(
         self, wf: dict = None, *, session_line: str = "fresh", milestone_id: str = "", **kwargs
@@ -2851,20 +3368,102 @@ class AutonomousOrchestrator:
         if "user_id" not in kwargs and workflow_data:
             kwargs["user_id"] = workflow_data.get("user_id")
 
-        # Get system_account for multi-user permission isolation (Issue #1395)
-        # When set, CLI tools will be run via `sudo -u <system_account>`
+        # Resolve the repository owner first.  GitHubOps continues to run as
+        # that identity, while the agent itself is switched below to a
+        # credentialless dedicated principal.
         if "system_account" not in kwargs and workflow_data:
             kwargs["system_account"] = self._resolve_system_account(workflow_data)
+        project_system_account = kwargs.get("system_account")
 
         repo_context = self._resolve_effective_repo_context(workflow_data)
         effective_project_path = repo_context.get("repo_path") or kwargs.get("project_path", "")
         if effective_project_path:
             kwargs["project_path"] = effective_project_path
+        if kwargs.get("workspace_type", "local") != "remote":
+            runtime_command, runtime_error = self._select_project_python_runtime(
+                effective_project_path, self._get_gh()
+            )
+            if runtime_command:
+                kwargs["runtime_python_command"] = runtime_command
+            elif runtime_error:
+                logger.warning("Autonomous runtime binding unavailable: %s", runtime_error)
         repo_state_before = self._snapshot_repo_context(
             workflow_data,
             kwargs.get("workspace_type", "local"),
-            kwargs.get("system_account"),
+            project_system_account,
         )
+        if (
+            kwargs.get("workspace_type", "local") == "local"
+            and effective_project_path
+            and repo_state_before is None
+        ):
+            return AgentTaskResult(
+                session_id=tracking_session_id,
+                tracking_session_id=tracking_session_id,
+                success=False,
+                error_code="repo_integrity_violation",
+                error="Cannot establish a trusted Git context before agent execution",
+            )
+
+        # Pin every privileged git operation to the gitdir resolved before the
+        # agent starts.  A writable worktree root lets an editor replace the
+        # .git directory entry even when the metadata itself is read-only; the
+        # trusted context prevents that replacement from redirecting later
+        # owner-credentialed commits or pushes.
+        if repo_state_before:
+            for state in (
+                repo_state_before.get("effective"),
+                repo_state_before.get("main"),
+            ):
+                if not isinstance(state, dict) or not state.get("git_dir"):
+                    continue
+                GitHubOps.register_trusted_git_context(
+                    state.get("repo_path", ""),
+                    state.get("git_dir", ""),
+                    state.get("git_identity", ""),
+                    state.get("common_dir", ""),
+                    state.get("common_identity", ""),
+                )
+            current_gh = self._get_gh()
+            effective_state = repo_state_before.get("effective") or {}
+            if current_gh is not None and os.path.realpath(
+                current_gh.repo_path
+            ) == os.path.realpath(effective_state.get("repo_path", "")):
+                current_gh.bind_trusted_git_context(
+                    effective_state.get("git_dir", ""),
+                    effective_state.get("git_identity", ""),
+                    effective_state.get("common_dir", ""),
+                    effective_state.get("common_identity", ""),
+                )
+
+        if kwargs.get("workspace_type", "local") == "local":
+            origin = str(((repo_state_before or {}).get("effective") or {}).get("origin") or "")
+            if re.match(r"^https?://[^/]*@", origin, re.IGNORECASE):
+                return AgentTaskResult(
+                    session_id=tracking_session_id,
+                    tracking_session_id=tracking_session_id,
+                    success=False,
+                    error=(
+                        "Autonomous agent isolation refused a repository whose origin URL "
+                        "contains embedded credentials; configure a credential helper instead"
+                    ),
+                )
+            isolated_account = self._resolve_isolated_agent_account()
+            try:
+                service_account = pwd.getpwuid(os.getuid()).pw_name
+            except (KeyError, OverflowError):
+                service_account = ""
+            if isolated_account in {project_system_account, service_account}:
+                return AgentTaskResult(
+                    session_id=tracking_session_id,
+                    tracking_session_id=tracking_session_id,
+                    success=False,
+                    error=(
+                        "Autonomous agent isolation is invalid: the credentialless agent "
+                        "account must differ from the service and repository owner accounts"
+                    ),
+                )
+            kwargs["system_account"] = isolated_account
 
         with self._session_lock:
             self._current_session_id = tracking_session_id
@@ -3055,14 +3654,14 @@ class AutonomousOrchestrator:
         # phrases. #1001. Centralized in a helper so the retry loop's early-exit
         # paths (status failed/cancelled, cancel-requested) apply it too. #1036.
         self._synthesize_transient_failure(result)
-        if result.success:
-            repo_validation_error = self._validate_repo_context_after_run(
-                repo_state_before, kwargs.get("system_account")
-            )
-            if repo_validation_error:
-                logger.error("Workflow repo validation failed: %s", repo_validation_error)
-                result.success = False
-                result.error = repo_validation_error
+        repo_validation_error = self._validate_repo_context_after_run(
+            repo_state_before, project_system_account
+        )
+        if repo_validation_error:
+            logger.error("Workflow repo validation failed: %s", repo_validation_error)
+            result.success = False
+            result.error_code = "repo_integrity_violation"
+            result.error = repo_validation_error
 
         # Attribute this call's own usage to its milestone (increment, not cumulative).
         self._write_phase_usage(milestone_id, result, retry_usage)
@@ -3101,6 +3700,26 @@ class AutonomousOrchestrator:
         result.response_text = ""  # don't let callers store the error body
         result.visible_response_text = ""
         result.structured_tags = {}
+
+    def _abort_on_repo_integrity_violation(
+        self, result: AgentTaskResult, milestone_id: str = ""
+    ) -> bool:
+        """Fail before any owner-credentialed salvage or remote mutation."""
+        if result.error_code != "repo_integrity_violation":
+            return False
+        message = result.error or "Protected Git metadata changed during agent execution"
+        if milestone_id:
+            self.repo.update_milestone(
+                milestone_id,
+                {
+                    "status": "failed",
+                    "session_id": result.session_id,
+                    "error_message": message,
+                },
+            )
+        self._update_workflow({"status": "failed", "error_message": message})
+        self._emit("workflow_failed", {"error": message, "reason": "repo_integrity_violation"})
+        return True
 
     def _write_phase_usage(
         self,
@@ -4244,6 +4863,15 @@ class AutonomousOrchestrator:
         """
         # Get Issue number for prompt context
         issue_number = wf.get("github_issue_number") or self.workflow.get("github_issue_number")
+        project_path = wf.get("worktree_path") or wf.get("project_path", "")
+        runtime_error = (
+            ""
+            if wf.get("workspace_type") == "remote"
+            else self._runtime_environment_gate(project_path, gh)
+        )
+        if runtime_error:
+            self._update_workflow({"status": "failed", "error_message": runtime_error})
+            return
         # Issue #1573: Verify we're on the correct branch before development
         expected_branch = wf.get("branch_name", "")
         workflow_prefix = f"auto-dev/{self._workflow_id[:8]}"
@@ -4335,7 +4963,7 @@ class AutonomousOrchestrator:
             dev_prompt += (
                 f"## 关联 Issue\n"
                 f"本任务关联 GitHub Issue #{issue_number}。\n"
-                f"开发完成后的 commit message 必须包含 Issue #{issue_number} 的引用（如 'fix: ... (Issue #{issue_number})'）。\n\n"
+                f"所有修改都必须满足 Issue #{issue_number}；提交由编排器统一完成。\n\n"
             )
         dev_prompt += (
             f"## 实现方案\n{final_plan}\n\n"
@@ -4345,7 +4973,10 @@ class AutonomousOrchestrator:
             f"3. 运行所有测试确保通过\n"
             f"4. 确保不破坏现有功能\n"
             f"5. 遵循项目现有的代码风格和约定\n"
-            f"6. 所有修改完成后，提交 git commit"
+            f"6. 保留修改在工作区，不要执行 git add、git commit 或 git push"
+        )
+        dev_prompt += self._project_runtime_contract(
+            wf.get("worktree_path") or wf.get("project_path", ""), gh
         )
         dev_prompt += self._get_ci_repair_prompt(wf)
         dev_prompt += self._get_user_feedback_prompt(wf)
@@ -4365,6 +4996,11 @@ class AutonomousOrchestrator:
             timeout=int(wf.get("task_timeout") or DEFAULT_TASK_TIMEOUT),
             milestone_id=ms.get("milestone_id", ""),
         )
+
+        if result.error_code == "repo_integrity_violation":
+            self._accumulate_tokens(result)
+            self._abort_on_repo_integrity_violation(result, ms.get("milestone_id", ""))
+            return
 
         # P2 修复（Issue #1611）：开发完成后重置 gh 缓存，重新绑定到正确路径
         self._gh = None
@@ -4536,6 +5172,28 @@ class AutonomousOrchestrator:
                     }
                 )
                 return
+
+        # Block accidental repository-wide rewrites before they can proceed to
+        # tests/PR creation.  The threshold is intentionally configurable for
+        # explicitly planned migrations, but the default catches the 80-170
+        # file scope explosions observed in security issue workflows.
+        scope_error = ""
+        if sha_changed:
+            scope_error = self._validate_autonomous_change_scope(gh, wf, commit_before, commit_sha)
+        if scope_error:
+            logger.error(scope_error)
+            self.repo.update_milestone(
+                ms.get("milestone_id", ""),
+                {
+                    "status": "failed",
+                    "session_id": result.session_id,
+                    "commit_shas": json.dumps([commit_sha] if commit_sha else []),
+                    "diff_stats": json.dumps(diff_stats),
+                    "error_message": scope_error,
+                },
+            )
+            self._update_workflow({"status": "failed", "error_message": scope_error})
+            return
 
         # Salvage logic (issue #723): the dev agent may report failure
         # (success=False) even though it produced real work this session — most
@@ -4729,6 +5387,15 @@ class AutonomousOrchestrator:
         """
         # Get Issue number for prompt context
         issue_number = wf.get("github_issue_number") or self.workflow.get("github_issue_number")
+        project_path = wf.get("worktree_path") or wf.get("project_path", "")
+        runtime_error = (
+            ""
+            if wf.get("workspace_type") == "remote"
+            else self._runtime_environment_gate(project_path, gh)
+        )
+        if runtime_error:
+            self._update_workflow({"status": "failed", "error_message": runtime_error})
+            return
         test_ms = self._create_milestone(
             phase="development",
             dev_round=dev_round,
@@ -4761,6 +5428,9 @@ class AutonomousOrchestrator:
                 f"测试验证需确保修改满足 Issue #{issue_number} 的所有需求。\n\n"
             )
         test_prompt += f"{targeted_test_context}\n\n"
+        test_prompt += self._project_runtime_contract(
+            wf.get("worktree_path") or wf.get("project_path", ""), gh
+        )
         test_prompt += (
             "## 重要：测试执行策略\n"
             "测试是必须执行的步骤，不能跳过。请严格遵循以下原则：\n"
@@ -4791,7 +5461,8 @@ class AutonomousOrchestrator:
             '- "测试运行完成，全部通过" ❌\n'
             '- "测试在后台运行中" ❌\n'
             '- "测试进度约50%" ❌\n'
-            "如果不遵守此格式要求，测试轮次将被判定为失败并触发 retry。\n"
+            "如果测试已经真实执行但汇总格式不标准，编排器会记录格式警告；"
+            "是否通过仍以测试进程结果为准。\n"
         )
 
         test_result = self._run_agent(
@@ -4810,6 +5481,9 @@ class AutonomousOrchestrator:
         )
 
         self._accumulate_tokens(test_result)
+
+        if self._abort_on_repo_integrity_violation(test_result, test_ms.get("milestone_id", "")):
+            return
 
         test_summary = self._artifact_text(test_result)
         test_visible_text = self._artifact_visible_text(test_result)
@@ -5032,11 +5706,19 @@ class AutonomousOrchestrator:
         has_test_result = has_actual_pytest_output
         test_status_tag = self._artifact_status_tag(test_result, "test_status").lower()
 
-        # Issue #1532 fix: Reverse judgment logic with tool_calls check
+        # A tool invocation proves only that the agent *attempted* to run a
+        # test command. It does not include the result/exit code, so it must
+        # never be treated as passing evidence by itself.
         has_test_tool_call = _has_test_tool_call(test_result.tool_calls or [], framework_type)
 
-        tests_actually_run = (
-            test_status_tag in ("passed", "failed") or has_test_tool_call or has_test_result
+        has_passing_tool_result = _has_passing_test_tool_result(
+            test_result.event_log or [], framework_type
+        )
+        tests_actually_run = has_passing_tool_result
+        test_result_inconclusive = (
+            test_result.success
+            and (has_test_tool_call or has_test_result or test_status_tag in ("passed", "failed"))
+            and not tests_actually_run
         )
 
         # Issue #1547: Validate test report format
@@ -5048,7 +5730,12 @@ class AutonomousOrchestrator:
             test_status_tag == "skipped"
             or has_skip_tag
             or (test_result.success and has_skip_keyword and not tests_actually_run)
-            or (test_result.success and not tests_actually_run)
+            or (
+                test_result.success
+                and not tests_actually_run
+                and not has_test_tool_call
+                and not has_test_result
+            )
         )
 
         # Post test results to issue
@@ -5056,6 +5743,8 @@ class AutonomousOrchestrator:
         if issue_number:
             if tests_actually_skipped:
                 status_line = "⚠️ Tests were not actually run — see details below"
+            elif test_result_inconclusive:
+                status_line = "⚠️ Test command was invoked but no verifiable result was captured"
             elif test_result.success:
                 status_line = "✅ All tests passed"
             else:
@@ -5064,6 +5753,22 @@ class AutonomousOrchestrator:
                 f"## 🧪 Test Results (Dev Round {dev_round})\n\n{status_line}\n\n{test_summary}"
             )
             self._post_github_comment(gh, issue_number, test_comment, context="test-results")
+
+        if test_result_inconclusive:
+            message = (
+                "Test execution is inconclusive: a test command was invoked, but no "
+                "structured TEST_STATUS or recognizable pass/fail output was captured"
+            )
+            self.repo.update_milestone(
+                test_ms.get("milestone_id", ""),
+                {"status": "failed", "error_message": message},
+            )
+            test_retries = int(wf.get("test_retries", 0) or 0) + 1
+            if test_retries <= MAX_TEST_RETRIES:
+                self._update_workflow({"test_retries": test_retries})
+                return
+            self._update_workflow({"status": "failed", "error_message": message})
+            return
 
         # Treat skipped tests as failure — tests must actually run.
         # Allow 1 retry in case of transient environment issues.
@@ -5117,33 +5822,15 @@ class AutonomousOrchestrator:
             )
             return
 
-        # Issue #1547: Handle non-standard format with retry
-        # If agent used non-standard format but tests actually ran, trigger retry
+        # Formatting is presentation metadata, not execution state.  When tool
+        # calls/output prove tests actually ran, a non-standard summary must not
+        # re-enter the scheduler and accidentally launch development again.
         if has_non_standard_format:
-            self.repo.update_milestone(
-                test_ms.get("milestone_id", ""),
-                {
-                    "status": "failed",
-                    "error_message": f"Non-standard test report format: {format_reason}",
-                },
-            )
-            format_retries = wf.get("format_retries", 0) + 1
-            if format_retries <= 1:
-                logger.warning(
-                    "Non-standard test report format for dev round %d, retry %d/1: %s",
-                    dev_round,
-                    format_retries,
-                    format_reason,
-                )
-                self._update_workflow({"format_retries": format_retries})
-                return  # Scheduler will re-call _run_test_phase
             logger.warning(
-                "Non-standard test report format after retry for dev round %d: %s",
+                "Non-standard test report format for dev round %d; using execution evidence: %s",
                 dev_round,
                 format_reason,
             )
-            # After retry exhausted, still proceed (tests did run, just format issue)
-            # But log warning and post comment to issue
             if issue_number:
                 format_comment = (
                     f"⚠️ **Format Warning**: Test report used non-standard format.\n"
@@ -5307,6 +5994,16 @@ class AutonomousOrchestrator:
                 # Branch is ahead or parallel → normal diff check
                 diff_stats = gh.get_diff_stats("main", branch_name)
                 has_changes = diff_stats.get("commits", 0) > 0
+                if has_changes:
+                    scope_error = self._validate_autonomous_change_scope(
+                        gh,
+                        wf,
+                        (wf.get("base_commit_sha") or main_sha),
+                        branch_sha,
+                    )
+                    if scope_error:
+                        self._update_workflow({"status": "failed", "error_message": scope_error})
+                        return
         except Exception as e:
             logger.warning("Failed to check branch status: %s", e)
             pass
@@ -5621,6 +6318,11 @@ class AutonomousOrchestrator:
 
         self._accumulate_tokens(review_result)
 
+        if self._abort_on_repo_integrity_violation(
+            review_result, review_ms.get("milestone_id", "")
+        ):
+            return
+
         review_text = self._artifact_text(review_result)
         # Detect approval using the language-aware marker, then persist a
         # structured verdict so progress_reported doesn't re-scan review text.
@@ -5735,6 +6437,10 @@ class AutonomousOrchestrator:
                 milestone_id=summary_ms.get("milestone_id", ""),
             )
             self._accumulate_tokens(summary_result)
+            if self._abort_on_repo_integrity_violation(
+                summary_result, summary_ms.get("milestone_id", "")
+            ):
+                return
             summary_text = self._artifact_text(summary_result)
             self.repo.update_milestone(
                 summary_ms.get("milestone_id", ""),
@@ -5827,7 +6533,7 @@ class AutonomousOrchestrator:
             "   - 如果是本 PR 引入的问题，修复后重新运行测试\n"
             "   - 如果是预先存在的问题（与本 PR 修改的文件无关），在回复末尾"
             "单独一行输出 `CI_STATUS: pre-existing`\n"
-            "3. 确认测试通过后提交 git commit 并推送\n"
+            "3. 确认测试通过后保留工作区修改；不要执行 git add、git commit 或 git push，编排器会校验、提交并推送\n"
         )
         if ci_failures:
             ci_summary = "\n".join(
@@ -5862,6 +6568,9 @@ class AutonomousOrchestrator:
 
         self._accumulate_tokens(fix_result)
 
+        if self._abort_on_repo_integrity_violation(fix_result, fix_ms.get("milestone_id", "")):
+            return
+
         # Clear user feedback after it has been injected into the prompt
         if wf.get("user_feedback", "").strip():
             self._update_workflow({"user_feedback": ""})
@@ -5893,8 +6602,15 @@ class AutonomousOrchestrator:
         push_failed = False
         push_error_msg = ""
         if sha_changed:
+            push_error_msg = self._validate_autonomous_change_scope(
+                gh, wf, commit_before, commit_sha
+            )
+            if push_error_msg:
+                push_failed = True
+                logger.error("Review fix scope rejected before push: %s", push_error_msg)
             try:
-                gh.git_push(force_with_lease=True)
+                if not push_failed:
+                    gh.git_push(force_with_lease=True)
             except Exception as e:
                 # Distinguish transient vs non-transient to enable Layer-2 retry
                 # (Issue #1814).
@@ -5934,6 +6650,13 @@ class AutonomousOrchestrator:
                     "tldr": self._artifact_tldr(fix_result),
                 },
             )
+            self._update_workflow(
+                {
+                    "status": "failed",
+                    "error_message": f"Review fix was not pushed: {push_error_msg}",
+                }
+            )
+            return
         else:
             self.repo.update_milestone(
                 fix_ms.get("milestone_id", ""),
@@ -6243,6 +6966,17 @@ class AutonomousOrchestrator:
 
         if pr_number:
             try:
+                pr_head_sha = gh.get_pr_head_sha(pr_number)
+                cumulative_base = (wf.get("base_commit_sha") or "origin/main").strip()
+                scope_error = self._validate_autonomous_change_scope(
+                    gh, wf, cumulative_base, pr_head_sha
+                )
+            except Exception as exc:
+                scope_error = f"Pre-merge change scope could not be verified: {exc}"
+            if scope_error:
+                self._update_workflow({"status": "failed", "error_message": scope_error})
+                return
+            try:
                 checks = gh.get_pr_checks(pr_number)
             except Exception as e:
                 raise GitHubOpsError(
@@ -6401,6 +7135,7 @@ class AutonomousOrchestrator:
         # All subsequent git ops run inside the temp worktree.
         wt_gh = GitHubOps(temp_wt_path, system_account=system_account)
         try:
+            original_pr_head = wt_gh.get_current_commit()
             # Fetch latest main and merge into the branch.
             wt_gh._run_git(["fetch", "origin", "main"])
             merge_result = wt_gh._run_git(["merge", "origin/main"], check=False)
@@ -6506,6 +7241,14 @@ class AutonomousOrchestrator:
                     current_branch,
                 )
                 branch_name = current_branch
+            resolved_head = wt_gh.get_current_commit()
+            merge_scope_wf = dict(wf)
+            merge_scope_wf["base_commit_sha"] = "origin/main"
+            scope_error = self._validate_autonomous_change_scope(
+                wt_gh, merge_scope_wf, original_pr_head, resolved_head
+            )
+            if scope_error:
+                raise RuntimeError(f"Conflict resolution scope rejected before push: {scope_error}")
             wt_gh.git_push(branch=branch_name, force_with_lease=True)
             self._create_milestone(
                 phase="merge",

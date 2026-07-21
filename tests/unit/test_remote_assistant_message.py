@@ -22,6 +22,7 @@ class TestAssistantMessageAccumulation(unittest.TestCase):
         from app.modules.workspace.remote_session_manager import RemoteSessionManager
 
         RemoteSessionManager._assistant_text_buffer.clear()
+        RemoteSessionManager._content_blocks_buffer.clear()
 
         self.patcher_sm = patch(
             "app.modules.workspace.remote_session_manager.SessionManager",
@@ -217,9 +218,8 @@ class TestAssistantMessageAccumulation(unittest.TestCase):
         self._send_output("system info", stream="system", is_complete=False)
         self.mock_session_mgr.append_transcript_message.assert_not_called()
 
-    def test_empty_text_not_stored(self):
-        """Empty accumulated text should not produce a DB record."""
-        # Only tool_use blocks — no text
+    def test_tool_only_turn_stores_structured_evidence(self):
+        """A tool-only turn must retain evidence even without visible text."""
         self._send_output(
             json.dumps(
                 {
@@ -233,7 +233,35 @@ class TestAssistantMessageAccumulation(unittest.TestCase):
         self._send_output(json.dumps({"type": "result", "subtype": "success"}))
 
         msgs = self._get_stored_assistant_messages()
-        self.assertEqual(len(msgs), 0)
+        self.assertEqual(len(msgs), 1)
+        self.assertEqual(msgs[0].kwargs["content"], "")
+        self.assertEqual(msgs[0].kwargs["metadata"]["content_blocks"][0]["type"], "tool_use")
+
+    def test_claude_user_tool_result_is_preserved(self):
+        self._send_output(
+            json.dumps(
+                {
+                    "type": "user",
+                    "message": {
+                        "content": [
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": "test-1",
+                                "content": "9 passed in 0.8s",
+                                "is_error": False,
+                            }
+                        ]
+                    },
+                }
+            )
+        )
+        self._send_output(json.dumps({"type": "result", "subtype": "success"}))
+
+        msgs = self._get_stored_assistant_messages()
+        self.assertEqual(len(msgs), 1)
+        blocks = msgs[0].kwargs["metadata"]["content_blocks"]
+        self.assertEqual(blocks[0]["type"], "tool_result")
+        self.assertEqual(blocks[0]["tool_use_id"], "test-1")
 
     def test_buffer_always_works(self):
         """Buffering to agent_manager always happens regardless of content."""

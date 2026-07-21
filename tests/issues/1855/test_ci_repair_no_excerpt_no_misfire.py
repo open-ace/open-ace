@@ -73,12 +73,8 @@ _FAILED_CHECKS = [
 # ── Layer 2: empty-excerpt fingerprint does not misfire give-up guard ──
 
 
-def test_no_excerpt_does_not_give_up_even_if_head_changed():
-    """When excerpt is unavailable, the fingerprint is name-only (<no-excerpt>).
-    Even if previous_sig == sig AND head_sha changed, the give-up guard must
-    NOT fire — it cannot tell whether the agent's fix changed the error set.
-    Reproduces #1855 where lint failed, agent fixed trailing newlines, but
-    fingerprint stayed lint::<empty-hash> and the workflow was wrongly killed."""
+def test_no_excerpt_defers_without_consuming_attempt():
+    """Missing diagnostics must wait instead of sending a blind repair agent."""
     wf = _make_workflow(
         # Previous round also had no excerpt → both sigs are lint::<no-excerpt>
         last_ci_failure_signature="lint::<no-excerpt>",
@@ -94,13 +90,61 @@ def test_no_excerpt_does_not_give_up_even_if_head_changed():
 
     orch._start_ci_repair_round(wf, 1873, _FAILED_CHECKS)
 
-    # Must proceed to repair, NOT give up — guard skipped because <no-excerpt>.
-    orch._run_merge_ci_repair.assert_called_once()
-    # And the workflow stayed merging (not failed).
+    orch._run_merge_ci_repair.assert_not_called()
     last_updates = [c.args[1] for c in mock_repo.update_workflow.call_args_list]
-    assert not any(
-        u.get("status") == "failed" for u in last_updates
-    ), "workflow wrongly failed on no-excerpt fingerprint"
+    assert any(u.get("status") == "merging" for u in last_updates)
+    assert not any("ci_repair_attempts" in u for u in last_updates)
+
+
+def test_no_excerpt_stops_after_bounded_diagnostics_polls():
+    from app.modules.workspace.autonomous.orchestrator import MAX_CI_DIAGNOSTICS_ATTEMPTS
+
+    wf = _make_workflow(ci_diagnostics_attempts=MAX_CI_DIAGNOSTICS_ATTEMPTS - 1)
+    orch, mock_repo = _make_orchestrator(wf)
+    gh = MagicMock()
+    gh.get_pr_head_sha.return_value = "sha-new"
+    gh.get_check_failure_excerpt.return_value = ""
+    orch._get_gh = MagicMock(return_value=gh)
+    orch._run_merge_ci_repair = MagicMock()
+
+    orch._start_ci_repair_round(wf, 1873, _FAILED_CHECKS)
+
+    orch._run_merge_ci_repair.assert_not_called()
+    updates = [call.args[1] for call in mock_repo.update_workflow.call_args_list]
+    assert any(update.get("status") == "failed" for update in updates)
+    assert any(
+        update.get("ci_diagnostics_attempts") == MAX_CI_DIAGNOSTICS_ATTEMPTS for update in updates
+    )
+
+
+def test_diagnostics_pending_milestone_closes_when_all_logs_arrive():
+    wf = _make_workflow(ci_diagnostics_attempts=2)
+    orch, mock_repo = _make_orchestrator(wf)
+    pending = {
+        "milestone_id": "ms-pending",
+        "milestone_type": "ci_diagnostics_pending",
+        "phase": "merge",
+        "dev_round": 1,
+        "round_number": 1,
+        "status": "in_progress",
+    }
+    mock_repo.list_milestones.side_effect = lambda *args, **kwargs: [pending]
+    gh = MagicMock()
+    gh.get_pr_head_sha.return_value = "sha-new"
+    gh.get_check_failure_excerpt.return_value = "pytest failed\n1 failed"
+    orch._get_gh = MagicMock(return_value=gh)
+    orch._run_merge_ci_repair = MagicMock()
+
+    orch._start_ci_repair_round(wf, 1873, _FAILED_CHECKS)
+
+    assert any(
+        call.args[0] == "ms-pending" and call.args[1].get("status") == "completed"
+        for call in mock_repo.update_milestone.call_args_list
+    )
+    assert any(
+        call.args[1].get("ci_diagnostics_attempts") == 0
+        for call in mock_repo.update_workflow.call_args_list
+    )
 
 
 def test_meaningful_fingerprint_still_gives_up_when_unchanged():
@@ -244,9 +288,11 @@ def test_mixed_fingerprint_skips_guard_when_any_check_has_no_excerpt():
     ]
     orch._start_ci_repair_round(wf, 1875, failed_checks)
 
-    # Mixed signature → guard skipped → proceeds to repair, not failed.
-    orch._run_merge_ci_repair.assert_called_once()
+    # Partial diagnostics must defer rather than asking the agent to guess the
+    # missing test failure or consuming a repair attempt.
+    orch._run_merge_ci_repair.assert_not_called()
     last_updates = [c.args[1] for c in mock_repo.update_workflow.call_args_list]
     assert not any(
         u.get("status") == "failed" for u in last_updates
-    ), "mixed fingerprint with <no-excerpt> wrongly triggered give-up"
+    ), "partial diagnostics should remain bounded-pending on the first poll"
+    assert any(u.get("ci_diagnostics_attempts") == 1 for u in last_updates)

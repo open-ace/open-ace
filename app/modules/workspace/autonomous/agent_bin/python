@@ -1,0 +1,4 @@
+#!/usr/bin/python3
+from _guard_exec import main
+
+main()

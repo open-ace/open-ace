@@ -122,7 +122,10 @@ def test_start_ci_repair_round_stays_in_merge_and_runs_merge_repair():
     ]
     orch._start_ci_repair_round(wf, 1697, failed_checks)
 
-    orch._run_merge_ci_repair.assert_called_once_with(wf, gh, 1697, failed_checks)
+    orch._run_merge_ci_repair.assert_called_once()
+    repair_args = orch._run_merge_ci_repair.call_args.args
+    assert repair_args[:3] == (wf, gh, 1697)
+    assert repair_args[3][0]["failure_excerpt"] == "black failed\nfiles were modified"
     updates = mock_repo.update_workflow.call_args.args[1]
     assert updates["current_phase"] == "merge"
     assert updates["status"] == "merging"

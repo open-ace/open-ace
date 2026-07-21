@@ -17,6 +17,7 @@ import re
 import shutil
 import signal
 import subprocess
+import sys
 import threading
 import time
 import uuid
@@ -29,6 +30,28 @@ from app.modules.workspace.autonomous.artifact_text import pick_best_artifact_te
 from app.modules.workspace.autonomous.models import AgentTaskResult
 
 logger = logging.getLogger(__name__)
+
+_AUTONOMOUS_GIT_MUTATION_RE = re.compile(
+    r"(?:^|[;&|]\s*|\bsudo\s+)(?:\S*/)?git\s+[^\n]*\bpush\b"
+    r"|(?:^|[;&|]\s*|\bsudo\s+)(?:\S*/)?gh\s+pr\s+(?:create|merge|close|reopen)\b",
+    re.IGNORECASE,
+)
+_AUTONOMOUS_RUNTIME_BYPASS_RE = re.compile(
+    r"(?:^|[;&|]\s*|\bsudo\s+)(?:/\S*/python(?:3(?:\.\d+)?)?|python3\.\d+)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_forbidden_autonomous_command(tool_name: str, tool_input: object) -> bool:
+    """Reserve remote mutations for the post-validation orchestrator path."""
+    if tool_name not in {"Bash", "run_shell_command", "Shell"}:
+        return False
+    if not isinstance(tool_input, dict):
+        return False
+    command = str(tool_input.get("command") or tool_input.get("cmd") or "")
+    return bool(
+        _AUTONOMOUS_GIT_MUTATION_RE.search(command) or _AUTONOMOUS_RUNTIME_BYPASS_RE.search(command)
+    )
 
 
 def _iso_to_epoch(ts: str) -> float | None:
@@ -543,25 +566,51 @@ class _ZcodeResultCollector:
                         {"type": "assistant", "text": text[:500]},
                     )
 
-        # Tool events: ZCode emits tool.<name> with data payload.
-        # Normalize to the Claude SDK tool_use shape for persistence.
+        # Tool events: ZCode emits both tool.<name> calls and tool.updated
+        # lifecycle records.  Preserve started/result pairs in the same
+        # tool_use/tool_result contract used by Claude and Codex.
         elif msg_type.startswith("tool."):
             tool_name = msg_type.split(".", 1)[1]
             payload = parsed.get("data", {}) or {}
-            # ZCode sends tool.updated lifecycle notifications (kind =
-            # scheduled/started/result/batch) that carry only scheduling
-            # metadata, not real tool input/output. These would leak as
-            # tool_name="updated" garbage messages, so skip them. Real
-            # tool_use events have no "kind" field and carry actual input.
-            if isinstance(payload, dict) and payload.get("kind") in (
-                "scheduled",
-                "started",
-                "result",
-                "batch",
-            ):
+            if not isinstance(payload, dict):
+                return
+            kind = payload.get("kind")
+            if tool_name == "updated" and kind == "result":
+                result = payload.get("result")
+                if not isinstance(result, dict):
+                    result = payload
+                result_text = (
+                    result.get("aggregated_output")
+                    or result.get("output")
+                    or result.get("content")
+                    or result.get("message")
+                    or ""
+                )
+                exit_code = result.get("exit_code", result.get("exitCode"))
+                self.event_log.append(
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": payload.get("id")
+                        or payload.get("toolCallId")
+                        or result.get("id"),
+                        "text": str(result_text),
+                        "exit_code": exit_code,
+                        "is_error": bool(result.get("is_error", False))
+                        or (isinstance(exit_code, int) and exit_code != 0),
+                    }
+                )
+                return
+            if tool_name == "updated" and kind in ("scheduled", "started"):
+                tool = payload.get("tool") if isinstance(payload.get("tool"), dict) else {}
+                tool_name = str(
+                    payload.get("toolName") or payload.get("name") or tool.get("name") or "unknown"
+                )
+                if tool_name == "unknown" or "input" not in payload:
+                    return
+            elif tool_name == "updated" and kind == "batch":
                 return
             tool_input = payload.get("input", payload)
-            tool_id = payload.get("id", "")
+            tool_id = payload.get("id") or payload.get("toolCallId") or ""
             self.tool_calls.append(
                 {"tool": {"name": tool_name, "input": tool_input, "id": tool_id}}
             )
@@ -879,7 +928,10 @@ class AutonomousAgentRunner:
 
     @staticmethod
     def _wrap_agent_cmd(
-        cmd: list[str], project_path: str, system_account: str | None
+        cmd: list[str],
+        project_path: str,
+        system_account: str | None,
+        env: dict[str, str] | None = None,
     ) -> tuple[list[str], str | None]:
         """Wrap an agent CLI command for cross-user launch (Issue #1395).
 
@@ -892,15 +944,43 @@ class AutonomousAgentRunner:
         """
         if AutonomousAgentRunner._is_cross_user(system_account):
             assert system_account is not None  # _is_cross_user guarantees non-empty
+            guard_env = []
+            for key in (
+                "PATH",
+                "OPENACE_REAL_GIT",
+                "OPENACE_REAL_GH",
+                "OPENACE_PYTHON_COMMAND",
+                "OPENACE_PROXY_URL",
+                "OPENACE_PROXY_TOKEN",
+                "OPENACE_MODEL",
+                "ANTHROPIC_API_KEY",
+                "ANTHROPIC_BASE_URL",
+                "OPENAI_API_KEY",
+                "OPENAI_BASE_URL",
+                "BAILIAN_CODING_PLAN_API_KEY",
+                "GEMINI_API_KEY",
+                "GEMINI_BASE_URL",
+                "GIT_AUTHOR_NAME",
+                "GIT_AUTHOR_EMAIL",
+                "GIT_COMMITTER_NAME",
+                "GIT_COMMITTER_EMAIL",
+                "GH_CONFIG_DIR",
+                "GIT_TERMINAL_PROMPT",
+            ):
+                if env and env.get(key):
+                    guard_env.append(f"{key}={env[key]}")
+            guarded_cmd = ["/usr/bin/env", *guard_env, *cmd] if guard_env else cmd
             wrapped = [
                 "sudo",
                 "-n",
                 "-u",
                 "root",
                 _OPENACE_RUN_AS,
+                "--isolated",
                 system_account,
                 project_path,
-            ] + cmd
+                *guarded_cmd,
+            ]
             return wrapped, None  # wrapper chdir's internally; cwd must be None
         return cmd, project_path
 
@@ -911,6 +991,7 @@ class AutonomousAgentRunner:
         user_id: int | None,
         session_id: str,
         model: str,
+        runtime_python_command: list[str] | None = None,
     ) -> dict[str, str]:
         """Build subprocess env with LLM proxy auth for a local agent.
 
@@ -926,6 +1007,24 @@ class AutonomousAgentRunner:
         keeps working.
         """
         env = dict(os.environ)
+        guard_bin = str(Path(__file__).with_name("agent_bin"))
+        real_git = shutil.which("git", path=env.get("PATH"))
+        real_gh = shutil.which("gh", path=env.get("PATH"))
+        if real_git:
+            env["OPENACE_REAL_GIT"] = real_git
+        if real_gh:
+            env["OPENACE_REAL_GH"] = real_gh
+        env["OPENACE_PYTHON_COMMAND"] = json.dumps(runtime_python_command or [sys.executable])
+        # The orchestrator owns all remote mutations. Agent subprocesses use
+        # the LLM proxy for model auth and do not need GitHub credentials.
+        # This environment cleanup is defense-in-depth; the actual credential
+        # boundary is the dedicated OS principal selected by the orchestrator
+        # and the isolated run-as wrapper's clean environment/worktree ACLs.
+        for key in ("GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "SSH_AUTH_SOCK"):
+            env.pop(key, None)
+        env["GH_CONFIG_DIR"] = "/var/empty/openace-autonomous-gh"
+        env["GIT_TERMINAL_PROMPT"] = "0"
+        env["PATH"] = guard_bin + os.pathsep + env.get("PATH", "")
         try:
             from app.modules.workspace.api_key_proxy import get_api_key_proxy_service
             from app.utils.config import get_config_value
@@ -1359,6 +1458,7 @@ class AutonomousAgentRunner:
         resume_session_id: str = None,
         milestone_id: str = "",
         system_account: str | None = None,
+        runtime_python_command: list[str] | None = None,
     ) -> AgentTaskResult:
         """
         Execute an agent task and wait for completion.
@@ -1478,6 +1578,7 @@ class AutonomousAgentRunner:
                     resume_session_id=resume_session_id,
                     milestone_id=milestone_id,
                     system_account=system_account,
+                    runtime_python_command=runtime_python_command,
                 )
 
             result.prompt = prompt
@@ -1581,6 +1682,7 @@ class AutonomousAgentRunner:
         resume_session_id: str = None,
         milestone_id: str = "",
         system_account: str | None = None,
+        runtime_python_command: list[str] | None = None,
     ) -> AgentTaskResult:
         """Run an agent task locally using a CLI subprocess."""
         import sys
@@ -1626,6 +1728,7 @@ class AutonomousAgentRunner:
                 resume_session_id=resume_session_id,
                 milestone_id=milestone_id,
                 system_account=system_account,
+                runtime_python_command=runtime_python_command,
             )
         if not adapter.supports_stdin_input():
             return self._run_single_shot(
@@ -1639,11 +1742,18 @@ class AutonomousAgentRunner:
                 milestone_id=milestone_id,
                 system_account=system_account,
                 user_id=user_id,
+                runtime_python_command=runtime_python_command,
             )
 
         # Build env vars with LLM proxy auth so the agent authenticates through
         # Open ACE (short-lived proxy token, never the raw API key).
-        env = self._build_agent_env(adapter, cli_tool, user_id, session_id, model)
+        env = (
+            self._build_agent_env(
+                adapter, cli_tool, user_id, session_id, model, runtime_python_command
+            )
+            if runtime_python_command
+            else self._build_agent_env(adapter, cli_tool, user_id, session_id, model)
+        )
 
         # Build command
         # When resuming an established session, pass the real CLI session_id
@@ -1684,7 +1794,11 @@ class AutonomousAgentRunner:
         # Cross-user launch: the run-as wrapper chdir's as root then drops to
         # system_account (claude-code/qwen-code infer project root from cwd
         # and have no --cwd flag). Same-user runs verbatim with cwd=project.
-        cmd, cwd = self._wrap_agent_cmd(cmd, project_path, system_account)
+        cmd, cwd = (
+            self._wrap_agent_cmd(cmd, project_path, system_account, env)
+            if self._is_cross_user(system_account)
+            else self._wrap_agent_cmd(cmd, project_path, system_account)
+        )
 
         logger.info("Launching local agent: %s", " ".join(cmd))
 
@@ -1764,6 +1878,14 @@ class AutonomousAgentRunner:
         completed = self._wait_for_completion(session, timeout)
 
         # Cleanup
+        if completed and process.returncode is None:
+            try:
+                # The isolated launcher performs its .git integrity check
+                # after the CLI emits the terminal result event. Give that
+                # trusted wrapper a short window to finish before escalation.
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
         if process.returncode is None:
             try:
                 os.killpg(os.getpgid(process.pid), signal.SIGTERM)
@@ -1782,6 +1904,12 @@ class AutonomousAgentRunner:
                 self._on_pid_cleared(session_id)
             except Exception as e:
                 logger.warning("on_pid_cleared callback failed: %s", e)
+
+        if session._stderr_thread:
+            session._stderr_thread.join(timeout=1)
+        if process.returncode == 68 or "OPENACE_REPO_INTEGRITY_VIOLATION" in session.last_stderr:
+            session.error_code = "repo_integrity_violation"
+            session.error = "Protected .git entry changed during autonomous agent execution"
 
         if (
             completed
@@ -1907,6 +2035,7 @@ class AutonomousAgentRunner:
         resume_session_id: str = None,
         milestone_id: str = "",
         system_account: str | None = None,
+        runtime_python_command: list[str] | None = None,
     ) -> AgentTaskResult:
         """Run a ZCode agent task via the persistent app-server protocol.
 
@@ -1928,7 +2057,13 @@ class AutonomousAgentRunner:
         _ensure_usage_parser()
         adapter = get_adapter(cli_tool)
 
-        env = self._build_agent_env(adapter, cli_tool, user_id, session_id, model)
+        env = (
+            self._build_agent_env(
+                adapter, cli_tool, user_id, session_id, model, runtime_python_command
+            )
+            if runtime_python_command
+            else self._build_agent_env(adapter, cli_tool, user_id, session_id, model)
+        )
         # Resolve the ZCode session mode. The --mode CLI flag is ignored by
         # app-server (verified: sessions always start in "build" mode regardless
         # of the flag). The mode is set via session/setMode protocol call in
@@ -1947,7 +2082,11 @@ class AutonomousAgentRunner:
             resume=resume,
         )
         # Cross-user launch via run-as wrapper (zcode needs cwd=project too).
-        cmd, cwd = self._wrap_agent_cmd(cmd, project_path, system_account)
+        cmd, cwd = (
+            self._wrap_agent_cmd(cmd, project_path, system_account, env)
+            if self._is_cross_user(system_account)
+            else self._wrap_agent_cmd(cmd, project_path, system_account)
+        )
 
         logger.info("Launching ZCode app-server (mode=%s): %s", zcode_mode, " ".join(cmd))
 
@@ -2169,6 +2308,49 @@ class AutonomousAgentRunner:
                 "tool_use_id": tool_info.get("id"),
             }
 
+        if msg_type == "user":
+            content = (parsed.get("message", {}) or {}).get("content", [])
+            if isinstance(content, list):
+                for block in content:
+                    if isinstance(block, dict) and block.get("type") == "tool_result":
+                        raw_content = block.get("content", "")
+                        return {
+                            "type": "tool_result",
+                            "tool_use_id": block.get("tool_use_id"),
+                            "text": str(raw_content or ""),
+                            "exit_code": block.get("exit_code"),
+                            "is_error": bool(block.get("is_error", False)),
+                        }
+            return None
+
+        # Codex exec --json lifecycle.  command_execution items provide a
+        # stable item id in both started and completed events, plus an explicit
+        # process exit code on completion.
+        if msg_type in ("item.started", "item.completed"):
+            item = parsed.get("item", {}) or {}
+            if item.get("type") == "command_execution":
+                item_id = item.get("id")
+                if msg_type == "item.started":
+                    return {
+                        "type": "tool_use",
+                        "tool_name": "Bash",
+                        "tool_input": {"command": item.get("command", "")},
+                        "tool_use_id": item_id,
+                    }
+                exit_code = item.get("exit_code")
+                return {
+                    "type": "tool_result",
+                    "tool_use_id": item_id,
+                    "text": str(item.get("aggregated_output") or item.get("output") or ""),
+                    "exit_code": exit_code,
+                    "is_error": isinstance(exit_code, int) and exit_code != 0,
+                }
+            if item.get("type") == "agent_message" and msg_type == "item.completed":
+                text = str(item.get("text") or "")
+                if text:
+                    return {"type": "assistant", "text": text, "message_id": item.get("id")}
+            return None
+
         # Codex/OpenAI shape: {"type":"message","role":"assistant","content":[{"type":"output_text","text":...}]}
         if msg_type == "message" and parsed.get("role") == "assistant":
             text = _extract_visible_text(parsed.get("content", ""))
@@ -2187,6 +2369,18 @@ class AutonomousAgentRunner:
                     "tool_use_id": parsed.get("call_id"),
                 }
             return None
+
+        if msg_type in ("function_call_output", "custom_tool_call_output"):
+            output = parsed.get("output", "")
+            exit_code = parsed.get("exit_code")
+            return {
+                "type": "tool_result",
+                "tool_use_id": parsed.get("call_id"),
+                "text": output if isinstance(output, str) else str(output),
+                "exit_code": exit_code,
+                "is_error": bool(parsed.get("is_error", False))
+                or (isinstance(exit_code, int) and exit_code != 0),
+            }
 
         return None
 
@@ -2261,6 +2455,7 @@ class AutonomousAgentRunner:
         milestone_id: str = "",
         system_account: str | None = None,
         user_id: int | None = None,
+        runtime_python_command: list[str] | None = None,
     ) -> AgentTaskResult:
         """Run a CLI tool in single-shot mode for tools without stdin protocol.
 
@@ -2291,11 +2486,21 @@ class AutonomousAgentRunner:
 
         args = adapter.build_single_shot_args(prompt, project_path, model)
         cmd = [executable] + (args[1:] if len(args) > 1 and args[0] == exe_name else args)
-        env = self._build_agent_env(adapter, cli_tool, user_id, session_id, model)
+        env = (
+            self._build_agent_env(
+                adapter, cli_tool, user_id, session_id, model, runtime_python_command
+            )
+            if runtime_python_command
+            else self._build_agent_env(adapter, cli_tool, user_id, session_id, model)
+        )
 
         # Cross-user launch via run-as wrapper (single-shot CLIs also need
         # cwd=project; openclaw documents it relies on the caller's cwd).
-        cmd, cwd = self._wrap_agent_cmd(cmd, project_path, system_account)
+        cmd, cwd = (
+            self._wrap_agent_cmd(cmd, project_path, system_account, env)
+            if self._is_cross_user(system_account)
+            else self._wrap_agent_cmd(cmd, project_path, system_account)
+        )
 
         logger.info("Launching single-shot agent (%s): %s", cli_tool, " ".join(cmd))
 
@@ -2361,8 +2566,12 @@ class AutonomousAgentRunner:
         stderr_text = (proc.stderr or "").strip()
         success = proc.returncode == 0
         error = None
+        error_code = None
         if not success:
             error = stderr_text or f"Command exited with code {proc.returncode}"
+            if proc.returncode == 68 or "OPENACE_REPO_INTEGRITY_VIOLATION" in stderr_text:
+                error_code = "repo_integrity_violation"
+                error = "Protected .git entry changed during autonomous agent execution"
 
         return _build_agent_task_result(
             session_id=session_id,
@@ -2376,6 +2585,7 @@ class AutonomousAgentRunner:
             tool_calls=tool_calls,
             success=success,
             error=error,
+            error_code=error_code,
         )
 
     @staticmethod
@@ -2396,6 +2606,125 @@ class AutonomousAgentRunner:
                         collector.error = text
         except (OSError, ValueError):
             pass
+
+    @staticmethod
+    def _normalize_remote_messages(messages: list) -> tuple[list[dict], list[dict]]:
+        """Convert persisted remote messages to the local event-log contract.
+
+        ``SessionManager.get_messages`` returns ``SessionMessage`` instances,
+        while older test doubles and remote implementations may return dicts.
+        Preserve structured tool calls/results from either representation so
+        remote test phases are held to the same evidence requirements as local
+        phases.
+        """
+        events: list[dict] = []
+        tool_calls: list[dict] = []
+
+        def _as_dict(message) -> dict:
+            if isinstance(message, dict):
+                return message
+            to_dict = getattr(message, "to_dict", None)
+            if callable(to_dict):
+                value = to_dict()
+                return value if isinstance(value, dict) else {}
+            return {
+                key: getattr(message, key)
+                for key in ("role", "content", "content_blocks", "metadata")
+                if hasattr(message, key)
+            }
+
+        def _result_text(value) -> str:
+            if isinstance(value, str):
+                return value
+            if isinstance(value, list):
+                parts = []
+                for item in value:
+                    if isinstance(item, dict):
+                        parts.append(str(item.get("text") or item.get("content") or ""))
+                    else:
+                        parts.append(str(item))
+                return "\n".join(part for part in parts if part)
+            if value is None:
+                return ""
+            return str(value)
+
+        for raw_message in messages or []:
+            message = _as_dict(raw_message)
+            role = str(message.get("role") or "")
+            metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+            blocks = message.get("content_blocks") or metadata.get("content_blocks") or []
+            if not isinstance(blocks, list):
+                blocks = []
+
+            visible_block_text = False
+            for block in blocks:
+                if not isinstance(block, dict):
+                    continue
+                block_type = block.get("type")
+                if block_type in ("text", "output_text") and role == "assistant":
+                    text = str(block.get("text") or "")
+                    if text:
+                        visible_block_text = True
+                        events.append({"type": "assistant", "text": text})
+                elif block_type in ("tool_use", "function_call"):
+                    tool_name = str(block.get("name") or block.get("tool_name") or "unknown")
+                    tool_input = block.get("input", block.get("arguments", {}))
+                    tool_id = block.get("id") or block.get("tool_use_id") or block.get("call_id")
+                    tool_calls.append(
+                        {"tool": {"name": tool_name, "input": tool_input, "id": tool_id}}
+                    )
+                    events.append(
+                        {
+                            "type": "tool_use",
+                            "tool_name": tool_name,
+                            "tool_input": tool_input,
+                            "tool_use_id": tool_id,
+                        }
+                    )
+                elif block_type in ("tool_result", "function_call_output"):
+                    exit_code = block.get("exit_code", block.get("exitCode"))
+                    events.append(
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": block.get("tool_use_id")
+                            or block.get("call_id")
+                            or block.get("id"),
+                            "text": _result_text(
+                                block.get("content", block.get("output", block.get("text", "")))
+                            ),
+                            "exit_code": exit_code,
+                            "is_error": bool(block.get("is_error", False))
+                            or (isinstance(exit_code, int) and exit_code != 0),
+                        }
+                    )
+
+            content = message.get("content", "")
+            if role == "assistant" and not visible_block_text:
+                text = _extract_visible_text(content)
+                if text:
+                    events.append({"type": "assistant", "text": text})
+            elif role in ("tool", "tool_result", "toolResult") and not any(
+                isinstance(block, dict)
+                and block.get("type") in ("tool_result", "function_call_output")
+                for block in blocks
+            ):
+                exit_code = message.get("exit_code", metadata.get("exit_code"))
+                events.append(
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": message.get("tool_use_id")
+                        or message.get("tool_call_id")
+                        or metadata.get("tool_use_id")
+                        or metadata.get("tool_call_id")
+                        or message.get("external_message_id"),
+                        "text": _result_text(content),
+                        "exit_code": exit_code,
+                        "is_error": bool(message.get("is_error", metadata.get("is_error", False)))
+                        or (isinstance(exit_code, int) and exit_code != 0),
+                    }
+                )
+
+        return events, tool_calls
 
     def _run_remote(
         self,
@@ -2481,23 +2810,18 @@ class AutonomousAgentRunner:
                         if hasattr(self.session_manager, "get_messages"):
                             messages = self.session_manager.get_messages(session_id) or []
 
-                        # Extract assistant text
-                        assistant_events: list[dict] = []
-                        for msg in messages:
-                            if msg.get("role") == "assistant":
-                                text = _extract_visible_text(msg.get("content", ""))
-                                if text:
-                                    assistant_events.append({"type": "assistant", "text": text})
+                        remote_events, remote_tool_calls = self._normalize_remote_messages(messages)
 
                         return _build_agent_task_result(
                             session_id=session_id,
                             tracking_session_id=session_id,
-                            event_log=assistant_events,
+                            event_log=remote_events,
                             messages=messages,
                             total_tokens=session_data.get("total_tokens", 0),
                             total_input_tokens=session_data.get("total_input_tokens", 0),
                             total_output_tokens=session_data.get("total_output_tokens", 0),
                             request_count=session_data.get("request_count", 0),
+                            tool_calls=remote_tool_calls,
                             success=status == "completed",
                             error=(
                                 session_data.get("error_message") if status != "completed" else None
@@ -2781,6 +3105,39 @@ class AutonomousAgentRunner:
                                 },
                             )
 
+                    elif msg_type == "user":
+                        # Claude stream-json carries Bash/tool execution output
+                        # as user-message ``tool_result`` blocks. Preserve it
+                        # in the private event log (never visible assistant
+                        # text) so test verification can use actual command
+                        # evidence instead of trusting the model's summary.
+                        content = (parsed.get("message", {}) or {}).get("content", [])
+                        if isinstance(content, list):
+                            for block in content:
+                                if (
+                                    not isinstance(block, dict)
+                                    or block.get("type") != "tool_result"
+                                ):
+                                    continue
+                                raw_content = block.get("content", "")
+                                if isinstance(raw_content, list):
+                                    result_text = "\n".join(
+                                        str(item.get("text", ""))
+                                        for item in raw_content
+                                        if isinstance(item, dict) and item.get("text")
+                                    )
+                                else:
+                                    result_text = str(raw_content or "")
+                                session.event_log.append(
+                                    {
+                                        "type": "tool_result",
+                                        "tool_use_id": block.get("tool_use_id"),
+                                        "text": result_text,
+                                        "exit_code": block.get("exit_code"),
+                                        "is_error": bool(block.get("is_error", False)),
+                                    }
+                                )
+
                     elif msg_type == "result":
                         self._capture_cli_session_id(session, parsed, "result")
                         # End of turn - extract usage via shared parser.
@@ -2887,8 +3244,12 @@ class AutonomousAgentRunner:
                         if req_id:
                             request_payload = parsed.get("request", {})
                             tool_name = request_payload.get("tool_name", "")
+                            tool_input = request_payload.get("input", {})
 
-                            if (
+                            forbidden_command = _is_forbidden_autonomous_command(
+                                tool_name, tool_input
+                            )
+                            if forbidden_command or (
                                 session.allowed_tools is not None
                                 and tool_name not in session.allowed_tools
                             ):
@@ -2901,8 +3262,11 @@ class AutonomousAgentRunner:
                                         "response": {
                                             "behavior": "deny",
                                             "message": (
-                                                f"Tool '{tool_name}' is not "
-                                                "allowed in planning phase."
+                                                "git push and mutating gh pr commands are reserved "
+                                                "for the orchestrator, and Python must use the "
+                                                "runtime-bound PATH shim."
+                                                if forbidden_command
+                                                else f"Tool '{tool_name}' is not allowed in this phase."
                                             ),
                                         },
                                     },

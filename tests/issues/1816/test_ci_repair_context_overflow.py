@@ -136,8 +136,15 @@ _FAILED_CHECKS = [
         ("CI repair failed: agent produced no code changes", "", False, False),
         ("API Error: 429 too many requests", "", False, False),
         ("", "normal plan output discussing input validation", False, False),
-        # Successful result must never match, even if body mentions length
+        # Successful prose must not match merely because its error field mentions length.
         ("Range of input length should be [1, 202752]", "", False, True),
+        # A provider can exit zero while returning a terminal API error envelope.
+        (
+            "",
+            "API Error: 400 Range of input length should be [1, 202752]",
+            True,
+            True,
+        ),
     ],
 )
 def test_is_context_overflow_matches_provider_signatures(error, response_text, expected, success):
@@ -152,9 +159,8 @@ def test_is_context_overflow_matches_provider_signatures(error, response_text, e
 # ── End-to-end: _run_merge_ci_repair switches to fresh on overflow ──────
 
 
-def test_context_overflow_triggers_fresh_retry():
-    """When main session hits context overflow, _run_merge_ci_repair must
-    retry the same attempt on a fresh session and NOT fail the workflow."""
+def test_context_overflow_does_not_repeat_same_fresh_prompt():
+    """A fresh-session overflow fails once instead of retrying a longer prompt."""
     wf = _make_workflow()
     orch, mock_repo = _make_orchestrator(wf)
     gh = _make_gh()
@@ -162,38 +168,24 @@ def test_context_overflow_triggers_fresh_retry():
     orch._accumulate_tokens = MagicMock()
     orch._post_github_comment = MagicMock()
 
-    # First call (main) overflows; second call (fresh) succeeds with a commit.
     overflow = AgentTaskResult(
         success=False,
         error="API Error: 400 <400> InternalError.Algo.InvalidParameter: "
         "Range of input length should be [1, 202752]",
     )
-    fresh_ok = AgentTaskResult(
-        success=True,
-        session_id="sess-fresh",
-        response_text="Reproduced test (3.9) failure and fixed it.",
-        visible_response_text="Reproduced test (3.9) failure and fixed it.",
-    )
-    orch._run_agent = MagicMock(side_effect=[overflow, fresh_ok])
+    orch._run_agent = MagicMock(return_value=overflow)
 
     orch._run_merge_ci_repair(wf, gh, 1849, _FAILED_CHECKS)
 
-    assert orch._run_agent.call_count == 2
-    # First call on main (resumed dev session), second on fresh (clean session).
-    assert orch._run_agent.call_args_list[0].kwargs["session_line"] == "main"
-    assert orch._run_agent.call_args_list[1].kwargs["session_line"] == "fresh"
-    # Worktree reset before the fresh retry to discard the aborted main run.
+    assert orch._run_agent.call_count == 1
+    assert orch._run_agent.call_args_list[0].kwargs["session_line"] == "fresh"
     gh.reset_hard_to_head.assert_called_once()
-    # Workflow stayed in merge (not failed) — the fresh retry recovered it.
     final_updates = mock_repo.update_workflow.call_args.args[1]
-    assert final_updates["status"] == "merging"
-    assert final_updates["error_message"] == ""
-    orch._post_github_comment.assert_called_once()
+    assert final_updates["status"] == "failed"
+    assert "context overflow" in final_updates["error_message"]
 
 
-def test_fresh_retry_injects_prior_failures_into_prompt():
-    """The fresh retry prompt must include full text of prior CI repair
-    failures so the agent avoids repeating them."""
+def test_initial_fresh_prompt_injects_prior_failures():
     prior_failure = {
         "milestone_id": "ms-prior",
         "milestone_type": "ci_repair_applied",
@@ -213,17 +205,11 @@ def test_fresh_retry_injects_prior_failures_into_prompt():
         success=False,
         error="Range of input length should be [1, 202752]",
     )
-    fresh_ok = AgentTaskResult(
-        success=True,
-        session_id="sess-fresh",
-        response_text="fixed",
-        visible_response_text="fixed",
-    )
-    orch._run_agent = MagicMock(side_effect=[overflow, fresh_ok])
+    orch._run_agent = MagicMock(return_value=overflow)
 
     orch._run_merge_ci_repair(wf, gh, 1849, _FAILED_CHECKS)
 
-    fresh_prompt = orch._run_agent.call_args_list[1].kwargs["prompt"]
+    fresh_prompt = orch._run_agent.call_args_list[0].kwargs["prompt"]
     # Header signalling "don't repeat"
     assert "请勿重复同样的修法" in fresh_prompt
     # Full prior error_message injected verbatim (not summarized)
@@ -273,7 +259,7 @@ def test_normal_ci_failure_does_not_trigger_fresh_retry():
 
     # Only one call (main); no fresh retry.
     assert orch._run_agent.call_count == 1
-    assert orch._run_agent.call_args_list[0].kwargs["session_line"] == "main"
+    assert orch._run_agent.call_args_list[0].kwargs["session_line"] == "fresh"
     gh.reset_hard_to_head.assert_not_called()
     # Existing behavior preserved: workflow failed.
     final_updates = mock_repo.update_workflow.call_args.args[1]
@@ -281,12 +267,7 @@ def test_normal_ci_failure_does_not_trigger_fresh_retry():
     assert "no code changes" in final_updates["error_message"]
 
 
-def test_double_overflow_falls_through_to_failed_and_preserves_signal():
-    """When BOTH main and fresh sessions overflow, the workflow must fail
-    (no infinite retry loop), and the milestone error_message must preserve
-    the overflow signature so the next round's _collect_prior_ci_repair_failures
-    filters it out (instead of misclassifying it as 'no code changes' and
-    injecting it as actionable). #1816 review suggestions #1 + #2."""
+def test_single_fresh_overflow_preserves_signal():
     wf = _make_workflow()
     orch, mock_repo = _make_orchestrator(wf)
     gh = _make_gh(commit_before="sha-old", commit_after="sha-old")  # no new commit
@@ -299,15 +280,12 @@ def test_double_overflow_falls_through_to_failed_and_preserves_signal():
         "Range of input length should be [1, 202752]"
     )
     overflow = AgentTaskResult(success=False, error=overflow_err)
-    # Both main and fresh overflow — no infinite retry.
-    orch._run_agent = MagicMock(side_effect=[overflow, overflow])
+    orch._run_agent = MagicMock(return_value=overflow)
 
     orch._run_merge_ci_repair(wf, gh, 1849, _FAILED_CHECKS)
 
-    # Exactly 2 calls (main + fresh), no third attempt.
-    assert orch._run_agent.call_count == 2
-    assert orch._run_agent.call_args_list[0].kwargs["session_line"] == "main"
-    assert orch._run_agent.call_args_list[1].kwargs["session_line"] == "fresh"
+    assert orch._run_agent.call_count == 1
+    assert orch._run_agent.call_args_list[0].kwargs["session_line"] == "fresh"
     # Workflow failed, not stuck retrying.
     final_updates = mock_repo.update_workflow.call_args.args[1]
     assert final_updates["status"] == "failed"
