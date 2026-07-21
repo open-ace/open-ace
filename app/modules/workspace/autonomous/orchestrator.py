@@ -2194,20 +2194,27 @@ class AutonomousOrchestrator:
             commit_sha = gh.get_current_commit()
         except Exception:
             pass
-        sha_changed = bool(commit_before and commit_sha and commit_before != commit_sha)
 
-        if not sha_changed:
-            try:
-                if gh.has_uncommitted_changes():
-                    gh.git_add_all()
-                    gh.git_commit(
-                        f"auto: ci repair (attempt {attempt})",
-                        no_verify=True,
-                    )
-                    commit_sha = gh.get_current_commit()
-                    sha_changed = bool(commit_before and commit_sha and commit_before != commit_sha)
-            except Exception as e:
-                logger.warning("CI repair auto-commit failed: %s", e)
+        # Always commit working-tree edits before comparing/pushing. The local
+        # HEAD may already be ahead of the remote PR after a transient push
+        # failure; pre-commit convergence can then add fresh edits on top of
+        # that commit. Skipping this check when HEAD differs would push the old
+        # commit and silently strand the validated hook fixes in the worktree.
+        try:
+            if gh.has_uncommitted_changes():
+                gh.git_add_all()
+                gh.git_commit(
+                    f"auto: ci repair (attempt {attempt})",
+                    no_verify=True,
+                )
+                commit_sha = gh.get_current_commit()
+        except Exception as e:
+            message = f"CI repair auto-commit failed: {e}"
+            logger.warning(message)
+            sha_changed = bool(commit_before and commit_sha and commit_before != commit_sha)
+            return commit_sha, sha_changed, message
+
+        sha_changed = bool(commit_before and commit_sha and commit_before != commit_sha)
 
         push_error = ""
         if sha_changed:
