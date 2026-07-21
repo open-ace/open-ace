@@ -437,6 +437,41 @@ PLANNING_ALLOWED_TOOLS: dict[str, list[str]] = {
     "zcode": [],
 }
 
+# PR review is an independent, read-only gate.  In particular, do not expose
+# Write/Edit/Bash or Agent here: a reviewer that edits the shared worktree can
+# accidentally make its own findings appear resolved without the main session
+# committing or testing those changes.  The main session applies findings in
+# ``_apply_pr_review_fix`` with ``AUTONOMOUS_DEV_ALLOWED_TOOLS`` instead.
+REVIEW_ALLOWED_TOOLS: dict[str, list[str]] = {
+    "claude-code": [
+        "Read",
+        "Glob",
+        "Grep",
+        "WebSearch",
+        "WebFetch",
+        "TaskRead",
+        "TaskGet",
+        "TaskList",
+    ],
+    "qwen-code-cli": [
+        "read_file",
+        "list_files",
+        "search_files",
+        "code_search",
+        "web_search",
+        "web_fetch",
+    ],
+    "codex": [],
+    "openclaw": [],
+    "zcode": [],
+}
+
+# OpenClaw's current single-shot adapter does not accept per-run permission or
+# tool-policy arguments.  Treating an empty allowlist as read-only would be a
+# false security boundary, so autonomous review must fail closed for this tool
+# until the adapter can provide an enforceable per-run sandbox.
+READ_ONLY_REVIEW_UNSUPPORTED_TOOLS = frozenset({"openclaw"})
+
 # Development-phase tools: planning read-only set + Write/Edit/Bash so the agent
 # can implement, run tests, and commit. Bash is allowed wholesale (test / git /
 # build commands vary by language and can't be enumerated). This bounds where
@@ -657,6 +692,76 @@ _REVIEW_APPROVAL_PHRASES = {
     "ja": "コードレビュー合格",
     "ko": "코드 리뷰 통과",
 }
+
+_REVIEW_RESULT_LINE_RE = re.compile(r"^REVIEW_RESULT\s*:\s*(\{.*\})$")
+
+
+def _parse_review_result(review_text: str) -> dict | None:
+    """Parse the final language-neutral PR review result, failing closed.
+
+    Natural-language severity inference is intentionally avoided: punctuation,
+    negation scope, and translated findings made it possible for a resolved P0
+    clause to hide an unresolved P1 clause.  The reviewer must instead provide
+    one single-line JSON result whose verdict agrees with its blocker list.
+    """
+    lines = (review_text or "").splitlines()
+    nonempty = [index for index, line in enumerate(lines) if line.strip()]
+    if not nonempty:
+        return None
+
+    # The result must be the final non-summary line.  A single TL;DR line may
+    # follow because build_language_instruction() asks every phase for it.
+    last_index = nonempty[-1]
+    candidate_index = last_index
+    if re.match(r"^TL;DR\s*:", lines[last_index].strip(), re.IGNORECASE):
+        if len(nonempty) < 2:
+            return None
+        candidate_index = nonempty[-2]
+
+    result_line_indexes = [
+        index
+        for index, line in enumerate(lines)
+        if line.strip().upper().startswith("REVIEW_RESULT")
+    ]
+    if result_line_indexes != [candidate_index]:
+        return None
+
+    # A result shown as a Markdown example is not authoritative.  Track fence
+    # state before the candidate; an unclosed or enclosing fence fails closed.
+    in_fence = False
+    fence_marker = ""
+    for line in lines[:candidate_index]:
+        stripped = line.strip()
+        marker = (
+            "```" if stripped.startswith("```") else "~~~" if stripped.startswith("~~~") else ""
+        )
+        if not marker:
+            continue
+        if not in_fence:
+            in_fence = True
+            fence_marker = marker
+        elif marker == fence_marker:
+            in_fence = False
+            fence_marker = ""
+    if in_fence:
+        return None
+
+    match = _REVIEW_RESULT_LINE_RE.fullmatch(lines[candidate_index].strip())
+    if not match:
+        return None
+    try:
+        result = json.loads(match.group(1))
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(result, dict):
+        return None
+    verdict = result.get("verdict")
+    blockers = result.get("blocking_findings")
+    if verdict not in {"APPROVE", "REQUEST_CHANGES"} or not isinstance(blockers, list):
+        return None
+    if not all(isinstance(item, str) and item.strip() for item in blockers):
+        return None
+    return {"verdict": verdict, "blocking_findings": blockers}
 
 
 def _extract_pr_number_from_error(error_text: str) -> int | None:
@@ -3254,8 +3359,15 @@ class AutonomousOrchestrator:
 
     @staticmethod
     def _review_is_approved(review_text: str, approval_text: str) -> bool:
-        """Whether the review text explicitly approves the artifact."""
-        return bool(review_text and approval_text in review_text)
+        """Whether a structured review result unambiguously approves the PR.
+
+        ``approval_text`` stays in the signature for call-site compatibility,
+        but localized prose is never authoritative for a new review. Missing or
+        malformed structured output fails closed.
+        """
+        del approval_text
+        result = _parse_review_result(review_text)
+        return bool(result and result["verdict"] == "APPROVE" and not result["blocking_findings"])
 
     @staticmethod
     def _derive_review_passed(review_milestones: list, content_language) -> bool:
@@ -6393,10 +6505,41 @@ class AutonomousOrchestrator:
             "4. 性能影响\n"
             "5. 与需求的对齐程度\n"
             "6. 上一轮审查意见的落实情况(如有)\n\n"
-            f"如果没有重大问题，请在审查结论中明确写出批准标记：{approval_phrase}。\n\n"
+            "本阶段是只读审查：不要修改文件、不要创建提交，也不要执行任何会改变仓库状态的命令。\n"
+            "只有在所有 Issue 验收标准均已满足、没有 P0/P1 阻塞项或未落实项时才能批准；"
+            "只要仍有阻塞项，即使核心功能已基本完成，也必须要求修改。\n"
+            f"如果没有重大问题，请在审查结论中明确写出批准标记：{approval_phrase}。\n"
+            "必须把下面的机器可读单行 JSON 作为 TL;DR 摘要之前的最后一个非摘要行"
+            "（不要放进代码块）。所有未解决的 P0/P1 都必须逐项放入 blocking_findings；"
+            "只有数组为空时 verdict 才能是 APPROVE：\n"
+            'REVIEW_RESULT: {"verdict":"APPROVE","blocking_findings":[]}\n'
+            'REVIEW_RESULT: {"verdict":"REQUEST_CHANGES",'
+            '"blocking_findings":["finding 1"]}\n\n'
             "重要：直接输出审查结果，不要添加引导文字(如'我来审查...'、'让我...'等)"
             "或结尾引导(如'下一步是否...'等)。"
         )
+
+        review_tool = wf.get("cli_tool", "claude-code")
+        if review_tool in READ_ONLY_REVIEW_UNSUPPORTED_TOOLS:
+            message = (
+                f"PR review cannot run safely with {review_tool}: its single-shot adapter "
+                "does not provide an enforceable per-run read-only sandbox. Configure a "
+                "review-capable CLI and retry the workflow."
+            )
+            self.repo.update_milestone(
+                review_ms.get("milestone_id", ""),
+                {"status": "failed", "error_message": message},
+            )
+            self._update_workflow({"status": "failed", "error_message": message})
+            if pr_number:
+                self._post_github_comment(
+                    gh,
+                    pr_number,
+                    f"## ⛔ PR Review Blocked\n\n{message}",
+                    is_pr=True,
+                    context="code-review",
+                )
+            return
 
         # Include CI failures in review prompt if any
         if ci_failures:
@@ -6412,14 +6555,14 @@ class AutonomousOrchestrator:
         review_result = self._run_agent(
             wf=wf,
             workflow_id=self._workflow_id,
-            cli_tool=wf.get("cli_tool", "claude-code"),
+            cli_tool=review_tool,
             model=wf.get("model", ""),
             project_path=wf.get("worktree_path") or wf.get("project_path", ""),
             prompt=review_prompt,
             workspace_type=wf.get("workspace_type", "local"),
             remote_machine_id=wf.get("remote_machine_id"),
-            permission_mode=wf.get("permission_mode", "auto-edit"),
-            allowed_tools=AUTONOMOUS_DEV_ALLOWED_TOOLS.get(wf.get("cli_tool", "claude-code"), []),
+            permission_mode=_zcode_planning_mode(wf),
+            allowed_tools=REVIEW_ALLOWED_TOOLS.get(review_tool, []),
             session_line="review",
             milestone_id=review_ms.get("milestone_id", ""),
         )
@@ -6436,9 +6579,7 @@ class AutonomousOrchestrator:
         # structured verdict so progress_reported doesn't re-scan review text.
         # The legacy zh marker is accepted too, for workflows whose content
         # language predates this field (mirrors _derive_review_passed).
-        review_passed = (
-            self._review_is_approved(review_text, approval_phrase) or "代码审查通过" in review_text
-        )
+        review_passed = self._review_is_approved(review_text, approval_phrase)
         review_metadata = _merge_milestone_metadata(
             self.repo.get_milestone(review_ms.get("milestone_id", "")),
             {"review_verdict": {"passed": review_passed, "round": round_num}},
