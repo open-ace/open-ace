@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Unit tests for Security Baseline Checker (Issue #1893)
 
@@ -11,20 +10,21 @@ Tests cover:
 """
 
 import os
+
 import pytest
 
 # Import the module under test
 from app.utils.security_baseline import (
-    SecurityMode,
     CheckResult,
+    SecurityMode,
+    check_all,
+    check_database_password,
+    check_encryption_key,
+    check_root_user,
+    check_secret_key,
     detect_security_mode,
     is_forbidden_password,
     is_placeholder_password,
-    check_database_password,
-    check_secret_key,
-    check_encryption_key,
-    check_root_user,
-    check_all,
 )
 
 
@@ -165,13 +165,17 @@ class TestCheckDatabasePassword:
 
     def test_dev_default_password_production_fails(self):
         """Test that dev-password-change-in-production fails in production mode."""
-        result = check_database_password("dev-password-change-in-production", SecurityMode.PRODUCTION)
+        result = check_database_password(
+            "dev-password-change-in-production", SecurityMode.PRODUCTION
+        )
         assert result.status == "fail"
         assert "weak default" in result.message.lower()
 
     def test_dev_default_password_development_warning(self):
         """Test that dev-password-change-in-production gives warning in development mode."""
-        result = check_database_password("dev-password-change-in-production", SecurityMode.DEVELOPMENT)
+        result = check_database_password(
+            "dev-password-change-in-production", SecurityMode.DEVELOPMENT
+        )
         assert result.status == "warning"
 
     def test_forbidden_password_development_warning(self):
@@ -325,9 +329,7 @@ class TestCheckResult:
     def test_check_result_creation(self):
         """Test CheckResult creation with all fields."""
         result = CheckResult(
-            status="pass",
-            message="Test message",
-            recommendation="Test recommendation"
+            status="pass", message="Test message", recommendation="Test recommendation"
         )
         assert result.status == "pass"
         assert result.message == "Test message"
