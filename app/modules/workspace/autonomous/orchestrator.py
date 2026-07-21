@@ -1898,7 +1898,26 @@ class AutonomousOrchestrator:
         ranges = [("current round", commit_before)]
         cumulative_base = (wf.get("base_commit_sha") or "").strip()
         if not cumulative_base:
-            cumulative_base = "origin/main"
+            # Legacy workflows (or a batch whose initial rev-parse failed) can
+            # have no persisted base. Never compare them with the *moving*
+            # origin/main ref: unrelated commits merged after branch creation
+            # would be counted as autonomous changes. The graph merge-base is
+            # the immutable branch point and remains stable as main advances.
+            try:
+                merge_base_result = gh._run_git(
+                    ["merge-base", commit_after, "origin/main"], check=False
+                )
+                cumulative_base = merge_base_result.stdout.strip()
+                if merge_base_result.returncode != 0 or not cumulative_base:
+                    raise GitHubOpsError("git merge-base returned no commit")
+            except Exception as exc:
+                return (
+                    "Autonomous cumulative branch scope could not be verified: "
+                    f"missing immutable base commit and merge-base derivation failed: {exc}"
+                )
+            # Backfill only the branch-point identifier, never usage/history.
+            # Future rounds then remain independent of origin/main movement.
+            self._update_workflow({"base_commit_sha": cumulative_base})
         if cumulative_base != commit_before:
             ranges.append(("cumulative branch", cumulative_base))
         for label, base in ranges:
@@ -4525,10 +4544,18 @@ class AutonomousOrchestrator:
                         wf = self.workflow
                         base_commit_sha = wf.get("base_commit_sha")
                         base_ref = base_commit_sha if base_commit_sha else "origin/main"
+                        # Resolve the symbolic ref before branch creation and
+                        # persist that immutable SHA. Scope checks must not use
+                        # a later, moving origin/main value.
+                        resolved_base = gh._run_git(["rev-parse", base_ref]).stdout.strip()
+                        if not resolved_base:
+                            raise GitHubOpsError(f"Unable to resolve branch base {base_ref}")
+                        if not base_commit_sha:
+                            self._update_workflow({"base_commit_sha": resolved_base})
                         wt_data = gh.create_worktree(
                             path=worktree_path,
                             branch=branch_name,
-                            base=base_ref,  # Locked SHA or dynamic origin/main
+                            base=resolved_base,
                         )
 
                     # Issue #1573: Verify worktree was created on correct branch
@@ -4574,8 +4601,14 @@ class AutonomousOrchestrator:
                     wf = self.workflow
                     base_commit_sha = wf.get("base_commit_sha")
                     base_ref = base_commit_sha if base_commit_sha else "origin/main"
-                    gh.create_branch(branch_name, base=base_ref)
-                    self._update_workflow({"branch_name": branch_name})
+                    resolved_base = gh._run_git(["rev-parse", base_ref]).stdout.strip()
+                    if not resolved_base:
+                        raise GitHubOpsError(f"Unable to resolve branch base {base_ref}")
+                    gh.create_branch(branch_name, base=resolved_base)
+                    updates = {"branch_name": branch_name}
+                    if not base_commit_sha:
+                        updates["base_commit_sha"] = resolved_base
+                    self._update_workflow(updates)
 
                 self._create_milestone(
                     phase="preparation",
@@ -6226,7 +6259,7 @@ class AutonomousOrchestrator:
                     scope_error = self._validate_autonomous_change_scope(
                         gh,
                         wf,
-                        (wf.get("base_commit_sha") or main_sha),
+                        (wf.get("base_commit_sha") or branch_sha),
                         branch_sha,
                     )
                     if scope_error:
@@ -7220,9 +7253,8 @@ class AutonomousOrchestrator:
         if pr_number:
             try:
                 pr_head_sha = gh.get_pr_head_sha(pr_number)
-                cumulative_base = (wf.get("base_commit_sha") or "origin/main").strip()
                 scope_error = self._validate_autonomous_change_scope(
-                    gh, wf, cumulative_base, pr_head_sha
+                    gh, wf, (wf.get("base_commit_sha") or pr_head_sha), pr_head_sha
                 )
             except Exception as exc:
                 scope_error = f"Pre-merge change scope could not be verified: {exc}"

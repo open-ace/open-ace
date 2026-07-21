@@ -38,6 +38,7 @@ export interface ParsedDiffFile {
 
 export interface ActivityHostMilestoneLike {
   milestone_id: string;
+  milestone_type: string;
   status: string;
   dev_round: number;
 }
@@ -45,15 +46,30 @@ export interface ActivityHostMilestoneLike {
 export function getActivityHostMilestoneId(
   milestones: ActivityHostMilestoneLike[],
   workflowDevRound: number,
-  isWorkflowActive: boolean
+  workflowStatus: string
 ): string | null {
   const active = milestones.find(
     (milestone) =>
-      milestone.status === 'in_progress' && (milestone.dev_round || 1) === workflowDevRound
+      milestone.status === 'in_progress' &&
+      (milestone.dev_round || 1) === workflowDevRound &&
+      isAiMilestoneType(milestone.milestone_type)
   );
   if (active) return active.milestone_id;
-  if (!isWorkflowActive || milestones.length === 0) return null;
-  return milestones[milestones.length - 1].milestone_id;
+
+  // Preserve the panel only across short scheduler gaps in phases that
+  // actively run an agent. System-only phases (queue/preparation/report/wait)
+  // must not impersonate an AI request, and merge shows a panel only while an
+  // explicit AI repair/conflict milestone is in progress (handled above).
+  if (!['planning', 'developing', 'pr_review'].includes(workflowStatus)) return null;
+
+  const fallback = [...milestones]
+    .reverse()
+    .find(
+      (milestone) =>
+        (milestone.dev_round || 1) === workflowDevRound &&
+        isAiMilestoneType(milestone.milestone_type)
+    );
+  return fallback?.milestone_id ?? null;
 }
 
 export function parseDiffStats(

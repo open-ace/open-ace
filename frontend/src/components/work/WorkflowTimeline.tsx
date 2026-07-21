@@ -1204,8 +1204,8 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
   // short scheduler gap between milestones there may be no in_progress row;
   // keep the panel on the latest card instead of unmounting and flashing away.
   const activityHostMilestoneId = useMemo(() => {
-    return getActivityHostMilestoneId(milestones, workflow.dev_round, isWorkflowActive);
-  }, [isWorkflowActive, milestones, workflow.dev_round]);
+    return getActivityHostMilestoneId(milestones, workflow.dev_round, workflow.status);
+  }, [milestones, workflow.dev_round, workflow.status]);
 
   // Track whether the user has manually collapsed the current active card, so
   // the auto-expand below doesn't fight a deliberate collapse. Reset whenever
@@ -2489,22 +2489,25 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
           contentFullscreen ? 'timeline-content-modal--fullscreen' : ''
         }`}
         scrollable={false}
+        headerActions={
+          <Button
+            size="sm"
+            variant="outline-secondary"
+            className="timeline-content-modal__toggle"
+            onClick={() => setContentFullscreen((current) => !current)}
+            aria-label={
+              contentFullscreen ? t('exitFullscreen', language) : t('enterFullscreen', language)
+            }
+          >
+            <i
+              className={`bi ${contentFullscreen ? 'bi-fullscreen-exit' : 'bi-fullscreen'} me-1`}
+            ></i>
+            {contentFullscreen ? t('exitFullscreen', language) : t('enterFullscreen', language)}
+          </Button>
+        }
       >
         {viewingContent?.content?.trim() ? (
           <div className="timeline-content-modal__body">
-            <div className="timeline-content-modal__toolbar">
-              <Button
-                size="sm"
-                variant="outline-secondary"
-                className="timeline-content-modal__toggle"
-                onClick={() => setContentFullscreen((current) => !current)}
-              >
-                <i
-                  className={`bi ${contentFullscreen ? 'bi-fullscreen-exit' : 'bi-fullscreen'} me-1`}
-                ></i>
-                {contentFullscreen ? t('exitFullscreen', language) : t('enterFullscreen', language)}
-              </Button>
-            </div>
             <div className="timeline-content-modal__document">
               <MarkdownContent
                 content={viewingContent.content}

@@ -41,17 +41,58 @@ describe('WorkflowTimeline.utils', () => {
 
   it('keeps an activity host through the scheduler gap between milestones', () => {
     const milestones = [
-      { milestone_id: 'old-round', status: 'completed', dev_round: 1 },
-      { milestone_id: 'current', status: 'in_progress', dev_round: 2 },
+      {
+        milestone_id: 'old-round',
+        milestone_type: 'plan_created',
+        status: 'completed',
+        dev_round: 1,
+      },
+      {
+        milestone_id: 'current',
+        milestone_type: 'dev_started',
+        status: 'in_progress',
+        dev_round: 2,
+      },
     ];
-    expect(getActivityHostMilestoneId(milestones, 2, true)).toBe('current');
+    expect(getActivityHostMilestoneId(milestones, 2, 'developing')).toBe('current');
 
     const betweenMilestones = milestones.map((milestone) => ({
       ...milestone,
       status: 'completed',
     }));
-    expect(getActivityHostMilestoneId(betweenMilestones, 2, true)).toBe('current');
-    expect(getActivityHostMilestoneId(betweenMilestones, 2, false)).toBeNull();
+    expect(getActivityHostMilestoneId(betweenMilestones, 2, 'developing')).toBe('current');
+    expect(getActivityHostMilestoneId(betweenMilestones, 2, 'completed')).toBeNull();
+  });
+
+  it('never mounts AI activity on system-only cards or idle workflow phases', () => {
+    const systemOnly = [
+      {
+        milestone_id: 'branch',
+        milestone_type: 'branch_created',
+        status: 'completed',
+        dev_round: 1,
+      },
+      {
+        milestone_id: 'wait',
+        milestone_type: 'wait_started',
+        status: 'in_progress',
+        dev_round: 1,
+      },
+    ];
+    expect(getActivityHostMilestoneId(systemOnly, 1, 'preparing')).toBeNull();
+    expect(getActivityHostMilestoneId(systemOnly, 1, 'waiting')).toBeNull();
+    expect(getActivityHostMilestoneId(systemOnly, 1, 'merging')).toBeNull();
+
+    const mergeRepair = [
+      ...systemOnly,
+      {
+        milestone_id: 'repair',
+        milestone_type: 'ci_repair_applied',
+        status: 'in_progress',
+        dev_round: 1,
+      },
+    ];
+    expect(getActivityHostMilestoneId(mergeRepair, 1, 'merging')).toBe('repair');
   });
 
   it('parses diff stats json', () => {

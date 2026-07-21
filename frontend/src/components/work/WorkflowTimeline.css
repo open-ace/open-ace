@@ -920,40 +920,45 @@
 }
 
 .timeline-content-modal .modal-content {
+  max-height: min(88vh, calc(100dvh - 2rem));
   overflow: hidden;
 }
 
 .timeline-content-modal .modal-body {
+  display: flex;
+  min-height: 0;
   padding: 0;
+  overflow: hidden;
 }
 
 .timeline-content-modal--fullscreen {
   max-width: calc(100vw - 1rem);
   margin: 0.5rem auto;
-  height: calc(100vh - 1rem);
+  height: calc(100dvh - 1rem);
 }
 
 .timeline-content-modal--fullscreen .modal-content {
   height: 100%;
+  max-height: 100%;
+}
+
+.timeline-content-modal--fullscreen .modal-body {
+  flex: 1 1 auto;
 }
 
 .timeline-content-modal__body {
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
+  width: 100%;
   min-height: 0;
-  max-height: min(78vh, calc(100vh - 180px));
+  max-height: min(78vh, calc(100dvh - 180px));
   background: var(--bg-primary);
 }
 
 .timeline-content-modal--fullscreen .timeline-content-modal__body {
   max-height: none;
   height: 100%;
-}
-
-.timeline-content-modal__toolbar {
-  display: flex;
-  justify-content: flex-end;
-  padding: 0.85rem 1rem 0;
 }
 
 .timeline-content-modal__toggle {
@@ -963,6 +968,7 @@
 }
 
 .timeline-content-modal__document {
+  flex: 1 1 auto;
   min-height: 0;
   padding: 0.25rem 1rem 1rem;
   overflow: auto;
@@ -1213,12 +1219,22 @@
     max-width: calc(100vw - 0.75rem);
   }
 
-  .timeline-content-modal__toolbar {
-    padding-inline: 0.75rem;
-  }
-
   .timeline-content-modal__document {
     padding: 0.25rem 0.75rem 0.75rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .timeline-content-modal__toggle {
+    width: 36px;
+    min-width: 36px;
+    padding-inline: 0;
+    font-size: 0;
+  }
+
+  .timeline-content-modal__toggle i {
+    margin-right: 0 !important;
+    font-size: 0.85rem;
   }
 }
 
@@ -1241,11 +1257,25 @@
 .workflow-timeline-diff-modal-fullscreen {
   max-width: calc(100vw - 1rem);
   margin: 0.5rem auto;
-  height: calc(100vh - 1rem);
+  height: calc(100dvh - 1rem);
 }
 
 .workflow-timeline-diff-modal-fullscreen .modal-content {
   height: 100%;
+  max-height: 100%;
+}
+
+.workflow-timeline-diff-modal-fullscreen .modal-body {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.workflow-timeline-diff-modal-fullscreen .workflow-timeline-diff-shell {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
 }
 
 .workflow-timeline-diff-shell {
