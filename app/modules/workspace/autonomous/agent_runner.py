@@ -3122,6 +3122,39 @@ class AutonomousAgentRunner:
                                     "model": msg.get("model"),
                                 }
                             )
+                        # Current Claude stream-json embeds tool_use blocks in
+                        # the assistant message instead of emitting the legacy
+                        # top-level ``type=tool_use`` shape handled below.
+                        # Preserve both the invocation and its stable id so a
+                        # later user/tool_result block can prove which test
+                        # command actually completed.
+                        if isinstance(content, list):
+                            for block in content:
+                                if not isinstance(block, dict) or block.get("type") != "tool_use":
+                                    continue
+                                tool_info = {
+                                    "name": block.get("name", "unknown"),
+                                    "input": block.get("input", {}),
+                                    "id": block.get("id"),
+                                }
+                                session.tool_calls.append({"type": "tool_use", "tool": tool_info})
+                                session.event_log.append(
+                                    {
+                                        "type": "tool_use",
+                                        "tool_name": tool_info["name"],
+                                        "tool_input": tool_info["input"],
+                                        "tool_use_id": tool_info["id"],
+                                    }
+                                )
+                                if self._activity_callback:
+                                    self._activity_callback(
+                                        session.session_id,
+                                        {
+                                            "type": "tool_use",
+                                            "tool_name": tool_info["name"],
+                                            "tool_input": str(tool_info["input"])[:200],
+                                        },
+                                    )
                         # Emit activity for real-time frontend display
                         if self._activity_callback and text_delta:
                             self._activity_callback(

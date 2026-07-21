@@ -170,6 +170,44 @@ class TestSchedulerProcessWorkflows:
 
                 assert mock_orch.advance.call_count == MAX_CONCURRENT_WORKFLOWS
 
+    def test_same_poll_selects_only_one_workflow_per_batch(self):
+        scheduler = AutonomousScheduler()
+        mock_repo = MagicMock()
+        mock_repo.get_active_workflows.return_value = [
+            {
+                "workflow_id": "batch-wf-1",
+                "status": "planning",
+                "batch_id": "batch-1",
+                "worktree_path": "/wt/1",
+                "branch_name": "auto/1",
+            },
+            {
+                "workflow_id": "batch-wf-2",
+                "status": "planning",
+                "batch_id": "batch-1",
+                "worktree_path": "/wt/2",
+                "branch_name": "auto/2",
+            },
+            {
+                "workflow_id": "independent-wf",
+                "status": "planning",
+                "batch_id": "batch-2",
+                "worktree_path": "/wt/3",
+                "branch_name": "auto/3",
+            },
+        ]
+
+        with (
+            patch("app.routes.autonomous._get_repo", return_value=mock_repo),
+            patch.object(
+                scheduler, "_advance_single", side_effect=lambda workflow_id: workflow_id
+            ) as advance,
+        ):
+            scheduler._process_workflows()
+
+        selected = [call.args[0] for call in advance.call_args_list]
+        assert selected == ["batch-wf-1", "independent-wf"]
+
     def test_single_workflow_error_continues(self):
         """Error in one workflow should not stop others."""
         scheduler = AutonomousScheduler()

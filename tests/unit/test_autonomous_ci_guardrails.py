@@ -435,6 +435,60 @@ def test_runner_preserves_tool_result_for_test_evidence():
     }
 
 
+def test_claude_embedded_tool_use_pairs_with_test_result():
+    from types import SimpleNamespace
+
+    from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner, _LocalSession
+    from app.modules.workspace.autonomous.orchestrator import _has_passing_test_tool_result
+
+    lines = [
+        {
+            "type": "assistant",
+            "message": {
+                "id": "msg-test",
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "tool-test",
+                        "name": "Bash",
+                        "input": {"command": "python -m pytest tests/issues/1891 -q"},
+                    }
+                ],
+            },
+        },
+        {
+            "type": "user",
+            "message": {
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "tool-test",
+                        "content": "65 passed in 3.2s",
+                        "is_error": False,
+                    }
+                ]
+            },
+        },
+    ]
+
+    class FakeStdout:
+        def __init__(self):
+            self.lines = [json.dumps(line).encode() for line in lines]
+
+        def readline(self):
+            return self.lines.pop(0) if self.lines else b""
+
+    runner = AutonomousAgentRunner.__new__(AutonomousAgentRunner)
+    runner._activity_callback = None
+    process = SimpleNamespace(stdout=FakeStdout(), returncode=None)
+    session = _LocalSession(session_id="test-session", process=process)
+
+    runner._read_stdout(session)
+
+    assert session.tool_calls[0]["tool"]["name"] == "Bash"
+    assert _has_passing_test_tool_result(session.event_log, "python")
+
+
 def test_codex_command_execution_normalizes_tool_evidence():
     from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner
     from app.modules.workspace.autonomous.orchestrator import _has_passing_test_tool_result

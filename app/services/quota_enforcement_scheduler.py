@@ -365,11 +365,21 @@ class QuotaEnforcementScheduler:
 
         # Terminate active sessions
         try:
-            from app.modules.workspace.session_manager import SessionManager
+            from app.modules.workspace.session_manager import (
+                SessionManager,
+                is_autonomous_workflow_session,
+            )
 
             sm = SessionManager()
             active_sessions = sm.get_active_sessions(user_id)
             for session in active_sessions:
+                if is_autonomous_workflow_session(session):
+                    logger.info(
+                        "Deferring quota enforcement for autonomous workflow session %s "
+                        "to AutonomousScheduler",
+                        session.session_id[:8],
+                    )
+                    continue
                 try:
                     sm.complete_session(session.session_id)
                     logger.info(
