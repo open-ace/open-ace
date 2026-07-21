@@ -4014,6 +4014,16 @@ do_upgrade() {
             cp "$target_path/usage.db" "$backup_dir/"
         fi
 
+        # Backup frontend build artifacts if source doesn't have them (Issue #1943)
+        # static/js/dist is not tracked in git, so upgrading from git repo would lose it
+        local preserve_frontend=false
+        if [ -d "$target_path/static/js/dist" ] && [ ! -d "$SOURCE_DIR/static/js/dist" ]; then
+            print_info "Backing up frontend build artifacts (static/js/dist)..."
+            mkdir -p "$backup_dir/static/js"
+            cp -r "$target_path/static/js/dist" "$backup_dir/static/js/"
+            preserve_frontend=true
+        fi
+
         # Update files (preserve logs, data, and config)
         print_info "Updating files..."
         # Remove old files except logs, data, and config directory
@@ -4071,6 +4081,16 @@ do_upgrade() {
         # Set permissions
         chmod +x "$target_path/scripts/"*.py 2>/dev/null || true
         chmod +x "$target_path/scripts/"*.sh 2>/dev/null || true
+
+        # Restore frontend build artifacts if source didn't have them (Issue #1943)
+        if [ "$preserve_frontend" = true ]; then
+            print_info "Restoring frontend build artifacts (source directory lacks static/js/dist)..."
+            mkdir -p "$target_path/static/js"
+            cp -r "$backup_dir/static/js/dist" "$target_path/static/js/"
+            print_warning "Preserved existing frontend build artifacts"
+            print_warning "To rebuild frontend with latest code, run:"
+            print_warning "  cd $target_path/frontend && npm install && npm run build"
+        fi
     fi
 
     # Fix ownership if running as root and a different user is specified
