@@ -195,7 +195,7 @@ Open ACE 根据用户角色提供两个不同的界面：
 
 | 层级 | 技术 |
 |------|------|
-| **后端** | Python 3.9+, Flask |
+| **后端** | Python 3.10+, Flask |
 | **前端** | React 18, TypeScript, Bootstrap 5, Chart.js |
 | **数据库** | SQLite (开发), PostgreSQL (生产) |
 | **构建** | Vite, TypeScript |
