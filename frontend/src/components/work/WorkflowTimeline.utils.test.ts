@@ -95,6 +95,31 @@ describe('WorkflowTimeline.utils', () => {
     expect(getActivityHostMilestoneId(mergeRepair, 1, 'merging')).toBe('repair');
   });
 
+  it('prefers the newest active AI milestone when a fork copied an older active card', () => {
+    const forkMilestones = [
+      {
+        milestone_id: 'copied-parent-plan',
+        milestone_type: 'plan_created',
+        status: 'in_progress',
+        dev_round: 1,
+      },
+      {
+        milestone_id: 'fork-marker',
+        milestone_type: 'workflow_forked',
+        status: 'completed',
+        dev_round: 1,
+      },
+      {
+        milestone_id: 'child-development',
+        milestone_type: 'dev_started',
+        status: 'in_progress',
+        dev_round: 1,
+      },
+    ];
+
+    expect(getActivityHostMilestoneId(forkMilestones, 1, 'developing')).toBe('child-development');
+  });
+
   it('parses diff stats json', () => {
     expect(parseDiffStats('{"additions":100,"deletions":25,"files":3,"commits":2}')).toEqual({
       additions: 100,

@@ -48,12 +48,17 @@ export function getActivityHostMilestoneId(
   workflowDevRound: number,
   workflowStatus: string
 ): string | null {
-  const active = milestones.find(
-    (milestone) =>
-      milestone.status === 'in_progress' &&
-      (milestone.dev_round || 1) === workflowDevRound &&
-      isAiMilestoneType(milestone.milestone_type)
-  );
+  // Forked workflows can retain a copied in-progress milestone from the
+  // parent. Timeline order is oldest-first, so always choose the newest
+  // in-progress AI step from the current branch/round.
+  const active = [...milestones]
+    .reverse()
+    .find(
+      (milestone) =>
+        milestone.status === 'in_progress' &&
+        (milestone.dev_round || 1) === workflowDevRound &&
+        isAiMilestoneType(milestone.milestone_type)
+    );
   if (active) return active.milestone_id;
 
   // Preserve the panel only across short scheduler gaps in phases that
