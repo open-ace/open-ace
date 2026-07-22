@@ -1075,6 +1075,21 @@ def handle_llm_proxy_request(
 
             if not converted_from_responses:
                 body = request.get_data()
+                # 注入 stream_options 以获取流式响应的 usage 字段
+                # 参考: model_gateway/attribution.py build_body_transformer()
+                # 注意: converted_from_responses=True 时，请求体已转换且 stream=False，
+                #       不会进入此分支，无需额外检查
+                try:
+                    data = json.loads(body)
+                    if data.get("stream") is True:
+                        existing_so = data.get("stream_options")
+                        if isinstance(existing_so, dict):
+                            existing_so.setdefault("include_usage", True)
+                        else:
+                            data["stream_options"] = {"include_usage": True}
+                        body = json.dumps(data).encode("utf-8")
+                except (json.JSONDecodeError, ValueError, TypeError):
+                    pass  # 解析失败，使用原始请求体
 
             resp = http_requests.request(
                 method=request.method,
