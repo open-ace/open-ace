@@ -8254,6 +8254,8 @@ class AutonomousOrchestrator:
         wt_gh = GitHubOps(temp_wt_path, system_account=system_account)
         try:
             original_pr_head = wt_gh.get_current_commit()
+            conflict_ms_id = ""
+            milestone_result = {}
             # Fetch latest main and merge into the branch.
             wt_gh._run_git(["fetch", "origin", "main"])
             merge_result = wt_gh._run_git(["merge", "origin/main"], check=False)
@@ -8290,6 +8292,10 @@ class AutonomousOrchestrator:
                     AUTONOMOUS_CONTEXT
                     + "当前分支与 main 存在合并冲突。请解决所有冲突文件中的冲突标记，"
                     "保留两边的有效修改。\n\n"
+                    f"编排器已经把你放在唯一允许操作的临时 worktree：`{temp_wt_path}`。\n"
+                    f"该 worktree 已检出目标分支 `{branch_name}` 并处于 merge conflict 状态。\n"
+                    "禁止切换/checkout 其他分支，禁止调用 EnterWorktree，禁止到主仓或其他"
+                    " worktree 查找冲突；直接处理当前目录的 U-stage 文件。\n\n"
                 )
                 # Issue reference is available in this method's scope
                 issue_number = wf.get("github_issue_number") or self.workflow.get(
@@ -8305,14 +8311,14 @@ class AutonomousOrchestrator:
                     "步骤：\n"
                     "1. 查看所有冲突文件：git diff --name-only --diff-filter=U\n"
                     "2. 逐个解决冲突标记（<<<<<<, ======, >>>>>>）\n"
-                    "3. git add 所有解决后的文件\n"
-                    "4. 运行测试验证冲突解决没有破坏功能（不能跳过）：\n"
+                    "3. 运行测试验证冲突解决没有破坏功能（不能跳过）：\n"
                     "   - python -m pytest 或 python3 -m pytest\n"
                     "   - 如果有测试失败，分析原因并修复，然后重新测试\n"
                     "   - 特别注意：main 上的改动可能修改了函数签名/SQL/接口，\n"
                     "     冲突文件相关的测试也需要同步更新\n"
                     "   - 重复直到所有测试通过\n"
-                    "5. 测试全部通过后，git commit 完成合并\n\n"
+                    "4. 测试全部通过后直接返回总结；不要执行 git add、git commit 或 git push，\n"
+                    "   暂存、提交与推送由编排器在校验冲突标记和提交图后完成。\n\n"
                     "## 总结报告（必须）\n"
                     "在回复末尾简要总结：\n"
                     "- 解决了哪些文件的冲突\n"
@@ -8322,6 +8328,20 @@ class AutonomousOrchestrator:
                 )
 
                 wf = self.workflow
+                # _run_agent derives its authoritative repository path and the
+                # prompt execution contract from ``wf``. Passing project_path
+                # alone is insufficient: the workflow's cleared worktree_path
+                # would otherwise override it back to the shared main repo.
+                # Bind a per-call workflow snapshot to the isolated resolver
+                # worktree without changing the persisted workflow row.
+                conflict_wf = dict(wf)
+                conflict_wf.update(
+                    {
+                        "branch_strategy": "worktree",
+                        "worktree_path": temp_wt_path,
+                        "branch_name": branch_name,
+                    }
+                )
                 # Track this as its own milestone so conflict-resolution usage is
                 # captured in phase_* (and thus workflow totals = SUM(phase_*)).
                 conflict_ms = self._create_milestone(
@@ -8332,7 +8352,7 @@ class AutonomousOrchestrator:
                     title=f"Resolving merge conflicts (PR #{pr_number})",
                 )
                 result = self._run_agent(
-                    wf=wf,
+                    wf=conflict_wf,
                     workflow_id=self._workflow_id,
                     cli_tool=wf.get("cli_tool", "claude-code"),
                     model=wf.get("model", ""),
@@ -8349,42 +8369,126 @@ class AutonomousOrchestrator:
                 )
                 self._accumulate_tokens(result)
                 response_text = self._artifact_text(result)
-                self.repo.update_milestone(
-                    conflict_ms.get("milestone_id", ""),
-                    {
-                        "status": "completed" if result.success else "failed",
-                        "session_id": result.session_id,
-                        "error_message": result.error or "",
-                        "result_summary": response_text,
-                        "tldr": self._artifact_tldr(result),
-                    },
-                )
-
+                conflict_ms_id = conflict_ms.get("milestone_id", "")
+                milestone_result = {
+                    "session_id": result.session_id,
+                    "result_summary": response_text,
+                    "tldr": self._artifact_tldr(result),
+                }
                 if not result.success:
+                    self.repo.update_milestone(
+                        conflict_ms_id,
+                        {
+                            **milestone_result,
+                            "status": "failed",
+                            "error_message": result.error or "Conflict resolution failed",
+                        },
+                    )
                     raise RuntimeError(f"Conflict resolution failed: {result.error}")
 
-            # Push the resolved branch. The new merge commit triggers a fresh
-            # CI run, so we do NOT merge here — _do_merge will retry on the
-            # next scheduler cycle once CI passes (it checks for pending CI
-            # at the top and defers until checks are green).
-            # P1 修复（Issue #1611）：Conflict 解决后检查分支一致性
-            current_branch = wt_gh.get_current_branch()
-            if isinstance(current_branch, str) and current_branch and current_branch != branch_name:
-                logger.warning(
-                    "Conflict resolution branch mismatch: expected=%s, actual=%s",
-                    branch_name,
-                    current_branch,
+                try:
+                    # The agent is intentionally edit/test-only: its command
+                    # guard denies mutating git operations.  The trusted
+                    # orchestrator owns staging and the merge commit after
+                    # verifying both the working tree and branch identity.
+                    current_branch = wt_gh.get_current_branch()
+                    if not isinstance(current_branch, str) or current_branch != branch_name:
+                        raise RuntimeError(
+                            "Conflict resolution branch mismatch before commit: "
+                            f"expected={branch_name!r}, actual={current_branch!r}"
+                        )
+                    unmerged_paths = wt_gh.get_unmerged_paths()
+                    marker_paths = wt_gh.get_conflict_marker_paths(unmerged_paths)
+                    if marker_paths:
+                        raise RuntimeError(
+                            "Conflict resolver left conflict markers in: "
+                            + ", ".join(marker_paths[:10])
+                        )
+                    wt_gh.git_add_all()
+                    remaining_unmerged = wt_gh.get_unmerged_paths()
+                    if remaining_unmerged:
+                        raise RuntimeError(
+                            "Conflict resolver left unmerged paths after staging: "
+                            + ", ".join(remaining_unmerged[:10])
+                        )
+                    wt_gh.git_commit(
+                        f"merge: resolve conflicts for PR #{pr_number}", no_verify=True
+                    )
+                except Exception as exc:
+                    self.repo.update_milestone(
+                        conflict_ms_id,
+                        {
+                            **milestone_result,
+                            "status": "failed",
+                            "error_message": str(exc),
+                        },
+                    )
+                    raise
+
+                # Do not mark the milestone complete until the shared
+                # pre-push commit-graph postconditions below have passed.
+
+            try:
+                # Push the resolved branch. The new merge commit triggers a
+                # fresh CI run, so _do_merge retries on the next scheduler
+                # cycle once checks are green.
+                # Fail closed on branch drift. Rewriting branch_name from the
+                # current checkout could push an unrelated branch.
+                current_branch = wt_gh.get_current_branch()
+                if not isinstance(current_branch, str) or current_branch != branch_name:
+                    raise RuntimeError(
+                        "Conflict resolution branch mismatch before push: "
+                        f"expected={branch_name!r}, actual={current_branch!r}"
+                    )
+                resolved_head = wt_gh.get_current_commit()
+                if (
+                    not isinstance(original_pr_head, str)
+                    or not original_pr_head
+                    or not isinstance(resolved_head, str)
+                    or not resolved_head
+                ):
+                    raise RuntimeError("Unable to verify merge commit identity before push")
+                if resolved_head == original_pr_head:
+                    raise RuntimeError("Merge resolution made no commit; refusing unchanged push")
+
+                pr_head_in_result = self._ancestor_check(wt_gh, original_pr_head, resolved_head)
+                main_head_in_result = self._ancestor_check(wt_gh, "origin/main", resolved_head)
+                if pr_head_in_result is not True or main_head_in_result is not True:
+                    raise RuntimeError(
+                        "Merge commit ancestry verification failed before push: "
+                        f"pr_head={pr_head_in_result!r}, origin_main={main_head_in_result!r}"
+                    )
+                merge_scope_wf = dict(wf)
+                merge_scope_wf["base_commit_sha"] = "origin/main"
+                scope_error = self._validate_autonomous_change_scope(
+                    wt_gh, merge_scope_wf, original_pr_head, resolved_head
                 )
-                branch_name = current_branch
-            resolved_head = wt_gh.get_current_commit()
-            merge_scope_wf = dict(wf)
-            merge_scope_wf["base_commit_sha"] = "origin/main"
-            scope_error = self._validate_autonomous_change_scope(
-                wt_gh, merge_scope_wf, original_pr_head, resolved_head
-            )
-            if scope_error:
-                raise RuntimeError(f"Conflict resolution scope rejected before push: {scope_error}")
-            wt_gh.git_push(branch=branch_name, force_with_lease=True)
+                if scope_error:
+                    raise RuntimeError(
+                        f"Conflict resolution scope rejected before push: {scope_error}"
+                    )
+                wt_gh.git_push(branch=branch_name, force_with_lease=True)
+            except Exception as exc:
+                if conflict_ms_id:
+                    self.repo.update_milestone(
+                        conflict_ms_id,
+                        {
+                            **milestone_result,
+                            "status": "failed",
+                            "error_message": str(exc),
+                        },
+                    )
+                raise
+
+            if conflict_ms_id:
+                self.repo.update_milestone(
+                    conflict_ms_id,
+                    {
+                        **milestone_result,
+                        "status": "completed",
+                        "error_message": "",
+                    },
+                )
             self._create_milestone(
                 phase="merge",
                 milestone_type="conflicts_pushed",
