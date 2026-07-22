@@ -84,7 +84,9 @@ def run_fetch_scripts():
         # For production, configure a dedicated service account with read-only
         # access to user home dirs and set FETCH_USE_SUDO=false in config.
         use_sudo = os.environ.get("FETCH_USE_SUDO", "true").lower() == "true"
-        python_path = "/usr/bin/python3" if use_sudo else sys.executable
+        # Use the same Python interpreter as the main process to ensure compatibility
+        # with type annotation syntax (e.g., str | None requires Python 3.10+)
+        python_path = sys.executable
 
         def _build_cmd(script_path, args):
             cmd = []
