@@ -976,6 +976,38 @@ def test_test_evidence_pairs_anonymous_results_with_all_tool_calls(
     assert _has_passing_test_tool_result(events, "python") is expected
 
 
+@pytest.mark.parametrize(
+    "events",
+    [
+        [
+            {
+                "type": "tool_use",
+                "tool_name": "Bash",
+                "tool_input": {"command": "python -m pytest tests/test_a.py -q"},
+            },
+            {
+                "type": "tool_use",
+                "tool_name": "Read",
+                "tool_input": {"file_path": "old-results.txt"},
+            },
+            {"type": "tool_result", "text": "Historical: 1 passed", "exit_code": 0},
+        ],
+        [
+            {"type": "tool_result", "text": "Historical: 1 passed", "exit_code": 0},
+            {
+                "type": "tool_use",
+                "tool_name": "Bash",
+                "tool_input": {"command": "python -m pytest tests/test_a.py -q"},
+            },
+        ],
+    ],
+)
+def test_test_evidence_rejects_incomplete_or_out_of_order_anonymous_events(events):
+    from app.modules.workspace.autonomous.orchestrator import _has_passing_test_tool_result
+
+    assert not _has_passing_test_tool_result(events, "python")
+
+
 def test_test_evidence_targeted_pass_does_not_cover_failed_full_suite():
     from app.modules.workspace.autonomous.orchestrator import _has_passing_test_tool_result
 

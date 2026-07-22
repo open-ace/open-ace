@@ -490,58 +490,36 @@ def _has_passing_test_tool_result(event_log: list, framework_type: str) -> bool:
     suite followed by one passing targeted test from opening a PR.
     """
     test_tools: dict[str, tuple[str, _PytestScope | None]] = {}
-    anonymous_tool_calls: list[tuple[str, _PytestScope | None] | None] = []
-    for event in event_log or []:
-        if not isinstance(event, dict) or event.get("type") != "tool_use":
-            continue
-        tool_id = str(event.get("tool_use_id") or "")
+    states: dict[str, bool] = {}
+    scopes: dict[str, _PytestScope | None] = {}
+    result_orders: dict[str, int] = {}
+    expected_commands: set[str] = set()
+    anonymous_pending: tuple[str, _PytestScope | None] | None = None
+    anonymous_has_pending = False
+    anonymous_evidence_ambiguous = False
+
+    def _command_info(event: dict) -> tuple[str, _PytestScope | None] | None:
         as_tool_call = {
             "tool": {
                 "name": event.get("tool_name", ""),
                 "input": event.get("tool_input", {}),
             }
         }
-        command_info = None
-        if _has_test_tool_call([as_tool_call], framework_type):
-            tool_input = event.get("tool_input") or {}
-            command = ""
-            if isinstance(tool_input, dict):
-                command = str(
-                    tool_input.get("command")
-                    or tool_input.get("cmd")
-                    or tool_input.get("args")
-                    or ""
-                )
-            command_key = _normalize_test_command(command) or (f"tool:{event.get('tool_name', '')}")
-            scope = _pytest_test_scope(command) if framework_type == "python" else None
-            command_info = (command_key, scope)
-            if tool_id:
-                test_tools[tool_id] = command_info
-        if not tool_id:
-            # Preserve every anonymous call's position.  Otherwise an unrelated
-            # anonymous result can be paired with the next pytest invocation,
-            # potentially turning a real failure into a false pass.
-            anonymous_tool_calls.append(command_info)
+        if not _has_test_tool_call([as_tool_call], framework_type):
+            return None
+        tool_input = event.get("tool_input") or {}
+        command = ""
+        if isinstance(tool_input, dict):
+            command = str(
+                tool_input.get("command") or tool_input.get("cmd") or tool_input.get("args") or ""
+            )
+        command_key = _normalize_test_command(command) or f"tool:{event.get('tool_name', '')}"
+        scope = _pytest_test_scope(command) if framework_type == "python" else None
+        return command_key, scope
 
-    states: dict[str, bool] = {}
-    scopes: dict[str, _PytestScope | None] = {}
-    result_orders: dict[str, int] = {}
-    anonymous_index = 0
-    for event_order, event in enumerate(event_log or []):
-        if not isinstance(event, dict) or event.get("type") != "tool_result":
-            continue
-        tool_id = str(event.get("tool_use_id") or "")
-        if tool_id:
-            command_info = test_tools.get(tool_id)
-            if not command_info:
-                continue
-        else:
-            if anonymous_index >= len(anonymous_tool_calls):
-                continue
-            command_info = anonymous_tool_calls[anonymous_index]
-            anonymous_index += 1
-            if command_info is None:
-                continue
+    def _record_result(
+        command_info: tuple[str, _PytestScope | None], event: dict, event_order: int
+    ) -> None:
         command_key, scope = command_info
         text = str(event.get("text") or "")
         exit_code = event.get("exit_code")
@@ -576,22 +554,48 @@ def _has_passing_test_tool_result(event_log: list, framework_type: str) -> bool:
         scopes[command_key] = scope
         result_orders[command_key] = event_order
 
-    expected_commands = {command_key for command_key, _scope in test_tools.values()} | {
-        command_key
-        for command_info in anonymous_tool_calls
-        if command_info is not None
-        for command_key, _scope in (command_info,)
-    }
+    for event_order, event in enumerate(event_log or []):
+        if not isinstance(event, dict):
+            continue
+        event_type = event.get("type")
+        if event_type == "tool_use":
+            tool_id = str(event.get("tool_use_id") or "")
+            command_info = _command_info(event)
+            if command_info is not None:
+                command_key, scope = command_info
+                expected_commands.add(command_key)
+                scopes.setdefault(command_key, scope)
+            if tool_id:
+                if command_info is not None:
+                    test_tools[tool_id] = command_info
+                continue
+            if anonymous_has_pending:
+                # Without IDs, overlapping calls cannot be paired safely.  Do
+                # not trust any anonymous result in this event stream.
+                anonymous_evidence_ambiguous = True
+            anonymous_pending = command_info
+            anonymous_has_pending = True
+            continue
+        if event_type != "tool_result":
+            continue
+
+        tool_id = str(event.get("tool_use_id") or "")
+        if tool_id:
+            command_info = test_tools.get(tool_id)
+            if not command_info:
+                continue
+        else:
+            if not anonymous_has_pending:
+                continue
+            command_info = anonymous_pending
+            anonymous_pending = None
+            anonymous_has_pending = False
+            if anonymous_evidence_ambiguous or command_info is None:
+                continue
+        _record_result(command_info, event, event_order)
+
     if not expected_commands:
         return False
-
-    for command_key, scope in test_tools.values():
-        scopes.setdefault(command_key, scope)
-    for command_info in anonymous_tool_calls:
-        if command_info is None:
-            continue
-        command_key, scope = command_info
-        scopes.setdefault(command_key, scope)
 
     passing_commands = [
         (command_key, scopes.get(command_key), result_orders.get(command_key, -1))
