@@ -485,20 +485,25 @@ def _pytest_scope_covers(
 def _has_passing_test_tool_result(event_log: list, framework_type: str) -> bool:
     """Require conclusive success for every distinct test command in this run.
 
-    A later successful retry only supersedes an earlier failure when it reruns
-    the same normalized command.  This deliberately prevents a failing full
-    suite followed by one passing targeted test from opening a PR.
+    A later successful retry can supersede an earlier failure only when it
+    reruns the same normalized command or a safely comparable pytest superset.
+    Every new invocation resets its command to pending, so stale success from
+    before a code change cannot satisfy an interrupted rerun.
     """
-    test_tools: dict[str, tuple[str, _PytestScope | None]] = {}
+    _CommandInfo = tuple[str, _PytestScope | None]
+    _Invocation = tuple[_CommandInfo, int]
+
+    test_tools: dict[str, _Invocation] = {}
     states: dict[str, bool] = {}
     scopes: dict[str, _PytestScope | None] = {}
-    result_orders: dict[str, int] = {}
+    state_orders: dict[str, int] = {}
+    latest_invocation_orders: dict[str, int] = {}
     expected_commands: set[str] = set()
-    anonymous_pending: tuple[str, _PytestScope | None] | None = None
+    anonymous_pending: _Invocation | None = None
     anonymous_has_pending = False
     anonymous_evidence_ambiguous = False
 
-    def _command_info(event: dict) -> tuple[str, _PytestScope | None] | None:
+    def _command_info(event: dict) -> _CommandInfo | None:
         as_tool_call = {
             "tool": {
                 "name": event.get("tool_name", ""),
@@ -517,10 +522,13 @@ def _has_passing_test_tool_result(event_log: list, framework_type: str) -> bool:
         scope = _pytest_test_scope(command) if framework_type == "python" else None
         return command_key, scope
 
-    def _record_result(
-        command_info: tuple[str, _PytestScope | None], event: dict, event_order: int
-    ) -> None:
+    def _record_result(invocation: _Invocation, event: dict, event_order: int) -> None:
+        command_info, invocation_order = invocation
         command_key, scope = command_info
+        if latest_invocation_orders.get(command_key) != invocation_order:
+            # A newer invocation of this command is pending or has completed;
+            # an out-of-order result from an older call must not replace it.
+            return
         text = str(event.get("text") or "")
         exit_code = event.get("exit_code")
         explicit_error = bool(event.get("is_error")) or (
@@ -552,7 +560,7 @@ def _has_passing_test_tool_result(event_log: list, framework_type: str) -> bool:
         )
         states[command_key] = not explicit_error and not has_failure and has_pass
         scopes[command_key] = scope
-        result_orders[command_key] = event_order
+        state_orders[command_key] = event_order
 
     for event_order, event in enumerate(event_log or []):
         if not isinstance(event, dict):
@@ -564,16 +572,22 @@ def _has_passing_test_tool_result(event_log: list, framework_type: str) -> bool:
             if command_info is not None:
                 command_key, scope = command_info
                 expected_commands.add(command_key)
-                scopes.setdefault(command_key, scope)
+                scopes[command_key] = scope
+                states[command_key] = False
+                state_orders[command_key] = event_order
+                latest_invocation_orders[command_key] = event_order
+                invocation = (command_info, event_order)
+            else:
+                invocation = None
             if tool_id:
-                if command_info is not None:
-                    test_tools[tool_id] = command_info
+                if invocation is not None:
+                    test_tools[tool_id] = invocation
                 continue
             if anonymous_has_pending:
                 # Without IDs, overlapping calls cannot be paired safely.  Do
                 # not trust any anonymous result in this event stream.
                 anonymous_evidence_ambiguous = True
-            anonymous_pending = command_info
+            anonymous_pending = invocation
             anonymous_has_pending = True
             continue
         if event_type != "tool_result":
@@ -581,24 +595,24 @@ def _has_passing_test_tool_result(event_log: list, framework_type: str) -> bool:
 
         tool_id = str(event.get("tool_use_id") or "")
         if tool_id:
-            command_info = test_tools.get(tool_id)
-            if not command_info:
+            invocation = test_tools.get(tool_id)
+            if not invocation:
                 continue
         else:
             if not anonymous_has_pending:
                 continue
-            command_info = anonymous_pending
+            invocation = anonymous_pending
             anonymous_pending = None
             anonymous_has_pending = False
-            if anonymous_evidence_ambiguous or command_info is None:
+            if anonymous_evidence_ambiguous or invocation is None:
                 continue
-        _record_result(command_info, event, event_order)
+        _record_result(invocation, event, event_order)
 
     if not expected_commands:
         return False
 
     passing_commands = [
-        (command_key, scopes.get(command_key), result_orders.get(command_key, -1))
+        (command_key, scopes.get(command_key), state_orders.get(command_key, -1))
         for command_key, passed in states.items()
         if passed
     ]
@@ -606,7 +620,7 @@ def _has_passing_test_tool_result(event_log: list, framework_type: str) -> bool:
         if states.get(command_key) is True:
             continue
         earlier_scope = scopes.get(command_key)
-        earlier_order = result_orders.get(command_key, -1)
+        earlier_order = state_orders.get(command_key, -1)
         if framework_type != "python" or not any(
             passing_order > earlier_order and _pytest_scope_covers(passing_scope, earlier_scope)
             for _passing_key, passing_scope, passing_order in passing_commands

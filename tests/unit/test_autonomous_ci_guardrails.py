@@ -1008,6 +1008,60 @@ def test_test_evidence_rejects_incomplete_or_out_of_order_anonymous_events(event
     assert not _has_passing_test_tool_result(events, "python")
 
 
+@pytest.mark.parametrize("tool_id", ["named-run", None])
+def test_test_evidence_new_invocation_invalidates_stale_pass(tool_id):
+    from app.modules.workspace.autonomous.orchestrator import _has_passing_test_tool_result
+
+    first_use = {
+        "type": "tool_use",
+        "tool_name": "Bash",
+        "tool_input": {"command": "python -m pytest tests/test_a.py -q"},
+    }
+    first_result = {
+        "type": "tool_result",
+        "text": "1 passed in 0.2s",
+        "exit_code": 0,
+    }
+    second_use = {
+        "type": "tool_use",
+        "tool_name": "Bash",
+        "tool_input": {"command": "python -m pytest tests/test_a.py -q"},
+    }
+    if tool_id is not None:
+        first_use["tool_use_id"] = tool_id
+        first_result["tool_use_id"] = tool_id
+        second_use["tool_use_id"] = tool_id
+
+    assert not _has_passing_test_tool_result([first_use, first_result, second_use], "python")
+
+
+def test_test_evidence_older_named_result_cannot_resolve_newer_invocation():
+    from app.modules.workspace.autonomous.orchestrator import _has_passing_test_tool_result
+
+    events = [
+        {
+            "type": "tool_use",
+            "tool_name": "Bash",
+            "tool_input": {"command": "python -m pytest tests/test_a.py -q"},
+            "tool_use_id": "older",
+        },
+        {
+            "type": "tool_use",
+            "tool_name": "Bash",
+            "tool_input": {"command": "python -m pytest tests/test_a.py -q"},
+            "tool_use_id": "newer",
+        },
+        {
+            "type": "tool_result",
+            "tool_use_id": "older",
+            "text": "1 passed in 0.2s",
+            "exit_code": 0,
+        },
+    ]
+
+    assert not _has_passing_test_tool_result(events, "python")
+
+
 def test_test_evidence_targeted_pass_does_not_cover_failed_full_suite():
     from app.modules.workspace.autonomous.orchestrator import _has_passing_test_tool_result
 
