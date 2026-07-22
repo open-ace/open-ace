@@ -1615,6 +1615,7 @@ class AutonomousAgentRunner:
             if workspace_type == "remote" and remote_machine_id:
                 result = self._run_remote(
                     session_id=session_id,
+                    user_id=user_id,
                     cli_tool=cli_tool,
                     model=model,
                     project_path=project_path,
@@ -2792,6 +2793,7 @@ class AutonomousAgentRunner:
     def _run_remote(
         self,
         session_id: str,
+        user_id: int | None,
         cli_tool: str,
         model: str,
         project_path: str,
@@ -2810,15 +2812,18 @@ class AutonomousAgentRunner:
                 error="Remote session manager not available",
             )
 
+        remote_session_id = session_id
         try:
             # Register a tracker so orchestrator can signal cancellation
-            self._local_sessions[session_id] = _LocalSession(
+            tracker = _LocalSession(
                 session_id=session_id,
                 process=None,  # type: ignore[arg-type]
             )
+            self._local_sessions[session_id] = tracker
 
             # Create remote session
             result = self.remote_session_manager.create_remote_session(
+                user_id=user_id,
                 machine_id=remote_machine_id,
                 project_path=project_path,
                 cli_tool=cli_tool,
@@ -2835,9 +2840,12 @@ class AutonomousAgentRunner:
                     error=result.get("error", "Failed to create remote session"),
                 )
 
+            remote_session_id = result.get("session_id") or session_id
+            tracker.persisted_session_id = remote_session_id
+
             # Send the prompt
             self.remote_session_manager.send_message(
-                session_id=session_id,
+                session_id=remote_session_id,
                 message=prompt,
             )
 
@@ -2858,25 +2866,25 @@ class AutonomousAgentRunner:
                 local_session = self._local_sessions.get(session_id)
                 if local_session and local_session._stopped.is_set():
                     return AgentTaskResult(
-                        session_id=session_id,
+                        session_id=remote_session_id,
                         tracking_session_id=session_id,
                         success=False,
                         error="Remote session cancelled by orchestrator",
                     )
 
-                session_data = self.session_manager.get_session(session_id)
+                session_data = self.session_manager.get_session(remote_session_id)
                 if session_data:
                     status = session_data.get("status", "active")
                     if status in ("completed", "stopped", "error", "exited"):
                         # Get messages
                         messages = []
                         if hasattr(self.session_manager, "get_messages"):
-                            messages = self.session_manager.get_messages(session_id) or []
+                            messages = self.session_manager.get_messages(remote_session_id) or []
 
                         remote_events, remote_tool_calls = self._normalize_remote_messages(messages)
 
                         return _build_agent_task_result(
-                            session_id=session_id,
+                            session_id=remote_session_id,
                             tracking_session_id=session_id,
                             event_log=remote_events,
                             messages=messages,
@@ -2893,7 +2901,7 @@ class AutonomousAgentRunner:
                 time.sleep(5)
 
             return AgentTaskResult(
-                session_id=session_id,
+                session_id=remote_session_id,
                 tracking_session_id=session_id,
                 success=False,
                 error=f"Remote agent task timed out after {timeout}s",
@@ -2901,7 +2909,7 @@ class AutonomousAgentRunner:
 
         except Exception as e:
             return AgentTaskResult(
-                session_id=session_id,
+                session_id=remote_session_id,
                 tracking_session_id=session_id,
                 success=False,
                 error=f"Remote execution error: {e}",
@@ -3439,7 +3447,24 @@ class AutonomousAgentRunner:
         first with SIGCONT so it can handle SIGTERM.
         """
         session = self._local_sessions.get(session_id)
-        if not session or not session.process or session.process.returncode is not None:
+        if not session:
+            return
+        if session.process is None:
+            # Remote autonomous calls use a process-less local tracker so the
+            # synchronous poll loop can observe cancellation. Stop the actual
+            # remote session when possible, but always trip the local events:
+            # shutdown must drain even if the remote machine is unreachable.
+            try:
+                if self.remote_session_manager:
+                    remote_session_id = session.persisted_session_id or session_id
+                    self.remote_session_manager.stop_session(remote_session_id)
+            except Exception as exc:
+                logger.warning("Failed to stop remote session %s: %s", session_id[:8], exc)
+            finally:
+                session._stopped.set()
+                session.completed.set()
+            return
+        if session.process.returncode is not None:
             return
 
         try:

@@ -232,6 +232,7 @@ class TestAgentRunnerRunTask:
         with patch("time.sleep"):
             result = runner.run_agent_task(
                 workflow_id="wf-1",
+                user_id=7,
                 cli_tool="claude-code",
                 model="m1",
                 project_path="/tmp/test",
@@ -244,6 +245,11 @@ class TestAgentRunnerRunTask:
         assert result.success is True
         assert "Task completed" in result.response_text
         assert result.total_tokens == 500
+        assert result.session_id == "rs-1"
+        rsm.create_remote_session.assert_called_once()
+        assert rsm.create_remote_session.call_args.kwargs["user_id"] == 7
+        rsm.send_message.assert_called_once_with(session_id="rs-1", message="Do something")
+        sm.get_session.assert_any_call("rs-1")
 
     def test_run_remote_creation_failure(self):
         """Remote session creation failure."""
@@ -830,6 +836,34 @@ class TestStopSession:
         runner = AutonomousAgentRunner()
         # Should not raise
         runner.stop_session("nonexistent")
+
+    def test_stop_remote_session_marks_tracker_and_notifies_manager(self):
+        remote_manager = MagicMock()
+        runner = AutonomousAgentRunner(remote_session_manager=remote_manager)
+        session = _LocalSession(
+            session_id="remote-1",
+            process=None,
+            persisted_session_id="remote-actual-1",
+        )
+        runner._local_sessions["remote-1"] = session
+
+        runner.stop_session("remote-1")
+
+        remote_manager.stop_session.assert_called_once_with("remote-actual-1")
+        assert session._stopped.is_set()
+        assert session.completed.is_set()
+
+    def test_stop_remote_session_still_drains_when_manager_fails(self):
+        remote_manager = MagicMock()
+        remote_manager.stop_session.side_effect = RuntimeError("remote unavailable")
+        runner = AutonomousAgentRunner(remote_session_manager=remote_manager)
+        session = _LocalSession(session_id="remote-2", process=None)
+        runner._local_sessions["remote-2"] = session
+
+        runner.stop_session("remote-2")
+
+        assert session._stopped.is_set()
+        assert session.completed.is_set()
 
 
 class TestPersistLocalSessionMessages:
