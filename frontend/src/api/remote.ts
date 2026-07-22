@@ -79,6 +79,29 @@ export interface UpdateApiKeyRequest {
   weight?: number;
 }
 
+// Terminal model selection types
+export interface TerminalModel {
+  id: string;
+  name: string;
+  key_id: number;
+  key_name: string;
+  provider: string;
+  protocol: string;
+  is_duplicate: boolean;
+}
+
+export interface TerminalModelGroup {
+  protocol: string;
+  label: string;
+  tools: string[];
+}
+
+export interface TerminalModelsResponse {
+  success: boolean;
+  models: TerminalModel[];
+  groups: TerminalModelGroup[];
+}
+
 export interface RemoteSession {
   session_id: string;
   machine_id: string;
@@ -323,7 +346,19 @@ export const remoteApi = {
   },
 
   // Terminal management
-  startTerminal(data: { machine_id: string; work_dir?: string }): Promise<{
+  getTerminalModels(params: {
+    workspace_type: 'local' | 'remote';
+    machine_id?: string;
+  }): Promise<TerminalModelsResponse> {
+    return apiClient.get('/api/workspace/terminal-models', params);
+  },
+
+  startTerminal(data: {
+    machine_id: string;
+    work_dir?: string;
+    model_id?: string;
+    key_id?: number;
+  }): Promise<{
     success: boolean;
     terminal?: {
       terminal_id: string;

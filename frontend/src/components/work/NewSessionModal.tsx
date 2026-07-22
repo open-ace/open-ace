@@ -21,8 +21,11 @@ import { t } from '@/i18n';
 import { Modal, Button } from '@/components/common';
 import { RemoteMachineSelector } from './RemoteMachineSelector';
 import { DirectoryBrowserModal } from './DirectoryBrowserModal';
-import type { RemoteMachine } from '@/api/remote';
+import type { RemoteMachine, TerminalModel, TerminalModelGroup } from '@/api/remote';
 import { remoteApi } from '@/api/remote';
+
+// LocalStorage key for remembering user's last model selection
+const TERMINAL_MODEL_STORAGE_KEY = 'terminal-selected-model';
 
 interface NewSessionModalProps {
   isOpen?: boolean;
@@ -35,7 +38,13 @@ interface NewSessionModalProps {
     sessionId: string;
     projectPath: string;
   }) => void;
-  onCreateTerminal?: (params: { machineId: string; machineName: string; workDir: string }) => void;
+  onCreateTerminal?: (params: {
+    machineId: string;
+    machineName: string;
+    workDir: string;
+    modelId?: string;
+    keyId?: number;
+  }) => void;
 }
 
 export const NewSessionModal: React.FC<NewSessionModalProps> = ({
@@ -58,6 +67,12 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
   const [isStartingTerminal, setIsStartingTerminal] = useState(false);
   const [showDirectoryBrowser, setShowDirectoryBrowser] = useState(false);
   const [pathHistory, setPathHistory] = useState<string[]>([]);
+
+  // Terminal model selection state
+  const [terminalModels, setTerminalModels] = useState<TerminalModel[]>([]);
+  const [terminalGroups, setTerminalGroups] = useState<TerminalModelGroup[]>([]);
+  const [selectedModelKey, setSelectedModelKey] = useState<string>('');
+  const [modelsLoading, setModelsLoading] = useState(false);
 
   const { data: machinesData, isLoading: machinesLoading } = useAvailableMachines();
   const createRemoteSession = useCreateRemoteSession();
@@ -125,6 +140,55 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
       }
     }
   }, [selectedMachineId]);
+
+  // Load terminal models when machine is selected in terminal mode
+  useEffect(() => {
+    if (workspaceType === 'terminal' && selectedMachineId) {
+      setModelsLoading(true);
+      remoteApi
+        .getTerminalModels({
+          workspace_type: 'remote',
+          machine_id: selectedMachineId,
+        })
+        .then((result) => {
+          if (result.success) {
+            setTerminalModels(result.models);
+            setTerminalGroups(result.groups);
+
+            // Restore last selection from localStorage
+            const savedModel = localStorage.getItem(TERMINAL_MODEL_STORAGE_KEY);
+            if (savedModel && result.models.length > 0) {
+              // Verify saved model still exists in the list
+              const exists = result.models.some((m) => `${m.id}:${m.key_id}` === savedModel);
+              if (exists) {
+                setSelectedModelKey(savedModel);
+              } else if (result.models.length > 0) {
+                // Default to first model
+                const first = result.models[0];
+                setSelectedModelKey(`${first.id}:${first.key_id}`);
+              }
+            } else if (result.models.length > 0) {
+              // Default to first model
+              const first = result.models[0];
+              setSelectedModelKey(`${first.id}:${first.key_id}`);
+            }
+          }
+        })
+        .catch((err) => {
+          console.error('Failed to load terminal models:', err);
+        })
+        .finally(() => {
+          setModelsLoading(false);
+        });
+    } else {
+      // Clear models when switching away from terminal mode
+      setTerminalModels([]);
+      setTerminalGroups([]);
+      if (workspaceType !== 'terminal') {
+        setSelectedModelKey('');
+      }
+    }
+  }, [workspaceType, selectedMachineId]);
 
   // Save path to history
   const savePathToHistory = useCallback(
@@ -218,23 +282,47 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
   };
 
   const handleCreateTerminal = async () => {
-    if (!selectedMachineId) return;
+    if (!selectedMachineId || !selectedModelKey) return;
 
     setIsStartingTerminal(true);
     try {
       const machineName = selectedMachine?.machine_name ?? selectedMachineId.slice(0, 8);
+
+      // Parse model_id and key_id from selectedModelKey
+      const [modelId, keyIdStr] = selectedModelKey.split(':');
+      const keyId = keyIdStr ? parseInt(keyIdStr, 10) : undefined;
+
+      // Save selection to localStorage
+      localStorage.setItem(TERMINAL_MODEL_STORAGE_KEY, selectedModelKey);
 
       if (onCreateTerminal) {
         await onCreateTerminal({
           machineId: selectedMachineId,
           machineName,
           workDir: projectPath || getDefaultPath(selectedMachine?.os_type),
+          modelId,
+          keyId,
         });
+      } else {
+        // Direct API call when not embedded
+        const result = await remoteApi.startTerminal({
+          machine_id: selectedMachineId,
+          work_dir: projectPath || getDefaultPath(selectedMachine?.os_type),
+          model_id: modelId,
+          key_id: keyId,
+        });
+
+        if (!result.success) {
+          throw new Error(result.error ?? 'Failed to start terminal');
+        }
       }
+
       setSelectedMachineId('');
       setProjectPath('');
       setWorkspaceType('local');
       onClose();
+    } catch (err) {
+      console.error('Failed to create terminal:', err);
     } finally {
       setIsStartingTerminal(false);
     }
@@ -252,10 +340,10 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
 
   const canCreate =
     workspaceType === 'local' ||
-    (workspaceType === 'terminal' && selectedMachineId) ||
+    (workspaceType === 'terminal' && selectedMachineId && selectedModelKey) ||
     (workspaceType === 'remote' && selectedMachineId && projectPath);
 
-  const isLoading = createRemoteSession.isPending || isStartingTerminal;
+  const isLoading = createRemoteSession.isPending || isStartingTerminal || modelsLoading;
 
   return (
     <>
@@ -369,6 +457,63 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
             {/* Terminal options */}
             {workspaceType === 'terminal' && selectedMachineId && (
               <>
+                {/* Model Selection */}
+                <div className="mb-3">
+                  <label className="form-label">
+                    {t('selectModel', language) || 'Select Model'}{' '}
+                    <span className="text-danger">*</span>
+                  </label>
+                  {modelsLoading ? (
+                    <div className="form-text text-muted">
+                      <i className="bi bi-arrow-repeat me-1" />
+                      {t('loadingModels', language) || 'Loading models...'}
+                    </div>
+                  ) : terminalModels.length === 0 ? (
+                    <div className="alert alert-warning small mb-0">
+                      <i className="bi bi-exclamation-triangle me-1" />
+                      {t('noModelsAvailable', language) ||
+                        'No models available. Please configure API keys in Settings.'}
+                    </div>
+                  ) : (
+                    <select
+                      className="form-select"
+                      value={selectedModelKey}
+                      onChange={(e) => setSelectedModelKey(e.target.value)}
+                    >
+                      {terminalModels.map((m) => (
+                        <option key={`${m.id}-${m.key_id}`} value={`${m.id}:${m.key_id}`}>
+                          {m.is_duplicate ? `${m.name} (${m.key_name})` : m.name} -{' '}
+                          {m.protocol === 'openai'
+                            ? 'OpenAI'
+                            : m.protocol === 'anthropic'
+                              ? 'Anthropic'
+                              : m.protocol}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  <div className="form-text text-muted small">
+                    {t('terminalModelHint', language) ||
+                      'Select a model to use its API key configuration'}
+                  </div>
+
+                  {/* Protocol info hint */}
+                  {terminalGroups.length > 0 && (
+                    <div className="alert alert-info small mt-2 mb-0">
+                      <i className="bi bi-info-circle me-1" />
+                      {t('terminalProtocolHint', language) ||
+                        'Model will be configured with the corresponding API key.'}
+                      <br />
+                      {terminalGroups.map((g) => (
+                        <span key={g.protocol}>
+                          {g.label}: {g.tools.join(', ')}
+                          <br />
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
                 {/* Working directory for terminal */}
                 <div className="mb-3">
                   <label className="form-label">
@@ -419,13 +564,6 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
                       </div>
                     </div>
                   )}
-                </div>
-
-                {/* Info hint */}
-                <div className="alert alert-info small">
-                  <i className="bi bi-info-circle me-1" />
-                  {t('terminalInfoHint', language) ||
-                    'Opens a web terminal on the remote machine. Claude Code is pre-configured with proxy authentication.'}
                 </div>
               </>
             )}
