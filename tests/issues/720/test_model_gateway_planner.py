@@ -2,6 +2,7 @@
 """Unit tests for the model_gateway planner, attribution, mapping, and config layers."""
 
 import json
+from unittest.mock import patch
 
 import pytest
 
@@ -17,6 +18,12 @@ from app.modules.workspace.model_gateway.planner import (
     NullGatewayPlanner,
     convert_responses_input_to_chat,
 )
+from app.utils.llm_proxy_url_validator import LlmProxyValidationResult
+
+
+def _mock_validate_llm_proxy_url(url, tenant_id, provider, *, resolver=None):
+    """Mock validator that allows all URLs for testing."""
+    return LlmProxyValidationResult(True)
 
 
 def _token_payload(**overrides):
@@ -73,6 +80,7 @@ class TestLitellmGatewayPlanner:
             is None
         )
 
+    @patch("app.utils.llm_proxy_url_validator.validate_llm_proxy_url", _mock_validate_llm_proxy_url)
     def test_chat_completions_target_url(self):
         plan = self._planner().plan(
             "openai", "gpt-4", "v1/chat/completions", _token_payload(), "sess-1", 7, 3
@@ -84,12 +92,14 @@ class TestLitellmGatewayPlanner:
         assert plan.gateway_key == "gw-secret"
         assert plan.is_responses is False
 
+    @patch("app.utils.llm_proxy_url_validator.validate_llm_proxy_url", _mock_validate_llm_proxy_url)
     def test_versionless_base_url_keeps_v1(self):
         plan = LitellmGatewayPlanner(
             GatewayConfig(base_url="https://gateway.example.com", api_key="k")
         ).plan("openai", "gpt-4", "v1/chat/completions", _token_payload(), "s", 7, 3)
         assert plan.target_url == "https://gateway.example.com/v1/chat/completions"
 
+    @patch("app.utils.llm_proxy_url_validator.validate_llm_proxy_url", _mock_validate_llm_proxy_url)
     def test_responses_path_maps_to_chat_completions(self):
         plan = self._planner().plan(
             "openai", "model-a", "v1/responses", _token_payload(), "sess-1", 7, 3
@@ -104,6 +114,7 @@ class TestLitellmGatewayPlanner:
         # metadata survives the conversion (not dropped)
         assert sent["metadata"]["openace_user_id"] == 7
 
+    @patch("app.utils.llm_proxy_url_validator.validate_llm_proxy_url", _mock_validate_llm_proxy_url)
     def test_attribution_headers_from_token(self):
         plan = self._planner().plan(
             "openai", "gpt-4", "v1/chat/completions", _token_payload(), "sess-1", 7, 3
@@ -115,6 +126,7 @@ class TestLitellmGatewayPlanner:
         assert plan.headers["X-OpenACE-Model"] == "gpt-4"
         assert plan.headers["X-OpenACE-Run-Id"] == "sess-run-1"
 
+    @patch("app.utils.llm_proxy_url_validator.validate_llm_proxy_url", _mock_validate_llm_proxy_url)
     def test_metadata_injected_into_body(self):
         plan = self._planner().plan(
             "openai", "gpt-4", "v1/chat/completions", _token_payload(), "sess-1", 7, 3
@@ -125,6 +137,7 @@ class TestLitellmGatewayPlanner:
         assert sent["metadata"]["openace_session_id"] == "sess-1"
         assert sent["user"] == "7"
 
+    @patch("app.utils.llm_proxy_url_validator.validate_llm_proxy_url", _mock_validate_llm_proxy_url)
     def test_model_prefix_when_enabled(self):
         plan = self._planner(model_prefix_mode=True).plan(
             "openai", "glm-5", "v1/chat/completions", _token_payload(), "s", 7, 3
@@ -132,6 +145,7 @@ class TestLitellmGatewayPlanner:
         out = plan.body_transformer(json.dumps({"model": "glm-5"}).encode())
         assert json.loads(out)["model"] == "openai/glm-5"
 
+    @patch("app.utils.llm_proxy_url_validator.validate_llm_proxy_url", _mock_validate_llm_proxy_url)
     def test_model_prefix_off_passthrough(self):
         plan = self._planner(model_prefix_mode=False).plan(
             "openai", "glm-5", "v1/chat/completions", _token_payload(), "s", 7, 3
@@ -139,6 +153,7 @@ class TestLitellmGatewayPlanner:
         out = plan.body_transformer(json.dumps({"model": "glm-5"}).encode())
         assert json.loads(out)["model"] == "glm-5"
 
+    @patch("app.utils.llm_proxy_url_validator.validate_llm_proxy_url", _mock_validate_llm_proxy_url)
     def test_stream_options_include_usage_hinted(self):
         plan = self._planner().plan(
             "openai", "gpt-4", "v1/chat/completions", _token_payload(), "s", 7, 3
@@ -147,6 +162,7 @@ class TestLitellmGatewayPlanner:
         sent = json.loads(out)
         assert sent["stream_options"]["include_usage"] is True
 
+    @patch("app.utils.llm_proxy_url_validator.validate_llm_proxy_url", _mock_validate_llm_proxy_url)
     def test_transformer_passthrough_on_invalid_json(self):
         plan = self._planner().plan(
             "openai", "gpt-4", "v1/chat/completions", _token_payload(), "s", 7, 3

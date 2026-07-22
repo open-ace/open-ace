@@ -92,6 +92,7 @@ class TestInsightsServiceConfig:
                 "https://db.api.com/v1",
                 1,
                 None,
+                None,
             )
             mock_get.return_value = mock_proxy
 
@@ -209,6 +210,7 @@ class TestInsightsServiceConfig:
                 "db-key",
                 "https://db.api.com/v1",
                 1,
+                None,
                 None,
             )
             mock_get.return_value = mock_proxy
@@ -643,6 +645,7 @@ class TestInsightsServiceGenerateInsights:
                 "https://api.example.com/v1",
                 1,
                 None,
+                None,
             )
             mock_get.return_value = mock_proxy
 
@@ -676,6 +679,7 @@ class TestInsightsServiceGenerateInsights:
                 "test-key",
                 "https://api.example.com/v1",
                 1,
+                None,
                 None,
             )
             mock_get.return_value = mock_proxy
