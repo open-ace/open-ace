@@ -334,6 +334,33 @@ def get_session_models():
     )
 
 
+@workspace_bp.route("/terminal-models", methods=["GET"])
+def get_terminal_models():
+    """Get all available models for terminal mode across all CLI tools.
+
+    Returns models with key_name and protocol for UI differentiation.
+    """
+    machine_id = request.args.get("machine_id")
+    workspace_type = request.args.get("workspace_type", "remote")
+
+    # Resolve tenant_id
+    tenant_id = 1
+    if workspace_type == "remote" and machine_id:
+        from app.modules.workspace.remote_agent_manager import get_remote_agent_manager
+
+        agent_mgr = get_remote_agent_manager()
+        if not agent_mgr.check_user_access(machine_id, g.user["id"]):
+            return jsonify({"success": False, "error": "Machine not found or access denied"}), 404
+        machine = agent_mgr.get_machine(machine_id) or {}
+        tenant_id = machine.get("tenant_id", 1)
+
+    api_proxy = get_api_key_proxy_service()
+    scope = "remote" if workspace_type == "remote" else "local"
+    result = api_proxy.get_all_terminal_models(tenant_id, scope)
+
+    return jsonify({"success": True, **result})
+
+
 # ==================== Prompt Templates ====================
 
 

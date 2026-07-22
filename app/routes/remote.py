@@ -2037,6 +2037,8 @@ def start_terminal():
     data = request.get_json() or {}
     machine_id = data.get("machine_id")
     work_dir = data.get("work_dir")
+    model_id = data.get("model_id")  # Optional: selected model
+    key_id = data.get("key_id")  # Optional: specific API key
 
     if not machine_id:  # decorator already guards; narrows type for mypy
         return jsonify({"error": "machine_id is required"}), 400
@@ -2070,6 +2072,10 @@ def start_terminal():
         {
             "workspace_type": "terminal",
             "remote_machine_id": machine_id,
+            "context": {
+                "model_id": model_id,
+                "key_id": key_id,
+            },
         },
     )
     logger.info(
@@ -2078,43 +2084,104 @@ def start_terminal():
 
     # Generate proxy tokens for LLM API auth through the terminal
     api_proxy = get_api_key_proxy_service()
-    anthropic_token = api_proxy.generate_proxy_token(
-        user_id=g.user["id"],
-        session_id=terminal_id,
-        tenant_id=tenant_id,
-        provider="anthropic",
-        session_type="terminal",
-    )
-    openai_token = api_proxy.generate_proxy_token(
-        user_id=g.user["id"],
-        session_id=terminal_id,
-        tenant_id=tenant_id,
-        provider="openai",
-        session_type="terminal",
-    )
+
+    # Determine which tokens to generate based on model selection
+    anthropic_token = None
+    openai_token = None
+
+    if model_id and key_id:
+        # User selected a specific model/key - only generate token for that provider
+        from app.modules.workspace.api_key_proxy import get_protocol_for_provider
+
+        # Get the key info to determine provider
+        key_info = api_proxy.get_key_by_id(tenant_id, key_id)
+        if key_info:
+            provider = key_info.get("provider", "")
+            protocol = get_protocol_for_provider(provider)
+
+            if protocol == "anthropic":
+                anthropic_token = api_proxy.generate_proxy_token(
+                    user_id=g.user["id"],
+                    session_id=terminal_id,
+                    tenant_id=tenant_id,
+                    provider="anthropic",
+                    session_type="terminal",
+                    extra_payload={
+                        "ha_candidate_keys": [{"key_id": key_id}],
+                        "ha_model_key_ids": {model_id: [key_id]},
+                    },
+                )
+            else:
+                openai_token = api_proxy.generate_proxy_token(
+                    user_id=g.user["id"],
+                    session_id=terminal_id,
+                    tenant_id=tenant_id,
+                    provider="openai",
+                    session_type="terminal",
+                    extra_payload={
+                        "ha_candidate_keys": [{"key_id": key_id}],
+                        "ha_model_key_ids": {model_id: [key_id]},
+                    },
+                )
+    else:
+        # No specific model selected - generate tokens for all providers (default behavior)
+        anthropic_token = api_proxy.generate_proxy_token(
+            user_id=g.user["id"],
+            session_id=terminal_id,
+            tenant_id=tenant_id,
+            provider="anthropic",
+            session_type="terminal",
+        )
+        openai_token = api_proxy.generate_proxy_token(
+            user_id=g.user["id"],
+            session_id=terminal_id,
+            tenant_id=tenant_id,
+            provider="openai",
+            session_type="terminal",
+        )
 
     # Use external URL for LLM proxy (remote machine needs to access it)
     backend_url = agent_mgr.get_backend_url(request.host_url)
     proxy_url = f"{backend_url}/api/remote/llm-proxy"
     logger.info("start_terminal: backend_url=%s, proxy_url=%s", backend_url, proxy_url)
 
-    # Get CLI settings for supported menu tools
+    # Get CLI settings
     cli_settings = {}
-    for tool_name in _CLI_SETTINGS_TOOLS:
-        tool_settings = api_proxy.get_cli_settings_for_tool(tenant_id, tool_name)
-        if tool_settings:
-            cli_settings[tool_name] = tool_settings
+    if model_id and key_id:
+        # Only get settings for the selected key
+        key_info = api_proxy.get_key_by_id(tenant_id, key_id)
+        logger.info(f"start_terminal: model_id={model_id}, key_id={key_id}, key_info={key_info}")
+        if key_info:
+            cli_tools_str = key_info.get("cli_tools", "[]")
+            try:
+                cli_tools = json.loads(cli_tools_str) if cli_tools_str else []
+            except json.JSONDecodeError:
+                cli_tools = []
+            # Get settings for each tool this key supports - use specific key settings
+            for tool_name in cli_tools:
+                tool_settings = api_proxy.get_cli_settings_for_key(tenant_id, key_id, tool_name)
+                if tool_settings:
+                    cli_settings[tool_name] = tool_settings
+        logger.info(f"start_terminal: cli_settings for key_id={key_id}: {cli_settings}")
+    else:
+        # Default: get settings for all supported tools (merged from all keys)
+        for tool_name in _CLI_SETTINGS_TOOLS:
+            tool_settings = api_proxy.get_cli_settings_for_tool(tenant_id, tool_name)
+            if tool_settings:
+                cli_settings[tool_name] = tool_settings
+        logger.info(f"start_terminal: cli_settings (default): {cli_settings}")
 
-    # Send start_terminal command to agent with tokens for both providers
+    # Send start_terminal command to agent with tokens for selected providers
     cmd = {
         "type": "command",
         "command": "start_terminal",
         "terminal_id": terminal_id,
         "proxy_url": proxy_url,
-        "anthropic_token": anthropic_token,
-        "openai_token": openai_token,
+        "anthropic_token": anthropic_token or "",
+        "openai_token": openai_token or "",
         "work_dir": work_dir or "",
         "cli_settings": cli_settings,
+        "model_id": model_id,  # Pass to agent for reference
     }
     agent_mgr.send_command(machine_id, cmd)
 
@@ -2293,26 +2360,77 @@ def attach_terminal(terminal_id):
     attach_machine = agent_mgr.get_machine(machine_id)
     attach_tenant_id = attach_machine.get("tenant_id", 1) if attach_machine else 1
 
+    # Get session context to retrieve model_id and key_id
+    from app.modules.workspace.session_manager import get_session_manager
+
+    sm = get_session_manager()
+    session_info = sm.get_session(terminal_id)
+    context = session_info.context if session_info else {}
+    stored_model_id = context.get("model_id")
+    stored_key_id = context.get("key_id")
+
     # Generate fresh API tokens for LLM proxy auth
     api_proxy = get_api_key_proxy_service()
     api_proxy.revoke_proxy_tokens_for_session(
         terminal_id,
         reason="terminal_tokens_rotated",
     )
-    anthropic_token = api_proxy.generate_proxy_token(
-        user_id=g.user["id"],
-        session_id=terminal_id,
-        tenant_id=attach_tenant_id,
-        provider="anthropic",
-        session_type="terminal",
-    )
-    openai_token = api_proxy.generate_proxy_token(
-        user_id=g.user["id"],
-        session_id=terminal_id,
-        tenant_id=attach_tenant_id,
-        provider="openai",
-        session_type="terminal",
-    )
+
+    # Determine token generation based on stored model/key selection
+    anthropic_token = None
+    openai_token = None
+
+    if stored_model_id and stored_key_id:
+        # User had selected a specific model/key - generate token with that info
+        from app.modules.workspace.api_key_proxy import get_protocol_for_provider
+
+        key_info = api_proxy.get_key_by_id(attach_tenant_id, stored_key_id)
+        if key_info:
+            provider = key_info.get("provider", "")
+            protocol = get_protocol_for_provider(provider)
+
+            if protocol == "anthropic":
+                anthropic_token = api_proxy.generate_proxy_token(
+                    user_id=g.user["id"],
+                    session_id=terminal_id,
+                    tenant_id=attach_tenant_id,
+                    provider="anthropic",
+                    session_type="terminal",
+                    extra_payload={
+                        "ha_candidate_keys": [{"key_id": stored_key_id}],
+                        "ha_model_key_ids": {stored_model_id: [stored_key_id]},
+                    },
+                )
+            else:
+                openai_token = api_proxy.generate_proxy_token(
+                    user_id=g.user["id"],
+                    session_id=terminal_id,
+                    tenant_id=attach_tenant_id,
+                    provider="openai",
+                    session_type="terminal",
+                    extra_payload={
+                        "ha_candidate_keys": [{"key_id": stored_key_id}],
+                        "ha_model_key_ids": {stored_model_id: [stored_key_id]},
+                    },
+                )
+
+    # Fall back to default behavior if no specific model was selected
+    if not anthropic_token:
+        anthropic_token = api_proxy.generate_proxy_token(
+            user_id=g.user["id"],
+            session_id=terminal_id,
+            tenant_id=attach_tenant_id,
+            provider="anthropic",
+            session_type="terminal",
+        )
+    if not openai_token:
+        openai_token = api_proxy.generate_proxy_token(
+            user_id=g.user["id"],
+            session_id=terminal_id,
+            tenant_id=attach_tenant_id,
+            provider="openai",
+            session_type="terminal",
+        )
 
     # Get proxy URL for LLM API
     backend_url = agent_mgr.get_backend_url(request.host_url)
