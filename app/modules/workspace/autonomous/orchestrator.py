@@ -4118,6 +4118,14 @@ class AutonomousOrchestrator:
         repo_validation_error = self._validate_repo_context_after_run(
             repo_state_before, project_system_account
         )
+        if repo_validation_error:
+            logger.error("Workflow repo validation failed: %s", repo_validation_error)
+            result.success = False
+            result.error_code = "repo_integrity_violation"
+            result.error = repo_validation_error
+        # Apply repository validation to the result before observing shutdown.
+        # Otherwise SIGTERM racing with this validation window could downgrade
+        # a newly detected integrity violation into a retryable cancellation.
         if self._is_shutdown_requested():
             self._abort_agent_run_for_shutdown(
                 milestone_id,
@@ -4126,11 +4134,6 @@ class AutonomousOrchestrator:
                 usage_session_ids,
                 tracking_session_id,
             )
-        if repo_validation_error:
-            logger.error("Workflow repo validation failed: %s", repo_validation_error)
-            result.success = False
-            result.error_code = "repo_integrity_violation"
-            result.error = repo_validation_error
         upstream_hard_quota_exhausted = self._is_upstream_hard_quota_exhausted(result)
 
         # Attribute this call's own usage to its milestone (increment, not cumulative).

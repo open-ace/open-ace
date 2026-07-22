@@ -235,6 +235,39 @@ class TestRunAgentApiErrorRetry:
         )
         o._write_phase_usage.assert_called_once()
 
+    def test_shutdown_racing_with_post_run_validation_fails_closed(self):
+        o = _make_orchestrator(_make_workflow())
+        o._runner.run_agent_task = MagicMock(
+            return_value=AgentTaskResult(
+                session_id="sess-track",
+                tracking_session_id="sess-track",
+                success=True,
+                total_tokens=90,
+            )
+        )
+
+        def detect_violation_as_shutdown_arrives(*_args):
+            o._shutdown_requested.set()
+            return "protected Git metadata changed"
+
+        o._validate_repo_context_after_run.side_effect = detect_violation_as_shutdown_arrives
+
+        with pytest.raises(orch_module.WorkflowPaused, match="integrity violation"):
+            o._run_agent(wf=_make_workflow(), milestone_id="ms-shutdown", prompt="x")
+
+        o.repo.update_milestone.assert_called_with(
+            "ms-shutdown",
+            {
+                "status": "failed",
+                "session_id": "sess-track",
+                "error_message": "protected Git metadata changed",
+            },
+        )
+        o._update_workflow.assert_called_with(
+            {"status": "failed", "error_message": "protected Git metadata changed"}
+        )
+        o._write_phase_usage.assert_called_once()
+
     def test_shutdown_racing_with_retry_cancel_clear_never_dispatches(self, monkeypatch):
         monkeypatch.setattr("time.sleep", lambda *_args, **_kwargs: None)
         o = _make_orchestrator(_make_workflow())
