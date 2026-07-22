@@ -7324,6 +7324,19 @@ class AutonomousOrchestrator:
             return
 
         review_text = self._artifact_text(review_result)
+        if not review_text.strip():
+            message = "PR review agent returned no result"
+            self.repo.update_milestone(
+                review_ms.get("milestone_id", ""),
+                {
+                    "status": "failed",
+                    "review_content": "",
+                    "review_session_id": review_result.session_id,
+                    "error_message": message,
+                },
+            )
+            self._update_workflow({"status": "failed", "error_message": message})
+            return
         # Detect approval using the language-aware marker, then persist a
         # structured verdict so progress_reported doesn't re-scan review text.
         # The legacy zh marker is accepted too, for workflows whose content
@@ -7461,6 +7474,18 @@ class AutonomousOrchestrator:
                 self._update_workflow({"status": "failed", "error_message": message})
                 return
             summary_text = self._artifact_text(summary_result)
+            if not summary_text.strip():
+                message = "PR review summary agent returned no result"
+                self.repo.update_milestone(
+                    summary_ms.get("milestone_id", ""),
+                    {
+                        "status": "failed",
+                        "review_content": "",
+                        "error_message": message,
+                    },
+                )
+                self._update_workflow({"status": "failed", "error_message": message})
+                return
             self.repo.update_milestone(
                 summary_ms.get("milestone_id", ""),
                 {
@@ -7646,8 +7671,8 @@ class AutonomousOrchestrator:
         diff_stats = {}
         try:
             commit_sha = gh.get_current_commit()
-        except Exception:
-            pass
+        except Exception as exc:
+            return fail_fix(f"Unable to inspect branch HEAD after PR review fix: {exc}", fix_result)
         sha_changed = commit_before and commit_sha and commit_before != commit_sha
         if not sha_changed:
             try:
@@ -7658,9 +7683,12 @@ class AutonomousOrchestrator:
                         no_verify=True,
                     )
                     commit_sha = gh.get_current_commit()
+                    if not commit_sha or commit_sha == commit_before:
+                        raise RuntimeError("review-fix commit did not advance branch HEAD")
                     sha_changed = True
             except Exception as e:
                 logger.warning("Fix auto-commit failed: %s", e)
+                return fail_fix(f"Unable to commit PR review fix: {e}", fix_result)
 
         # Track push failure to decide milestone status and avoid misleading comment
         push_failed = False
