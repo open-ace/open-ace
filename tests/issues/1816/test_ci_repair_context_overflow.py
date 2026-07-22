@@ -240,6 +240,73 @@ def test_stable_session_line_rebinds_once_and_preserves_usage(recovered_success)
     assert wf["test_session_id"] == "test-track"
 
 
+@pytest.mark.parametrize("recovered_success", [True, False])
+def test_context_recovery_carries_transient_retry_usage(recovered_success):
+    """Transient usage before overflow is read from the persisted milestone."""
+    wf = _make_workflow(main_session_id="main-track")
+    orch, mock_repo = _make_orchestrator(wf)
+    orch._update_workflow = MagicMock()
+    orch._accumulate_tokens = MagicMock()
+    orch._runner.session_manager = MagicMock()
+    orch._runner.session_manager.get_session.return_value = MagicMock(context={})
+    orch._runner.session_manager.update_session_fields.return_value = True
+    # First _run_agent aggregate: transient 5/3/2/1 + overflow 11/7/4/1.
+    mock_repo.get_milestone.return_value = {
+        "phase_total_tokens": 16,
+        "phase_input_tokens": 10,
+        "phase_output_tokens": 6,
+        "phase_request_count": 2,
+    }
+    overflow = AgentTaskResult(
+        session_id="main-track",
+        success=True,
+        response_text="API Error: 400 Range of input length should be [1, 202752]",
+        total_tokens=11,
+        total_input_tokens=7,
+        total_output_tokens=4,
+        request_count=1,
+    )
+    recovered = AgentTaskResult(
+        session_id="main-track",
+        success=recovered_success,
+        response_text="fixed" if recovered_success else "",
+        error="agent exited 1" if not recovered_success else "",
+        total_tokens=23,
+        total_input_tokens=17,
+        total_output_tokens=6,
+        request_count=2,
+    )
+
+    def run_agent(**kwargs):
+        result = overflow if not kwargs.get("force_fresh") else recovered
+        orch._write_phase_usage(kwargs["milestone_id"], result, kwargs.get("prior_usage"))
+        return result
+
+    orch._run_agent = MagicMock(side_effect=run_agent)
+
+    result = orch._run_agent_with_context_recovery(
+        wf,
+        session_line="main",
+        milestone_id="ms-pr-fix",
+        prompt="fix review findings",
+    )
+
+    assert result is recovered
+    assert orch._run_agent.call_args_list[1].kwargs["prior_usage"] == {
+        "total_tokens": 16,
+        "total_input_tokens": 10,
+        "total_output_tokens": 6,
+        "request_count": 2,
+    }
+    usage_update = mock_repo.update_milestone.call_args.args[1]
+    assert usage_update == {
+        "phase_total_tokens": 39,
+        "phase_input_tokens": 27,
+        "phase_output_tokens": 12,
+        "phase_request_count": 4,
+    }
+
+
 def test_review_fix_double_overflow_fails_before_committing_dirty_tree():
     """A terminal API envelope must never commit unrelated pending changes."""
     wf = _make_workflow(current_phase="pr_review", status="pr_review")

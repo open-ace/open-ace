@@ -3978,6 +3978,32 @@ class AutonomousOrchestrator:
             "total_output_tokens": int(result.total_output_tokens or 0),
             "request_count": int(result.request_count or 0),
         }
+        # _run_agent may itself have consumed transient retries before its
+        # final attempt overflowed. Those attempts live in its local
+        # retry_usage and have already been persisted to phase_*; they are not
+        # represented by the returned final AgentTaskResult. Carry forward the
+        # milestone aggregate so the recovery write cannot erase them.
+        if milestone_id:
+            try:
+                milestone = self.repo.get_milestone(milestone_id)
+                if isinstance(milestone, dict):
+                    for usage_key, phase_key in (
+                        ("total_tokens", "phase_total_tokens"),
+                        ("total_input_tokens", "phase_input_tokens"),
+                        ("total_output_tokens", "phase_output_tokens"),
+                        ("request_count", "phase_request_count"),
+                    ):
+                        prior_usage[usage_key] = max(
+                            prior_usage[usage_key], int(milestone.get(phase_key, 0) or 0)
+                        )
+            except Exception:
+                # The final result remains a safe lower bound. A repository
+                # read outage must not make context recovery lose even that
+                # attempt's usage.
+                logger.warning(
+                    "Failed to read aggregate phase usage before context recovery",
+                    exc_info=True,
+                )
         self._accumulate_tokens(result)
         logger.warning(
             "Session line %s exceeded provider context; rebinding it and retrying once",
