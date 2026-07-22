@@ -324,21 +324,25 @@ def _normalize_test_command(command: str) -> str:
     return re.sub(r"\s+2>\&1\s*$", "", normalized).strip()
 
 
-def _pytest_test_scope(command: str) -> frozenset[str] | None:
-    """Return pytest selectors, or ``None`` for a full-suite invocation.
+_PytestScope = tuple[str, frozenset[str]]
 
-    An empty frozenset means the command is too complex for safe scope
-    comparison.  This lets a later passing superset rerun clear earlier
-    failures for the same files while ensuring a targeted pass can never clear
+
+def _pytest_test_scope(command: str) -> _PytestScope | None:
+    """Return the pytest execution context and selectors when safely comparable.
+
+    ``None`` means the command is too complex for safe scope comparison.  An
+    empty selector set means a full-suite invocation.  This lets a later
+    passing superset rerun clear earlier failures for the same files while
+    ensuring a targeted pass or a different Python environment can never clear
     a failed full-suite command.
     """
     normalized = _normalize_test_command(command)
     if any(operator in normalized for operator in ("&&", "||", ";", "|")):
-        return frozenset()
+        return None
     try:
         tokens = shlex.split(normalized)
     except ValueError:
-        return frozenset()
+        return None
 
     pytest_index = -1
     for index, token in enumerate(tokens):
@@ -346,7 +350,7 @@ def _pytest_test_scope(command: str) -> frozenset[str] | None:
             pytest_index = index
             break
     if pytest_index < 0:
-        return frozenset()
+        return None
 
     # Only compare scopes when the invocation prefix has ordinary pytest
     # semantics.  Environment assignments and wrappers can change collection
@@ -359,7 +363,10 @@ def _pytest_test_scope(command: str) -> frozenset[str] | None:
             or prefix[1] != "-m"
             or re.fullmatch(r"python(?:\d+(?:\.\d+)*)?", python_name) is None
         ):
-            return frozenset()
+            return None
+        execution_context = f"{prefix[0]} -m {tokens[pytest_index]}"
+    else:
+        execution_context = tokens[pytest_index]
 
     scope_narrowing_options = {
         "-k",
@@ -422,7 +429,7 @@ def _pytest_test_scope(command: str) -> frozenset[str] | None:
         if not selectors_only and token.startswith("-"):
             option_name = token.split("=", 1)[0]
             if option_name in scope_narrowing_options:
-                return frozenset()
+                return None
             if token in safe_flags:
                 index += 1
                 continue
@@ -430,28 +437,32 @@ def _pytest_test_scope(command: str) -> frozenset[str] | None:
                 if "=" not in token:
                     index += 1
                     if index >= len(args):
-                        return frozenset()
+                        return None
                 index += 1
                 continue
             # Plugin and future pytest options are unknown here.  Exact-command
             # retries remain supported, but cross-command scope coverage is not.
-            return frozenset()
+            return None
         selectors.add(token.rstrip("/") or ".")
         index += 1
 
-    return frozenset(selectors) if selectors else None
+    return execution_context, frozenset(selectors)
 
 
 def _pytest_scope_covers(
-    passing_scope: frozenset[str] | None,
-    earlier_scope: frozenset[str] | None,
+    passing_scope: _PytestScope | None,
+    earlier_scope: _PytestScope | None,
 ) -> bool:
     """Whether a passing pytest command covers an earlier command's scope."""
-    if earlier_scope == frozenset() or passing_scope == frozenset():
+    if passing_scope is None or earlier_scope is None:
         return False
-    if passing_scope is None:
+    passing_context, passing_selectors = passing_scope
+    earlier_context, earlier_selectors = earlier_scope
+    if passing_context != earlier_context:
+        return False
+    if not passing_selectors:
         return True
-    if earlier_scope is None:
+    if not earlier_selectors:
         return False
 
     def _selector_covers(passing: str, earlier: str) -> bool:
@@ -466,8 +477,8 @@ def _pytest_scope_covers(
         return "::" not in passing and earlier_path.startswith(f"{passing_path}/")
 
     return all(
-        any(_selector_covers(passing, earlier) for passing in passing_scope)
-        for earlier in earlier_scope
+        any(_selector_covers(passing, earlier) for passing in passing_selectors)
+        for earlier in earlier_selectors
     )
 
 
@@ -478,8 +489,8 @@ def _has_passing_test_tool_result(event_log: list, framework_type: str) -> bool:
     the same normalized command.  This deliberately prevents a failing full
     suite followed by one passing targeted test from opening a PR.
     """
-    test_tools: dict[str, tuple[str, frozenset[str] | None]] = {}
-    anonymous_test_calls: list[tuple[str, frozenset[str] | None]] = []
+    test_tools: dict[str, tuple[str, _PytestScope | None]] = {}
+    anonymous_test_calls: list[tuple[str, _PytestScope | None]] = []
     for event in event_log or []:
         if not isinstance(event, dict) or event.get("type") != "tool_use":
             continue
@@ -501,14 +512,14 @@ def _has_passing_test_tool_result(event_log: list, framework_type: str) -> bool:
                     or ""
                 )
             command_key = _normalize_test_command(command) or (f"tool:{event.get('tool_name', '')}")
-            scope = _pytest_test_scope(command) if framework_type == "python" else frozenset()
+            scope = _pytest_test_scope(command) if framework_type == "python" else None
             if tool_id:
                 test_tools[tool_id] = (command_key, scope)
             else:
                 anonymous_test_calls.append((command_key, scope))
 
     states: dict[str, bool] = {}
-    scopes: dict[str, frozenset[str] | None] = {}
+    scopes: dict[str, _PytestScope | None] = {}
     result_orders: dict[str, int] = {}
     anonymous_index = 0
     for event_order, event in enumerate(event_log or []):
@@ -577,7 +588,7 @@ def _has_passing_test_tool_result(event_log: list, framework_type: str) -> bool:
     for command_key in expected_commands:
         if states.get(command_key) is True:
             continue
-        earlier_scope = scopes.get(command_key, frozenset())
+        earlier_scope = scopes.get(command_key)
         earlier_order = result_orders.get(command_key, -1)
         if framework_type != "python" or not any(
             passing_order > earlier_order and _pytest_scope_covers(passing_scope, earlier_scope)

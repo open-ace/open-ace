@@ -890,6 +890,54 @@ def test_test_evidence_restricted_pass_does_not_cover_earlier_failure(
     assert not _has_passing_test_tool_result(events, "python")
 
 
+@pytest.mark.parametrize(
+    ("failed_command", "passing_command"),
+    [
+        (
+            "python3.10 -m pytest tests/test_a.py -q",
+            "python3.12 -m pytest tests/test_a.py tests/test_b.py -q",
+        ),
+        (
+            "pytest tests/test_a.py -q",
+            "python -m pytest tests/test_a.py tests/test_b.py -q",
+        ),
+    ],
+)
+def test_test_evidence_different_pytest_context_does_not_cover_failure(
+    failed_command, passing_command
+):
+    from app.modules.workspace.autonomous.orchestrator import _has_passing_test_tool_result
+
+    events = [
+        {
+            "type": "tool_use",
+            "tool_name": "Bash",
+            "tool_input": {"command": failed_command},
+            "tool_use_id": "failed-context",
+        },
+        {
+            "type": "tool_result",
+            "tool_use_id": "failed-context",
+            "text": "1 failed, 1 passed in 0.4s",
+            "exit_code": 1,
+        },
+        {
+            "type": "tool_use",
+            "tool_name": "Bash",
+            "tool_input": {"command": passing_command},
+            "tool_use_id": "passing-context",
+        },
+        {
+            "type": "tool_result",
+            "tool_use_id": "passing-context",
+            "text": "3 passed in 0.3s",
+            "exit_code": 0,
+        },
+    ]
+
+    assert not _has_passing_test_tool_result(events, "python")
+
+
 def test_test_evidence_targeted_pass_does_not_cover_failed_full_suite():
     from app.modules.workspace.autonomous.orchestrator import _has_passing_test_tool_result
 
