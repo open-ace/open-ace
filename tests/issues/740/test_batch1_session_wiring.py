@@ -367,6 +367,7 @@ class TestRemoteNullGuard:
 
         result = runner._run_remote(
             session_id="remote-sess-1",
+            user_id=1,
             cli_tool="claude-code",
             model="test-model",
             project_path="/tmp/test",
@@ -404,6 +405,7 @@ class TestRemoteNullGuard:
 
         result = runner._run_remote(
             session_id="remote-sess-2",
+            user_id=1,
             cli_tool="claude-code",
             model="test-model",
             project_path="/tmp/test",
@@ -427,6 +429,7 @@ class TestRemoteNullGuard:
 
         result = runner._run_remote(
             session_id="remote-sess-3",
+            user_id=1,
             cli_tool="claude-code",
             model="test-model",
             project_path="/tmp/test",
@@ -473,6 +476,7 @@ class TestRemoteNullGuard:
 
         result = runner._run_remote(
             session_id="remote-sess-cancel",
+            user_id=1,
             cli_tool="claude-code",
             model="test-model",
             project_path="/tmp/test",

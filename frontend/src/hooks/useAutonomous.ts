@@ -55,6 +55,7 @@ export function useWorkflowTimeline(workflowId: string, enabled = true) {
 
 /** A single agent activity event from the SSE stream */
 export interface AgentActivity {
+  activity_id?: string;
   session_id: string;
   type: 'assistant' | 'tool_use' | 'usage' | 'system';
   timestamp?: string;
@@ -78,6 +79,14 @@ export function useWorkflowActivity(workflowId: string, enabled = true) {
   const [activities, setActivities] = useState<AgentActivity[]>([]);
   const eventSourceRef = useRef<EventSource | null>(null);
 
+  // A WorkflowTimeline instance can be reused while navigating between
+  // workflows. Never show the previous workflow's transient activity in the
+  // next one, but preserve it when the current workflow merely becomes
+  // inactive so completed milestone cards do not flicker empty.
+  useEffect(() => {
+    setActivities([]);
+  }, [workflowId]);
+
   useEffect(() => {
     if (!enabled || !workflowId) return;
 
@@ -89,16 +98,24 @@ export function useWorkflowActivity(workflowId: string, enabled = true) {
       try {
         const data = JSON.parse(event.data);
         if (data.event_type === 'agent_activity') {
-          setActivities((prev) => [
-            ...prev.slice(-49),
-            {
-              ...data.data,
-              timestamp:
-                typeof data.data?.timestamp === 'string' && data.data.timestamp
-                  ? data.data.timestamp
-                  : new Date().toISOString(),
-            },
-          ]);
+          const next: AgentActivity = {
+            ...data.data,
+            timestamp:
+              typeof data.data?.timestamp === 'string' && data.data.timestamp
+                ? data.data.timestamp
+                : new Date().toISOString(),
+          };
+          setActivities((prev) => {
+            // The backend replays a short activity window whenever EventSource
+            // reconnects. Keep the replay seamless instead of duplicating rows.
+            if (
+              next.activity_id &&
+              prev.some((activity) => activity.activity_id === next.activity_id)
+            ) {
+              return prev;
+            }
+            return [...prev, next].slice(-50);
+          });
         }
       } catch {
         // Ignore parse errors
@@ -106,8 +123,9 @@ export function useWorkflowActivity(workflowId: string, enabled = true) {
     };
 
     es.onerror = () => {
-      es.close();
-      eventSourceRef.current = null;
+      // Do not close here: native EventSource reconnects automatically. The
+      // backend replay window fills any short gap and activity_id de-duplicates
+      // entries received again after reconnect.
     };
 
     return () => {

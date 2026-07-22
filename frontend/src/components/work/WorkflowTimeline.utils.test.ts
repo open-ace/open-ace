@@ -1,8 +1,179 @@
 import { describe, expect, it } from 'vitest';
 
-import { findForkMilestoneIndex, parseDiffFiles, parseDiffStats } from './WorkflowTimeline.utils';
+import {
+  findForkMilestoneIndex,
+  getActivityHostMilestoneId,
+  getWorkflowSessionIdForMilestone,
+  isAiMilestoneType,
+  isDisplayableTimelineActivity,
+  parseDiffFiles,
+  parseDiffStats,
+} from './WorkflowTimeline.utils';
 
 describe('WorkflowTimeline.utils', () => {
+  it('filters empty assistant placeholders without hiding real activity events', () => {
+    expect(isDisplayableTimelineActivity({ type: 'assistant' })).toBe(false);
+    expect(isDisplayableTimelineActivity({ type: 'assistant', text: '   ' })).toBe(false);
+    expect(isDisplayableTimelineActivity({ type: 'assistant', text: '-' })).toBe(false);
+    expect(isDisplayableTimelineActivity({ type: 'assistant', text: 'Reviewing files' })).toBe(
+      true
+    );
+    expect(isDisplayableTimelineActivity({ type: 'tool_use' })).toBe(true);
+    expect(isDisplayableTimelineActivity({ type: 'system' })).toBe(true);
+    expect(isDisplayableTimelineActivity({ type: 'usage' })).toBe(true);
+  });
+
+  it('maps in-flight milestones to the strict main/review/test session lines', () => {
+    const workflow = {
+      main_session_id: 'main-session',
+      review_session_id: 'review-session',
+      test_session_id: 'test-session',
+    };
+
+    expect(getWorkflowSessionIdForMilestone('pr_updated', workflow)).toBe('main-session');
+    expect(getWorkflowSessionIdForMilestone('plan_finalized', workflow)).toBe('main-session');
+    expect(getWorkflowSessionIdForMilestone('pr_reviewed', workflow)).toBe('review-session');
+    expect(getWorkflowSessionIdForMilestone('plan_reviewed', workflow)).toBe('review-session');
+    expect(getWorkflowSessionIdForMilestone('tests_run', workflow)).toBe('test-session');
+  });
+
+  it('classifies AI-backed and system-only milestone cards', () => {
+    for (const type of [
+      'plan_created',
+      'plan_refined',
+      'plan_reviewed',
+      'plan_finalized',
+      'dev_started',
+      'tests_run',
+      'pr_reviewed',
+      'pr_review_summary',
+      'pr_updated',
+      'ci_repair_applied',
+      'conflicts_resolved',
+    ]) {
+      expect(isAiMilestoneType(type), type).toBe(true);
+    }
+    for (const type of [
+      'issue_linked',
+      'branch_created',
+      'pr_created',
+      'dev_completed',
+      'progress_reported',
+      'round_completed',
+      'merged',
+      'cleaned_up',
+    ]) {
+      expect(isAiMilestoneType(type), type).toBe(false);
+    }
+  });
+
+  it('keeps an activity host through the scheduler gap between milestones', () => {
+    const milestones = [
+      {
+        milestone_id: 'old-round',
+        milestone_type: 'plan_created',
+        status: 'completed',
+        dev_round: 1,
+      },
+      {
+        milestone_id: 'current',
+        milestone_type: 'dev_started',
+        status: 'in_progress',
+        dev_round: 2,
+      },
+    ];
+    expect(getActivityHostMilestoneId(milestones, 2, 'developing')).toBe('current');
+
+    const betweenMilestones = milestones.map((milestone) => ({
+      ...milestone,
+      status: 'completed',
+    }));
+    expect(getActivityHostMilestoneId(betweenMilestones, 2, 'developing')).toBe('current');
+    expect(getActivityHostMilestoneId(betweenMilestones, 2, 'completed')).toBeNull();
+  });
+
+  it('never mounts AI activity on system-only cards or idle workflow phases', () => {
+    const systemOnly = [
+      {
+        milestone_id: 'branch',
+        milestone_type: 'branch_created',
+        status: 'completed',
+        dev_round: 1,
+      },
+      {
+        milestone_id: 'wait',
+        milestone_type: 'wait_started',
+        status: 'in_progress',
+        dev_round: 1,
+      },
+    ];
+    expect(getActivityHostMilestoneId(systemOnly, 1, 'preparing')).toBeNull();
+    expect(getActivityHostMilestoneId(systemOnly, 1, 'waiting')).toBeNull();
+    expect(getActivityHostMilestoneId(systemOnly, 1, 'merging')).toBeNull();
+
+    const mergeRepair = [
+      ...systemOnly,
+      {
+        milestone_id: 'repair',
+        milestone_type: 'ci_repair_applied',
+        status: 'in_progress',
+        dev_round: 1,
+      },
+    ];
+    expect(getActivityHostMilestoneId(mergeRepair, 1, 'merging')).toBe('repair');
+  });
+
+  it('prefers the newest active AI milestone when a fork copied an older active card', () => {
+    const forkMilestones = [
+      {
+        milestone_id: 'copied-parent-plan',
+        milestone_type: 'plan_created',
+        status: 'in_progress',
+        dev_round: 1,
+      },
+      {
+        milestone_id: 'fork-marker',
+        milestone_type: 'workflow_forked',
+        status: 'completed',
+        dev_round: 1,
+      },
+      {
+        milestone_id: 'child-development',
+        milestone_type: 'dev_started',
+        status: 'in_progress',
+        dev_round: 1,
+      },
+    ];
+
+    expect(getActivityHostMilestoneId(forkMilestones, 1, 'developing')).toBe('child-development');
+  });
+
+  it('ignores stale in-progress AI milestones outside an agent-running phase', () => {
+    const staleForkMilestones = [
+      {
+        milestone_id: 'copied-parent-plan',
+        milestone_type: 'plan_created',
+        status: 'in_progress',
+        dev_round: 1,
+      },
+    ];
+
+    for (const status of [
+      'queued',
+      'pending',
+      'preparing',
+      'reporting',
+      'waiting',
+      'paused',
+      'planning_timeout',
+      'failed',
+      'cancelled',
+      'completed',
+    ]) {
+      expect(getActivityHostMilestoneId(staleForkMilestones, 1, status), status).toBeNull();
+    }
+  });
+
   it('parses diff stats json', () => {
     expect(parseDiffStats('{"additions":100,"deletions":25,"files":3,"commits":2}')).toEqual({
       additions: 100,

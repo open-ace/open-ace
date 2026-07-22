@@ -69,6 +69,15 @@ def _mock_upstream_429_quota_exceeded():
     return resp
 
 
+def _mock_bailian_allocated_rate_limit():
+    """Mock Bailian Coding Plan's temporary allocation limit response."""
+    resp = MagicMock()
+    resp.status_code = 429
+    resp.content = b'{"error": {"message": "usage allocated quota exceeded"}}'
+    resp.headers = {"Content-Type": "application/json"}
+    return resp
+
+
 _PROXY_PATH = "app.routes.remote.get_api_key_proxy_service"
 _QUOTA_PATH = "app.modules.governance.quota_manager.QuotaManager"
 _HTTP_PATH = "requests.request"
@@ -81,6 +90,44 @@ _HTTP_PATH = "requests.request"
 
 class TestUpstreamQuotaExceededAlert:
     """Tests for upstream 429 quota exceeded alert handling."""
+
+    @patch("app.modules.governance.alert_notifier.get_alert_notifier")
+    @patch(_HTTP_PATH)
+    @patch(_QUOTA_PATH)
+    @patch(_PROXY_PATH)
+    def test_bailian_allocated_limit_is_retryable_and_does_not_alert(
+        self, mock_get_proxy, mock_quota_cls, mock_http, mock_get_notifier, remote_app
+    ):
+        """Bailian allocated quota wording is rate limiting, not depletion."""
+        mock_proxy = MagicMock()
+        mock_proxy.validate_proxy_token.return_value = _mock_proxy_token()
+        mock_proxy.resolve_api_key_for_scope.side_effect = [
+            (
+                "sk-key",
+                "https://coding.dashscope.aliyuncs.com/apps/anthropic/v1",
+                18,
+                None,
+            ),
+            None,
+        ]
+        mock_get_proxy.return_value = mock_proxy
+        mock_quota_cls.return_value = _make_quota_ok()
+        mock_http.return_value = _mock_bailian_allocated_rate_limit()
+
+        client = remote_app.test_client()
+        resp = client.post(
+            "/api/remote/llm-proxy",
+            json={"model": "glm-5", "messages": [{"role": "user", "content": "hi"}]},
+            headers={"Authorization": "Bearer tok"},
+        )
+
+        assert resp.status_code == 429
+        data = resp.get_json()
+        assert data["error"]["type"] == "rate_limit_error"
+        assert "retry later" in data["error"]["message"].lower()
+        mock_get_notifier.assert_not_called()
+        assert mock_proxy.resolve_api_key_for_scope.call_count == 2
+        assert mock_proxy.resolve_api_key_for_scope.call_args.kwargs["exclude_key_ids"] == {18}
 
     @patch("app.modules.governance.alert_notifier.get_alert_notifier")
     @patch(_HTTP_PATH)

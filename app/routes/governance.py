@@ -334,7 +334,24 @@ def api_check_content():
     data = request.get_json() or {}
     content = data.get("content", "")
 
-    result = content_filter.check_content(content)
+    # Get tenant-specific sensitive keyword config
+    tenant_id = _current_tenant_id()
+    tenant_config = None
+    if tenant_id:
+        try:
+            from app.repositories.tenant_repo import TenantRepository
+
+            tenant_repo = TenantRepository()
+            tenant = tenant_repo.get_by_id(tenant_id)
+            if tenant and tenant.settings:
+                tenant_config = {
+                    "block_sensitive_keyword": tenant.settings.block_sensitive_keyword,
+                    "sensitive_keyword_match_mode": tenant.settings.sensitive_keyword_match_mode,
+                }
+        except Exception as e:
+            logger.warning(f"Failed to fetch tenant config for tenant {tenant_id}: {e}")
+
+    result = content_filter.check_content(content, tenant_config=tenant_config)
 
     # Log if blocked
     if not result.passed:

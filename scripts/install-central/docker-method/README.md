@@ -102,9 +102,39 @@ docker compose exec open-ace sh -c 'python3 scripts/check_min_revision.py && ale
 |------|------|--------|
 | `SECRET_KEY` | Flask 密钥 | 随机生成 |
 | `UPLOAD_AUTH_KEY` | 上传认证密钥 | 随机生成 |
+| `OPENACE_ENCRYPTION_KEY` | 数据加密密钥 | 随机生成 |
 | `DB_USER` | PostgreSQL 用户名 | ace |
-| `DB_PASSWORD` | PostgreSQL 密码 | ace-secret |
+| `DB_PASSWORD` | PostgreSQL 密码（Issue #1893：生产必须设置强密码） | 开发模式自动生成 |
 | `DB_NAME` | PostgreSQL 数据库名 | ace |
+| `OPENACE_SECURITY_MODE` | 安全模式：development/pilot/production | development |
+
+### 安全模式（Issue #1893）
+
+Open ACE 支持三种安全模式，通过 `OPENACE_SECURITY_MODE` 环境变量控制：
+
+| 模式 | 说明 | 密码要求 |
+|------|------|----------|
+| `development` | 开发/试用模式（默认） | 允许空密码（自动生成临时密码） |
+| `pilot` | 试点环境 | 允许空密码（输出强警告） |
+| `production` | 生产环境（推荐） | 必须设置强密码（≥9字符），启动失败 |
+
+**生产环境配置示例**：
+
+```bash
+# 生成强密码
+python3 -c "import secrets; print(secrets.token_urlsafe(32))"
+
+# 设置环境变量
+cat > .env << EOF
+OPENACE_SECURITY_MODE=production
+DB_PASSWORD=<your-strong-password>
+SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))")
+OPENACE_ENCRYPTION_KEY=$(python3 -c "import secrets; print(secrets.token_hex(16))")
+EOF
+
+# 启动服务
+docker compose up -d
+```
 
 ### Workspace 多用户模式
 
@@ -128,9 +158,20 @@ docker compose exec open-ace sh -c 'python3 scripts/check_min_revision.py && ale
 **启动方式：**
 
 ```bash
-# 启用多用户模式
-WORKSPACE_MULTI_USER_MODE=true docker compose up -d
+# 方式一：使用多用户配置文件（推荐）
+docker compose -f docker-compose.yml -f docker-compose.multi-user.yml up -d
+
+# 方式二：通过环境变量启用
+WORKSPACE_MULTI_USER_MODE=true \
+OPENACE_ALLOW_ROOT_MULTI_USER=1 \
+docker compose up -d
 ```
+
+> ⚠️ **安全提示（Issue #1893）**：多用户模式需要容器以 root 运行。
+> 生产环境必须：
+> 1. 设置 `OPENACE_SECURITY_MODE=production`
+> 2. 设置强密码（`DB_PASSWORD`、`SECRET_KEY`、`OPENACE_ENCRYPTION_KEY`）
+> 3. 显式设置 `OPENACE_ALLOW_ROOT_MULTI_USER=1` 确认 root 运行
 
 **用户创建（自动管理）：**
 

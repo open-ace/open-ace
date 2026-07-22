@@ -1420,6 +1420,7 @@ class TestOrchestratorPrReview:
                 "commits": 1,
             }
             orch._gh.get_diff.return_value = "diff content"
+            orch._gh.get_pr_diff.return_value = "diff content"
             orch._gh.git_push.return_value = None
             orch._gh.create_pr.return_value = {"number": 99, "url": "https://github.com/pull/99"}
             orch._gh.get_current_branch.return_value = wf_data.get("branch_name") or "main"
@@ -1441,7 +1442,9 @@ class TestOrchestratorPrReview:
             "url": "https://github.com/user/repo/pull/99",
         }
         orch._gh.get_diff.return_value = "diff content here"
-        orch._runner.run_agent_task.return_value = _make_agent_result(text="Code review passed")
+        orch._runner.run_agent_task.return_value = _make_agent_result(
+            text='Code review passed\nREVIEW_RESULT: {"verdict":"APPROVE","blocking_findings":[]}'
+        )
 
         orch._do_pr_review(wf)
 
@@ -1450,6 +1453,32 @@ class TestOrchestratorPrReview:
         assert pr_call[1]["head"] == wf["branch_name"]
         assert pr_call[1]["base"] == "main"
         assert "Closes #42" in pr_call[1]["body"]
+
+    def test_pr_review_uses_github_pr_diff_not_two_point_main_diff(self):
+        """Main advancing after branch creation must not pollute review context."""
+        wf = _make_workflow(
+            current_phase="pr_review",
+            status="pr_review",
+            current_round=0,
+            max_pr_review_rounds=1,
+            github_pr_number=99,
+            branch_name="auto-dev/test-wf",
+        )
+        orch, _ = self._make_orchestrator(wf)
+        orch._runner = MagicMock()
+        orch._gh.get_pr_diff.return_value = "diff --git a/feature.py b/feature.py\n+feature"
+        orch._gh.get_diff.return_value = "diff --git a/unrelated.py b/unrelated.py\n-main"
+        orch._runner.run_agent_task.return_value = _make_agent_result(
+            text='Code review passed\nREVIEW_RESULT: {"verdict":"APPROVE","blocking_findings":[]}'
+        )
+
+        orch._do_pr_review(wf)
+
+        review_prompt = orch._runner.run_agent_task.call_args_list[0].kwargs["prompt"]
+        assert "feature.py" in review_prompt
+        assert "unrelated.py" not in review_prompt
+        orch._gh.get_pr_diff.assert_called_with(99)
+        orch._gh.get_diff.assert_not_called()
 
     def test_pr_review_max_rounds_moves_to_report(self):
         """When the round count exceeds max, the workflow moves to report.
@@ -1599,7 +1628,9 @@ class TestOrchestratorPrReview:
         orch._runner = MagicMock()
         orch._gh.get_diff.return_value = "diff"
         orch._runner.run_agent_task.side_effect = [
-            _make_agent_result(text="代码审查通过。没有遗留问题。"),
+            _make_agent_result(
+                text='代码审查通过。没有遗留问题。\nREVIEW_RESULT: {"verdict":"APPROVE","blocking_findings":[]}'
+            ),
             _make_agent_result(text="可以合并。"),
         ]
 
@@ -1629,7 +1660,7 @@ class TestOrchestratorPrReview:
         orch._runner = MagicMock()
         orch._gh.get_diff.return_value = "diff"
         orch._runner.run_agent_task.return_value = _make_agent_result(
-            text="代码审查通过。没有遗留问题。"
+            text='代码审查通过。没有遗留问题。\nREVIEW_RESULT: {"verdict":"APPROVE","blocking_findings":[]}'
         )
 
         orch._do_pr_review(wf)

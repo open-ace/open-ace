@@ -251,6 +251,14 @@ def update_tenant_settings(tenant_id: int):
     if not success:
         return jsonify({"error": "Failed to update tenant settings"}), 500
 
+    # Invalidate tenant config cache for sensitive keyword settings
+    try:
+        from app.modules.workspace.tenant_config_cache import invalidate_tenant_config_cache
+
+        invalidate_tenant_config_cache(tenant_id)
+    except ImportError:
+        pass  # Cache module may not be available in all contexts
+
     tenant = tenant_service.get_tenant(tenant_id)
     if tenant is None:
         return jsonify({"error": "Tenant not found"}), 404

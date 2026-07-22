@@ -76,6 +76,9 @@ class TenantSettings:
     branding_logo_url: str | None = None
     # P1: Tenant-level ROI assumptions configuration
     roi_assumptions: dict[str, Any] | None = None
+    # Issue #1904: Sensitive keyword filtering configuration
+    block_sensitive_keyword: bool = False
+    sensitive_keyword_match_mode: str = "word_boundary"  # 'word_boundary' or 'substring'
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""
@@ -92,6 +95,8 @@ class TenantSettings:
             "branding_name": self.branding_name,
             "branding_logo_url": self.branding_logo_url,
             "roi_assumptions": self.roi_assumptions,
+            "block_sensitive_keyword": self.block_sensitive_keyword,
+            "sensitive_keyword_match_mode": self.sensitive_keyword_match_mode,
         }
 
     @classmethod
@@ -109,6 +114,15 @@ class TenantSettings:
             else:
                 roi_assumptions = roi_assumptions_raw
 
+        # Validate sensitive_keyword_match_mode
+        match_mode = data.get("sensitive_keyword_match_mode", "word_boundary")
+        if match_mode not in ("word_boundary", "substring"):
+            logger.warning(
+                "Invalid sensitive_keyword_match_mode: %s, using default 'word_boundary'",
+                match_mode,
+            )
+            match_mode = "word_boundary"
+
         return cls(
             allowed_tools=data.get(
                 "allowed_tools", ["claude", "qwen", "openclaw", "codex", "zcode"]
@@ -124,6 +138,8 @@ class TenantSettings:
             branding_name=data.get("branding_name"),
             branding_logo_url=data.get("branding_logo_url"),
             roi_assumptions=roi_assumptions,
+            block_sensitive_keyword=data.get("block_sensitive_keyword", False),
+            sensitive_keyword_match_mode=match_mode,
         )
 
 

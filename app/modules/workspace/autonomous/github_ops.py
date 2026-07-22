@@ -1400,6 +1400,53 @@ class GitHubOps:
         result = self._run_git(["status", "--porcelain"])
         return bool(result.stdout.strip())
 
+    def get_unmerged_paths(self) -> list[str]:
+        """Return paths that still have unmerged index entries."""
+        result = self._run_git(["diff", "--name-only", "--diff-filter=U"], check=False)
+        if result.returncode != 0:
+            raise GitHubOpsError(
+                f"Unable to inspect unmerged index (exit code {result.returncode}): "
+                f"{(result.stderr or result.stdout).strip()}"
+            )
+        return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+    def get_conflict_marker_paths(self, paths: list[str]) -> list[str]:
+        """Return files that still contain standard merge-conflict markers.
+
+        The caller supplies the authoritative U-stage path list captured before
+        staging.  Restricting the search to those files avoids false positives
+        from fixtures or documentation elsewhere in the repository.
+        """
+        if not paths:
+            return []
+        result = self._run_git(
+            [
+                "grep",
+                "--no-index",
+                "-l",
+                "-I",
+                "-E",
+                "-e",
+                r"^<<<<<<<( |$)",
+                "-e",
+                r"^=======$",
+                "-e",
+                r"^>>>>>>>( |$)",
+                "--",
+                *paths,
+            ],
+            check=False,
+        )
+        # git grep returns 1 when there are no matches.
+        if result.returncode not in (0, 1):
+            raise GitHubOpsError(
+                f"Unable to inspect conflict markers (exit code {result.returncode}): "
+                f"{(result.stderr or result.stdout).strip()}"
+            )
+        if result.returncode == 1:
+            return []
+        return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
     def git_add_all(self) -> None:
         """Stage all changes."""
         self._run_git(["add", "-A"])
@@ -1450,6 +1497,11 @@ class GitHubOps:
                     f"force_with_lease refused on non-auto-dev branch '{target}' "
                     "(only auto-dev/* workflow branches may be force-pushed)"
                 )
+            # Never leave a validated force-push target implicit. An auto-dev
+            # worktree can inherit ``main`` as its upstream, and
+            # ``push.default=simple`` then rejects a plain ``git push`` even
+            # though the current local branch is safe and was validated above.
+            branch = target
         args = ["push", remote]
         if branch:
             args.append(branch)

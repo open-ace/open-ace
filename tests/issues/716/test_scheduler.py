@@ -1,6 +1,7 @@
 """Unit tests for AutonomousScheduler."""
 
 import threading
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -38,6 +39,30 @@ class TestSchedulerStartStop:
         scheduler._stop_event.clear()
         scheduler.stop()
         assert scheduler._stop_event.is_set()
+
+    def test_stop_interrupts_active_orchestrators_before_join(self):
+        scheduler = AutonomousScheduler()
+        orchestrator = MagicMock()
+        scheduler._running_orchestrators = {"wf-1": orchestrator}
+        thread = MagicMock()
+        thread.is_alive.return_value = False
+        scheduler._thread = thread
+
+        scheduler.stop()
+
+        orchestrator.prepare_for_shutdown.assert_called_once_with()
+        thread.join.assert_called_once_with(timeout=20)
+
+    def test_server_shutdown_stops_autonomous_scheduler(self):
+        server_source = (Path(__file__).resolve().parents[3] / "server.py").read_text(
+            encoding="utf-8"
+        )
+
+        scheduler_stop = server_source.index("AutonomousScheduler.instance().stop()")
+        webui_stop = server_source.index("shutdown_webui_manager()")
+        server_stop = server_source.index("server.stop()")
+
+        assert scheduler_stop < webui_stop < server_stop
 
     def test_start_creates_daemon_thread(self):
         scheduler = AutonomousScheduler()
@@ -101,6 +126,29 @@ class TestSchedulerProcessWorkflows:
 
                 assert mock_orch_cls.call_count == 2
                 assert mock_orch.advance.call_count == 2
+
+    def test_worker_created_during_shutdown_never_advances(self):
+        scheduler = AutonomousScheduler()
+        scheduler._stop_event.set()
+        mock_repo = MagicMock()
+        mock_repo.get_workflow.return_value = {
+            "workflow_id": "wf-race",
+            "status": "planning",
+        }
+        mock_repo.acquire_lock.return_value = True
+
+        with (
+            patch("app.routes.autonomous._get_repo", return_value=mock_repo),
+            patch(
+                "app.modules.workspace.autonomous.orchestrator.AutonomousOrchestrator"
+            ) as orchestrator_cls,
+        ):
+            orchestrator = orchestrator_cls.return_value
+            scheduler._advance_single("wf-race")
+
+        orchestrator.prepare_for_shutdown.assert_called_once_with()
+        orchestrator.advance.assert_not_called()
+        mock_repo.release_lock.assert_called_once()
 
     def test_skips_paused_workflows(self):
         scheduler = AutonomousScheduler()
@@ -169,6 +217,44 @@ class TestSchedulerProcessWorkflows:
                 scheduler._process_workflows()
 
                 assert mock_orch.advance.call_count == MAX_CONCURRENT_WORKFLOWS
+
+    def test_same_poll_selects_only_one_workflow_per_batch(self):
+        scheduler = AutonomousScheduler()
+        mock_repo = MagicMock()
+        mock_repo.get_active_workflows.return_value = [
+            {
+                "workflow_id": "batch-wf-1",
+                "status": "planning",
+                "batch_id": "batch-1",
+                "worktree_path": "/wt/1",
+                "branch_name": "auto/1",
+            },
+            {
+                "workflow_id": "batch-wf-2",
+                "status": "planning",
+                "batch_id": "batch-1",
+                "worktree_path": "/wt/2",
+                "branch_name": "auto/2",
+            },
+            {
+                "workflow_id": "independent-wf",
+                "status": "planning",
+                "batch_id": "batch-2",
+                "worktree_path": "/wt/3",
+                "branch_name": "auto/3",
+            },
+        ]
+
+        with (
+            patch("app.routes.autonomous._get_repo", return_value=mock_repo),
+            patch.object(
+                scheduler, "_advance_single", side_effect=lambda workflow_id: workflow_id
+            ) as advance,
+        ):
+            scheduler._process_workflows()
+
+        selected = [call.args[0] for call in advance.call_args_list]
+        assert selected == ["batch-wf-1", "independent-wf"]
 
     def test_single_workflow_error_continues(self):
         """Error in one workflow should not stop others."""

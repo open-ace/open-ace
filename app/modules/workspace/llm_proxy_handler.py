@@ -35,6 +35,28 @@ def _get_content_filter():
     return _content_filter_instance
 
 
+# Import shared cache function
+from app.modules.workspace.tenant_config_cache import get_tenant_sensitive_keyword_config
+
+
+def _get_tenant_sensitive_keyword_config_wrapper(tenant_id: int | None) -> dict[str, Any]:
+    """
+    Wrapper for tenant-specific sensitive keyword configuration.
+
+    Args:
+        tenant_id: Tenant ID, or None for default behavior.
+
+    Returns:
+        Dictionary with 'block_sensitive_keyword' and 'sensitive_keyword_match_mode' keys.
+    """
+    if tenant_id is None:
+        return {
+            "block_sensitive_keyword": False,
+            "sensitive_keyword_match_mode": "word_boundary",
+        }
+    return get_tenant_sensitive_keyword_config(tenant_id)
+
+
 def _extract_requested_model() -> str | None:
     """Best-effort extraction of the requested model from the proxied request body."""
     try:
@@ -613,6 +635,7 @@ def _check_content_filter(
     user_id: int,
     username: str | None,
     request_body: bytes | None,
+    tenant_id: int | None = None,
 ) -> tuple[Response, int] | str | None:
     """Check user input content for sensitive information.
 
@@ -620,6 +643,7 @@ def _check_content_filter(
         user_id: User ID for audit logging.
         username: Username for audit logging.
         request_body: Raw request body bytes.
+        tenant_id: Optional tenant ID for tenant-specific filtering config.
 
     Returns:
         - tuple(Response, int): Error response if blocked (403)
@@ -663,7 +687,10 @@ def _check_content_filter(
         content_filter = _get_content_filter()
         audit_logger = AuditLogger()
 
-        result = content_filter.check_content(combined_content)
+        # Get tenant-specific sensitive keyword config
+        tenant_config = _get_tenant_sensitive_keyword_config_wrapper(tenant_id)
+
+        result = content_filter.check_content(combined_content, tenant_config=tenant_config)
 
         if result.action == "block":
             # Log the block action
@@ -912,6 +939,7 @@ def handle_llm_proxy_request(
         user_id=user_id,
         username=username,
         request_body=request.get_data(),
+        tenant_id=tenant_id,
     )
     if isinstance(content_filter_result, tuple):
         # Block: return error response
@@ -998,6 +1026,7 @@ def handle_llm_proxy_request(
         )
 
     exclude_key_ids: set[int] = set()
+    allocated_rate_limited_key_ids: set[int] = set()
     attempt = 0
 
     while True:
@@ -1018,6 +1047,21 @@ def handle_llm_proxy_request(
             )
 
         if not key_result:
+            if allocated_rate_limited_key_ids:
+                return (
+                    jsonify(
+                        {
+                            "error": {
+                                "message": (
+                                    "All available upstream keys are temporarily allocation "
+                                    "rate limited. Please retry later."
+                                ),
+                                "type": "rate_limit_error",
+                            }
+                        }
+                    ),
+                    429,
+                )
             if exclude_key_ids:
                 return (
                     jsonify(
@@ -1189,6 +1233,19 @@ def handle_llm_proxy_request(
 
                 # 检测上游 quota exceeded 错误并触发告警 (Issue #1060)
                 if resp.status_code == 429 and "quota exceeded" in error_text.lower():
+                    # Bailian Coding Plan uses this wording for a temporary
+                    # allocation rate limit, not for a depleted paid quota.
+                    # Keep it retryable and avoid a false platform-quota alert.
+                    allocated_rate_limited = "usage allocated quota exceeded" in error_text.lower()
+                    if allocated_rate_limited:
+                        logger.warning(
+                            "Upstream allocated rate limit reached for user %d; retry later",
+                            user_id,
+                        )
+                        allocated_rate_limited_key_ids.add(key_id)
+                        exclude_key_ids.add(key_id)
+                        continue
+
                     try:
                         from app.modules.governance.alert_notifier import (
                             create_quota_alert,
@@ -1219,7 +1276,6 @@ def handle_llm_proxy_request(
                     except Exception as alert_exc:
                         logger.error("Failed to create quota exceeded alert: %s", alert_exc)
 
-                    # 返回明确的 quota exceeded 错误
                     return (
                         jsonify(
                             {

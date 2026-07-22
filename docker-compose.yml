@@ -52,8 +52,14 @@ services:
       - SECRET_KEY=${SECRET_KEY:-}
       - OPENACE_ENCRYPTION_KEY=${OPENACE_ENCRYPTION_KEY:-}
       - UPLOAD_AUTH_KEY=${UPLOAD_AUTH_KEY:-}
-      # Database
-      - DATABASE_URL=postgresql://${DB_USER:-ace}:${DB_PASSWORD:-ace-secret}@postgres:5432/${DB_NAME:-ace}
+      # Security mode (Issue #1893): development | pilot | production
+      # - development: Allow dev password with warnings (default for trial)
+      # - pilot: Allow dev password with strong warnings
+      # - production: Reject dev/default passwords, fail-fast on security issues
+      - OPENACE_SECURITY_MODE=${OPENACE_SECURITY_MODE:-}
+      # Database (Issue #1893): Development mode uses dev-password-change-in-production.
+      # Production mode requires explicit strong password via DB_PASSWORD env var.
+      - DATABASE_URL=postgresql://${DB_USER:-ace}:${DB_PASSWORD:-dev-password-change-in-production}@postgres:5432/${DB_NAME:-ace}
       # Multi-user Workspace
       - WORKSPACE_MULTI_USER_MODE=${WORKSPACE_MULTI_USER_MODE:-false}
       # Workspace base directory (users' projects stored under /workspace/<username>/)
@@ -112,7 +118,10 @@ services:
     restart: unless-stopped
     environment:
       - POSTGRES_USER=${DB_USER:-ace}
-      - POSTGRES_PASSWORD=${DB_PASSWORD:-ace-secret}
+      # Issue #1893: Development mode uses a fixed dev password for convenience.
+      # Production mode requires explicit strong password via DB_PASSWORD env var.
+      # The entrypoint will warn on dev password and reject in production mode.
+      - POSTGRES_PASSWORD=${DB_PASSWORD:-dev-password-change-in-production}
       - POSTGRES_DB=${DB_NAME:-ace}
     volumes:
       - postgres-data:/var/lib/postgresql/data

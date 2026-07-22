@@ -468,7 +468,7 @@ class AlertStateSynchronizer:
                         SELECT 1 FROM alerts a
                         WHERE a.user_id = qa.user_id
                         AND a.alert_type = 'quota'
-                        AND a.metadata->>'quota_type' = qa.quota_type
+                        AND (a.metadata::jsonb)->>'quota_type' = qa.quota_type
                         AND DATE(a.created_at) = DATE(qa.created_at)
                     )
                 """
@@ -507,13 +507,15 @@ class AlertStateSynchronizer:
             if is_postgresql():
                 orphan_alerts = self.db.fetch_all(
                     """
-                    SELECT a.alert_id, a.user_id, a.metadata->>'quota_type' as quota_type, a.created_at
+                    SELECT a.alert_id, a.user_id,
+                           (a.metadata::jsonb)->>'quota_type' as quota_type,
+                           a.created_at
                     FROM alerts a
                     WHERE a.alert_type = 'quota'
                     AND NOT EXISTS (
                         SELECT 1 FROM quota_alerts qa
                         WHERE qa.user_id = a.user_id
-                        AND qa.quota_type = a.metadata->>'quota_type'
+                        AND qa.quota_type = (a.metadata::jsonb)->>'quota_type'
                         AND DATE(qa.created_at) = DATE(a.created_at)
                     )
                 """

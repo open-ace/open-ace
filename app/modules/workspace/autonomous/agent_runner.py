@@ -16,6 +16,7 @@ import pwd
 import re
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import threading
@@ -148,6 +149,10 @@ _APPSERVER_TOOLS = frozenset({"zcode", "zcode-code"})
 # wrapper (root via a narrow sudoers rule) chdir's then drops to system_account
 # via runuser. See scripts/openace-run-as.sh.
 _OPENACE_RUN_AS = os.environ.get("OPENACE_RUN_AS", "/usr/local/bin/openace-run-as")
+_OPENACE_AGENT_GUARD_BIN = os.environ.get(
+    "OPENACE_AGENT_GUARD_BIN", "/usr/local/libexec/openace-agent-bin"
+)
+_AGENT_GUARD_EXECUTABLES = ("_guard_exec.py", "git", "gh", "python", "python3", "pytest")
 
 # Security wrapper paths (Issue #1855)
 _OPENACE_CAT_WRAPPER = os.environ.get("OPENACE_CAT_WRAPPER", "/usr/local/bin/openace-cat")
@@ -224,6 +229,10 @@ class _LocalSession:
     # claude emits multiple assistant events per message: thinking then text).
     _counted_message_ids: set = field(default_factory=set)
     _paused: threading.Event = field(default_factory=threading.Event)  # set when SIGSTOPed
+    # Serializes remote session-id publication/message dispatch with shutdown.
+    # Local subprocess sessions do not use it, but keeping it on the tracker
+    # avoids a second tracker type and closes the create-vs-stop race.
+    _remote_lifecycle_lock: threading.Lock = field(default_factory=threading.Lock)
 
 
 # Top-level keys that indicate a JSON object is a leaked tool-call blob
@@ -862,17 +871,15 @@ class AutonomousAgentRunner:
 
     @staticmethod
     def _ensure_project_dir(project_path: str, system_account: str | None) -> None:
-        """Ensure ``project_path`` exists, cross-user safe (Issue #1395).
+        """Ensure ``project_path`` is reachable by the selected agent account.
 
-        ``Path.mkdir`` stats/creates as the service user and raises
-        ``PermissionError`` when the path lives under a user-private parent
-        (e.g. a 0700 home). When ``system_account`` differs from the service
-        user, route through ``sudo -u <account> mkdir -p`` (``mkdir`` is
-        covered by the sudoers ``OPENACE_UTILS`` alias). Same-user skips sudo
-        to avoid failing under systemd ``NoNewPrivileges`` (mirrors
-        ``github_ops._needs_sudo``).
-
-        Issue #1855: 优先使用 openace-mkdir 安全 wrapper，wrapper 内部做路径校验和审计日志。
+        Trusted orchestration creates local worktrees as the repository owner
+        before an AI process starts.  A credentialless cross-user agent cannot
+        traverse the owner's 0700 home until ``openace-run-as --isolated``
+        grants its temporary ACLs, so probing with ``Path`` or asking that
+        account to run ``mkdir`` produces a false "missing directory" error.
+        Use the same root-owned launcher as the real process for the existence
+        check; it grants and revokes the scoped ACL in one short invocation.
         """
         same_user = False
         if system_account:
@@ -881,29 +888,28 @@ class AutonomousAgentRunner:
             except (KeyError, OverflowError):
                 same_user = False
         if system_account and not same_user:
-            # Issue #1855: 优先使用安全 wrapper
-            if os.path.isfile(_OPENACE_MKDIR_WRAPPER) and os.access(
-                _OPENACE_MKDIR_WRAPPER, os.X_OK
-            ):
-                result = subprocess.run(
-                    ["sudo", _OPENACE_MKDIR_WRAPPER, system_account, project_path],
-                    capture_output=True,
-                    text=True,
-                    timeout=30,
-                    check=False,
-                )
-            else:
-                # Fallback: 使用传统 sudo -u mkdir 命令
-                result = subprocess.run(
-                    ["sudo", "-u", system_account, "mkdir", "-p", project_path],
-                    capture_output=True,
-                    text=True,
-                    timeout=30,
-                    check=False,
-                )
+            result = subprocess.run(
+                [
+                    "sudo",
+                    "-n",
+                    "-u",
+                    "root",
+                    _OPENACE_RUN_AS,
+                    "--isolated",
+                    system_account,
+                    project_path,
+                    "/usr/bin/test",
+                    "-d",
+                    ".",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
             if result.returncode != 0:
                 raise PermissionError(
-                    f"Failed to create project dir {project_path} as "
+                    f"Failed to access project dir {project_path} as "
                     f"{system_account} (exit {result.returncode}): "
                     f"{result.stderr.strip()}"
                 )
@@ -944,6 +950,8 @@ class AutonomousAgentRunner:
         """
         if AutonomousAgentRunner._is_cross_user(system_account):
             assert system_account is not None  # _is_cross_user guarantees non-empty
+            if env:
+                AutonomousAgentRunner._validate_cross_user_guard_bin(env)
             guard_env = []
             for key in (
                 "PATH",
@@ -985,6 +993,65 @@ class AutonomousAgentRunner:
         return cmd, project_path
 
     @staticmethod
+    def _resolve_agent_guard_bin() -> str:
+        """Return the installed guard directory, with a source-tree fallback.
+
+        Cross-user launches require the root-owned packaged directory because
+        the isolated agent cannot traverse the service account's private home.
+        Same-user development can still use the guards shipped beside this
+        module when the package has not been installed system-wide.
+        """
+        # Freeze a canonical path before checking its contents. Returning a
+        # configured symlink would let PATH traverse that link after the
+        # cross-user ownership validation, creating a check/use race if the
+        # link were replaced in between.
+        packaged_guard_bin = Path(os.path.realpath(_OPENACE_AGENT_GUARD_BIN))
+        if all((packaged_guard_bin / name).is_file() for name in _AGENT_GUARD_EXECUTABLES):
+            return str(packaged_guard_bin)
+        return str(Path(__file__).with_name("agent_bin"))
+
+    @staticmethod
+    def _validate_cross_user_guard_bin(env: dict[str, str]) -> None:
+        """Fail closed unless cross-user command guards are safely installed.
+
+        A source-tree guard path under a 0700 service home is visible to the
+        service but not to ``openace-agent``.  PATH would then silently fall
+        through to unguarded system binaries.  Cross-user launches therefore
+        require the root-owned packaged guard directory installed by every
+        supported deployment path.
+        """
+        path_head = (env.get("PATH") or "").split(os.pathsep, 1)[0]
+        expected = os.path.realpath(_OPENACE_AGENT_GUARD_BIN)
+        if not path_head or os.path.realpath(path_head) != expected:
+            raise RuntimeError(
+                "Cross-user autonomous launch requires the packaged agent command guards"
+            )
+        try:
+            directory_stat = os.stat(expected, follow_symlinks=False)
+        except OSError as exc:
+            raise RuntimeError(f"Missing packaged agent guard directory: {expected}") from exc
+        if (
+            not stat.S_ISDIR(directory_stat.st_mode)
+            or directory_stat.st_uid != 0
+            or directory_stat.st_mode & 0o022
+            or directory_stat.st_mode & 0o555 != 0o555
+        ):
+            raise RuntimeError(f"Unsafe packaged agent guard directory: {expected}")
+        for name in _AGENT_GUARD_EXECUTABLES:
+            guard_path = os.path.join(expected, name)
+            try:
+                stat_result = os.stat(guard_path, follow_symlinks=False)
+            except OSError as exc:
+                raise RuntimeError(f"Missing packaged agent guard: {guard_path}") from exc
+            if (
+                not stat.S_ISREG(stat_result.st_mode)
+                or stat_result.st_uid != 0
+                or stat_result.st_mode & 0o022
+                or stat_result.st_mode & 0o555 != 0o555
+            ):
+                raise RuntimeError(f"Unsafe packaged agent guard: {guard_path}")
+
+    @staticmethod
     def _build_agent_env(
         adapter: Any,
         cli_tool: str,
@@ -1007,7 +1074,7 @@ class AutonomousAgentRunner:
         keeps working.
         """
         env = dict(os.environ)
-        guard_bin = str(Path(__file__).with_name("agent_bin"))
+        guard_bin = AutonomousAgentRunner._resolve_agent_guard_bin()
         real_git = shutil.which("git", path=env.get("PATH"))
         real_gh = shutil.which("gh", path=env.get("PATH"))
         if real_git:
@@ -1552,6 +1619,7 @@ class AutonomousAgentRunner:
             if workspace_type == "remote" and remote_machine_id:
                 result = self._run_remote(
                     session_id=session_id,
+                    user_id=user_id,
                     cli_tool=cli_tool,
                     model=model,
                     project_path=project_path,
@@ -1600,7 +1668,7 @@ class AutonomousAgentRunner:
             # so the session columns stay cumulative and Σ milestone == Σ session
             # holds (#1003). The previous overwrite reset the columns to each
             # call's local count, breaking the invariant.
-            if self.session_manager and persisted_session_id:
+            if self.session_manager and persisted_session_id and workspace_type != "remote":
                 try:
                     self.session_manager.increment_session_usage(
                         persisted_session_id,
@@ -1616,6 +1684,20 @@ class AutonomousAgentRunner:
                     )
                 except Exception as e:
                     logger.warning("Failed to update session record: %s", e)
+
+            # RemoteSessionManager owns the actual remote row's transcript,
+            # usage and status lifecycle. Re-applying the result totals here
+            # would double-count usage reports that the remote endpoint has
+            # already persisted. Only close the hidden stable tracking row;
+            # its cli_session_id mapping was written by _run_remote.
+            if self.session_manager and workspace_type == "remote":
+                try:
+                    self.session_manager.update_session_fields(
+                        session_id,
+                        {"status": "completed" if result.success else "error"},
+                    )
+                except Exception as e:
+                    logger.warning("Failed to update remote tracking session: %s", e)
 
             # Close the eagerly-created workflow wrapper row when the agent never
             # produced a real CLI session id (sidebar source + executable not
@@ -2729,6 +2811,7 @@ class AutonomousAgentRunner:
     def _run_remote(
         self,
         session_id: str,
+        user_id: int | None,
         cli_tool: str,
         model: str,
         project_path: str,
@@ -2746,16 +2829,33 @@ class AutonomousAgentRunner:
                 success=False,
                 error="Remote session manager not available",
             )
+        if not self.session_manager:
+            return AgentTaskResult(
+                session_id=session_id,
+                tracking_session_id=session_id,
+                success=False,
+                error="Session manager not available for remote session polling",
+            )
+        if user_id is None:
+            return AgentTaskResult(
+                session_id=session_id,
+                tracking_session_id=session_id,
+                success=False,
+                error="User ID is required for remote autonomous execution",
+            )
 
+        remote_session_id = session_id
         try:
             # Register a tracker so orchestrator can signal cancellation
-            self._local_sessions[session_id] = _LocalSession(
+            tracker = _LocalSession(
                 session_id=session_id,
                 process=None,  # type: ignore[arg-type]
             )
+            self._local_sessions[session_id] = tracker
 
             # Create remote session
             result = self.remote_session_manager.create_remote_session(
+                user_id=user_id,
                 machine_id=remote_machine_id,
                 project_path=project_path,
                 cli_tool=cli_tool,
@@ -2764,88 +2864,199 @@ class AutonomousAgentRunner:
                 allowed_tools=allowed_tools,
             )
 
-            if not result.get("success"):
+            # The concrete RemoteSessionManager returns the session payload
+            # directly (without a success=True envelope). Keep compatibility
+            # with older/test adapters that explicitly return success=False.
+            if not result or result.get("success") is False or not result.get("session_id"):
                 return AgentTaskResult(
                     session_id=session_id,
                     tracking_session_id=session_id,
                     success=False,
-                    error=result.get("error", "Failed to create remote session"),
+                    error=(result or {}).get("error", "Failed to create remote session"),
                 )
 
-            # Send the prompt
-            self.remote_session_manager.send_message(
-                session_id=session_id,
-                message=prompt,
-            )
+            remote_session_id = result["session_id"]
+            with tracker._remote_lifecycle_lock:
+                tracker.persisted_session_id = remote_session_id
+                if tracker._stopped.is_set():
+                    # Shutdown won while create_remote_session was in flight.
+                    # Stop the newly discovered real session before any prompt
+                    # can be dispatched.
+                    self.remote_session_manager.stop_session(remote_session_id)
+                    return self._build_remote_cancelled_result(remote_session_id, session_id)
+
+                # Map the hidden stable workflow line to the real remote row so
+                # milestone details resolve the transcript without replacing
+                # the main/review/test tracking identity.
+                tracking_row = self.session_manager.get_session(session_id)
+                context = dict(getattr(tracking_row, "context", {}) or {})
+                if isinstance(tracking_row, dict):
+                    context = dict(tracking_row.get("context", {}) or {})
+                context.update(
+                    {
+                        "workflow_id": context.get("workflow_id", ""),
+                        "cli_session_id": remote_session_id,
+                    }
+                )
+                self.session_manager.update_session_fields(
+                    session_id,
+                    {
+                        "context": context,
+                        "status": "active",
+                        "cli_session_id": remote_session_id,
+                    },
+                )
+
+                if tracker._stopped.is_set():
+                    self.remote_session_manager.stop_session(remote_session_id)
+                    return self._build_remote_cancelled_result(remote_session_id, session_id)
+
+                # The real manager names this argument ``content``. Treat an
+                # explicit False as a dispatch failure while retaining support
+                # for legacy adapters that returned None on success.
+                sent = self.remote_session_manager.send_message(
+                    session_id=remote_session_id,
+                    content=prompt,
+                    user_id=user_id,
+                )
+                if sent is False:
+                    self.remote_session_manager.stop_session(remote_session_id)
+                    return AgentTaskResult(
+                        session_id=remote_session_id,
+                        tracking_session_id=session_id,
+                        source_session_id=remote_session_id,
+                        success=False,
+                        error="Failed to send prompt to remote session",
+                    )
 
             # Poll until session completes
             import time
-
-            if not self.session_manager:
-                return AgentTaskResult(
-                    session_id=session_id,
-                    tracking_session_id=session_id,
-                    success=False,
-                    error="Session manager not available for remote session polling",
-                )
 
             start_time = time.time()
             while time.time() - start_time < timeout:
                 # Check if the session has been cancelled externally
                 local_session = self._local_sessions.get(session_id)
                 if local_session and local_session._stopped.is_set():
-                    return AgentTaskResult(
-                        session_id=session_id,
-                        tracking_session_id=session_id,
-                        success=False,
-                        error="Remote session cancelled by orchestrator",
-                    )
+                    return self._build_remote_cancelled_result(remote_session_id, session_id)
 
-                session_data = self.session_manager.get_session(session_id)
+                session_data = self.session_manager.get_session(remote_session_id)
                 if session_data:
-                    status = session_data.get("status", "active")
-                    if status in ("completed", "stopped", "error", "exited"):
+                    status = self._session_field(session_data, "status", "active")
+                    remote_state = None
+                    get_remote_status = getattr(
+                        self.remote_session_manager, "get_session_status", None
+                    )
+                    if callable(get_remote_status):
+                        remote_state = get_remote_status(remote_session_id)
+                    turn_complete = self._remote_turn_complete(remote_state)
+                    if status in ("completed", "stopped", "error", "exited") or turn_complete:
                         # Get messages
                         messages = []
                         if hasattr(self.session_manager, "get_messages"):
-                            messages = self.session_manager.get_messages(session_id) or []
+                            messages = self.session_manager.get_messages(remote_session_id) or []
 
                         remote_events, remote_tool_calls = self._normalize_remote_messages(messages)
 
                         return _build_agent_task_result(
-                            session_id=session_id,
+                            session_id=remote_session_id,
                             tracking_session_id=session_id,
+                            source_session_id=remote_session_id,
                             event_log=remote_events,
                             messages=messages,
-                            total_tokens=session_data.get("total_tokens", 0),
-                            total_input_tokens=session_data.get("total_input_tokens", 0),
-                            total_output_tokens=session_data.get("total_output_tokens", 0),
-                            request_count=session_data.get("request_count", 0),
+                            total_tokens=self._session_field(session_data, "total_tokens", 0),
+                            total_input_tokens=self._session_field(
+                                session_data, "total_input_tokens", 0
+                            ),
+                            total_output_tokens=self._session_field(
+                                session_data, "total_output_tokens", 0
+                            ),
+                            request_count=self._session_field(session_data, "request_count", 0),
                             tool_calls=remote_tool_calls,
-                            success=status == "completed",
+                            # A normal remote CLI turn reports completion via
+                            # an is_complete output entry while its reusable
+                            # sidebar session deliberately remains active.
+                            success=(status in ("active", "completed", "exited")),
                             error=(
-                                session_data.get("error_message") if status != "completed" else None
+                                self._session_field(session_data, "error_message", None)
+                                if status != "completed"
+                                else None
                             ),
                         )
                 time.sleep(5)
 
-            return AgentTaskResult(
-                session_id=session_id,
-                tracking_session_id=session_id,
-                success=False,
-                error=f"Remote agent task timed out after {timeout}s",
-            )
+            timeout_result = self._build_remote_cancelled_result(remote_session_id, session_id)
+            try:
+                self.remote_session_manager.stop_session(remote_session_id)
+            except Exception:
+                logger.warning(
+                    "Failed to stop timed-out remote session %s",
+                    remote_session_id[:8],
+                    exc_info=True,
+                )
+            timeout_result.error = f"Remote agent task timed out after {timeout}s"
+            return timeout_result
 
         except Exception as e:
+            # Once a real remote id exists, never drop its local tracker while
+            # leaving the remote task running after a mapping/polling failure.
+            if remote_session_id != session_id:
+                try:
+                    self.remote_session_manager.stop_session(remote_session_id)
+                except Exception:
+                    logger.warning(
+                        "Failed to stop remote session after runner error %s",
+                        remote_session_id[:8],
+                        exc_info=True,
+                    )
             return AgentTaskResult(
-                session_id=session_id,
+                session_id=remote_session_id,
                 tracking_session_id=session_id,
+                source_session_id=remote_session_id,
                 success=False,
                 error=f"Remote execution error: {e}",
             )
         finally:
             # Clean up the remote session tracker
             self._local_sessions.pop(session_id, None)
+
+    @staticmethod
+    def _session_field(session_data: Any, field_name: str, default: Any = None) -> Any:
+        """Read SessionManager dataclasses and legacy/test dict rows uniformly."""
+        if isinstance(session_data, dict):
+            return session_data.get(field_name, default)
+        return getattr(session_data, field_name, default)
+
+    @staticmethod
+    def _remote_turn_complete(remote_state: Any) -> bool:
+        """Whether the remote manager observed the current request finish."""
+        if not isinstance(remote_state, dict):
+            return False
+        output = remote_state.get("output") or []
+        return any(
+            isinstance(entry, dict)
+            and bool(entry.get("is_complete"))
+            and entry.get("stream") in ("stdout", "stderr", "system")
+            for entry in output
+        )
+
+    def _build_remote_cancelled_result(
+        self, remote_session_id: str, tracking_session_id: str
+    ) -> AgentTaskResult:
+        """Snapshot durable partial remote usage before unwinding shutdown."""
+        session_data = (
+            self.session_manager.get_session(remote_session_id) if self.session_manager else None
+        )
+        return AgentTaskResult(
+            session_id=remote_session_id,
+            tracking_session_id=tracking_session_id,
+            source_session_id=remote_session_id,
+            total_tokens=self._session_field(session_data, "total_tokens", 0),
+            total_input_tokens=self._session_field(session_data, "total_input_tokens", 0),
+            total_output_tokens=self._session_field(session_data, "total_output_tokens", 0),
+            request_count=self._session_field(session_data, "request_count", 0),
+            success=False,
+            error="Remote session cancelled by orchestrator",
+        )
 
     # ── Local helpers ──────────────────────────────────────────────
 
@@ -3072,6 +3283,39 @@ class AutonomousAgentRunner:
                                     "model": msg.get("model"),
                                 }
                             )
+                        # Current Claude stream-json embeds tool_use blocks in
+                        # the assistant message instead of emitting the legacy
+                        # top-level ``type=tool_use`` shape handled below.
+                        # Preserve both the invocation and its stable id so a
+                        # later user/tool_result block can prove which test
+                        # command actually completed.
+                        if isinstance(content, list):
+                            for block in content:
+                                if not isinstance(block, dict) or block.get("type") != "tool_use":
+                                    continue
+                                tool_info = {
+                                    "name": block.get("name", "unknown"),
+                                    "input": block.get("input", {}),
+                                    "id": block.get("id"),
+                                }
+                                session.tool_calls.append({"type": "tool_use", "tool": tool_info})
+                                session.event_log.append(
+                                    {
+                                        "type": "tool_use",
+                                        "tool_name": tool_info["name"],
+                                        "tool_input": tool_info["input"],
+                                        "tool_use_id": tool_info["id"],
+                                    }
+                                )
+                                if self._activity_callback:
+                                    self._activity_callback(
+                                        session.session_id,
+                                        {
+                                            "type": "tool_use",
+                                            "tool_name": tool_info["name"],
+                                            "tool_input": str(tool_info["input"])[:200],
+                                        },
+                                    )
                         # Emit activity for real-time frontend display
                         if self._activity_callback and text_delta:
                             self._activity_callback(
@@ -3171,6 +3415,17 @@ class AutonomousAgentRunner:
                         self._sync_sidebar_session_totals(
                             session, status="error" if session.error else "active"
                         )
+                        # ``--input-format stream-json`` keeps the CLI alive for
+                        # another turn until stdin reaches EOF. A result event is
+                        # terminal for this one-shot invocation, so close the
+                        # write side before waking the caller. Otherwise killing
+                        # only the sudo launcher can strand the isolated wrapper
+                        # while it still holds the per-agent ACL lock.
+                        try:
+                            if session.process and session.process.stdin:
+                                session.process.stdin.close()
+                        except (OSError, BrokenPipeError, AttributeError, ValueError):
+                            pass
                         session.completed.set()
                         # Emit usage activity for real-time token display
                         if self._activity_callback:
@@ -3332,7 +3587,28 @@ class AutonomousAgentRunner:
         first with SIGCONT so it can handle SIGTERM.
         """
         session = self._local_sessions.get(session_id)
-        if not session or not session.process or session.process.returncode is not None:
+        if not session:
+            return
+        if session.process is None:
+            # Remote autonomous calls use a process-less local tracker so the
+            # synchronous poll loop can observe cancellation. Stop the actual
+            # remote session when possible, but always trip the local events:
+            # shutdown must drain even if the remote machine is unreachable.
+            # Publish cancellation before waiting for an in-flight mapping or
+            # send call. _run_remote re-checks this flag immediately before
+            # dispatch, so shutdown cannot be hidden behind the lifecycle lock.
+            session._stopped.set()
+            with session._remote_lifecycle_lock:
+                try:
+                    if self.remote_session_manager:
+                        remote_session_id = session.persisted_session_id or session_id
+                        self.remote_session_manager.stop_session(remote_session_id)
+                except Exception as exc:
+                    logger.warning("Failed to stop remote session %s: %s", session_id[:8], exc)
+                finally:
+                    session.completed.set()
+            return
+        if session.process.returncode is not None:
             return
 
         try:

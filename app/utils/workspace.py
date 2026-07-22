@@ -82,8 +82,8 @@ def run_as_root_if_needed(cmd: list) -> subprocess.CompletedProcess:
         subprocess.CompletedProcess 结果。
     """
     if os.geteuid() != 0:
-        return subprocess.run(["sudo"] + cmd, capture_output=True, text=True)
-    return subprocess.run(cmd, capture_output=True, text=True)
+        return subprocess.run(["sudo"] + cmd, capture_output=True, text=True, cwd="/tmp")
+    return subprocess.run(cmd, capture_output=True, text=True, cwd="/tmp")
 
 
 def _is_docker_multi_user_mode() -> bool:
