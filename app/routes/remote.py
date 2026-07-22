@@ -2150,9 +2150,7 @@ def start_terminal():
     if model_id and key_id:
         # Only get settings for the selected key
         key_info = api_proxy.get_key_by_id(tenant_id, key_id)
-        logger.info(
-            f"start_terminal: model_id={model_id}, key_id={key_id}, key_info={key_info}"
-        )
+        logger.info(f"start_terminal: model_id={model_id}, key_id={key_id}, key_info={key_info}")
         if key_info:
             cli_tools_str = key_info.get("cli_tools", "[]")
             try:
@@ -2367,7 +2365,7 @@ def attach_terminal(terminal_id):
 
     sm = get_session_manager()
     session_info = sm.get_session(terminal_id)
-    context = session_info.get("context", {}) if session_info else {}
+    context = session_info.context if session_info else {}
     stored_model_id = context.get("model_id")
     stored_key_id = context.get("key_id")
 

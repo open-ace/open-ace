@@ -1505,14 +1505,16 @@ class APIKeyProxyService:
                     # Find the candidate_key for this key_id
                     for ck in candidate_keys:
                         if ck["key_id"] == key_id:
-                            all_models.append({
-                                "id": model_id,
-                                "name": model_name,
-                                "key_id": key_id,
-                                "key_name": ck.get("key_name", f"Key-{key_id}"),
-                                "provider": ck.get("provider", ""),
-                                "protocol": get_protocol_for_provider(ck.get("provider", "")),
-                            })
+                            all_models.append(
+                                {
+                                    "id": model_id,
+                                    "name": model_name,
+                                    "key_id": key_id,
+                                    "key_name": ck.get("key_name", f"Key-{key_id}"),
+                                    "provider": ck.get("provider", ""),
+                                    "protocol": get_protocol_for_provider(ck.get("provider", "")),
+                                }
+                            )
                             model_count[model_id] = model_count.get(model_id, 0) + 1
                             break
 
