@@ -348,17 +348,97 @@ def _pytest_test_scope(command: str) -> frozenset[str] | None:
     if pytest_index < 0:
         return frozenset()
 
-    selectors = {
-        token.rstrip("/") or "."
-        for token in tokens[pytest_index + 1 :]
-        if not token.startswith("-")
-        and (
-            token in {".", "test", "tests"}
-            or "/" in token
-            or "::" in token
-            or token.endswith(".py")
-        )
+    # Only compare scopes when the invocation prefix has ordinary pytest
+    # semantics.  Environment assignments and wrappers can change collection
+    # even when the visible selectors are identical.
+    prefix = tokens[:pytest_index]
+    if prefix:
+        python_name = os.path.basename(prefix[0])
+        if (
+            len(prefix) != 2
+            or prefix[1] != "-m"
+            or re.fullmatch(r"python(?:\d+(?:\.\d+)*)?", python_name) is None
+        ):
+            return frozenset()
+
+    scope_narrowing_options = {
+        "-k",
+        "-m",
+        "--ignore",
+        "--ignore-glob",
+        "--deselect",
+        "--lf",
+        "--last-failed",
+        "--ff",
+        "--failed-first",
+        "--nf",
+        "--new-first",
+        "--sw",
+        "--stepwise",
+        "--stepwise-skip",
     }
+    safe_flags = {
+        "-q",
+        "--quiet",
+        "-v",
+        "-vv",
+        "--verbose",
+        "-s",
+        "-x",
+        "--exitfirst",
+        "--disable-warnings",
+        "--strict-config",
+        "--strict-markers",
+        "--continue-on-collection-errors",
+        "--full-trace",
+        "--showlocals",
+        "-l",
+        "--no-header",
+        "--no-summary",
+    }
+    safe_value_options = {
+        "--tb",
+        "--color",
+        "--capture",
+        "--durations",
+        "--durations-min",
+        "--junitxml",
+        "--junit-prefix",
+        "--basetemp",
+        "--verbosity",
+        "--maxfail",
+    }
+
+    selectors: set[str] = set()
+    args = tokens[pytest_index + 1 :]
+    index = 0
+    selectors_only = False
+    while index < len(args):
+        token = args[index]
+        if token == "--":
+            selectors_only = True
+            index += 1
+            continue
+        if not selectors_only and token.startswith("-"):
+            option_name = token.split("=", 1)[0]
+            if option_name in scope_narrowing_options:
+                return frozenset()
+            if token in safe_flags:
+                index += 1
+                continue
+            if option_name in safe_value_options:
+                if "=" not in token:
+                    index += 1
+                    if index >= len(args):
+                        return frozenset()
+                index += 1
+                continue
+            # Plugin and future pytest options are unknown here.  Exact-command
+            # retries remain supported, but cross-command scope coverage is not.
+            return frozenset()
+        selectors.add(token.rstrip("/") or ".")
+        index += 1
+
     return frozenset(selectors) if selectors else None
 
 
@@ -376,6 +456,8 @@ def _pytest_scope_covers(
 
     def _selector_covers(passing: str, earlier: str) -> bool:
         if passing == earlier:
+            return True
+        if passing in {".", "./"}:
             return True
         passing_path = passing.split("::", 1)[0].rstrip("/")
         earlier_path = earlier.split("::", 1)[0].rstrip("/")

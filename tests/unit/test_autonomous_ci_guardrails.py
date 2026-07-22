@@ -847,6 +847,49 @@ def test_test_evidence_earlier_passing_superset_does_not_clear_later_failure():
     assert not _has_passing_test_tool_result(events, "python")
 
 
+@pytest.mark.parametrize(
+    "restricted_command",
+    [
+        "python -m pytest tests/test_a.py -q -k passing_case",
+        "python -m pytest tests -q --ignore tests/test_a.py",
+        "ONLY_FAST=1 python -m pytest tests/test_a.py -q",
+    ],
+)
+def test_test_evidence_restricted_pass_does_not_cover_earlier_failure(
+    restricted_command,
+):
+    from app.modules.workspace.autonomous.orchestrator import _has_passing_test_tool_result
+
+    events = [
+        {
+            "type": "tool_use",
+            "tool_name": "Bash",
+            "tool_input": {"command": "python -m pytest tests/test_a.py -q"},
+            "tool_use_id": "file-failed",
+        },
+        {
+            "type": "tool_result",
+            "tool_use_id": "file-failed",
+            "text": "1 failed, 1 passed in 0.4s",
+            "exit_code": 1,
+        },
+        {
+            "type": "tool_use",
+            "tool_name": "Bash",
+            "tool_input": {"command": restricted_command},
+            "tool_use_id": "restricted-pass",
+        },
+        {
+            "type": "tool_result",
+            "tool_use_id": "restricted-pass",
+            "text": "1 passed in 0.2s",
+            "exit_code": 0,
+        },
+    ]
+
+    assert not _has_passing_test_tool_result(events, "python")
+
+
 def test_test_evidence_targeted_pass_does_not_cover_failed_full_suite():
     from app.modules.workspace.autonomous.orchestrator import _has_passing_test_tool_result
 
