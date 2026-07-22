@@ -3942,6 +3942,58 @@ class AutonomousOrchestrator:
         visible = (result.response_text or "").strip()
         return bool(re.match(r"^API Error:\s*400\b", visible, re.IGNORECASE))
 
+    def _run_agent_with_context_recovery(
+        self,
+        wf: dict,
+        *,
+        session_line: str,
+        milestone_id: str = "",
+        **kwargs,
+    ) -> AgentTaskResult:
+        """Retry one overflowing stable session on a new session-line head.
+
+        Main/review/test remain the workflow's three logical session lines,
+        but a provider context limit can make an established line impossible
+        to resume. Rotate only that line once and retry the same self-contained
+        prompt without history. The rejected attempt is accounted here; the
+        caller accounts the returned final attempt as usual.
+        """
+        result = self._run_agent(
+            wf=wf,
+            session_line=session_line,
+            milestone_id=milestone_id,
+            **kwargs,
+        )
+        if not self._is_context_overflow(result):
+            return result
+
+        field = SESSION_LINE_FIELDS.get(session_line)
+        if not field:
+            return result
+
+        self._accumulate_tokens(result)
+        logger.warning(
+            "Session line %s exceeded provider context; rotating it and retrying once",
+            session_line,
+        )
+        self._update_workflow(
+            {
+                field: "",
+                "agent_session_id": "",
+                "agent_pid": None,
+            }
+        )
+        retry_wf = dict(wf)
+        retry_wf[field] = ""
+        retry_wf["agent_session_id"] = ""
+        retry_wf["agent_pid"] = None
+        return self._run_agent(
+            wf=retry_wf,
+            session_line=session_line,
+            milestone_id=milestone_id,
+            **kwargs,
+        )
+
     def _run_agent(
         self, wf: dict = None, *, session_line: str = "fresh", milestone_id: str = "", **kwargs
     ) -> AgentTaskResult:
@@ -7179,7 +7231,7 @@ class AutonomousOrchestrator:
                 "如果是预先存在的问题，在审查结论中明确说明。"
             )
 
-        review_result = self._run_agent(
+        review_result = self._run_agent_with_context_recovery(
             wf=wf,
             workflow_id=self._workflow_id,
             cli_tool=review_tool,
@@ -7199,6 +7251,22 @@ class AutonomousOrchestrator:
         if self._abort_on_repo_integrity_violation(
             review_result, review_ms.get("milestone_id", "")
         ):
+            return
+
+        if not review_result.success or self._is_context_overflow(review_result):
+            message = (
+                "PR review agent failed: "
+                f"{review_result.error or self._artifact_text(review_result) or 'no result'}"
+            )
+            self.repo.update_milestone(
+                review_ms.get("milestone_id", ""),
+                {
+                    "status": "failed",
+                    "review_session_id": review_result.session_id,
+                    "error_message": message,
+                },
+            )
+            self._update_workflow({"status": "failed", "error_message": message})
             return
 
         review_text = self._artifact_text(review_result)
@@ -7244,9 +7312,15 @@ class AutonomousOrchestrator:
         # the cap ends the loop. There is never an (N+1)-th review.
         at_cap = round_num >= max_rounds
         if not review_passed:
-            self._apply_pr_review_fix(
+            fix_succeeded = self._apply_pr_review_fix(
                 wf, gh, review_text, round_num, dev_round, ci_failures, pr_number
             )
+            if not fix_succeeded:
+                return
+            # Context recovery may have rotated the main session line during
+            # the fix. The cap-round summary runs in this same scheduler call,
+            # so refresh before it resumes main again.
+            wf = self.workflow
 
         if (review_passed and not force_full_rounds) or at_cap:
             # All PR review rounds completed — summarize via the main session,
@@ -7296,7 +7370,7 @@ class AutonomousOrchestrator:
                 "如果审查意见已全部落实、无遗留问题，请明确说明'可以合并'。"
                 "直接输出总结，不要添加引导文字。"
             )
-            summary_result = self._run_agent(
+            summary_result = self._run_agent_with_context_recovery(
                 wf=wf,
                 workflow_id=self._workflow_id,
                 cli_tool=wf.get("cli_tool", "claude-code"),
@@ -7316,6 +7390,21 @@ class AutonomousOrchestrator:
             if self._abort_on_repo_integrity_violation(
                 summary_result, summary_ms.get("milestone_id", "")
             ):
+                return
+            if not summary_result.success or self._is_context_overflow(summary_result):
+                message = (
+                    "PR review summary agent failed: "
+                    f"{summary_result.error or self._artifact_text(summary_result) or 'no result'}"
+                )
+                self.repo.update_milestone(
+                    summary_ms.get("milestone_id", ""),
+                    {
+                        "status": "failed",
+                        "review_content": "",
+                        "error_message": message,
+                    },
+                )
+                self._update_workflow({"status": "failed", "error_message": message})
                 return
             summary_text = self._artifact_text(summary_result)
             self.repo.update_milestone(
@@ -7375,7 +7464,7 @@ class AutonomousOrchestrator:
         dev_round: int,
         ci_failures: list,
         pr_number,
-    ) -> None:
+    ) -> bool:
         """Apply one round of code-review fixes (pr_updated milestone).
 
         Runs for every non-passing review — including the cap round — so the
@@ -7427,7 +7516,7 @@ class AutonomousOrchestrator:
         except Exception:
             pass
 
-        fix_result = self._run_agent(
+        fix_result = self._run_agent_with_context_recovery(
             wf=wf,
             workflow_id=self._workflow_id,
             cli_tool=wf.get("cli_tool", "claude-code"),
@@ -7445,7 +7534,24 @@ class AutonomousOrchestrator:
         self._accumulate_tokens(fix_result)
 
         if self._abort_on_repo_integrity_violation(fix_result, fix_ms.get("milestone_id", "")):
-            return
+            return False
+
+        if self._is_context_overflow(fix_result):
+            message = (
+                "PR review fix failed after context recovery: "
+                f"{fix_result.error or self._artifact_text(fix_result) or 'no result'}"
+            )
+            self.repo.update_milestone(
+                fix_ms.get("milestone_id", ""),
+                {
+                    "status": "failed",
+                    "session_id": fix_result.session_id,
+                    "error_message": message,
+                    "result_summary": "",
+                },
+            )
+            self._update_workflow({"status": "failed", "error_message": message})
+            return False
 
         # Clear user feedback after it has been injected into the prompt
         if wf.get("user_feedback", "").strip():
@@ -7532,7 +7638,7 @@ class AutonomousOrchestrator:
                     "error_message": f"Review fix was not pushed: {push_error_msg}",
                 }
             )
-            return
+            return False
         else:
             self.repo.update_milestone(
                 fix_ms.get("milestone_id", ""),
@@ -7565,6 +7671,7 @@ class AutonomousOrchestrator:
             ):
                 comment += "\n> ⚠️ 部分 CI 检查失败，但经分析为预先存在的问题，非本 PR 引入。\n"
             self._post_github_comment(gh, pr_number, comment, is_pr=True, context="fix")
+        return True
 
     # ── Phase: Report ───────────────────────────────────────────────
 
@@ -8020,10 +8127,21 @@ class AutonomousOrchestrator:
             # failure, abandoning merge without ever invoking the AI resolver.
             combined_output = f"{merge_result.stdout}\n{merge_result.stderr}"
             if merge_result.returncode != 0:
-                if "CONFLICT" not in combined_output:
-                    raise GitHubOpsError(
-                        f"git merge failed (non-conflict): {merge_result.stderr.strip()}"
+                # Locale-dependent git builds may print "CONFLICT" translated.
+                # The index is authoritative: any unmerged path has a U-stage
+                # entry regardless of stdout/stderr language.
+                has_conflict_marker = "CONFLICT" in combined_output
+                if not has_conflict_marker:
+                    unmerged_result = wt_gh._run_git(
+                        ["diff", "--name-only", "--diff-filter=U"], check=False
                     )
+                    unmerged_output = getattr(unmerged_result, "stdout", "")
+                    has_conflict_marker = isinstance(unmerged_output, str) and bool(
+                        unmerged_output.strip()
+                    )
+                if not has_conflict_marker:
+                    detail = combined_output.strip() or f"exit code {merge_result.returncode}"
+                    raise GitHubOpsError(f"git merge failed (non-conflict): {detail}")
 
                 # Ask AI agent to resolve conflicts inside the temp worktree.
                 conflict_prompt = (

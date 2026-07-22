@@ -156,6 +156,77 @@ def test_is_context_overflow_matches_provider_signatures(error, response_text, e
     assert AutonomousOrchestrator._is_context_overflow(result) is expected
 
 
+def test_stable_session_line_rotates_once_after_context_overflow():
+    """PR review/fix/summary calls keep one logical line but replace its head."""
+    wf = _make_workflow(main_session_id="main-too-large")
+    orch, _ = _make_orchestrator(wf)
+    orch._update_workflow = MagicMock()
+    orch._accumulate_tokens = MagicMock()
+    overflow = AgentTaskResult(
+        session_id="main-too-large",
+        success=True,
+        response_text="API Error: 400 Range of input length should be [1, 202752]",
+    )
+    recovered = AgentTaskResult(
+        session_id="main-replacement",
+        success=True,
+        response_text="修复完成",
+    )
+    orch._run_agent = MagicMock(side_effect=[overflow, recovered])
+
+    result = orch._run_agent_with_context_recovery(
+        wf,
+        session_line="main",
+        milestone_id="ms-pr-fix",
+        prompt="fix review findings",
+    )
+
+    assert result is recovered
+    assert orch._run_agent.call_count == 2
+    assert orch._run_agent.call_args_list[0].kwargs["wf"]["main_session_id"] == "main-too-large"
+    assert orch._run_agent.call_args_list[1].kwargs["wf"]["main_session_id"] == ""
+    orch._update_workflow.assert_called_once_with(
+        {"main_session_id": "", "agent_session_id": "", "agent_pid": None}
+    )
+    orch._accumulate_tokens.assert_called_once_with(overflow)
+
+
+def test_review_fix_double_overflow_fails_before_committing_dirty_tree():
+    """A terminal API envelope must never commit unrelated pending changes."""
+    wf = _make_workflow(current_phase="pr_review", status="pr_review")
+    orch, mock_repo = _make_orchestrator(wf)
+    orch._create_milestone = MagicMock(return_value={"milestone_id": "ms-fix"})
+    orch._update_workflow = MagicMock()
+    orch._accumulate_tokens = MagicMock()
+    overflow = AgentTaskResult(
+        session_id="replacement-overflowed",
+        success=True,
+        response_text="API Error: 400 Range of input length should be [1, 202752]",
+    )
+    orch._run_agent_with_context_recovery = MagicMock(return_value=overflow)
+    gh = MagicMock()
+    gh.has_uncommitted_changes.return_value = True
+
+    succeeded = orch._apply_pr_review_fix(
+        wf,
+        gh,
+        "B1 must be fixed",
+        round_num=1,
+        dev_round=1,
+        ci_failures=[],
+        pr_number=1849,
+    )
+
+    assert succeeded is False
+    gh.git_add_all.assert_not_called()
+    gh.git_commit.assert_not_called()
+    milestone_update = mock_repo.update_milestone.call_args.args[1]
+    assert milestone_update["status"] == "failed"
+    assert "context recovery" in milestone_update["error_message"]
+    workflow_update = orch._update_workflow.call_args.args[0]
+    assert workflow_update["status"] == "failed"
+
+
 # ── End-to-end: _run_merge_ci_repair switches to fresh on overflow ──────
 
 
