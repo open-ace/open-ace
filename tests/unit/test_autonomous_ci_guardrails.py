@@ -938,6 +938,44 @@ def test_test_evidence_different_pytest_context_does_not_cover_failure(
     assert not _has_passing_test_tool_result(events, "python")
 
 
+@pytest.mark.parametrize(
+    ("test_output", "test_exit_code", "expected"),
+    [
+        ("1 failed in 0.2s", 1, False),
+        ("1 passed in 0.2s", 0, True),
+    ],
+)
+def test_test_evidence_pairs_anonymous_results_with_all_tool_calls(
+    test_output, test_exit_code, expected
+):
+    from app.modules.workspace.autonomous.orchestrator import _has_passing_test_tool_result
+
+    events = [
+        {
+            "type": "tool_use",
+            "tool_name": "Read",
+            "tool_input": {"file_path": "test-summary.txt"},
+        },
+        {
+            "type": "tool_result",
+            "text": "Historical note: 1 passed",
+            "exit_code": 0,
+        },
+        {
+            "type": "tool_use",
+            "tool_name": "Bash",
+            "tool_input": {"command": "python -m pytest tests/test_a.py -q"},
+        },
+        {
+            "type": "tool_result",
+            "text": test_output,
+            "exit_code": test_exit_code,
+        },
+    ]
+
+    assert _has_passing_test_tool_result(events, "python") is expected
+
+
 def test_test_evidence_targeted_pass_does_not_cover_failed_full_suite():
     from app.modules.workspace.autonomous.orchestrator import _has_passing_test_tool_result
 
