@@ -229,6 +229,10 @@ class _LocalSession:
     # claude emits multiple assistant events per message: thinking then text).
     _counted_message_ids: set = field(default_factory=set)
     _paused: threading.Event = field(default_factory=threading.Event)  # set when SIGSTOPed
+    # Serializes remote session-id publication/message dispatch with shutdown.
+    # Local subprocess sessions do not use it, but keeping it on the tracker
+    # avoids a second tracker type and closes the create-vs-stop race.
+    _remote_lifecycle_lock: threading.Lock = field(default_factory=threading.Lock)
 
 
 # Top-level keys that indicate a JSON object is a leaked tool-call blob
@@ -1615,6 +1619,7 @@ class AutonomousAgentRunner:
             if workspace_type == "remote" and remote_machine_id:
                 result = self._run_remote(
                     session_id=session_id,
+                    user_id=user_id,
                     cli_tool=cli_tool,
                     model=model,
                     project_path=project_path,
@@ -1663,7 +1668,7 @@ class AutonomousAgentRunner:
             # so the session columns stay cumulative and Σ milestone == Σ session
             # holds (#1003). The previous overwrite reset the columns to each
             # call's local count, breaking the invariant.
-            if self.session_manager and persisted_session_id:
+            if self.session_manager and persisted_session_id and workspace_type != "remote":
                 try:
                     self.session_manager.increment_session_usage(
                         persisted_session_id,
@@ -1679,6 +1684,20 @@ class AutonomousAgentRunner:
                     )
                 except Exception as e:
                     logger.warning("Failed to update session record: %s", e)
+
+            # RemoteSessionManager owns the actual remote row's transcript,
+            # usage and status lifecycle. Re-applying the result totals here
+            # would double-count usage reports that the remote endpoint has
+            # already persisted. Only close the hidden stable tracking row;
+            # its cli_session_id mapping was written by _run_remote.
+            if self.session_manager and workspace_type == "remote":
+                try:
+                    self.session_manager.update_session_fields(
+                        session_id,
+                        {"status": "completed" if result.success else "error"},
+                    )
+                except Exception as e:
+                    logger.warning("Failed to update remote tracking session: %s", e)
 
             # Close the eagerly-created workflow wrapper row when the agent never
             # produced a real CLI session id (sidebar source + executable not
@@ -2792,6 +2811,7 @@ class AutonomousAgentRunner:
     def _run_remote(
         self,
         session_id: str,
+        user_id: int | None,
         cli_tool: str,
         model: str,
         project_path: str,
@@ -2809,16 +2829,33 @@ class AutonomousAgentRunner:
                 success=False,
                 error="Remote session manager not available",
             )
+        if not self.session_manager:
+            return AgentTaskResult(
+                session_id=session_id,
+                tracking_session_id=session_id,
+                success=False,
+                error="Session manager not available for remote session polling",
+            )
+        if user_id is None:
+            return AgentTaskResult(
+                session_id=session_id,
+                tracking_session_id=session_id,
+                success=False,
+                error="User ID is required for remote autonomous execution",
+            )
 
+        remote_session_id = session_id
         try:
             # Register a tracker so orchestrator can signal cancellation
-            self._local_sessions[session_id] = _LocalSession(
+            tracker = _LocalSession(
                 session_id=session_id,
                 process=None,  # type: ignore[arg-type]
             )
+            self._local_sessions[session_id] = tracker
 
             # Create remote session
             result = self.remote_session_manager.create_remote_session(
+                user_id=user_id,
                 machine_id=remote_machine_id,
                 project_path=project_path,
                 cli_tool=cli_tool,
@@ -2827,88 +2864,199 @@ class AutonomousAgentRunner:
                 allowed_tools=allowed_tools,
             )
 
-            if not result.get("success"):
+            # The concrete RemoteSessionManager returns the session payload
+            # directly (without a success=True envelope). Keep compatibility
+            # with older/test adapters that explicitly return success=False.
+            if not result or result.get("success") is False or not result.get("session_id"):
                 return AgentTaskResult(
                     session_id=session_id,
                     tracking_session_id=session_id,
                     success=False,
-                    error=result.get("error", "Failed to create remote session"),
+                    error=(result or {}).get("error", "Failed to create remote session"),
                 )
 
-            # Send the prompt
-            self.remote_session_manager.send_message(
-                session_id=session_id,
-                message=prompt,
-            )
+            remote_session_id = result["session_id"]
+            with tracker._remote_lifecycle_lock:
+                tracker.persisted_session_id = remote_session_id
+                if tracker._stopped.is_set():
+                    # Shutdown won while create_remote_session was in flight.
+                    # Stop the newly discovered real session before any prompt
+                    # can be dispatched.
+                    self.remote_session_manager.stop_session(remote_session_id)
+                    return self._build_remote_cancelled_result(remote_session_id, session_id)
+
+                # Map the hidden stable workflow line to the real remote row so
+                # milestone details resolve the transcript without replacing
+                # the main/review/test tracking identity.
+                tracking_row = self.session_manager.get_session(session_id)
+                context = dict(getattr(tracking_row, "context", {}) or {})
+                if isinstance(tracking_row, dict):
+                    context = dict(tracking_row.get("context", {}) or {})
+                context.update(
+                    {
+                        "workflow_id": context.get("workflow_id", ""),
+                        "cli_session_id": remote_session_id,
+                    }
+                )
+                self.session_manager.update_session_fields(
+                    session_id,
+                    {
+                        "context": context,
+                        "status": "active",
+                        "cli_session_id": remote_session_id,
+                    },
+                )
+
+                if tracker._stopped.is_set():
+                    self.remote_session_manager.stop_session(remote_session_id)
+                    return self._build_remote_cancelled_result(remote_session_id, session_id)
+
+                # The real manager names this argument ``content``. Treat an
+                # explicit False as a dispatch failure while retaining support
+                # for legacy adapters that returned None on success.
+                sent = self.remote_session_manager.send_message(
+                    session_id=remote_session_id,
+                    content=prompt,
+                    user_id=user_id,
+                )
+                if sent is False:
+                    self.remote_session_manager.stop_session(remote_session_id)
+                    return AgentTaskResult(
+                        session_id=remote_session_id,
+                        tracking_session_id=session_id,
+                        source_session_id=remote_session_id,
+                        success=False,
+                        error="Failed to send prompt to remote session",
+                    )
 
             # Poll until session completes
             import time
-
-            if not self.session_manager:
-                return AgentTaskResult(
-                    session_id=session_id,
-                    tracking_session_id=session_id,
-                    success=False,
-                    error="Session manager not available for remote session polling",
-                )
 
             start_time = time.time()
             while time.time() - start_time < timeout:
                 # Check if the session has been cancelled externally
                 local_session = self._local_sessions.get(session_id)
                 if local_session and local_session._stopped.is_set():
-                    return AgentTaskResult(
-                        session_id=session_id,
-                        tracking_session_id=session_id,
-                        success=False,
-                        error="Remote session cancelled by orchestrator",
-                    )
+                    return self._build_remote_cancelled_result(remote_session_id, session_id)
 
-                session_data = self.session_manager.get_session(session_id)
+                session_data = self.session_manager.get_session(remote_session_id)
                 if session_data:
-                    status = session_data.get("status", "active")
-                    if status in ("completed", "stopped", "error", "exited"):
+                    status = self._session_field(session_data, "status", "active")
+                    remote_state = None
+                    get_remote_status = getattr(
+                        self.remote_session_manager, "get_session_status", None
+                    )
+                    if callable(get_remote_status):
+                        remote_state = get_remote_status(remote_session_id)
+                    turn_complete = self._remote_turn_complete(remote_state)
+                    if status in ("completed", "stopped", "error", "exited") or turn_complete:
                         # Get messages
                         messages = []
                         if hasattr(self.session_manager, "get_messages"):
-                            messages = self.session_manager.get_messages(session_id) or []
+                            messages = self.session_manager.get_messages(remote_session_id) or []
 
                         remote_events, remote_tool_calls = self._normalize_remote_messages(messages)
 
                         return _build_agent_task_result(
-                            session_id=session_id,
+                            session_id=remote_session_id,
                             tracking_session_id=session_id,
+                            source_session_id=remote_session_id,
                             event_log=remote_events,
                             messages=messages,
-                            total_tokens=session_data.get("total_tokens", 0),
-                            total_input_tokens=session_data.get("total_input_tokens", 0),
-                            total_output_tokens=session_data.get("total_output_tokens", 0),
-                            request_count=session_data.get("request_count", 0),
+                            total_tokens=self._session_field(session_data, "total_tokens", 0),
+                            total_input_tokens=self._session_field(
+                                session_data, "total_input_tokens", 0
+                            ),
+                            total_output_tokens=self._session_field(
+                                session_data, "total_output_tokens", 0
+                            ),
+                            request_count=self._session_field(session_data, "request_count", 0),
                             tool_calls=remote_tool_calls,
-                            success=status == "completed",
+                            # A normal remote CLI turn reports completion via
+                            # an is_complete output entry while its reusable
+                            # sidebar session deliberately remains active.
+                            success=(status in ("active", "completed", "exited")),
                             error=(
-                                session_data.get("error_message") if status != "completed" else None
+                                self._session_field(session_data, "error_message", None)
+                                if status != "completed"
+                                else None
                             ),
                         )
                 time.sleep(5)
 
-            return AgentTaskResult(
-                session_id=session_id,
-                tracking_session_id=session_id,
-                success=False,
-                error=f"Remote agent task timed out after {timeout}s",
-            )
+            timeout_result = self._build_remote_cancelled_result(remote_session_id, session_id)
+            try:
+                self.remote_session_manager.stop_session(remote_session_id)
+            except Exception:
+                logger.warning(
+                    "Failed to stop timed-out remote session %s",
+                    remote_session_id[:8],
+                    exc_info=True,
+                )
+            timeout_result.error = f"Remote agent task timed out after {timeout}s"
+            return timeout_result
 
         except Exception as e:
+            # Once a real remote id exists, never drop its local tracker while
+            # leaving the remote task running after a mapping/polling failure.
+            if remote_session_id != session_id:
+                try:
+                    self.remote_session_manager.stop_session(remote_session_id)
+                except Exception:
+                    logger.warning(
+                        "Failed to stop remote session after runner error %s",
+                        remote_session_id[:8],
+                        exc_info=True,
+                    )
             return AgentTaskResult(
-                session_id=session_id,
+                session_id=remote_session_id,
                 tracking_session_id=session_id,
+                source_session_id=remote_session_id,
                 success=False,
                 error=f"Remote execution error: {e}",
             )
         finally:
             # Clean up the remote session tracker
             self._local_sessions.pop(session_id, None)
+
+    @staticmethod
+    def _session_field(session_data: Any, field_name: str, default: Any = None) -> Any:
+        """Read SessionManager dataclasses and legacy/test dict rows uniformly."""
+        if isinstance(session_data, dict):
+            return session_data.get(field_name, default)
+        return getattr(session_data, field_name, default)
+
+    @staticmethod
+    def _remote_turn_complete(remote_state: Any) -> bool:
+        """Whether the remote manager observed the current request finish."""
+        if not isinstance(remote_state, dict):
+            return False
+        output = remote_state.get("output") or []
+        return any(
+            isinstance(entry, dict)
+            and bool(entry.get("is_complete"))
+            and entry.get("stream") in ("stdout", "stderr", "system")
+            for entry in output
+        )
+
+    def _build_remote_cancelled_result(
+        self, remote_session_id: str, tracking_session_id: str
+    ) -> AgentTaskResult:
+        """Snapshot durable partial remote usage before unwinding shutdown."""
+        session_data = (
+            self.session_manager.get_session(remote_session_id) if self.session_manager else None
+        )
+        return AgentTaskResult(
+            session_id=remote_session_id,
+            tracking_session_id=tracking_session_id,
+            source_session_id=remote_session_id,
+            total_tokens=self._session_field(session_data, "total_tokens", 0),
+            total_input_tokens=self._session_field(session_data, "total_input_tokens", 0),
+            total_output_tokens=self._session_field(session_data, "total_output_tokens", 0),
+            request_count=self._session_field(session_data, "request_count", 0),
+            success=False,
+            error="Remote session cancelled by orchestrator",
+        )
 
     # ── Local helpers ──────────────────────────────────────────────
 
@@ -3439,7 +3587,28 @@ class AutonomousAgentRunner:
         first with SIGCONT so it can handle SIGTERM.
         """
         session = self._local_sessions.get(session_id)
-        if not session or not session.process or session.process.returncode is not None:
+        if not session:
+            return
+        if session.process is None:
+            # Remote autonomous calls use a process-less local tracker so the
+            # synchronous poll loop can observe cancellation. Stop the actual
+            # remote session when possible, but always trip the local events:
+            # shutdown must drain even if the remote machine is unreachable.
+            # Publish cancellation before waiting for an in-flight mapping or
+            # send call. _run_remote re-checks this flag immediately before
+            # dispatch, so shutdown cannot be hidden behind the lifecycle lock.
+            session._stopped.set()
+            with session._remote_lifecycle_lock:
+                try:
+                    if self.remote_session_manager:
+                        remote_session_id = session.persisted_session_id or session_id
+                        self.remote_session_manager.stop_session(remote_session_id)
+                except Exception as exc:
+                    logger.warning("Failed to stop remote session %s: %s", session_id[:8], exc)
+                finally:
+                    session.completed.set()
+            return
+        if session.process.returncode is not None:
             return
 
         try:
