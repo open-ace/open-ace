@@ -13,6 +13,7 @@ import logging
 import os
 import pwd
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -295,56 +296,239 @@ def _has_test_tool_call(tool_calls: list, framework_type: str) -> bool:
     return False
 
 
+_TEST_OUTPUT_FILTER_RE = re.compile(
+    r"(?:\s+2>\&1)?\s*\|\s*(?:head|tail)(?:\s+-[^\s]+|\s+\d+)*\s*$",
+    re.IGNORECASE,
+)
+
+
+def _normalize_test_command(command: str) -> str:
+    """Return a stable identity for a test command across output-only filters.
+
+    Autonomous agents commonly run ``pytest ... | head -100`` while exploring
+    a failure and rerun the same target as ``pytest ... | tail -20`` after the
+    fix.  Those filters change only which output is displayed, not the tests
+    executed.  Treating the two strings as distinct left the truncated first
+    run permanently inconclusive even when the later rerun passed.
+
+    Strip only trailing ``head``/``tail`` pipelines (and their adjacent stderr
+    merge).  Execution-affecting shell operators such as ``&&``/``||`` and
+    pytest selectors/options remain part of the identity.
+    """
+    normalized = " ".join(str(command or "").split())
+    while True:
+        stripped = _TEST_OUTPUT_FILTER_RE.sub("", normalized).strip()
+        if stripped == normalized:
+            break
+        normalized = stripped
+    return re.sub(r"\s+2>\&1\s*$", "", normalized).strip()
+
+
+_PytestScope = tuple[str, frozenset[str]]
+
+
+def _pytest_test_scope(command: str) -> _PytestScope | None:
+    """Return the pytest execution context and selectors when safely comparable.
+
+    ``None`` means the command is too complex for safe scope comparison.  An
+    empty selector set means a full-suite invocation.  This lets a later
+    passing superset rerun clear earlier failures for the same files while
+    ensuring a targeted pass or a different Python environment can never clear
+    a failed full-suite command.
+    """
+    normalized = _normalize_test_command(command)
+    if any(operator in normalized for operator in ("&&", "||", ";", "|")):
+        return None
+    try:
+        tokens = shlex.split(normalized)
+    except ValueError:
+        return None
+
+    pytest_index = -1
+    for index, token in enumerate(tokens):
+        if os.path.basename(token) in {"pytest", "py.test"}:
+            pytest_index = index
+            break
+    if pytest_index < 0:
+        return None
+
+    # Only compare scopes when the invocation prefix has ordinary pytest
+    # semantics.  Environment assignments and wrappers can change collection
+    # even when the visible selectors are identical.
+    prefix = tokens[:pytest_index]
+    if prefix:
+        python_name = os.path.basename(prefix[0])
+        if (
+            len(prefix) != 2
+            or prefix[1] != "-m"
+            or re.fullmatch(r"python(?:\d+(?:\.\d+)*)?", python_name) is None
+        ):
+            return None
+        execution_context = f"{prefix[0]} -m {tokens[pytest_index]}"
+    else:
+        execution_context = tokens[pytest_index]
+
+    scope_narrowing_options = {
+        "-k",
+        "-m",
+        "--ignore",
+        "--ignore-glob",
+        "--deselect",
+        "--lf",
+        "--last-failed",
+        "--ff",
+        "--failed-first",
+        "--nf",
+        "--new-first",
+        "--sw",
+        "--stepwise",
+        "--stepwise-skip",
+    }
+    safe_flags = {
+        "-q",
+        "--quiet",
+        "-v",
+        "-vv",
+        "--verbose",
+        "-s",
+        "-x",
+        "--exitfirst",
+        "--disable-warnings",
+        "--strict-config",
+        "--strict-markers",
+        "--continue-on-collection-errors",
+        "--full-trace",
+        "--showlocals",
+        "-l",
+        "--no-header",
+        "--no-summary",
+    }
+    safe_value_options = {
+        "--tb",
+        "--color",
+        "--capture",
+        "--durations",
+        "--durations-min",
+        "--junitxml",
+        "--junit-prefix",
+        "--basetemp",
+        "--verbosity",
+        "--maxfail",
+    }
+
+    selectors: set[str] = set()
+    args = tokens[pytest_index + 1 :]
+    index = 0
+    selectors_only = False
+    while index < len(args):
+        token = args[index]
+        if token == "--":
+            selectors_only = True
+            index += 1
+            continue
+        if not selectors_only and token.startswith("-"):
+            option_name = token.split("=", 1)[0]
+            if option_name in scope_narrowing_options:
+                return None
+            if token in safe_flags:
+                index += 1
+                continue
+            if option_name in safe_value_options:
+                if "=" not in token:
+                    index += 1
+                    if index >= len(args):
+                        return None
+                index += 1
+                continue
+            # Plugin and future pytest options are unknown here.  Exact-command
+            # retries remain supported, but cross-command scope coverage is not.
+            return None
+        selectors.add(token.rstrip("/") or ".")
+        index += 1
+
+    return execution_context, frozenset(selectors)
+
+
+def _pytest_scope_covers(
+    passing_scope: _PytestScope | None,
+    earlier_scope: _PytestScope | None,
+) -> bool:
+    """Whether a passing pytest command covers an earlier command's scope."""
+    if passing_scope is None or earlier_scope is None:
+        return False
+    passing_context, passing_selectors = passing_scope
+    earlier_context, earlier_selectors = earlier_scope
+    if passing_context != earlier_context:
+        return False
+    if not passing_selectors:
+        return True
+    if not earlier_selectors:
+        return False
+
+    def _selector_covers(passing: str, earlier: str) -> bool:
+        if passing == earlier:
+            return True
+        if passing in {".", "./"}:
+            return True
+        passing_path = passing.split("::", 1)[0].rstrip("/")
+        earlier_path = earlier.split("::", 1)[0].rstrip("/")
+        if "::" not in passing and passing_path == earlier_path:
+            return True
+        return "::" not in passing and earlier_path.startswith(f"{passing_path}/")
+
+    return all(
+        any(_selector_covers(passing, earlier) for passing in passing_selectors)
+        for earlier in earlier_selectors
+    )
+
+
 def _has_passing_test_tool_result(event_log: list, framework_type: str) -> bool:
     """Require conclusive success for every distinct test command in this run.
 
-    A later successful retry only supersedes an earlier failure when it reruns
-    the same normalized command.  This deliberately prevents a failing full
-    suite followed by one passing targeted test from opening a PR.
+    A later successful retry can supersede an earlier failure only when it
+    reruns the same normalized command or a safely comparable pytest superset.
+    Every new invocation resets its command to pending, so stale success from
+    before a code change cannot satisfy an interrupted rerun.
     """
-    test_tools: dict[str, str] = {}
-    anonymous_test_calls: list[str] = []
-    for event in event_log or []:
-        if not isinstance(event, dict) or event.get("type") != "tool_use":
-            continue
+    _CommandInfo = tuple[str, _PytestScope | None]
+    _Invocation = tuple[_CommandInfo, int]
+
+    test_tools: dict[str, _Invocation] = {}
+    states: dict[str, bool] = {}
+    scopes: dict[str, _PytestScope | None] = {}
+    state_orders: dict[str, int] = {}
+    latest_invocation_orders: dict[str, int] = {}
+    expected_commands: set[str] = set()
+    anonymous_pending: _Invocation | None = None
+    anonymous_has_pending = False
+    anonymous_evidence_ambiguous = False
+
+    def _command_info(event: dict) -> _CommandInfo | None:
         as_tool_call = {
             "tool": {
                 "name": event.get("tool_name", ""),
                 "input": event.get("tool_input", {}),
             }
         }
-        if _has_test_tool_call([as_tool_call], framework_type):
-            tool_id = str(event.get("tool_use_id") or "")
-            tool_input = event.get("tool_input") or {}
-            command = ""
-            if isinstance(tool_input, dict):
-                command = str(
-                    tool_input.get("command")
-                    or tool_input.get("cmd")
-                    or tool_input.get("args")
-                    or ""
-                )
-            command_key = " ".join(command.split()) or f"tool:{event.get('tool_name', '')}"
-            if tool_id:
-                test_tools[tool_id] = command_key
-            else:
-                anonymous_test_calls.append(command_key)
+        if not _has_test_tool_call([as_tool_call], framework_type):
+            return None
+        tool_input = event.get("tool_input") or {}
+        command = ""
+        if isinstance(tool_input, dict):
+            command = str(
+                tool_input.get("command") or tool_input.get("cmd") or tool_input.get("args") or ""
+            )
+        command_key = _normalize_test_command(command) or f"tool:{event.get('tool_name', '')}"
+        scope = _pytest_test_scope(command) if framework_type == "python" else None
+        return command_key, scope
 
-    states: dict[str, bool] = {}
-    anonymous_index = 0
-    for event in event_log or []:
-        if not isinstance(event, dict) or event.get("type") != "tool_result":
-            continue
-        tool_id = str(event.get("tool_use_id") or "")
-        if tool_id:
-            command_key = test_tools.get(tool_id)
-            if not command_key:
-                continue
-        else:
-            if anonymous_index >= len(anonymous_test_calls):
-                continue
-            command_key = anonymous_test_calls[anonymous_index]
-            anonymous_index += 1
+    def _record_result(invocation: _Invocation, event: dict, event_order: int) -> None:
+        command_info, invocation_order = invocation
+        command_key, scope = command_info
+        if latest_invocation_orders.get(command_key) != invocation_order:
+            # A newer invocation of this command is pending or has completed;
+            # an out-of-order result from an older call must not replace it.
+            return
         text = str(event.get("text") or "")
         exit_code = event.get("exit_code")
         explicit_error = bool(event.get("is_error")) or (
@@ -375,11 +559,74 @@ def _has_passing_test_tool_result(event_log: list, framework_type: str) -> bool:
             )
         )
         states[command_key] = not explicit_error and not has_failure and has_pass
+        scopes[command_key] = scope
+        state_orders[command_key] = event_order
 
-    expected_commands = set(test_tools.values()) | set(anonymous_test_calls)
-    return bool(expected_commands) and all(
-        states.get(command) is True for command in expected_commands
-    )
+    for event_order, event in enumerate(event_log or []):
+        if not isinstance(event, dict):
+            continue
+        event_type = event.get("type")
+        if event_type == "tool_use":
+            tool_id = str(event.get("tool_use_id") or "")
+            command_info = _command_info(event)
+            if command_info is not None:
+                command_key, scope = command_info
+                expected_commands.add(command_key)
+                scopes[command_key] = scope
+                states[command_key] = False
+                state_orders[command_key] = event_order
+                latest_invocation_orders[command_key] = event_order
+                invocation = (command_info, event_order)
+            else:
+                invocation = None
+            if tool_id:
+                if invocation is not None:
+                    test_tools[tool_id] = invocation
+                continue
+            if anonymous_has_pending:
+                # Without IDs, overlapping calls cannot be paired safely.  Do
+                # not trust any anonymous result in this event stream.
+                anonymous_evidence_ambiguous = True
+            anonymous_pending = invocation
+            anonymous_has_pending = True
+            continue
+        if event_type != "tool_result":
+            continue
+
+        tool_id = str(event.get("tool_use_id") or "")
+        if tool_id:
+            invocation = test_tools.get(tool_id)
+            if not invocation:
+                continue
+        else:
+            if not anonymous_has_pending:
+                continue
+            invocation = anonymous_pending
+            anonymous_pending = None
+            anonymous_has_pending = False
+            if anonymous_evidence_ambiguous or invocation is None:
+                continue
+        _record_result(invocation, event, event_order)
+
+    if not expected_commands:
+        return False
+
+    passing_commands = [
+        (command_key, scopes.get(command_key), state_orders.get(command_key, -1))
+        for command_key, passed in states.items()
+        if passed
+    ]
+    for command_key in expected_commands:
+        if states.get(command_key) is True:
+            continue
+        earlier_scope = scopes.get(command_key)
+        earlier_order = state_orders.get(command_key, -1)
+        if framework_type != "python" or not any(
+            passing_order > earlier_order and _pytest_scope_covers(passing_scope, earlier_scope)
+            for _passing_key, passing_scope, passing_order in passing_commands
+        ):
+            return False
+    return True
 
 
 # Prefix added to all prompts to inform the agent it is running autonomously

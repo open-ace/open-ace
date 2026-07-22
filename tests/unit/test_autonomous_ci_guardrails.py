@@ -733,6 +733,368 @@ def test_test_evidence_requires_every_distinct_command_to_pass():
     assert not _has_passing_test_tool_result(events, "python")
 
 
+def test_test_evidence_treats_head_and_tail_as_same_pytest_rerun():
+    from app.modules.workspace.autonomous.orchestrator import _has_passing_test_tool_result
+
+    events = [
+        {
+            "type": "tool_use",
+            "tool_name": "Bash",
+            "tool_input": {
+                "command": (
+                    "python -m pytest tests/unit/test_insights_service.py "
+                    "-v --tb=short 2>&1 | head -100"
+                )
+            },
+            "tool_use_id": "truncated",
+        },
+        {
+            "type": "tool_result",
+            "tool_use_id": "truncated",
+            "text": "================ test session starts ================",
+            "exit_code": 0,
+        },
+        {
+            "type": "tool_use",
+            "tool_name": "Bash",
+            "tool_input": {
+                "command": (
+                    "python -m pytest tests/unit/test_insights_service.py "
+                    "-v --tb=short 2>&1 | tail -20"
+                )
+            },
+            "tool_use_id": "rerun",
+        },
+        {
+            "type": "tool_result",
+            "tool_use_id": "rerun",
+            "text": "49 passed in 0.47s",
+            "exit_code": 0,
+        },
+    ]
+
+    assert _has_passing_test_tool_result(events, "python")
+
+
+def test_test_evidence_accepts_later_passing_pytest_superset():
+    from app.modules.workspace.autonomous.orchestrator import _has_passing_test_tool_result
+
+    events = [
+        {
+            "type": "tool_use",
+            "tool_name": "Bash",
+            "tool_input": {"command": "python -m pytest tests/test_a.py tests/test_b.py -v"},
+            "tool_use_id": "group-failed",
+        },
+        {
+            "type": "tool_result",
+            "tool_use_id": "group-failed",
+            "text": "1 failed, 1 passed in 0.4s",
+            "exit_code": 1,
+        },
+        {
+            "type": "tool_use",
+            "tool_name": "Bash",
+            "tool_input": {
+                "command": (
+                    "python -m pytest tests/test_a.py tests/test_b.py tests/test_c.py "
+                    "-v 2>&1 | tail -10"
+                )
+            },
+            "tool_use_id": "final-matrix",
+        },
+        {
+            "type": "tool_result",
+            "tool_use_id": "final-matrix",
+            "text": "3 passed in 0.8s",
+            "exit_code": 0,
+        },
+    ]
+
+    assert _has_passing_test_tool_result(events, "python")
+
+
+def test_test_evidence_earlier_passing_superset_does_not_clear_later_failure():
+    from app.modules.workspace.autonomous.orchestrator import _has_passing_test_tool_result
+
+    events = [
+        {
+            "type": "tool_use",
+            "tool_name": "Bash",
+            "tool_input": {"command": "python -m pytest tests/test_a.py tests/test_b.py -q"},
+            "tool_use_id": "matrix-passed",
+        },
+        {
+            "type": "tool_result",
+            "tool_use_id": "matrix-passed",
+            "text": "2 passed in 0.4s",
+            "exit_code": 0,
+        },
+        {
+            "type": "tool_use",
+            "tool_name": "Bash",
+            "tool_input": {"command": "python -m pytest tests/test_a.py -q"},
+            "tool_use_id": "later-failure",
+        },
+        {
+            "type": "tool_result",
+            "tool_use_id": "later-failure",
+            "text": "1 failed in 0.2s",
+            "exit_code": 1,
+        },
+    ]
+
+    assert not _has_passing_test_tool_result(events, "python")
+
+
+@pytest.mark.parametrize(
+    "restricted_command",
+    [
+        "python -m pytest tests/test_a.py -q -k passing_case",
+        "python -m pytest tests -q --ignore tests/test_a.py",
+        "ONLY_FAST=1 python -m pytest tests/test_a.py -q",
+    ],
+)
+def test_test_evidence_restricted_pass_does_not_cover_earlier_failure(
+    restricted_command,
+):
+    from app.modules.workspace.autonomous.orchestrator import _has_passing_test_tool_result
+
+    events = [
+        {
+            "type": "tool_use",
+            "tool_name": "Bash",
+            "tool_input": {"command": "python -m pytest tests/test_a.py -q"},
+            "tool_use_id": "file-failed",
+        },
+        {
+            "type": "tool_result",
+            "tool_use_id": "file-failed",
+            "text": "1 failed, 1 passed in 0.4s",
+            "exit_code": 1,
+        },
+        {
+            "type": "tool_use",
+            "tool_name": "Bash",
+            "tool_input": {"command": restricted_command},
+            "tool_use_id": "restricted-pass",
+        },
+        {
+            "type": "tool_result",
+            "tool_use_id": "restricted-pass",
+            "text": "1 passed in 0.2s",
+            "exit_code": 0,
+        },
+    ]
+
+    assert not _has_passing_test_tool_result(events, "python")
+
+
+@pytest.mark.parametrize(
+    ("failed_command", "passing_command"),
+    [
+        (
+            "python3.10 -m pytest tests/test_a.py -q",
+            "python3.12 -m pytest tests/test_a.py tests/test_b.py -q",
+        ),
+        (
+            "pytest tests/test_a.py -q",
+            "python -m pytest tests/test_a.py tests/test_b.py -q",
+        ),
+    ],
+)
+def test_test_evidence_different_pytest_context_does_not_cover_failure(
+    failed_command, passing_command
+):
+    from app.modules.workspace.autonomous.orchestrator import _has_passing_test_tool_result
+
+    events = [
+        {
+            "type": "tool_use",
+            "tool_name": "Bash",
+            "tool_input": {"command": failed_command},
+            "tool_use_id": "failed-context",
+        },
+        {
+            "type": "tool_result",
+            "tool_use_id": "failed-context",
+            "text": "1 failed, 1 passed in 0.4s",
+            "exit_code": 1,
+        },
+        {
+            "type": "tool_use",
+            "tool_name": "Bash",
+            "tool_input": {"command": passing_command},
+            "tool_use_id": "passing-context",
+        },
+        {
+            "type": "tool_result",
+            "tool_use_id": "passing-context",
+            "text": "3 passed in 0.3s",
+            "exit_code": 0,
+        },
+    ]
+
+    assert not _has_passing_test_tool_result(events, "python")
+
+
+@pytest.mark.parametrize(
+    ("test_output", "test_exit_code", "expected"),
+    [
+        ("1 failed in 0.2s", 1, False),
+        ("1 passed in 0.2s", 0, True),
+    ],
+)
+def test_test_evidence_pairs_anonymous_results_with_all_tool_calls(
+    test_output, test_exit_code, expected
+):
+    from app.modules.workspace.autonomous.orchestrator import _has_passing_test_tool_result
+
+    events = [
+        {
+            "type": "tool_use",
+            "tool_name": "Read",
+            "tool_input": {"file_path": "test-summary.txt"},
+        },
+        {
+            "type": "tool_result",
+            "text": "Historical note: 1 passed",
+            "exit_code": 0,
+        },
+        {
+            "type": "tool_use",
+            "tool_name": "Bash",
+            "tool_input": {"command": "python -m pytest tests/test_a.py -q"},
+        },
+        {
+            "type": "tool_result",
+            "text": test_output,
+            "exit_code": test_exit_code,
+        },
+    ]
+
+    assert _has_passing_test_tool_result(events, "python") is expected
+
+
+@pytest.mark.parametrize(
+    "events",
+    [
+        [
+            {
+                "type": "tool_use",
+                "tool_name": "Bash",
+                "tool_input": {"command": "python -m pytest tests/test_a.py -q"},
+            },
+            {
+                "type": "tool_use",
+                "tool_name": "Read",
+                "tool_input": {"file_path": "old-results.txt"},
+            },
+            {"type": "tool_result", "text": "Historical: 1 passed", "exit_code": 0},
+        ],
+        [
+            {"type": "tool_result", "text": "Historical: 1 passed", "exit_code": 0},
+            {
+                "type": "tool_use",
+                "tool_name": "Bash",
+                "tool_input": {"command": "python -m pytest tests/test_a.py -q"},
+            },
+        ],
+    ],
+)
+def test_test_evidence_rejects_incomplete_or_out_of_order_anonymous_events(events):
+    from app.modules.workspace.autonomous.orchestrator import _has_passing_test_tool_result
+
+    assert not _has_passing_test_tool_result(events, "python")
+
+
+@pytest.mark.parametrize("tool_id", ["named-run", None])
+def test_test_evidence_new_invocation_invalidates_stale_pass(tool_id):
+    from app.modules.workspace.autonomous.orchestrator import _has_passing_test_tool_result
+
+    first_use = {
+        "type": "tool_use",
+        "tool_name": "Bash",
+        "tool_input": {"command": "python -m pytest tests/test_a.py -q"},
+    }
+    first_result = {
+        "type": "tool_result",
+        "text": "1 passed in 0.2s",
+        "exit_code": 0,
+    }
+    second_use = {
+        "type": "tool_use",
+        "tool_name": "Bash",
+        "tool_input": {"command": "python -m pytest tests/test_a.py -q"},
+    }
+    if tool_id is not None:
+        first_use["tool_use_id"] = tool_id
+        first_result["tool_use_id"] = tool_id
+        second_use["tool_use_id"] = tool_id
+
+    assert not _has_passing_test_tool_result([first_use, first_result, second_use], "python")
+
+
+def test_test_evidence_older_named_result_cannot_resolve_newer_invocation():
+    from app.modules.workspace.autonomous.orchestrator import _has_passing_test_tool_result
+
+    events = [
+        {
+            "type": "tool_use",
+            "tool_name": "Bash",
+            "tool_input": {"command": "python -m pytest tests/test_a.py -q"},
+            "tool_use_id": "older",
+        },
+        {
+            "type": "tool_use",
+            "tool_name": "Bash",
+            "tool_input": {"command": "python -m pytest tests/test_a.py -q"},
+            "tool_use_id": "newer",
+        },
+        {
+            "type": "tool_result",
+            "tool_use_id": "older",
+            "text": "1 passed in 0.2s",
+            "exit_code": 0,
+        },
+    ]
+
+    assert not _has_passing_test_tool_result(events, "python")
+
+
+def test_test_evidence_targeted_pass_does_not_cover_failed_full_suite():
+    from app.modules.workspace.autonomous.orchestrator import _has_passing_test_tool_result
+
+    events = [
+        {
+            "type": "tool_use",
+            "tool_name": "Bash",
+            "tool_input": {"command": "python -m pytest -q"},
+            "tool_use_id": "full-suite",
+        },
+        {
+            "type": "tool_result",
+            "tool_use_id": "full-suite",
+            "text": "1 failed, 200 passed",
+            "exit_code": 1,
+        },
+        {
+            "type": "tool_use",
+            "tool_name": "Bash",
+            "tool_input": {"command": "python -m pytest tests/test_one.py -q"},
+            "tool_use_id": "targeted",
+        },
+        {
+            "type": "tool_result",
+            "tool_use_id": "targeted",
+            "text": "1 passed",
+            "exit_code": 0,
+        },
+    ]
+
+    assert not _has_passing_test_tool_result(events, "python")
+
+
 def test_test_evidence_accepts_common_framework_success_summaries():
     from app.modules.workspace.autonomous.orchestrator import _has_passing_test_tool_result
 
