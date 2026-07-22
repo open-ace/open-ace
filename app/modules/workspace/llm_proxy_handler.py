@@ -14,6 +14,9 @@ from flask import Response, g, jsonify, request, stream_with_context
 # gateway feature = drop this import + the seam + the two _gateway_* helpers.
 from app.modules.workspace.model_gateway import get_gateway_planner
 
+# Issue #1894: SSRF protection
+from app.utils.outbound_url_guard import safe_request
+
 logger = logging.getLogger(__name__)
 
 # Shared ContentFilter instance for performance (uses cached rules)
@@ -70,8 +73,13 @@ def _determine_target_url(
     provider: str,
     base_url: str | None,
     path: str,
+    tenant_id: int | None = None,
+    resolved_ips: str | None = None,
 ) -> str | tuple[Response, int]:
-    """Build the upstream target URL.  Returns a (Response, status) tuple on validation error."""
+    """Build the upstream target URL.  Returns a (Response, status) tuple on validation error.
+
+    Issue #1894: Added SSRF protection with IP pinning for custom base_url.
+    """
     if base_url:
         target_base = base_url.rstrip("/")
         # When base_url already contains a version segment (e.g. /v4), strip the
@@ -101,7 +109,82 @@ def _determine_target_url(
             400,
         )
 
-    return f"{target_base}{suffix}"
+    target_url = f"{target_base}{suffix}"
+
+    # Issue #1894: SSRF protection for custom base_url
+    if base_url and tenant_id is not None:
+        from app.utils.llm_proxy_url_validator import (
+            audit_blocked_url,
+            hash_host_for_audit,
+            record_allowlist_hit,
+            record_ip_mismatch,
+            record_ssrf_blocked,
+            sanitize_error_message,
+            validate_ip_against_stored,
+            validate_llm_proxy_url,
+        )
+
+        # DNS rebinding protection: validate against stored IPs
+        if resolved_ips:
+            is_valid, ip_error = validate_ip_against_stored(target_url, resolved_ips)
+            if not is_valid:
+                logger.warning(
+                    "DNS rebinding detected for tenant %s provider %s: %s",
+                    tenant_id,
+                    provider,
+                    ip_error,
+                )
+                record_ip_mismatch(tenant_id, provider)
+                audit_blocked_url(
+                    tenant_id=tenant_id,
+                    provider=provider,
+                    url=target_url,
+                    reason="dns_rebinding",
+                )
+                return (
+                    jsonify({
+                        "error": {
+                            "message": "Blocked outbound URL: DNS resolution changed",
+                            "type": "ssrf_blocked",
+                            "blocked_host_hash": hash_host_for_audit(target_url),
+                        }
+                    }),
+                    403,
+                )
+
+        # Standard SSRF validation
+        result = validate_llm_proxy_url(target_url, tenant_id, provider)
+        if not result.allowed:
+            sanitized_error = sanitize_error_message(result.error or "Invalid URL")
+            logger.warning(
+                "LLM proxy URL blocked for tenant %s provider %s: %s",
+                tenant_id,
+                provider,
+                sanitized_error,
+            )
+            record_ssrf_blocked(tenant_id, provider, "ssrf_violation")
+            audit_blocked_url(
+                tenant_id=tenant_id,
+                provider=provider,
+                url=target_url,
+                reason=result.error or "ssrf_violation",
+            )
+            return (
+                jsonify({
+                    "error": {
+                        "message": sanitized_error,
+                        "type": "ssrf_blocked",
+                        "blocked_host_hash": hash_host_for_audit(target_url),
+                    }
+                }),
+                403,
+            )
+
+        # Record allowlist hit if matched
+        if result.is_allowlist_match:
+            record_allowlist_hit(tenant_id, "tenant" if tenant_id > 0 else "global")
+
+    return target_url
 
 
 def _record_messages(
@@ -669,7 +752,23 @@ def _forward_via_gateway(
     of this call. Usage recording + streaming passthrough are handled by the
     shared ``_finalize_upstream_response`` tail. Errors are sanitized via
     ``_gateway_error_response`` so the gateway key never leaks (R7).
+
+    Issue #1894: Added SSRF blocked handling.
     """
+    # Issue #1894: Handle SSRF blocked gateway URL
+    if getattr(plan, "ssrf_blocked", False):
+        from app.utils.llm_proxy_url_validator import hash_host_for_audit
+        return (
+            jsonify({
+                "error": {
+                    "message": plan.ssrf_error or "Blocked outbound URL",
+                    "type": "ssrf_blocked",
+                    "blocked_host_hash": hash_host_for_audit(plan.target_url),
+                }
+            }),
+            403,
+        )
+
     import requests as http_requests
 
     try:
@@ -946,8 +1045,10 @@ def handle_llm_proxy_request(
                 500,
             )
 
-        api_key, base_url, key_id, _ = key_result
-        target_result = _determine_target_url(provider, base_url, path)
+        api_key, base_url, key_id, _, resolved_ips = key_result
+        target_result = _determine_target_url(
+            provider, base_url, path, tenant_id=tenant_id, resolved_ips=resolved_ips
+        )
         if isinstance(target_result, tuple):
             return target_result
         target_url = target_result
@@ -1032,15 +1133,44 @@ def handle_llm_proxy_request(
             if not converted_from_responses:
                 body = request.get_data()
 
-            resp = http_requests.request(
-                method=request.method,
-                url=target_url,
-                headers=fwd_headers,
-                data=body,
-                stream=True,
-                timeout=120,
-                proxies={"http": None, "https": None},  # type: ignore[dict-item]
-            )
+            # Issue #1894: Use safe_request for public URLs with resolved_ips
+            # to prevent DNS rebinding attacks. For private URLs (in allowlist)
+            # or default provider URLs, use regular request.
+            if resolved_ips and base_url:
+                # Public URL with IP pinning - use safe_request
+                try:
+                    resp = safe_request(
+                        method=request.method,
+                        url=target_url,
+                        headers=fwd_headers,
+                        data=body,
+                        stream=True,
+                        timeout=120,
+                    )
+                except Exception as exc:
+                    # safe_request may raise OutboundUrlBlockedError
+                    logger.error("LLM proxy safe_request error: %s", exc)
+                    return (
+                        jsonify({
+                            "error": {
+                                "message": "Blocked outbound URL: security policy violation",
+                                "type": "ssrf_blocked",
+                            }
+                        }),
+                        403,
+                    )
+            else:
+                # Default provider URL or private URL in allowlist - use regular request
+                import requests as http_requests
+                resp = http_requests.request(
+                    method=request.method,
+                    url=target_url,
+                    headers=fwd_headers,
+                    data=body,
+                    stream=True,
+                    timeout=120,
+                    proxies={"http": None, "https": None},  # type: ignore[dict-item]
+                )
 
             if resp.status_code >= 400:
                 peek = (

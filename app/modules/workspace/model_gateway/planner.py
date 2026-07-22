@@ -5,6 +5,8 @@ Mirrors the run_timeline recorder shape: a Null/real strategy pair, an
 the toggle. ``plan()`` returns a :class:`GatewayPlan` (gateway mode) or ``None``
 (disabled -> direct mode, OR enabled-but-misconfigured -> the handler surfaces a
 503 rather than silently falling back).
+
+Issue #1894: Added SSRF validation for DB-configured gateway URLs.
 """
 
 from __future__ import annotations
@@ -15,6 +17,8 @@ import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
+
+from flask import jsonify
 
 from app.modules.workspace.model_gateway.attribution import (
     build_attribution_headers,
@@ -37,6 +41,8 @@ class GatewayPlan:
     body_transformer: Callable[[bytes], bytes] = field(default=lambda raw: raw)
     mode: str = "gateway"
     is_responses: bool = False
+    ssrf_blocked: bool = False  # Issue #1894: Flag for SSRF blocked response
+    ssrf_error: str | None = None  # Issue #1894: Error message for SSRF block
 
 
 class GatewayPlanner:
@@ -76,6 +82,8 @@ class LitellmGatewayPlanner(GatewayPlanner):
     Constructed with a resolved :class:`GatewayConfig` (or None when the gateway is
     enabled but unconfigured, in which case ``plan()`` returns None and the handler
     surfaces a 503 — never a silent fallback to direct mode).
+
+    Issue #1894: Added SSRF validation for gateway URL at request time.
     """
 
     is_noop = False
@@ -100,6 +108,39 @@ class LitellmGatewayPlanner(GatewayPlanner):
 
         base_url = cfg.base_url.strip().rstrip("/")
         target_url, is_responses = _resolve_target_url(base_url, path)
+
+        # Issue #1894: SSRF validation for DB-configured gateway URL
+        from app.utils.llm_proxy_url_validator import (
+            audit_blocked_url,
+            hash_host_for_audit,
+            sanitize_error_message,
+            validate_llm_proxy_url,
+        )
+
+        result = validate_llm_proxy_url(target_url, tenant_id, "gateway")
+        if not result.allowed:
+            sanitized_error = sanitize_error_message(result.error or "Invalid URL")
+            logger.warning(
+                "Gateway URL blocked for tenant %s: %s",
+                tenant_id,
+                sanitized_error,
+            )
+            audit_blocked_url(
+                tenant_id=tenant_id,
+                provider="gateway",
+                url=target_url,
+                reason=result.error or "ssrf_violation",
+                user_id=user_id,
+            )
+            # Return a blocked plan instead of None to return proper 403
+            return GatewayPlan(
+                target_url=target_url,
+                gateway_key="",  # Don't expose key on error
+                mode="gateway",
+                is_responses=is_responses,
+                ssrf_blocked=True,
+                ssrf_error=sanitized_error,
+            )
 
         headers = build_attribution_headers(
             token_payload, requested_model, session_id, user_id, tenant_id, provider

@@ -5,6 +5,8 @@ headless/CI setups), then the single admin DB row (Phase B). Returns None when n
 usable base_url + api_key are configured, regardless of the toggle — the planner
 treats None as "not configured" and the handler surfaces a 503 (no silent
 fallback to direct mode).
+
+Issue #1894: Added SSRF validation for gateway base_url at startup.
 """
 
 from __future__ import annotations
@@ -40,11 +42,41 @@ def _truthy(value: str | None) -> bool:
 
 
 def _config_from_env() -> GatewayConfig | None:
-    """Read gateway credentials from env (overrides DB). None if incomplete."""
+    """Read gateway credentials from env (overrides DB). None if incomplete.
+
+    Issue #1894: Added SSRF validation at startup.
+    """
     base_url = os.environ.get("OPENACE_MODEL_GATEWAY_BASE_URL", "").strip()
     api_key = os.environ.get("OPENACE_MODEL_GATEWAY_API_KEY", "").strip()
     if not base_url or not api_key:
         return None
+
+    # Issue #1894: SSRF validation for gateway URL
+    from app.utils.llm_proxy_url_validator import (
+        sanitize_error_message,
+        validate_llm_proxy_url,
+    )
+
+    strict_startup = os.environ.get(
+        "OPENACE_MODEL_GATEWAY_STRICT_STARTUP", "true"
+    ).strip().lower() not in ("false", "0", "no", "off")
+
+    result = validate_llm_proxy_url(base_url, tenant_id=0, provider="gateway")
+    if not result.allowed:
+        sanitized_error = sanitize_error_message(result.error or "Invalid URL")
+        if strict_startup:
+            logger.fatal(
+                "OPENACE_MODEL_GATEWAY_BASE_URL blocked by SSRF policy: %s",
+                sanitized_error,
+            )
+            raise ValueError(f"Gateway base_url blocked: {sanitized_error}")
+        else:
+            logger.error(
+                "OPENACE_MODEL_GATEWAY_BASE_URL blocked by SSRF policy (strict mode disabled): %s",
+                sanitized_error,
+            )
+            return None
+
     return GatewayConfig(
         base_url=base_url,
         api_key=api_key,

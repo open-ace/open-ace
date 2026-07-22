@@ -330,6 +330,7 @@ class TestHandleLlmProxyRequest:
             "https://api.openai.com/v1",
             42,
             None,
+            None,  # resolved_ips (Issue #1894)
         )
         mock_get_proxy.return_value = mock_proxy
         mock_quota_cls.return_value = _make_quota_ok()
@@ -374,6 +375,7 @@ class TestHandleLlmProxyRequest:
             "https://api.openai.com/v1",
             1,
             None,
+            None,  # resolved_ips (Issue #1894)
         )
         mock_get_proxy.return_value = mock_proxy
         mock_quota_cls.return_value = _make_quota_ok()
@@ -437,6 +439,7 @@ class TestHandleLlmProxyRequest:
             "https://api.openai.com/v1",
             1,
             None,
+            None,  # resolved_ips (Issue #1894)
         )
         mock_get_proxy.return_value = mock_proxy
         mock_quota_cls.return_value = _make_quota_ok()
@@ -466,6 +469,7 @@ class TestHandleLlmProxyRequest:
             "https://api.openai.com/v1",
             1,
             None,
+            None,  # resolved_ips (Issue #1894)
         )
         mock_get_proxy.return_value = mock_proxy
         mock_quota_cls.return_value = _make_quota_ok()
@@ -492,7 +496,13 @@ class TestHandleLlmProxyRequest:
 class TestResponsesApiConversion:
     """Test Responses API → Chat Completions conversion in the proxy handler."""
 
-    def _make_ha_proxy(self, base_url="https://custom.api.com/v1"):
+    def _make_ha_proxy(self, base_url="https://example.com/v1"):
+        """Create mock proxy with HA token.
+
+        Note: Uses a valid public URL format. SSRF validation may reject if DNS fails.
+        Tests that need to bypass SSRF should set OPENACE_LLM_PROXY_DISABLE_SSRF_CHECK=true
+        or use the default provider URL.
+        """
         mock_proxy = MagicMock()
         mock_proxy.validate_proxy_token.return_value = _mock_proxy_token(
             scope="remote",
@@ -505,6 +515,7 @@ class TestResponsesApiConversion:
             base_url,
             1,
             None,
+            None,  # resolved_ips (Issue #1894)
         )
         return mock_proxy
 
