@@ -3950,13 +3950,14 @@ class AutonomousOrchestrator:
         milestone_id: str = "",
         **kwargs,
     ) -> AgentTaskResult:
-        """Retry one overflowing stable session on a new session-line head.
+        """Retry one overflowing stable line without creating a fourth session.
 
-        Main/review/test remain the workflow's three logical session lines,
-        but a provider context limit can make an established line impossible
-        to resume. Rotate only that line once and retry the same self-contained
-        prompt without history. The rejected attempt is accounted here; the
-        caller accounts the returned final attempt as usual.
+        The workflow's main/review/test tracking ids are permanent identities.
+        When a provider transcript is too large, clear only that tracking row's
+        provider mapping and run the same self-contained prompt without resume.
+        The runner then rebinds the new provider transcript to the SAME tracking
+        row. Usage from the rejected attempt is carried into the retry's final
+        milestone write; the caller accounts the returned result as usual.
         """
         result = self._run_agent(
             wf=wf,
@@ -3971,31 +3972,69 @@ class AutonomousOrchestrator:
         if not field:
             return result
 
+        prior_usage = {
+            "total_tokens": int(result.total_tokens or 0),
+            "total_input_tokens": int(result.total_input_tokens or 0),
+            "total_output_tokens": int(result.total_output_tokens or 0),
+            "request_count": int(result.request_count or 0),
+        }
         self._accumulate_tokens(result)
         logger.warning(
-            "Session line %s exceeded provider context; rotating it and retrying once",
+            "Session line %s exceeded provider context; rebinding it and retrying once",
             session_line,
         )
-        self._update_workflow(
-            {
-                field: "",
-                "agent_session_id": "",
-                "agent_pid": None,
-            }
-        )
-        retry_wf = dict(wf)
-        retry_wf[field] = ""
-        retry_wf["agent_session_id"] = ""
-        retry_wf["agent_pid"] = None
+        tracking_session_id = ((wf or {}).get(field) or "").strip()
+        if not tracking_session_id:
+            tracking_session_id = ((self.workflow or {}).get(field) or "").strip()
+        session_manager = getattr(self._runner, "session_manager", None)
+        if tracking_session_id and session_manager is not None:
+            try:
+                session_row = session_manager.get_session(tracking_session_id) or {}
+                context = getattr(session_row, "context", None)
+                if not isinstance(context, dict):
+                    context = (
+                        session_row.get("context", {}) if isinstance(session_row, dict) else {}
+                    )
+                context = dict(context or {})
+                context.pop("cli_session_id", None)
+                if not session_manager.update_session_fields(
+                    tracking_session_id,
+                    {
+                        "cli_session_id": "",
+                        "context": context,
+                        "status": "active",
+                    },
+                ):
+                    raise RuntimeError("tracking session row was not updated")
+            except Exception as exc:
+                logger.error(
+                    "Failed to clear provider context for session line %s",
+                    session_line,
+                    exc_info=True,
+                )
+                result.success = False
+                result.error = f"Context recovery could not rebind {session_line} session: {exc}"
+                return result
+
+        self._update_workflow({"agent_session_id": "", "agent_pid": None})
         return self._run_agent(
-            wf=retry_wf,
+            wf=wf,
             session_line=session_line,
             milestone_id=milestone_id,
+            force_fresh=True,
+            prior_usage=prior_usage,
             **kwargs,
         )
 
     def _run_agent(
-        self, wf: dict = None, *, session_line: str = "fresh", milestone_id: str = "", **kwargs
+        self,
+        wf: dict = None,
+        *,
+        session_line: str = "fresh",
+        milestone_id: str = "",
+        force_fresh: bool = False,
+        prior_usage: dict[str, int] | None = None,
+        **kwargs,
     ) -> AgentTaskResult:
         """Run an agent task with session-line tracking and transient-API-error retry.
 
@@ -4006,25 +4045,40 @@ class AutonomousOrchestrator:
                 "review", "test" (resumed across milestones via --resume), or
                 "fresh" (a brand-new one-off session).
             milestone_id: Milestone to attribute this call's phase usage to.
+            force_fresh: Start a new provider transcript while retaining a
+                named line's stable tracking id.
+            prior_usage: Usage from a preceding attempt that belongs to the
+                same milestone and must be included in the final phase totals.
         """
         workflow_data = wf or self.workflow
         field = SESSION_LINE_FIELDS.get(session_line)
 
         # Resolve the session line: resume an established session or start new.
-        session_id, resume_session_id, resume = self._resolve_session_line(
-            workflow_data, session_line
-        )
+        # Context recovery forces a fresh provider transcript while retaining
+        # the named line's stable tracking id.
+        if force_fresh and field:
+            session_id = ((workflow_data or {}).get(field) or "").strip()
+            if not session_id:
+                session_id = ((self.workflow or {}).get(field) or "").strip()
+            session_id = session_id or str(uuid.uuid4())
+            resume_session_id = None
+            resume = False
+        else:
+            session_id, resume_session_id, resume = self._resolve_session_line(
+                workflow_data, session_line
+            )
         kwargs["session_id"] = session_id
         kwargs["resume"] = resume
         kwargs["resume_session_id"] = resume_session_id
         if milestone_id:
             kwargs["milestone_id"] = milestone_id
         tracking_session_id = session_id
+        prior_usage = prior_usage or {}
         retry_usage = {
-            "total_tokens": 0,
-            "total_input_tokens": 0,
-            "total_output_tokens": 0,
-            "request_count": 0,
+            "total_tokens": int(prior_usage.get("total_tokens", 0) or 0),
+            "total_input_tokens": int(prior_usage.get("total_input_tokens", 0) or 0),
+            "total_output_tokens": int(prior_usage.get("total_output_tokens", 0) or 0),
+            "request_count": int(prior_usage.get("request_count", 0) or 0),
         }
         usage_session_ids = {tracking_session_id}
         if self._is_shutdown_requested():
@@ -7479,6 +7533,22 @@ class AutonomousOrchestrator:
             title=f"PR fixes round {round_num}",
         )
 
+        def fail_fix(message: str, result: AgentTaskResult | None = None) -> bool:
+            """Fail closed before the orchestrator stages or pushes anything."""
+            self.repo.update_milestone(
+                fix_ms.get("milestone_id", ""),
+                {
+                    "status": "failed",
+                    "session_id": result.session_id if result else "",
+                    "error_message": message,
+                    "result_summary": (
+                        self._artifact_text(result)[:200] if result is not None else ""
+                    ),
+                },
+            )
+            self._update_workflow({"status": "failed", "error_message": message})
+            return False
+
         fix_prompt = (
             AUTONOMOUS_CONTEXT
             + f"根据以下代码审查意见修改代码：\n\n{self._clean_agent_text(review_text)}\n\n"
@@ -7510,11 +7580,23 @@ class AutonomousOrchestrator:
                 "如果确认是预先存在的问题，在回复末尾单独一行输出 `CI_STATUS: pre-existing`。"
             )
 
+        # A review-fix call can only attribute and auto-stage changes safely
+        # when it starts from a clean tree. Never let an unrelated test/manual
+        # edit hitchhike on a successful recovery or a no-op agent response.
+        try:
+            dirty_before = gh.has_uncommitted_changes()
+        except Exception as exc:
+            return fail_fix(f"Unable to verify clean worktree before PR review fix: {exc}")
+        if dirty_before is True:
+            return fail_fix(
+                "PR review fix refused: worktree already had uncommitted changes before agent run"
+            )
+
         commit_before = ""
         try:
             commit_before = gh.get_current_commit()
-        except Exception:
-            pass
+        except Exception as exc:
+            return fail_fix(f"Unable to capture branch HEAD before PR review fix: {exc}")
 
         fix_result = self._run_agent_with_context_recovery(
             wf=wf,
@@ -7541,17 +7623,17 @@ class AutonomousOrchestrator:
                 "PR review fix failed after context recovery: "
                 f"{fix_result.error or self._artifact_text(fix_result) or 'no result'}"
             )
-            self.repo.update_milestone(
-                fix_ms.get("milestone_id", ""),
-                {
-                    "status": "failed",
-                    "session_id": fix_result.session_id,
-                    "error_message": message,
-                    "result_summary": "",
-                },
+            return fail_fix(message, fix_result)
+
+        if not fix_result.success:
+            message = (
+                "PR review fix agent failed: "
+                f"{fix_result.error or self._artifact_text(fix_result) or 'no result'}"
             )
-            self._update_workflow({"status": "failed", "error_message": message})
-            return False
+            return fail_fix(message, fix_result)
+
+        if not self._artifact_text(fix_result).strip():
+            return fail_fix("PR review fix agent returned no result", fix_result)
 
         # Clear user feedback after it has been injected into the prompt
         if wf.get("user_feedback", "").strip():
@@ -8131,16 +8213,22 @@ class AutonomousOrchestrator:
                 # The index is authoritative: any unmerged path has a U-stage
                 # entry regardless of stdout/stderr language.
                 has_conflict_marker = "CONFLICT" in combined_output
+                unmerged_query_error = ""
                 if not has_conflict_marker:
-                    unmerged_result = wt_gh._run_git(
-                        ["diff", "--name-only", "--diff-filter=U"], check=False
-                    )
-                    unmerged_output = getattr(unmerged_result, "stdout", "")
-                    has_conflict_marker = isinstance(unmerged_output, str) and bool(
-                        unmerged_output.strip()
-                    )
+                    try:
+                        unmerged_result = wt_gh._run_git(
+                            ["diff", "--name-only", "--diff-filter=U"], check=False
+                        )
+                        unmerged_output = getattr(unmerged_result, "stdout", "")
+                        has_conflict_marker = isinstance(unmerged_output, str) and bool(
+                            unmerged_output.strip()
+                        )
+                    except Exception as exc:
+                        unmerged_query_error = str(exc)
                 if not has_conflict_marker:
                     detail = combined_output.strip() or f"exit code {merge_result.returncode}"
+                    if unmerged_query_error:
+                        detail += f"; unable to inspect unmerged index: {unmerged_query_error}"
                     raise GitHubOpsError(f"git merge failed (non-conflict): {detail}")
 
                 # Ask AI agent to resolve conflicts inside the temp worktree.

@@ -156,23 +156,48 @@ def test_is_context_overflow_matches_provider_signatures(error, response_text, e
     assert AutonomousOrchestrator._is_context_overflow(result) is expected
 
 
-def test_stable_session_line_rotates_once_after_context_overflow():
-    """PR review/fix/summary calls keep one logical line but replace its head."""
-    wf = _make_workflow(main_session_id="main-too-large")
+@pytest.mark.parametrize("recovered_success", [True, False])
+def test_stable_session_line_rebinds_once_and_preserves_usage(recovered_success):
+    """Recovery keeps the tracking line and combines both attempts' usage."""
+    wf = _make_workflow(
+        main_session_id="main-track",
+        review_session_id="review-track",
+        test_session_id="test-track",
+    )
     orch, _ = _make_orchestrator(wf)
     orch._update_workflow = MagicMock()
     orch._accumulate_tokens = MagicMock()
+    orch._runner.session_manager = MagicMock()
+    orch._runner.session_manager.get_session.return_value = MagicMock(
+        context={"cli_session_id": "provider-too-large", "keep": "value"}
+    )
+    orch._runner.session_manager.update_session_fields.return_value = True
     overflow = AgentTaskResult(
-        session_id="main-too-large",
+        session_id="main-track",
         success=True,
         response_text="API Error: 400 Range of input length should be [1, 202752]",
+        total_tokens=11,
+        total_input_tokens=7,
+        total_output_tokens=4,
+        request_count=1,
     )
     recovered = AgentTaskResult(
-        session_id="main-replacement",
-        success=True,
-        response_text="修复完成",
+        session_id="main-track",
+        success=recovered_success,
+        response_text="修复完成" if recovered_success else "",
+        error="agent exited 1" if not recovered_success else "",
+        total_tokens=23,
+        total_input_tokens=17,
+        total_output_tokens=6,
+        request_count=2,
     )
-    orch._run_agent = MagicMock(side_effect=[overflow, recovered])
+
+    def run_agent(**kwargs):
+        result = overflow if not kwargs.get("force_fresh") else recovered
+        orch._write_phase_usage(kwargs["milestone_id"], result, kwargs.get("prior_usage"))
+        return result
+
+    orch._run_agent = MagicMock(side_effect=run_agent)
 
     result = orch._run_agent_with_context_recovery(
         wf,
@@ -183,12 +208,36 @@ def test_stable_session_line_rotates_once_after_context_overflow():
 
     assert result is recovered
     assert orch._run_agent.call_count == 2
-    assert orch._run_agent.call_args_list[0].kwargs["wf"]["main_session_id"] == "main-too-large"
-    assert orch._run_agent.call_args_list[1].kwargs["wf"]["main_session_id"] == ""
-    orch._update_workflow.assert_called_once_with(
-        {"main_session_id": "", "agent_session_id": "", "agent_pid": None}
+    assert orch._run_agent.call_args_list[0].kwargs["wf"]["main_session_id"] == "main-track"
+    retry_kwargs = orch._run_agent.call_args_list[1].kwargs
+    assert retry_kwargs["wf"]["main_session_id"] == "main-track"
+    assert retry_kwargs["force_fresh"] is True
+    assert retry_kwargs["prior_usage"] == {
+        "total_tokens": 11,
+        "total_input_tokens": 7,
+        "total_output_tokens": 4,
+        "request_count": 1,
+    }
+    orch._runner.session_manager.update_session_fields.assert_called_once_with(
+        "main-track",
+        {
+            "cli_session_id": "",
+            "context": {"keep": "value"},
+            "status": "active",
+        },
     )
+    orch._update_workflow.assert_called_once_with({"agent_session_id": "", "agent_pid": None})
     orch._accumulate_tokens.assert_called_once_with(overflow)
+    usage_update = orch.repo.update_milestone.call_args.args[1]
+    assert usage_update == {
+        "phase_total_tokens": 34,
+        "phase_input_tokens": 24,
+        "phase_output_tokens": 10,
+        "phase_request_count": 3,
+    }
+    assert wf["main_session_id"] == "main-track"
+    assert wf["review_session_id"] == "review-track"
+    assert wf["test_session_id"] == "test-track"
 
 
 def test_review_fix_double_overflow_fails_before_committing_dirty_tree():
@@ -205,7 +254,7 @@ def test_review_fix_double_overflow_fails_before_committing_dirty_tree():
     )
     orch._run_agent_with_context_recovery = MagicMock(return_value=overflow)
     gh = MagicMock()
-    gh.has_uncommitted_changes.return_value = True
+    gh.has_uncommitted_changes.return_value = False
 
     succeeded = orch._apply_pr_review_fix(
         wf,
@@ -225,6 +274,131 @@ def test_review_fix_double_overflow_fails_before_committing_dirty_tree():
     assert "context recovery" in milestone_update["error_message"]
     workflow_update = orch._update_workflow.call_args.args[0]
     assert workflow_update["status"] == "failed"
+
+
+def test_review_fix_refuses_preexisting_dirty_tree_before_agent():
+    """Pre-existing edits can never hitchhike on a recovered review fix."""
+    wf = _make_workflow(current_phase="pr_review", status="pr_review")
+    orch, mock_repo = _make_orchestrator(wf)
+    orch._create_milestone = MagicMock(return_value={"milestone_id": "ms-fix"})
+    orch._update_workflow = MagicMock()
+    orch._run_agent_with_context_recovery = MagicMock()
+    gh = MagicMock()
+    gh.has_uncommitted_changes.return_value = True
+
+    succeeded = orch._apply_pr_review_fix(
+        wf,
+        gh,
+        "B1 must be fixed",
+        round_num=1,
+        dev_round=1,
+        ci_failures=[],
+        pr_number=1849,
+    )
+
+    assert succeeded is False
+    orch._run_agent_with_context_recovery.assert_not_called()
+    gh.git_add_all.assert_not_called()
+    gh.git_commit.assert_not_called()
+    gh.git_push.assert_not_called()
+    assert (
+        "already had uncommitted changes"
+        in mock_repo.update_milestone.call_args.args[1]["error_message"]
+    )
+
+
+@pytest.mark.parametrize(
+    "result, expected_error",
+    [
+        (AgentTaskResult(success=False, error="agent process exited 1"), "agent failed"),
+        (AgentTaskResult(success=True, response_text=""), "returned no result"),
+    ],
+)
+def test_review_fix_failed_or_empty_agent_never_mutates_git(result, expected_error):
+    """All unsuccessful agent outcomes stop before salvage, push, or cap summary."""
+    wf = _make_workflow(current_phase="pr_review", status="pr_review")
+    orch, mock_repo = _make_orchestrator(wf)
+    orch._create_milestone = MagicMock(return_value={"milestone_id": "ms-fix"})
+    orch._update_workflow = MagicMock()
+    orch._accumulate_tokens = MagicMock()
+    orch._run_agent_with_context_recovery = MagicMock(return_value=result)
+    gh = MagicMock()
+    gh.has_uncommitted_changes.return_value = False
+    gh.get_current_commit.return_value = "sha-before"
+
+    succeeded = orch._apply_pr_review_fix(
+        wf,
+        gh,
+        "B1 must be fixed",
+        round_num=3,
+        dev_round=1,
+        ci_failures=[],
+        pr_number=1849,
+    )
+
+    assert succeeded is False
+    gh.git_add_all.assert_not_called()
+    gh.git_commit.assert_not_called()
+    gh.git_push.assert_not_called()
+    assert expected_error in mock_repo.update_milestone.call_args.args[1]["error_message"]
+    assert orch._update_workflow.call_args.args[0]["status"] == "failed"
+
+
+def test_failed_cap_round_fix_does_not_create_summary_or_enter_report():
+    """A failed fix on the last review round must stop the state machine."""
+    wf = _make_workflow(
+        current_phase="pr_review",
+        status="pr_review",
+        current_round=0,
+        max_pr_review_rounds=1,
+        github_pr_number=1849,
+    )
+    orch, _ = _make_orchestrator(wf)
+    milestone_types = []
+
+    def create_milestone(**fields):
+        milestone_types.append(fields.get("milestone_type"))
+        return {"milestone_id": f"ms-{fields.get('milestone_type')}"}
+
+    orch._create_milestone = MagicMock(side_effect=create_milestone)
+    orch._update_workflow = MagicMock()
+    orch._get_pr_review_diff = MagicMock(return_value="diff")
+    orch._validate_autonomous_change_scope = MagicMock(return_value="")
+    orch._poll_ci_status = MagicMock(return_value=[])
+    orch._post_github_comment = MagicMock()
+    orch._accumulate_tokens = MagicMock()
+    orch._apply_pr_review_fix = MagicMock(return_value=False)
+    orch._gh = MagicMock()
+    orch._get_gh = MagicMock(return_value=orch._gh)
+    orch._gh.get_current_branch.return_value = wf["branch_name"]
+    orch._gh.get_diff_stats.return_value = {"commits": 1}
+
+    def run_git(args, check=True):
+        if args[:1] == ["rev-parse"]:
+            return MagicMock(stdout=f"{args[1]}-sha\n", returncode=0)
+        if args[:2] == ["merge-base", "--is-ancestor"]:
+            return MagicMock(stdout="", returncode=1)
+        return MagicMock(stdout="", returncode=0)
+
+    orch._gh._run_git.side_effect = run_git
+    orch._run_agent_with_context_recovery = MagicMock(
+        return_value=AgentTaskResult(
+            session_id="review-track",
+            success=True,
+            response_text=(
+                '发现阻塞问题\nREVIEW_RESULT: {"verdict":"REQUEST_CHANGES",'
+                '"blocking_findings":["B1"]}'
+            ),
+        )
+    )
+
+    orch._do_pr_review(wf)
+
+    orch._apply_pr_review_fix.assert_called_once()
+    assert "pr_review_summary" not in milestone_types
+    assert not any(
+        call.args[0].get("status") == "reporting" for call in orch._update_workflow.call_args_list
+    )
 
 
 # ── End-to-end: _run_merge_ci_repair switches to fresh on overflow ──────

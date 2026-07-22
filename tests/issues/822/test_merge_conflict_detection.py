@@ -178,6 +178,46 @@ class TestResolveMergeConflictsStdoutConflict:
 
         o._run_agent.assert_called_once()
 
+    @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
+    def test_empty_merge_diagnostics_report_exit_code(self, mock_gh_cls):
+        """An empty localized failure still exposes an actionable exit code."""
+        o, _ = _make_orchestrator(_make_workflow())
+        mock_gh = MagicMock()
+        mock_gh_cls.return_value = mock_gh
+
+        def run_git(args, check=True):
+            if args[:2] == ["merge", "origin/main"] and not check:
+                return MagicMock(returncode=128, stdout="", stderr="")
+            if args == ["diff", "--name-only", "--diff-filter=U"]:
+                return MagicMock(returncode=0, stdout="", stderr="")
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        mock_gh._run_git.side_effect = run_git
+        import pytest
+
+        with pytest.raises(GitHubOpsError, match="exit code 128"):
+            o._resolve_merge_conflicts(mock_gh, "auto-dev/fc82f22a", 1103)
+
+    @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
+    def test_unmerged_index_query_failure_is_reported(self, mock_gh_cls):
+        """Index inspection errors must not be mistaken for real conflicts."""
+        o, _ = _make_orchestrator(_make_workflow())
+        mock_gh = MagicMock()
+        mock_gh_cls.return_value = mock_gh
+
+        def run_git(args, check=True):
+            if args[:2] == ["merge", "origin/main"] and not check:
+                return MagicMock(returncode=1, stdout="", stderr="")
+            if args == ["diff", "--name-only", "--diff-filter=U"]:
+                raise GitHubOpsError("index unavailable")
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        mock_gh._run_git.side_effect = run_git
+        import pytest
+
+        with pytest.raises(GitHubOpsError, match="index unavailable"):
+            o._resolve_merge_conflicts(mock_gh, "auto-dev/fc82f22a", 1103)
+
 
 # ── Bug 2: branch-policy rejection uses --auto ───────────────────────────
 
