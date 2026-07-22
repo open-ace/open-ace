@@ -3942,8 +3942,125 @@ class AutonomousOrchestrator:
         visible = (result.response_text or "").strip()
         return bool(re.match(r"^API Error:\s*400\b", visible, re.IGNORECASE))
 
+    def _run_agent_with_context_recovery(
+        self,
+        wf: dict,
+        *,
+        session_line: str,
+        milestone_id: str = "",
+        **kwargs,
+    ) -> AgentTaskResult:
+        """Retry one overflowing stable line without creating a fourth session.
+
+        The workflow's main/review/test tracking ids are permanent identities.
+        When a provider transcript is too large, clear only that tracking row's
+        provider mapping and run the same self-contained prompt without resume.
+        The runner then rebinds the new provider transcript to the SAME tracking
+        row. Usage from the rejected attempt is carried into the retry's final
+        milestone write; the caller accounts the returned result as usual.
+        """
+        result = self._run_agent(
+            wf=wf,
+            session_line=session_line,
+            milestone_id=milestone_id,
+            **kwargs,
+        )
+        if not self._is_context_overflow(result):
+            return result
+
+        field = SESSION_LINE_FIELDS.get(session_line)
+        if not field:
+            return result
+
+        prior_usage = {
+            "total_tokens": int(result.total_tokens or 0),
+            "total_input_tokens": int(result.total_input_tokens or 0),
+            "total_output_tokens": int(result.total_output_tokens or 0),
+            "request_count": int(result.request_count or 0),
+        }
+        # _run_agent may itself have consumed transient retries before its
+        # final attempt overflowed. Those attempts live in its local
+        # retry_usage and have already been persisted to phase_*; they are not
+        # represented by the returned final AgentTaskResult. Carry forward the
+        # milestone aggregate so the recovery write cannot erase them.
+        if milestone_id:
+            try:
+                milestone = self.repo.get_milestone(milestone_id)
+                if isinstance(milestone, dict):
+                    for usage_key, phase_key in (
+                        ("total_tokens", "phase_total_tokens"),
+                        ("total_input_tokens", "phase_input_tokens"),
+                        ("total_output_tokens", "phase_output_tokens"),
+                        ("request_count", "phase_request_count"),
+                    ):
+                        prior_usage[usage_key] = max(
+                            prior_usage[usage_key], int(milestone.get(phase_key, 0) or 0)
+                        )
+            except Exception:
+                # The final result remains a safe lower bound. A repository
+                # read outage must not make context recovery lose even that
+                # attempt's usage.
+                logger.warning(
+                    "Failed to read aggregate phase usage before context recovery",
+                    exc_info=True,
+                )
+        self._accumulate_tokens(result)
+        logger.warning(
+            "Session line %s exceeded provider context; rebinding it and retrying once",
+            session_line,
+        )
+        tracking_session_id = ((wf or {}).get(field) or "").strip()
+        if not tracking_session_id:
+            tracking_session_id = ((self.workflow or {}).get(field) or "").strip()
+        session_manager = getattr(self._runner, "session_manager", None)
+        if tracking_session_id and session_manager is not None:
+            try:
+                session_row = session_manager.get_session(tracking_session_id) or {}
+                context = getattr(session_row, "context", None)
+                if not isinstance(context, dict):
+                    context = (
+                        session_row.get("context", {}) if isinstance(session_row, dict) else {}
+                    )
+                context = dict(context or {})
+                context.pop("cli_session_id", None)
+                if not session_manager.update_session_fields(
+                    tracking_session_id,
+                    {
+                        "cli_session_id": "",
+                        "context": context,
+                        "status": "active",
+                    },
+                ):
+                    raise RuntimeError("tracking session row was not updated")
+            except Exception as exc:
+                logger.error(
+                    "Failed to clear provider context for session line %s",
+                    session_line,
+                    exc_info=True,
+                )
+                result.success = False
+                result.error = f"Context recovery could not rebind {session_line} session: {exc}"
+                return result
+
+        self._update_workflow({"agent_session_id": "", "agent_pid": None})
+        return self._run_agent(
+            wf=wf,
+            session_line=session_line,
+            milestone_id=milestone_id,
+            force_fresh=True,
+            prior_usage=prior_usage,
+            **kwargs,
+        )
+
     def _run_agent(
-        self, wf: dict = None, *, session_line: str = "fresh", milestone_id: str = "", **kwargs
+        self,
+        wf: dict = None,
+        *,
+        session_line: str = "fresh",
+        milestone_id: str = "",
+        force_fresh: bool = False,
+        prior_usage: dict[str, int] | None = None,
+        **kwargs,
     ) -> AgentTaskResult:
         """Run an agent task with session-line tracking and transient-API-error retry.
 
@@ -3954,25 +4071,40 @@ class AutonomousOrchestrator:
                 "review", "test" (resumed across milestones via --resume), or
                 "fresh" (a brand-new one-off session).
             milestone_id: Milestone to attribute this call's phase usage to.
+            force_fresh: Start a new provider transcript while retaining a
+                named line's stable tracking id.
+            prior_usage: Usage from a preceding attempt that belongs to the
+                same milestone and must be included in the final phase totals.
         """
         workflow_data = wf or self.workflow
         field = SESSION_LINE_FIELDS.get(session_line)
 
         # Resolve the session line: resume an established session or start new.
-        session_id, resume_session_id, resume = self._resolve_session_line(
-            workflow_data, session_line
-        )
+        # Context recovery forces a fresh provider transcript while retaining
+        # the named line's stable tracking id.
+        if force_fresh and field:
+            session_id = ((workflow_data or {}).get(field) or "").strip()
+            if not session_id:
+                session_id = ((self.workflow or {}).get(field) or "").strip()
+            session_id = session_id or str(uuid.uuid4())
+            resume_session_id = None
+            resume = False
+        else:
+            session_id, resume_session_id, resume = self._resolve_session_line(
+                workflow_data, session_line
+            )
         kwargs["session_id"] = session_id
         kwargs["resume"] = resume
         kwargs["resume_session_id"] = resume_session_id
         if milestone_id:
             kwargs["milestone_id"] = milestone_id
         tracking_session_id = session_id
+        prior_usage = prior_usage or {}
         retry_usage = {
-            "total_tokens": 0,
-            "total_input_tokens": 0,
-            "total_output_tokens": 0,
-            "request_count": 0,
+            "total_tokens": int(prior_usage.get("total_tokens", 0) or 0),
+            "total_input_tokens": int(prior_usage.get("total_input_tokens", 0) or 0),
+            "total_output_tokens": int(prior_usage.get("total_output_tokens", 0) or 0),
+            "request_count": int(prior_usage.get("request_count", 0) or 0),
         }
         usage_session_ids = {tracking_session_id}
         if self._is_shutdown_requested():
@@ -7179,7 +7311,7 @@ class AutonomousOrchestrator:
                 "如果是预先存在的问题，在审查结论中明确说明。"
             )
 
-        review_result = self._run_agent(
+        review_result = self._run_agent_with_context_recovery(
             wf=wf,
             workflow_id=self._workflow_id,
             cli_tool=review_tool,
@@ -7201,7 +7333,36 @@ class AutonomousOrchestrator:
         ):
             return
 
+        if not review_result.success or self._is_context_overflow(review_result):
+            message = (
+                "PR review agent failed: "
+                f"{review_result.error or self._artifact_text(review_result) or 'no result'}"
+            )
+            self.repo.update_milestone(
+                review_ms.get("milestone_id", ""),
+                {
+                    "status": "failed",
+                    "review_session_id": review_result.session_id,
+                    "error_message": message,
+                },
+            )
+            self._update_workflow({"status": "failed", "error_message": message})
+            return
+
         review_text = self._artifact_text(review_result)
+        if not review_text.strip():
+            message = "PR review agent returned no result"
+            self.repo.update_milestone(
+                review_ms.get("milestone_id", ""),
+                {
+                    "status": "failed",
+                    "review_content": "",
+                    "review_session_id": review_result.session_id,
+                    "error_message": message,
+                },
+            )
+            self._update_workflow({"status": "failed", "error_message": message})
+            return
         # Detect approval using the language-aware marker, then persist a
         # structured verdict so progress_reported doesn't re-scan review text.
         # The legacy zh marker is accepted too, for workflows whose content
@@ -7244,9 +7405,15 @@ class AutonomousOrchestrator:
         # the cap ends the loop. There is never an (N+1)-th review.
         at_cap = round_num >= max_rounds
         if not review_passed:
-            self._apply_pr_review_fix(
+            fix_succeeded = self._apply_pr_review_fix(
                 wf, gh, review_text, round_num, dev_round, ci_failures, pr_number
             )
+            if not fix_succeeded:
+                return
+            # Context recovery may have rotated the main session line during
+            # the fix. The cap-round summary runs in this same scheduler call,
+            # so refresh before it resumes main again.
+            wf = self.workflow
 
         if (review_passed and not force_full_rounds) or at_cap:
             # All PR review rounds completed — summarize via the main session,
@@ -7296,7 +7463,7 @@ class AutonomousOrchestrator:
                 "如果审查意见已全部落实、无遗留问题，请明确说明'可以合并'。"
                 "直接输出总结，不要添加引导文字。"
             )
-            summary_result = self._run_agent(
+            summary_result = self._run_agent_with_context_recovery(
                 wf=wf,
                 workflow_id=self._workflow_id,
                 cli_tool=wf.get("cli_tool", "claude-code"),
@@ -7317,7 +7484,34 @@ class AutonomousOrchestrator:
                 summary_result, summary_ms.get("milestone_id", "")
             ):
                 return
+            if not summary_result.success or self._is_context_overflow(summary_result):
+                message = (
+                    "PR review summary agent failed: "
+                    f"{summary_result.error or self._artifact_text(summary_result) or 'no result'}"
+                )
+                self.repo.update_milestone(
+                    summary_ms.get("milestone_id", ""),
+                    {
+                        "status": "failed",
+                        "review_content": "",
+                        "error_message": message,
+                    },
+                )
+                self._update_workflow({"status": "failed", "error_message": message})
+                return
             summary_text = self._artifact_text(summary_result)
+            if not summary_text.strip():
+                message = "PR review summary agent returned no result"
+                self.repo.update_milestone(
+                    summary_ms.get("milestone_id", ""),
+                    {
+                        "status": "failed",
+                        "review_content": "",
+                        "error_message": message,
+                    },
+                )
+                self._update_workflow({"status": "failed", "error_message": message})
+                return
             self.repo.update_milestone(
                 summary_ms.get("milestone_id", ""),
                 {
@@ -7375,7 +7569,7 @@ class AutonomousOrchestrator:
         dev_round: int,
         ci_failures: list,
         pr_number,
-    ) -> None:
+    ) -> bool:
         """Apply one round of code-review fixes (pr_updated milestone).
 
         Runs for every non-passing review — including the cap round — so the
@@ -7389,6 +7583,22 @@ class AutonomousOrchestrator:
             status="in_progress",
             title=f"PR fixes round {round_num}",
         )
+
+        def fail_fix(message: str, result: AgentTaskResult | None = None) -> bool:
+            """Fail closed before the orchestrator stages or pushes anything."""
+            self.repo.update_milestone(
+                fix_ms.get("milestone_id", ""),
+                {
+                    "status": "failed",
+                    "session_id": result.session_id if result else "",
+                    "error_message": message,
+                    "result_summary": (
+                        self._artifact_text(result)[:200] if result is not None else ""
+                    ),
+                },
+            )
+            self._update_workflow({"status": "failed", "error_message": message})
+            return False
 
         fix_prompt = (
             AUTONOMOUS_CONTEXT
@@ -7421,13 +7631,25 @@ class AutonomousOrchestrator:
                 "如果确认是预先存在的问题，在回复末尾单独一行输出 `CI_STATUS: pre-existing`。"
             )
 
+        # A review-fix call can only attribute and auto-stage changes safely
+        # when it starts from a clean tree. Never let an unrelated test/manual
+        # edit hitchhike on a successful recovery or a no-op agent response.
+        try:
+            dirty_before = gh.has_uncommitted_changes()
+        except Exception as exc:
+            return fail_fix(f"Unable to verify clean worktree before PR review fix: {exc}")
+        if dirty_before is True:
+            return fail_fix(
+                "PR review fix refused: worktree already had uncommitted changes before agent run"
+            )
+
         commit_before = ""
         try:
             commit_before = gh.get_current_commit()
-        except Exception:
-            pass
+        except Exception as exc:
+            return fail_fix(f"Unable to capture branch HEAD before PR review fix: {exc}")
 
-        fix_result = self._run_agent(
+        fix_result = self._run_agent_with_context_recovery(
             wf=wf,
             workflow_id=self._workflow_id,
             cli_tool=wf.get("cli_tool", "claude-code"),
@@ -7445,7 +7667,24 @@ class AutonomousOrchestrator:
         self._accumulate_tokens(fix_result)
 
         if self._abort_on_repo_integrity_violation(fix_result, fix_ms.get("milestone_id", "")):
-            return
+            return False
+
+        if self._is_context_overflow(fix_result):
+            message = (
+                "PR review fix failed after context recovery: "
+                f"{fix_result.error or self._artifact_text(fix_result) or 'no result'}"
+            )
+            return fail_fix(message, fix_result)
+
+        if not fix_result.success:
+            message = (
+                "PR review fix agent failed: "
+                f"{fix_result.error or self._artifact_text(fix_result) or 'no result'}"
+            )
+            return fail_fix(message, fix_result)
+
+        if not self._artifact_text(fix_result).strip():
+            return fail_fix("PR review fix agent returned no result", fix_result)
 
         # Clear user feedback after it has been injected into the prompt
         if wf.get("user_feedback", "").strip():
@@ -7458,8 +7697,8 @@ class AutonomousOrchestrator:
         diff_stats = {}
         try:
             commit_sha = gh.get_current_commit()
-        except Exception:
-            pass
+        except Exception as exc:
+            return fail_fix(f"Unable to inspect branch HEAD after PR review fix: {exc}", fix_result)
         sha_changed = commit_before and commit_sha and commit_before != commit_sha
         if not sha_changed:
             try:
@@ -7470,9 +7709,12 @@ class AutonomousOrchestrator:
                         no_verify=True,
                     )
                     commit_sha = gh.get_current_commit()
+                    if not commit_sha or commit_sha == commit_before:
+                        raise RuntimeError("review-fix commit did not advance branch HEAD")
                     sha_changed = True
             except Exception as e:
                 logger.warning("Fix auto-commit failed: %s", e)
+                return fail_fix(f"Unable to commit PR review fix: {e}", fix_result)
 
         # Track push failure to decide milestone status and avoid misleading comment
         push_failed = False
@@ -7532,7 +7774,7 @@ class AutonomousOrchestrator:
                     "error_message": f"Review fix was not pushed: {push_error_msg}",
                 }
             )
-            return
+            return False
         else:
             self.repo.update_milestone(
                 fix_ms.get("milestone_id", ""),
@@ -7565,6 +7807,7 @@ class AutonomousOrchestrator:
             ):
                 comment += "\n> ⚠️ 部分 CI 检查失败，但经分析为预先存在的问题，非本 PR 引入。\n"
             self._post_github_comment(gh, pr_number, comment, is_pr=True, context="fix")
+        return True
 
     # ── Phase: Report ───────────────────────────────────────────────
 
@@ -8020,10 +8263,27 @@ class AutonomousOrchestrator:
             # failure, abandoning merge without ever invoking the AI resolver.
             combined_output = f"{merge_result.stdout}\n{merge_result.stderr}"
             if merge_result.returncode != 0:
-                if "CONFLICT" not in combined_output:
-                    raise GitHubOpsError(
-                        f"git merge failed (non-conflict): {merge_result.stderr.strip()}"
-                    )
+                # Locale-dependent git builds may print "CONFLICT" translated.
+                # The index is authoritative: any unmerged path has a U-stage
+                # entry regardless of stdout/stderr language.
+                has_conflict_marker = "CONFLICT" in combined_output
+                unmerged_query_error = ""
+                if not has_conflict_marker:
+                    try:
+                        unmerged_result = wt_gh._run_git(
+                            ["diff", "--name-only", "--diff-filter=U"], check=False
+                        )
+                        unmerged_output = getattr(unmerged_result, "stdout", "")
+                        has_conflict_marker = isinstance(unmerged_output, str) and bool(
+                            unmerged_output.strip()
+                        )
+                    except Exception as exc:
+                        unmerged_query_error = str(exc)
+                if not has_conflict_marker:
+                    detail = combined_output.strip() or f"exit code {merge_result.returncode}"
+                    if unmerged_query_error:
+                        detail += f"; unable to inspect unmerged index: {unmerged_query_error}"
+                    raise GitHubOpsError(f"git merge failed (non-conflict): {detail}")
 
                 # Ask AI agent to resolve conflicts inside the temp worktree.
                 conflict_prompt = (
