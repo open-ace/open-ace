@@ -395,7 +395,7 @@ export const LocalDirectoryBrowser: React.FC<LocalDirectoryBrowserProps> = ({
     // If the user uploaded while in search mode, they expect to see the
     // uploaded file in the normal listing. Clearing the search state
     // restores the regular directory view so the new file is visible.
-    setSearchQuery("");
+    setSearchQuery('');
     setSearchResults(null);
     setSearchTruncated(false);
 
