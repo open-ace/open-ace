@@ -2063,6 +2063,15 @@ configure_sudoers() {
     local sudoers_file="/etc/sudoers.d/open-ace-webui"
 
     # Build fetch script rules (check all 5 scripts)
+    # 【修复 Issue #1977】支持 Python 3.10+ 类型注解语法
+    # 使用安装的 Python 版本，而非系统 /usr/bin/python3（可能是 3.9）
+    local python_bin="${install_dir}/agent_bin/python3"
+    if [ ! -x "$python_bin" ]; then
+        python_bin="/usr/local/bin/python3.12"
+    fi
+    if [ ! -x "$python_bin" ]; then
+        python_bin="/usr/bin/python3"
+    fi
     local fetch_scripts=("fetch_qwen.py" "fetch_claude.py" "fetch_openclaw.py" "fetch_codex.py" "fetch_zcode.py")
     local fetch_rules=""
     for script in "${fetch_scripts[@]}"; do
@@ -2070,7 +2079,7 @@ configure_sudoers() {
         if [ -f "$script_path" ]; then
             fetch_rules="${fetch_rules}
 # Allow $run_user to run $script as root for multi-user data collection
-$run_user ALL=(root) NOPASSWD: /usr/bin/python3 $script_path *"
+$run_user ALL=(root) NOPASSWD: $python_bin $script_path *"
         fi
     done
 
