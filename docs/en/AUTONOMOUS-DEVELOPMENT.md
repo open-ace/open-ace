@@ -227,9 +227,20 @@ Base synchronization, worktree restoration, and waiting for CI logs do not consu
 
 The repair prompt requires inspecting `.github/workflows/`, `package.json`, `Makefile`, `tox.ini`, `pytest.ini`, and `scripts/`, then reproducing the exact CI command instead of running only a small test subset the Agent assumes is relevant.
 
-### 9.3 Merge conflicts
+### 9.3 Merge readiness and real conflicts
 
-Conflicts are resolved in a temporary isolated worktree bound to the current PR branch. The result still passes scope validation so unrelated changes from `main` or another checkout cannot leak into the PR.
+`gh pr merge` uses a non-zero exit for real Git conflicts, incomplete required checks, required branch updates, review rules, and other repository rules. The orchestrator must not send every merge rejection to the conflict-resolution Agent. Doing so mislabels branch protection as a conflict and can produce a false “no new commit” failure after the base was already synchronized.
+
+The current decision order is:
+
+1. Before the final merge, use the controlled path to detect and synchronize a PR branch that is behind `main`. The push starts fresh CI, so the current cycle returns without consuming a CI repair attempt.
+2. If the merge call is rejected, refresh both checks and GitHub REST `mergeable` / `mergeable_state` instead of relying on pre-call state.
+3. Route newly failed checks to CI repair and keep waiting for newly pending checks.
+4. Treat `blocked`, `behind`, `unstable`, `has_hooks`, `draft`, and explicit repository-rule, required-check, or branch-protection errors as policy waits. They do not launch a conflict Agent.
+5. Enter conflict resolution only for `mergeable_state=dirty`, an explicit conflict error, or `mergeable=false` without a more specific state.
+6. Preserve unknown permission, API, or infrastructure errors instead of rewriting them as “Merge conflict resolution failed.”
+
+Real conflict resolution runs in a temporary isolated worktree bound to the current PR branch. Its output still passes scope validation so unrelated changes from `main` or another worktree cannot leak into the PR. After the result is pushed, the workflow waits for fresh CI before normal merge processing resumes.
 
 ## 10. Error classification and recovery
 
@@ -408,6 +419,8 @@ Do not test only the helper that exposed the current failure. Cover the complete
 ### 17.2 CI repair
 
 - PR branch behind `main`.
+- Branch protection returning `repository rule violations`, including pending checks and `blocked`, `behind`, `unstable`, `has_hooks`, and `draft` states.
+- A real `mergeable_state=dirty` conflict, plus unknown permission/API failures that must not be mislabeled as conflicts.
 - Remote head different from local head.
 - Valid unpushed local commit.
 - Worktree temporarily removed by conflict resolution.
@@ -468,6 +481,7 @@ Then run `tests/autonomous/`, relevant issue regressions, and the repository's f
 | Bailian throttle stops automation | Whether `allocated quota exceeded` was misclassified as hard quota |
 | CI repair attempts disappear immediately | Whether attempt count increased before logs, worktree restoration, or base sync |
 | Repair says no changes | Whether the baseline incorrectly used local HEAD instead of remote PR head |
+| Branch protection launches conflict resolution | Whether checks and REST merge state are refreshed after rejection; policy states must wait, and only `dirty`/explicit conflicts enter the resolver |
 | `.git` integrity failure | Inspect registry, ACL, worktree pointer, inode, and interruption logs; do not delete registry blindly |
 | Manual pause auto-resumes | Check whether its reason incorrectly uses the application-quota prefix |
 | Fullscreen modal cannot scroll | Check `min-height: 0` and inner `overflow: auto` on modal body/content |
@@ -477,5 +491,6 @@ Then run `tests/autonomous/`, relevant issue regressions, and the repository's f
 - Live AI Activity depends on in-process SSE and is not a complete cross-restart log. Milestones and sessions are the durable audit record.
 - In-memory workspace/branch sets provide fast scheduler exclusion; multi-instance correctness also relies on database locks and Git constraints.
 - Automatic CI repair has a strict attempt cap and never loops indefinitely.
+- Repository-policy waits do not consume CI repair attempts, but a user may still need to approve, mark the PR ready, or change repository rules.
 - Provider error wording can change. New adapters must constrain matching to zero-token envelopes and structured runner results.
 - Isolated execution depends on Linux ACLs and controlled sudoers. It must not degrade to running as the project owner when those requirements are unavailable.
