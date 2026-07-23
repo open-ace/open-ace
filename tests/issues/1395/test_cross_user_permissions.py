@@ -20,7 +20,14 @@ Covers the four fixes:
      cross-user.
 """
 
+import os
+import shutil
+import signal
+import subprocess
+import time
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from app.modules.workspace.autonomous.github_ops import GitHubOps
 
@@ -438,9 +445,94 @@ def test_isolated_wrapper_can_handle_signals_while_waiting_for_agent():
     assert "trap 'exit 129' HUP" in wrapper
     assert "trap 'exit 130' INT" in wrapper
     assert "trap 'exit 143' TERM" in wrapper
-    assert '"GIT_CONFIG_VALUE_0=$project_dir" "$@" <&0 &' in wrapper
+    assert '"GIT_CONFIG_VALUE_0=$project_dir" "$@" <&0 9>&- &' in wrapper
     assert "agent_child_pid=$!" in wrapper
     assert 'wait "$agent_child_pid"' in wrapper
+
+
+def test_background_child_does_not_inherit_acl_lock(tmp_path):
+    """A SIGKILLed wrapper must not strand fd 9 in its live child."""
+    if not shutil.which("flock"):
+        pytest.skip("flock is required for the launcher lock regression")
+
+    lock_path = tmp_path / "agent.lock"
+    child_pid_path = tmp_path / "child.pid"
+    wrapper = subprocess.Popen(
+        [
+            "bash",
+            "-c",
+            (
+                'exec 9>"$1"; flock -x 9; '
+                'sleep 30 9>&- & child=$!; printf "%s" "$child" > "$2"; wait "$child"'
+            ),
+            "openace-lock-test",
+            str(lock_path),
+            str(child_pid_path),
+        ]
+    )
+    child_pid = 0
+    try:
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            if child_pid_path.exists() and child_pid_path.read_text().strip():
+                child_pid = int(child_pid_path.read_text().strip())
+                break
+            time.sleep(0.05)
+        assert child_pid > 0
+
+        wrapper.kill()
+        wrapper.wait(timeout=5)
+        acquired = subprocess.run(
+            ["flock", "-w", "1", str(lock_path), "true"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert acquired.returncode == 0
+    finally:
+        if wrapper.poll() is None:
+            wrapper.kill()
+            wrapper.wait(timeout=5)
+        if child_pid:
+            try:
+                os.kill(child_pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+
+def test_isolated_wrapper_normalizes_recovered_acls_before_git_baseline():
+    """Launcher-owned ACL recovery must not look like agent .git tampering.
+
+    The prior baseline remains durable across interruption, is checked only
+    after abandoned ACLs are revoked, and the current run snapshots the
+    normalized entry before granting new ACLs.
+    """
+    from pathlib import Path
+
+    wrapper = Path("scripts/openace-run-as.sh").read_text(encoding="utf-8")
+
+    signature_registry = 'signature_registry="/run/openace-agent-git-signature-${target_uid}"'
+    recovery = 'recovered_git_signature="$(git_entry_signature "$previous_signature_project")"'
+    current_baseline = 'git_entry_before="$(git_entry_signature "$project_dir")"'
+    first_acl_grant = 'setfacl -m "u:${target_user}:x" "$parent"'
+    final_signature = 'git_entry_after="$(git_entry_signature "$project_dir")"'
+
+    assert signature_registry in wrapper
+    assert wrapper.index("cleanup_isolated\n") < wrapper.index(recovery)
+    assert wrapper.index(recovery) < wrapper.index(current_baseline)
+    assert wrapper.index(current_baseline) < wrapper.index(first_acl_grant)
+    assert wrapper.index(
+        'printf \'%s\\n%s\\n\' "$project_dir" "$git_entry_before" > "$signature_tmp"'
+    ) < wrapper.index(first_acl_grant)
+    assert wrapper.index("cleanup_isolated\n", wrapper.index('wait "$agent_child_pid"')) < (
+        wrapper.index(final_signature)
+    )
+    final_comparison = wrapper.index(
+        'if [ "$git_entry_before" != "$git_entry_after" ]',
+        wrapper.index(final_signature),
+    )
+    assert wrapper.index(final_signature) < final_comparison
+    assert final_comparison < wrapper.index('rm -f "$signature_registry"', final_comparison)
 
 
 def test_background_wait_keeps_runner_stdin_until_eof():
