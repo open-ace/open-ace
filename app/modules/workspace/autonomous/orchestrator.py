@@ -837,6 +837,15 @@ _TRANSIENT_ORCHESTRATOR_KEYWORDS = [
     "unable to access",
     "rpc failed",
     "early eof",
+    # --force-with-lease rejects the push when the remote auto-dev tip moved
+    # between git's read of the remote-tracking ref and the actual push (a
+    # concurrent push, or a freshly-fetched ref). The worktree is unchanged, so
+    # a Layer-2 retry that re-reads the remote ref succeeds; treating it as
+    # non-transient strands the workflow on a recoverable race.
+    "stale info",
+    "fetch first",
+    "non-fast-forward",
+    "[rejected]",
 ]
 
 
