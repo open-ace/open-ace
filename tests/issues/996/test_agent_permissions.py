@@ -7,12 +7,13 @@ Verifies:
     didn't commit, so review fixes actually reach the PR.
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 from app.modules.workspace.autonomous.models import AgentTaskResult
 from app.modules.workspace.autonomous.orchestrator import (
     AUTONOMOUS_DEV_ALLOWED_TOOLS,
     PLANNING_ALLOWED_TOOLS,
+    REVIEW_ALLOWED_TOOLS,
     AutonomousOrchestrator,
 )
 
@@ -56,6 +57,7 @@ def _make_agent_result(text="done\nTL;DR: fixed the bug"):
 
 def _make_gh(commit_sha="abc1234", uncommitted=True):
     gh = MagicMock()
+    gh.get_current_branch.return_value = "feature-x"
     gh.get_diff_stats.return_value = {"commits": 1, "additions": 5, "deletions": 1, "files": 1}
     gh.get_commit_diff_stats.return_value = {
         "commits": 1,
@@ -91,6 +93,7 @@ def _make_orchestrator(wf):
     orch._poll_ci_status = MagicMock(return_value=[])
     orch._smart_truncate_diff = MagicMock(return_value="DIFF_TEXT")
     orch._clean_agent_text = MagicMock(side_effect=lambda x: x or "")
+    orch._validate_autonomous_change_scope = MagicMock(return_value="")
     orch._create_milestone = MagicMock(return_value={"milestone_id": "ms-x"})
     orch._update_workflow = MagicMock()
     orch._accumulate_tokens = MagicMock()
@@ -116,6 +119,14 @@ class TestAllowedToolSets:
         assert "Write" not in tools
         assert "Edit" not in tools
 
+    def test_review_set_is_read_only_and_cannot_delegate(self):
+        tools = REVIEW_ALLOWED_TOOLS["claude-code"]
+        assert "Bash" not in tools
+        assert "Write" not in tools
+        assert "Edit" not in tools
+        assert "Agent" not in tools
+        assert "Read" in tools and "Grep" in tools
+
 
 # ── fix phase: passes Bash + salvages uncommitted changes ────────────────
 
@@ -130,11 +141,32 @@ class TestFixPhasePermissionsAndFallback:
 
         orch._do_pr_review(wf)
 
-        # every _run_agent call in the fix branch carries the dev tool set
-        for call in orch._run_agent.call_args_list:
-            allowed = call.kwargs.get("allowed_tools")
-            assert allowed is not None, "fix/review _run_agent must pass allowed_tools"
-            assert "Bash" in allowed
+        review_call, fix_call = orch._run_agent.call_args_list[:2]
+        review_allowed = review_call.kwargs.get("allowed_tools")
+        assert review_allowed == REVIEW_ALLOWED_TOOLS["claude-code"]
+        assert "Bash" not in review_allowed
+
+        fix_allowed = fix_call.kwargs.get("allowed_tools")
+        assert fix_allowed == AUTONOMOUS_DEV_ALLOWED_TOOLS["claude-code"]
+        assert "Bash" in fix_allowed
+
+    def test_openclaw_review_fails_closed_without_running_agent(self):
+        wf = _make_workflow(cli_tool="openclaw")
+        orch = _make_orchestrator(wf)
+        orch._get_gh.return_value = _make_gh()
+        orch.repo.list_milestones.return_value = []
+        orch._run_agent = MagicMock()
+
+        orch._do_pr_review(wf)
+
+        orch._run_agent.assert_not_called()
+        failed_updates = [
+            call.args[0]
+            for call in orch._update_workflow.call_args_list
+            if call.args and call.args[0].get("status") == "failed"
+        ]
+        assert failed_updates
+        assert "read-only sandbox" in failed_updates[-1]["error_message"]
 
     def test_fix_salvages_uncommitted_when_agent_did_not_commit(self):
         wf = _make_workflow()
@@ -152,7 +184,8 @@ class TestFixPhasePermissionsAndFallback:
         gh.git_add_all.assert_called_once()
         gh.git_commit.assert_called_once()
         assert gh.git_commit.call_args.kwargs.get("no_verify") is True
-        gh.git_push.assert_called()  # pushed after salvage
+        expected_push = call(branch=wf["branch_name"], force_with_lease=True)
+        gh.git_push.assert_has_calls([expected_push, expected_push])
 
     def test_fix_no_salvage_when_no_uncommitted_changes(self):
         wf = _make_workflow()

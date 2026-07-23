@@ -132,7 +132,7 @@ def get_effective_system_account(system_account: str | None) -> str | None:
 def run_as_user(system_account: str, command: list) -> subprocess.CompletedProcess:
     """Run a command as a specific user using sudo."""
     sudo_cmd = ["sudo", "-u", system_account] + command
-    return subprocess.run(sudo_cmd, capture_output=True, text=True, timeout=30)
+    return subprocess.run(sudo_cmd, capture_output=True, text=True, timeout=30, cwd="/tmp")
 
 
 @projects_bp.route("/projects", methods=["GET"])

@@ -354,3 +354,29 @@ class TestTransientKeywordsCoverage:
 
         e = GitHubOpsError("git push failed: early EOF")
         assert _is_transient_git_error(e) is True
+
+    def test_force_with_lease_stale_info_is_transient(self):
+        """--force-with-lease stale-info rejection is a recoverable race."""
+        from app.modules.workspace.autonomous.orchestrator import _is_transient_git_error
+
+        e = GitHubOpsError(
+            "git push origin auto-dev/3c5aefb9 --force-with-lease failed (exit 1): "
+            "To https://github.com/open-ace/open-ace "
+            "! [rejected] auto-dev/3c5aefb9 -> auto-dev/3c5aefb9 (stale info) "
+            "错误：无法推送一些引用"
+        )
+        assert _is_transient_git_error(e) is True
+
+    def test_fetch_first_is_transient(self):
+        """git 'fetch first' rejection is transient."""
+        from app.modules.workspace.autonomous.orchestrator import _is_transient_git_error
+
+        e = GitHubOpsError("git push failed: ! [rejected] main -> main (fetch first)")
+        assert _is_transient_git_error(e) is True
+
+    def test_non_fast_forward_is_transient(self):
+        """non-fast-forward rejection is transient."""
+        from app.modules.workspace.autonomous.orchestrator import _is_transient_git_error
+
+        e = GitHubOpsError("git push failed: ! [rejected] (non-fast-forward)")
+        assert _is_transient_git_error(e) is True

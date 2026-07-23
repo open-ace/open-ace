@@ -51,6 +51,27 @@ def _make_orchestrator(wf):
     o.emitter = MagicMock()
     # Stub _run_agent's collaborators so we test IT, not its dependencies.
     o._resolve_session_line = MagicMock(return_value=("sess-track", None, False))
+    o._snapshot_repo_context = MagicMock(
+        return_value={
+            "context": {
+                "repo_path": wf["worktree_path"],
+                "project_path": wf["project_path"],
+                "strategy": "worktree",
+                "expected_branch": "auto-dev/test",
+            },
+            "effective": {
+                "repo_path": wf["worktree_path"],
+                "top_level": wf["worktree_path"],
+                "git_dir": f"{wf['worktree_path']}/.git",
+                "git_identity": "1:1",
+                "common_dir": f"{wf['worktree_path']}/.git",
+                "common_identity": "1:1",
+                "origin": "git@github.com:open-ace/open-ace.git",
+            },
+        }
+    )
+    o._validate_repo_context_after_run = MagicMock(return_value="")
+    o._get_gh = MagicMock()
     o._link_session_to_current_milestone = MagicMock()
     o._write_phase_usage = MagicMock()
     o._update_workflow = MagicMock()
@@ -107,6 +128,174 @@ class TestIsTransientApiError:
 
 
 class TestRunAgentApiErrorRetry:
+    def test_shutdown_before_dispatch_does_not_launch_agent(self):
+        o = _make_orchestrator(_make_workflow())
+        o._shutdown_requested.set()
+
+        with pytest.raises(orch_module.WorkflowPaused, match="Service shutdown"):
+            o._run_agent(wf=_make_workflow(), milestone_id="ms-shutdown", prompt="x")
+
+        o._runner.run_agent_task.assert_not_called()
+        o.repo.update_milestone.assert_called_with(
+            "ms-shutdown",
+            {
+                "status": "cancelled",
+                "error_message": (
+                    "Service shutdown interrupted this attempt; it will retry automatically"
+                ),
+            },
+        )
+        o.repo.refresh_workflow_usage_from_sessions.assert_called_once_with("test-wf-1001")
+
+    def test_shutdown_milestone_write_failure_still_unwinds_as_pause(self):
+        o = _make_orchestrator(_make_workflow())
+        o._shutdown_requested.set()
+        o.repo.update_milestone.side_effect = RuntimeError("database is closing")
+
+        with pytest.raises(orch_module.WorkflowPaused, match="Service shutdown"):
+            o._run_agent(wf=_make_workflow(), milestone_id="ms-shutdown", prompt="x")
+
+        o._runner.run_agent_task.assert_not_called()
+        o._update_workflow.assert_not_called()
+
+    def test_shutdown_interrupts_ci_poll_wait(self):
+        o = _make_orchestrator(_make_workflow())
+        o._shutdown_requested.wait = MagicMock(return_value=True)
+        gh = MagicMock()
+        gh.get_pr_checks.return_value = [{"name": "lint", "bucket": "pending"}]
+
+        with pytest.raises(orch_module.WorkflowPaused, match="CI polling"):
+            o._poll_ci_status(gh, 1966)
+
+        gh.get_pr_checks.assert_called_once_with(1966)
+        o._shutdown_requested.wait.assert_called_once_with(orch_module.CI_POLL_INTERVAL)
+
+    def test_shutdown_cancels_attempt_without_returning_failure(self):
+        o = _make_orchestrator(_make_workflow())
+        result = AgentTaskResult(
+            session_id="sess-track",
+            tracking_session_id="sess-track",
+            response_text="partial result",
+            total_tokens=500,
+            success=False,
+            error="stopped",
+        )
+
+        def stop_during_run(**_kwargs):
+            o._shutdown_requested.set()
+            return result
+
+        o._runner.run_agent_task = MagicMock(side_effect=stop_during_run)
+
+        with pytest.raises(orch_module.WorkflowPaused, match="Service shutdown"):
+            o._run_agent(wf=_make_workflow(), milestone_id="ms-shutdown", prompt="x")
+
+        o.repo.update_milestone.assert_called_with(
+            "ms-shutdown",
+            {
+                "status": "cancelled",
+                "error_message": (
+                    "Service shutdown interrupted this attempt; it will retry automatically"
+                ),
+            },
+        )
+        o._write_phase_usage.assert_called_once()
+        assert o._current_session_id == "sess-track"
+
+    def test_shutdown_never_downgrades_repo_integrity_violation(self):
+        o = _make_orchestrator(_make_workflow())
+        violation = AgentTaskResult(
+            session_id="sess-track",
+            tracking_session_id="sess-track",
+            success=False,
+            error_code="repo_integrity_violation",
+            error="protected .git entry changed",
+            total_tokens=75,
+        )
+
+        def stop_with_violation(**_kwargs):
+            o._shutdown_requested.set()
+            return violation
+
+        o._runner.run_agent_task = MagicMock(side_effect=stop_with_violation)
+
+        with pytest.raises(orch_module.WorkflowPaused, match="integrity violation"):
+            o._run_agent(wf=_make_workflow(), milestone_id="ms-shutdown", prompt="x")
+
+        o.repo.update_milestone.assert_called_with(
+            "ms-shutdown",
+            {
+                "status": "failed",
+                "session_id": "sess-track",
+                "error_message": "protected .git entry changed",
+            },
+        )
+        o._update_workflow.assert_called_with(
+            {"status": "failed", "error_message": "protected .git entry changed"}
+        )
+        o._write_phase_usage.assert_called_once()
+
+    def test_shutdown_racing_with_post_run_validation_fails_closed(self):
+        o = _make_orchestrator(_make_workflow())
+        o._runner.run_agent_task = MagicMock(
+            return_value=AgentTaskResult(
+                session_id="sess-track",
+                tracking_session_id="sess-track",
+                success=True,
+                total_tokens=90,
+            )
+        )
+
+        def detect_violation_as_shutdown_arrives(*_args):
+            o._shutdown_requested.set()
+            return "protected Git metadata changed"
+
+        o._validate_repo_context_after_run.side_effect = detect_violation_as_shutdown_arrives
+
+        with pytest.raises(orch_module.WorkflowPaused, match="integrity violation"):
+            o._run_agent(wf=_make_workflow(), milestone_id="ms-shutdown", prompt="x")
+
+        o.repo.update_milestone.assert_called_with(
+            "ms-shutdown",
+            {
+                "status": "failed",
+                "session_id": "sess-track",
+                "error_message": "protected Git metadata changed",
+            },
+        )
+        o._update_workflow.assert_called_with(
+            {"status": "failed", "error_message": "protected Git metadata changed"}
+        )
+        o._write_phase_usage.assert_called_once()
+
+    def test_shutdown_racing_with_retry_cancel_clear_never_dispatches(self, monkeypatch):
+        monkeypatch.setattr("time.sleep", lambda *_args, **_kwargs: None)
+        o = _make_orchestrator(_make_workflow())
+        transient = AgentTaskResult(
+            session_id="sess-track",
+            tracking_session_id="sess-track",
+            response_text="API Error: 529 [overloaded]",
+            success=True,
+        )
+        o._runner.run_agent_task = MagicMock(return_value=transient)
+
+        class ShutdownDuringClear:
+            def clear(self):
+                # Reproduce SIGTERM after the retry loop checked shutdown but
+                # before it cleared the ordinary cancellation signal.
+                o._shutdown_requested.set()
+
+            def is_set(self):
+                return False
+
+        o._cancel_requested = ShutdownDuringClear()
+
+        with pytest.raises(orch_module.WorkflowPaused, match="Service shutdown"):
+            o._run_agent(wf=_make_workflow(), milestone_id="ms-shutdown", prompt="x")
+
+        o._runner.run_agent_task.assert_called_once()
+        o._write_phase_usage.assert_called_once()
+
     def test_no_retry_on_normal_response(self, monkeypatch):
         monkeypatch.setattr("time.sleep", lambda *a, **k: None)
         o = _make_orchestrator(_make_workflow())

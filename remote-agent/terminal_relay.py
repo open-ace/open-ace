@@ -15,6 +15,7 @@ import argparse
 import asyncio
 import logging
 import os
+import ssl
 import sys
 import tempfile
 
@@ -25,6 +26,8 @@ except ImportError:
     print("Install with: pip install 'websockets>=13.0,<17.0'", file=sys.stderr)
     sys.exit(1)
 
+from tls_config import TLSConfig
+
 logger = logging.getLogger("openace-terminal-relay")
 
 # Globals from CLI args
@@ -32,11 +35,13 @@ BACKEND_URL = ""
 TERMINAL_ID = ""
 LOCAL_WS_URL = ""
 RELAY_TOKEN = ""
+TLS_SKIP_VERIFY = False
+TLS_CA_BUNDLE = None
 
 
 async def run_relay() -> None:
     """Run the relay: connect to backend and local terminal_server, bridge them."""
-    global BACKEND_URL, TERMINAL_ID, LOCAL_WS_URL, RELAY_TOKEN
+    global BACKEND_URL, TERMINAL_ID, LOCAL_WS_URL, RELAY_TOKEN, TLS_SKIP_VERIFY, TLS_CA_BUNDLE
 
     # Build relay WebSocket URL to backend
     # Use wss:// for https:// backend URLs
@@ -46,6 +51,21 @@ async def run_relay() -> None:
     logger.info("Connecting to backend relay: %s", relay_url[:80] + "...")
     logger.info("Connecting to local terminal: %s", LOCAL_WS_URL)
 
+    # Create SSL context for TLS
+    ssl_context = None
+    if relay_url.startswith("wss://"):
+        if TLS_SKIP_VERIFY:
+            logger.warning("TLS certificate verification disabled - NOT RECOMMENDED for production")
+            ssl_context = ssl._create_unverified_context()
+        elif TLS_CA_BUNDLE:
+            ssl_context = ssl.create_default_context()
+            try:
+                ssl_context.load_verify_locations(cafile=TLS_CA_BUNDLE)
+                logger.info("Using custom CA bundle: %s", TLS_CA_BUNDLE)
+            except Exception as e:
+                logger.error("Failed to load CA bundle from %s: %s", TLS_CA_BUNDLE, e)
+                raise
+
     try:
         # Connect to backend relay endpoint
         backend_ws = await websockets.connect(
@@ -54,10 +74,11 @@ async def run_relay() -> None:
             close_timeout=5,
             ping_interval=20,
             ping_timeout=10,
+            ssl=ssl_context,
         )
         logger.info("Connected to backend relay")
 
-        # Connect to local terminal_server
+        # Connect to local terminal_server (no TLS for local connection)
         local_ws_url_with_token = f"{LOCAL_WS_URL}?token={RELAY_TOKEN}"
         local_ws = await websockets.connect(
             local_ws_url_with_token,
@@ -134,7 +155,7 @@ async def main_async() -> None:
 
 
 def main() -> None:
-    global BACKEND_URL, TERMINAL_ID, LOCAL_WS_URL, RELAY_TOKEN
+    global BACKEND_URL, TERMINAL_ID, LOCAL_WS_URL, RELAY_TOKEN, TLS_SKIP_VERIFY, TLS_CA_BUNDLE
 
     parser = argparse.ArgumentParser(description="Open ACE Terminal Relay Client")
     parser.add_argument("--backend-url", required=True, help="Backend server URL")
@@ -151,6 +172,25 @@ def main() -> None:
     if not RELAY_TOKEN:
         print("Error: OPEN_ACE_RELAY_TOKEN environment variable is required", file=sys.stderr)
         sys.exit(1)
+
+    # Re-validate the propagated policy in this independently executable
+    # subprocess.  This prevents a direct or restored relay from bypassing the
+    # daemon's production insecure-mode policy.
+    tls_config = TLSConfig.from_env(server_url=BACKEND_URL)
+    warnings = tls_config.validate()
+    for warning in warnings:
+        print(f"TLS warning: {warning}", file=sys.stderr)
+    if tls_config.ca_bundle_path and tls_config.ca_bundle_valid is False:
+        print("Error: invalid TLS CA bundle", file=sys.stderr)
+        sys.exit(1)
+    if tls_config.should_reject_startup():
+        print(
+            "Error: insecure TLS relay is not explicitly acknowledged or is disabled by policy",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    TLS_SKIP_VERIFY = tls_config.skip_verify
+    TLS_CA_BUNDLE = tls_config.ca_bundle_path
 
     # Set up logging
     log_file = os.path.join(tempfile.gettempdir(), f"terminal_relay_{TERMINAL_ID[:8]}.log")
@@ -169,6 +209,15 @@ def main() -> None:
         TERMINAL_ID[:8],
         LOCAL_WS_URL,
     )
+
+    # Log TLS configuration
+    if BACKEND_URL.startswith("https://"):
+        if TLS_SKIP_VERIFY:
+            logger.warning("TLS verification disabled for backend connection")
+        elif TLS_CA_BUNDLE:
+            logger.info("Using custom CA bundle: %s", TLS_CA_BUNDLE)
+        else:
+            logger.info("TLS verification enabled (system CA bundle)")
 
     # Run with asyncio
     try:

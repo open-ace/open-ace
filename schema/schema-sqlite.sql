@@ -209,7 +209,9 @@ CREATE TABLE api_key_store (
  cli_settings text,
  scope text DEFAULT 'shared',
  priority integer DEFAULT 0,
- weight integer DEFAULT 100
+ weight integer DEFAULT 100,
+ resolved_ips text,
+ resolved_at TIMESTAMP
 );
 
 CREATE TABLE audit_logs (
@@ -925,7 +927,9 @@ CREATE TABLE tenant_settings (
  branding_logo_url TEXT,
  auto_provision_users INTEGER DEFAULT 0,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
- updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+ updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+ block_sensitive_keyword INTEGER DEFAULT 0,
+ sensitive_keyword_match_mode TEXT DEFAULT 'word_boundary'
 );
 
 CREATE TABLE tenant_usage (
@@ -984,6 +988,28 @@ CREATE TABLE tool_account_mapping_rules (
  description TEXT,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE usage_report_rate_limits (
+ rate_key TEXT PRIMARY KEY NOT NULL,
+ window_started_at TIMESTAMP NOT NULL,
+ request_count integer DEFAULT 0 NOT NULL,
+ updated_at TIMESTAMP NOT NULL,
+    CONSTRAINT ck_usage_report_rate_limits_count CHECK ((request_count >= 0))
+);
+
+CREATE TABLE usage_report_receipts (
+ report_id TEXT PRIMARY KEY NOT NULL,
+ session_id text NOT NULL,
+ machine_id text NOT NULL,
+ user_id integer NOT NULL,
+ tenant_id integer NOT NULL,
+ payload_hash TEXT NOT NULL,
+ status TEXT NOT NULL,
+ created_at TIMESTAMP NOT NULL,
+ updated_at TIMESTAMP NOT NULL,
+ processed_at TIMESTAMP,
+    CONSTRAINT ck_usage_report_receipts_status CHECK ((status IN ('processing', 'completed', 'failed')))
 );
 
 CREATE TABLE usage_summary (
@@ -1228,11 +1254,15 @@ CREATE INDEX idx_agent_runs_user_id ON agent_runs (user_id);
 
 CREATE INDEX idx_agent_sessions_project ON agent_sessions (project_id);
 
+CREATE INDEX idx_agent_sessions_remote_machine_id ON agent_sessions (remote_machine_id);
+
 CREATE INDEX idx_agent_sessions_session_id ON agent_sessions (session_id);
 
 CREATE INDEX idx_agent_sessions_session_type ON agent_sessions (session_type);
 
 CREATE INDEX idx_agent_sessions_status ON agent_sessions (status);
+
+CREATE INDEX idx_agent_sessions_tenant_id ON agent_sessions (tenant_id);
 
 CREATE INDEX idx_agent_sessions_tenant_updated ON agent_sessions (tenant_id, updated_at);
 
@@ -1537,6 +1567,10 @@ CREATE INDEX idx_usage_date ON daily_usage (date);
 CREATE INDEX idx_usage_date_tool_host ON daily_usage (tenant_id, date, tool_name, host_name);
 
 CREATE INDEX idx_usage_host_name ON daily_usage (host_name);
+
+CREATE INDEX idx_usage_report_rate_limits_updated ON usage_report_rate_limits (updated_at);
+
+CREATE INDEX idx_usage_report_receipts_session ON usage_report_receipts (session_id, created_at);
 
 CREATE INDEX idx_usage_summary_host ON usage_summary (host_name);
 

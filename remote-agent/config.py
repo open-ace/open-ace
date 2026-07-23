@@ -27,7 +27,9 @@ DEFAULTS = {
     "output_buffer_size": 4096,
     "max_sessions": 5,
     "log_level": "INFO",
-    "skip_ssl_verify": True,
+    "skip_ssl_verify": False,  # Security: Default to verifying TLS certificates
+    "allow_insecure_tls": False,  # Admin policy: explicit insecure mode is disabled by default
+    "ca_bundle_path": None,  # Optional: Custom CA bundle for private certificates
 }
 
 CONFIG_DIR = Path.home() / ".open-ace-agent"
@@ -80,6 +82,11 @@ class AgentConfig:
                 "skip_ssl_verify",
                 lambda v: v.lower() in ("true", "1", "yes"),
             ),
+            "OPENACE_ALLOW_INSECURE_TLS": (
+                "allow_insecure_tls",
+                lambda v: v.lower() in ("true", "1", "yes"),
+            ),
+            "OPENACE_CA_BUNDLE_PATH": ("ca_bundle_path", str),
         }
 
         for env_key, (config_key, type_fn) in env_overrides.items():
@@ -166,6 +173,16 @@ class AgentConfig:
         return self._data.get("skip_ssl_verify", DEFAULTS["skip_ssl_verify"])
 
     @property
+    def ca_bundle_path(self) -> str | None:
+        """Custom CA bundle path for private certificates."""
+        return self._data.get("ca_bundle_path", DEFAULTS["ca_bundle_path"])
+
+    @property
+    def allow_insecure_tls(self) -> bool:
+        """Whether administrator policy permits explicitly insecure TLS."""
+        return self._data.get("allow_insecure_tls", DEFAULTS["allow_insecure_tls"])
+
+    @property
     def max_sessions(self) -> int:
         """Maximum concurrent sessions allowed on this agent."""
         return self._data.get("max_sessions", DEFAULTS["max_sessions"])
@@ -249,3 +266,26 @@ class AgentConfig:
         # Hide sensitive fields
         safe = {k: v for k, v in self._data.items() if k != "agent_token"}
         return f"AgentConfig({safe})"
+
+    def get_tls_config(
+        self,
+        explicit_insecure: bool = False,
+        ca_bundle_path: str | None = None,
+    ) -> Any:
+        """
+        Create TLSConfig from this configuration.
+
+        Args:
+            explicit_insecure: Whether --insecure-skip-tls-verify CLI flag was used
+            ca_bundle_path: Optional CLI override for the custom CA bundle
+
+        Returns:
+            TLSConfig instance
+        """
+        from tls_config import TLSConfig
+
+        return TLSConfig.from_config(
+            self,
+            explicit_insecure=explicit_insecure,
+            ca_bundle_path=ca_bundle_path,
+        )

@@ -443,7 +443,7 @@ class TestInsightsService:
             patch("app.modules.workspace.api_key_proxy.get_api_key_proxy_service") as mock_get,
         ):
             mock_proxy = MagicMock()
-            mock_proxy.resolve_api_key_for_scope.return_value = ("test-key", None, 1, None)
+            mock_proxy.resolve_api_key_for_scope.return_value = ("test-key", None, 1, None, None)
             mock_get.return_value = mock_proxy
             result, error = service.generate_insights(1, "2026-04-09", "2026-04-16")
 

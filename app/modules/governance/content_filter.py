@@ -7,6 +7,8 @@ Detects and filters sensitive information, PII, and prohibited content.
 
 import logging
 import re
+import threading
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
@@ -144,6 +146,8 @@ class ContentFilter:
                 - redact_pii: Redact PII in output (default: True)
                 - block_high_risk: Block high risk content (default: True)
                 - log_matches: Log all matches (default: True)
+                - block_sensitive_keyword: Block sensitive keyword matches (default: False)
+                - sensitive_keyword_match_mode: Match mode ('word_boundary' or 'substring')
             custom_patterns: Additional regex patterns to match.
             custom_keywords: Additional keywords to detect.
             governance_repo: Optional GovernanceRepository for database rules.
@@ -153,11 +157,22 @@ class ContentFilter:
         self.redact_pii = self.config.get("redact_pii", True)
         self.block_high_risk = self.config.get("block_high_risk", True)
         self.log_matches = self.config.get("log_matches", True)
+        self.block_sensitive_keyword = self.config.get("block_sensitive_keyword", False)
+        self.sensitive_keyword_match_mode = self.config.get(
+            "sensitive_keyword_match_mode", "word_boundary"
+        )
 
         # Database rules integration
         self.governance_repo = governance_repo
         self._rules_cache: list[dict[str, Any]] | None = None
         self._cache_valid: bool = False
+
+        # Compiled regex cache for database rules (LRU cache)
+        self._compiled_rules_cache: OrderedDict[tuple[str, int], re.Pattern] = OrderedDict()
+        self._cache_lock = threading.Lock()
+        self._cache_hits: int = 0
+        self._cache_misses: int = 0
+        self._max_compiled_cache_size: int = self.config.get("max_compiled_cache_size", 100)
 
         # Compile patterns
         self.patterns = dict(self.DEFAULT_PII_PATTERNS)
@@ -173,6 +188,10 @@ class ContentFilter:
         if custom_keywords:
             self.keywords.update(custom_keywords)
 
+        # Pre-compile keyword patterns for performance
+        self._keyword_patterns: dict[str, re.Pattern] = {}
+        self._compile_keyword_patterns()
+
         # Risk level mapping
         self.risk_mapping = {
             "pii_ssn": "critical",
@@ -187,6 +206,89 @@ class ContentFilter:
             "custom_pattern": "medium",
         }
 
+    def _build_keyword_pattern(self, keyword: str) -> re.Pattern:
+        r"""
+        Build a regex pattern for a keyword with appropriate word boundaries.
+
+        For keywords containing underscores or hyphens, use non-alphanumeric
+        boundaries instead of \b (which treats underscore as word character).
+
+        Args:
+            keyword: The keyword to build a pattern for.
+
+        Returns:
+            Compiled regex pattern.
+        """
+        keyword_lower = keyword.lower()
+
+        # Check if keyword contains underscores or hyphens
+        if "_" in keyword or "-" in keyword:
+            # Use non-alphanumeric boundaries for compound keywords
+            # This ensures "api_key" matches "my api_key is" but not "my_api_key_value"
+            pattern = rf"(?<![a-zA-Z0-9]){re.escape(keyword_lower)}(?![a-zA-Z0-9])"
+        else:
+            # Use standard word boundary for simple keywords
+            pattern = rf"\b{re.escape(keyword_lower)}\b"
+
+        return re.compile(pattern, re.IGNORECASE)
+
+    def _compile_keyword_patterns(self) -> None:
+        """
+        Pre-compile regex patterns for all keywords.
+
+        Compiles both word_boundary and substring patterns for each keyword
+        to allow runtime mode switching without recompilation.
+        """
+        for keyword in self.keywords:
+            # Always compile word_boundary pattern
+            self._keyword_patterns[keyword] = self._build_keyword_pattern(keyword)
+
+    def _validate_tenant_config(self, tenant_config: dict[str, Any] | None) -> dict[str, Any]:
+        """
+        Validate and normalize tenant configuration.
+
+        Args:
+            tenant_config: Raw tenant configuration dictionary.
+
+        Returns:
+            Validated configuration dictionary with defaults for missing/invalid values.
+        """
+        if tenant_config is None:
+            return {
+                "block_sensitive_keyword": self.block_sensitive_keyword,
+                "sensitive_keyword_match_mode": self.sensitive_keyword_match_mode,
+            }
+
+        validated: dict[str, Any] = {}
+
+        # Validate block_sensitive_keyword
+        block_value = tenant_config.get("block_sensitive_keyword")
+        if isinstance(block_value, bool):
+            validated["block_sensitive_keyword"] = block_value
+        elif block_value is not None:
+            logger.warning(
+                "Invalid block_sensitive_keyword value: %s, using default False",
+                block_value,
+            )
+            validated["block_sensitive_keyword"] = False
+        else:
+            validated["block_sensitive_keyword"] = self.block_sensitive_keyword
+
+        # Validate sensitive_keyword_match_mode
+        match_mode = tenant_config.get("sensitive_keyword_match_mode")
+        if match_mode in ("word_boundary", "substring"):
+            validated["sensitive_keyword_match_mode"] = match_mode
+        elif match_mode is not None:
+            logger.warning(
+                "Invalid sensitive_keyword_match_mode: %s, using default 'word_boundary'",
+                match_mode,
+            )
+            validated["sensitive_keyword_match_mode"] = "word_boundary"
+        else:
+            validated["sensitive_keyword_match_mode"] = self.sensitive_keyword_match_mode
+
+        return validated
+
     def _load_rules_from_db(self) -> list[dict[str, Any]]:
         """
         Load filter rules from database.
@@ -197,28 +299,88 @@ class ContentFilter:
         if self.governance_repo is None:
             return []
 
+        # Fast path: check cache validity without lock
         if self._cache_valid and self._rules_cache is not None:
             return self._rules_cache
 
+        # Load rules from database (I/O operation outside lock)
         try:
             rules = self.governance_repo.get_filter_rules()
-            # Filter only enabled rules
             enabled_rules = [r for r in rules if r.get("is_enabled", True)]
-            self._rules_cache = enabled_rules
-            self._cache_valid = True
-            logger.debug(f"Loaded {len(enabled_rules)} filter rules from database")
-            return enabled_rules
         except Exception as e:
             logger.error(f"Failed to load filter rules from database: {e}")
             return []
+
+        # Update cache with lock protection
+        with self._cache_lock:
+            # Double-check: another thread may have updated while we were loading
+            if self._cache_valid and self._rules_cache is not None:
+                return self._rules_cache
+            self._rules_cache = enabled_rules
+            self._cache_valid = True
+
+        logger.debug(f"Loaded {len(enabled_rules)} filter rules from database")
+        return enabled_rules
+
+    def _get_compiled_pattern(
+        self, pattern: str, flags: int = re.IGNORECASE, rule_id: Any = None
+    ) -> re.Pattern | None:
+        """
+        Get compiled regex pattern from cache or compile and cache it.
+
+        Uses LRU cache with configurable max size. Thread-safe with lock protection.
+
+        Args:
+            pattern: Regex pattern string to compile.
+            flags: Regex flags (default: re.IGNORECASE).
+            rule_id: Optional rule ID for error logging.
+
+        Returns:
+            Compiled regex pattern, or None if pattern is invalid.
+        """
+        if not pattern:
+            return None
+
+        cache_key = (pattern, flags)
+
+        # All cache operations are protected by lock for thread safety
+        with self._cache_lock:
+            if cache_key in self._compiled_rules_cache:
+                # Move to end for LRU
+                self._compiled_rules_cache.move_to_end(cache_key)
+                self._cache_hits += 1
+                return self._compiled_rules_cache[cache_key]
+
+            # Track attempt before compiling (counts as miss regardless of validity)
+            self._cache_misses += 1
+
+            # Compile the pattern
+            try:
+                compiled = re.compile(pattern, flags)
+            except re.error as e:
+                logger.error(f"Invalid regex pattern in rule {rule_id}: {e}")
+                return None
+
+            # Cache the compiled pattern
+            self._compiled_rules_cache[cache_key] = compiled
+
+            # Check cache size and evict oldest if needed (LRU)
+            while len(self._compiled_rules_cache) > self._max_compiled_cache_size:
+                self._compiled_rules_cache.popitem(last=False)
+
+            return compiled
 
     def invalidate_cache(self) -> None:
         """
         Invalidate the rules cache.
         Call this after CRUD operations on filter rules.
         """
-        self._cache_valid = False
-        self._rules_cache = None
+        with self._cache_lock:
+            self._cache_valid = False
+            self._rules_cache = None
+            self._compiled_rules_cache.clear()
+            self._cache_hits = 0
+            self._cache_misses = 0
         logger.debug("Content filter rules cache invalidated")
 
     def refresh_rules(self) -> None:
@@ -228,13 +390,22 @@ class ContentFilter:
         """
         self.invalidate_cache()
 
-    def check_content(self, content: str, context: dict[str, Any] | None = None) -> FilterResult:
+    def check_content(
+        self,
+        content: str,
+        context: dict[str, Any] | None = None,
+        tenant_config: dict[str, Any] | None = None,
+    ) -> FilterResult:
         """
         Check content for sensitive information.
 
         Args:
             content: Text content to check.
             context: Optional context information (user, action, etc.).
+            tenant_config: Optional tenant-specific configuration for sensitive
+                keyword filtering. Allows runtime override of:
+                - block_sensitive_keyword: Whether to block (default: instance config)
+                - sensitive_keyword_match_mode: 'word_boundary' or 'substring'
 
         Returns:
             FilterResult: Result of the filtering check.
@@ -244,6 +415,11 @@ class ContentFilter:
 
         if not content:
             return FilterResult(passed=True, risk_level="low", action="none")
+
+        # Validate and apply tenant config for sensitive keyword behavior
+        validated_config = self._validate_tenant_config(tenant_config)
+        block_sensitive_keyword = validated_config["block_sensitive_keyword"]
+        sensitive_keyword_match_mode = validated_config["sensitive_keyword_match_mode"]
 
         matched_rules = []
         overall_risk = "low"
@@ -263,17 +439,22 @@ class ContentFilter:
             if not rule_pattern:
                 continue
 
+            compiled = None  # Cache compiled pattern for reuse
             try:
                 if rule_type == "regex":
-                    # Compile regex pattern
-                    compiled = re.compile(rule_pattern, re.IGNORECASE)
+                    # Compile regex pattern with caching
+                    compiled = self._get_compiled_pattern(rule_pattern, re.IGNORECASE, rule_id)
+                    if compiled is None:
+                        continue  # Invalid pattern, skip this rule
                     matches = compiled.findall(content)
                 elif rule_type == "keyword":
                     # Keyword matching (case-insensitive substring)
                     matches = [rule_pattern] if rule_pattern.lower() in content.lower() else []
                 elif rule_type == "pii":
-                    # PII pattern matching
-                    compiled = re.compile(rule_pattern, re.IGNORECASE)
+                    # PII pattern matching with caching
+                    compiled = self._get_compiled_pattern(rule_pattern, re.IGNORECASE, rule_id)
+                    if compiled is None:
+                        continue  # Invalid pattern, skip this rule
                     matches = compiled.findall(content)
                 else:
                     continue
@@ -299,13 +480,16 @@ class ContentFilter:
                     # Apply redaction if action is redact
                     if rule_action == "redact":
                         if rule_type == "regex" or rule_type == "pii":
-                            compiled = re.compile(rule_pattern, re.IGNORECASE)
+                            # compiled is guaranteed to be non-None (checked above)
+                            assert compiled is not None  # for type checker
                             redacted = compiled.sub("***", redacted)
                         elif rule_type == "keyword":
                             # Redact keyword matches
-                            redacted = re.sub(
-                                re.compile(rule_pattern, re.IGNORECASE), "***", redacted
+                            compiled_keyword = self._get_compiled_pattern(
+                                rule_pattern, re.IGNORECASE, rule_id
                             )
+                            if compiled_keyword is not None:
+                                redacted = compiled_keyword.sub("***", redacted)
 
             except re.error as e:
                 logger.error(f"Invalid regex pattern in rule {rule_id}: {e}")
@@ -339,27 +523,34 @@ class ContentFilter:
                 if self.redact_pii:
                     redacted = self._redact_matches(redacted, compiled_pattern, pattern_name)
 
-        # Check built-in sensitive keywords
-        keyword_matches = self._check_keywords(content)
+        # Check built-in sensitive keywords with configurable behavior
+        keyword_matches = self._check_keywords(content, match_mode=sensitive_keyword_match_mode)
         if keyword_matches:
             matched_rules.append(
                 {
                     "type": "sensitive_keyword",
                     "count": len(keyword_matches),
-                    "risk": "medium",  # Downgrade: sensitive_keyword sub-match is prone to false positives
+                    "risk": "medium",
                     "keywords": list(keyword_matches),
                     "source": "builtin",
+                    "match_mode": sensitive_keyword_match_mode,
                 }
             )
 
-            # Update overall_risk but do NOT force overall_action to block
-            # sensitive_keyword should only generate audit logs, not block requests
-            overall_risk = self._update_risk_level(overall_risk, "medium")
+            # Update overall_risk
+            if overall_risk not in ["critical", "high"]:
+                overall_risk = "medium"
 
-            # Set action to 'warn' for audit visibility, but do NOT block
-            # This prevents blocking legitimate messages containing words like
-            # "password" or "secret" in non-sensitive contexts
-            overall_action = self._update_action(overall_action, "warn")
+            # Determine action based on tenant config
+            # block_sensitive_keyword=True → block
+            # block_sensitive_keyword=False → warn (audit only)
+            if block_sensitive_keyword:
+                if overall_action not in ["block"]:
+                    overall_action = "block"
+            else:
+                # Default: warn only (no block)
+                if overall_action not in ["block", "warn"]:
+                    overall_action = "warn"
 
         # Determine passed based on action
         passed = overall_action != "block"
@@ -394,14 +585,30 @@ class ContentFilter:
             suggestion=suggestion,
         )
 
-    def _check_keywords(self, content: str) -> set[str]:
-        """Check for sensitive keywords."""
-        content_lower = content.lower()
+    def _check_keywords(self, content: str, match_mode: str = "word_boundary") -> set[str]:
+        """
+        Check for sensitive keywords using specified matching mode.
+
+        Args:
+            content: Text content to check.
+            match_mode: Matching mode - 'word_boundary' or 'substring'.
+
+        Returns:
+            Set of matched keywords.
+        """
         found = set()
 
-        for keyword in self.keywords:
-            if keyword.lower() in content_lower:
-                found.add(keyword)
+        if match_mode == "word_boundary":
+            # Use pre-compiled word boundary patterns
+            for keyword, pattern in self._keyword_patterns.items():
+                if pattern.search(content):
+                    found.add(keyword)
+        else:
+            # Fallback to substring matching (original behavior)
+            content_lower = content.lower()
+            for keyword in self.keywords:
+                if keyword.lower() in content_lower:
+                    found.add(keyword)
 
         return found
 
@@ -491,10 +698,15 @@ class ContentFilter:
         Args:
             keyword: Keyword to add.
         """
-        self.keywords.add(keyword.lower())
+        keyword_lower = keyword.lower()
+        self.keywords.add(keyword_lower)
+        # Compile pattern for the new keyword
+        self._keyword_patterns[keyword_lower] = self._build_keyword_pattern(keyword_lower)
 
     def get_stats(self) -> dict[str, Any]:
         """Get filter statistics."""
+        total_requests = self._cache_hits + self._cache_misses
+        hit_rate = (self._cache_hits / total_requests * 100) if total_requests > 0 else 0.0
         return {
             "enabled": self.enabled,
             "redact_pii": self.redact_pii,
@@ -502,4 +714,9 @@ class ContentFilter:
             "pattern_count": len(self.patterns),
             "keyword_count": len(self.keywords),
             "patterns": list(self.patterns.keys()),
+            "compiled_cache_size": len(self._compiled_rules_cache),
+            "compiled_cache_hits": self._cache_hits,
+            "compiled_cache_misses": self._cache_misses,
+            "compiled_cache_hit_rate": round(hit_rate, 2),
+            "compiled_cache_max_size": self._max_compiled_cache_size,
         }

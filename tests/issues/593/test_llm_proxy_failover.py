@@ -70,8 +70,8 @@ class TestLLMProxyFailover:
         mock_proxy = MagicMock()
         mock_proxy.validate_proxy_token.return_value = _mock_proxy_token()
         mock_proxy.resolve_api_key_for_scope.side_effect = [
-            ("sk-key1", "https://api.openai.com/v1", 1, None),
-            ("sk-key2", "https://api.openai.com/v1", 2, None),
+            ("sk-key1", "https://api.openai.com/v1", 1, None, None),
+            ("sk-key2", "https://api.openai.com/v1", 2, None, None),
             None,
         ]
         mock_get_proxy.return_value = mock_proxy
@@ -104,8 +104,8 @@ class TestLLMProxyFailover:
         mock_proxy = MagicMock()
         mock_proxy.validate_proxy_token.return_value = _mock_proxy_token()
         mock_proxy.resolve_api_key_for_scope.side_effect = [
-            ("sk-key1", "https://api.openai.com/v1", 1, None),
-            ("sk-key2", "https://api.openai.com/v1", 2, None),
+            ("sk-key1", "https://api.openai.com/v1", 1, None, None),
+            ("sk-key2", "https://api.openai.com/v1", 2, None, None),
             None,
         ]
         mock_get_proxy.return_value = mock_proxy
@@ -133,10 +133,10 @@ class TestLLMProxyFailover:
         mock_proxy = MagicMock()
         mock_proxy.validate_proxy_token.return_value = _mock_proxy_token()
         mock_proxy.resolve_api_key_for_scope.side_effect = [
-            ("sk-1", "https://api.openai.com/v1", 1, None),
-            ("sk-2", "https://api.openai.com/v1", 2, None),
-            ("sk-3", "https://api.openai.com/v1", 3, None),
-            ("sk-4", "https://api.openai.com/v1", 4, None),
+            ("sk-1", "https://api.openai.com/v1", 1, None, None),
+            ("sk-2", "https://api.openai.com/v1", 2, None, None),
+            ("sk-3", "https://api.openai.com/v1", 3, None, None),
+            ("sk-4", "https://api.openai.com/v1", 4, None, None),
             None,
         ]
         mock_get_proxy.return_value = mock_proxy
@@ -165,10 +165,10 @@ class TestLLMProxyFailover:
         mock_proxy = MagicMock()
         mock_proxy.validate_proxy_token.return_value = _mock_proxy_token()
         mock_proxy.resolve_api_key_for_scope.side_effect = [
-            ("sk-1", "https://api.openai.com/v1", 1, None),
-            ("sk-2", "https://api.openai.com/v1", 2, None),
-            ("sk-3", "https://api.openai.com/v1", 3, None),
-            ("sk-4", "https://api.openai.com/v1", 4, None),
+            ("sk-1", "https://api.openai.com/v1", 1, None, None),
+            ("sk-2", "https://api.openai.com/v1", 2, None, None),
+            ("sk-3", "https://api.openai.com/v1", 3, None, None),
+            ("sk-4", "https://api.openai.com/v1", 4, None, None),
             None,
         ]
         mock_get_proxy.return_value = mock_proxy
@@ -201,6 +201,7 @@ class TestLLMProxyFailover:
             "sk-1",
             "https://api.openai.com/v1",
             1,
+            None,
             None,
         )
         mock_get_proxy.return_value = mock_proxy
@@ -266,8 +267,8 @@ class TestLLMProxyFailover:
             },
         }
         mock_proxy.resolve_api_key_from_key_ids.side_effect = [
-            ("sk-key1", "https://api.openai.com/v1", 11, None),
-            ("sk-key3", "https://api.openai.com/v1", 33, None),
+            ("sk-key1", "https://api.openai.com/v1", 11, None, None),
+            ("sk-key3", "https://api.openai.com/v1", 33, None, None),
             None,
         ]
         mock_get_proxy.return_value = mock_proxy

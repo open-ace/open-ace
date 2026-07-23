@@ -182,6 +182,25 @@ class TestPlanningIntegration:
 
         orch.emitter = MagicMock()
         orch._runner = MagicMock()
+        orch._runner._uses_sidebar_session_source.return_value = False
+        # These tests exercise planning semantics, not the privileged Git
+        # boundary. Keep them hermetic on developer machines that do not have
+        # the production repository-owner account configured.
+        orch._snapshot_repo_context = MagicMock(
+            return_value={
+                "effective": {
+                    "repo_path": "/tmp/test",
+                    "git_dir": "/tmp/test.git",
+                    "git_identity": "test-git",
+                    "common_dir": "/tmp/test.git",
+                    "common_identity": "test-common",
+                    "origin": "",
+                },
+                "main": {},
+            }
+        )
+        orch._validate_repo_context_after_run = MagicMock(return_value="")
+        orch._get_gh = MagicMock()
         return orch, mock_repo
 
     def _make_workflow(self, **overrides):
@@ -316,6 +335,14 @@ class TestPlanningIntegration:
             if c[0][1].get("status") == "developing"
         ]
         assert len(status_updates) >= 1
+
+        finalized_calls = [
+            c[0][0]
+            for c in mock_repo.create_milestone.call_args_list
+            if c[0][0].get("milestone_type") == "plan_finalized"
+        ]
+        assert len(finalized_calls) == 1
+        assert finalized_calls[0]["session_id"] == "sess-plan"
 
     def test_plan_review_final_refine_failure_blocks_development(self):
         """If the final plan_refined (that acts on the Nth review's feedback)

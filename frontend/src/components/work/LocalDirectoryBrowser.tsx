@@ -339,19 +339,31 @@ export const LocalDirectoryBrowser: React.FC<LocalDirectoryBrowserProps> = ({
   };
 
   const handleFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selected = e.target.files;
-    if (!selected || selected.length === 0) return;
+    // Issue #1959: FileList is a "live" object bound to the input element.
+    // When e.target.value is cleared, e.target.files is also cleared.
+    // Must convert to array immediately to preserve the file references.
+    const selected = e.target.files ? Array.from(e.target.files) : [];
+    if (selected.length === 0) return;
 
     // Reset input so selecting the same file again fires onChange.
     e.target.value = '';
 
-    if (!isWritable) {
+    const targetIsWritable = isWritable;
+
+    if (!targetIsWritable) {
       toast.error(
         t('uploadFailed', language) || 'Upload failed',
         t('notWritable', language) || 'Directory is not writable'
       );
       return;
     }
+
+    // Issue #1959 (root cause): Capture the target directory at the start.
+    // `currentPath` is React state and can change during async operations
+    // (e.g., if the user navigates to another directory while uploading).
+    // Using the captured value ensures files are uploaded to and refreshed
+    // from the intended directory.
+    const targetDir = currentPath;
 
     for (const file of Array.from(selected)) {
       if (file.size > MAX_UPLOAD_SIZE_MB * 1024 * 1024) {
@@ -365,7 +377,7 @@ export const LocalDirectoryBrowser: React.FC<LocalDirectoryBrowserProps> = ({
 
       setIsUploading(true);
       try {
-        const result = await fsApi.uploadFile(file, currentPath);
+        const result = await fsApi.uploadFile(file, targetDir);
         if (result.success) {
           toast.success(t('uploadSuccess', language) || 'File uploaded', file.name);
         } else {
@@ -382,7 +394,21 @@ export const LocalDirectoryBrowser: React.FC<LocalDirectoryBrowserProps> = ({
     }
 
     // Refresh the listing so the uploaded file appears.
-    await fetchDirectories(currentPath);
+    // Issue #1959 (follow-up): Exit search mode before refreshing.
+    // If the user uploaded while in search mode, they expect to see the
+    // uploaded file in the normal listing. Clearing the search state
+    // restores the regular directory view so the new file is visible.
+    setSearchQuery('');
+    setSearchResults(null);
+    setSearchTruncated(false);
+
+    // Issue #1959: wrap in try-catch to prevent unhandled exceptions,
+    // even though fetchDirectories has its own error handling (Issue #1912).
+    try {
+      await fetchDirectories(targetDir);
+    } catch (err) {
+      console.error('Failed to refresh directory listing after upload:', err);
+    }
   };
 
   const handleDownload = async (file: FileEntry) => {
@@ -433,7 +459,10 @@ export const LocalDirectoryBrowser: React.FC<LocalDirectoryBrowserProps> = ({
       return;
     }
     const ok = await confirm({
+      title: file.name,
       message: (t('confirmDeleteFile', language) as string) || `Delete "${file.name}"?`,
+      confirmText: (t('confirm', language) as string) || 'Confirm',
+      cancelText: (t('cancel', language) as string) || 'Cancel',
       variant: 'danger',
     });
     if (!ok) return;

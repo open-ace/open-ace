@@ -55,9 +55,9 @@ QUEUE_BLOCKING_STATUSES = {"paused", "cancelled"}
 # Prefix written to error_message when a workflow is paused because its owner
 # exceeded quota. The scheduler auto-resumes only workflows paused with this
 # prefix — a user's manual pause (error_message empty / different text) is left
-# untouched. Autonomous agents bypass the LLM proxy (local mode connects to the
-# model API directly), so the proxy's 429 can't enforce quota for them; the
-# scheduler gate below is the enforcement point.
+# untouched. This scheduler owns autonomous workflow lifecycle enforcement;
+# generic quota sweepers deliberately leave workflow sessions alone so they do
+# not revoke an in-flight agent's LLM proxy token.
 QUOTA_PAUSE_REASON_PREFIX = "Quota exceeded"
 
 
@@ -119,11 +119,22 @@ class AutonomousScheduler:
         logger.info("Autonomous scheduler started")
 
     def stop(self):
-        """Stop the scheduler."""
+        """Stop scheduling and drain active orchestrators before interpreter exit."""
         self._stop_event.set()
+        with self._orchestrator_lock:
+            orchestrators = list(self._running_orchestrators.values())
+        for orchestrator in orchestrators:
+            try:
+                orchestrator.prepare_for_shutdown()
+            except Exception:
+                logger.warning("Failed to prepare autonomous workflow for shutdown", exc_info=True)
         if self._thread:
-            self._thread.join(timeout=10)
-        logger.info("Autonomous scheduler stopped")
+            self._thread.join(timeout=20)
+            if self._thread.is_alive():
+                logger.warning("Autonomous scheduler did not drain before shutdown timeout")
+        logger.info(
+            "Autonomous scheduler stopped (%d active attempts interrupted)", len(orchestrators)
+        )
 
     def get_running_orchestrator(self, workflow_id: str):
         """Get the currently running orchestrator for a workflow, if any."""
@@ -255,9 +266,9 @@ class AutonomousScheduler:
             return workflow_id
 
         # Quota gate (fail-closed): a user over quota (or whose quota check
-        # errored) must not advance. Local autonomous agents bypass the LLM
-        # proxy, so this scheduler gate — not the proxy's 429 — is what bounds
-        # them.
+        # errored) must not advance. This scheduler is the lifecycle authority
+        # for workflow-owned sessions, so it pauses before a new advance cycle
+        # without revoking a proxy token out from under an in-flight agent.
         #
         # Enforcement granularity is between advance() cycles, not mid-step:
         # while an agent is mid-flight, advance() is blocked and workflow_id
@@ -294,6 +305,12 @@ class AutonomousScheduler:
             orchestrator = AutonomousOrchestrator(workflow_id)
             with self._orchestrator_lock:
                 self._running_orchestrators[workflow_id] = orchestrator
+            # stop() may race with this worker after its orchestrator snapshot.
+            # Register first, then re-check the event so no new agent task can
+            # start after graceful shutdown has begun.
+            if self._stop_event.is_set():
+                orchestrator.prepare_for_shutdown()
+                return workflow_id
             orchestrator.advance()
         except Exception as e:
             logger.error(
@@ -547,10 +564,35 @@ class AutonomousScheduler:
             )
         )
 
-        # Limit to concurrency cap, accounting for already-running workflows
+        # Limit to the concurrency cap while reserving conflict keys inside
+        # this same selection pass.  Filtering above only sees workflows that
+        # were already running before this poll; without local reservations,
+        # multiple newly auto-resumed siblings from one batch (or workflows
+        # sharing a worktree/branch) can all enter ``to_process`` together.
         with self._in_progress_lock:
             slots_available = MAX_CONCURRENT_WORKFLOWS - len(self._in_progress_ids)
-        to_process = active[: max(0, slots_available)]
+            selected_batches: set[str] = set()
+            selected_workspaces: set[str] = set()
+            selected_branches: set[str] = set()
+            to_process: list[dict] = []
+            for wf in active:
+                if len(to_process) >= max(0, slots_available):
+                    break
+                batch_id = wf.get("batch_id")
+                workspace, branch = self._conflict_keys(wf)
+                if batch_id and batch_id in selected_batches:
+                    continue
+                if workspace and workspace in selected_workspaces:
+                    continue
+                if branch and branch in selected_branches:
+                    continue
+                to_process.append(wf)
+                if batch_id:
+                    selected_batches.add(batch_id)
+                if workspace:
+                    selected_workspaces.add(workspace)
+                if branch:
+                    selected_branches.add(branch)
 
         if not to_process:
             return

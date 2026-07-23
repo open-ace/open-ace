@@ -66,7 +66,7 @@ def _get_effective_system_account(system_account: str | None) -> str | None:
 def _run_as_user(system_account: str, command: list) -> subprocess.CompletedProcess:
     """Run a command as a specific user using sudo."""
     sudo_cmd = ["sudo", "-u", system_account] + command
-    return subprocess.run(sudo_cmd, capture_output=True, text=True, timeout=10)
+    return subprocess.run(sudo_cmd, capture_output=True, text=True, timeout=10, cwd="/tmp")
 
 
 def _get_repo() -> AutonomousWorkflowRepository:
@@ -75,6 +75,18 @@ def _get_repo() -> AutonomousWorkflowRepository:
     if auto_repo is None:
         auto_repo = AutonomousWorkflowRepository()
     return auto_repo
+
+
+def _is_recoverable_system_pause_reason(error_message: str) -> bool:
+    """Whether resume should clear a stale system-generated pause reason."""
+    from app.modules.workspace.autonomous.orchestrator import (
+        MERGE_POLICY_PAUSE_REASON_PREFIX,
+        UPSTREAM_QUOTA_PAUSE_REASON_PREFIX,
+    )
+
+    return error_message.startswith(
+        (UPSTREAM_QUOTA_PAUSE_REASON_PREFIX, MERGE_POLICY_PAUSE_REASON_PREFIX)
+    )
 
 
 autonomous_bp = Blueprint("autonomous", __name__)
@@ -1035,13 +1047,15 @@ def resume_workflow(workflow_id):
     phase = workflow.get("current_phase", "preparation")
     status = PHASE_TO_STATUS.get(phase, "pending")
 
-    _get_repo().update_workflow(
-        workflow_id,
-        {
-            "status": status,
-            "paused_at": None,
-        },
-    )
+    # Clear stale recoverable system-pause errors after an operator resumes.
+    # Bailian allocated-quota rate limits never enter the paused state, while a
+    # manual pause may retain an unrelated diagnostic for the user's context.
+    error_message = workflow.get("error_message") or ""
+    updates = {"status": status, "paused_at": None}
+    if _is_recoverable_system_pause_reason(error_message):
+        updates["error_message"] = ""
+
+    _get_repo().update_workflow(workflow_id, updates)
 
     _emit_event_safe(workflow_id, "status_change", {"status": status})
     return jsonify({"success": True})

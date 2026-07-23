@@ -37,7 +37,8 @@ class TestAuditActionsSynchronization:
             "Data Access": 4,  # DATA_VIEW, EXPORT, IMPORT, DELETE
             "System": 3,  # SYSTEM_CONFIG_CHANGE, START, STOP
             "Content Filter": 4,  # CONTENT_BLOCKED, FLAGGED, WARNED, REDACTED
-            "Remote Agent": 5,  # AGENT_REGISTER, TOKEN_ROTATE, REVOKE, AUTH_FAILURE, RECONNECT
+            "Remote Agent": 8,  # Agent lifecycle plus usage-report security actions
+            "SSRF Protection": 3,  # LLM_PROXY_URL_BLOCKED, ALLOWLIST_ENTRY_INVALID, IP_RESOLVED_MISMATCH
         }
 
         total_expected = sum(expected_categories.values())

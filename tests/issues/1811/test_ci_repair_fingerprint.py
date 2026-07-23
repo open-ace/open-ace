@@ -267,6 +267,47 @@ class TestDetectAndPushCiRepairChanges:
         gh.git_add_all.assert_called_once()
         gh.git_push.assert_called_once()
 
+    def test_commits_hook_edits_when_local_head_already_leads_remote(self):
+        from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+        gh = MagicMock()
+        gh.get_current_commit.side_effect = ["sha-B", "sha-C"]
+        gh.has_uncommitted_changes.return_value = True
+
+        commit_sha, sha_changed, push_error = (
+            AutonomousOrchestrator._detect_and_push_ci_repair_changes(
+                gh,
+                commit_before="sha-A",
+                attempt=2,
+                branch_name="auto-dev/x",
+                pr_number=1812,
+            )
+        )
+
+        assert (commit_sha, sha_changed, push_error) == ("sha-C", True, "")
+        gh.git_add_all.assert_called_once()
+        gh.git_commit.assert_called_once_with("auto: ci repair (attempt 2)", no_verify=True)
+        gh.git_push.assert_called_once_with(branch="auto-dev/x", force_with_lease=True)
+
+    def test_commit_failure_does_not_push_stale_local_head(self):
+        from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+        gh = MagicMock()
+        gh.get_current_commit.return_value = "sha-B"
+        gh.has_uncommitted_changes.return_value = True
+        gh.git_commit.side_effect = RuntimeError("hook edits could not be committed")
+
+        commit_sha, sha_changed, push_error = (
+            AutonomousOrchestrator._detect_and_push_ci_repair_changes(
+                gh, "sha-A", 2, "auto-dev/x", 1812
+            )
+        )
+
+        assert commit_sha == "sha-B"
+        assert sha_changed is True
+        assert "could not be committed" in push_error
+        gh.git_push.assert_not_called()
+
     def test_push_error_captured_not_raised(self):
         from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
 

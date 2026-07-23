@@ -723,6 +723,14 @@ class GitHubOps:
         result = self._run_git(["rev-parse", "HEAD"])
         return result.stdout.strip()
 
+    def resolve_commit(self, ref: str) -> str:
+        """Resolve a ref to an immutable commit SHA."""
+        result = self._run_git(["rev-parse", "--verify", f"{ref}^{{commit}}"])
+        sha = result.stdout.strip()
+        if not sha:
+            raise GitHubOpsError(f"Unable to resolve commit ref: {ref}")
+        return sha
+
     def checkout(self, ref: str) -> None:
         """Checkout a branch or commit."""
         self._run_git(["checkout", ref])
@@ -735,6 +743,10 @@ class GitHubOps:
         that produced partial tool edits but no commit).
         """
         self._run_git(["reset", "--hard", "HEAD"])
+
+    def reset_hard_to(self, ref: str) -> None:
+        """Discard local CI-repair state and reset to a trusted immutable ref."""
+        self._run_git(["reset", "--hard", ref])
 
     def delete_branch(self, name: str, remote: bool = True) -> None:
         """Delete a branch locally and optionally remotely."""
@@ -842,6 +854,26 @@ class GitHubOps:
             ]
         )
         return json.loads(result.stdout.strip())
+
+    def get_pr_merge_state(self, number: int) -> dict:
+        """Return GitHub's current mergeability classification for a PR.
+
+        ``gh pr merge`` uses one exit status for conflicts, pending required
+        checks, review rules, and other repository-rule violations.  The REST
+        fields let the orchestrator distinguish a real ``dirty`` conflict from
+        a policy-blocked but otherwise mergeable PR instead of launching the
+        conflict resolver for every rejection.
+        """
+        repo = self.get_repo_name()
+        result = self._run_gh(
+            self._gh_api_args([f"repos/{repo}/pulls/{number}"]),
+            repo_scoped=False,
+        )
+        data = json.loads((result.stdout or "").strip() or "{}")
+        return {
+            "mergeable": data.get("mergeable"),
+            "mergeable_state": str(data.get("mergeable_state") or "").strip().lower(),
+        }
 
     def find_existing_pr(self, head_branch: str) -> dict | None:
         """Find an existing open PR for a head branch (scoped to base=main).
@@ -1400,6 +1432,124 @@ class GitHubOps:
         result = self._run_git(["status", "--porcelain"])
         return bool(result.stdout.strip())
 
+    def get_unmerged_paths(self) -> list[str]:
+        """Return paths that still have unmerged index entries."""
+        result = self._run_git(["diff", "--name-only", "--diff-filter=U"], check=False)
+        if result.returncode != 0:
+            raise GitHubOpsError(
+                f"Unable to inspect unmerged index (exit code {result.returncode}): "
+                f"{(result.stderr or result.stdout).strip()}"
+            )
+        return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+    def get_worktree_changed_paths(self) -> list[str]:
+        """Return tracked working-tree changes plus untracked files.
+
+        During a conflicted merge, clean changes brought in from the other
+        parent are already staged in the index.  This view therefore isolates
+        the resolver's still-unstaged edits (including U-stage paths) instead
+        of counting every file that arrived from ``origin/main``.
+        """
+        tracked = self._run_git(["diff", "--name-only"], check=False)
+        if tracked.returncode != 0:
+            raise GitHubOpsError(
+                f"Unable to inspect working-tree changes (exit code {tracked.returncode}): "
+                f"{(tracked.stderr or tracked.stdout).strip()}"
+            )
+        untracked = self._run_git(["ls-files", "--others", "--exclude-standard"], check=False)
+        if untracked.returncode != 0:
+            raise GitHubOpsError(
+                f"Unable to inspect untracked files (exit code {untracked.returncode}): "
+                f"{(untracked.stderr or untracked.stdout).strip()}"
+            )
+        return sorted(
+            {
+                line.strip()
+                for output in (tracked.stdout, untracked.stdout)
+                for line in output.splitlines()
+                if line.strip()
+            }
+        )
+
+    def get_index_snapshot(self) -> dict[str, tuple[str, ...]]:
+        """Return the complete staged-index identity grouped by path.
+
+        Each value contains the mode/blob/stage tuples emitted by
+        ``git ls-files --stage``.  U-stage paths therefore retain all base,
+        ours, and theirs entries, while normal staged files have one stage-0
+        entry.  ``-z`` keeps unusual filenames unambiguous.
+        """
+        result = self._run_git(["ls-files", "--stage", "-z"], check=False)
+        if result.returncode != 0:
+            raise GitHubOpsError(
+                f"Unable to snapshot git index (exit code {result.returncode}): "
+                f"{(result.stderr or result.stdout).strip()}"
+            )
+        entries: dict[str, list[str]] = {}
+        for record in result.stdout.split("\0"):
+            if not record:
+                continue
+            identity, separator, path = record.partition("\t")
+            if not separator or not identity or not path:
+                raise GitHubOpsError("Unable to parse git index snapshot")
+            entries.setdefault(path, []).append(identity)
+        return {path: tuple(sorted(identities)) for path, identities in entries.items()}
+
+    @staticmethod
+    def get_index_changed_paths(
+        before: dict[str, tuple[str, ...]], after: dict[str, tuple[str, ...]]
+    ) -> list[str]:
+        """Return paths whose stage entries were added, removed, or changed."""
+        return sorted(
+            path for path in set(before) | set(after) if before.get(path) != after.get(path)
+        )
+
+    def get_conflict_marker_paths(self, paths: list[str]) -> list[str]:
+        """Return files that still contain standard merge-conflict markers.
+
+        The caller supplies the authoritative U-stage path list captured before
+        staging.  Restricting the search to those files avoids false positives
+        from fixtures or documentation elsewhere in the repository.
+        """
+        if not paths:
+            return []
+        existing_paths = [
+            path
+            for path in sorted(set(paths))
+            if self.path_exists_as_user(os.path.join(self.repo_path, path), file_only=True)
+        ]
+        # Deleting a conflicted file is a valid resolution. Owner-side
+        # ``git add -A`` records that deletion after this marker check.
+        if not existing_paths:
+            return []
+        result = self._run_git(
+            [
+                "grep",
+                "--no-index",
+                "-l",
+                "-I",
+                "-E",
+                "-e",
+                r"^<{7,}( |$)",
+                "-e",
+                r"^={7,}$",
+                "-e",
+                r"^>{7,}( |$)",
+                "--",
+                *existing_paths,
+            ],
+            check=False,
+        )
+        # git grep returns 1 when there are no matches.
+        if result.returncode not in (0, 1):
+            raise GitHubOpsError(
+                f"Unable to inspect conflict markers (exit code {result.returncode}): "
+                f"{(result.stderr or result.stdout).strip()}"
+            )
+        if result.returncode == 1:
+            return []
+        return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
     def git_add_all(self) -> None:
         """Stage all changes."""
         self._run_git(["add", "-A"])
@@ -1450,6 +1600,11 @@ class GitHubOps:
                     f"force_with_lease refused on non-auto-dev branch '{target}' "
                     "(only auto-dev/* workflow branches may be force-pushed)"
                 )
+            # Never leave a validated force-push target implicit. An auto-dev
+            # worktree can inherit ``main`` as its upstream, and
+            # ``push.default=simple`` then rejects a plain ``git push`` even
+            # though the current local branch is safe and was validated above.
+            branch = target
         args = ["push", remote]
         if branch:
             args.append(branch)

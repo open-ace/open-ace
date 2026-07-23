@@ -14,6 +14,9 @@ from flask import Response, g, jsonify, request, stream_with_context
 # gateway feature = drop this import + the seam + the two _gateway_* helpers.
 from app.modules.workspace.model_gateway import get_gateway_planner
 
+# Issue #1894: SSRF protection
+from app.utils.outbound_url_guard import safe_request
+
 logger = logging.getLogger(__name__)
 
 # Shared ContentFilter instance for performance (uses cached rules)
@@ -30,6 +33,28 @@ def _get_content_filter():
         governance_repo = GovernanceRepository()
         _content_filter_instance = ContentFilter(governance_repo=governance_repo)
     return _content_filter_instance
+
+
+# Import shared cache function
+from app.modules.workspace.tenant_config_cache import get_tenant_sensitive_keyword_config
+
+
+def _get_tenant_sensitive_keyword_config_wrapper(tenant_id: int | None) -> dict[str, Any]:
+    """
+    Wrapper for tenant-specific sensitive keyword configuration.
+
+    Args:
+        tenant_id: Tenant ID, or None for default behavior.
+
+    Returns:
+        Dictionary with 'block_sensitive_keyword' and 'sensitive_keyword_match_mode' keys.
+    """
+    if tenant_id is None:
+        return {
+            "block_sensitive_keyword": False,
+            "sensitive_keyword_match_mode": "word_boundary",
+        }
+    return get_tenant_sensitive_keyword_config(tenant_id)
 
 
 def _extract_requested_model() -> str | None:
@@ -70,8 +95,13 @@ def _determine_target_url(
     provider: str,
     base_url: str | None,
     path: str,
+    tenant_id: int | None = None,
+    resolved_ips: str | None = None,
 ) -> str | tuple[Response, int]:
-    """Build the upstream target URL.  Returns a (Response, status) tuple on validation error."""
+    """Build the upstream target URL.  Returns a (Response, status) tuple on validation error.
+
+    Issue #1894: Added SSRF protection with IP pinning for custom base_url.
+    """
     if base_url:
         target_base = base_url.rstrip("/")
         # When base_url already contains a version segment (e.g. /v4), strip the
@@ -101,7 +131,86 @@ def _determine_target_url(
             400,
         )
 
-    return f"{target_base}{suffix}"
+    target_url = f"{target_base}{suffix}"
+
+    # Issue #1894: SSRF protection for custom base_url
+    if base_url and tenant_id is not None:
+        from app.utils.llm_proxy_url_validator import (
+            audit_blocked_url,
+            hash_host_for_audit,
+            record_allowlist_hit,
+            record_ip_mismatch,
+            record_ssrf_blocked,
+            sanitize_error_message,
+            validate_ip_against_stored,
+            validate_llm_proxy_url,
+        )
+
+        # DNS rebinding protection: validate against stored IPs
+        if resolved_ips:
+            is_valid, ip_error = validate_ip_against_stored(target_url, resolved_ips)
+            if not is_valid:
+                logger.warning(
+                    "DNS rebinding detected for tenant %s provider %s: %s",
+                    tenant_id,
+                    provider,
+                    ip_error,
+                )
+                record_ip_mismatch(tenant_id, provider)
+                audit_blocked_url(
+                    tenant_id=tenant_id,
+                    provider=provider,
+                    url=target_url,
+                    reason="dns_rebinding",
+                )
+                return (
+                    jsonify(
+                        {
+                            "error": {
+                                "message": "Blocked outbound URL: DNS resolution changed",
+                                "type": "ssrf_blocked",
+                                "blocked_host_hash": hash_host_for_audit(target_url),
+                            }
+                        }
+                    ),
+                    403,
+                )
+
+        # Standard SSRF validation
+        result = validate_llm_proxy_url(target_url, tenant_id, provider)
+        if not result.allowed:
+            sanitized_error = sanitize_error_message(result.error or "Invalid URL")
+            logger.warning(
+                "LLM proxy URL blocked for tenant %s provider %s: %s",
+                tenant_id,
+                provider,
+                sanitized_error,
+            )
+            record_ssrf_blocked(tenant_id, provider, "ssrf_violation")
+            audit_blocked_url(
+                tenant_id=tenant_id,
+                provider=provider,
+                url=target_url,
+                reason=result.error or "ssrf_violation",
+            )
+            return (
+                jsonify(
+                    {
+                        "error": {
+                            "message": sanitized_error,
+                            "type": "ssrf_blocked",
+                            "blocked_host_hash": hash_host_for_audit(target_url),
+                        }
+                    }
+                ),
+                403,
+            )
+
+        # Record allowlist hit if matched
+        if result.is_allowlist_match:
+            record_allowlist_hit(tenant_id, "tenant" if tenant_id > 0 else "global")
+
+    return target_url
 
 
 def _record_messages(
@@ -530,6 +639,7 @@ def _check_content_filter(
     user_id: int,
     username: str | None,
     request_body: bytes | None,
+    tenant_id: int | None = None,
 ) -> tuple[Response, int] | str | None:
     """Check user input content for sensitive information.
 
@@ -537,6 +647,7 @@ def _check_content_filter(
         user_id: User ID for audit logging.
         username: Username for audit logging.
         request_body: Raw request body bytes.
+        tenant_id: Optional tenant ID for tenant-specific filtering config.
 
     Returns:
         - tuple(Response, int): Error response if blocked (403)
@@ -580,7 +691,10 @@ def _check_content_filter(
         content_filter = _get_content_filter()
         audit_logger = AuditLogger()
 
-        result = content_filter.check_content(combined_content)
+        # Get tenant-specific sensitive keyword config
+        tenant_config = _get_tenant_sensitive_keyword_config_wrapper(tenant_id)
+
+        result = content_filter.check_content(combined_content, tenant_config=tenant_config)
 
         if result.action == "block":
             # Log the block action
@@ -669,7 +783,26 @@ def _forward_via_gateway(
     of this call. Usage recording + streaming passthrough are handled by the
     shared ``_finalize_upstream_response`` tail. Errors are sanitized via
     ``_gateway_error_response`` so the gateway key never leaks (R7).
+
+    Issue #1894: Added SSRF blocked handling.
     """
+    # Issue #1894: Handle SSRF blocked gateway URL
+    if getattr(plan, "ssrf_blocked", False):
+        from app.utils.llm_proxy_url_validator import hash_host_for_audit
+
+        return (
+            jsonify(
+                {
+                    "error": {
+                        "message": plan.ssrf_error or "Blocked outbound URL",
+                        "type": "ssrf_blocked",
+                        "blocked_host_hash": hash_host_for_audit(plan.target_url),
+                    }
+                }
+            ),
+            403,
+        )
+
     import requests as http_requests
 
     try:
@@ -813,6 +946,7 @@ def handle_llm_proxy_request(
         user_id=user_id,
         username=username,
         request_body=request.get_data(),
+        tenant_id=tenant_id,
     )
     if isinstance(content_filter_result, tuple):
         # Block: return error response
@@ -899,6 +1033,7 @@ def handle_llm_proxy_request(
         )
 
     exclude_key_ids: set[int] = set()
+    allocated_rate_limited_key_ids: set[int] = set()
     attempt = 0
 
     while True:
@@ -919,6 +1054,21 @@ def handle_llm_proxy_request(
             )
 
         if not key_result:
+            if allocated_rate_limited_key_ids:
+                return (
+                    jsonify(
+                        {
+                            "error": {
+                                "message": (
+                                    "All available upstream keys are temporarily allocation "
+                                    "rate limited. Please retry later."
+                                ),
+                                "type": "rate_limit_error",
+                            }
+                        }
+                    ),
+                    429,
+                )
             if exclude_key_ids:
                 return (
                     jsonify(
@@ -946,8 +1096,10 @@ def handle_llm_proxy_request(
                 500,
             )
 
-        api_key, base_url, key_id, _ = key_result
-        target_result = _determine_target_url(provider, base_url, path)
+        api_key, base_url, key_id, _, resolved_ips = key_result
+        target_result = _determine_target_url(
+            provider, base_url, path, tenant_id=tenant_id, resolved_ips=resolved_ips
+        )
         if isinstance(target_result, tuple):
             return target_result
         target_url = target_result
@@ -1031,16 +1183,63 @@ def handle_llm_proxy_request(
 
             if not converted_from_responses:
                 body = request.get_data()
+                # 注入 stream_options 以获取流式响应的 usage 字段
+                # 参考: model_gateway/attribution.py build_body_transformer()
+                # 注意: converted_from_responses=True 时，请求体已转换且 stream=False，
+                #       不会进入此分支，无需额外检查
+                try:
+                    data = json.loads(body)
+                    if data.get("stream") is True:
+                        existing_so = data.get("stream_options")
+                        if isinstance(existing_so, dict):
+                            existing_so.setdefault("include_usage", True)
+                        else:
+                            data["stream_options"] = {"include_usage": True}
+                        body = json.dumps(data).encode("utf-8")
+                except (json.JSONDecodeError, ValueError, TypeError):
+                    pass  # 解析失败，使用原始请求体
 
-            resp = http_requests.request(
-                method=request.method,
-                url=target_url,
-                headers=fwd_headers,
-                data=body,
-                stream=True,
-                timeout=120,
-                proxies={"http": None, "https": None},  # type: ignore[dict-item]
-            )
+            # Issue #1894: Use safe_request for public URLs with resolved_ips
+            # to prevent DNS rebinding attacks. For private URLs (in allowlist)
+            # or default provider URLs, use regular request.
+            if resolved_ips and base_url:
+                # Public URL with IP pinning - use safe_request
+                try:
+                    resp = safe_request(
+                        method=request.method,
+                        url=target_url,
+                        headers=fwd_headers,
+                        data=body,
+                        stream=True,
+                        timeout=120,
+                    )
+                except Exception as exc:
+                    # safe_request may raise OutboundUrlBlockedError
+                    logger.error("LLM proxy safe_request error: %s", exc)
+                    return (
+                        jsonify(
+                            {
+                                "error": {
+                                    "message": "Blocked outbound URL: security policy violation",
+                                    "type": "ssrf_blocked",
+                                }
+                            }
+                        ),
+                        403,
+                    )
+            else:
+                # Default provider URL or private URL in allowlist - use regular request
+                import requests as http_requests
+
+                resp = http_requests.request(
+                    method=request.method,
+                    url=target_url,
+                    headers=fwd_headers,
+                    data=body,
+                    stream=True,
+                    timeout=120,
+                    proxies={"http": None, "https": None},  # type: ignore[dict-item]
+                )
 
             if resp.status_code >= 400:
                 peek = (
@@ -1059,6 +1258,19 @@ def handle_llm_proxy_request(
 
                 # 检测上游 quota exceeded 错误并触发告警 (Issue #1060)
                 if resp.status_code == 429 and "quota exceeded" in error_text.lower():
+                    # Bailian Coding Plan uses this wording for a temporary
+                    # allocation rate limit, not for a depleted paid quota.
+                    # Keep it retryable and avoid a false platform-quota alert.
+                    allocated_rate_limited = "usage allocated quota exceeded" in error_text.lower()
+                    if allocated_rate_limited:
+                        logger.warning(
+                            "Upstream allocated rate limit reached for user %d; retry later",
+                            user_id,
+                        )
+                        allocated_rate_limited_key_ids.add(key_id)
+                        exclude_key_ids.add(key_id)
+                        continue
+
                     try:
                         from app.modules.governance.alert_notifier import (
                             create_quota_alert,
@@ -1089,7 +1301,6 @@ def handle_llm_proxy_request(
                     except Exception as alert_exc:
                         logger.error("Failed to create quota exceeded alert: %s", alert_exc)
 
-                    # 返回明确的 quota exceeded 错误
                     return (
                         jsonify(
                             {

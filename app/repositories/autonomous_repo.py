@@ -1039,7 +1039,7 @@ class AutonomousWorkflowRepository:
 
         where = f"WHERE {' AND '.join(conditions)}"
         return self.db.fetch_all(
-            f"SELECT * FROM workflow_milestones {where} ORDER BY created_at ASC",
+            f"SELECT * FROM workflow_milestones {where} ORDER BY created_at ASC, id ASC",
             tuple(params),
         )
 
@@ -1130,7 +1130,8 @@ class AutonomousWorkflowRepository:
     def list_events(self, workflow_id: str, limit: int = 200, offset: int = 0) -> list:
         """List events for a workflow."""
         return self.db.fetch_all(
-            "SELECT * FROM workflow_events WHERE workflow_id = ? ORDER BY created_at ASC LIMIT ? OFFSET ?",
+            "SELECT * FROM workflow_events WHERE workflow_id = ? "
+            "ORDER BY created_at ASC, id ASC LIMIT ? OFFSET ?",
             (workflow_id, limit, offset),
         )
 

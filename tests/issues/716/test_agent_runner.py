@@ -14,6 +14,7 @@ from app.modules.workspace.autonomous.agent_runner import (
     _extract_cli_result_error,
     _LocalSession,
 )
+from app.modules.workspace.session_manager import AgentSession
 
 
 class TestAgentRunnerInit:
@@ -201,6 +202,7 @@ class TestAgentRunnerRunTask:
         runner = AutonomousAgentRunner()
         result = runner.run_agent_task(
             workflow_id="wf-1",
+            user_id=1,
             cli_tool="claude-code",
             model="m1",
             project_path="/tmp/test",
@@ -214,24 +216,41 @@ class TestAgentRunnerRunTask:
     def test_run_remote_success(self):
         """Test remote agent execution via mocked RemoteSessionManager."""
         rsm = MagicMock()
-        rsm.create_remote_session.return_value = {"success": True, "session_id": "rs-1"}
+        # Concrete RemoteSessionManager returns the payload directly, without
+        # a success=True wrapper.
+        rsm.create_remote_session.return_value = {"session_id": "rs-1"}
 
         sm = MagicMock()
-        sm.get_session.return_value = {
-            "status": "completed",
-            "total_tokens": 500,
-            "total_input_tokens": 300,
-            "total_output_tokens": 200,
-        }
+        tracking = AgentSession(
+            session_id="track-1",
+            session_type="workflow",
+            context={"workflow_id": "wf-1"},
+        )
+        remote = AgentSession(
+            session_id="rs-1",
+            # Reusable remote sidebar sessions remain active after a turn;
+            # request completion is carried by the buffered output entry.
+            status="active",
+            total_tokens=500,
+            total_input_tokens=300,
+            total_output_tokens=200,
+            request_count=2,
+        )
+        sm.get_session.side_effect = lambda sid: remote if sid == "rs-1" else tracking
         sm.get_messages.return_value = [
             {"role": "assistant", "content": "Task completed successfully"}
         ]
 
         runner = AutonomousAgentRunner(session_manager=sm, remote_session_manager=rsm)
+        rsm.get_session_status.return_value = {
+            "status": "active",
+            "output": [{"stream": "stdout", "is_complete": True}],
+        }
 
         with patch("time.sleep"):
             result = runner.run_agent_task(
                 workflow_id="wf-1",
+                user_id=7,
                 cli_tool="claude-code",
                 model="m1",
                 project_path="/tmp/test",
@@ -239,20 +258,66 @@ class TestAgentRunnerRunTask:
                 workspace_type="remote",
                 remote_machine_id="machine-1",
                 timeout=5,
+                session_id="track-1",
             )
 
         assert result.success is True
         assert "Task completed" in result.response_text
         assert result.total_tokens == 500
+        assert result.session_id == "rs-1"
+        rsm.create_remote_session.assert_called_once()
+        assert rsm.create_remote_session.call_args.kwargs["user_id"] == 7
+        rsm.send_message.assert_called_once_with(
+            session_id="rs-1", content="Do something", user_id=7
+        )
+        sm.get_session.assert_any_call("rs-1")
+        assert any(
+            call.args[0] == "track-1" and call.args[1].get("cli_session_id") == "rs-1"
+            for call in sm.update_session_fields.call_args_list
+        )
+        # Remote usage reports already own the actual row's counters.
+        sm.increment_session_usage.assert_not_called()
+
+    def test_run_remote_requires_user_id_before_creation(self):
+        rsm = MagicMock()
+        runner = AutonomousAgentRunner(session_manager=MagicMock(), remote_session_manager=rsm)
+
+        result = runner.run_agent_task(
+            workflow_id="wf-1",
+            cli_tool="claude-code",
+            model="m1",
+            project_path="/tmp/test",
+            prompt="Do something",
+            workspace_type="remote",
+            remote_machine_id="machine-1",
+        )
+
+        assert result.success is False
+        assert "User ID" in result.error
+        rsm.create_remote_session.assert_not_called()
+
+    def test_remote_abort_failed_event_is_not_successful_turn_completion(self):
+        assert not AutonomousAgentRunner._remote_turn_complete(
+            {
+                "output": [
+                    {
+                        "stream": "request_state",
+                        "is_complete": True,
+                        "data": '{"type":"abort_failed"}',
+                    }
+                ]
+            }
+        )
 
     def test_run_remote_creation_failure(self):
         """Remote session creation failure."""
         rsm = MagicMock()
         rsm.create_remote_session.return_value = {"success": False, "error": "Machine offline"}
 
-        runner = AutonomousAgentRunner(remote_session_manager=rsm)
+        runner = AutonomousAgentRunner(session_manager=MagicMock(), remote_session_manager=rsm)
         result = runner.run_agent_task(
             workflow_id="wf-1",
+            user_id=1,
             cli_tool="claude-code",
             model="m1",
             project_path="/tmp/test",
@@ -830,6 +895,84 @@ class TestStopSession:
         runner = AutonomousAgentRunner()
         # Should not raise
         runner.stop_session("nonexistent")
+
+    def test_stop_remote_session_marks_tracker_and_notifies_manager(self):
+        remote_manager = MagicMock()
+        runner = AutonomousAgentRunner(remote_session_manager=remote_manager)
+        session = _LocalSession(
+            session_id="remote-1",
+            process=None,
+            persisted_session_id="remote-actual-1",
+        )
+        runner._local_sessions["remote-1"] = session
+
+        runner.stop_session("remote-1")
+
+        remote_manager.stop_session.assert_called_once_with("remote-actual-1")
+        assert session._stopped.is_set()
+        assert session.completed.is_set()
+
+    def test_stop_remote_session_still_drains_when_manager_fails(self):
+        remote_manager = MagicMock()
+        remote_manager.stop_session.side_effect = RuntimeError("remote unavailable")
+        runner = AutonomousAgentRunner(remote_session_manager=remote_manager)
+        session = _LocalSession(session_id="remote-2", process=None)
+        runner._local_sessions["remote-2"] = session
+
+        runner.stop_session("remote-2")
+
+        assert session._stopped.is_set()
+        assert session.completed.is_set()
+
+    def test_shutdown_during_remote_creation_stops_actual_before_prompt(self):
+        create_started = threading.Event()
+        allow_create_to_finish = threading.Event()
+        remote_manager = MagicMock()
+
+        def create_remote_session(**_kwargs):
+            create_started.set()
+            assert allow_create_to_finish.wait(timeout=2)
+            return {"session_id": "remote-actual-race"}
+
+        remote_manager.create_remote_session.side_effect = create_remote_session
+        session_manager = MagicMock()
+        session_manager.get_session.return_value = AgentSession(
+            session_id="remote-actual-race",
+            status="active",
+        )
+        runner = AutonomousAgentRunner(
+            session_manager=session_manager,
+            remote_session_manager=remote_manager,
+        )
+        result_box = {}
+
+        def run_remote():
+            result_box["result"] = runner._run_remote(
+                session_id="tracking-race",
+                user_id=8,
+                cli_tool="claude-code",
+                model="m1",
+                project_path="/tmp/test",
+                prompt="must not dispatch",
+                remote_machine_id="machine-1",
+                permission_mode="auto-edit",
+                timeout=5,
+            )
+
+        worker = threading.Thread(target=run_remote)
+        worker.start()
+        assert create_started.wait(timeout=2)
+        runner.stop_session("tracking-race")
+        allow_create_to_finish.set()
+        worker.join(timeout=2)
+
+        assert not worker.is_alive()
+        assert result_box["result"].success is False
+        remote_manager.send_message.assert_not_called()
+        assert any(
+            call.args[0] == "remote-actual-race"
+            for call in remote_manager.stop_session.call_args_list
+        )
 
 
 class TestPersistLocalSessionMessages:

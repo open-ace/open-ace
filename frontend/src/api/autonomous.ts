@@ -88,6 +88,10 @@ export interface AutonomousWorkflow {
   updated_at: string | null;
   completed_at: string | null;
   paused_at: string | null;
+  /** Stable session lines used by autonomous main/review/test agents. */
+  main_session_id?: string;
+  review_session_id?: string;
+  test_session_id?: string;
 }
 
 export interface WorkflowMilestone {
