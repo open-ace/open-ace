@@ -9,6 +9,62 @@ import pytest
 from app.modules.workspace.autonomous.models import AgentTaskResult
 
 
+@pytest.mark.parametrize(
+    ("return_code", "error_code", "stderr", "expected"),
+    [
+        (
+            126,
+            "",
+            "mutating git commands are reserved for the Open ACE orchestrator",
+            "command guard rejected",
+        ),
+        (1, "", "fatal: detected dubious ownership", "safe-directory validation failed"),
+        (
+            67,
+            "",
+            "openace-run-as: isolated agent must differ from project owner",
+            "rejected by safety checks",
+        ),
+        (
+            68,
+            "",
+            "OPENACE_REPO_INTEGRITY_VIOLATION: .git entry changed",
+            "Protected .git entry changed",
+        ),
+        (23, "", "provider-key=must-not-leak", "exit code 23"),
+        (
+            64,
+            "",
+            "ordinary child usage error",
+            "exit code 64",
+        ),
+        (
+            1,
+            "",
+            "API Error: model not found",
+            "exit code 1",
+        ),
+        (
+            0,
+            "",
+            "",
+            "Failed to detect Claude sidebar session JSONL",
+        ),
+    ],
+)
+def test_sidebar_start_failure_is_actionable_without_raw_stderr(
+    return_code, error_code, stderr, expected
+):
+    from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner
+
+    message = AutonomousAgentRunner._classify_sidebar_start_failure(return_code, error_code, stderr)
+
+    assert expected in message
+    assert "must-not-leak" not in message
+    assert "ordinary child usage error" not in message
+    assert "model not found" not in message
+
+
 def test_actions_job_log_prefers_rest_api_without_run_cache():
     from app.modules.workspace.autonomous.github_ops import GitHubOps
 
