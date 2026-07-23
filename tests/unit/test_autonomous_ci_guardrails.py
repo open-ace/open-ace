@@ -678,11 +678,45 @@ def test_isolated_git_guard_denies_cache_escape(tmp_path):
         env={**env, "GIT_DIR": str(project / ".git")},
         check=False,
     )
+    cache_cwd_init_escape = subprocess.run(
+        [str(_source_git_guard()), "init", str(project / "escaped")],
+        cwd=cache_repo,
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+    object_directory_escape = subprocess.run(
+        [str(_source_git_guard()), "hash-object", "-w", "--stdin"],
+        cwd=cache_repo,
+        input="outside cache",
+        capture_output=True,
+        text=True,
+        env={**env, "GIT_OBJECT_DIRECTORY": str(project / "objects")},
+        check=False,
+    )
+    unsafe_config_escape = subprocess.run(
+        [
+            str(_source_git_guard()),
+            "-c",
+            f"core.worktree={project}",
+            "checkout",
+            "HEAD",
+        ],
+        cwd=cache_repo,
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
 
     assert outside_init.returncode == 126
     assert redirected_commit.returncode == 126
     assert separate_git_dir.returncode == 126
     assert env_redirect.returncode == 126
+    assert cache_cwd_init_escape.returncode == 126
+    assert object_directory_escape.returncode == 126
+    assert unsafe_config_escape.returncode == 126
 
 
 def test_runner_preserves_tool_result_for_test_evidence():
