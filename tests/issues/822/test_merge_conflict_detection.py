@@ -1791,3 +1791,39 @@ class TestAddWorktreeExistingBranch:
         with patch.object(gh, "_run_git"):
             result = gh.add_worktree("/tmp/wt", "feature/x")
             assert result == {"worktree_path": "/tmp/wt", "branch": "feature/x"}
+
+    @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
+    def test_stale_dirty_when_branch_has_main_does_not_resolve(self, mock_gh_cls):
+        """A stale ``dirty`` cache (branch already has main) must not no-op resolve.
+
+        Reproduces issue #1895: after a synchronization push, GitHub briefly
+        reports ``mergeable_state == "dirty"`` while the synthetic merge commit
+        is recomputed, even though the branch already contains main. Driving
+        conflict resolution in that case ran ``git merge`` to "Already up to
+        date" and failed with "made no commit". The guard verifies ancestry and
+        defers to the policy/check path instead.
+        """
+        o, _ = _make_orchestrator(_make_workflow())
+        mock_gh = MagicMock()
+        mock_gh_cls.return_value = mock_gh
+        o._gh = mock_gh
+        mock_gh.get_pr_head_sha.return_value = "pr-head-sha"
+        mock_gh.get_pr_checks.return_value = [{"name": "test", "bucket": "pass"}]
+        mock_gh.merge_pr.side_effect = [
+            GitHubOpsError("gh pr merge 1103 failed: the base branch policy prohibits the merge"),
+        ]
+        mock_gh.get_pr_merge_state.return_value = {
+            "mergeable": True,
+            "mergeable_state": "dirty",
+        }
+        o._sync_failed_pr_with_main = MagicMock(return_value=False)
+        o._branch_contains_main = MagicMock(return_value=True)
+        o._resolve_merge_conflicts = MagicMock()
+
+        with pytest.raises(WorkflowPaused, match="Merge blocked by repository policy"):
+            o._do_merge(_make_workflow())
+
+        o._resolve_merge_conflicts.assert_not_called()
+        o._branch_contains_main.assert_called_once()
+        pause_update = o._update_workflow.call_args.args[0]
+        assert pause_update["status"] == "paused"

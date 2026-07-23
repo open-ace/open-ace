@@ -3482,9 +3482,7 @@ class AutonomousOrchestrator:
         integrations patch it, but final merge now uses the same synchronization
         gate before asking GitHub to merge.
         """
-        gh._run_git(["fetch", "origin", "main"])
-        main_head = gh.resolve_commit("FETCH_HEAD")
-        contains_main = self._ancestor_check(gh, main_head, pr_head_sha)
+        contains_main = self._branch_contains_main(gh, pr_head_sha)
         if contains_main is None:
             raise GitHubOpsError("Unable to verify whether the failed PR contains current main")
         if contains_main:
@@ -3495,6 +3493,17 @@ class AutonomousOrchestrator:
         )
         self._resolve_merge_conflicts(gh, branch_name, pr_number)
         return True
+
+    def _branch_contains_main(self, gh: "GitHubOps", pr_head_sha: str) -> bool | None:
+        """Whether the PR branch already contains current main.
+
+        Returns True if the PR head has main as an ancestor (nothing to merge),
+        False if the branch is behind main, or None when the probe is
+        indeterminate and the caller must fail closed.
+        """
+        gh._run_git(["fetch", "origin", "main"])
+        main_head = gh.resolve_commit("FETCH_HEAD")
+        return self._ancestor_check(gh, main_head, pr_head_sha)
 
     def _start_ci_repair_round(self, wf: dict, pr_number: int, failed_checks: list[dict]) -> None:
         """Repair merge-phase CI failures in-place on the existing PR branch."""
@@ -8342,6 +8351,27 @@ class AutonomousOrchestrator:
                     or is_conflict_rejection
                     or (mergeable is False and not mergeable_state)
                 )
+                # GitHub's mergeability cache can report a stale "dirty"
+                # immediately after a synchronization push, before the
+                # synthetic merge commit is recomputed. The PR branch already
+                # contains main in that case, so verifying ancestry avoids a
+                # no-op merge that fails with "made no commit". Only the
+                # cache-derived "dirty" path needs the probe; text evidence
+                # and a definitive non-mergeable branch are authoritative.
+                if (
+                    is_real_conflict
+                    and mergeable_state == "dirty"
+                    and not is_conflict_rejection
+                    and mergeable is not False
+                    and pr_head_sha
+                    and self._branch_contains_main(gh, pr_head_sha) is True
+                ):
+                    logger.info(
+                        "PR #%s mergeable_state=dirty is stale (branch has main); "
+                        "deferring to policy/check path",
+                        pr_number,
+                    )
+                    is_real_conflict = False
                 if is_real_conflict:
                     try:
                         # Authoritative conflict evidence wins over generic
