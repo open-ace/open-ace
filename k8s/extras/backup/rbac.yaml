@@ -11,9 +11,9 @@ metadata:
     app.kubernetes.io/name: open-ace
     app.kubernetes.io/component: backup
 rules:
-  # Optional: Only needed if backup script exports ConfigMaps/Secrets
+  # Optional: Only needed if backup script exports ConfigMaps
   - apiGroups: [""]
-    resources: ["configmaps", "secrets"]
+    resources: ["configmaps"]
     verbs: ["get", "list"]
   # For cleanup of old job history (optional)
   - apiGroups: ["batch"]
