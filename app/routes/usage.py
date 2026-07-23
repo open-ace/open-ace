@@ -159,8 +159,8 @@ def api_tools():
 def api_hosts():
     """Get list of all hosts from pre-aggregated summary table."""
     tenant_id = _current_tenant_id()
-    # Ensure summary is up to date for global scope
-    if tenant_id is None and summary_service.needs_refresh():
+    # Ensure summary is up to date
+    if summary_service.needs_refresh():
         summary_service.refresh_summary()
 
     if tenant_id is None:
@@ -182,7 +182,7 @@ def api_trend():
 
     # Ensure daily_stats is up to date
     daily_stats_repo = DailyStatsRepository()
-    if tenant_id is None and daily_stats_repo.needs_refresh():
+    if daily_stats_repo.needs_refresh():
         daily_stats_repo.refresh_stats()
 
     entries = usage_service.get_trend_data(

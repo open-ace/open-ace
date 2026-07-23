@@ -8258,7 +8258,12 @@ class AutonomousOrchestrator:
             milestone_result = {}
             # Fetch latest main and merge into the branch.
             wt_gh._run_git(["fetch", "origin", "main"])
-            merge_result = wt_gh._run_git(["merge", "origin/main"], check=False)
+            # Worktrees share their common git dir, so another workflow can
+            # move origin/main while this resolver spends minutes editing and
+            # testing. FETCH_HEAD is the object guaranteed by the command
+            # above; pin it for the merge and every later graph/scope gate.
+            fetched_main_head = wt_gh.resolve_commit("FETCH_HEAD")
+            merge_result = wt_gh._run_git(["merge", fetched_main_head], check=False)
             # git writes conflict summaries to STDOUT (not stderr), so we must
             # check both streams. Checking only stderr left stderr empty on a
             # real conflict and the code misclassified it as a "non-conflict"
@@ -8286,6 +8291,17 @@ class AutonomousOrchestrator:
                     if unmerged_query_error:
                         detail += f"; unable to inspect unmerged index: {unmerged_query_error}"
                     raise GitHubOpsError(f"git merge failed (non-conflict): {detail}")
+
+                initial_unmerged_paths = wt_gh.get_unmerged_paths()
+                if not initial_unmerged_paths:
+                    raise GitHubOpsError(
+                        "git merge reported a conflict but the index has no unmerged paths"
+                    )
+                # Snapshot the complete conflicted index before exposing the
+                # worktree to the agent. PATH wrappers are policy guidance,
+                # not a security boundary: an agent or repository script can
+                # invoke an absolute git binary or write the index indirectly.
+                resolver_index_before = wt_gh.get_index_snapshot()
 
                 # Ask AI agent to resolve conflicts inside the temp worktree.
                 conflict_prompt = (
@@ -8398,11 +8414,35 @@ class AutonomousOrchestrator:
                             f"expected={branch_name!r}, actual={current_branch!r}"
                         )
                     unmerged_paths = wt_gh.get_unmerged_paths()
-                    marker_paths = wt_gh.get_conflict_marker_paths(unmerged_paths)
+                    marker_paths = wt_gh.get_conflict_marker_paths(
+                        sorted(set(initial_unmerged_paths) | set(unmerged_paths))
+                    )
                     if marker_paths:
                         raise RuntimeError(
                             "Conflict resolver left conflict markers in: "
                             + ", ".join(marker_paths[:10])
+                        )
+                    agent_head = wt_gh.get_current_commit()
+                    if agent_head != original_pr_head:
+                        raise RuntimeError(
+                            "Conflict resolver changed HEAD; commits and merge-state changes "
+                            "are reserved for the orchestrator"
+                        )
+                    resolver_index_after = wt_gh.get_index_snapshot()
+                    resolver_index_changes = wt_gh.get_index_changed_paths(
+                        resolver_index_before, resolver_index_after
+                    )
+                    if resolver_index_changes:
+                        raise RuntimeError(
+                            "Conflict resolver changed the Git index; staging is reserved for "
+                            "the orchestrator. Paths: " + ", ".join(resolver_index_changes[:10])
+                        )
+                    resolver_changed_paths = wt_gh.get_worktree_changed_paths()
+                    resolver_scope_error = self._scope_violation(resolver_changed_paths)
+                    if resolver_scope_error:
+                        raise RuntimeError(
+                            "Conflict resolver scope rejected before staging: "
+                            f"{resolver_scope_error}"
                         )
                     wt_gh.git_add_all()
                     remaining_unmerged = wt_gh.get_unmerged_paths()
@@ -8452,16 +8492,22 @@ class AutonomousOrchestrator:
                     raise RuntimeError("Merge resolution made no commit; refusing unchanged push")
 
                 pr_head_in_result = self._ancestor_check(wt_gh, original_pr_head, resolved_head)
-                main_head_in_result = self._ancestor_check(wt_gh, "origin/main", resolved_head)
+                main_head_in_result = self._ancestor_check(wt_gh, fetched_main_head, resolved_head)
                 if pr_head_in_result is not True or main_head_in_result is not True:
                     raise RuntimeError(
                         "Merge commit ancestry verification failed before push: "
                         f"pr_head={pr_head_in_result!r}, origin_main={main_head_in_result!r}"
                     )
                 merge_scope_wf = dict(wf)
-                merge_scope_wf["base_commit_sha"] = "origin/main"
+                merge_scope_wf["base_commit_sha"] = fetched_main_head
+                # original_pr_head..resolved_head includes every upstream file
+                # brought in by the merge.  That is not autonomous resolver
+                # scope and can exceed the file cap on an old PR even when the
+                # agent touched one conflict.  The resolver's actual edit set
+                # was checked before staging above; this common gate now checks
+                # the cumulative PR delta relative to the fetched main.
                 scope_error = self._validate_autonomous_change_scope(
-                    wt_gh, merge_scope_wf, original_pr_head, resolved_head
+                    wt_gh, merge_scope_wf, fetched_main_head, resolved_head
                 )
                 if scope_error:
                     raise RuntimeError(

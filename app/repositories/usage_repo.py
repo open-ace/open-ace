@@ -1375,25 +1375,22 @@ class UsageRepository:
         start_date: str,
         end_date: str,
     ) -> tuple[int, int]:
-        """Query agent_sessions for session-backed tokens/requests in a window.
+        """Query session_messages for tokens/requests in a date window.
 
-        Shared by get_combined_usage (Manage page) and get_session_only_usage
-        (Work page) so the workspace_type/date/request-subquery filter lives in
-        one place — see #1272 review (avoid two copies drifting).
+        Changed from agent_sessions.created_at to session_messages.timestamp
+        to correctly count messages for long-running sessions like webui:N.
+        See Issue #1974 for details.
         """
         session_row = self.db.fetch_one(
             """
             SELECT
-                COALESCE(SUM(total_tokens), 0) as tokens,
-                COALESCE(SUM(
-                    (SELECT COUNT(*) FROM session_messages sm
-                     WHERE sm.session_id = agent_sessions.session_id
-                       AND sm.role = 'assistant')
-                ), 0) as requests
-            FROM agent_sessions
-            WHERE user_id = ?
-              AND workspace_type IN ('local', 'remote', 'terminal')
-              AND CAST(created_at AS DATE) >= ? AND CAST(created_at AS DATE) <= ?
+                COALESCE(SUM(sm.tokens_used), 0) as tokens,
+                COUNT(CASE WHEN sm.role = 'assistant' THEN 1 END) as requests
+            FROM session_messages sm
+            JOIN agent_sessions a ON sm.session_id = a.session_id
+            WHERE a.user_id = ?
+              AND a.workspace_type IN ('local', 'remote', 'terminal')
+              AND CAST(sm.timestamp AS DATE) >= ? AND CAST(sm.timestamp AS DATE) <= ?
         """,
             (user_id, start_date, end_date),
         )

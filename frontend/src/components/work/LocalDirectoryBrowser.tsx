@@ -345,13 +345,22 @@ export const LocalDirectoryBrowser: React.FC<LocalDirectoryBrowserProps> = ({
     // Reset input so selecting the same file again fires onChange.
     e.target.value = '';
 
-    if (!isWritable) {
+    const targetIsWritable = isWritable;
+
+    if (!targetIsWritable) {
       toast.error(
         t('uploadFailed', language) || 'Upload failed',
         t('notWritable', language) || 'Directory is not writable'
       );
       return;
     }
+
+    // Issue #1959 (root cause): Capture the target directory at the start.
+    // `currentPath` is React state and can change during async operations
+    // (e.g., if the user navigates to another directory while uploading).
+    // Using the captured value ensures files are uploaded to and refreshed
+    // from the intended directory.
+    const targetDir = currentPath;
 
     for (const file of Array.from(selected)) {
       if (file.size > MAX_UPLOAD_SIZE_MB * 1024 * 1024) {
@@ -365,7 +374,7 @@ export const LocalDirectoryBrowser: React.FC<LocalDirectoryBrowserProps> = ({
 
       setIsUploading(true);
       try {
-        const result = await fsApi.uploadFile(file, currentPath);
+        const result = await fsApi.uploadFile(file, targetDir);
         if (result.success) {
           toast.success(t('uploadSuccess', language) || 'File uploaded', file.name);
         } else {
@@ -382,10 +391,18 @@ export const LocalDirectoryBrowser: React.FC<LocalDirectoryBrowserProps> = ({
     }
 
     // Refresh the listing so the uploaded file appears.
+    // Issue #1959 (follow-up): Exit search mode before refreshing.
+    // If the user uploaded while in search mode, they expect to see the
+    // uploaded file in the normal listing. Clearing the search state
+    // restores the regular directory view so the new file is visible.
+    setSearchQuery('');
+    setSearchResults(null);
+    setSearchTruncated(false);
+
     // Issue #1959: wrap in try-catch to prevent unhandled exceptions,
     // even though fetchDirectories has its own error handling (Issue #1912).
     try {
-      await fetchDirectories(currentPath);
+      await fetchDirectories(targetDir);
     } catch (err) {
       console.error('Failed to refresh directory listing after upload:', err);
     }

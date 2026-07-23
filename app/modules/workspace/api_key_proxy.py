@@ -30,6 +30,53 @@ except ModuleNotFoundError:  # pragma: no cover - Python < 3.11
 
 logger = logging.getLogger(__name__)
 
+# ─────────────────────────────────────────────────────────────────────
+# CLI Tools and Protocol Definitions
+# Shared with remote-agent/terminal_menu.py and frontend
+# ─────────────────────────────────────────────────────────────────────
+
+# CLI tool definitions with protocol mapping
+CLI_TOOLS: dict[str, dict[str, str]] = {
+    "claude-code": {"name": "Claude Code", "protocol": "anthropic", "env_key": "ANTHROPIC_API_KEY"},
+    "qwen-code": {"name": "Qwen Code", "protocol": "openai", "env_key": "OPENAI_API_KEY"},
+    "codex-cli": {"name": "Codex", "protocol": "openai", "env_key": "OPENAI_API_KEY"},
+    "zcode": {"name": "ZCode", "protocol": "anthropic", "env_key": "ANTHROPIC_API_KEY"},
+}
+
+# Provider to protocol mapping
+# Multiple providers may use the same protocol (e.g., deepseek, bailian -> openai)
+PROTOCOL_MAP: dict[str, str] = {
+    # OpenAI-compatible protocol
+    "openai": "openai",
+    "deepseek": "openai",
+    "bailian": "openai",
+    # Anthropic-compatible protocol
+    "anthropic": "anthropic",
+    "zai": "anthropic",
+}
+
+
+def get_protocol_for_provider(provider: str) -> str:
+    """Map provider to protocol type."""
+    return PROTOCOL_MAP.get(provider, "unknown")
+
+
+def get_terminal_groups() -> list[dict[str, Any]]:
+    """Get terminal model groups with supported CLI tools."""
+    groups: dict[str, dict[str, Any]] = {}
+    for tool_info in CLI_TOOLS.values():
+        protocol = tool_info["protocol"]
+        if protocol not in groups:
+            # Capitalize protocol name: openai -> OpenAI, anthropic -> Anthropic
+            groups[protocol] = {
+                "protocol": protocol,
+                "label": protocol.capitalize(),
+                "tools": [],
+            }
+        groups[protocol]["tools"].append(tool_info["name"])
+    return list(groups.values())
+
+
 # Environment variable keys that contain API credentials.
 # These must NEVER be written to settings.json — they are injected
 # via environment variables by the remote agent at process launch time.
@@ -790,6 +837,47 @@ class APIKeyProxyService:
         conn.close()
         return success
 
+    def get_key_by_id(self, tenant_id: int, key_id: int) -> dict[str, Any] | None:
+        """Get an API key by its ID.
+
+        Args:
+            tenant_id: Tenant ID for security check.
+            key_id: The key ID to retrieve.
+
+        Returns:
+            Dict with key info or None if not found.
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute(
+            f"""
+            SELECT id, provider, key_name, base_url, cli_tools, cli_settings, priority, weight, scope, is_active
+            FROM api_key_store
+            WHERE tenant_id = {_param()} AND id = {_param()}
+        """,
+            (tenant_id, key_id),
+        )
+
+        row = cursor.fetchone()
+        conn.close()
+
+        if not row:
+            return None
+
+        return {
+            "id": row["id"],
+            "provider": row["provider"],
+            "key_name": row["key_name"],
+            "base_url": row["base_url"],
+            "cli_tools": row["cli_tools"],
+            "cli_settings": row["cli_settings"],
+            "priority": row["priority"] if row["priority"] is not None else 0,
+            "weight": row["weight"] if row["weight"] is not None else 100,
+            "scope": row["scope"] or "remote",
+            "is_active": bool(row["is_active"]),
+        }
+
     def update_api_key_by_id(
         self,
         key_id: int,
@@ -949,6 +1037,55 @@ class APIKeyProxyService:
 
         # Multiple keys — merge modelProviders from all keys
         return self._merge_multi_key_settings(ranked_settings)
+
+    def get_cli_settings_for_key(
+        self,
+        tenant_id: int,
+        key_id: int,
+        tool_name: str,
+    ) -> dict[str, Any] | None:
+        """Get CLI settings for a specific key and tool.
+
+        This is used when a user selects a specific model/key combination,
+        ensuring only that key's settings are passed to the remote terminal.
+
+        Args:
+            tenant_id: Tenant ID.
+            key_id: The specific API key ID.
+            tool_name: CLI tool name (e.g., "claude-code", "qwen-code").
+
+        Returns:
+            Dict with settings for this specific key/tool, or None if not found.
+        """
+        key_info = self.get_key_by_id(tenant_id, key_id)
+        if not key_info:
+            return None
+
+        cli_settings_str = key_info.get("cli_settings") or "{}"
+        try:
+            cli_settings = json.loads(cli_settings_str) if cli_settings_str else {}
+        except json.JSONDecodeError:
+            cli_settings = {}
+
+        canonical_tool = normalize_tool_name(tool_name)
+
+        # Try to find tool-specific settings
+        # The key may be stored under various forms (tool_name, canonical_tool, or alias)
+        alias_candidates = [tool_name]
+        alias_candidates.extend(TOOL_NAME_ALIASES.get(canonical_tool, []))
+        seen_keys: set[str] = set()
+        tool_settings: Any = {}
+        for candidate in alias_candidates:
+            key = candidate.strip().lower()
+            if not key or key in seen_keys:
+                continue
+            seen_keys.add(key)
+            value = cli_settings.get(candidate) or cli_settings.get(key)
+            if value:
+                tool_settings = value
+                break
+
+        return self._build_cli_settings_for_tool(tool_name, tool_settings)
 
     def _collect_tool_key_settings(
         self,
@@ -1154,7 +1291,7 @@ class APIKeyProxyService:
             cursor = conn.cursor()
             cursor.execute(
                 f"""
-                SELECT id, provider, encrypted_key, base_url, cli_tools, cli_settings, priority, weight, scope
+                SELECT id, provider, key_name, encrypted_key, base_url, cli_tools, cli_settings, priority, weight, scope
                 FROM api_key_store
                 WHERE tenant_id = {_param()} AND provider = {_param()} AND is_active = TRUE
                   AND (scope = {_param()} OR scope = 'shared')
@@ -1244,6 +1381,8 @@ class APIKeyProxyService:
             candidate_keys.append(
                 {
                     "key_id": key_id,
+                    "key_name": row.get("key_name", f"Key-{key_id}"),
+                    "provider": row.get("provider", ""),
                     "priority": priority,
                     "weight": weight,
                     "scope": row.get("scope") or scope,
@@ -1412,6 +1551,68 @@ class APIKeyProxyService:
                 if isinstance(entry, dict) and entry.get("id"):
                     models.append({"id": entry["id"], "name": entry.get("name") or entry["id"]})
         return models
+
+    def get_all_terminal_models(
+        self,
+        tenant_id: int,
+        scope: str = "remote",
+    ) -> dict[str, Any]:
+        """Get all available models for terminal mode across all CLI tools.
+
+        Returns models with key_name and protocol for differentiation.
+        Models appearing in multiple API keys are marked as duplicates.
+
+        Returns:
+            Dict with "models" list and "groups" list for UI rendering.
+        """
+        all_models: list[dict[str, Any]] = []
+        model_count: dict[str, int] = {}  # Track how many keys have each model
+
+        for tool_name in CLI_TOOLS:
+            # Determine provider for this tool
+            tool_info = CLI_TOOLS[tool_name]
+            protocol = tool_info["protocol"]
+
+            # Map protocol to provider for database query
+            provider = "openai" if protocol == "openai" else "anthropic"
+
+            pool = self.get_tool_model_pool(tenant_id, tool_name, scope, provider)
+            candidate_keys = pool.get("candidate_keys", [])
+            model_key_ids = pool.get("model_key_ids", {})
+
+            for model in pool.get("models", []):
+                model_id = model.get("id")
+                model_name = model.get("name", model_id)
+
+                # Find all keys that support this model
+                for key_id in model_key_ids.get(model_id, []):
+                    # Find the candidate_key for this key_id
+                    for ck in candidate_keys:
+                        if ck["key_id"] == key_id:
+                            all_models.append(
+                                {
+                                    "id": model_id,
+                                    "name": model_name,
+                                    "key_id": key_id,
+                                    "key_name": ck.get("key_name", f"Key-{key_id}"),
+                                    "provider": ck.get("provider", ""),
+                                    "protocol": get_protocol_for_provider(ck.get("provider", "")),
+                                }
+                            )
+                            model_count[model_id] = model_count.get(model_id, 0) + 1
+                            break
+
+        # Mark duplicates
+        for m in all_models:
+            m["is_duplicate"] = model_count.get(m["id"], 0) > 1
+
+        # Sort by protocol, then by name
+        all_models.sort(key=lambda x: (x.get("protocol", ""), x.get("name", "")))
+
+        return {
+            "models": all_models,
+            "groups": get_terminal_groups(),
+        }
 
     def _build_cli_settings_for_tool(
         self,
