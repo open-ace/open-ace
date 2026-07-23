@@ -723,6 +723,14 @@ class GitHubOps:
         result = self._run_git(["rev-parse", "HEAD"])
         return result.stdout.strip()
 
+    def resolve_commit(self, ref: str) -> str:
+        """Resolve a ref to an immutable commit SHA."""
+        result = self._run_git(["rev-parse", "--verify", f"{ref}^{{commit}}"])
+        sha = result.stdout.strip()
+        if not sha:
+            raise GitHubOpsError(f"Unable to resolve commit ref: {ref}")
+        return sha
+
     def checkout(self, ref: str) -> None:
         """Checkout a branch or commit."""
         self._run_git(["checkout", ref])
@@ -1410,6 +1418,68 @@ class GitHubOps:
             )
         return [line.strip() for line in result.stdout.splitlines() if line.strip()]
 
+    def get_worktree_changed_paths(self) -> list[str]:
+        """Return tracked working-tree changes plus untracked files.
+
+        During a conflicted merge, clean changes brought in from the other
+        parent are already staged in the index.  This view therefore isolates
+        the resolver's still-unstaged edits (including U-stage paths) instead
+        of counting every file that arrived from ``origin/main``.
+        """
+        tracked = self._run_git(["diff", "--name-only"], check=False)
+        if tracked.returncode != 0:
+            raise GitHubOpsError(
+                f"Unable to inspect working-tree changes (exit code {tracked.returncode}): "
+                f"{(tracked.stderr or tracked.stdout).strip()}"
+            )
+        untracked = self._run_git(["ls-files", "--others", "--exclude-standard"], check=False)
+        if untracked.returncode != 0:
+            raise GitHubOpsError(
+                f"Unable to inspect untracked files (exit code {untracked.returncode}): "
+                f"{(untracked.stderr or untracked.stdout).strip()}"
+            )
+        return sorted(
+            {
+                line.strip()
+                for output in (tracked.stdout, untracked.stdout)
+                for line in output.splitlines()
+                if line.strip()
+            }
+        )
+
+    def get_index_snapshot(self) -> dict[str, tuple[str, ...]]:
+        """Return the complete staged-index identity grouped by path.
+
+        Each value contains the mode/blob/stage tuples emitted by
+        ``git ls-files --stage``.  U-stage paths therefore retain all base,
+        ours, and theirs entries, while normal staged files have one stage-0
+        entry.  ``-z`` keeps unusual filenames unambiguous.
+        """
+        result = self._run_git(["ls-files", "--stage", "-z"], check=False)
+        if result.returncode != 0:
+            raise GitHubOpsError(
+                f"Unable to snapshot git index (exit code {result.returncode}): "
+                f"{(result.stderr or result.stdout).strip()}"
+            )
+        entries: dict[str, list[str]] = {}
+        for record in result.stdout.split("\0"):
+            if not record:
+                continue
+            identity, separator, path = record.partition("\t")
+            if not separator or not identity or not path:
+                raise GitHubOpsError("Unable to parse git index snapshot")
+            entries.setdefault(path, []).append(identity)
+        return {path: tuple(sorted(identities)) for path, identities in entries.items()}
+
+    @staticmethod
+    def get_index_changed_paths(
+        before: dict[str, tuple[str, ...]], after: dict[str, tuple[str, ...]]
+    ) -> list[str]:
+        """Return paths whose stage entries were added, removed, or changed."""
+        return sorted(
+            path for path in set(before) | set(after) if before.get(path) != after.get(path)
+        )
+
     def get_conflict_marker_paths(self, paths: list[str]) -> list[str]:
         """Return files that still contain standard merge-conflict markers.
 
@@ -1419,6 +1489,15 @@ class GitHubOps:
         """
         if not paths:
             return []
+        existing_paths = [
+            path
+            for path in sorted(set(paths))
+            if self.path_exists_as_user(os.path.join(self.repo_path, path), file_only=True)
+        ]
+        # Deleting a conflicted file is a valid resolution. Owner-side
+        # ``git add -A`` records that deletion after this marker check.
+        if not existing_paths:
+            return []
         result = self._run_git(
             [
                 "grep",
@@ -1427,13 +1506,13 @@ class GitHubOps:
                 "-I",
                 "-E",
                 "-e",
-                r"^<<<<<<<( |$)",
+                r"^<{7,}( |$)",
                 "-e",
-                r"^=======$",
+                r"^={7,}$",
                 "-e",
-                r"^>>>>>>>( |$)",
+                r"^>{7,}( |$)",
                 "--",
-                *paths,
+                *existing_paths,
             ],
             check=False,
         )
