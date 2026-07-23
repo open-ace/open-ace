@@ -13,7 +13,7 @@ Two bugs caused worktrees in the 807-845 batch to fail at the merge phase:
    needs ``--auto`` so GitHub merges asynchronously once requirements pass.
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 
@@ -66,6 +66,7 @@ def _make_orchestrator(wf):
     o._create_milestone = MagicMock(return_value={"milestone_id": "ms-1"})
     o._accumulate_tokens = MagicMock()
     o._write_phase_usage = MagicMock()
+    o._validate_pre_merge_change_scope = MagicMock(return_value="")
     return o, mock_repo
 
 
@@ -304,6 +305,96 @@ class TestDoMergeDeferredRetry:
         o._do_merge(_make_workflow())
 
         mock_gh.merge_pr.assert_not_called()
+
+    # Pre-merge scope must exclude upstream files merged into an old PR.
+
+    def test_uses_graph_merge_base_and_backfills_stale_scope_base(self):
+        wf = _make_workflow(base_commit_sha="old-branch-base")
+        o, _ = _make_orchestrator(wf)
+        gh = MagicMock()
+        gh.resolve_commit.return_value = "fetched-main-head"
+        gh._run_git.side_effect = [
+            MagicMock(returncode=0, stdout="", stderr=""),
+            MagicMock(returncode=0, stdout="fetched-main-head\n", stderr=""),
+        ]
+        gh.get_changed_files.return_value = [f"business/file-{index}.py" for index in range(16)]
+
+        assert (
+            AutonomousOrchestrator._validate_pre_merge_change_scope(o, gh, wf, "resolved-pr-head")
+            == ""
+        )
+
+        assert gh._run_git.call_args_list == [
+            call(["fetch", "origin", "main"]),
+            call(["merge-base", "resolved-pr-head", "fetched-main-head"], check=False),
+        ]
+        gh.get_changed_files.assert_called_once_with("fetched-main-head", "resolved-pr-head")
+        o._update_workflow.assert_called_once_with({"base_commit_sha": "fetched-main-head"})
+        assert wf["base_commit_sha"] == "fetched-main-head"
+
+    def test_effective_pr_delta_still_enforces_scope_cap(self):
+        wf = _make_workflow(base_commit_sha="old-branch-base")
+        o, _ = _make_orchestrator(wf)
+        gh = MagicMock()
+        gh.resolve_commit.return_value = "fetched-main-head"
+        gh._run_git.side_effect = [
+            MagicMock(returncode=0, stdout="", stderr=""),
+            MagicMock(returncode=0, stdout="effective-base\n", stderr=""),
+        ]
+        gh.get_changed_files.return_value = [f"agent/file-{index}.py" for index in range(61)]
+
+        error = AutonomousOrchestrator._validate_pre_merge_change_scope(
+            o, gh, wf, "resolved-pr-head"
+        )
+
+        assert "61 files changed" in error
+        o._update_workflow.assert_not_called()
+
+    def test_merge_base_failure_fails_closed(self):
+        o, _ = _make_orchestrator(_make_workflow())
+        gh = MagicMock()
+        gh.resolve_commit.return_value = "fetched-main-head"
+        gh._run_git.side_effect = [
+            MagicMock(returncode=0, stdout="", stderr=""),
+            MagicMock(returncode=1, stdout="", stderr="no common ancestor"),
+        ]
+
+        error = AutonomousOrchestrator._validate_pre_merge_change_scope(
+            o, gh, _make_workflow(), "pr-head"
+        )
+
+        assert "could not derive effective PR base" in error
+        gh.get_changed_files.assert_not_called()
+        o._update_workflow.assert_not_called()
+
+    def test_same_cycle_ci_repair_receives_refreshed_scope_base(self):
+        wf = _make_workflow(base_commit_sha="old-branch-base")
+        o, _ = _make_orchestrator(wf)
+        o._validate_pre_merge_change_scope = (
+            AutonomousOrchestrator._validate_pre_merge_change_scope.__get__(
+                o, AutonomousOrchestrator
+            )
+        )
+        o._start_ci_repair_round = MagicMock()
+        gh = MagicMock()
+        o._gh = gh
+        gh.get_pr_head_sha.return_value = "resolved-pr-head"
+        gh.resolve_commit.return_value = "fetched-main-head"
+        gh._run_git.side_effect = [
+            MagicMock(returncode=0, stdout="", stderr=""),
+            MagicMock(returncode=0, stdout="fetched-main-head\n", stderr=""),
+        ]
+        gh.get_changed_files.return_value = [f"business/file-{index}.py" for index in range(18)]
+        failed_checks = [{"name": "migration", "bucket": "fail"}]
+        gh.get_pr_checks.return_value = failed_checks
+
+        o._do_merge(wf)
+
+        o._start_ci_repair_round.assert_called_once_with(wf, 1103, failed_checks)
+        assert o._start_ci_repair_round.call_args.args[0]["base_commit_sha"] == (
+            "fetched-main-head"
+        )
+        gh.merge_pr.assert_not_called()
 
     @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
     def test_ci_pass_merges_successfully(self, mock_gh_cls):
