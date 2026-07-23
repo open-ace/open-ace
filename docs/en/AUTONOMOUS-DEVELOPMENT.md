@@ -343,16 +343,16 @@ Important settings:
 | `OPENACE_RUN_AS` | `/usr/local/bin/openace-run-as` | Isolated launcher |
 | `OPENACE_AGENT_GUARD_BIN` | `/usr/local/libexec/openace-agent-bin` | Controlled command directory for isolated execution |
 
-Internal limits referenced elsewhere in this document are also module-level constants (in `app/services/autonomous_scheduler.py` and `app/modules/workspace/autonomous/orchestrator.py`) and are not operator-tunable:
+Internal limits referenced elsewhere in this document are also module-level constants and are not operator-tunable:
 
-| Constant | Default | Purpose |
-|----------|---------|---------|
-| `MAX_CONCURRENT_WORKFLOWS` | `3` | Concurrent workflows advanced by the scheduler (see also §6) |
-| `MAX_CI_REPAIR_ATTEMPTS` | `3` | Automatic merge-phase CI repair attempts (§9.2) |
-| `MAX_CI_DIAGNOSTICS_ATTEMPTS` | `6` | Bounded scheduler polls when failed-job logs stay unavailable (§9.2) |
-| `MAX_PRE_COMMIT_CONVERGENCE_PASSES` | `3` | Isolated `pre-commit` convergence rounds (§9.2) |
-| `API_RETRY_TOTAL_TIMEOUT` | `1800` seconds | Maximum total backoff window for transient API errors, roughly 30 minutes (§10) |
-| `PLANNING_TIMEOUT` | `1800` seconds | Planning phase timeout |
+| Constant | Default | Source | Purpose |
+|----------|---------|--------|---------|
+| `MAX_CONCURRENT_WORKFLOWS` | `3` | `app/services/autonomous_scheduler.py` | Concurrent workflows advanced by the scheduler (see also §6) |
+| `MAX_CI_REPAIR_ATTEMPTS` | `3` | `app/modules/workspace/autonomous/orchestrator.py` | Automatic merge-phase CI repair attempts (§9.2) |
+| `MAX_CI_DIAGNOSTICS_ATTEMPTS` | `6` | `app/modules/workspace/autonomous/orchestrator.py` | Bounded scheduler polls when failed-job logs stay unavailable (§9.2) |
+| `MAX_PRE_COMMIT_CONVERGENCE_PASSES` | `3` | `app/modules/workspace/autonomous/orchestrator.py` | Isolated `pre-commit` convergence rounds (§9.2) |
+| `API_RETRY_TOTAL_TIMEOUT` | `1800` seconds | `app/modules/workspace/autonomous/orchestrator.py` | Maximum total backoff window for transient API errors, roughly 30 minutes (§10) |
+| `PLANNING_TIMEOUT` | `1800` seconds | `app/modules/workspace/autonomous/orchestrator.py` | Planning phase timeout |
 
 When upgrading an older installation, run the installer validation/upgrade path and confirm that legacy broad `openace-run-as` sudoers files are disabled.
 
