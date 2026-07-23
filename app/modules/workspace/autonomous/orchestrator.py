@@ -2187,6 +2187,52 @@ class AutonomousOrchestrator:
                 return f"{label.capitalize()} {violation}"
         return ""
 
+    def _validate_pre_merge_change_scope(
+        self,
+        gh: GitHubOps,
+        wf: dict,
+        pr_head_sha: str,
+    ) -> str:
+        """Validate the effective PR delta against an immutable main snapshot.
+
+        A conflict resolver can merge months of upstream main history into an
+        old PR branch.  The workflow's original ``base_commit_sha`` must not be
+        used as the pre-merge "current round" boundary after that merge: doing
+        so counts every upstream file as an autonomous edit.  The graph merge
+        base with the just-fetched main commit is the effective PR base both
+        before and after an upstream merge.
+        """
+        if not pr_head_sha:
+            return "Pre-merge change scope could not be verified: missing PR head"
+        try:
+            gh._run_git(["fetch", "origin", "main"])
+            fetched_main_head = gh.resolve_commit("FETCH_HEAD")
+            merge_base_result = gh._run_git(
+                ["merge-base", pr_head_sha, fetched_main_head], check=False
+            )
+            effective_base = merge_base_result.stdout.strip()
+            if merge_base_result.returncode != 0 or not effective_base:
+                raise GitHubOpsError("git merge-base returned no commit")
+        except Exception as exc:
+            return f"Pre-merge change scope could not derive effective PR base: {exc}"
+
+        effective_wf = dict(wf)
+        effective_wf["base_commit_sha"] = effective_base
+        scope_error = self._validate_autonomous_change_scope(
+            gh, effective_wf, effective_base, pr_head_sha
+        )
+        if not scope_error and (wf.get("base_commit_sha") or "").strip() != effective_base:
+            # Once upstream main has been merged, subsequent CI-repair rounds
+            # must use the same effective PR base rather than the stale branch
+            # creation point.  This updates only scope metadata, never usage or
+            # session history.
+            self._update_workflow({"base_commit_sha": effective_base})
+            # _do_merge can enter CI repair later in this same scheduler cycle.
+            # Keep that in-memory snapshot aligned with the persisted value so
+            # its scope validator cannot reuse the stale branch-creation base.
+            wf["base_commit_sha"] = effective_base
+        return scope_error
+
     def _get_ci_repair_prompt(self, wf: dict) -> str:
         """Return merge-phase CI repair context, or empty."""
         context = wf.get("ci_repair_context", "")
@@ -8086,9 +8132,7 @@ class AutonomousOrchestrator:
         if pr_number:
             try:
                 pr_head_sha = gh.get_pr_head_sha(pr_number)
-                scope_error = self._validate_autonomous_change_scope(
-                    gh, wf, (wf.get("base_commit_sha") or pr_head_sha), pr_head_sha
-                )
+                scope_error = self._validate_pre_merge_change_scope(gh, wf, pr_head_sha)
             except Exception as exc:
                 scope_error = f"Pre-merge change scope could not be verified: {exc}"
             if scope_error:
