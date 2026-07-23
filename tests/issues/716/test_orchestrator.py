@@ -1003,8 +1003,12 @@ class TestOrchestratorMerge:
 
         mock_gh = MagicMock()
         mock_gh.merge_pr.return_value = {"merged": True}
+        mock_gh.get_pr_head_sha.return_value = "pr-head"
+        mock_gh.get_pr_checks.return_value = [{"name": "test", "bucket": "pass"}]
         mock_gh_cls.return_value = mock_gh
         orch._gh = mock_gh
+        orch._validate_pre_merge_change_scope = MagicMock(return_value="")
+        orch._sync_failed_pr_with_main = MagicMock(return_value=False)
 
         orch._do_merge(wf)
 
@@ -1028,8 +1032,12 @@ class TestOrchestratorMerge:
 
         mock_gh = MagicMock()
         mock_gh.merge_pr.return_value = {"merged": True}
+        mock_gh.get_pr_head_sha.return_value = "pr-head"
+        mock_gh.get_pr_checks.return_value = [{"name": "test", "bucket": "pass"}]
         mock_gh_cls.return_value = mock_gh
         orch._gh = mock_gh
+        orch._validate_pre_merge_change_scope = MagicMock(return_value="")
+        orch._sync_failed_pr_with_main = MagicMock(return_value=False)
 
         orch._do_merge(wf)
 

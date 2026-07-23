@@ -339,8 +339,11 @@ export const LocalDirectoryBrowser: React.FC<LocalDirectoryBrowserProps> = ({
   };
 
   const handleFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selected = e.target.files;
-    if (!selected || selected.length === 0) return;
+    // Issue #1959: FileList is a "live" object bound to the input element.
+    // When e.target.value is cleared, e.target.files is also cleared.
+    // Must convert to array immediately to preserve the file references.
+    const selected = e.target.files ? Array.from(e.target.files) : [];
+    if (selected.length === 0) return;
 
     // Reset input so selecting the same file again fires onChange.
     e.target.value = '';

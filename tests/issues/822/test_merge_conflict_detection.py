@@ -18,7 +18,7 @@ from unittest.mock import MagicMock, call, patch
 import pytest
 
 from app.modules.workspace.autonomous.github_ops import GitHubOps, GitHubOpsError
-from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator, WorkflowPaused
 
 
 def _make_workflow(**overrides):
@@ -68,6 +68,9 @@ def _make_orchestrator(wf):
     o._write_phase_usage = MagicMock()
     o._validate_pre_merge_change_scope = MagicMock(return_value="")
     o._sync_failed_pr_with_main = MagicMock(return_value=False)
+    # The remote-head sync runs real git ops; stub it so tests model only the
+    # merge/resolve sequence (the sync itself is unit-tested separately).
+    o._sync_worktree_to_pr_remote_head = MagicMock()
     return o, mock_repo
 
 
@@ -307,11 +310,33 @@ class TestDoMergeDeferredRetry:
 
         mock_gh.merge_pr.assert_not_called()
 
+    @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
+    def test_branch_behind_main_syncs_before_ci_and_merge(self, mock_gh_cls):
+        """A required-up-to-date rule must be satisfied before merge is tried."""
+        o, _ = _make_orchestrator(_make_workflow())
+        mock_gh = MagicMock()
+        mock_gh_cls.return_value = mock_gh
+        o._gh = mock_gh
+        o._sync_failed_pr_with_main.return_value = True
+        mock_gh.get_pr_head_sha.return_value = "old-pr-head"
+
+        o._do_merge(_make_workflow())
+
+        o._sync_failed_pr_with_main.assert_called_once_with(
+            mock_gh,
+            "auto-dev/fc82f22a",
+            1103,
+            "old-pr-head",
+        )
+        mock_gh.get_pr_checks.assert_not_called()
+        mock_gh.merge_pr.assert_not_called()
+
     # Pre-merge scope must exclude upstream files merged into an old PR.
 
     def test_uses_graph_merge_base_and_backfills_stale_scope_base(self):
         wf = _make_workflow(base_commit_sha="old-branch-base")
         o, _ = _make_orchestrator(wf)
+        o._ensure_pr_head_local = MagicMock(return_value=True)
         gh = MagicMock()
         gh.resolve_commit.return_value = "fetched-main-head"
         gh._run_git.side_effect = [
@@ -336,6 +361,7 @@ class TestDoMergeDeferredRetry:
     def test_effective_pr_delta_still_enforces_scope_cap(self):
         wf = _make_workflow(base_commit_sha="old-branch-base")
         o, _ = _make_orchestrator(wf)
+        o._ensure_pr_head_local = MagicMock(return_value=True)
         gh = MagicMock()
         gh.resolve_commit.return_value = "fetched-main-head"
         gh._run_git.side_effect = [
@@ -368,6 +394,30 @@ class TestDoMergeDeferredRetry:
         gh.get_changed_files.assert_not_called()
         o._update_workflow.assert_not_called()
 
+    def test_pre_merge_scope_fails_when_pr_head_missing_locally(self):
+        """A PR head absent from the local object DB must fail closed, not crash.
+
+        Reproduces issue #1895 retry: after the worktree is torn down the PR
+        head SHA (from the GitHub API) is not in the local object DB, so
+        ``git merge-base`` failed. ``_ensure_pr_head_local`` now fetches the PR
+        branch; if the object still cannot be resolved the scope check returns a
+        clear error instead of "git merge-base returned no commit".
+        """
+        wf = _make_workflow(base_commit_sha="old-branch-base")
+        o, _ = _make_orchestrator(wf)
+        gh = MagicMock()
+        gh.resolve_commit.return_value = "fetched-main-head"
+        # PR head object never resolves locally even after a branch fetch.
+        gh._run_git.return_value = MagicMock(returncode=1, stdout="", stderr="")
+
+        error = AutonomousOrchestrator._validate_pre_merge_change_scope(
+            o, gh, wf, "resolved-pr-head"
+        )
+
+        assert "not present in local object DB" in error
+        gh.get_changed_files.assert_not_called()
+        o._update_workflow.assert_not_called()
+
     def test_same_cycle_ci_repair_receives_refreshed_scope_base(self):
         wf = _make_workflow(base_commit_sha="old-branch-base")
         o, _ = _make_orchestrator(wf)
@@ -379,6 +429,7 @@ class TestDoMergeDeferredRetry:
         o._start_ci_repair_round = MagicMock()
         gh = MagicMock()
         o._gh = gh
+        o._ensure_pr_head_local = MagicMock(return_value=True)
         gh.get_pr_head_sha.return_value = "resolved-pr-head"
         gh.resolve_commit.return_value = "fetched-main-head"
         gh._run_git.side_effect = [
@@ -415,22 +466,34 @@ class TestDoMergeDeferredRetry:
 
     @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
     def test_policy_rejection_no_ci_fail_defers(self, mock_gh_cls):
-        """Policy rejection with no CI failures defers to next cycle."""
+        """A newly pending required check is a confirmed transient wait."""
         o, _ = _make_orchestrator(_make_workflow())
         mock_gh = MagicMock()
         mock_gh_cls.return_value = mock_gh
         o._gh = mock_gh
-        mock_gh.get_pr_checks.return_value = [
-            {"name": "test", "bucket": "pass"},
+        mock_gh.get_pr_checks.side_effect = [
+            [{"name": "test", "bucket": "pass"}],
+            [{"name": "new head check", "bucket": "pending"}],
         ]
-        mock_gh.merge_pr.side_effect = GitHubOpsError("base branch policy prohibits the merge")
+        mock_gh.get_pr_merge_state.return_value = {
+            "mergeable": True,
+            "mergeable_state": "blocked",
+        }
+        mock_gh.merge_pr.side_effect = GitHubOpsError("GraphQL: Repository rule violations found")
+        o._resolve_merge_conflicts = MagicMock()
 
         o._do_merge(_make_workflow())
 
-        # Did not fail, did not resolve — deferred.
+        # Did not fail, did not resolve — refreshed checks and deferred.
         mock_gh.merge_pr.assert_called_once()
-        o._resolve_merge_conflicts = MagicMock()
-        # The merge was not re-attempted (returned early).
+        assert mock_gh.get_pr_checks.call_count == 2
+        o._resolve_merge_conflicts.assert_not_called()
+        paused_updates = [
+            call_args
+            for call_args in o._update_workflow.call_args_list
+            if call_args.args[0].get("status") == "paused"
+        ]
+        assert not paused_updates
 
     @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
     def test_policy_rejection_with_ci_fail_raises(self, mock_gh_cls):
@@ -460,12 +523,132 @@ class TestDoMergeDeferredRetry:
         mock_gh.merge_pr.side_effect = [
             GitHubOpsError("gh pr merge 1103 failed: the merge commit cannot be cleanly created"),
         ]
+        mock_gh.get_pr_merge_state.return_value = {
+            "mergeable": False,
+            "mergeable_state": "dirty",
+        }
         o._resolve_merge_conflicts = MagicMock()
 
         o._do_merge(_make_workflow())
 
         mock_gh.merge_pr.assert_called_once()
         o._resolve_merge_conflicts.assert_called_once()
+
+    @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
+    def test_unknown_merge_failure_is_not_misclassified_as_conflict(self, mock_gh_cls):
+        """Permission/infrastructure errors must retain their original cause."""
+        o, _ = _make_orchestrator(_make_workflow())
+        mock_gh = MagicMock()
+        mock_gh_cls.return_value = mock_gh
+        o._gh = mock_gh
+        mock_gh.get_pr_checks.return_value = [{"name": "test", "bucket": "pass"}]
+        mock_gh.get_pr_merge_state.return_value = {
+            "mergeable": True,
+            "mergeable_state": "clean",
+        }
+        mock_gh.merge_pr.side_effect = GitHubOpsError("GraphQL: Resource not accessible")
+        o._resolve_merge_conflicts = MagicMock()
+
+        with pytest.raises(GitHubOpsError, match="Resource not accessible"):
+            o._do_merge(_make_workflow())
+
+        o._resolve_merge_conflicts.assert_not_called()
+
+    @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
+    def test_blocked_merge_state_is_not_a_conflict_even_when_mergeable_false(self, mock_gh_cls):
+        """A confirmed no-pending policy block becomes manually recoverable."""
+        o, _ = _make_orchestrator(_make_workflow())
+        mock_gh = MagicMock()
+        mock_gh_cls.return_value = mock_gh
+        o._gh = mock_gh
+        mock_gh.get_pr_checks.return_value = [{"name": "test", "bucket": "pass"}]
+        mock_gh.get_pr_merge_state.return_value = {
+            "mergeable": False,
+            "mergeable_state": "blocked",
+        }
+        mock_gh.merge_pr.side_effect = GitHubOpsError("GraphQL: review required")
+        o._resolve_merge_conflicts = MagicMock()
+
+        with pytest.raises(WorkflowPaused, match="Merge blocked by repository policy"):
+            o._do_merge(_make_workflow())
+
+        o._resolve_merge_conflicts.assert_not_called()
+        pause_update = o._update_workflow.call_args.args[0]
+        assert pause_update["status"] == "paused"
+        assert pause_update["paused_at"]
+        assert "Merge blocked by repository policy:" in pause_update["error_message"]
+        assert "resume the workflow" in pause_update["error_message"]
+        o.emitter.emit.assert_called()
+
+    @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
+    def test_policy_pause_survives_advance_success_cleanup(self, mock_gh_cls):
+        """An older transient retry counter must not clear the pause reason."""
+        wf = _make_workflow(transient_retry_count=2)
+        o, _ = _make_orchestrator(wf)
+        o._ensure_worktree = MagicMock()
+        mock_gh = MagicMock()
+        mock_gh_cls.return_value = mock_gh
+        o._gh = mock_gh
+        mock_gh.get_pr_checks.return_value = [{"name": "test", "bucket": "pass"}]
+        mock_gh.get_pr_merge_state.return_value = {
+            "mergeable": True,
+            "mergeable_state": "blocked",
+        }
+        mock_gh.merge_pr.side_effect = GitHubOpsError("GraphQL: Repository rule violations found")
+
+        o.advance()
+
+        updates = [call_args.args[0] for call_args in o._update_workflow.call_args_list]
+        pause_updates = [update for update in updates if update.get("status") == "paused"]
+        assert len(pause_updates) == 1
+        assert "Merge blocked by repository policy:" in pause_updates[0]["error_message"]
+        assert not any(update.get("error_message") == "" for update in updates)
+
+    @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
+    def test_blocked_state_does_not_swallow_unknown_permission_error(self, mock_gh_cls):
+        """Merge state alone cannot turn infrastructure failure into policy wait."""
+        o, _ = _make_orchestrator(_make_workflow())
+        mock_gh = MagicMock()
+        mock_gh_cls.return_value = mock_gh
+        o._gh = mock_gh
+        mock_gh.get_pr_checks.return_value = [{"name": "test", "bucket": "pass"}]
+        mock_gh.get_pr_merge_state.return_value = {
+            "mergeable": False,
+            "mergeable_state": "blocked",
+        }
+        mock_gh.merge_pr.side_effect = GitHubOpsError("GraphQL: Resource not accessible")
+        o._resolve_merge_conflicts = MagicMock()
+
+        with pytest.raises(GitHubOpsError, match="Resource not accessible"):
+            o._do_merge(_make_workflow())
+
+        o._resolve_merge_conflicts.assert_not_called()
+        o._update_workflow.assert_not_called()
+
+    @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
+    def test_dirty_state_wins_over_generic_repository_rule_text(self, mock_gh_cls):
+        """Authoritative dirty state must resolve even with mixed policy text."""
+        o, _ = _make_orchestrator(_make_workflow())
+        mock_gh = MagicMock()
+        mock_gh_cls.return_value = mock_gh
+        o._gh = mock_gh
+        mock_gh.get_pr_checks.return_value = [{"name": "test", "bucket": "pass"}]
+        mock_gh.get_pr_merge_state.return_value = {
+            "mergeable": False,
+            "mergeable_state": "dirty",
+        }
+        mock_gh.merge_pr.side_effect = GitHubOpsError("GraphQL: Repository Rule Violations Found")
+        o._resolve_merge_conflicts = MagicMock()
+
+        o._do_merge(_make_workflow())
+
+        o._resolve_merge_conflicts.assert_called_once()
+        paused_updates = [
+            call_args
+            for call_args in o._update_workflow.call_args_list
+            if call_args.args[0].get("status") == "paused"
+        ]
+        assert not paused_updates
 
     @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
     def test_resolve_returns_without_cleanup(self, mock_gh_cls):
@@ -481,6 +664,10 @@ class TestDoMergeDeferredRetry:
         mock_gh.merge_pr.side_effect = [
             GitHubOpsError("the merge commit cannot be cleanly created"),
         ]
+        mock_gh.get_pr_merge_state.return_value = {
+            "mergeable": False,
+            "mergeable_state": "dirty",
+        }
         o._resolve_merge_conflicts = MagicMock()
 
         o._do_merge(_make_workflow())
@@ -1634,3 +1821,80 @@ class TestAddWorktreeExistingBranch:
         with patch.object(gh, "_run_git"):
             result = gh.add_worktree("/tmp/wt", "feature/x")
             assert result == {"worktree_path": "/tmp/wt", "branch": "feature/x"}
+
+    @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
+    def test_stale_dirty_when_branch_has_main_does_not_resolve(self, mock_gh_cls):
+        """A stale ``dirty`` cache (branch already has main) must not no-op resolve.
+
+        Reproduces issue #1895: after a synchronization push, GitHub briefly
+        reports ``mergeable_state == "dirty"`` while the synthetic merge commit
+        is recomputed, even though the branch already contains main. Driving
+        conflict resolution in that case ran ``git merge`` to "Already up to
+        date" and failed with "made no commit". The guard verifies ancestry and
+        defers to the policy/check path instead.
+        """
+        o, _ = _make_orchestrator(_make_workflow())
+        mock_gh = MagicMock()
+        mock_gh_cls.return_value = mock_gh
+        o._gh = mock_gh
+        mock_gh.get_pr_head_sha.return_value = "pr-head-sha"
+        mock_gh.get_pr_checks.return_value = [{"name": "test", "bucket": "pass"}]
+        mock_gh.merge_pr.side_effect = [
+            GitHubOpsError("gh pr merge 1103 failed: the base branch policy prohibits the merge"),
+        ]
+        mock_gh.get_pr_merge_state.return_value = {
+            "mergeable": True,
+            "mergeable_state": "dirty",
+        }
+        o._sync_failed_pr_with_main = MagicMock(return_value=False)
+        o._branch_contains_main = MagicMock(return_value=True)
+        o._resolve_merge_conflicts = MagicMock()
+
+        with pytest.raises(WorkflowPaused, match="Merge blocked by repository policy"):
+            o._do_merge(_make_workflow())
+
+        o._resolve_merge_conflicts.assert_not_called()
+        o._branch_contains_main.assert_called_once()
+        pause_update = o._update_workflow.call_args.args[0]
+        assert pause_update["status"] == "paused"
+
+
+class TestSyncWorktreeToPrRemoteHead:
+    """``_sync_worktree_to_pr_remote_head`` resets the local branch to the remote
+    tip before merging main (workflow 1895: stale local branch ahead of remote)."""
+
+    def test_fetches_branch_and_resets_hard_to_remote_head(self):
+        from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+        o, _ = _make_orchestrator(_make_workflow())
+        # _make_orchestrator stubs this out; restore the real implementation.
+        o._sync_worktree_to_pr_remote_head = (
+            AutonomousOrchestrator._sync_worktree_to_pr_remote_head.__get__(o)
+        )
+        wt_gh = MagicMock()
+        wt_gh.resolve_commit.return_value = "remote-tip-sha"
+
+        o._sync_worktree_to_pr_remote_head(wt_gh, "auto-dev/3c5aefb9")
+
+        # fetch origin <branch>, then reset --hard <remote_head>
+        assert wt_gh._run_git.call_args_list == [
+            call(["fetch", "origin", "auto-dev/3c5aefb9"]),
+            call(["reset", "--hard", "remote-tip-sha"]),
+        ]
+        wt_gh.resolve_commit.assert_called_once_with("FETCH_HEAD")
+
+    def test_sync_failure_is_non_fatal_and_warns(self):
+        """A fetch/reset failure must not raise; it falls back to the local ref."""
+        from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+        o, _ = _make_orchestrator(_make_workflow())
+        o._sync_worktree_to_pr_remote_head = (
+            AutonomousOrchestrator._sync_worktree_to_pr_remote_head.__get__(o)
+        )
+        wt_gh = MagicMock()
+        wt_gh._run_git.side_effect = GitHubOpsError("fetch failed: network down")
+
+        # Should not raise.
+        o._sync_worktree_to_pr_remote_head(wt_gh, "auto-dev/3c5aefb9")
+
+        wt_gh._run_git.assert_called_once_with(["fetch", "origin", "auto-dev/3c5aefb9"])
