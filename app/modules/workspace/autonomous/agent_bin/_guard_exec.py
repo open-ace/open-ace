@@ -43,7 +43,15 @@ def _resolve_from(path: str, base: str) -> str:
 
 def _safe_cache_git_config(value: str) -> bool:
     key, separator, setting = value.partition("=")
-    return bool(separator) and (key.lower(), setting.lower()) in _SAFE_CACHE_GIT_CONFIGS
+    if not separator:
+        return False
+    normalized_key = key.lower()
+    if normalized_key == "safe.directory":
+        # openace-run-as injects the absolute, validated worktree path through
+        # GIT_CONFIG_COUNT after clearing the inherited environment. This
+        # setting changes repository trust only; it cannot redirect Git writes.
+        return os.path.isabs(setting) and setting != "*"
+    return (normalized_key, setting.lower()) in _SAFE_CACHE_GIT_CONFIGS
 
 
 def _parse_git_command(args: list[str]) -> tuple[str, list[str], str, list[str], bool]:

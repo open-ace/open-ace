@@ -168,6 +168,7 @@ def test_ci_repair_scope_rejection_prevents_push():
 
     assert result == ("head", True, "scope rejected")
     gh.git_push.assert_not_called()
+    gh.reset_hard_to.assert_called_once_with("base")
 
 
 def test_runtime_gate_blocks_incompatible_host_without_provisioner(tmp_path):
@@ -209,6 +210,7 @@ def test_agent_environment_binds_python_and_git_guards(monkeypatch, tmp_path):
         guard.write_text("#!/bin/sh\n", encoding="utf-8")
         guard.chmod(0o755)
     monkeypatch.setattr(agent_runner, "_OPENACE_AGENT_GUARD_BIN", str(guard_dir))
+    monkeypatch.setenv("SKIP", "all-hooks")
 
     adapter = MagicMock()
     adapter.get_env_vars.return_value = {}
@@ -226,6 +228,7 @@ def test_agent_environment_binds_python_and_git_guards(monkeypatch, tmp_path):
     assert env["OPENACE_REAL_GIT"]
     assert env["GH_CONFIG_DIR"] == "/var/empty/openace-autonomous-gh"
     assert "GH_TOKEN" not in env
+    assert "SKIP" not in env
 
 
 def test_agent_guard_bin_falls_back_to_source_when_install_is_incomplete(monkeypatch, tmp_path):
@@ -595,6 +598,11 @@ def test_isolated_git_guard_allows_pre_commit_cache_init(tmp_path):
             **os.environ,
             "OPENACE_REAL_GIT": str(_fake_real_git(tmp_path)),
             "OPENACE_GIT_CACHE_ROOT": str(cache_root),
+            # openace-run-as clears the environment and injects this trusted
+            # ownership exception for the validated workflow worktree.
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "safe.directory",
+            "GIT_CONFIG_VALUE_0": str(project),
         },
         check=False,
     )
@@ -1453,7 +1461,9 @@ def test_fresh_ci_repair_prompt_keeps_requirements_plan_and_diff():
     assert "APPROVED PLAN" in prompt
     assert "diff --git" in prompt
     assert "CI EXCERPT" in prompt
-    assert "pre-commit run --all-files" in prompt
+    assert "pre-commit run --files" in prompt
+    assert "禁止直接对旧分支运行 `--all-files`" in prompt
+    assert "SKIP=bandit,no-commit-to-branch" in prompt
     assert "直到 exit 0" in prompt
 
 
@@ -1483,6 +1493,8 @@ def test_pre_commit_convergence_reruns_modified_hooks_as_isolated_agent():
     orch._select_project_python_runtime = MagicMock(return_value=(["python3"], ""))
     gh = MagicMock()
     gh.path_exists_as_user.return_value = True
+    gh.get_changed_files.return_value = ["app/a.py", "tests/test_a.py"]
+    gh.get_worktree_changed_paths.return_value = ["app/a.py", "app/new.py"]
     failed_checks = [
         {
             "name": "lint",
@@ -1520,6 +1532,7 @@ def test_pre_commit_convergence_reruns_modified_hooks_as_isolated_agent():
             {
                 "workspace_type": "local",
                 "worktree_path": "/private/repo",
+                "base_commit_sha": "pr-base",
             },
             gh,
             failed_checks,
@@ -1530,11 +1543,19 @@ def test_pre_commit_convergence_reruns_modified_hooks_as_isolated_agent():
     assert run.call_count == 2
     wrap.assert_called_once()
     assert wrap.call_args.args[:3] == (
-        ["/usr/local/bin/pre-commit", "run", "--all-files"],
+        [
+            "/usr/local/bin/pre-commit",
+            "run",
+            "--files",
+            "./app/a.py",
+            "./app/new.py",
+            "./tests/test_a.py",
+        ],
         "/private/repo",
         "openace-agent",
     )
     assert wrap.call_args.args[3]["PATH"].split(":", 1)[0] == "/usr/local/libexec/openace-agent-bin"
+    assert wrap.call_args.args[3]["SKIP"] == "bandit,no-commit-to-branch"
     assert run.call_args.kwargs["cwd"] is None
     assert run.call_args.kwargs["env"] is None
 
@@ -1562,6 +1583,40 @@ def test_pre_commit_convergence_rejects_repository_owner_account():
             [{"failure_excerpt": "pre-commit hook(s) made changes"}],
         )
 
+    run.assert_not_called()
+
+
+def test_pre_commit_convergence_rejects_paths_outside_worktree():
+    from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+    orch = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
+    orch._resolve_isolated_agent_account = MagicMock(return_value="openace-agent")
+    orch._resolve_system_account = MagicMock(return_value="repo-owner")
+    orch._select_project_python_runtime = MagicMock(return_value=(["python3"], ""))
+    gh = MagicMock()
+    gh.path_exists_as_user.return_value = True
+    gh.get_changed_files.return_value = ["../outside.py"]
+    gh.get_worktree_changed_paths.return_value = []
+
+    with (
+        patch(
+            "app.modules.workspace.autonomous.orchestrator.shutil.which",
+            side_effect=["/usr/local/bin/pre-commit", "/usr/bin/git"],
+        ),
+        patch("app.modules.workspace.autonomous.orchestrator.subprocess.run") as run,
+    ):
+        attempted, error = orch._converge_pre_commit_fixes(
+            {
+                "workspace_type": "local",
+                "worktree_path": "/private/repo",
+                "base_commit_sha": "pr-base",
+            },
+            gh,
+            [{"failure_excerpt": "pre-commit hook(s) made changes"}],
+        )
+
+    assert attempted
+    assert "rejected unsafe path" in error
     run.assert_not_called()
 
 

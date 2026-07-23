@@ -1191,6 +1191,7 @@ MAX_DEV_RETRIES_ON_TEST_FAIL = 2  # max dev round retries for unfixable test fai
 MAX_CI_REPAIR_ATTEMPTS = 3  # max automatic dev-round retries for merge-phase CI failures
 MAX_PRE_COMMIT_CONVERGENCE_PASSES = 3
 PRE_COMMIT_CONVERGENCE_TIMEOUT = 600
+CI_PRE_COMMIT_SKIP = "bandit,no-commit-to-branch"
 MAX_CI_DIAGNOSTICS_ATTEMPTS = 6  # bound scheduler polls when failed job logs stay unavailable
 try:
     MAX_AUTONOMOUS_CHANGED_FILES = int(os.environ.get("AUTONOMOUS_MAX_CHANGED_FILES", "60"))
@@ -2338,10 +2339,13 @@ class AutonomousOrchestrator:
             "1. 保持在当前工作分支上修复，不要创建新的 PR，不要切换到其他分支。\n"
             "2. 不要进入新的代码审查、进度汇报或等待流程；当前唯一目标是让现有 PR 的 CI 通过。\n"
             "3. 必须优先根据 CI 工作流、失败日志摘录和仓库脚本定位问题，复现 CI 真实执行的命令。\n"
-            "4. 修复后必须重新运行 CI 的完整对应命令，而不是只运行单个 hook、单个文件或你认为相关的子集。\n"
+            "4. 修复后必须重新运行 CI 的完整对应检查语义，而不是只运行单个 hook 或你主观挑选的子集。\n"
             "5. 如果命令中的 formatter / pre-commit hook 自动修改了文件并以非零状态退出，这只是修复过程，"
             "不代表验证完成；必须保留这些修改并重复运行同一完整命令，直到 exit 0 或确认存在不可自动修复的错误。\n"
-            "6. 对 `pre-commit run --all-files` 这类全仓检查，必须原样保留 `--all-files`，并在结束前取得一次干净的 exit 0。\n"
+            "6. GitHub 的 `pre-commit run --all-files` 针对当前 main 与 PR 的合并结果；本地 PR 分支可能落后于 main，"
+            "禁止直接对旧分支运行 `--all-files` 并保留无关格式化。请对相对工作流 base 的全部现存 PR 变更文件"
+            "运行 `SKIP=bandit,no-commit-to-branch pre-commit run --files ...`，重复至 exit 0；"
+            "Bandit 由 CI 独立检查，编排器会用同一范围再次收敛。\n"
             "7. 不要执行 git add、git commit 或 git push；编排器会在范围校验通过后统一提交并推送。\n"
             "8. 结束时请明确说明：你复现了哪些完整命令、最终 exit code、修复了什么、还剩什么风险。\n"
         )
@@ -2417,6 +2421,41 @@ class AutonomousOrchestrator:
                 "Autonomous validation account must differ from the repository owner account"
             )
         runtime_command, _ = self._select_project_python_runtime(project_path, gh)
+        base_commit = (wf.get("base_commit_sha") or "").strip()
+        if not base_commit:
+            return True, "isolated pre-commit validation could not derive the PR base commit"
+        try:
+            candidate_paths = {
+                *gh.get_changed_files(base_commit, "HEAD"),
+                *gh.get_worktree_changed_paths(),
+            }
+        except Exception as exc:
+            return True, f"isolated pre-commit validation could not list PR changes: {exc}"
+
+        project_root = os.path.realpath(project_path)
+        scoped_files: list[str] = []
+        for raw_path in sorted(candidate_paths):
+            raw_path = str(raw_path)
+            normalized = os.path.normpath(raw_path)
+            absolute_path = os.path.realpath(os.path.join(project_root, normalized))
+            try:
+                within_project = os.path.commonpath((absolute_path, project_root)) == project_root
+            except ValueError:
+                within_project = False
+            if (
+                not normalized
+                or normalized == "."
+                or os.path.isabs(normalized)
+                or not within_project
+            ):
+                return True, f"isolated pre-commit validation rejected unsafe path: {raw_path}"
+            # Deleted PR files do not exist in the effective merge tree and
+            # must not be passed to filename-based hooks.
+            if gh.path_exists_as_user(absolute_path, file_only=True):
+                scoped_files.append(f"./{normalized}")
+        if not scoped_files:
+            return True, "isolated pre-commit validation found no existing PR-scoped files"
+
         guard_bin = AutonomousAgentRunner._resolve_agent_guard_bin()
         env = {
             "PATH": guard_bin + os.pathsep + os.environ.get("PATH", ""),
@@ -2427,9 +2466,10 @@ class AutonomousOrchestrator:
             "OPENACE_PYTHON_COMMAND": json.dumps(runtime_command or [sys.executable]),
             "GH_CONFIG_DIR": "/var/empty/openace-autonomous-gh",
             "GIT_TERMINAL_PROMPT": "0",
+            "SKIP": CI_PRE_COMMIT_SKIP,
         }
         command, cwd = AutonomousAgentRunner._wrap_agent_cmd(
-            [pre_commit, "run", "--all-files"],
+            [pre_commit, "run", "--files", *scoped_files],
             project_path,
             isolated_account,
             env,
@@ -2469,7 +2509,7 @@ class AutonomousOrchestrator:
 
         concise_output = last_output[-4000:] if last_output else "no output"
         return True, (
-            "isolated `pre-commit run --all-files` did not reach exit 0 after "
+            "isolated PR-scoped `pre-commit run --files ...` did not reach exit 0 after "
             f"{passes_run} pass(es):\n{concise_output}"
         )
 
@@ -2521,6 +2561,12 @@ class AutonomousOrchestrator:
             if scope_validator is not None:
                 push_error = str(scope_validator(commit_before, commit_sha) or "")
                 if push_error:
+                    try:
+                        gh.reset_hard_to(commit_before)
+                    except Exception as exc:
+                        push_error += (
+                            "; failed to discard the rejected local CI-repair commit: " f"{exc}"
+                        )
                     return commit_sha, sha_changed, push_error
             try:
                 gh.git_push(branch=branch_name, force_with_lease=True)
@@ -2718,7 +2764,8 @@ class AutonomousOrchestrator:
         )
         if pre_commit_attempted:
             validation_summary = (
-                pre_commit_error or "isolated `pre-commit run --all-files` converged with exit 0"
+                pre_commit_error
+                or "isolated PR-scoped `pre-commit run --files ...` converged with exit 0"
             )
             summary = f"{summary}\n\nValidation: {validation_summary}".strip()
 
