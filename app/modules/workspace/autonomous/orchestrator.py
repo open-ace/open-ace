@@ -2421,6 +2421,9 @@ class AutonomousOrchestrator:
         env = {
             "PATH": guard_bin + os.pathsep + os.environ.get("PATH", ""),
             "OPENACE_REAL_GIT": real_git,
+            "OPENACE_GIT_CACHE_ROOT": str(
+                AutonomousAgentRunner._resolve_home_dir(isolated_account) / ".cache" / "pre-commit"
+            ),
             "OPENACE_PYTHON_COMMAND": json.dumps(runtime_command or [sys.executable]),
             "GH_CONFIG_DIR": "/var/empty/openace-autonomous-gh",
             "GIT_TERMINAL_PROMPT": "0",
