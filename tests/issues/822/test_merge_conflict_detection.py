@@ -18,7 +18,7 @@ from unittest.mock import MagicMock, call, patch
 import pytest
 
 from app.modules.workspace.autonomous.github_ops import GitHubOps, GitHubOpsError
-from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator, WorkflowPaused
 
 
 def _make_workflow(**overrides):
@@ -436,7 +436,7 @@ class TestDoMergeDeferredRetry:
 
     @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
     def test_policy_rejection_no_ci_fail_defers(self, mock_gh_cls):
-        """Policy rejection with no CI failures defers to next cycle."""
+        """A newly pending required check is a confirmed transient wait."""
         o, _ = _make_orchestrator(_make_workflow())
         mock_gh = MagicMock()
         mock_gh_cls.return_value = mock_gh
@@ -458,6 +458,12 @@ class TestDoMergeDeferredRetry:
         mock_gh.merge_pr.assert_called_once()
         assert mock_gh.get_pr_checks.call_count == 2
         o._resolve_merge_conflicts.assert_not_called()
+        paused_updates = [
+            call_args
+            for call_args in o._update_workflow.call_args_list
+            if call_args.args[0].get("status") == "paused"
+        ]
+        assert not paused_updates
 
     @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
     def test_policy_rejection_with_ci_fail_raises(self, mock_gh_cls):
@@ -520,7 +526,7 @@ class TestDoMergeDeferredRetry:
 
     @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
     def test_blocked_merge_state_is_not_a_conflict_even_when_mergeable_false(self, mock_gh_cls):
-        """Repository rules remain policy blockers, not conflict evidence."""
+        """A confirmed no-pending policy block becomes manually recoverable."""
         o, _ = _make_orchestrator(_make_workflow())
         mock_gh = MagicMock()
         mock_gh_cls.return_value = mock_gh
@@ -533,9 +539,86 @@ class TestDoMergeDeferredRetry:
         mock_gh.merge_pr.side_effect = GitHubOpsError("GraphQL: review required")
         o._resolve_merge_conflicts = MagicMock()
 
-        o._do_merge(_make_workflow())
+        with pytest.raises(WorkflowPaused, match="Merge blocked by repository policy"):
+            o._do_merge(_make_workflow())
 
         o._resolve_merge_conflicts.assert_not_called()
+        pause_update = o._update_workflow.call_args.args[0]
+        assert pause_update["status"] == "paused"
+        assert pause_update["paused_at"]
+        assert "Merge blocked by repository policy:" in pause_update["error_message"]
+        assert "resume the workflow" in pause_update["error_message"]
+        o.emitter.emit.assert_called()
+
+    @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
+    def test_policy_pause_survives_advance_success_cleanup(self, mock_gh_cls):
+        """An older transient retry counter must not clear the pause reason."""
+        wf = _make_workflow(transient_retry_count=2)
+        o, _ = _make_orchestrator(wf)
+        o._ensure_worktree = MagicMock()
+        mock_gh = MagicMock()
+        mock_gh_cls.return_value = mock_gh
+        o._gh = mock_gh
+        mock_gh.get_pr_checks.return_value = [{"name": "test", "bucket": "pass"}]
+        mock_gh.get_pr_merge_state.return_value = {
+            "mergeable": True,
+            "mergeable_state": "blocked",
+        }
+        mock_gh.merge_pr.side_effect = GitHubOpsError("GraphQL: Repository rule violations found")
+
+        o.advance()
+
+        updates = [call_args.args[0] for call_args in o._update_workflow.call_args_list]
+        pause_updates = [update for update in updates if update.get("status") == "paused"]
+        assert len(pause_updates) == 1
+        assert "Merge blocked by repository policy:" in pause_updates[0]["error_message"]
+        assert not any(update.get("error_message") == "" for update in updates)
+
+    @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
+    def test_blocked_state_does_not_swallow_unknown_permission_error(self, mock_gh_cls):
+        """Merge state alone cannot turn infrastructure failure into policy wait."""
+        o, _ = _make_orchestrator(_make_workflow())
+        mock_gh = MagicMock()
+        mock_gh_cls.return_value = mock_gh
+        o._gh = mock_gh
+        mock_gh.get_pr_checks.return_value = [{"name": "test", "bucket": "pass"}]
+        mock_gh.get_pr_merge_state.return_value = {
+            "mergeable": False,
+            "mergeable_state": "blocked",
+        }
+        mock_gh.merge_pr.side_effect = GitHubOpsError("GraphQL: Resource not accessible")
+        o._resolve_merge_conflicts = MagicMock()
+
+        with pytest.raises(GitHubOpsError, match="Resource not accessible"):
+            o._do_merge(_make_workflow())
+
+        o._resolve_merge_conflicts.assert_not_called()
+        o._update_workflow.assert_not_called()
+
+    @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
+    def test_dirty_state_wins_over_generic_repository_rule_text(self, mock_gh_cls):
+        """Authoritative dirty state must resolve even with mixed policy text."""
+        o, _ = _make_orchestrator(_make_workflow())
+        mock_gh = MagicMock()
+        mock_gh_cls.return_value = mock_gh
+        o._gh = mock_gh
+        mock_gh.get_pr_checks.return_value = [{"name": "test", "bucket": "pass"}]
+        mock_gh.get_pr_merge_state.return_value = {
+            "mergeable": False,
+            "mergeable_state": "dirty",
+        }
+        mock_gh.merge_pr.side_effect = GitHubOpsError("GraphQL: Repository Rule Violations Found")
+        o._resolve_merge_conflicts = MagicMock()
+
+        o._do_merge(_make_workflow())
+
+        o._resolve_merge_conflicts.assert_called_once()
+        paused_updates = [
+            call_args
+            for call_args in o._update_workflow.call_args_list
+            if call_args.args[0].get("status") == "paused"
+        ]
+        assert not paused_updates
 
     @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
     def test_resolve_returns_without_cleanup(self, mock_gh_cls):

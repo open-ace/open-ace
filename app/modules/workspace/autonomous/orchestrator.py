@@ -45,6 +45,7 @@ from app.repositories.user_repo import UserRepository
 logger = logging.getLogger(__name__)
 
 UPSTREAM_QUOTA_PAUSE_REASON_PREFIX = "Upstream provider quota exhausted:"
+MERGE_POLICY_PAUSE_REASON_PREFIX = "Merge blocked by repository policy:"
 
 
 class WorkflowPaused(RuntimeError):
@@ -8308,8 +8309,11 @@ class AutonomousOrchestrator:
                         "base branch policy prohibits",
                         "repository rule violations",
                         "required status check",
+                        "review required",
+                        "review is required",
                         "branch protection",
                         "protected branch",
+                        "pull request is in draft",
                     )
                 )
                 is_conflict_rejection = any(
@@ -8321,20 +8325,15 @@ class AutonomousOrchestrator:
                     )
                 )
 
-                is_policy_state = mergeable_state in {
-                    "blocked",
-                    "behind",
-                    "unstable",
-                    "has_hooks",
-                    "draft",
-                }
-                if pending or is_policy_rejection or is_policy_state:
+                # Pending checks are confirmed transient state. Keep polling
+                # without consuming an AI repair attempt, even when GitHub's
+                # mergeability cache concurrently reports ``dirty``.
+                if pending:
                     logger.info(
-                        "PR #%s: merge blocked by repository policy "
-                        "(state=%s, pending=%d), deferring",
+                        "PR #%s: merge blocked with %d checks pending " "(state=%s), deferring",
                         pr_number,
-                        mergeable_state or "unknown",
                         len(pending),
+                        mergeable_state or "unknown",
                     )
                     return
 
@@ -8343,36 +8342,70 @@ class AutonomousOrchestrator:
                     or is_conflict_rejection
                     or (mergeable is False and not mergeable_state)
                 )
-                if not is_real_conflict:
-                    # A mergeable/blocked/unknown PR is not evidence of a Git
-                    # conflict. Preserve the original infrastructure or
-                    # permission error instead of spending Agent time in a
-                    # resolver that cannot change repository policy.
-                    raise
+                if is_real_conflict:
+                    try:
+                        # Authoritative conflict evidence wins over generic
+                        # repository-rule text. GitHub can return both for the
+                        # same rejected merge.
+                        logger.info(
+                            "PR #%s has a real merge conflict (state=%s), resolving",
+                            pr_number,
+                            mergeable_state or "unknown",
+                        )
+                        self._resolve_merge_conflicts(gh, branch_name, pr_number)
+                        # Conflicts resolved + pushed, but NOT merged yet — the push
+                        # triggered a fresh CI run. Return here (staying in 'merging')
+                        # so _do_merge's CI-pending deferral handles the wait on the
+                        # next cycle. Falling through to cleanup would delete the
+                        # branch before the PR is merged (#1112 P1).
+                        return
+                    except Exception as resolve_err:
+                        self._create_milestone(
+                            phase="merge",
+                            milestone_type="merged",
+                            status="failed",
+                            title="PR merge failed",
+                            error_message=f"Merge conflict resolution failed: {resolve_err}",
+                        )
+                        raise
 
-                try:
-                    # Merge conflict — resolve locally and retry
-                    logger.info(
-                        "PR #%s has a real merge conflict (state=%s), resolving",
-                        pr_number,
-                        mergeable_state or "unknown",
+                if is_policy_rejection:
+                    # With no failed/pending checks and no conflict evidence,
+                    # repository policy requires external action (approval,
+                    # marking ready, or a rule change). Persist a manually
+                    # recoverable pause instead of retrying forever.
+                    state_label = mergeable_state or "unknown"
+                    message = (
+                        f"{MERGE_POLICY_PAUSE_REASON_PREFIX} PR #{pr_number} "
+                        f"is not merge-ready (state={state_label}). Satisfy the "
+                        f"repository requirement, then resume the workflow. {err_msg}"
                     )
-                    self._resolve_merge_conflicts(gh, branch_name, pr_number)
-                    # Conflicts resolved + pushed, but NOT merged yet — the push
-                    # triggered a fresh CI run. Return here (staying in 'merging')
-                    # so _do_merge's CI-pending deferral handles the wait on the
-                    # next cycle. Falling through to cleanup would delete the
-                    # branch before the PR is merged (#1112 P1).
-                    return
-                except Exception as resolve_err:
-                    self._create_milestone(
-                        phase="merge",
-                        milestone_type="merged",
-                        status="failed",
-                        title="PR merge failed",
-                        error_message=f"Merge conflict resolution failed: {resolve_err}",
+                    self._update_workflow(
+                        {
+                            "status": "paused",
+                            "paused_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+                            "error_message": message,
+                            "agent_pid": None,
+                        }
                     )
-                    raise
+                    self._emit(
+                        "status_change",
+                        {
+                            "status": "paused",
+                            "reason": "merge_policy",
+                            "message": message,
+                        },
+                    )
+                    # Stop advance() before its success cleanup can clear the
+                    # persisted pause reason along with an older transient
+                    # retry counter.
+                    raise WorkflowPaused(message)
+
+                # A mergeable/blocked/unknown PR is not by itself evidence of
+                # either a Git conflict or a recognized policy rejection.
+                # Preserve the original permission, API, or infrastructure
+                # error so the workflow fails visibly instead of spinning.
+                raise
 
         # Clean up branch/worktree. Re-read wf because _resolve_merge_conflicts
         # may have cleared worktree_path (removed the original worktree to free
