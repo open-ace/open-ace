@@ -168,6 +168,28 @@ def test_ci_repair_scope_rejection_prevents_push():
 
     assert result == ("head", True, "scope rejected")
     gh.git_push.assert_not_called()
+    gh.reset_hard_to.assert_called_once_with("head")
+
+
+def test_ci_repair_scope_rejection_preserves_prior_unpushed_head():
+    from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+    gh = MagicMock()
+    gh.get_current_commit.side_effect = ["local-B", "rejected-C"]
+    gh.has_uncommitted_changes.return_value = True
+
+    result = AutonomousOrchestrator._detect_and_push_ci_repair_changes(
+        gh,
+        "remote-A",
+        2,
+        "auto-dev/test",
+        42,
+        scope_validator=lambda before, after: "scope rejected",
+    )
+
+    assert result == ("rejected-C", True, "scope rejected")
+    gh.reset_hard_to.assert_called_once_with("local-B")
+    gh.git_push.assert_not_called()
 
 
 def test_runtime_gate_blocks_incompatible_host_without_provisioner(tmp_path):
@@ -209,6 +231,7 @@ def test_agent_environment_binds_python_and_git_guards(monkeypatch, tmp_path):
         guard.write_text("#!/bin/sh\n", encoding="utf-8")
         guard.chmod(0o755)
     monkeypatch.setattr(agent_runner, "_OPENACE_AGENT_GUARD_BIN", str(guard_dir))
+    monkeypatch.setenv("SKIP", "all-hooks")
 
     adapter = MagicMock()
     adapter.get_env_vars.return_value = {}
@@ -226,6 +249,7 @@ def test_agent_environment_binds_python_and_git_guards(monkeypatch, tmp_path):
     assert env["OPENACE_REAL_GIT"]
     assert env["GH_CONFIG_DIR"] == "/var/empty/openace-autonomous-gh"
     assert "GH_TOKEN" not in env
+    assert "SKIP" not in env
 
 
 def test_agent_guard_bin_falls_back_to_source_when_install_is_incomplete(monkeypatch, tmp_path):
@@ -595,6 +619,11 @@ def test_isolated_git_guard_allows_pre_commit_cache_init(tmp_path):
             **os.environ,
             "OPENACE_REAL_GIT": str(_fake_real_git(tmp_path)),
             "OPENACE_GIT_CACHE_ROOT": str(cache_root),
+            # openace-run-as clears the environment and injects this trusted
+            # ownership exception for the validated workflow worktree.
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "safe.directory",
+            "GIT_CONFIG_VALUE_0": str(project),
         },
         check=False,
     )
@@ -1454,6 +1483,8 @@ def test_fresh_ci_repair_prompt_keeps_requirements_plan_and_diff():
     assert "diff --git" in prompt
     assert "CI EXCERPT" in prompt
     assert "pre-commit run --all-files" in prompt
+    assert "编排器已先把当前 main 合并进 PR 分支" in prompt
+    assert "SKIP=bandit,no-commit-to-branch" in prompt
     assert "直到 exit 0" in prompt
 
 
@@ -1535,6 +1566,7 @@ def test_pre_commit_convergence_reruns_modified_hooks_as_isolated_agent():
         "openace-agent",
     )
     assert wrap.call_args.args[3]["PATH"].split(":", 1)[0] == "/usr/local/libexec/openace-agent-bin"
+    assert wrap.call_args.args[3]["SKIP"] == "bandit,no-commit-to-branch"
     assert run.call_args.kwargs["cwd"] is None
     assert run.call_args.kwargs["env"] is None
 
@@ -1563,6 +1595,65 @@ def test_pre_commit_convergence_rejects_repository_owner_account():
         )
 
     run.assert_not_called()
+
+
+def test_failed_pr_sync_skips_branch_that_already_contains_main():
+    from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+    orch = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
+    orch._ancestor_check = MagicMock(return_value=True)
+    orch._resolve_merge_conflicts = MagicMock()
+    gh = MagicMock()
+    gh.resolve_commit.return_value = "main-head"
+
+    synced = orch._sync_failed_pr_with_main(gh, "auto-dev/test", 42, "pr-head")
+
+    assert not synced
+    gh._run_git.assert_called_once_with(["fetch", "origin", "main"])
+    orch._ancestor_check.assert_called_once_with(gh, "main-head", "pr-head")
+    orch._resolve_merge_conflicts.assert_not_called()
+
+
+def test_failed_pr_sync_pushes_main_before_ai_repair():
+    from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+    orch = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
+    orch._ancestor_check = MagicMock(return_value=False)
+    orch._resolve_merge_conflicts = MagicMock()
+    gh = MagicMock()
+    gh.resolve_commit.return_value = "main-head"
+
+    synced = orch._sync_failed_pr_with_main(gh, "auto-dev/test", 42, "pr-head")
+
+    assert synced
+    orch._resolve_merge_conflicts.assert_called_once_with(gh, "auto-dev/test", 42)
+
+
+def test_failed_pr_sync_happens_before_ai_attempt_limit():
+    from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+    orch = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
+    orch._workflow_id = "wf-sync-before-limit"
+    gh = MagicMock()
+    gh.get_pr_head_sha.return_value = "pr-head"
+    orch._get_gh = MagicMock(return_value=gh)
+    orch._sync_failed_pr_with_main = MagicMock(return_value=True)
+    orch._create_milestone = MagicMock()
+    orch._update_workflow = MagicMock()
+
+    orch._start_ci_repair_round(
+        {
+            "dev_round": 1,
+            "ci_repair_attempts": 3,
+            "branch_name": "auto-dev/test",
+        },
+        42,
+        [{"name": "lint", "bucket": "fail"}],
+    )
+
+    orch._sync_failed_pr_with_main.assert_called_once_with(gh, "auto-dev/test", 42, "pr-head")
+    orch._create_milestone.assert_not_called()
+    orch._update_workflow.assert_not_called()
 
 
 def test_nonstandard_report_with_real_test_evidence_does_not_retry():

@@ -981,6 +981,7 @@ class AutonomousAgentRunner:
                 "GIT_COMMITTER_EMAIL",
                 "GH_CONFIG_DIR",
                 "GIT_TERMINAL_PROMPT",
+                "SKIP",
             ):
                 if env and env.get(key):
                     guard_env.append(f"{key}={env[key]}")
@@ -1101,6 +1102,10 @@ class AutonomousAgentRunner:
         # and the isolated run-as wrapper's clean environment/worktree ACLs.
         for key in ("GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "SSH_AUTH_SOCK"):
             env.pop(key, None)
+        # CI-only hook exclusions are set explicitly by the orchestrator's
+        # convergence command. Never let a service-level SKIP leak into a
+        # normal autonomous agent and silently suppress repository hooks.
+        env.pop("SKIP", None)
         env["GH_CONFIG_DIR"] = "/var/empty/openace-autonomous-gh"
         env["GIT_TERMINAL_PROMPT"] = "0"
         env["PATH"] = guard_bin + os.pathsep + env.get("PATH", "")
