@@ -20,10 +20,12 @@ Covers the four fixes:
      cross-user.
 """
 
+import base64
 import os
 import shutil
 import signal
 import subprocess
+import sys
 import time
 from unittest.mock import MagicMock, patch
 
@@ -501,38 +503,157 @@ def test_background_child_does_not_inherit_acl_lock(tmp_path):
 
 
 def test_isolated_wrapper_normalizes_recovered_acls_before_git_baseline():
-    """Launcher-owned ACL recovery must not look like agent .git tampering.
+    """Launcher ACL recovery precedes exact signature/ACL verification.
 
-    The prior baseline remains durable across interruption, is checked only
-    after abandoned ACLs are revoked, and the current run snapshots the
-    normalized entry before granting new ACLs.
+    The durable registry carries the exact ACL snapshot, cleanup runs before
+    recovery, and the next baseline is published before any new ACL grant.
     """
     from pathlib import Path
 
     wrapper = Path("scripts/openace-run-as.sh").read_text(encoding="utf-8")
 
     signature_registry = 'signature_registry="/run/openace-agent-git-signature-${target_uid}"'
-    recovery = 'recovered_git_signature="$(git_entry_signature "$previous_signature_project")"'
+    recovery = '"$previous_git_acl_snapshot"; then'
     current_baseline = 'git_entry_before="$(git_entry_signature "$project_dir")"'
+    current_acl_baseline = 'git_acl_before="$(git_entry_acl_snapshot "$project_dir")"'
     first_acl_grant = 'setfacl -m "u:${target_user}:x" "$parent"'
-    final_signature = 'git_entry_after="$(git_entry_signature "$project_dir")"'
+    final_verification = (
+        'if ! verify_and_restore_git_entry "$project_dir" "$git_entry_before" "$git_acl_before";'
+    )
 
     assert signature_registry in wrapper
+    assert 'previous_git_acl_snapshot="$(sed -n \'3p\' "$signature_registry")"' in wrapper
     assert wrapper.index("cleanup_isolated\n") < wrapper.index(recovery)
     assert wrapper.index(recovery) < wrapper.index(current_baseline)
     assert wrapper.index(current_baseline) < wrapper.index(first_acl_grant)
-    assert wrapper.index(
-        'printf \'%s\\n%s\\n\' "$project_dir" "$git_entry_before" > "$signature_tmp"'
-    ) < wrapper.index(first_acl_grant)
+    assert wrapper.index(current_acl_baseline) < wrapper.index(first_acl_grant)
+    assert wrapper.index("printf '%s\\n%s\\n%s\\n' \\") < wrapper.index(first_acl_grant)
     assert wrapper.index("cleanup_isolated\n", wrapper.index('wait "$agent_child_pid"')) < (
-        wrapper.index(final_signature)
+        wrapper.index(final_verification)
     )
-    final_comparison = wrapper.index(
-        'if [ "$git_entry_before" != "$git_entry_after" ]',
-        wrapper.index(final_signature),
+    assert wrapper.index(final_verification) < wrapper.index(
+        'rm -f "$signature_registry"', wrapper.index(final_verification)
     )
-    assert wrapper.index(final_signature) < final_comparison
-    assert final_comparison < wrapper.index('rm -f "$signature_registry"', final_comparison)
+
+
+def test_git_entry_acl_restore_preserves_exact_integrity(tmp_path):
+    """Only launcher-shaped mask churn is restored; real changes fail."""
+    if sys.platform != "linux":
+        pytest.skip("GNU stat signature regression is Linux-specific")
+    if not shutil.which("setfacl"):
+        pytest.skip("setfacl is required for the ACL mask regression")
+
+    from pathlib import Path
+    from textwrap import dedent
+
+    wrapper = Path("scripts/openace-run-as.sh").read_text(encoding="utf-8")
+    function_start = wrapper.index("    normalize_group_class_signature() {")
+    function_end = function_start
+    for _ in range(6):
+        function_end = wrapper.index("\n    }\n", function_end + 1) + len("\n    }")
+    signature_functions = dedent(wrapper[function_start:function_end])
+    project = tmp_path / "project"
+    project.mkdir()
+    git_entry = project / ".git"
+    git_entry.write_text("gitdir: /safe/metadata\n", encoding="utf-8")
+
+    def shell_value(expression: str) -> str:
+        result = subprocess.run(
+            ["bash", "-c", f"{signature_functions}\n{expression}", "signature", project],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return result.stdout
+
+    def signature() -> str:
+        return shell_value('git_entry_signature "$1"')
+
+    def acl_snapshot() -> str:
+        return shell_value('git_entry_acl_snapshot "$1"')
+
+    def verify(expected_signature: str, expected_acl: str) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [
+                "bash",
+                "-c",
+                f'{signature_functions}\nverify_and_restore_git_entry "$1" "$2" "$3"',
+                "verify",
+                project,
+                expected_signature,
+                expected_acl,
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    # Extended ACL: launcher mask churn is restored to the exact baseline.
+    subprocess.run(
+        ["setfacl", "-m", f"u:{os.getuid()}:rwx,m::rw", str(git_entry)],
+        check=True,
+    )
+    git_entry.chmod(0o664)
+    baseline = signature()
+    baseline_acl = acl_snapshot()
+    git_entry.chmod(0o674)
+    assert signature() != baseline
+    assert verify(baseline, baseline_acl).returncode == 0
+    assert signature() == baseline
+    assert acl_snapshot() == baseline_acl
+
+    # Owner/other permissions, content, inode, and non-mask ACL changes fail.
+    git_entry.chmod(0o675)
+    assert verify(baseline, baseline_acl).returncode != 0
+    git_entry.chmod(0o664)
+    git_entry.write_text("gitdir: /tampered/metadata\n", encoding="utf-8")
+    assert verify(baseline, baseline_acl).returncode != 0
+    git_entry.write_text("gitdir: /safe/metadata\n", encoding="utf-8")
+    subprocess.run(["setfacl", "-m", "g::rwx", str(git_entry)], check=True)
+    assert verify(baseline, baseline_acl).returncode != 0
+    subprocess.run(
+        ["setfacl", "-n", "--set-file=-", str(git_entry)],
+        input=base64.b64decode(baseline_acl),
+        check=True,
+    )
+    git_entry.unlink()
+    git_entry.write_text("gitdir: /safe/metadata\n", encoding="utf-8")
+    git_entry.chmod(0o664)
+    assert verify(baseline, baseline_acl).returncode != 0
+
+    # Plain ACL -> launcher mask-only ACL is restored exactly, while a plain
+    # Unix group-mode change (group::, not mask::) is rejected.
+    git_entry.unlink()
+    git_entry.write_text("gitdir: /safe/metadata\n", encoding="utf-8")
+    subprocess.run(["setfacl", "-b", str(git_entry)], check=True)
+    git_entry.chmod(0o600)
+    plain_baseline = signature()
+    plain_acl = acl_snapshot()
+    subprocess.run(["setfacl", "-m", f"u:{os.getuid()}:r", str(git_entry)], check=True)
+    subprocess.run(["setfacl", "-x", f"u:{os.getuid()}", str(git_entry)], check=True)
+    assert verify(plain_baseline, plain_acl).returncode == 0
+    assert signature() == plain_baseline
+    assert acl_snapshot() == plain_acl
+
+    git_entry.chmod(0o640)
+    assert verify(plain_baseline, plain_acl).returncode != 0
+
+    # Legacy two-line registries get one restricted group-class-compatible
+    # recovery, then the caller immediately writes the exact ACL-aware format.
+    subprocess.run(
+        ["setfacl", "-n", "--set-file=-", str(git_entry)],
+        input="user::rw-\ngroup::---\nother::---\n",
+        text=True,
+        check=True,
+    )
+    git_entry.chmod(0o674)
+    legacy_expected = signature().replace(":674:", ":664:")
+    assert verify(legacy_expected, "").returncode != 0
+    subprocess.run(
+        ["setfacl", "-m", f"u:{os.getuid()}:rwx,m::rwx", str(git_entry)],
+        check=True,
+    )
+    assert verify(legacy_expected, "").returncode == 0
 
 
 def test_background_wait_keeps_runner_stdin_until_eof():
