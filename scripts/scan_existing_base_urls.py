@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Scan existing API key base_url configurations for SSRF policy violations.
 
 This script scans the api_key_store table for custom base_url entries

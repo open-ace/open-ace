@@ -53,8 +53,10 @@ def downgrade() -> None:
 
     existing_columns = {col["name"] for col in inspector.get_columns("api_key_store")}
 
-    if "resolved_ips" in existing_columns:
-        op.drop_column("api_key_store", "resolved_ips")
+    # Use batch_alter_table for SQLite compatibility
+    with op.batch_alter_table("api_key_store") as batch_op:
+        if "resolved_ips" in existing_columns:
+            batch_op.drop_column("resolved_ips")
 
-    if "resolved_at" in existing_columns:
-        op.drop_column("api_key_store", "resolved_at")
+        if "resolved_at" in existing_columns:
+            batch_op.drop_column("resolved_at")
