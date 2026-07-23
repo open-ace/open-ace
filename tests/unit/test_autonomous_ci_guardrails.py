@@ -168,7 +168,28 @@ def test_ci_repair_scope_rejection_prevents_push():
 
     assert result == ("head", True, "scope rejected")
     gh.git_push.assert_not_called()
-    gh.reset_hard_to.assert_called_once_with("base")
+    gh.reset_hard_to.assert_called_once_with("head")
+
+
+def test_ci_repair_scope_rejection_preserves_prior_unpushed_head():
+    from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+    gh = MagicMock()
+    gh.get_current_commit.side_effect = ["local-B", "rejected-C"]
+    gh.has_uncommitted_changes.return_value = True
+
+    result = AutonomousOrchestrator._detect_and_push_ci_repair_changes(
+        gh,
+        "remote-A",
+        2,
+        "auto-dev/test",
+        42,
+        scope_validator=lambda before, after: "scope rejected",
+    )
+
+    assert result == ("rejected-C", True, "scope rejected")
+    gh.reset_hard_to.assert_called_once_with("local-B")
+    gh.git_push.assert_not_called()
 
 
 def test_runtime_gate_blocks_incompatible_host_without_provisioner(tmp_path):
@@ -1461,8 +1482,8 @@ def test_fresh_ci_repair_prompt_keeps_requirements_plan_and_diff():
     assert "APPROVED PLAN" in prompt
     assert "diff --git" in prompt
     assert "CI EXCERPT" in prompt
-    assert "pre-commit run --files" in prompt
-    assert "禁止直接对旧分支运行 `--all-files`" in prompt
+    assert "pre-commit run --all-files" in prompt
+    assert "编排器已先把当前 main 合并进 PR 分支" in prompt
     assert "SKIP=bandit,no-commit-to-branch" in prompt
     assert "直到 exit 0" in prompt
 
@@ -1493,8 +1514,6 @@ def test_pre_commit_convergence_reruns_modified_hooks_as_isolated_agent():
     orch._select_project_python_runtime = MagicMock(return_value=(["python3"], ""))
     gh = MagicMock()
     gh.path_exists_as_user.return_value = True
-    gh.get_changed_files.return_value = ["app/a.py", "tests/test_a.py"]
-    gh.get_worktree_changed_paths.return_value = ["app/a.py", "app/new.py"]
     failed_checks = [
         {
             "name": "lint",
@@ -1532,7 +1551,6 @@ def test_pre_commit_convergence_reruns_modified_hooks_as_isolated_agent():
             {
                 "workspace_type": "local",
                 "worktree_path": "/private/repo",
-                "base_commit_sha": "pr-base",
             },
             gh,
             failed_checks,
@@ -1543,14 +1561,7 @@ def test_pre_commit_convergence_reruns_modified_hooks_as_isolated_agent():
     assert run.call_count == 2
     wrap.assert_called_once()
     assert wrap.call_args.args[:3] == (
-        [
-            "/usr/local/bin/pre-commit",
-            "run",
-            "--files",
-            "./app/a.py",
-            "./app/new.py",
-            "./tests/test_a.py",
-        ],
+        ["/usr/local/bin/pre-commit", "run", "--all-files"],
         "/private/repo",
         "openace-agent",
     )
@@ -1586,38 +1597,63 @@ def test_pre_commit_convergence_rejects_repository_owner_account():
     run.assert_not_called()
 
 
-def test_pre_commit_convergence_rejects_paths_outside_worktree():
+def test_failed_pr_sync_skips_branch_that_already_contains_main():
     from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
 
     orch = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
-    orch._resolve_isolated_agent_account = MagicMock(return_value="openace-agent")
-    orch._resolve_system_account = MagicMock(return_value="repo-owner")
-    orch._select_project_python_runtime = MagicMock(return_value=(["python3"], ""))
+    orch._ancestor_check = MagicMock(return_value=True)
+    orch._resolve_merge_conflicts = MagicMock()
     gh = MagicMock()
-    gh.path_exists_as_user.return_value = True
-    gh.get_changed_files.return_value = ["../outside.py"]
-    gh.get_worktree_changed_paths.return_value = []
+    gh.resolve_commit.return_value = "main-head"
 
-    with (
-        patch(
-            "app.modules.workspace.autonomous.orchestrator.shutil.which",
-            side_effect=["/usr/local/bin/pre-commit", "/usr/bin/git"],
-        ),
-        patch("app.modules.workspace.autonomous.orchestrator.subprocess.run") as run,
-    ):
-        attempted, error = orch._converge_pre_commit_fixes(
-            {
-                "workspace_type": "local",
-                "worktree_path": "/private/repo",
-                "base_commit_sha": "pr-base",
-            },
-            gh,
-            [{"failure_excerpt": "pre-commit hook(s) made changes"}],
-        )
+    synced = orch._sync_failed_pr_with_main(gh, "auto-dev/test", 42, "pr-head")
 
-    assert attempted
-    assert "rejected unsafe path" in error
-    run.assert_not_called()
+    assert not synced
+    gh._run_git.assert_called_once_with(["fetch", "origin", "main"])
+    orch._ancestor_check.assert_called_once_with(gh, "main-head", "pr-head")
+    orch._resolve_merge_conflicts.assert_not_called()
+
+
+def test_failed_pr_sync_pushes_main_before_ai_repair():
+    from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+    orch = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
+    orch._ancestor_check = MagicMock(return_value=False)
+    orch._resolve_merge_conflicts = MagicMock()
+    gh = MagicMock()
+    gh.resolve_commit.return_value = "main-head"
+
+    synced = orch._sync_failed_pr_with_main(gh, "auto-dev/test", 42, "pr-head")
+
+    assert synced
+    orch._resolve_merge_conflicts.assert_called_once_with(gh, "auto-dev/test", 42)
+
+
+def test_failed_pr_sync_happens_before_ai_attempt_limit():
+    from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+    orch = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
+    orch._workflow_id = "wf-sync-before-limit"
+    gh = MagicMock()
+    gh.get_pr_head_sha.return_value = "pr-head"
+    orch._get_gh = MagicMock(return_value=gh)
+    orch._sync_failed_pr_with_main = MagicMock(return_value=True)
+    orch._create_milestone = MagicMock()
+    orch._update_workflow = MagicMock()
+
+    orch._start_ci_repair_round(
+        {
+            "dev_round": 1,
+            "ci_repair_attempts": 3,
+            "branch_name": "auto-dev/test",
+        },
+        42,
+        [{"name": "lint", "bucket": "fail"}],
+    )
+
+    orch._sync_failed_pr_with_main.assert_called_once_with(gh, "auto-dev/test", 42, "pr-head")
+    orch._create_milestone.assert_not_called()
+    orch._update_workflow.assert_not_called()
 
 
 def test_nonstandard_report_with_real_test_evidence_does_not_retry():

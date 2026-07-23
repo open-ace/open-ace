@@ -37,6 +37,7 @@ def _make_workflow(**overrides):
         "total_output_tokens": 0,
         "total_requests": 0,
         "error_message": "",
+        "base_commit_sha": "base-sha",
         "last_ci_failure_head_sha": "",
     }
     base.update(overrides)
@@ -66,6 +67,7 @@ def _make_orchestrator(wf_data):
         orch = AutonomousOrchestrator(wf_data["workflow_id"])
         orch.repo = mock_repo
         orch.emitter = MagicMock()
+        orch._sync_failed_pr_with_main = MagicMock(return_value=False)
     return orch, mock_repo
 
 

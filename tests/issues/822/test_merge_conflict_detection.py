@@ -67,6 +67,7 @@ def _make_orchestrator(wf):
     o._accumulate_tokens = MagicMock()
     o._write_phase_usage = MagicMock()
     o._validate_pre_merge_change_scope = MagicMock(return_value="")
+    o._sync_failed_pr_with_main = MagicMock(return_value=False)
     return o, mock_repo
 
 
