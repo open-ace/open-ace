@@ -86,6 +86,7 @@ def _make_orchestrator(wf_data):
         orch = AutonomousOrchestrator(wf_data["workflow_id"])
         orch.repo = mock_repo
         orch.emitter = MagicMock()
+        orch._sync_failed_pr_with_main = MagicMock(return_value=False)
     return orch, mock_repo
 
 
@@ -292,8 +293,9 @@ class TestSecondAttemptCreatesDistinctMilestone:
             mock_repo.get_workflow.return_value = wf
             mock_repo.create_event.return_value = {"id": 1}
             mock_repo.update_workflow.return_value = wf
-            # _find_existing_milestone: in_progress empty, completed has attempt1
-            mock_repo.list_milestones.side_effect = [[], [attempt1_started]]
+            # First pair checks for a stale diagnostics milestone; second pair
+            # checks the attempt-specific ci_repair_started milestone.
+            mock_repo.list_milestones.side_effect = [[], [], [], [attempt1_started]]
             mock_repo.create_milestone.return_value = {
                 "milestone_id": "ms-attempt2-started",
                 "workflow_id": wf["workflow_id"],
@@ -303,6 +305,7 @@ class TestSecondAttemptCreatesDistinctMilestone:
             orch = AutonomousOrchestrator(wf["workflow_id"])
             orch.repo = mock_repo
             orch.emitter = MagicMock()
+            orch._sync_failed_pr_with_main = MagicMock(return_value=False)
             gh = MagicMock()
             gh.get_pr_head_sha.return_value = "sha-2"
             gh.get_check_failure_excerpt.return_value = "black failed"

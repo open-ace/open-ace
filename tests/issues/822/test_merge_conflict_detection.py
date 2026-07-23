@@ -13,7 +13,9 @@ Two bugs caused worktrees in the 807-845 batch to fail at the merge phase:
    needs ``--auto`` so GitHub merges asynchronously once requirements pass.
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
+
+import pytest
 
 from app.modules.workspace.autonomous.github_ops import GitHubOps, GitHubOpsError
 from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
@@ -64,7 +66,46 @@ def _make_orchestrator(wf):
     o._create_milestone = MagicMock(return_value={"milestone_id": "ms-1"})
     o._accumulate_tokens = MagicMock()
     o._write_phase_usage = MagicMock()
+    o._validate_pre_merge_change_scope = MagicMock(return_value="")
+    o._sync_failed_pr_with_main = MagicMock(return_value=False)
     return o, mock_repo
+
+
+def _set_unchanged_index(gh, path: str = "app/x.py"):
+    snapshot = {
+        path: (
+            "100644 base 1",
+            "100644 ours 2",
+            "100644 theirs 3",
+        )
+    }
+    gh.get_index_snapshot.side_effect = [snapshot, snapshot]
+    gh.get_index_changed_paths.side_effect = GitHubOps.get_index_changed_paths
+
+
+def _set_valid_merge_result(
+    orchestrator,
+    gh,
+    *,
+    conflict: bool = True,
+    original_head: str = "head-before",
+    resolved_head: str = "head-after",
+):
+    """Configure strict branch/index/commit-graph postconditions for a success test."""
+    gh.resolve_commit.return_value = "main-head"
+    gh.get_current_branch.return_value = "auto-dev/fc82f22a"
+    gh.get_current_commit.side_effect = (
+        [original_head, original_head, resolved_head]
+        if conflict
+        else [original_head, resolved_head]
+    )
+    if conflict:
+        gh.get_unmerged_paths.side_effect = [["app/x.py"], ["app/x.py"], []]
+        gh.get_conflict_marker_paths.return_value = []
+        gh.get_worktree_changed_paths.return_value = ["app/x.py"]
+        _set_unchanged_index(gh)
+    orchestrator._ancestor_check = MagicMock(return_value=True)
+    orchestrator._validate_autonomous_change_scope = MagicMock(return_value="")
 
 
 # ── Bug 1: conflict detection must check stdout ──────────────────────────
@@ -83,11 +124,11 @@ class TestResolveMergeConflictsStdoutConflict:
         # Model _run_git so the *second* merge (check=False) returns CONFLICT
         # on stdout with empty stderr — the exact shape that broke #822.
         def run_git(args, check=True):
-            # Only the "merge origin/main" call matters; merge --abort and
+            # Only the merge of the pinned FETCH_HEAD commit matters; merge --abort and
             # other ops are no-ops.
-            if args[:2] == ["merge", "origin/main"] and check:
-                raise GitHubOpsError("git merge origin/main failed")
-            if args[:2] == ["merge", "origin/main"] and not check:
+            if args[:2] == ["merge", "main-head"] and check:
+                raise GitHubOpsError("git merge main-head failed")
+            if args[:2] == ["merge", "main-head"] and not check:
                 return MagicMock(
                     returncode=1,
                     stdout=(
@@ -95,10 +136,13 @@ class TestResolveMergeConflictsStdoutConflict:
                     ),
                     stderr="",
                 )
+            if args == ["diff", "--name-only", "--diff-filter=U"]:
+                return MagicMock(returncode=0, stdout="app/services/auth_service.py\n", stderr="")
             return MagicMock()
 
         mock_gh._run_git = MagicMock(side_effect=run_git)
         o._gh = mock_gh
+        _set_valid_merge_result(o, mock_gh)
 
         # Stub the AI conflict resolver so we verify it IS reached.
         o._run_agent = MagicMock()
@@ -126,13 +170,16 @@ class TestResolveMergeConflictsStdoutConflict:
         o, _ = _make_orchestrator(_make_workflow())
         mock_gh = MagicMock()
         mock_gh_cls.return_value = mock_gh
+        mock_gh.resolve_commit.return_value = "main-head"
 
         def run_git(args, check=True):
-            if args[:2] == ["merge", "origin/main"] and check:
+            if args[:2] == ["merge", "main-head"] and check:
                 raise GitHubOpsError("git merge failed")
-            if args[:2] == ["merge", "origin/main"] and not check:
+            if args[:2] == ["merge", "main-head"] and not check:
                 # No CONFLICT anywhere — a genuine non-conflict failure.
                 return MagicMock(returncode=1, stdout="fatal: bad object", stderr="")
+            if args == ["diff", "--name-only", "--diff-filter=U"]:
+                return MagicMock(returncode=0, stdout="", stderr="")
             return MagicMock()
 
         mock_gh._run_git = MagicMock(side_effect=run_git)
@@ -142,6 +189,100 @@ class TestResolveMergeConflictsStdoutConflict:
 
         with pytest.raises(GitHubOpsError, match="non-conflict"):
             o._resolve_merge_conflicts(mock_gh, "auto-dev/fc82f22a", 1103)
+
+    @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
+    def test_localized_conflict_uses_unmerged_index(self, mock_gh_cls):
+        """Translated git output still enters conflict resolution via U paths."""
+        o, _ = _make_orchestrator(_make_workflow())
+        mock_gh = MagicMock()
+        mock_gh_cls.return_value = mock_gh
+
+        def run_git(args, check=True):
+            if args[:2] == ["merge", "main-head"] and not check:
+                return MagicMock(
+                    returncode=1,
+                    stdout="自动合并失败；修正冲突后提交结果。\n",
+                    stderr="",
+                )
+            if args == ["diff", "--name-only", "--diff-filter=U"]:
+                return MagicMock(returncode=0, stdout="app/routes/auth.py\n", stderr="")
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        mock_gh._run_git.side_effect = run_git
+        _set_valid_merge_result(o, mock_gh)
+        from app.modules.workspace.autonomous.models import AgentTaskResult
+
+        o._run_agent = MagicMock(
+            return_value=AgentTaskResult(
+                session_id="resolver", success=True, response_text="42 passed"
+            )
+        )
+
+        o._resolve_merge_conflicts(mock_gh, "auto-dev/fc82f22a", 1103)
+
+        o._run_agent.assert_called_once()
+
+    @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
+    def test_empty_merge_diagnostics_report_exit_code(self, mock_gh_cls):
+        """An empty localized failure still exposes an actionable exit code."""
+        o, _ = _make_orchestrator(_make_workflow())
+        mock_gh = MagicMock()
+        mock_gh_cls.return_value = mock_gh
+        mock_gh.resolve_commit.return_value = "main-head"
+
+        def run_git(args, check=True):
+            if args[:2] == ["merge", "main-head"] and not check:
+                return MagicMock(returncode=128, stdout="", stderr="")
+            if args == ["diff", "--name-only", "--diff-filter=U"]:
+                return MagicMock(returncode=0, stdout="", stderr="")
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        mock_gh._run_git.side_effect = run_git
+        import pytest
+
+        with pytest.raises(GitHubOpsError, match="exit code 128"):
+            o._resolve_merge_conflicts(mock_gh, "auto-dev/fc82f22a", 1103)
+
+    @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
+    def test_unmerged_index_query_failure_is_reported(self, mock_gh_cls):
+        """Index inspection errors must not be mistaken for real conflicts."""
+        o, _ = _make_orchestrator(_make_workflow())
+        mock_gh = MagicMock()
+        mock_gh_cls.return_value = mock_gh
+        mock_gh.resolve_commit.return_value = "main-head"
+
+        def run_git(args, check=True):
+            if args[:2] == ["merge", "main-head"] and not check:
+                return MagicMock(returncode=1, stdout="", stderr="")
+            if args == ["diff", "--name-only", "--diff-filter=U"]:
+                raise GitHubOpsError("index unavailable")
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        mock_gh._run_git.side_effect = run_git
+        import pytest
+
+        with pytest.raises(GitHubOpsError, match="index unavailable"):
+            o._resolve_merge_conflicts(mock_gh, "auto-dev/fc82f22a", 1103)
+
+    @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
+    def test_conflict_text_without_u_stage_fails_closed(self, mock_gh_cls):
+        """English output alone cannot launch a resolver without an unmerged index."""
+        o, _ = _make_orchestrator(_make_workflow())
+        main_gh = MagicMock()
+        wt_gh = MagicMock()
+        wt_gh.resolve_commit.return_value = "main-head"
+        wt_gh._run_git.side_effect = [
+            MagicMock(returncode=0, stdout="", stderr=""),
+            MagicMock(returncode=1, stdout="CONFLICT (content): app/x.py\n", stderr=""),
+        ]
+        wt_gh.get_unmerged_paths.return_value = []
+        mock_gh_cls.side_effect = [main_gh, wt_gh]
+        o._run_agent = MagicMock()
+
+        with pytest.raises(GitHubOpsError, match="no unmerged paths"):
+            o._resolve_merge_conflicts(MagicMock(), "auto-dev/fc82f22a", 1103)
+
+        o._run_agent.assert_not_called()
 
 
 # ── Bug 2: branch-policy rejection uses --auto ───────────────────────────
@@ -165,6 +306,96 @@ class TestDoMergeDeferredRetry:
         o._do_merge(_make_workflow())
 
         mock_gh.merge_pr.assert_not_called()
+
+    # Pre-merge scope must exclude upstream files merged into an old PR.
+
+    def test_uses_graph_merge_base_and_backfills_stale_scope_base(self):
+        wf = _make_workflow(base_commit_sha="old-branch-base")
+        o, _ = _make_orchestrator(wf)
+        gh = MagicMock()
+        gh.resolve_commit.return_value = "fetched-main-head"
+        gh._run_git.side_effect = [
+            MagicMock(returncode=0, stdout="", stderr=""),
+            MagicMock(returncode=0, stdout="fetched-main-head\n", stderr=""),
+        ]
+        gh.get_changed_files.return_value = [f"business/file-{index}.py" for index in range(16)]
+
+        assert (
+            AutonomousOrchestrator._validate_pre_merge_change_scope(o, gh, wf, "resolved-pr-head")
+            == ""
+        )
+
+        assert gh._run_git.call_args_list == [
+            call(["fetch", "origin", "main"]),
+            call(["merge-base", "resolved-pr-head", "fetched-main-head"], check=False),
+        ]
+        gh.get_changed_files.assert_called_once_with("fetched-main-head", "resolved-pr-head")
+        o._update_workflow.assert_called_once_with({"base_commit_sha": "fetched-main-head"})
+        assert wf["base_commit_sha"] == "fetched-main-head"
+
+    def test_effective_pr_delta_still_enforces_scope_cap(self):
+        wf = _make_workflow(base_commit_sha="old-branch-base")
+        o, _ = _make_orchestrator(wf)
+        gh = MagicMock()
+        gh.resolve_commit.return_value = "fetched-main-head"
+        gh._run_git.side_effect = [
+            MagicMock(returncode=0, stdout="", stderr=""),
+            MagicMock(returncode=0, stdout="effective-base\n", stderr=""),
+        ]
+        gh.get_changed_files.return_value = [f"agent/file-{index}.py" for index in range(61)]
+
+        error = AutonomousOrchestrator._validate_pre_merge_change_scope(
+            o, gh, wf, "resolved-pr-head"
+        )
+
+        assert "61 files changed" in error
+        o._update_workflow.assert_not_called()
+
+    def test_merge_base_failure_fails_closed(self):
+        o, _ = _make_orchestrator(_make_workflow())
+        gh = MagicMock()
+        gh.resolve_commit.return_value = "fetched-main-head"
+        gh._run_git.side_effect = [
+            MagicMock(returncode=0, stdout="", stderr=""),
+            MagicMock(returncode=1, stdout="", stderr="no common ancestor"),
+        ]
+
+        error = AutonomousOrchestrator._validate_pre_merge_change_scope(
+            o, gh, _make_workflow(), "pr-head"
+        )
+
+        assert "could not derive effective PR base" in error
+        gh.get_changed_files.assert_not_called()
+        o._update_workflow.assert_not_called()
+
+    def test_same_cycle_ci_repair_receives_refreshed_scope_base(self):
+        wf = _make_workflow(base_commit_sha="old-branch-base")
+        o, _ = _make_orchestrator(wf)
+        o._validate_pre_merge_change_scope = (
+            AutonomousOrchestrator._validate_pre_merge_change_scope.__get__(
+                o, AutonomousOrchestrator
+            )
+        )
+        o._start_ci_repair_round = MagicMock()
+        gh = MagicMock()
+        o._gh = gh
+        gh.get_pr_head_sha.return_value = "resolved-pr-head"
+        gh.resolve_commit.return_value = "fetched-main-head"
+        gh._run_git.side_effect = [
+            MagicMock(returncode=0, stdout="", stderr=""),
+            MagicMock(returncode=0, stdout="fetched-main-head\n", stderr=""),
+        ]
+        gh.get_changed_files.return_value = [f"business/file-{index}.py" for index in range(18)]
+        failed_checks = [{"name": "migration", "bucket": "fail"}]
+        gh.get_pr_checks.return_value = failed_checks
+
+        o._do_merge(wf)
+
+        o._start_ci_repair_round.assert_called_once_with(wf, 1103, failed_checks)
+        assert o._start_ci_repair_round.call_args.args[0]["base_commit_sha"] == (
+            "fetched-main-head"
+        )
+        gh.merge_pr.assert_not_called()
 
     @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
     def test_ci_pass_merges_successfully(self, mock_gh_cls):
@@ -291,13 +522,15 @@ class TestDoMergeDeferredRetry:
         mock_gh.delete_branch.assert_called_once_with("auto-dev/fc82f22a")
 
     def test_start_ci_repair_round_restores_preferred_worktree(self):
-        """CI repair loop should restore the preferred worktree path for worktree strategy."""
+        """CI repair recreates and binds the PR worktree before launching its agent."""
         wf = _make_workflow(worktree_path="", preferred_worktree_path="/srv/repo/.worktrees/wf-822")
         o, _ = _make_orchestrator(wf)
-        mock_gh = MagicMock()
-        mock_gh.get_pr_head_sha.return_value = "sha-old"
-        mock_gh.get_check_failure_excerpt.return_value = "pytest failed"
-        o._get_gh = MagicMock(return_value=mock_gh)
+        main_gh = MagicMock()
+        main_gh.get_pr_head_sha.return_value = "sha-old"
+        main_gh.get_check_failure_excerpt.return_value = "pytest failed"
+        worktree_gh = MagicMock()
+        o._get_gh = MagicMock(side_effect=[main_gh, worktree_gh])
+        o._ensure_worktree = MagicMock(return_value="/srv/repo/.worktrees/wf-822")
         o._run_merge_ci_repair = MagicMock()
 
         o._start_ci_repair_round(
@@ -313,9 +546,12 @@ class TestDoMergeDeferredRetry:
         assert update_payload["ci_repair_attempts"] == 1
         assert update_payload["worktree_path"] == "/srv/repo/.worktrees/wf-822"
         assert update_payload["preferred_worktree_path"] == "/srv/repo/.worktrees/wf-822"
+        restore_wf = o._ensure_worktree.call_args.args[0]
+        assert restore_wf["worktree_path"] == "/srv/repo/.worktrees/wf-822"
+        assert restore_wf["branch_name"] == "auto-dev/fc82f22a"
         o._run_merge_ci_repair.assert_called_once_with(
-            wf,
-            mock_gh,
+            restore_wf,
+            worktree_gh,
             1103,
             [
                 {
@@ -326,6 +562,41 @@ class TestDoMergeDeferredRetry:
                 }
             ],
         )
+
+    def test_worktree_restore_failure_does_not_consume_ci_repair_attempt(self):
+        """Infrastructure retries must not spend the bounded AI repair budget."""
+        wf = _make_workflow(
+            worktree_path="",
+            preferred_worktree_path="/srv/repo/.worktrees/wf-822",
+        )
+        o, _ = _make_orchestrator(wf)
+        main_gh = MagicMock()
+        main_gh.get_pr_head_sha.return_value = "sha-old"
+        main_gh.get_check_failure_excerpt.return_value = "pytest failed"
+        o._get_gh = MagicMock(return_value=main_gh)
+        o._ensure_worktree = MagicMock(side_effect=GitHubOpsError("network timed out"))
+        o._run_merge_ci_repair = MagicMock()
+
+        with pytest.raises(GitHubOpsError, match="network timed out"):
+            o._start_ci_repair_round(
+                wf,
+                1103,
+                [{"name": "test (3.9)", "bucket": "fail", "state": "failure"}],
+            )
+
+        o._run_merge_ci_repair.assert_not_called()
+        attempt_updates = [
+            call_args.args[0]
+            for call_args in o._update_workflow.call_args_list
+            if call_args.args and "ci_repair_attempts" in call_args.args[0]
+        ]
+        assert attempt_updates == []
+        started_milestones = [
+            call_args.kwargs
+            for call_args in o._create_milestone.call_args_list
+            if call_args.kwargs.get("milestone_type") == "ci_repair_started"
+        ]
+        assert started_milestones == []
 
     def test_start_ci_repair_round_fails_when_signature_repeats(self):
         """A repeated failed-check signature should stop the auto-repair loop.
@@ -389,6 +660,223 @@ class TestMergePrAutoFlag:
             assert "--auto" not in cmd
 
 
+class TestGetUnmergedPaths:
+    def test_returns_authoritative_u_stage_paths(self):
+        gh = GitHubOps("/tmp/repo")
+        with patch.object(
+            gh,
+            "_run_git",
+            return_value=MagicMock(
+                returncode=0,
+                stdout="app/a.py\nfrontend/b.tsx\n",
+                stderr="",
+            ),
+        ):
+            assert gh.get_unmerged_paths() == ["app/a.py", "frontend/b.tsx"]
+
+    def test_query_failure_raises(self):
+        gh = GitHubOps("/tmp/repo")
+        with patch.object(
+            gh,
+            "_run_git",
+            return_value=MagicMock(returncode=128, stdout="", stderr="bad index"),
+        ):
+            import pytest
+
+            with pytest.raises(GitHubOpsError, match="exit code 128"):
+                gh.get_unmerged_paths()
+
+
+class TestResolveCommit:
+    def test_resolves_ref_to_immutable_commit(self):
+        gh = GitHubOps("/tmp/repo")
+        with patch.object(
+            gh,
+            "_run_git",
+            return_value=MagicMock(returncode=0, stdout="abc123\n", stderr=""),
+        ) as mock_run:
+            assert gh.resolve_commit("origin/main") == "abc123"
+        mock_run.assert_called_once_with(["rev-parse", "--verify", "origin/main^{commit}"])
+
+    def test_empty_resolution_raises(self):
+        gh = GitHubOps("/tmp/repo")
+        with patch.object(
+            gh,
+            "_run_git",
+            return_value=MagicMock(returncode=0, stdout="", stderr=""),
+        ):
+            with pytest.raises(GitHubOpsError, match="Unable to resolve"):
+                gh.resolve_commit("origin/main")
+
+
+class TestGetWorktreeChangedPaths:
+    def test_combines_tracked_unmerged_and_untracked_paths(self):
+        gh = GitHubOps("/tmp/repo")
+        with patch.object(
+            gh,
+            "_run_git",
+            side_effect=[
+                MagicMock(
+                    returncode=0,
+                    stdout="app/conflict.py\napp/edited.py\n",
+                    stderr="",
+                ),
+                MagicMock(returncode=0, stdout="tests/new_test.py\n", stderr=""),
+            ],
+        ) as mock_run:
+            assert gh.get_worktree_changed_paths() == [
+                "app/conflict.py",
+                "app/edited.py",
+                "tests/new_test.py",
+            ]
+        assert mock_run.call_args_list[0].args[0] == ["diff", "--name-only"]
+        assert mock_run.call_args_list[1].args[0] == [
+            "ls-files",
+            "--others",
+            "--exclude-standard",
+        ]
+
+    @pytest.mark.parametrize("failed_probe", [0, 1])
+    def test_probe_failure_raises(self, failed_probe):
+        results = [
+            MagicMock(returncode=0, stdout="app/x.py\n", stderr=""),
+            MagicMock(returncode=0, stdout="", stderr=""),
+        ]
+        results[failed_probe] = MagicMock(returncode=128, stdout="", stderr="probe failed")
+        gh = GitHubOps("/tmp/repo")
+        with patch.object(gh, "_run_git", side_effect=results):
+            with pytest.raises(GitHubOpsError, match="exit code 128"):
+                gh.get_worktree_changed_paths()
+
+
+class TestIndexSnapshot:
+    def test_parses_stage_zero_and_unmerged_entries(self):
+        output = (
+            "100644 blob-a 0\tapp/clean.py\0"
+            "100644 blob-base 1\tapp/conflict.py\0"
+            "100644 blob-ours 2\tapp/conflict.py\0"
+            "100644 blob-theirs 3\tapp/conflict.py\0"
+        )
+        gh = GitHubOps("/tmp/repo")
+        with patch.object(
+            gh,
+            "_run_git",
+            return_value=MagicMock(returncode=0, stdout=output, stderr=""),
+        ) as mock_run:
+            assert gh.get_index_snapshot() == {
+                "app/clean.py": ("100644 blob-a 0",),
+                "app/conflict.py": (
+                    "100644 blob-base 1",
+                    "100644 blob-ours 2",
+                    "100644 blob-theirs 3",
+                ),
+            }
+        mock_run.assert_called_once_with(["ls-files", "--stage", "-z"], check=False)
+
+    def test_snapshot_probe_and_parse_fail_closed(self):
+        gh = GitHubOps("/tmp/repo")
+        with patch.object(
+            gh,
+            "_run_git",
+            return_value=MagicMock(returncode=128, stdout="", stderr="bad index"),
+        ):
+            with pytest.raises(GitHubOpsError, match="exit code 128"):
+                gh.get_index_snapshot()
+        with patch.object(
+            gh,
+            "_run_git",
+            return_value=MagicMock(returncode=0, stdout="malformed\0", stderr=""),
+        ):
+            with pytest.raises(GitHubOpsError, match="parse git index"):
+                gh.get_index_snapshot()
+
+    def test_diff_detects_added_removed_blob_and_stage_changes(self):
+        before = {
+            "deleted.py": ("100644 old 0",),
+            "modified.py": ("100644 old 0",),
+            "resolved.py": ("100644 base 1", "100644 ours 2", "100644 theirs 3"),
+            "unchanged.py": ("100644 same 0",),
+        }
+        after = {
+            "added.py": ("100644 new 0",),
+            "modified.py": ("100644 new 0",),
+            "resolved.py": ("100644 resolved 0",),
+            "unchanged.py": ("100644 same 0",),
+        }
+        assert GitHubOps.get_index_changed_paths(before, after) == [
+            "added.py",
+            "deleted.py",
+            "modified.py",
+            "resolved.py",
+        ]
+
+
+class TestGetConflictMarkerPaths:
+    def test_returns_only_matching_conflict_files(self):
+        gh = GitHubOps("/tmp/repo")
+        with (
+            patch.object(gh, "path_exists_as_user", return_value=True),
+            patch.object(
+                gh,
+                "_run_git",
+                return_value=MagicMock(returncode=0, stdout="app/a.py\napp/b.py\n", stderr=""),
+            ) as mock_run,
+        ):
+            assert gh.get_conflict_marker_paths(["app/a.py", "app/b.py"]) == [
+                "app/a.py",
+                "app/b.py",
+            ]
+        command = mock_run.call_args.args[0]
+        assert command[:4] == ["grep", "--no-index", "-l", "-I"]
+        assert command[-3:] == ["--", "app/a.py", "app/b.py"]
+        assert r"^<{7,}( |$)" in command
+        assert r"^={7,}$" in command
+        assert r"^>{7,}( |$)" in command
+
+    def test_no_matches_returns_empty_list(self):
+        gh = GitHubOps("/tmp/repo")
+        with (
+            patch.object(gh, "path_exists_as_user", return_value=True),
+            patch.object(
+                gh,
+                "_run_git",
+                return_value=MagicMock(returncode=1, stdout="", stderr=""),
+            ),
+        ):
+            assert gh.get_conflict_marker_paths(["app/a.py"]) == []
+
+    def test_probe_failure_raises(self):
+        gh = GitHubOps("/tmp/repo")
+        with (
+            patch.object(gh, "path_exists_as_user", return_value=True),
+            patch.object(
+                gh,
+                "_run_git",
+                return_value=MagicMock(returncode=128, stdout="", stderr="bad path"),
+            ),
+        ):
+            with pytest.raises(GitHubOpsError, match="exit code 128"):
+                gh.get_conflict_marker_paths(["app/a.py"])
+
+    def test_deleted_conflict_path_is_a_valid_marker_free_resolution(self):
+        gh = GitHubOps("/tmp/repo")
+        with (
+            patch.object(gh, "path_exists_as_user", return_value=False),
+            patch.object(gh, "_run_git") as mock_run,
+        ):
+            assert gh.get_conflict_marker_paths(["app/deleted.py"]) == []
+        mock_run.assert_not_called()
+
+    def test_detects_custom_marker_size_larger_than_seven(self, tmp_path):
+        conflict_file = tmp_path / "conflict.py"
+        conflict_file.write_text(
+            "<<<<<<<<<< HEAD\nours\n==========\ntheirs\n>>>>>>>>>> main\n",
+            encoding="utf-8",
+        )
+        gh = GitHubOps(str(tmp_path))
+        assert gh.get_conflict_marker_paths(["conflict.py"]) == ["conflict.py"]
+
+
 # ── Bug 3: isolated temp worktree for conflict resolution ────────────────
 
 
@@ -417,6 +905,7 @@ class TestResolveMergeConflictsWorktreeIsolation:
             MagicMock(returncode=0, stdout="", stderr=""),  # merge (clean)
         ]
         mock_gh_cls.side_effect = [main_gh, wt_gh, caller_gh]
+        _set_valid_merge_result(o, wt_gh, conflict=False)
 
         o._resolve_merge_conflicts(caller_gh, "auto-dev/fc82f22a", 1103)
 
@@ -449,6 +938,7 @@ class TestResolveMergeConflictsWorktreeIsolation:
             ),  # merge (conflict)
         ]
         mock_gh_cls.side_effect = [main_gh, wt_gh, caller_gh]
+        _set_valid_merge_result(o, wt_gh)
 
         import pytest
 
@@ -483,6 +973,7 @@ class TestResolveMergeConflictsWorktreeIsolation:
             ),  # merge (conflict)
         ]
         mock_gh_cls.side_effect = [main_gh, wt_gh, caller_gh]
+        _set_valid_merge_result(o, wt_gh)
 
         o._run_agent = MagicMock()
         from app.modules.workspace.autonomous.models import AgentTaskResult
@@ -499,6 +990,19 @@ class TestResolveMergeConflictsWorktreeIsolation:
         assert agent_project_path.endswith("merge-wf-822")  # temp worktree, not main repo
         # Must NOT be the main repo project_path.
         assert agent_project_path != _make_workflow()["project_path"]
+        agent_wf = o._run_agent.call_args.kwargs["wf"]
+        assert agent_wf["worktree_path"] == agent_project_path
+        assert agent_wf["branch_strategy"] == "worktree"
+        assert agent_wf["branch_name"] == "auto-dev/fc82f22a"
+        effective = o._resolve_effective_repo_context(agent_wf)
+        assert effective["repo_path"] == agent_project_path
+        contract = o._build_repo_execution_contract(agent_wf)
+        assert agent_project_path in contract
+        assert "`/srv/repo`" not in contract
+        wt_gh.git_add_all.assert_called_once()
+        wt_gh.git_commit.assert_called_once_with(
+            "merge: resolve conflicts for PR #1103", no_verify=True
+        )
 
     @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
     def test_agent_uses_fresh_session_not_main(self, mock_gh_cls):
@@ -522,6 +1026,7 @@ class TestResolveMergeConflictsWorktreeIsolation:
             ),  # merge (conflict)
         ]
         mock_gh_cls.side_effect = [main_gh, wt_gh, caller_gh]
+        _set_valid_merge_result(o, wt_gh)
 
         o._run_agent = MagicMock()
         from app.modules.workspace.autonomous.models import AgentTaskResult
@@ -539,11 +1044,7 @@ class TestResolveMergeConflictsWorktreeIsolation:
 
     @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
     def test_conflict_prompt_requires_test_verification(self, mock_gh_cls):
-        """The conflict prompt must instruct the agent to run tests before
-        committing. Without this, the agent resolves conflict markers and
-        commits immediately — missing semantic breakage (e.g. main changed a
-        SQL query structure but the branch's tests still assert the old one).
-        """
+        """The edit-only agent must test before orchestration commits."""
         o, _ = _make_orchestrator(_make_workflow())
         main_gh = MagicMock()
         wt_gh = MagicMock()
@@ -557,6 +1058,7 @@ class TestResolveMergeConflictsWorktreeIsolation:
             ),  # merge (conflict)
         ]
         mock_gh_cls.side_effect = [main_gh, wt_gh, caller_gh]
+        _set_valid_merge_result(o, wt_gh)
 
         o._run_agent = MagicMock()
         from app.modules.workspace.autonomous.models import AgentTaskResult
@@ -570,15 +1072,441 @@ class TestResolveMergeConflictsWorktreeIsolation:
         o._resolve_merge_conflicts(caller_gh, "auto-dev/fc82f22a", 1103)
 
         prompt = o._run_agent.call_args.kwargs.get("prompt", "")
-        # Must instruct the agent to run tests before committing.
+        # The agent only edits and tests. Trusted orchestration owns all
+        # mutating git operations because the agent command guard denies them.
         assert "pytest" in prompt
         assert "测试" in prompt or "test" in prompt.lower()
-        # Test step must come BEFORE the commit step.
-        test_pos = prompt.lower().find("pytest")
-        commit_pos = prompt.lower().find("git commit")
-        assert test_pos < commit_pos, "tests must run before git commit"
+        assert "不要执行 git add、git commit 或 git push" in prompt
+        assert "暂存、提交与推送由编排器" in prompt
         # Must require a summary report (for timeline tldr visibility).
         assert "总结" in prompt, "prompt must require a summary report"
+        assert "merge-wf-822" in prompt
+        assert "禁止调用 EnterWorktree" in prompt
+
+    @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
+    def test_success_with_conflict_markers_fails_before_push(self, mock_gh_cls):
+        """Model success cannot bypass conflict-marker verification."""
+        o, _ = _make_orchestrator(_make_workflow())
+        main_gh = MagicMock()
+        wt_gh = MagicMock()
+        caller_gh = MagicMock()
+        wt_gh.get_current_commit.return_value = "head-before"
+        wt_gh.get_current_branch.return_value = "auto-dev/fc82f22a"
+        wt_gh._run_git.side_effect = [
+            MagicMock(returncode=0, stdout="", stderr=""),  # fetch
+            MagicMock(
+                returncode=1,
+                stdout="CONFLICT (content): app/x.py\n",
+                stderr="",
+            ),
+        ]
+        wt_gh.get_unmerged_paths.return_value = ["app/x.py"]
+        wt_gh.get_conflict_marker_paths.return_value = ["app/x.py"]
+        mock_gh_cls.side_effect = [main_gh, wt_gh]
+        from app.modules.workspace.autonomous.models import AgentTaskResult
+
+        o._run_agent = MagicMock(
+            return_value=AgentTaskResult(
+                session_id="resolver", success=True, response_text="resolved"
+            )
+        )
+
+        import pytest
+
+        with pytest.raises(RuntimeError, match="conflict markers"):
+            o._resolve_merge_conflicts(caller_gh, "auto-dev/fc82f22a", 1103)
+
+        wt_gh.git_push.assert_not_called()
+        main_gh.remove_worktree.assert_called_once()
+
+    @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
+    def test_staged_file_still_scans_initial_conflict_path(self, mock_gh_cls):
+        """Clearing U-stage cannot hide unresolved markers from the owner gate."""
+        o, _ = _make_orchestrator(_make_workflow())
+        main_gh = MagicMock()
+        wt_gh = MagicMock()
+        caller_gh = MagicMock()
+        wt_gh.resolve_commit.return_value = "main-head"
+        wt_gh.get_current_commit.return_value = "head-before"
+        wt_gh.get_current_branch.return_value = "auto-dev/fc82f22a"
+        wt_gh._run_git.side_effect = [
+            MagicMock(returncode=0, stdout="", stderr=""),
+            MagicMock(returncode=1, stdout="CONFLICT (content): app/x.py\n", stderr=""),
+        ]
+        # Agent bypasses the PATH guard and stages the path, clearing U-stage.
+        wt_gh.get_unmerged_paths.side_effect = [["app/x.py"], []]
+        wt_gh.get_conflict_marker_paths.return_value = ["app/x.py"]
+        wt_gh.get_index_snapshot.return_value = {"app/x.py": ("100644 ours 2",)}
+        mock_gh_cls.side_effect = [main_gh, wt_gh]
+        from app.modules.workspace.autonomous.models import AgentTaskResult
+
+        o._run_agent = MagicMock(
+            return_value=AgentTaskResult(
+                session_id="resolver", success=True, response_text="staged"
+            )
+        )
+
+        with pytest.raises(RuntimeError, match="left conflict markers"):
+            o._resolve_merge_conflicts(caller_gh, "auto-dev/fc82f22a", 1103)
+
+        wt_gh.get_conflict_marker_paths.assert_called_once_with(["app/x.py"])
+        wt_gh.git_add_all.assert_not_called()
+        wt_gh.git_push.assert_not_called()
+
+    @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
+    def test_agent_head_change_fails_before_owner_staging(self, mock_gh_cls):
+        """An absolute git commit/abort cannot be adopted by orchestration."""
+        o, _ = _make_orchestrator(_make_workflow())
+        main_gh = MagicMock()
+        wt_gh = MagicMock()
+        caller_gh = MagicMock()
+        wt_gh.resolve_commit.return_value = "main-head"
+        wt_gh.get_current_commit.side_effect = ["head-before", "agent-head"]
+        wt_gh.get_current_branch.return_value = "auto-dev/fc82f22a"
+        wt_gh._run_git.side_effect = [
+            MagicMock(returncode=0, stdout="", stderr=""),
+            MagicMock(returncode=1, stdout="CONFLICT (content): app/x.py\n", stderr=""),
+        ]
+        wt_gh.get_unmerged_paths.side_effect = [["app/x.py"], []]
+        wt_gh.get_conflict_marker_paths.return_value = []
+        wt_gh.get_index_snapshot.return_value = {"app/x.py": ("100644 resolved 0",)}
+        mock_gh_cls.side_effect = [main_gh, wt_gh]
+        from app.modules.workspace.autonomous.models import AgentTaskResult
+
+        o._run_agent = MagicMock(
+            return_value=AgentTaskResult(
+                session_id="resolver", success=True, response_text="committed"
+            )
+        )
+
+        with pytest.raises(RuntimeError, match="changed HEAD"):
+            o._resolve_merge_conflicts(caller_gh, "auto-dev/fc82f22a", 1103)
+
+        wt_gh.git_add_all.assert_not_called()
+        wt_gh.git_push.assert_not_called()
+
+    @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
+    def test_deleted_conflict_file_is_staged_and_committed_by_owner(self, mock_gh_cls):
+        """Deleting a conflicted path is a valid edit-only resolver outcome."""
+        o, _ = _make_orchestrator(_make_workflow())
+        main_gh = MagicMock()
+        wt_gh = MagicMock()
+        caller_gh = MagicMock()
+        wt_gh.resolve_commit.return_value = "main-head"
+        wt_gh.get_current_commit.side_effect = [
+            "head-before",
+            "head-before",
+            "head-after",
+        ]
+        wt_gh.get_current_branch.return_value = "auto-dev/fc82f22a"
+        wt_gh._run_git.side_effect = [
+            MagicMock(returncode=0, stdout="", stderr=""),
+            MagicMock(
+                returncode=1,
+                stdout="CONFLICT (modify/delete): app/deleted.py\n",
+                stderr="",
+            ),
+        ]
+        wt_gh.get_unmerged_paths.side_effect = [
+            ["app/deleted.py"],
+            ["app/deleted.py"],
+            [],
+        ]
+        wt_gh.get_conflict_marker_paths.return_value = []
+        wt_gh.get_worktree_changed_paths.return_value = ["app/deleted.py"]
+        _set_unchanged_index(wt_gh, "app/deleted.py")
+        o._ancestor_check = MagicMock(return_value=True)
+        o._validate_autonomous_change_scope = MagicMock(return_value="")
+        mock_gh_cls.side_effect = [main_gh, wt_gh]
+        from app.modules.workspace.autonomous.models import AgentTaskResult
+
+        o._run_agent = MagicMock(
+            return_value=AgentTaskResult(
+                session_id="resolver", success=True, response_text="deleted intentionally"
+            )
+        )
+
+        o._resolve_merge_conflicts(caller_gh, "auto-dev/fc82f22a", 1103)
+
+        wt_gh.get_conflict_marker_paths.assert_called_once_with(["app/deleted.py"])
+        wt_gh.git_add_all.assert_called_once()
+        wt_gh.git_commit.assert_called_once()
+        wt_gh.git_push.assert_called_once()
+
+    @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
+    def test_success_without_merge_commit_fails_before_push(self, mock_gh_cls):
+        """A no-op resolver response must terminate instead of looping forever."""
+        o, _ = _make_orchestrator(_make_workflow())
+        main_gh = MagicMock()
+        wt_gh = MagicMock()
+        caller_gh = MagicMock()
+        wt_gh.get_current_commit.side_effect = [
+            "head-before",
+            "head-before",
+            "head-before",
+        ]
+        wt_gh.resolve_commit.return_value = "main-head"
+        wt_gh.get_current_branch.return_value = "auto-dev/fc82f22a"
+        wt_gh._run_git.side_effect = [
+            MagicMock(returncode=0, stdout="", stderr=""),  # fetch
+            MagicMock(
+                returncode=1,
+                stdout="CONFLICT (content): app/x.py\n",
+                stderr="",
+            ),
+        ]
+        wt_gh.get_unmerged_paths.side_effect = [["app/x.py"], ["app/x.py"], []]
+        wt_gh.get_conflict_marker_paths.return_value = []
+        wt_gh.get_worktree_changed_paths.return_value = ["app/x.py"]
+        _set_unchanged_index(wt_gh)
+        mock_gh_cls.side_effect = [main_gh, wt_gh]
+        from app.modules.workspace.autonomous.models import AgentTaskResult
+
+        o._run_agent = MagicMock(
+            return_value=AgentTaskResult(
+                session_id="resolver", success=True, response_text="resolved"
+            )
+        )
+
+        import pytest
+
+        with pytest.raises(RuntimeError, match="made no commit"):
+            o._resolve_merge_conflicts(caller_gh, "auto-dev/fc82f22a", 1103)
+
+        wt_gh.git_push.assert_not_called()
+        main_gh.remove_worktree.assert_called_once()
+
+    @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
+    def test_post_stage_unmerged_paths_fail_before_commit(self, mock_gh_cls):
+        """Trusted staging must actually clear every U-stage entry."""
+        o, _ = _make_orchestrator(_make_workflow())
+        main_gh = MagicMock()
+        wt_gh = MagicMock()
+        caller_gh = MagicMock()
+        wt_gh.get_current_commit.return_value = "head-before"
+        wt_gh.resolve_commit.return_value = "main-head"
+        wt_gh.get_current_branch.return_value = "auto-dev/fc82f22a"
+        wt_gh._run_git.side_effect = [
+            MagicMock(returncode=0, stdout="", stderr=""),
+            MagicMock(returncode=1, stdout="CONFLICT (content): app/x.py\n", stderr=""),
+        ]
+        wt_gh.get_unmerged_paths.side_effect = [
+            ["app/x.py"],
+            ["app/x.py"],
+            ["app/x.py"],
+        ]
+        wt_gh.get_conflict_marker_paths.return_value = []
+        wt_gh.get_worktree_changed_paths.return_value = ["app/x.py"]
+        _set_unchanged_index(wt_gh)
+        mock_gh_cls.side_effect = [main_gh, wt_gh]
+        from app.modules.workspace.autonomous.models import AgentTaskResult
+
+        o._run_agent = MagicMock(
+            return_value=AgentTaskResult(
+                session_id="resolver", success=True, response_text="resolved"
+            )
+        )
+
+        with pytest.raises(RuntimeError, match="unmerged paths after staging"):
+            o._resolve_merge_conflicts(caller_gh, "auto-dev/fc82f22a", 1103)
+
+        wt_gh.git_add_all.assert_called_once()
+        wt_gh.git_commit.assert_not_called()
+        wt_gh.git_push.assert_not_called()
+        failed_updates = [
+            call.args[1]
+            for call in o.repo.update_milestone.call_args_list
+            if call.args[1].get("status") == "failed"
+        ]
+        assert failed_updates
+
+    @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
+    def test_clean_merge_no_op_refuses_unchanged_push(self, mock_gh_cls):
+        """A clean but unchanged merge must not be pushed and retried forever."""
+        o, _ = _make_orchestrator(_make_workflow())
+        main_gh = MagicMock()
+        wt_gh = MagicMock()
+        wt_gh._run_git.side_effect = [
+            MagicMock(returncode=0, stdout="", stderr=""),
+            MagicMock(returncode=0, stdout="Already up to date.\n", stderr=""),
+        ]
+        wt_gh.get_current_branch.return_value = "auto-dev/fc82f22a"
+        wt_gh.get_current_commit.side_effect = ["same-head", "same-head"]
+        mock_gh_cls.side_effect = [main_gh, wt_gh]
+
+        with pytest.raises(RuntimeError, match="made no commit"):
+            o._resolve_merge_conflicts(MagicMock(), "auto-dev/fc82f22a", 1103)
+
+        wt_gh.git_push.assert_not_called()
+
+    @pytest.mark.parametrize("actual_branch", ["", "auto-dev/unrelated"])
+    @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
+    def test_branch_mismatch_fails_closed(self, mock_gh_cls, actual_branch):
+        """Empty or different branches are never rewritten into the push target."""
+        o, _ = _make_orchestrator(_make_workflow())
+        main_gh = MagicMock()
+        wt_gh = MagicMock()
+        wt_gh._run_git.side_effect = [
+            MagicMock(returncode=0, stdout="", stderr=""),
+            MagicMock(returncode=0, stdout="merged\n", stderr=""),
+        ]
+        wt_gh.get_current_branch.return_value = actual_branch
+        wt_gh.get_current_commit.side_effect = ["head-before", "head-after"]
+        mock_gh_cls.side_effect = [main_gh, wt_gh]
+
+        with pytest.raises(RuntimeError, match="branch mismatch"):
+            o._resolve_merge_conflicts(MagicMock(), "auto-dev/fc82f22a", 1103)
+
+        wt_gh.git_push.assert_not_called()
+
+    @pytest.mark.parametrize("ancestry", [(False, True), (True, False), (None, True)])
+    @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
+    def test_both_merge_parents_must_be_ancestors(self, mock_gh_cls, ancestry):
+        """The resolved head must contain both the PR head and fetched main."""
+        o, _ = _make_orchestrator(_make_workflow())
+        main_gh = MagicMock()
+        wt_gh = MagicMock()
+        wt_gh._run_git.side_effect = [
+            MagicMock(returncode=0, stdout="", stderr=""),
+            MagicMock(returncode=0, stdout="merged\n", stderr=""),
+        ]
+        wt_gh.get_current_branch.return_value = "auto-dev/fc82f22a"
+        wt_gh.get_current_commit.side_effect = ["head-before", "head-after"]
+        wt_gh.resolve_commit.return_value = "main-head"
+        o._ancestor_check = MagicMock(side_effect=list(ancestry))
+        mock_gh_cls.side_effect = [main_gh, wt_gh]
+
+        with pytest.raises(RuntimeError, match="ancestry verification failed"):
+            o._resolve_merge_conflicts(MagicMock(), "auto-dev/fc82f22a", 1103)
+
+        assert o._ancestor_check.call_args_list[0].args[1:] == ("head-before", "head-after")
+        assert o._ancestor_check.call_args_list[1].args[1:] == ("main-head", "head-after")
+        wt_gh.git_push.assert_not_called()
+
+    @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
+    def test_scope_excludes_files_brought_in_from_main(self, mock_gh_cls):
+        """An old PR may merge many upstream files while the resolver edits two."""
+        o, _ = _make_orchestrator(_make_workflow())
+        main_gh = MagicMock()
+        wt_gh = MagicMock()
+        caller_gh = MagicMock()
+        wt_gh._run_git.side_effect = [
+            MagicMock(returncode=0, stdout="", stderr=""),
+            MagicMock(returncode=1, stdout="CONFLICT (content): app/x.py\n", stderr=""),
+        ]
+        wt_gh.get_current_branch.return_value = "auto-dev/fc82f22a"
+        wt_gh.get_current_commit.side_effect = [
+            "old-pr-head",
+            "old-pr-head",
+            "resolved-head",
+        ]
+        wt_gh.resolve_commit.return_value = "fetched-main-head"
+        wt_gh.get_unmerged_paths.side_effect = [["app/x.py"], ["app/x.py"], []]
+        wt_gh.get_conflict_marker_paths.return_value = []
+        wt_gh.get_worktree_changed_paths.return_value = ["app/x.py", "tests/test_x.py"]
+        _set_unchanged_index(wt_gh)
+
+        def changed_files(base, _head):
+            if base == "old-pr-head":
+                return [f"upstream/file-{index}.py" for index in range(97)]
+            assert base == "fetched-main-head"
+            return ["app/x.py", "tests/test_x.py"]
+
+        wt_gh.get_changed_files.side_effect = changed_files
+        o._ancestor_check = MagicMock(return_value=True)
+        mock_gh_cls.side_effect = [main_gh, wt_gh]
+        from app.modules.workspace.autonomous.models import AgentTaskResult
+
+        o._run_agent = MagicMock(
+            return_value=AgentTaskResult(
+                session_id="resolver", success=True, response_text="77 passed"
+            )
+        )
+
+        o._resolve_merge_conflicts(caller_gh, "auto-dev/fc82f22a", 1103)
+
+        wt_gh.resolve_commit.assert_called_once_with("FETCH_HEAD")
+        assert wt_gh._run_git.call_args_list[1].args[0] == [
+            "merge",
+            "fetched-main-head",
+        ]
+        wt_gh.get_changed_files.assert_called_once_with("fetched-main-head", "resolved-head")
+        wt_gh.git_push.assert_called_once_with(branch="auto-dev/fc82f22a", force_with_lease=True)
+
+    @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
+    def test_resolver_actual_edit_set_still_enforces_scope_cap(self, mock_gh_cls):
+        """Excluding upstream files must not weaken the resolver's own cap."""
+        o, _ = _make_orchestrator(_make_workflow())
+        main_gh = MagicMock()
+        wt_gh = MagicMock()
+        caller_gh = MagicMock()
+        wt_gh._run_git.side_effect = [
+            MagicMock(returncode=0, stdout="", stderr=""),
+            MagicMock(returncode=1, stdout="CONFLICT (content): app/x.py\n", stderr=""),
+        ]
+        wt_gh.get_current_commit.return_value = "old-pr-head"
+        wt_gh.resolve_commit.return_value = "fetched-main-head"
+        wt_gh.get_current_branch.return_value = "auto-dev/fc82f22a"
+        wt_gh.get_unmerged_paths.return_value = ["app/x.py"]
+        wt_gh.get_conflict_marker_paths.return_value = []
+        wt_gh.get_worktree_changed_paths.return_value = [
+            f"agent/file-{index}.py" for index in range(61)
+        ]
+        _set_unchanged_index(wt_gh)
+        mock_gh_cls.side_effect = [main_gh, wt_gh]
+        from app.modules.workspace.autonomous.models import AgentTaskResult
+
+        o._run_agent = MagicMock(
+            return_value=AgentTaskResult(
+                session_id="resolver", success=True, response_text="resolved"
+            )
+        )
+
+        with pytest.raises(RuntimeError, match="resolver scope rejected.*61 files"):
+            o._resolve_merge_conflicts(caller_gh, "auto-dev/fc82f22a", 1103)
+
+        wt_gh.git_add_all.assert_not_called()
+        wt_gh.git_commit.assert_not_called()
+        wt_gh.git_push.assert_not_called()
+
+    @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
+    def test_agent_index_mutations_cannot_bypass_scope_cap(self, mock_gh_cls):
+        """Absolute git or scripts that stage files are included in resolver scope."""
+        o, _ = _make_orchestrator(_make_workflow())
+        main_gh = MagicMock()
+        wt_gh = MagicMock()
+        caller_gh = MagicMock()
+        wt_gh._run_git.side_effect = [
+            MagicMock(returncode=0, stdout="", stderr=""),
+            MagicMock(returncode=1, stdout="CONFLICT (content): agent/file-0.py\n", stderr=""),
+        ]
+        wt_gh.get_current_commit.return_value = "old-pr-head"
+        wt_gh.resolve_commit.return_value = "fetched-main-head"
+        wt_gh.get_current_branch.return_value = "auto-dev/fc82f22a"
+        wt_gh.get_unmerged_paths.return_value = ["agent/file-0.py"]
+        wt_gh.get_conflict_marker_paths.return_value = []
+        # A staged file disappears from normal `git diff`; only the remaining
+        # conflict is visible in the working tree.
+        wt_gh.get_worktree_changed_paths.return_value = ["agent/file-0.py"]
+        before = {f"agent/file-{index}.py": (f"100644 old-{index} 0",) for index in range(61)}
+        after = {f"agent/file-{index}.py": (f"100644 new-{index} 0",) for index in range(61)}
+        wt_gh.get_index_snapshot.side_effect = [before, after]
+        wt_gh.get_index_changed_paths.side_effect = GitHubOps.get_index_changed_paths
+        mock_gh_cls.side_effect = [main_gh, wt_gh]
+        from app.modules.workspace.autonomous.models import AgentTaskResult
+
+        o._run_agent = MagicMock(
+            return_value=AgentTaskResult(
+                session_id="resolver", success=True, response_text="resolved and staged"
+            )
+        )
+
+        with pytest.raises(RuntimeError, match="changed the Git index"):
+            o._resolve_merge_conflicts(caller_gh, "auto-dev/fc82f22a", 1103)
+
+        wt_gh.git_add_all.assert_not_called()
+        wt_gh.git_commit.assert_not_called()
+        wt_gh.git_push.assert_not_called()
 
     @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
     def test_conflict_milestone_records_tldr_and_summary(self, mock_gh_cls):
@@ -598,6 +1526,7 @@ class TestResolveMergeConflictsWorktreeIsolation:
             ),  # merge (conflict)
         ]
         mock_gh_cls.side_effect = [main_gh, wt_gh, caller_gh]
+        _set_valid_merge_result(o, wt_gh)
 
         o._run_agent = MagicMock()
         from app.modules.workspace.autonomous.models import AgentTaskResult
@@ -632,6 +1561,7 @@ class TestResolveMergeConflictsWorktreeIsolation:
             MagicMock(returncode=0, stdout="", stderr=""),  # merge clean
         ]
         mock_gh_cls.side_effect = [main_gh, wt_gh, caller_gh]
+        _set_valid_merge_result(o, wt_gh, conflict=False)
 
         o._resolve_merge_conflicts(caller_gh, "auto-dev/fc82f22a", 1103)
 
@@ -660,6 +1590,7 @@ class TestResolveMergeConflictsWorktreeIsolation:
         ]
         # GitHubOps construction order: main_gh, rebound_gh (after removal), wt_gh
         mock_gh_cls.side_effect = [main_gh, rebound_gh, wt_gh]
+        _set_valid_merge_result(o, wt_gh, conflict=False)
 
         # caller_gh simulates the stale handle from _do_merge; it should be
         # replaced by rebound_gh after worktree removal.

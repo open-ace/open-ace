@@ -321,7 +321,7 @@ class AlertTransactionManager:
                 """
                     SELECT COUNT(*) as count FROM alerts
                     WHERE user_id = %s AND alert_type = %s AND created_at >= %s
-                    AND metadata->>'quota_type' = %s
+                    AND (metadata::jsonb)->>'quota_type' = %s
                 """,
                 (user_id, "quota", threshold_str, quota_type),
             )

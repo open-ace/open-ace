@@ -19,6 +19,12 @@ from app.modules.workspace.model_gateway.planner import (
     get_gateway_planner,
     reset_gateway_planner_for_tests,
 )
+from app.utils.llm_proxy_url_validator import LlmProxyValidationResult
+
+
+def _mock_validate_llm_proxy_url(url, tenant_id, provider, *, resolver=None):
+    """Mock validator that allows all URLs for testing."""
+    return LlmProxyValidationResult(True)
 
 
 @pytest.fixture
@@ -29,6 +35,15 @@ def remote_app():
     app.config["TESTING"] = True
     app.register_blueprint(remote_bp, url_prefix="/api/remote")
     return app
+
+
+@pytest.fixture(autouse=True)
+def mock_url_validator():
+    """Auto-mock URL validator for all tests in this module."""
+    with patch(
+        "app.utils.llm_proxy_url_validator.validate_llm_proxy_url", _mock_validate_llm_proxy_url
+    ):
+        yield
 
 
 def _mock_proxy_token(**overrides):
@@ -52,7 +67,13 @@ def _quota_ok():
 def _mock_proxy():
     mock = MagicMock()
     mock.validate_proxy_token.return_value = _mock_proxy_token()
-    mock.resolve_api_key_for_scope.return_value = ("sk-key", "https://api.openai.com/v1", 1, None)
+    mock.resolve_api_key_for_scope.return_value = (
+        "sk-key",
+        "https://api.openai.com/v1",
+        1,
+        None,
+        None,
+    )
     return mock
 
 

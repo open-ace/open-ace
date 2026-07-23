@@ -182,7 +182,10 @@ describe('LocalDirectoryBrowser', () => {
     expect(toastMock.success).toHaveBeenCalledWith('deleteSuccess', 'trash.txt');
     // Issue #1917: the app confirm modal (not window.confirm) must be invoked
     // with the danger variant before the delete fires.
-    expect(confirmMock).toHaveBeenCalledWith({ message: 'confirmDeleteFile', variant: 'danger' });
+    // Issue #1949: confirm now receives i18n button text and filename title
+    expect(confirmMock).toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'confirmDeleteFile', variant: 'danger' })
+    );
   });
 
   it('aborts delete when confirm dialog is cancelled', async () => {

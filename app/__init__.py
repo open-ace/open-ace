@@ -281,6 +281,25 @@ def create_app(config=None):
             }
         )
 
+    # Security status endpoint (Issue #1893)
+    @app.route("/security-status")
+    def security_status():
+        """Security baseline status endpoint for monitoring and health checks.
+
+        Returns security configuration status for the current deployment.
+        In production mode, returns HTTP 503 if security baseline fails.
+        """
+        from app.utils.security_baseline import check_all
+
+        results = check_all()
+        status_code = 200
+
+        # For production mode, return 503 if unhealthy
+        if results.get("status") == "unhealthy":
+            status_code = 503
+
+        return jsonify(results), status_code
+
     # Start background services
     start_background_services()
 

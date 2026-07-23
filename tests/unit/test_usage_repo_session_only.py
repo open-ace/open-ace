@@ -1,8 +1,11 @@
 """Tests for UsageRepository.get_session_only_usage (#1269 P1).
 
-Pins that the Work-page quota display reads agent_sessions only and does NOT
-touch daily_messages, per the #1125 data-contract rule that analysis fact
+Pins that the Work-page quota display reads session_messages (filtered by timestamp)
+and never daily_messages, per the #1125 data-contract rule that analysis fact
 tables must not participate in Workspace runtime display.
+
+Updated for Issue #1974: Query now filters by session_messages.timestamp instead
+of agent_sessions.created_at to correctly count messages for long-running sessions.
 """
 
 from unittest.mock import MagicMock
@@ -17,8 +20,8 @@ def _make_repo(db):
 
 
 class TestGetSessionOnlyUsage:
-    def test_does_not_query_daily_messages(self):
-        """The query must read agent_sessions and never daily_messages."""
+    def test_queries_session_messages_by_timestamp(self):
+        """The query must read session_messages and filter by message timestamp."""
         db = MagicMock()
         db.fetch_one.return_value = {"tokens": 12345, "requests": 7}
         repo = _make_repo(db)
@@ -28,8 +31,12 @@ class TestGetSessionOnlyUsage:
         )
 
         sql = db.fetch_one.call_args[0][0]
-        assert "FROM agent_sessions" in sql
+        # Query now starts from session_messages and joins agent_sessions
+        assert "FROM session_messages" in sql
+        assert "JOIN agent_sessions" in sql
         assert "daily_messages" not in sql
+        # Must filter by message timestamp, not session created_at
+        assert "CAST(sm.timestamp AS DATE)" in sql
         # Must cover all workspace types (local autonomous/terminal/remote).
         assert "workspace_type IN ('local', 'remote', 'terminal')" in sql
         assert result["tokens"] == 12345

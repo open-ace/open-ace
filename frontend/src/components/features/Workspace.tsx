@@ -2525,12 +2525,16 @@ export const Workspace: React.FC = () => {
           machineId: string;
           machineName: string;
           workDir: string;
+          modelId?: string;
+          keyId?: number;
         }) => {
           setShowNewSessionModal(false);
           try {
             const result = await remoteApi.startTerminal({
               machine_id: params.machineId,
               work_dir: params.workDir,
+              model_id: params.modelId,
+              key_id: params.keyId,
             });
             if (result.success && result.terminal) {
               const tabId = generateTabId();

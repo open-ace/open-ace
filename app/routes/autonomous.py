@@ -66,7 +66,7 @@ def _get_effective_system_account(system_account: str | None) -> str | None:
 def _run_as_user(system_account: str, command: list) -> subprocess.CompletedProcess:
     """Run a command as a specific user using sudo."""
     sudo_cmd = ["sudo", "-u", system_account] + command
-    return subprocess.run(sudo_cmd, capture_output=True, text=True, timeout=10)
+    return subprocess.run(sudo_cmd, capture_output=True, text=True, timeout=10, cwd="/tmp")
 
 
 def _get_repo() -> AutonomousWorkflowRepository:
@@ -1035,13 +1035,16 @@ def resume_workflow(workflow_id):
     phase = workflow.get("current_phase", "preparation")
     status = PHASE_TO_STATUS.get(phase, "pending")
 
-    _get_repo().update_workflow(
-        workflow_id,
-        {
-            "status": status,
-            "paused_at": None,
-        },
-    )
+    # Clear only the stale hard-quota error after an operator resumes. Bailian
+    # allocated-quota rate limits never enter the paused state.
+    from app.modules.workspace.autonomous.orchestrator import UPSTREAM_QUOTA_PAUSE_REASON_PREFIX
+
+    error_message = workflow.get("error_message") or ""
+    updates = {"status": status, "paused_at": None}
+    if error_message.startswith(UPSTREAM_QUOTA_PAUSE_REASON_PREFIX):
+        updates["error_message"] = ""
+
+    _get_repo().update_workflow(workflow_id, updates)
 
     _emit_event_safe(workflow_id, "status_change", {"status": status})
     return jsonify({"success": True})

@@ -132,8 +132,12 @@ class TestPrReviewSummaryBeforeCiCheck:
             orch._runner = MagicMock()
             orch._runner.run_agent_task.return_value = AgentTaskResult(
                 session_id="s",
-                response_text="代码审查通过",
-                visible_response_text="代码审查通过",
+                response_text=(
+                    '代码审查通过\nREVIEW_RESULT: {"verdict":"APPROVE",' '"blocking_findings":[]}'
+                ),
+                visible_response_text=(
+                    '代码审查通过\nREVIEW_RESULT: {"verdict":"APPROVE",' '"blocking_findings":[]}'
+                ),
                 success=True,
             )
 
@@ -172,3 +176,76 @@ class TestPrReviewSummaryBeforeCiCheck:
         assert (
             summary_idx < ci_repair_calls[0]
         ), "review_content must be filled BEFORE entering CI repair"
+
+    def test_summary_overflow_fails_workflow_instead_of_entering_report(self):
+        """A terminal 400 summary is not valid review content or a success."""
+        from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+        wf = _make_workflow()
+        with (
+            patch("app.modules.workspace.autonomous.orchestrator.Database"),
+            patch(
+                "app.modules.workspace.autonomous.orchestrator.AutonomousWorkflowRepository"
+            ) as mock_repo_cls,
+        ):
+            mock_repo = MagicMock()
+            mock_repo.get_workflow.return_value = wf
+            mock_repo.list_milestones.return_value = []
+            mock_repo.create_milestone.side_effect = lambda fields: {
+                "milestone_id": f"ms-{fields.get('milestone_type')}",
+                "workflow_id": wf["workflow_id"],
+            }
+            mock_repo.create_event.return_value = {"id": 1}
+            mock_repo.update_workflow.return_value = wf
+            mock_repo_cls.return_value = mock_repo
+
+            orch = AutonomousOrchestrator(wf["workflow_id"])
+            orch.repo = mock_repo
+            orch._emit = MagicMock()
+            orch._accumulate_tokens = MagicMock()
+            orch._post_github_comment = MagicMock()
+            orch._gh = MagicMock()
+            orch._gh.get_pr_diff.return_value = "diff"
+            orch._gh.get_diff_stats.return_value = {"commits": 1}
+            orch._gh.get_current_branch.return_value = wf["branch_name"]
+            orch._gh.get_current_commit.return_value = "branch-sha"
+
+            def run_git(args, check=True):
+                if args[:1] == ["rev-parse"]:
+                    return MagicMock(stdout=f"{args[1]}-sha\n", returncode=0)
+                if args[:2] == ["merge-base", "--is-ancestor"]:
+                    return MagicMock(stdout="", returncode=1)
+                return MagicMock(stdout="", returncode=0)
+
+            orch._gh._run_git.side_effect = run_git
+            orch._validate_autonomous_change_scope = MagicMock(return_value="")
+            approved = AgentTaskResult(
+                session_id="review",
+                success=True,
+                response_text=(
+                    '代码审查通过\nREVIEW_RESULT: {"verdict":"APPROVE",' '"blocking_findings":[]}'
+                ),
+            )
+            overflow = AgentTaskResult(
+                session_id="main-replacement",
+                success=True,
+                response_text=(
+                    "API Error: 400 InternalError.Algo.InvalidParameter: "
+                    "Range of input length should be [1, 202752]"
+                ),
+            )
+            orch._run_agent_with_context_recovery = MagicMock(side_effect=[approved, overflow])
+
+            with patch.object(orch, "_poll_ci_status", return_value=[]):
+                orch._do_pr_review(wf)
+
+        workflow_updates = [call.args[1] for call in mock_repo.update_workflow.call_args_list]
+        assert any(update.get("status") == "failed" for update in workflow_updates)
+        assert not any(update.get("status") == "reporting" for update in workflow_updates)
+        summary_updates = [
+            call.args[1]
+            for call in mock_repo.update_milestone.call_args_list
+            if call.args[0] == "ms-pr_review_summary"
+        ]
+        assert summary_updates[-1]["status"] == "failed"
+        assert summary_updates[-1]["review_content"] == ""

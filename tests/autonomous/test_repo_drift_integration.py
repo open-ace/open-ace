@@ -19,6 +19,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from app.modules.workspace.autonomous.github_ops import GitHubOps
 from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
 
 
@@ -118,3 +119,27 @@ class TestRepoDriftIntegration:
 
         o = _make_orchestrator()
         assert o._main_drift_is_benign_pull(str(clone), base, after, None) is False
+
+    def test_scope_guard_uses_branch_point_after_origin_main_advances(self, tmp_path):
+        clone, base = _build_repo(tmp_path)
+        origin = tmp_path / "origin.git"
+        _git(clone, "checkout", "-q", "-b", "auto-dev/test", base)
+        (clone / "agent.py").write_text("answer = 42\n")
+        _git(clone, "add", "agent.py")
+        _git(clone, "commit", "-q", "-m", "agent change")
+        head = _git(clone, "rev-parse", "HEAD").stdout.strip()
+
+        # Main advances independently after the workflow branch was created.
+        # A diff against moving origin/main contains both f.txt and agent.py;
+        # a diff against the merge-base contains only the autonomous file.
+        _add_remote_commit(origin, clone)
+        _git(clone, "fetch", "-q", "origin", "main")
+
+        o = _make_orchestrator()
+        o._update_workflow = MagicMock()
+        gh = GitHubOps(str(clone))
+        with patch("app.modules.workspace.autonomous.orchestrator.MAX_AUTONOMOUS_CHANGED_FILES", 1):
+            reason = o._validate_autonomous_change_scope(gh, {}, base, head)
+
+        assert reason == ""
+        o._update_workflow.assert_called_once_with({"base_commit_sha": base})

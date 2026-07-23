@@ -2,7 +2,7 @@
 
 import json
 import os
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -548,6 +548,17 @@ class TestMilestoneCRUD:
         all_ms = repo.list_milestones(wf_id)
         assert len(all_ms) == 3
 
+    def test_list_milestones_uses_id_to_order_equal_timestamps(self):
+        db = Mock()
+        db.fetch_all.return_value = []
+        repo = AutonomousWorkflowRepository(db)
+
+        repo.list_milestones("workflow-1")
+
+        query, params = db.fetch_all.call_args.args
+        assert query.endswith("ORDER BY created_at ASC, id ASC")
+        assert params == ("workflow-1",)
+
     def test_list_milestones_filter_phase(self, auto_db):
         repo = AutonomousWorkflowRepository(auto_db)
         wf = self._create_workflow(repo)
@@ -688,6 +699,17 @@ class TestEventCRUD:
 
         events = repo.list_events(wf_id)
         assert len(events) == 5
+
+    def test_list_events_uses_id_to_order_equal_timestamps(self):
+        db = Mock()
+        db.fetch_all.return_value = []
+        repo = AutonomousWorkflowRepository(db)
+
+        repo.list_events("workflow-1", limit=25, offset=5)
+
+        query, params = db.fetch_all.call_args.args
+        assert "ORDER BY created_at ASC, id ASC" in query
+        assert params == ("workflow-1", 25, 5)
 
     def test_list_events_with_limit(self, auto_db):
         repo = AutonomousWorkflowRepository(auto_db)

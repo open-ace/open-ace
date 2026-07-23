@@ -42,6 +42,12 @@ def _get_content_filter():
     return _content_filter_instance
 
 
+# Import shared cache function
+from app.modules.workspace.tenant_config_cache import (
+    get_tenant_sensitive_keyword_config as _get_tenant_sensitive_keyword_config,
+)
+
+
 def _sanitize_text_value(text: str | None) -> str | None:
     """Remove NUL / invalid UTF-8 surrogate data before persistence."""
     if text is None:
@@ -69,6 +75,27 @@ def _params(count: int) -> str:
 
 _WORKFLOW_ID_CONTEXT_MARKER = '"workflow_id"'
 _AUTONOMOUS_WORKFLOW_CONTEXT_PATTERN = "%" + escape_like(_WORKFLOW_ID_CONTEXT_MARKER) + "%"
+
+
+def is_autonomous_workflow_session(session: Any) -> bool:
+    """Return whether ``session`` is owned by the autonomous scheduler.
+
+    Autonomous workflow sessions have a separate lifecycle owner.  Quota
+    enforcement pauses their parent workflow between orchestrator cycles; a
+    generic session sweeper must not complete the backing session mid-agent,
+    because completion revokes its LLM proxy token while the process is still
+    running.
+    """
+    session_type = getattr(session, "session_type", None)
+    context = getattr(session, "context", None)
+    if isinstance(session, dict):
+        session_type = session.get("session_type")
+        context = session.get("context")
+    return (
+        session_type == SessionType.WORKFLOW.value
+        and isinstance(context, dict)
+        and bool(context.get("workflow_id"))
+    )
 
 
 def visible_session_clause(alias: str = "") -> tuple[str, list[Any]]:
@@ -1480,7 +1507,10 @@ class SessionManager:
                 filter_session_row = cursor.fetchone()
                 filter_user_id = filter_session_row["user_id"] if filter_session_row else None
 
-                result = content_filter.check_content(content)
+                # Get tenant-specific sensitive keyword config
+                tenant_config = _get_tenant_sensitive_keyword_config(int(effective_tenant_id))
+
+                result = content_filter.check_content(content, tenant_config=tenant_config)
 
                 if result.action in ("block", "warn", "redact"):
                     audit_logger = AuditLogger()

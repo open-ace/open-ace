@@ -102,6 +102,8 @@ class TestXSessionIdHeaderFormat:
             "sk-key",
             "https://api.openai.com/v1",
             42,
+            None,
+            None,
         )
         mock_get_proxy.return_value = mock_proxy
         mock_quota_cls.return_value = _make_quota_ok()
@@ -136,6 +138,8 @@ class TestXSessionIdHeaderFormat:
             "sk-key",
             "https://api.openai.com/v1",
             42,
+            None,
+            None,
         )
         mock_get_proxy.return_value = mock_proxy
         mock_quota_cls.return_value = _make_quota_ok()
@@ -170,6 +174,8 @@ class TestXSessionIdHeaderFormat:
             "sk-key",
             "https://api.openai.com/v1",
             42,
+            None,
+            None,
         )
         mock_get_proxy.return_value = mock_proxy
         mock_quota_cls.return_value = _make_quota_ok()
@@ -206,6 +212,8 @@ class TestXSessionIdHeaderFormat:
             "sk-key",
             "https://api.openai.com/v1",
             42,
+            None,
+            None,
         )
         mock_get_proxy.return_value = mock_proxy
         mock_quota_cls.return_value = _make_quota_ok()
@@ -252,6 +260,8 @@ class TestXSessionIdHeaderOverride:
             "sk-key",
             "https://api.openai.com/v1",
             42,
+            None,
+            None,
         )
         mock_get_proxy.return_value = mock_proxy
         mock_quota_cls.return_value = _make_quota_ok()
@@ -287,6 +297,8 @@ class TestXSessionIdHeaderOverride:
             "sk-key",
             "https://api.openai.com/v1",
             42,
+            None,
+            None,
         )
         mock_get_proxy.return_value = mock_proxy
         mock_quota_cls.return_value = _make_quota_ok()

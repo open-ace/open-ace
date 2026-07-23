@@ -162,14 +162,14 @@ def test_login_with_password_extracts_session_token(monkeypatch, tmp_path):
         def __exit__(self, *args):
             pass
 
-    def fake_urlopen(req, timeout=30):
+    def fake_urlopen(req):
         assert "/api/auth/login" in req.full_url, f"Unexpected URL: {req.full_url}"
         body = json.loads(req.data)
         assert body["username"] == "testuser"
         assert body["password"] == "testpass"
         return FakeResp()
 
-    monkeypatch.setattr(openace_cli.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(openace_cli, "_urlopen", fake_urlopen)
 
     args = type("Args", (), {"token": None})()
     assert openace_cli.cmd_login(args) == 0

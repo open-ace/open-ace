@@ -11,15 +11,18 @@ API endpoints for remote workspace management including:
 
 from __future__ import annotations
 
+import hashlib
 import hmac
 import ipaddress
 import json
 import logging
 import os
+import re
 import threading
 import time
 import urllib.parse
 import uuid
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from flask import Blueprint, Response, g, jsonify, request, stream_with_context
@@ -33,6 +36,7 @@ from app.modules.workspace.remote_agent_manager import get_remote_agent_manager
 from app.modules.workspace.remote_session_manager import get_remote_session_manager
 from app.modules.workspace.session_access import _set_user_from_token, _set_user_from_webui_token
 from app.modules.workspace.terminal_store import terminal_info_store
+from app.repositories.database import adapt_sql
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +78,7 @@ def load_user():
         "/api/remote/agent/register",
         "/api/remote/agent/ws",
         "/api/remote/agent/message",
+        # Uses the Remote Agent Bearer token, not a WebUI session token.
         "/api/remote/usage-report",
         "/api/remote/agent/install.sh",
         "/api/remote/agent/install.ps1",
@@ -246,6 +251,161 @@ def _audit_auth_failure(token_or_prefix: str, reason: str, client_ip: str) -> No
         },
         success=False,
     )
+
+
+def _audit_usage_report_failure(
+    action: str,
+    session_id: str,
+    machine_id: str,
+    client_ip: str,
+    error_reason: str,
+    details: dict | None = None,
+    *,
+    user_id: int | None = None,
+    tenant_id: int | None = None,
+    machine_verified: bool = False,
+) -> None:
+    """Record a usage report audit event for auth failure or binding mismatch.
+
+    Args:
+        action: AuditAction enum value (USAGE_REPORT_AUTH_FAILURE or USAGE_REPORT_BINDING_MISMATCH)
+        session_id: The session_id from the request
+        machine_id: The machine_id from the request
+        client_ip: Client IP address
+        error_reason: Reason for the failure
+        details: Optional additional details to include
+        user_id: User attributable to the authenticated machine, if known.
+        tenant_id: Tenant attributable to the authenticated machine, if known.
+        machine_verified: Whether machine_id names an authenticated database row.
+    """
+    if machine_verified and action == AuditAction.USAGE_REPORT_BINDING_MISMATCH.value:
+        try:
+            agent_mgr = get_remote_agent_manager()
+            source_ip = _transport_peer_ip()
+            audit_key = f"usage-binding-audit:{machine_id}:{source_ip}"
+            if not _check_usage_report_rate_limit(agent_mgr, audit_key, 5):
+                return
+        except Exception:
+            logger.exception("Failed to apply usage binding audit rate limit")
+            return
+
+    audit_details = {
+        "machine_id": machine_id,
+        "client_ip": client_ip,
+        "error_reason": error_reason,
+    }
+    if details:
+        audit_details.update(details)
+
+    audit_logger.log(
+        action=action,
+        severity="warning",
+        resource_type="remote_machine" if machine_verified else "usage_report",
+        resource_id=machine_id if machine_verified else None,
+        details=audit_details,
+        user_id=user_id,
+        tenant_id=tenant_id,
+        ip_address=client_ip,
+        # A caller-controlled or cross-tenant session identifier must never be
+        # persisted until the full machine/tenant/user binding succeeds.
+        session_id=None,
+        success=False,
+        error_message=error_reason,
+    )
+
+
+def _validate_usage_report_binding(
+    session_id: str, machine_id: str, client_ip: str
+) -> tuple[dict | None, tuple[Any, Any] | None]:
+    """Validate session-machine binding and tenant consistency for usage report.
+
+    Args:
+        session_id: The session_id from the request
+        machine_id: The machine_id from the request
+        client_ip: Client IP address for audit logging
+
+    Returns:
+        (session_data, None) on success.
+        (None, error_response) on failure.
+    """
+    agent_mgr = get_remote_agent_manager()
+    machine = agent_mgr.get_machine(machine_id)
+    if not machine:
+        _audit_usage_report_failure(
+            AuditAction.USAGE_REPORT_BINDING_MISMATCH.value,
+            session_id,
+            machine_id,
+            client_ip,
+            "machine_not_found",
+        )
+        return None, (jsonify({"error": "Machine not found"}), 403)
+
+    machine_tenant_id = machine.get("tenant_id")
+    machine_owner_id = machine.get("created_by")
+
+    # Query only inside the authenticated machine+tenant scope.  A missing,
+    # cross-machine, and cross-tenant session all produce the same response and
+    # audit shape, preventing session-existence and cross-tenant oracles.
+    try:
+        with agent_mgr.db.connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                adapt_sql(
+                    "SELECT session_id, remote_machine_id, tenant_id, user_id, status "
+                    "FROM agent_sessions "
+                    "WHERE session_id = ? AND remote_machine_id = ? AND tenant_id = ?"
+                ),
+                (session_id, machine_id, machine_tenant_id),
+            )
+            row = cursor.fetchone()
+    except Exception as e:
+        logger.error(f"Failed to query session {session_id[:8]}: {e}")
+        return None, (jsonify({"error": "Internal error"}), 500)
+
+    if not row:
+        _audit_usage_report_failure(
+            AuditAction.USAGE_REPORT_BINDING_MISMATCH.value,
+            session_id,
+            machine_id,
+            client_ip,
+            "binding_rejected",
+            user_id=machine_owner_id,
+            tenant_id=machine_tenant_id,
+            machine_verified=True,
+        )
+        return None, (jsonify({"error": "Usage report binding rejected"}), 403)
+
+    # Extract session data
+    session_data = (
+        dict(row)
+        if isinstance(row, dict)
+        else {
+            "session_id": row[0],
+            "remote_machine_id": row[1],
+            "tenant_id": row[2],
+            "user_id": row[3],
+            "status": row[4],
+        }
+    )
+
+    # A machine token is allowed to report only for a user assigned to that
+    # machine. Registration always assigns created_by as an administrator; this
+    # explicit lookup also supports sessions owned by delegated users.
+    session_user_id = session_data.get("user_id")
+    if not session_user_id or not agent_mgr.check_user_access(machine_id, session_user_id):
+        _audit_usage_report_failure(
+            AuditAction.USAGE_REPORT_BINDING_MISMATCH.value,
+            session_id,
+            machine_id,
+            client_ip,
+            "cross_user",
+            user_id=machine_owner_id,
+            tenant_id=machine_tenant_id,
+            machine_verified=True,
+        )
+        return None, (jsonify({"error": "Usage report binding rejected"}), 403)
+
+    return session_data, None
 
 
 def _require_machine_admin(machine_id):
@@ -1082,6 +1242,25 @@ def get_client_ip_from_request() -> str:
     return request.remote_addr or "127.0.0.1"
 
 
+def _transport_peer_ip() -> str:
+    """Return the original WSGI peer before ProxyFix rewrites REMOTE_ADDR.
+
+    ``create_app`` trusts one forwarded hop via ``ProxyFix(x_for=1)``.  Flask's
+    ``request.remote_addr`` is therefore client-controlled on a directly
+    reachable deployment. Werkzeug preserves the pre-rewrite value in
+    ``werkzeug.proxy_fix.orig``; pre-authentication limits must use that value.
+    """
+    proxy_orig = request.environ.get("werkzeug.proxy_fix.orig")
+    if isinstance(proxy_orig, dict):
+        original = proxy_orig.get("REMOTE_ADDR")
+        if isinstance(original, str) and original:
+            return original
+    raw = request.environ.get("REMOTE_ADDR")
+    if isinstance(raw, str) and raw:
+        return raw
+    return "unknown"
+
+
 @remote_bp.route("/agent/register", methods=["POST"])
 def agent_register():
     """
@@ -1212,7 +1391,9 @@ def agent_message():
             # Not legacy and no Bearer → try extracting for audit
             auth_header = request.headers.get("Authorization", "")
             client_ip = get_client_ip_from_request()
-            if auth_header.startswith("Bearer "):
+            if auth_header.startswith("Bearer ") and (
+                msg_type != "usage_report" or _should_audit_usage_auth_failure(agent_mgr, client_ip)
+            ):
                 failed_token = auth_header[7:]
                 _audit_auth_failure(failed_token, "invalid_or_revoked", client_ip)
             return legacy_error
@@ -1223,7 +1404,10 @@ def agent_message():
             if bearer_error:
                 client_ip = get_client_ip_from_request()
                 auth_header = request.headers.get("Authorization", "")
-                if auth_header.startswith("Bearer "):
+                if auth_header.startswith("Bearer ") and (
+                    msg_type != "usage_report"
+                    or _should_audit_usage_auth_failure(agent_mgr, client_ip)
+                ):
                     _audit_auth_failure(
                         auth_header[7:],
                         bearer_error[0].get_json().get("error", "unknown"),
@@ -1325,19 +1509,11 @@ def agent_message():
         return jsonify({"success": True})
 
     elif msg_type == "usage_report":
-        session_id = data.get("session_id")
-        tokens = data.get("tokens", {})
-        requests_count = data.get("requests", 1)
-
-        if session_id:
-            session_mgr = get_remote_session_manager()
-            session_mgr.process_usage_report(
-                session_id=session_id,
-                tokens=tokens,
-                requests=requests_count,
-            )
-
-        return jsonify({"success": True})
+        return _process_authenticated_usage_report(
+            data,
+            machine_id,
+            get_client_ip_from_request(),
+        )
 
     elif msg_type == "permission_request":
         session_id = data.get("session_id")
@@ -1645,6 +1821,8 @@ def agent_message():
 
                 # Mirror messages to daily_messages for ConversationHistory visibility
                 synced_message_delta = 0
+                synced_input_tokens = 0
+                synced_output_tokens = 0
                 for msg in messages:
                     role = msg.get("role", "")
                     content = msg.get("content", "")
@@ -1700,6 +1878,8 @@ def agent_message():
                         )
                         if getattr(stored, "_was_inserted", False):
                             synced_message_delta += 1
+                            synced_input_tokens += input_tokens
+                            synced_output_tokens += output_tokens
                     except Exception as e:
                         logger.debug("Failed to add session_message: %s", e)
 
@@ -1801,10 +1981,29 @@ def agent_message():
                 # (count_usage=False), so the session owner must advance
                 # message_count itself — otherwise remote-synced sessions
                 # never reflect their imported messages (#1128).
-                if synced_message_delta:
+                if synced_message_delta or synced_input_tokens or synced_output_tokens:
                     sync_session_mgr.increment_session_usage(
-                        session_id, message_delta=synced_message_delta
+                        session_id,
+                        message_delta=synced_message_delta,
+                        total_tokens_delta=synced_input_tokens + synced_output_tokens,
+                        total_input_delta=synced_input_tokens,
+                        total_output_delta=synced_output_tokens,
                     )
+
+                    # Record usage in QuotaManager for quota tracking
+                    if sync_user_id and (synced_input_tokens or synced_output_tokens):
+                        try:
+                            from app.modules.governance.quota_manager import QuotaManager
+
+                            quota_mgr = QuotaManager()
+                            quota_mgr.record_usage(
+                                user_id=sync_user_id,
+                                tokens=synced_input_tokens + synced_output_tokens,
+                                requests=1,  # Each session_sync counts as 1 request
+                            )
+                        except Exception as e:
+                            logger.error("Failed to record quota usage: %s", e)
+
             except Exception as e:
                 logger.debug("Failed to mirror messages: %s", e)
 
@@ -1838,6 +2037,8 @@ def start_terminal():
     data = request.get_json() or {}
     machine_id = data.get("machine_id")
     work_dir = data.get("work_dir")
+    model_id = data.get("model_id")  # Optional: selected model
+    key_id = data.get("key_id")  # Optional: specific API key
 
     if not machine_id:  # decorator already guards; narrows type for mypy
         return jsonify({"error": "machine_id is required"}), 400
@@ -1871,6 +2072,10 @@ def start_terminal():
         {
             "workspace_type": "terminal",
             "remote_machine_id": machine_id,
+            "context": {
+                "model_id": model_id,
+                "key_id": key_id,
+            },
         },
     )
     logger.info(
@@ -1879,43 +2084,104 @@ def start_terminal():
 
     # Generate proxy tokens for LLM API auth through the terminal
     api_proxy = get_api_key_proxy_service()
-    anthropic_token = api_proxy.generate_proxy_token(
-        user_id=g.user["id"],
-        session_id=terminal_id,
-        tenant_id=tenant_id,
-        provider="anthropic",
-        session_type="terminal",
-    )
-    openai_token = api_proxy.generate_proxy_token(
-        user_id=g.user["id"],
-        session_id=terminal_id,
-        tenant_id=tenant_id,
-        provider="openai",
-        session_type="terminal",
-    )
+
+    # Determine which tokens to generate based on model selection
+    anthropic_token = None
+    openai_token = None
+
+    if model_id and key_id:
+        # User selected a specific model/key - only generate token for that provider
+        from app.modules.workspace.api_key_proxy import get_protocol_for_provider
+
+        # Get the key info to determine provider
+        key_info = api_proxy.get_key_by_id(tenant_id, key_id)
+        if key_info:
+            provider = key_info.get("provider", "")
+            protocol = get_protocol_for_provider(provider)
+
+            if protocol == "anthropic":
+                anthropic_token = api_proxy.generate_proxy_token(
+                    user_id=g.user["id"],
+                    session_id=terminal_id,
+                    tenant_id=tenant_id,
+                    provider="anthropic",
+                    session_type="terminal",
+                    extra_payload={
+                        "ha_candidate_keys": [{"key_id": key_id}],
+                        "ha_model_key_ids": {model_id: [key_id]},
+                    },
+                )
+            else:
+                openai_token = api_proxy.generate_proxy_token(
+                    user_id=g.user["id"],
+                    session_id=terminal_id,
+                    tenant_id=tenant_id,
+                    provider="openai",
+                    session_type="terminal",
+                    extra_payload={
+                        "ha_candidate_keys": [{"key_id": key_id}],
+                        "ha_model_key_ids": {model_id: [key_id]},
+                    },
+                )
+    else:
+        # No specific model selected - generate tokens for all providers (default behavior)
+        anthropic_token = api_proxy.generate_proxy_token(
+            user_id=g.user["id"],
+            session_id=terminal_id,
+            tenant_id=tenant_id,
+            provider="anthropic",
+            session_type="terminal",
+        )
+        openai_token = api_proxy.generate_proxy_token(
+            user_id=g.user["id"],
+            session_id=terminal_id,
+            tenant_id=tenant_id,
+            provider="openai",
+            session_type="terminal",
+        )
 
     # Use external URL for LLM proxy (remote machine needs to access it)
     backend_url = agent_mgr.get_backend_url(request.host_url)
     proxy_url = f"{backend_url}/api/remote/llm-proxy"
     logger.info("start_terminal: backend_url=%s, proxy_url=%s", backend_url, proxy_url)
 
-    # Get CLI settings for supported menu tools
+    # Get CLI settings
     cli_settings = {}
-    for tool_name in _CLI_SETTINGS_TOOLS:
-        tool_settings = api_proxy.get_cli_settings_for_tool(tenant_id, tool_name)
-        if tool_settings:
-            cli_settings[tool_name] = tool_settings
+    if model_id and key_id:
+        # Only get settings for the selected key
+        key_info = api_proxy.get_key_by_id(tenant_id, key_id)
+        logger.info(f"start_terminal: model_id={model_id}, key_id={key_id}, key_info={key_info}")
+        if key_info:
+            cli_tools_str = key_info.get("cli_tools", "[]")
+            try:
+                cli_tools = json.loads(cli_tools_str) if cli_tools_str else []
+            except json.JSONDecodeError:
+                cli_tools = []
+            # Get settings for each tool this key supports - use specific key settings
+            for tool_name in cli_tools:
+                tool_settings = api_proxy.get_cli_settings_for_key(tenant_id, key_id, tool_name)
+                if tool_settings:
+                    cli_settings[tool_name] = tool_settings
+        logger.info(f"start_terminal: cli_settings for key_id={key_id}: {cli_settings}")
+    else:
+        # Default: get settings for all supported tools (merged from all keys)
+        for tool_name in _CLI_SETTINGS_TOOLS:
+            tool_settings = api_proxy.get_cli_settings_for_tool(tenant_id, tool_name)
+            if tool_settings:
+                cli_settings[tool_name] = tool_settings
+        logger.info(f"start_terminal: cli_settings (default): {cli_settings}")
 
-    # Send start_terminal command to agent with tokens for both providers
+    # Send start_terminal command to agent with tokens for selected providers
     cmd = {
         "type": "command",
         "command": "start_terminal",
         "terminal_id": terminal_id,
         "proxy_url": proxy_url,
-        "anthropic_token": anthropic_token,
-        "openai_token": openai_token,
+        "anthropic_token": anthropic_token or "",
+        "openai_token": openai_token or "",
         "work_dir": work_dir or "",
         "cli_settings": cli_settings,
+        "model_id": model_id,  # Pass to agent for reference
     }
     agent_mgr.send_command(machine_id, cmd)
 
@@ -2094,26 +2360,77 @@ def attach_terminal(terminal_id):
     attach_machine = agent_mgr.get_machine(machine_id)
     attach_tenant_id = attach_machine.get("tenant_id", 1) if attach_machine else 1
 
+    # Get session context to retrieve model_id and key_id
+    from app.modules.workspace.session_manager import get_session_manager
+
+    sm = get_session_manager()
+    session_info = sm.get_session(terminal_id)
+    context = session_info.context if session_info else {}
+    stored_model_id = context.get("model_id")
+    stored_key_id = context.get("key_id")
+
     # Generate fresh API tokens for LLM proxy auth
     api_proxy = get_api_key_proxy_service()
     api_proxy.revoke_proxy_tokens_for_session(
         terminal_id,
         reason="terminal_tokens_rotated",
     )
-    anthropic_token = api_proxy.generate_proxy_token(
-        user_id=g.user["id"],
-        session_id=terminal_id,
-        tenant_id=attach_tenant_id,
-        provider="anthropic",
-        session_type="terminal",
-    )
-    openai_token = api_proxy.generate_proxy_token(
-        user_id=g.user["id"],
-        session_id=terminal_id,
-        tenant_id=attach_tenant_id,
-        provider="openai",
-        session_type="terminal",
-    )
+
+    # Determine token generation based on stored model/key selection
+    anthropic_token = None
+    openai_token = None
+
+    if stored_model_id and stored_key_id:
+        # User had selected a specific model/key - generate token with that info
+        from app.modules.workspace.api_key_proxy import get_protocol_for_provider
+
+        key_info = api_proxy.get_key_by_id(attach_tenant_id, stored_key_id)
+        if key_info:
+            provider = key_info.get("provider", "")
+            protocol = get_protocol_for_provider(provider)
+
+            if protocol == "anthropic":
+                anthropic_token = api_proxy.generate_proxy_token(
+                    user_id=g.user["id"],
+                    session_id=terminal_id,
+                    tenant_id=attach_tenant_id,
+                    provider="anthropic",
+                    session_type="terminal",
+                    extra_payload={
+                        "ha_candidate_keys": [{"key_id": stored_key_id}],
+                        "ha_model_key_ids": {stored_model_id: [stored_key_id]},
+                    },
+                )
+            else:
+                openai_token = api_proxy.generate_proxy_token(
+                    user_id=g.user["id"],
+                    session_id=terminal_id,
+                    tenant_id=attach_tenant_id,
+                    provider="openai",
+                    session_type="terminal",
+                    extra_payload={
+                        "ha_candidate_keys": [{"key_id": stored_key_id}],
+                        "ha_model_key_ids": {stored_model_id: [stored_key_id]},
+                    },
+                )
+
+    # Fall back to default behavior if no specific model was selected
+    if not anthropic_token:
+        anthropic_token = api_proxy.generate_proxy_token(
+            user_id=g.user["id"],
+            session_id=terminal_id,
+            tenant_id=attach_tenant_id,
+            provider="anthropic",
+            session_type="terminal",
+        )
+    if not openai_token:
+        openai_token = api_proxy.generate_proxy_token(
+            user_id=g.user["id"],
+            session_id=terminal_id,
+            tenant_id=attach_tenant_id,
+            provider="openai",
+            session_type="terminal",
+        )
 
     # Get proxy URL for LLM API
     backend_url = agent_mgr.get_backend_url(request.host_url)
@@ -2214,27 +2531,440 @@ def llm_proxy(path=""):
 
 # ==================== Usage Report (from Agent) ====================
 
+_USAGE_REPORT_RATE_LIMIT_WINDOW = 60  # seconds
+_USAGE_REPORT_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$")
+_USAGE_REPORT_LEGACY_DEADLINE_DEFAULT = "2026-08-04T00:00:00+00:00"
 
-@remote_bp.route("/usage-report", methods=["POST"])
-def usage_report():
-    """Receive usage report from a remote agent."""
-    data = request.get_json() or {}
+# Constants for input validation (Issue #1891)
+_MAX_TOKENS_PER_REPORT = 10**9  # 1 billion tokens per report
+_MAX_REQUESTS_PER_REPORT = 1000  # max requests per single report
+
+
+def _check_usage_report_rate_limit(agent_mgr: Any, key: str, limit: int) -> bool:
+    """Atomically enforce a shared fixed-window rate limit.
+
+    The state lives in the application database, so gunicorn workers and
+    multiple application instances observe the same counter.  This helper is
+    called only after the authenticated machine/session binding is verified;
+    unauthenticated callers cannot allocate keys or exhaust valid counters.
+    """
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    cutoff = now - timedelta(seconds=_USAGE_REPORT_RATE_LIMIT_WINDOW)
+    stale_cutoff = now - timedelta(days=1)
+
+    with agent_mgr.db.connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            adapt_sql(
+                """
+                INSERT INTO usage_report_rate_limits
+                    (rate_key, window_started_at, request_count, updated_at)
+                VALUES (?, ?, 0, ?)
+                ON CONFLICT(rate_key) DO NOTHING
+                """
+            ),
+            (key, now, now),
+        )
+        cursor.execute(
+            adapt_sql(
+                """
+                UPDATE usage_report_rate_limits
+                SET request_count = CASE
+                        WHEN window_started_at <= ? THEN 1
+                        ELSE request_count + 1
+                    END,
+                    window_started_at = CASE
+                        WHEN window_started_at <= ? THEN ?
+                        ELSE window_started_at
+                    END,
+                    updated_at = ?
+                WHERE rate_key = ?
+                RETURNING request_count
+                """
+            ),
+            (cutoff, cutoff, now, now, key),
+        )
+        row = cursor.fetchone()
+        cursor.execute(
+            adapt_sql("DELETE FROM usage_report_rate_limits WHERE updated_at < ?"),
+            (stale_cutoff,),
+        )
+        conn.commit()
+
+    count = row["request_count"] if isinstance(row, dict) else row[0]
+    return bool(count <= limit)
+
+
+def _should_audit_usage_auth_failure(agent_mgr: Any, client_ip: str) -> bool:
+    """Bound usage-auth audit writes across workers without changing the 401."""
+    try:
+        # Do not trust X-Forwarded-For for a pre-authentication limiter: a
+        # direct caller can spoof it and allocate unbounded rate/audit keys.
+        source_ip = _transport_peer_ip()
+        return _check_usage_report_rate_limit(agent_mgr, f"usage-auth-audit:{source_ip}", 5)
+    except Exception:
+        logger.exception("Failed to apply usage auth audit rate limit")
+        return False
+
+
+def _legacy_usage_report_deadline() -> datetime:
+    """Return the explicit rollout deadline for report_id-less Agents."""
+    raw = os.environ.get(
+        "OPENACE_USAGE_REPORT_LEGACY_DEADLINE",
+        _USAGE_REPORT_LEGACY_DEADLINE_DEFAULT,
+    )
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        logger.error("Invalid OPENACE_USAGE_REPORT_LEGACY_DEADLINE=%r; disabling fallback", raw)
+        return datetime.min.replace(tzinfo=timezone.utc)
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def _normalize_usage_report_id(data: dict) -> tuple[dict, bool, str | None]:
+    """Validate report_id or apply the short, explicitly bounded rollout fallback."""
+    report_id = data.get("report_id")
+    if isinstance(report_id, str) and _USAGE_REPORT_ID_RE.fullmatch(report_id):
+        return data, False, None
+    if report_id is not None:
+        return data, False, "A valid report_id is required"
+
+    deadline = _legacy_usage_report_deadline()
+    if datetime.now(timezone.utc) >= deadline:
+        return data, False, "report_id is required; the legacy migration window has expired"
+
+    normalized = dict(data)
+    normalized["report_id"] = f"legacy-{uuid.uuid4()}"
+    logger.warning(
+        "Accepted report_id-less usage payload during migration window ending %s",
+        deadline.isoformat(),
+    )
+    return normalized, True, None
+
+
+def _usage_report_payload_hash(data: dict) -> str:
+    """Return a stable digest for replay-conflict detection."""
+    canonical = {
+        "machine_id": data.get("machine_id"),
+        "session_id": data.get("session_id"),
+        "tokens": data.get("tokens", {}),
+        "requests": data.get("requests", 1),
+    }
+    raw = json.dumps(canonical, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(raw).hexdigest()
+
+
+def _claim_usage_report(
+    agent_mgr: Any,
+    *,
+    report_id: str,
+    session_id: str,
+    machine_id: str,
+    user_id: int,
+    tenant_id: int,
+    payload_hash: str,
+) -> str:
+    """Claim a report ID and return claimed, duplicate, conflict, or processing."""
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    with agent_mgr.db.connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            adapt_sql(
+                """
+                INSERT INTO usage_report_receipts
+                    (report_id, session_id, machine_id, user_id, tenant_id,
+                     payload_hash, status, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, 'processing', ?, ?)
+                ON CONFLICT(report_id) DO NOTHING
+                """
+            ),
+            (
+                report_id,
+                session_id,
+                machine_id,
+                user_id,
+                tenant_id,
+                payload_hash,
+                now,
+                now,
+            ),
+        )
+        inserted = cursor.rowcount > 0
+        if inserted:
+            conn.commit()
+            return "claimed"
+
+        cursor.execute(
+            adapt_sql(
+                "SELECT session_id, machine_id, payload_hash, status "
+                "FROM usage_report_receipts WHERE report_id = ?"
+            ),
+            (report_id,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            conn.rollback()
+            return "processing"
+
+        existing = dict(row) if not isinstance(row, dict) else row
+        same_report = (
+            existing.get("session_id") == session_id
+            and existing.get("machine_id") == machine_id
+            and hmac.compare_digest(existing.get("payload_hash") or "", payload_hash)
+        )
+        if not same_report:
+            conn.rollback()
+            return "conflict"
+        if existing.get("status") == "completed":
+            conn.rollback()
+            return "duplicate"
+        if existing.get("status") == "failed":
+            cursor.execute(
+                adapt_sql(
+                    "UPDATE usage_report_receipts SET status = 'processing', updated_at = ? "
+                    "WHERE report_id = ? AND status = 'failed'"
+                ),
+                (now, report_id),
+            )
+            conn.commit()
+            return "claimed" if cursor.rowcount > 0 else "processing"
+        conn.rollback()
+        return "processing"
+
+
+def _finish_usage_report(agent_mgr: Any, report_id: str, status: str) -> None:
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    with agent_mgr.db.connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            adapt_sql(
+                "UPDATE usage_report_receipts SET status = ?, updated_at = ?, "
+                "processed_at = CASE WHEN ? = 'completed' THEN ? ELSE processed_at END "
+                "WHERE report_id = ?"
+            ),
+            (status, now, status, now, report_id),
+        )
+        conn.commit()
+
+
+def _validate_usage_report_input(tokens: dict, requests: int) -> tuple[str | None, str | None]:
+    """Validate input data for usage report.
+
+    Args:
+        tokens: Token counts dict with 'input' and 'output' keys
+        requests: Number of requests
+
+    Returns:
+        (None, None) if valid, (error_message, error_reason) if invalid
+    """
+    # Validate tokens is a dict
+    if not isinstance(tokens, dict):
+        return "tokens must be an object", "invalid_tokens_type"
+
+    # Validate input tokens
+    input_tokens = tokens.get("input", 0)
+    if not isinstance(input_tokens, int) or isinstance(input_tokens, bool):
+        return "tokens.input must be an integer", "invalid_input_tokens_type"
+    if input_tokens < 0:
+        return "tokens.input must be non-negative", "negative_input_tokens"
+
+    # Validate output tokens
+    output_tokens = tokens.get("output", 0)
+    if not isinstance(output_tokens, int) or isinstance(output_tokens, bool):
+        return "tokens.output must be an integer", "invalid_output_tokens_type"
+    if output_tokens < 0:
+        return "tokens.output must be non-negative", "negative_output_tokens"
+
+    # Validate total tokens limit
+    total_tokens = input_tokens + output_tokens
+    if total_tokens > _MAX_TOKENS_PER_REPORT:
+        return f"total tokens exceeds maximum ({_MAX_TOKENS_PER_REPORT})", "tokens_exceeds_limit"
+
+    # Validate requests
+    if not isinstance(requests, int) or isinstance(requests, bool):
+        return "requests must be an integer", "invalid_requests_type"
+    if requests < 0:
+        return "requests must be non-negative", "negative_requests"
+    if requests > _MAX_REQUESTS_PER_REPORT:
+        return f"requests exceeds maximum ({_MAX_REQUESTS_PER_REPORT})", "requests_exceeds_limit"
+
+    return None, None
+
+
+def _process_authenticated_usage_report(data: dict, machine_id: str, client_ip: str):
+    """Validate and apply one usage delta after machine-token authentication."""
+    agent_mgr = get_remote_agent_manager()
+    # A valid machine token is known at this boundary.  Apply machine/IP limits
+    # before parsing or binding the caller-controlled session identifier so
+    # invalid-binding traffic cannot amplify database or audit writes.
+    for key, limit, label in (
+        (f"machine:{machine_id}", 60, "this machine"),
+        (f"ip:{_transport_peer_ip()}", 120, "this client"),
+    ):
+        if not _check_usage_report_rate_limit(agent_mgr, key, limit):
+            return jsonify({"error": f"Rate limit exceeded for {label}"}), 429
+
+    data, legacy_report_id, report_id_error = _normalize_usage_report_id(data)
     session_id = data.get("session_id")
+    report_id = data.get("report_id")
     tokens = data.get("tokens", {})
-    requests = data.get("requests", 1)
-    data.get("machine_id")
+    requests_count = data.get("requests", 1)
 
     if not session_id:
         return jsonify({"error": "session_id is required"}), 400
+    if report_id_error:
+        return jsonify({"error": report_id_error}), 400
+    assert isinstance(report_id, str)
 
-    session_mgr = get_remote_session_manager()
-    session_mgr.process_usage_report(
+    input_error, _ = _validate_usage_report_input(tokens, requests_count)
+    if input_error:
+        return jsonify({"error": input_error}), 400
+
+    session_data, binding_error = _validate_usage_report_binding(session_id, machine_id, client_ip)
+    if binding_error:
+        return binding_error
+    assert session_data is not None
+
+    if not _check_usage_report_rate_limit(agent_mgr, f"session:{session_id}", 10):
+        return jsonify({"error": "Rate limit exceeded for this session"}), 429
+
+    user_id = int(session_data["user_id"])
+    tenant_id = int(session_data["tenant_id"])
+    payload_hash = _usage_report_payload_hash(data)
+    claim = _claim_usage_report(
+        agent_mgr,
+        report_id=report_id,
         session_id=session_id,
-        tokens=tokens,
-        requests=requests,
+        machine_id=machine_id,
+        user_id=user_id,
+        tenant_id=tenant_id,
+        payload_hash=payload_hash,
+    )
+    if claim == "duplicate":
+        return jsonify({"success": True, "duplicate": True, "report_id": report_id})
+    if claim == "processing":
+        return jsonify({"error": "Usage report is already being processed"}), 409
+    if claim == "conflict":
+        _audit_usage_report_failure(
+            AuditAction.USAGE_REPORT_BINDING_MISMATCH.value,
+            session_id,
+            machine_id,
+            client_ip,
+            "report_id_replay_conflict",
+            {"report_id": report_id},
+            user_id=user_id,
+            tenant_id=tenant_id,
+            machine_verified=True,
+        )
+        return jsonify({"error": "report_id was already used for different content"}), 409
+
+    try:
+        session_mgr = get_remote_session_manager()
+        session_mgr.process_usage_report(
+            session_id=session_id,
+            tokens=tokens,
+            requests=requests_count,
+        )
+    except Exception:
+        _finish_usage_report(agent_mgr, report_id, "failed")
+        logger.exception("Failed to process usage report %s", report_id)
+        return jsonify({"error": "Failed to process usage report"}), 500
+
+    _finish_usage_report(agent_mgr, report_id, "completed")
+    audit_logger.log(
+        action=AuditAction.USAGE_REPORT_ACCEPTED.value,
+        user_id=user_id,
+        tenant_id=tenant_id,
+        severity="info",
+        resource_type="usage_report",
+        resource_id=report_id,
+        session_id=session_id,
+        ip_address=client_ip,
+        details={
+            "machine_id": machine_id,
+            "session_id": session_id,
+            "requests": requests_count,
+            "total_tokens": tokens.get("input", 0) + tokens.get("output", 0),
+            "legacy_report_id_generated": legacy_report_id,
+            "idempotency_protected": not legacy_report_id,
+            "legacy_deadline": (
+                _legacy_usage_report_deadline().isoformat() if legacy_report_id else None
+            ),
+        },
+        success=True,
+    )
+    return jsonify(
+        {
+            "success": True,
+            "duplicate": False,
+            "report_id": report_id,
+            "legacy_report_id_generated": legacy_report_id,
+        }
     )
 
-    return jsonify({"success": True})
+
+@remote_bp.route("/usage-report", methods=["POST"])
+def usage_report():
+    """Receive an authenticated, bound, idempotent Agent usage report."""
+    client_ip = get_client_ip_from_request()
+    data = request.get_json() or {}
+    machine_id = data.get("machine_id")
+    if not machine_id:
+        return jsonify({"error": "machine_id is required"}), 400
+    agent_mgr = get_remote_agent_manager()
+    machine = agent_mgr.get_machine(machine_id)
+    if not machine:
+        if _should_audit_usage_auth_failure(agent_mgr, client_ip):
+            _audit_usage_report_failure(
+                AuditAction.USAGE_REPORT_AUTH_FAILURE.value,
+                data.get("session_id") or "",
+                machine_id,
+                client_ip,
+                "unknown_machine",
+            )
+        return jsonify({"error": "Unknown machine"}), 401
+
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        _, bearer_error = _validate_agent_bearer(machine_id)
+        if bearer_error:
+            token = auth_header[7:]
+            if _should_audit_usage_auth_failure(agent_mgr, client_ip):
+                _audit_usage_report_failure(
+                    AuditAction.USAGE_REPORT_AUTH_FAILURE.value,
+                    data.get("session_id") or "",
+                    machine_id,
+                    client_ip,
+                    "invalid_token",
+                    {"token_hash_prefix": token_hash_prefix(token)},
+                    user_id=machine.get("created_by"),
+                    tenant_id=machine.get("tenant_id"),
+                    machine_verified=True,
+                )
+            return bearer_error
+        if agent_mgr.is_legacy_machine(machine_id):
+            agent_mgr.clear_legacy_mode(machine_id)
+            logger.info("Legacy mode cleared for machine %s after Bearer auth", machine_id[:8])
+    else:
+        _, legacy_error = _check_legacy_fallback(machine_id)
+        if legacy_error:
+            if _should_audit_usage_auth_failure(agent_mgr, client_ip):
+                _audit_usage_report_failure(
+                    AuditAction.USAGE_REPORT_AUTH_FAILURE.value,
+                    data.get("session_id") or "",
+                    machine_id,
+                    client_ip,
+                    "missing_token_or_legacy_expired",
+                    user_id=machine.get("created_by"),
+                    tenant_id=machine.get("tenant_id"),
+                    machine_verified=True,
+                )
+            return legacy_error
+        logger.warning(
+            "Usage report accepted for legacy machine %s (no Bearer token)",
+            machine_id[:8],
+        )
+    return _process_authenticated_usage_report(data, machine_id, client_ip)
 
 
 # ==================== Machine File Browse ====================

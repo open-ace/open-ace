@@ -41,6 +41,271 @@ if [ "${WORKSPACE_MULTI_USER_MODE}" = "true" ]; then
 fi
 
 # ============================================================================
+# 0. Security Baseline Check (Issue #1893)
+# ============================================================================
+# Detect security mode and enforce baseline checks before proceeding.
+# This must run before any database initialization or secret generation.
+
+# Detect security mode based on environment variables
+# Priority: OPENACE_SECURITY_MODE > FLASK_ENV > default (development)
+detect_security_mode() {
+    # Priority 1: Explicit security mode variable
+    if [ "${OPENACE_SECURITY_MODE}" = "production" ]; then
+        echo "production"
+        return
+    fi
+    if [ "${OPENACE_SECURITY_MODE}" = "pilot" ]; then
+        echo "pilot"
+        return
+    fi
+    if [ "${OPENACE_SECURITY_MODE}" = "development" ]; then
+        echo "development"
+        return
+    fi
+
+    # Priority 2: Flask environment inference (backward compatibility)
+    if [ "${FLASK_ENV}" = "production" ]; then
+        echo "production"
+        return
+    fi
+
+    # Default: development mode
+    echo "development"
+}
+
+# Forbidden database password values (Issue #1893)
+# Includes development default password that must be changed for production
+FORBIDDEN_DB_PASSWORDS="ace-secret dev-password-change-in-production change-me password admin postgres 123456"
+
+# Check if password is in forbidden list
+is_forbidden_password() {
+    local password="$1"
+    local forbidden
+    for forbidden in $FORBIDDEN_DB_PASSWORDS; do
+        if [ "$password" = "$forbidden" ]; then
+            return 0  # true: is forbidden
+        fi
+    done
+    return 1  # false: not forbidden
+}
+
+# Check if password is a placeholder pattern
+is_placeholder_password() {
+    local password="$1"
+    # Match patterns like replace-with-random-*, dev-secret-key, etc.
+    if echo "$password" | grep -qE '^(replace-with-random|dev-secret|default-secret|change-me-in-production)'; then
+        return 0  # true: is placeholder
+    fi
+    return 1  # false: not placeholder
+}
+
+# Security baseline checker
+check_security_baseline() {
+    local mode
+    mode=$(detect_security_mode)
+
+    echo "=========================================="
+    echo "  Security Baseline Check (Issue #1893)"
+    echo "  Mode: $mode"
+    echo "=========================================="
+
+    local has_warning=false
+    local db_password="${DB_PASSWORD:-}"
+
+    # ---- Database Password Check ----
+    if [ -z "$db_password" ]; then
+        # Empty password
+        case "$mode" in
+            production)
+                echo "[ERROR] SECURITY: Database password is required in production mode."
+                echo ""
+                echo "To fix:"
+                echo "  1. Generate a strong password:"
+                echo "     python3 -c \"import secrets; print(secrets.token_urlsafe(32))\""
+                echo "  2. Set in .env: DB_PASSWORD=<generated-password>"
+                echo "  3. Restart: docker compose down && docker compose up -d"
+                echo ""
+                echo "For trial/development, use OPENACE_SECURITY_MODE=development"
+                exit 1
+                ;;
+            pilot)
+                # Generate temporary password for pilot mode
+                DB_PASSWORD=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
+                export DB_PASSWORD
+                echo "[ERROR] SECURITY: Database password not set. Auto-generated temporary password."
+                echo "        This is acceptable for pilot but MUST be set before production."
+                echo ""
+                echo "To set a permanent password:"
+                echo "  1. Generate: python3 -c \"import secrets; print(secrets.token_urlsafe(32))\""
+                echo "  2. Set in .env: DB_PASSWORD=<generated-password>"
+                echo "  3. Restart: docker compose down && docker compose up -d"
+                echo ""
+                has_warning=true
+                ;;
+            development|*)
+                # Generate temporary password for development mode
+                DB_PASSWORD=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
+                export DB_PASSWORD
+                echo "[WARN] SECURITY: Database password not set. Auto-generated temporary password."
+                echo "       For production, set DB_PASSWORD in .env before deployment."
+                has_warning=true
+                ;;
+        esac
+    elif is_forbidden_password "$db_password"; then
+        # Forbidden password
+        case "$mode" in
+            production)
+                echo "[ERROR] SECURITY: Database password \"$db_password\" is a known weak default."
+                echo "        This password is forbidden in production mode."
+                echo ""
+                echo "To fix:"
+                echo "  1. Generate a strong password:"
+                echo "     python3 -c \"import secrets; print(secrets.token_urlsafe(32))\""
+                echo "  2. Update .env: DB_PASSWORD=<generated-password>"
+                echo "  3. Restart: docker compose down && docker compose up -d"
+                exit 1
+                ;;
+            pilot)
+                echo "[ERROR] SECURITY: Database password \"$db_password\" is a known weak default."
+                echo "        This is acceptable for pilot but MUST be changed before production."
+                echo ""
+                echo "To fix:"
+                echo "  1. Generate: python3 -c \"import secrets; print(secrets.token_urlsafe(32))\""
+                echo "  2. Update .env: DB_PASSWORD=<generated-password>"
+                echo "  3. Restart: docker compose down && docker compose up -d"
+                echo ""
+                echo "Set OPENACE_SECURITY_MODE=production to enforce this check."
+                has_warning=true
+                ;;
+            development|*)
+                echo "[WARN] SECURITY: Database password \"$db_password\" is a known weak default."
+                echo "       For production, use a strong password (>=9 characters)."
+                has_warning=true
+                ;;
+        esac
+    elif [ "$mode" = "production" ] && [ ${#db_password} -le 8 ]; then
+        # Password too short for production
+        echo "[ERROR] SECURITY: Database password is too short (${#db_password} chars)."
+        echo "        Production mode requires at least 9 characters."
+        echo ""
+        echo "To fix:"
+        echo "  1. Generate a strong password:"
+        echo "     python3 -c \"import secrets; print(secrets.token_urlsafe(32))\""
+        echo "  2. Update .env: DB_PASSWORD=<generated-password>"
+        exit 1
+    fi
+
+    # ---- Secret Key Check ----
+    local secret_key="${SECRET_KEY:-}"
+    if [ -z "$secret_key" ]; then
+        case "$mode" in
+            production)
+                echo "[ERROR] SECURITY: SECRET_KEY is required in production mode."
+                echo ""
+                echo "To fix:"
+                echo "  1. Generate: python3 -c \"import secrets; print(secrets.token_hex(32))\""
+                echo "  2. Set in .env: SECRET_KEY=<generated-key>"
+                echo "  3. Restart: docker compose down && docker compose up -d"
+                exit 1
+                ;;
+            pilot)
+                echo "[WARN] SECURITY: SECRET_KEY not set. Will auto-generate."
+                echo "        For production, set SECRET_KEY explicitly in .env."
+                has_warning=true
+                ;;
+            development|*)
+                # Development mode: auto-generate is fine
+                ;;
+        esac
+    elif is_placeholder_password "$secret_key"; then
+        case "$mode" in
+            production)
+                echo "[ERROR] SECURITY: SECRET_KEY contains placeholder value."
+                echo "        Production requires a strong random key."
+                exit 1
+                ;;
+            pilot|development|*)
+                echo "[WARN] SECURITY: SECRET_KEY appears to be a placeholder."
+                has_warning=true
+                ;;
+        esac
+    fi
+
+    # ---- Encryption Key Check ----
+    local enc_key="${OPENACE_ENCRYPTION_KEY:-}"
+    if [ -z "$enc_key" ]; then
+        case "$mode" in
+            production)
+                echo "[ERROR] SECURITY: OPENACE_ENCRYPTION_KEY is required in production mode."
+                echo "        This key encrypts sensitive data (SMTP passwords, API keys)."
+                echo ""
+                echo "To fix:"
+                echo "  1. Generate: python3 -c \"import secrets; print(secrets.token_hex(16))\""
+                echo "  2. Set in .env: OPENACE_ENCRYPTION_KEY=<generated-key>"
+                echo "  3. Restart: docker compose down && docker compose up -d"
+                echo ""
+                echo "WARNING: Changing this key makes existing encrypted data unreadable!"
+                exit 1
+                ;;
+            pilot)
+                echo "[WARN] SECURITY: OPENACE_ENCRYPTION_KEY not set. Will auto-generate."
+                echo "        For production, set OPENACE_ENCRYPTION_KEY explicitly in .env."
+                echo "        WARNING: Key change makes existing encrypted data unreadable!"
+                has_warning=true
+                ;;
+            development|*)
+                # Development mode: auto-generate is fine
+                ;;
+        esac
+    elif is_placeholder_password "$enc_key"; then
+        case "$mode" in
+            production)
+                echo "[ERROR] SECURITY: OPENACE_ENCRYPTION_KEY contains placeholder value."
+                echo "        Production requires a strong random key."
+                exit 1
+                ;;
+            pilot|development|*)
+                echo "[WARN] SECURITY: OPENACE_ENCRYPTION_KEY appears to be a placeholder."
+                has_warning=true
+                ;;
+        esac
+    fi
+
+    # ---- Root User Check (Issue #1893) ----
+    if [ "$(id -u)" = "0" ]; then
+        # Running as root - check if properly authorized for multi-user mode
+        if [ "${WORKSPACE_MULTI_USER_MODE}" != "true" ] || [ "${OPENACE_ALLOW_ROOT_MULTI_USER}" != "1" ]; then
+            echo "[ERROR] SECURITY: Container running as root without proper authorization."
+            echo "        The image defaults to non-root user (uid 1000)."
+            echo ""
+            echo "If you need multi-user workspace mode:"
+            echo "  1. Set WORKSPACE_MULTI_USER_MODE=true"
+            echo "  2. Set OPENACE_ALLOW_ROOT_MULTI_USER=1"
+            echo "  3. Use: docker run --user 0 ..."
+            echo ""
+            echo "For single-user mode, remove any --user 0 or user: \"0\" setting."
+            exit 1
+        fi
+    fi
+
+    # Summary
+    if [ "$has_warning" = true ]; then
+        echo ""
+        echo "=========================================="
+        echo "  Security warnings detected. Review above."
+        if [ "$mode" = "pilot" ]; then
+            echo "  These MUST be fixed before production deployment."
+        fi
+        echo "=========================================="
+    else
+        echo "Security baseline check passed."
+    fi
+}
+
+# Run security baseline check before any other initialization
+check_security_baseline
+
+# ============================================================================
 # 0. Pre-flight Setup
 # ============================================================================
 # Create logs directory (Issue #1205)
@@ -343,7 +608,8 @@ generate_default_config() {
 
     # Generate default config (matches install.sh defaults)
     # Note: DATABASE_URL env var takes precedence over config file for database connection
-    # Database credentials use docker-compose.yml defaults, shell-expanded at generation time
+    # Database credentials use shell-expanded variables from environment
+    # Issue #1893: Use ${VAR:-} syntax (no default password) - security check runs earlier
     # Issue #1336: Use ${VAR:-default} syntax (no \$ escape) so shell expands variables
     # This prevents fetch scripts from reading unexpanded "${DB_USER:-ace}" literal strings
     # which would cause psycopg2 to parse "${DB_USER" as username (colon as delimiter)
@@ -352,7 +618,7 @@ generate_default_config() {
   "host_name": "$HOST_NAME",
   "database": {
     "type": "postgresql",
-    "url": "postgresql://${DB_USER:-ace}:${DB_PASSWORD:-ace-secret}@postgres:5432/${DB_NAME:-ace}"
+    "url": "postgresql://${DB_USER:-ace}:${DB_PASSWORD:-dev-password-change-in-production}@postgres:5432/${DB_NAME:-ace}"
   },
   "server": {
     "upload_auth_key": "$UPLOAD_AUTH_KEY",

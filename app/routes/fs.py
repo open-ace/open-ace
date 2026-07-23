@@ -153,7 +153,7 @@ def get_effective_system_account(system_account: str | None) -> str | None:
 def run_as_user(system_account: str, command: list) -> subprocess.CompletedProcess:
     """Run a command as a specific user using sudo."""
     sudo_cmd = ["sudo", "-u", system_account] + command
-    return subprocess.run(sudo_cmd, capture_output=True, text=True, timeout=10)
+    return subprocess.run(sudo_cmd, capture_output=True, text=True, timeout=10, cwd="/tmp")
 
 
 def get_current_user():
@@ -1143,7 +1143,7 @@ def api_upload_file():
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.PIPE,
             )
-            stdin = cast(IO[bytes], proc.stdin)
+            stdin = cast("IO[bytes]", proc.stdin)
             try:
                 # Stream uploaded content to the wrapper's stdin in chunks so
                 # large uploads don't buffer fully in memory.

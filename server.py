@@ -115,6 +115,12 @@ if __name__ == "__main__":
 
     def _shutdown_and_stop():
         try:
+            from app.services.autonomous_scheduler import AutonomousScheduler
+
+            AutonomousScheduler.instance().stop()
+        except Exception as e:
+            print(f"Error stopping autonomous scheduler: {e}")
+        try:
             from app.services.webui_manager import shutdown_webui_manager
 
             shutdown_webui_manager()
