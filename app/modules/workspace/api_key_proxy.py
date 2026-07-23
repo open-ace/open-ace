@@ -221,6 +221,7 @@ class APIKeyProxyService:
 
         # api_key_store table is created by migration, but ensure it exists for
         # environments that don't run migrations
+        # Issue #1894: Added resolved_ips and resolved_at for SSRF protection
         cursor.execute(
             f"""
             CREATE TABLE IF NOT EXISTS api_key_store (
@@ -240,6 +241,8 @@ class APIKeyProxyService:
                 scope TEXT DEFAULT 'remote',
                 priority INTEGER DEFAULT 0,
                 weight INTEGER DEFAULT 100,
+                resolved_ips TEXT,
+                resolved_at TIMESTAMP,
                 UNIQUE(tenant_id, provider, key_name)
             )
         """
@@ -567,6 +570,37 @@ class APIKeyProxyService:
         Returns:
             Dict with success status and key info.
         """
+        # Issue #1894: SSRF protection - validate base_url before storing
+        resolved_ips: str = ""
+        resolved_at: str | None = None
+        if base_url:
+            from app.utils.llm_proxy_url_validator import (
+                resolve_and_store_ips,
+                sanitize_error_message,
+                validate_llm_proxy_url,
+            )
+
+            result = validate_llm_proxy_url(base_url, tenant_id, provider)
+            if not result.allowed:
+                sanitized_error = sanitize_error_message(result.error or "Invalid URL")
+                logger.warning(
+                    "API key base_url blocked for tenant %s provider %s: %s",
+                    tenant_id,
+                    provider,
+                    sanitized_error,
+                )
+                return {"success": False, "error": sanitized_error}
+
+            # Resolve and store IPs for DNS rebinding protection
+            resolved_ips, _ = resolve_and_store_ips(base_url)
+            if resolved_ips:
+                resolved_at = "CURRENT_TIMESTAMP"
+                logger.info(
+                    "Resolved IPs for base_url: %s -> %s",
+                    base_url[:50] + "..." if len(base_url) > 50 else base_url,
+                    resolved_ips,
+                )
+
         encrypted = self._encrypt_key(api_key)
         key_hash = self._hash_key(api_key)
 
@@ -576,8 +610,8 @@ class APIKeyProxyService:
         try:
             cursor.execute(
                 f"""
-                INSERT INTO api_key_store (tenant_id, provider, key_name, encrypted_key, key_hash, base_url, created_by, cli_tools, cli_settings, scope, priority, weight)
-                VALUES ({_params(12)})
+                INSERT INTO api_key_store (tenant_id, provider, key_name, encrypted_key, key_hash, base_url, created_by, cli_tools, cli_settings, scope, priority, weight, resolved_ips, resolved_at)
+                VALUES ({_params(14)})
                 ON CONFLICT (tenant_id, provider, key_name) DO UPDATE SET
                     encrypted_key = EXCLUDED.encrypted_key,
                     key_hash = EXCLUDED.key_hash,
@@ -588,6 +622,8 @@ class APIKeyProxyService:
                     scope = EXCLUDED.scope,
                     priority = EXCLUDED.priority,
                     weight = EXCLUDED.weight,
+                    resolved_ips = EXCLUDED.resolved_ips,
+                    resolved_at = EXCLUDED.resolved_at,
                     updated_at = CURRENT_TIMESTAMP
             """,
                 (
@@ -603,6 +639,8 @@ class APIKeyProxyService:
                     scope,
                     priority,
                     weight,
+                    resolved_ips,
+                    resolved_at,
                 ),
             )
 
@@ -648,7 +686,7 @@ class APIKeyProxyService:
         provider: str,
         scope: str = "remote",
         exclude_key_ids: set[int] | None = None,
-    ) -> tuple[str, str | None, int, str | None] | None:
+    ) -> tuple[str, str | None, int, str | None, str | None] | None:
         """
         Resolve and decrypt an API key for a tenant/provider with scope filtering
         and multi-key scheduling.
@@ -660,7 +698,8 @@ class APIKeyProxyService:
             exclude_key_ids: Key IDs to exclude (for failover retries).
 
         Returns:
-            Tuple of (api_key, base_url, key_id, cli_settings) or None if not found.
+            Tuple of (api_key, base_url, key_id, cli_settings, resolved_ips) or None if not found.
+            Issue #1894: Added resolved_ips for SSRF protection.
         """
         from app.modules.workspace.api_key_router import APIKeyRouter
 
@@ -669,10 +708,11 @@ class APIKeyProxyService:
 
         try:
             # Query keys matching scope (exact match or 'shared')
+            # Issue #1894: Added resolved_ips to SELECT
             if is_postgresql():
                 cursor.execute(
                     """
-                    SELECT id, encrypted_key, base_url, priority, weight, cli_settings
+                    SELECT id, encrypted_key, base_url, priority, weight, cli_settings, resolved_ips
                     FROM api_key_store
                     WHERE tenant_id = %s AND provider = %s AND is_active = TRUE
                       AND (scope = %s OR scope = 'shared')
@@ -682,7 +722,7 @@ class APIKeyProxyService:
             else:
                 cursor.execute(
                     """
-                    SELECT id, encrypted_key, base_url, priority, weight, cli_settings
+                    SELECT id, encrypted_key, base_url, priority, weight, cli_settings, resolved_ips
                     FROM api_key_store
                     WHERE tenant_id = ? AND provider = ? AND is_active = TRUE
                       AND (scope = ? OR scope = 'shared')
@@ -702,6 +742,7 @@ class APIKeyProxyService:
                 encrypted_key = row_dict["encrypted_key"]
                 base_url = row_dict["base_url"]
                 cli_settings = row_dict.get("cli_settings")
+                resolved_ips = row_dict.get("resolved_ips")
                 try:
                     decrypted = self._decrypt_key(encrypted_key)
                 except Exception as e:
@@ -715,6 +756,7 @@ class APIKeyProxyService:
                         "priority": row_dict.get("priority") or 0,
                         "weight": row_dict.get("weight") or 100,
                         "cli_settings": cli_settings,
+                        "resolved_ips": resolved_ips,
                     }
                 )
 
@@ -731,6 +773,7 @@ class APIKeyProxyService:
                 selected["base_url"],
                 selected["id"],
                 selected.get("cli_settings"),
+                selected.get("resolved_ips"),
             )
         except Exception as e:
             logger.error("Failed to resolve API key for scope: %s", e)
@@ -866,6 +909,39 @@ class APIKeyProxyService:
         Returns:
             True if updated successfully, False otherwise.
         """
+        # Issue #1894: SSRF protection - validate base_url before updating
+        resolved_ips: str | None = None
+        resolved_at: str | None = None
+        if base_url is not None:
+            from app.utils.llm_proxy_url_validator import (
+                resolve_and_store_ips,
+                sanitize_error_message,
+                validate_llm_proxy_url,
+            )
+
+            result = validate_llm_proxy_url(base_url, tenant_id, "unknown")
+            if not result.allowed:
+                sanitized_error = sanitize_error_message(result.error or "Invalid URL")
+                logger.warning(
+                    "API key update base_url blocked for key_id %s tenant %s: %s",
+                    key_id,
+                    tenant_id,
+                    sanitized_error,
+                )
+                # Return False to indicate update failed due to validation
+                return False
+
+            # Resolve and store IPs for DNS rebinding protection
+            if base_url:
+                resolved_ips, _ = resolve_and_store_ips(base_url)
+                if resolved_ips:
+                    resolved_at = "CURRENT_TIMESTAMP"
+                    logger.info(
+                        "Resolved IPs for updated base_url: %s -> %s",
+                        base_url[:50] + "..." if len(base_url) > 50 else base_url,
+                        resolved_ips,
+                    )
+
         conn = self._get_connection()
         cursor = conn.cursor()
 
@@ -878,6 +954,14 @@ class APIKeyProxyService:
         if base_url is not None:
             updates.append(f"base_url = {_param()}")
             values.append(base_url)
+            # Issue #1894: Also update resolved IPs
+            updates.append(f"resolved_ips = {_param()}")
+            values.append(resolved_ips)
+            if resolved_at:
+                updates.append(f"resolved_at = {_param()}")
+                values.append(resolved_at)
+            else:
+                updates.append("resolved_at = NULL")
         if cli_tools is not None:
             updates.append(f"cli_tools = {_param()}")
             values.append(cli_tools)
@@ -1579,11 +1663,12 @@ class APIKeyProxyService:
         provider: str,
         key_ids: list[int],
         exclude_key_ids: set[int] | None = None,
-    ) -> tuple[str, str | None, int, str | None] | None:
+    ) -> tuple[str, str | None, int, str | None, str | None] | None:
         """Resolve a real API key from an allowed key-id subset using HA routing.
 
         Returns:
-            Tuple of (api_key, base_url, key_id, cli_settings) or None if not found.
+            Tuple of (api_key, base_url, key_id, cli_settings, resolved_ips) or None if not found.
+            Issue #1894: Added resolved_ips for SSRF protection.
         """
         normalized_ids = sorted({int(key_id) for key_id in key_ids if key_id is not None})
         if not normalized_ids:
@@ -1593,9 +1678,10 @@ class APIKeyProxyService:
         conn = self._get_connection()
         try:
             cursor = conn.cursor()
+            # Issue #1894: Added resolved_ips to SELECT
             cursor.execute(
                 f"""
-                SELECT id, encrypted_key, base_url, priority, weight, cli_settings
+                SELECT id, encrypted_key, base_url, priority, weight, cli_settings, resolved_ips
                 FROM api_key_store
                 WHERE tenant_id = {_param()} AND provider = {_param()} AND is_active = TRUE
                   AND id IN ({placeholders})
@@ -1621,6 +1707,7 @@ class APIKeyProxyService:
                     "api_key": api_key,
                     "base_url": row.get("base_url"),
                     "cli_settings": row.get("cli_settings"),
+                    "resolved_ips": row.get("resolved_ips"),
                 }
             )
 
@@ -1632,6 +1719,7 @@ class APIKeyProxyService:
             cast("str | None", selected.get("base_url")),
             int(selected["id"]),
             cast("str | None", selected.get("cli_settings")),
+            cast("str | None", selected.get("resolved_ips")),
         )
 
     def delete_api_key_by_id(self, key_id: int, tenant_id: int) -> bool:

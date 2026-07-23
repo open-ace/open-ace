@@ -60,7 +60,7 @@ class InsightsService:
             api_proxy = get_api_key_proxy_service()
             result = api_proxy.resolve_api_key_for_scope(1, "openai", scope="local")
             if result:
-                api_key, base_url, _, cli_settings = result
+                api_key, base_url, _, cli_settings, _ = result
                 default_model = self._extract_model_from_cli_settings(cli_settings)
                 if base_url:
                     return api_key, base_url, default_model

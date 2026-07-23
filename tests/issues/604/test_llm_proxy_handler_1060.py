@@ -107,6 +107,7 @@ class TestUpstreamQuotaExceededAlert:
                 "https://coding.dashscope.aliyuncs.com/apps/anthropic/v1",
                 18,
                 None,
+                None,
             ),
             None,
         ]
@@ -144,6 +145,8 @@ class TestUpstreamQuotaExceededAlert:
             "sk-key",
             "https://api.openai.com/v1",
             1,
+            None,
+            None,
         )
         mock_get_proxy.return_value = mock_proxy
         mock_quota_cls.return_value = _make_quota_ok()
@@ -197,6 +200,8 @@ class TestUpstreamQuotaExceededAlert:
             "sk-key",
             "https://api.openai.com/v1",
             1,
+            None,
+            None,
         )
         mock_get_proxy.return_value = mock_proxy
         mock_quota_cls.return_value = _make_quota_ok()
@@ -242,6 +247,8 @@ class TestUpstreamQuotaExceededAlert:
             "sk-key",
             "https://api.openai.com/v1",
             1,
+            None,
+            None,
         )
         mock_get_proxy.return_value = mock_proxy
         mock_quota_cls.return_value = _make_quota_ok()
@@ -290,6 +297,8 @@ class TestUpstreamQuotaExceededAlert:
             "sk-key",
             "https://api.openai.com/v1",
             1,
+            None,
+            None,
         )
         mock_get_proxy.return_value = mock_proxy
         mock_quota_cls.return_value = _make_quota_ok()

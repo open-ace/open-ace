@@ -83,6 +83,11 @@ class AuditAction(Enum):
     AGENT_AUTH_FAILURE = "agent_auth_failure"
     AGENT_RECONNECT = "agent_reconnect"
 
+    # SSRF protection actions (Issue #1894)
+    LLM_PROXY_URL_BLOCKED = "llm_proxy_url_blocked"
+    ALLOWLIST_ENTRY_INVALID = "allowlist_entry_invalid"
+    IP_RESOLVED_MISMATCH = "ip_resolved_mismatch"
+
     # Usage report actions (Issue #1891)
     USAGE_REPORT_ACCEPTED = "usage_report_accepted"
     USAGE_REPORT_AUTH_FAILURE = "usage_report_auth_failure"
@@ -924,6 +929,28 @@ def get_action_categories() -> dict[str, dict[str, Any]]:
                     "value": "usage_report_binding_mismatch",
                     "label": "Usage Report Binding Mismatch",
                     "i18n_key": "actionUsageReportBindingMismatch",
+                },
+            ],
+        },
+        "ssrf_protection": {
+            "label": "SSRF Protection",
+            "i18n_key": "categorySSRFProtection",
+            "resource_types": ["llm_proxy", "allowlist"],
+            "actions": [
+                {
+                    "value": "llm_proxy_url_blocked",
+                    "label": "LLM Proxy URL Blocked",
+                    "i18n_key": "actionLLMProxyURLBlocked",
+                },
+                {
+                    "value": "allowlist_entry_invalid",
+                    "label": "Allowlist Entry Invalid",
+                    "i18n_key": "actionAllowlistEntryInvalid",
+                },
+                {
+                    "value": "ip_resolved_mismatch",
+                    "label": "IP Resolved Mismatch",
+                    "i18n_key": "actionIPResolvedMismatch",
                 },
             ],
         },

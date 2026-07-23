@@ -342,7 +342,9 @@ CREATE TABLE api_key_store (
     cli_settings text,
     scope text DEFAULT 'shared'::text,
     priority integer DEFAULT 0,
-    weight integer DEFAULT 100
+    weight integer DEFAULT 100,
+    resolved_ips text,
+    resolved_at timestamp without time zone
 );
 
 CREATE SEQUENCE api_key_store_id_seq

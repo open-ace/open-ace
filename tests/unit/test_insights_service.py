@@ -92,6 +92,7 @@ class TestInsightsServiceConfig:
                 "https://db.api.com/v1",
                 1,
                 None,
+                None,
             )
             mock_get.return_value = mock_proxy
 
@@ -111,7 +112,7 @@ class TestInsightsServiceConfig:
             patch("app.modules.workspace.api_key_proxy.get_api_key_proxy_service") as mock_get,
         ):
             mock_proxy = MagicMock()
-            mock_proxy.resolve_api_key_for_scope.return_value = ("db-key", None, 1, None)
+            mock_proxy.resolve_api_key_for_scope.return_value = ("db-key", None, 1, None, None)
             mock_get.return_value = mock_proxy
 
             api_key, base_url, model = svc._get_api_credentials(config)
@@ -209,6 +210,7 @@ class TestInsightsServiceConfig:
                 "db-key",
                 "https://db.api.com/v1",
                 1,
+                None,
                 None,
             )
             mock_get.return_value = mock_proxy
@@ -643,6 +645,7 @@ class TestInsightsServiceGenerateInsights:
                 "https://api.example.com/v1",
                 1,
                 None,
+                None,
             )
             mock_get.return_value = mock_proxy
 
@@ -676,6 +679,7 @@ class TestInsightsServiceGenerateInsights:
                 "test-key",
                 "https://api.example.com/v1",
                 1,
+                None,
                 None,
             )
             mock_get.return_value = mock_proxy

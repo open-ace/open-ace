@@ -83,8 +83,10 @@ def downgrade() -> None:
     inspector = sa.inspect(conn)
     columns = _column_names(inspector, "tenant_settings")
 
-    if "sensitive_keyword_match_mode" in columns:
-        op.drop_column("tenant_settings", "sensitive_keyword_match_mode")
+    # Use batch_alter_table for SQLite compatibility
+    with op.batch_alter_table("tenant_settings") as batch_op:
+        if "sensitive_keyword_match_mode" in columns:
+            batch_op.drop_column("sensitive_keyword_match_mode")
 
-    if "block_sensitive_keyword" in columns:
-        op.drop_column("tenant_settings", "block_sensitive_keyword")
+        if "block_sensitive_keyword" in columns:
+            batch_op.drop_column("block_sensitive_keyword")

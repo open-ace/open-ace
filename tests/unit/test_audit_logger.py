@@ -533,13 +533,13 @@ class TestGetActionCategories:
                 assert "label" in action
                 assert "i18n_key" in action
 
-    def test_get_action_categories_total_actions_is_35(self):
-        """Test that total number of actions is 35."""
+    def test_get_action_categories_total_actions_is_38(self):
+        """Test that total number of actions is 38."""
         from app.modules.governance.audit_logger import get_action_categories
 
         categories = get_action_categories()
         total_actions = sum(len(cat["actions"]) for cat in categories.values())
-        assert total_actions == 35, f"Expected 35 actions, got {total_actions}"
+        assert total_actions == 38, f"Expected 38 actions, got {total_actions}"
 
     def test_get_action_categories_matches_enum_values(self):
         """Test that all action values match AuditAction enum values."""

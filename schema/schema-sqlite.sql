@@ -209,7 +209,9 @@ CREATE TABLE api_key_store (
  cli_settings text,
  scope text DEFAULT 'shared',
  priority integer DEFAULT 0,
- weight integer DEFAULT 100
+ weight integer DEFAULT 100,
+ resolved_ips text,
+ resolved_at TIMESTAMP
 );
 
 CREATE TABLE audit_logs (
