@@ -667,10 +667,12 @@ def test_context_overflow_failure_not_injected():
     assert prior == []
 
 
-def test_normal_ci_failure_does_not_trigger_fresh_retry():
-    """A non-overflow agent failure (no code changes, no context-length text)
-    must NOT trigger the fresh retry — it should fall through to the existing
-    failure path and fail the workflow as before."""
+def test_normal_ci_failure_preserves_runner_error_without_fresh_retry():
+    """A non-overflow runner failure must remain actionable in the milestone.
+
+    It must not trigger a fresh retry, and the no-change fallback must not
+    overwrite the first-class runner error.
+    """
     wf = _make_workflow()
     orch, mock_repo = _make_orchestrator(wf)
     gh = _make_gh(commit_before="sha-old", commit_after="sha-old")  # no new commit
@@ -695,7 +697,8 @@ def test_normal_ci_failure_does_not_trigger_fresh_retry():
     # Existing behavior preserved: workflow failed.
     final_updates = mock_repo.update_workflow.call_args.args[1]
     assert final_updates["status"] == "failed"
-    assert "no code changes" in final_updates["error_message"]
+    assert "failed before producing code changes" in final_updates["error_message"]
+    assert "agent produced no output" in final_updates["error_message"]
 
 
 def test_single_fresh_overflow_preserves_signal():
