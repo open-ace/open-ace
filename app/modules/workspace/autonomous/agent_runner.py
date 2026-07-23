@@ -726,6 +726,47 @@ class AutonomousAgentRunner:
         return workspace_type == "local" and cli_tool == "claude-code"
 
     @staticmethod
+    def _classify_sidebar_start_failure(
+        return_code: int | None,
+        error_code: str = "",
+        stderr: str = "",
+    ) -> str:
+        """Return a safe, actionable reason for a pre-session Claude exit.
+
+        Raw stderr can contain command arguments or provider credentials, so it
+        must never be copied into workflow milestones.  Classify only known
+        launcher/guard signatures and otherwise report the numeric exit code.
+        """
+        lowered = (stderr or "").lower()
+        if error_code == "repo_integrity_violation" or (
+            "openace_repo_integrity_violation:" in lowered
+        ):
+            return "Protected .git entry changed during autonomous agent execution"
+
+        # openace-run-as forwards the child process status unchanged, so exit
+        # codes 64-68 alone do not identify launcher failures. Match only its
+        # exact sentinel prefix and stable message fragments.
+        if lowered.startswith("openace-run-as:"):
+            if "cannot chdir" in lowered:
+                return "Isolated launcher could not enter the project directory"
+            if "is required for isolated" in lowered:
+                return "Isolated launcher prerequisites are unavailable"
+            if "isolated agent must" in lowered or "isolated project path must" in lowered:
+                return "Isolated agent launch was rejected by safety checks"
+            if "usage:" in lowered:
+                return "Invalid isolated launcher invocation"
+            return "Isolated agent launcher failed before Claude session initialization"
+
+        if "mutating git commands are reserved" in lowered:
+            return "Agent command guard rejected a mutating Git operation during CLI startup"
+        if "fatal: detected dubious ownership" in lowered:
+            return "Git safe-directory validation failed during CLI startup"
+
+        if return_code not in (None, 0):
+            return f"Claude CLI exited before session initialization (exit code {return_code})"
+        return "Failed to detect Claude sidebar session JSONL for autonomous task"
+
+    @staticmethod
     def _extract_stream_session_id(parsed: dict[str, Any]) -> str:
         """Best-effort extraction of Claude's real session_id from a stream event."""
         if not isinstance(parsed, dict):
@@ -2038,7 +2079,12 @@ class AutonomousAgentRunner:
                 request_count=session.request_count,
                 tool_calls=session.tool_calls,
                 success=False,
-                error="Failed to detect Claude sidebar session JSONL for autonomous task",
+                error=self._classify_sidebar_start_failure(
+                    process.returncode,
+                    session.error_code,
+                    session.last_stderr,
+                ),
+                error_code=session.error_code,
             )
 
         if not completed:

@@ -2761,6 +2761,8 @@ class AutonomousOrchestrator:
             # the next fresh prompt. (#1816 review suggestion)
             if self._is_context_overflow(repair_result):
                 message = f"CI repair failed: context overflow - {repair_result.error}"
+            elif primary_error := self._primary_result_error(repair_result):
+                message = f"CI repair agent failed before producing code changes: {primary_error}"
             else:
                 message = "CI repair failed: agent produced no code changes"
             milestone_updates["status"] = "failed"
