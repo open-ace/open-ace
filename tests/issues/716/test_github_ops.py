@@ -230,6 +230,20 @@ class TestGitHubOpsPR:
         assert result["number"] == 10
         assert result["additions"] == 100
 
+    @patch.object(GitHubOps, "get_repo_url", return_value="https://github.com/user/test.git")
+    @patch("app.modules.workspace.autonomous.github_ops.subprocess.run")
+    def test_get_pr_merge_state(self, mock_run, _mock_url):
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout='{"mergeable": true, "mergeable_state": "blocked"}',
+        )
+
+        result = self.gh.get_pr_merge_state(10)
+
+        assert result == {"mergeable": True, "mergeable_state": "blocked"}
+        cmd = mock_run.call_args[0][0]
+        assert "repos/user/test/pulls/10" in cmd
+
     @patch("app.modules.workspace.autonomous.github_ops.subprocess.run")
     def test_merge_pr(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0, stdout='{"merged": true}')

@@ -855,6 +855,26 @@ class GitHubOps:
         )
         return json.loads(result.stdout.strip())
 
+    def get_pr_merge_state(self, number: int) -> dict:
+        """Return GitHub's current mergeability classification for a PR.
+
+        ``gh pr merge`` uses one exit status for conflicts, pending required
+        checks, review rules, and other repository-rule violations.  The REST
+        fields let the orchestrator distinguish a real ``dirty`` conflict from
+        a policy-blocked but otherwise mergeable PR instead of launching the
+        conflict resolver for every rejection.
+        """
+        repo = self.get_repo_name()
+        result = self._run_gh(
+            self._gh_api_args([f"repos/{repo}/pulls/{number}"]),
+            repo_scoped=False,
+        )
+        data = json.loads((result.stdout or "").strip() or "{}")
+        return {
+            "mergeable": data.get("mergeable"),
+            "mergeable_state": str(data.get("mergeable_state") or "").strip().lower(),
+        }
+
     def find_existing_pr(self, head_branch: str) -> dict | None:
         """Find an existing open PR for a head branch (scoped to base=main).
 

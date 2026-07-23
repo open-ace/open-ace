@@ -307,6 +307,27 @@ class TestDoMergeDeferredRetry:
 
         mock_gh.merge_pr.assert_not_called()
 
+    @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
+    def test_branch_behind_main_syncs_before_ci_and_merge(self, mock_gh_cls):
+        """A required-up-to-date rule must be satisfied before merge is tried."""
+        o, _ = _make_orchestrator(_make_workflow())
+        mock_gh = MagicMock()
+        mock_gh_cls.return_value = mock_gh
+        o._gh = mock_gh
+        o._sync_failed_pr_with_main.return_value = True
+        mock_gh.get_pr_head_sha.return_value = "old-pr-head"
+
+        o._do_merge(_make_workflow())
+
+        o._sync_failed_pr_with_main.assert_called_once_with(
+            mock_gh,
+            "auto-dev/fc82f22a",
+            1103,
+            "old-pr-head",
+        )
+        mock_gh.get_pr_checks.assert_not_called()
+        mock_gh.merge_pr.assert_not_called()
+
     # Pre-merge scope must exclude upstream files merged into an old PR.
 
     def test_uses_graph_merge_base_and_backfills_stale_scope_base(self):
@@ -420,17 +441,23 @@ class TestDoMergeDeferredRetry:
         mock_gh = MagicMock()
         mock_gh_cls.return_value = mock_gh
         o._gh = mock_gh
-        mock_gh.get_pr_checks.return_value = [
-            {"name": "test", "bucket": "pass"},
+        mock_gh.get_pr_checks.side_effect = [
+            [{"name": "test", "bucket": "pass"}],
+            [{"name": "new head check", "bucket": "pending"}],
         ]
-        mock_gh.merge_pr.side_effect = GitHubOpsError("base branch policy prohibits the merge")
+        mock_gh.get_pr_merge_state.return_value = {
+            "mergeable": True,
+            "mergeable_state": "blocked",
+        }
+        mock_gh.merge_pr.side_effect = GitHubOpsError("GraphQL: Repository rule violations found")
+        o._resolve_merge_conflicts = MagicMock()
 
         o._do_merge(_make_workflow())
 
-        # Did not fail, did not resolve — deferred.
+        # Did not fail, did not resolve — refreshed checks and deferred.
         mock_gh.merge_pr.assert_called_once()
-        o._resolve_merge_conflicts = MagicMock()
-        # The merge was not re-attempted (returned early).
+        assert mock_gh.get_pr_checks.call_count == 2
+        o._resolve_merge_conflicts.assert_not_called()
 
     @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
     def test_policy_rejection_with_ci_fail_raises(self, mock_gh_cls):
@@ -460,12 +487,55 @@ class TestDoMergeDeferredRetry:
         mock_gh.merge_pr.side_effect = [
             GitHubOpsError("gh pr merge 1103 failed: the merge commit cannot be cleanly created"),
         ]
+        mock_gh.get_pr_merge_state.return_value = {
+            "mergeable": False,
+            "mergeable_state": "dirty",
+        }
         o._resolve_merge_conflicts = MagicMock()
 
         o._do_merge(_make_workflow())
 
         mock_gh.merge_pr.assert_called_once()
         o._resolve_merge_conflicts.assert_called_once()
+
+    @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
+    def test_unknown_merge_failure_is_not_misclassified_as_conflict(self, mock_gh_cls):
+        """Permission/infrastructure errors must retain their original cause."""
+        o, _ = _make_orchestrator(_make_workflow())
+        mock_gh = MagicMock()
+        mock_gh_cls.return_value = mock_gh
+        o._gh = mock_gh
+        mock_gh.get_pr_checks.return_value = [{"name": "test", "bucket": "pass"}]
+        mock_gh.get_pr_merge_state.return_value = {
+            "mergeable": True,
+            "mergeable_state": "clean",
+        }
+        mock_gh.merge_pr.side_effect = GitHubOpsError("GraphQL: Resource not accessible")
+        o._resolve_merge_conflicts = MagicMock()
+
+        with pytest.raises(GitHubOpsError, match="Resource not accessible"):
+            o._do_merge(_make_workflow())
+
+        o._resolve_merge_conflicts.assert_not_called()
+
+    @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
+    def test_blocked_merge_state_is_not_a_conflict_even_when_mergeable_false(self, mock_gh_cls):
+        """Repository rules remain policy blockers, not conflict evidence."""
+        o, _ = _make_orchestrator(_make_workflow())
+        mock_gh = MagicMock()
+        mock_gh_cls.return_value = mock_gh
+        o._gh = mock_gh
+        mock_gh.get_pr_checks.return_value = [{"name": "test", "bucket": "pass"}]
+        mock_gh.get_pr_merge_state.return_value = {
+            "mergeable": False,
+            "mergeable_state": "blocked",
+        }
+        mock_gh.merge_pr.side_effect = GitHubOpsError("GraphQL: review required")
+        o._resolve_merge_conflicts = MagicMock()
+
+        o._do_merge(_make_workflow())
+
+        o._resolve_merge_conflicts.assert_not_called()
 
     @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
     def test_resolve_returns_without_cleanup(self, mock_gh_cls):
@@ -481,6 +551,10 @@ class TestDoMergeDeferredRetry:
         mock_gh.merge_pr.side_effect = [
             GitHubOpsError("the merge commit cannot be cleanly created"),
         ]
+        mock_gh.get_pr_merge_state.return_value = {
+            "mergeable": False,
+            "mergeable_state": "dirty",
+        }
         o._resolve_merge_conflicts = MagicMock()
 
         o._do_merge(_make_workflow())
