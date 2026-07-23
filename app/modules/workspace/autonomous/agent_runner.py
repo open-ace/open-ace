@@ -951,12 +951,19 @@ class AutonomousAgentRunner:
         if AutonomousAgentRunner._is_cross_user(system_account):
             assert system_account is not None  # _is_cross_user guarantees non-empty
             if env:
+                env = dict(env)
+                env["OPENACE_GIT_CACHE_ROOT"] = str(
+                    AutonomousAgentRunner._resolve_home_dir(system_account)
+                    / ".cache"
+                    / "pre-commit"
+                )
                 AutonomousAgentRunner._validate_cross_user_guard_bin(env)
             guard_env = []
             for key in (
                 "PATH",
                 "OPENACE_REAL_GIT",
                 "OPENACE_REAL_GH",
+                "OPENACE_GIT_CACHE_ROOT",
                 "OPENACE_PYTHON_COMMAND",
                 "OPENACE_PROXY_URL",
                 "OPENACE_PROXY_TOKEN",
@@ -974,6 +981,7 @@ class AutonomousAgentRunner:
                 "GIT_COMMITTER_EMAIL",
                 "GH_CONFIG_DIR",
                 "GIT_TERMINAL_PROMPT",
+                "SKIP",
             ):
                 if env and env.get(key):
                     guard_env.append(f"{key}={env[key]}")
@@ -1082,6 +1090,11 @@ class AutonomousAgentRunner:
         if real_gh:
             env["OPENACE_REAL_GH"] = real_gh
         env["OPENACE_PYTHON_COMMAND"] = json.dumps(runtime_python_command or [sys.executable])
+        try:
+            agent_home = Path(pwd.getpwuid(os.getuid()).pw_dir)
+        except (KeyError, OverflowError):
+            agent_home = Path.home()
+        env["OPENACE_GIT_CACHE_ROOT"] = str(agent_home / ".cache" / "pre-commit")
         # The orchestrator owns all remote mutations. Agent subprocesses use
         # the LLM proxy for model auth and do not need GitHub credentials.
         # This environment cleanup is defense-in-depth; the actual credential
@@ -1089,6 +1102,10 @@ class AutonomousAgentRunner:
         # and the isolated run-as wrapper's clean environment/worktree ACLs.
         for key in ("GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "SSH_AUTH_SOCK"):
             env.pop(key, None)
+        # CI-only hook exclusions are set explicitly by the orchestrator's
+        # convergence command. Never let a service-level SKIP leak into a
+        # normal autonomous agent and silently suppress repository hooks.
+        env.pop("SKIP", None)
         env["GH_CONFIG_DIR"] = "/var/empty/openace-autonomous-gh"
         env["GIT_TERMINAL_PROMPT"] = "0"
         env["PATH"] = guard_bin + os.pathsep + env.get("PATH", "")

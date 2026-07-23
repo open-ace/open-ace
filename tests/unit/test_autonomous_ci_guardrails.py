@@ -168,6 +168,28 @@ def test_ci_repair_scope_rejection_prevents_push():
 
     assert result == ("head", True, "scope rejected")
     gh.git_push.assert_not_called()
+    gh.reset_hard_to.assert_called_once_with("head")
+
+
+def test_ci_repair_scope_rejection_preserves_prior_unpushed_head():
+    from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+    gh = MagicMock()
+    gh.get_current_commit.side_effect = ["local-B", "rejected-C"]
+    gh.has_uncommitted_changes.return_value = True
+
+    result = AutonomousOrchestrator._detect_and_push_ci_repair_changes(
+        gh,
+        "remote-A",
+        2,
+        "auto-dev/test",
+        42,
+        scope_validator=lambda before, after: "scope rejected",
+    )
+
+    assert result == ("rejected-C", True, "scope rejected")
+    gh.reset_hard_to.assert_called_once_with("local-B")
+    gh.git_push.assert_not_called()
 
 
 def test_runtime_gate_blocks_incompatible_host_without_provisioner(tmp_path):
@@ -209,6 +231,7 @@ def test_agent_environment_binds_python_and_git_guards(monkeypatch, tmp_path):
         guard.write_text("#!/bin/sh\n", encoding="utf-8")
         guard.chmod(0o755)
     monkeypatch.setattr(agent_runner, "_OPENACE_AGENT_GUARD_BIN", str(guard_dir))
+    monkeypatch.setenv("SKIP", "all-hooks")
 
     adapter = MagicMock()
     adapter.get_env_vars.return_value = {}
@@ -226,6 +249,7 @@ def test_agent_environment_binds_python_and_git_guards(monkeypatch, tmp_path):
     assert env["OPENACE_REAL_GIT"]
     assert env["GH_CONFIG_DIR"] == "/var/empty/openace-autonomous-gh"
     assert "GH_TOKEN" not in env
+    assert "SKIP" not in env
 
 
 def test_agent_guard_bin_falls_back_to_source_when_install_is_incomplete(monkeypatch, tmp_path):
@@ -313,6 +337,8 @@ def test_cross_user_launch_preserves_nonsecret_guard_environment(monkeypatch, tm
     assert "/usr/bin/env" in command
     assert f"PATH={guard_dir}:/usr/bin" in command
     assert "OPENACE_REAL_GIT=/usr/bin/git" in command
+    expected_cache = str(agent_runner.AutonomousAgentRunner._resolve_home_dir("repo-user"))
+    assert f"OPENACE_GIT_CACHE_ROOT={expected_cache}/.cache/pre-commit" in command
 
 
 def test_terminal_result_closes_stream_json_stdin():
@@ -541,6 +567,217 @@ def test_isolated_git_guard_allows_pre_commit_check_attr(tmp_path):
 
     assert result.returncode == 0
     assert result.stdout.strip() == "check-attr filter -z --stdin"
+
+
+def _fake_real_git(tmp_path):
+    real_git = tmp_path / "real-git"
+    real_git.write_text(
+        f"#!{sys.executable}\nimport sys\nprint(' '.join(sys.argv[1:]))\n",
+        encoding="utf-8",
+    )
+    real_git.chmod(0o755)
+    return real_git
+
+
+def _source_git_guard():
+    from pathlib import Path
+
+    return (
+        Path(__file__).parents[2]
+        / "app"
+        / "modules"
+        / "workspace"
+        / "autonomous"
+        / "agent_bin"
+        / "git"
+    )
+
+
+def test_isolated_git_guard_allows_pre_commit_cache_init(tmp_path):
+    """Global -c options must not hide cache-scoped git init from the guard."""
+    import os
+    import subprocess
+
+    project = tmp_path / "project"
+    project.mkdir()
+    cache_root = tmp_path / "agent-home" / ".cache" / "pre-commit"
+    cache_root.mkdir(parents=True)
+    target = cache_root / "repo123"
+    result = subprocess.run(
+        [
+            str(_source_git_guard()),
+            "-c",
+            "core.useBuiltinFSMonitor=false",
+            "init",
+            "--template=",
+            str(target),
+        ],
+        cwd=project,
+        capture_output=True,
+        text=True,
+        env={
+            **os.environ,
+            "OPENACE_REAL_GIT": str(_fake_real_git(tmp_path)),
+            "OPENACE_GIT_CACHE_ROOT": str(cache_root),
+            # openace-run-as clears the environment and injects this trusted
+            # ownership exception for the validated workflow worktree.
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "safe.directory",
+            "GIT_CONFIG_VALUE_0": str(project),
+        },
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert "init --template=" in result.stdout
+    assert str(target) in result.stdout
+
+
+def test_isolated_git_guard_allows_mutation_inside_pre_commit_cache(tmp_path):
+    import os
+    import subprocess
+
+    cache_repo = tmp_path / "agent-home" / ".cache" / "pre-commit" / "repo123"
+    cache_repo.mkdir(parents=True)
+    result = subprocess.run(
+        [str(_source_git_guard()), "remote", "add", "origin", "https://example.invalid/hook"],
+        cwd=cache_repo,
+        capture_output=True,
+        text=True,
+        env={
+            **os.environ,
+            "OPENACE_REAL_GIT": str(_fake_real_git(tmp_path)),
+            "OPENACE_GIT_CACHE_ROOT": str(cache_repo.parent),
+        },
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert result.stdout.strip().startswith("remote add origin")
+
+
+def test_isolated_git_guard_denies_cache_escape(tmp_path):
+    import os
+    import subprocess
+
+    project = tmp_path / "project"
+    project.mkdir()
+    cache_repo = tmp_path / "agent-home" / ".cache" / "pre-commit" / "repo123"
+    cache_repo.mkdir(parents=True)
+    env = {
+        **os.environ,
+        "OPENACE_REAL_GIT": str(_fake_real_git(tmp_path)),
+        "OPENACE_GIT_CACHE_ROOT": str(cache_repo.parent),
+    }
+
+    outside_init = subprocess.run(
+        [str(_source_git_guard()), "init", str(project / "nested")],
+        cwd=project,
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+    redirected_commit = subprocess.run(
+        [str(_source_git_guard()), "-C", str(project), "commit", "-m", "escape"],
+        cwd=cache_repo,
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+    separate_git_dir = subprocess.run(
+        [
+            str(_source_git_guard()),
+            "init",
+            f"--separate-git-dir={project / 'metadata'}",
+            str(cache_repo / "nested"),
+        ],
+        cwd=project,
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+    env_redirect = subprocess.run(
+        [str(_source_git_guard()), "commit", "-m", "escape"],
+        cwd=cache_repo,
+        capture_output=True,
+        text=True,
+        env={**env, "GIT_DIR": str(project / ".git")},
+        check=False,
+    )
+    cache_cwd_init_escape = subprocess.run(
+        [str(_source_git_guard()), "init", str(project / "escaped")],
+        cwd=cache_repo,
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+    object_directory_escape = subprocess.run(
+        [str(_source_git_guard()), "hash-object", "-w", "--stdin"],
+        cwd=cache_repo,
+        input="outside cache",
+        capture_output=True,
+        text=True,
+        env={**env, "GIT_OBJECT_DIRECTORY": str(project / "objects")},
+        check=False,
+    )
+    unsafe_config_escape = subprocess.run(
+        [
+            str(_source_git_guard()),
+            "-c",
+            f"core.worktree={project}",
+            "checkout",
+            "HEAD",
+        ],
+        cwd=cache_repo,
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+    clone_escape = subprocess.run(
+        [
+            str(_source_git_guard()),
+            "clone",
+            "https://example.invalid/hook",
+            str(project / "clone"),
+        ],
+        cwd=cache_repo,
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+    global_config_escape = subprocess.run(
+        [str(_source_git_guard()), "config", "--global", "user.name", "escape"],
+        cwd=cache_repo,
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+    environment_config_escape = subprocess.run(
+        [str(_source_git_guard()), "checkout", "HEAD"],
+        cwd=cache_repo,
+        capture_output=True,
+        text=True,
+        env={**env, "GIT_CONFIG_PARAMETERS": f"'core.worktree'='{project}'"},
+        check=False,
+    )
+
+    assert outside_init.returncode == 126
+    assert redirected_commit.returncode == 126
+    assert separate_git_dir.returncode == 126
+    assert env_redirect.returncode == 126
+    assert cache_cwd_init_escape.returncode == 126
+    assert object_directory_escape.returncode == 126
+    assert unsafe_config_escape.returncode == 126
+    assert clone_escape.returncode == 126
+    assert global_config_escape.returncode == 126
+    assert environment_config_escape.returncode == 126
 
 
 def test_runner_preserves_tool_result_for_test_evidence():
@@ -1246,6 +1483,8 @@ def test_fresh_ci_repair_prompt_keeps_requirements_plan_and_diff():
     assert "diff --git" in prompt
     assert "CI EXCERPT" in prompt
     assert "pre-commit run --all-files" in prompt
+    assert "编排器已先把当前 main 合并进 PR 分支" in prompt
+    assert "SKIP=bandit,no-commit-to-branch" in prompt
     assert "直到 exit 0" in prompt
 
 
@@ -1327,6 +1566,7 @@ def test_pre_commit_convergence_reruns_modified_hooks_as_isolated_agent():
         "openace-agent",
     )
     assert wrap.call_args.args[3]["PATH"].split(":", 1)[0] == "/usr/local/libexec/openace-agent-bin"
+    assert wrap.call_args.args[3]["SKIP"] == "bandit,no-commit-to-branch"
     assert run.call_args.kwargs["cwd"] is None
     assert run.call_args.kwargs["env"] is None
 
@@ -1355,6 +1595,65 @@ def test_pre_commit_convergence_rejects_repository_owner_account():
         )
 
     run.assert_not_called()
+
+
+def test_failed_pr_sync_skips_branch_that_already_contains_main():
+    from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+    orch = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
+    orch._ancestor_check = MagicMock(return_value=True)
+    orch._resolve_merge_conflicts = MagicMock()
+    gh = MagicMock()
+    gh.resolve_commit.return_value = "main-head"
+
+    synced = orch._sync_failed_pr_with_main(gh, "auto-dev/test", 42, "pr-head")
+
+    assert not synced
+    gh._run_git.assert_called_once_with(["fetch", "origin", "main"])
+    orch._ancestor_check.assert_called_once_with(gh, "main-head", "pr-head")
+    orch._resolve_merge_conflicts.assert_not_called()
+
+
+def test_failed_pr_sync_pushes_main_before_ai_repair():
+    from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+    orch = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
+    orch._ancestor_check = MagicMock(return_value=False)
+    orch._resolve_merge_conflicts = MagicMock()
+    gh = MagicMock()
+    gh.resolve_commit.return_value = "main-head"
+
+    synced = orch._sync_failed_pr_with_main(gh, "auto-dev/test", 42, "pr-head")
+
+    assert synced
+    orch._resolve_merge_conflicts.assert_called_once_with(gh, "auto-dev/test", 42)
+
+
+def test_failed_pr_sync_happens_before_ai_attempt_limit():
+    from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+    orch = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
+    orch._workflow_id = "wf-sync-before-limit"
+    gh = MagicMock()
+    gh.get_pr_head_sha.return_value = "pr-head"
+    orch._get_gh = MagicMock(return_value=gh)
+    orch._sync_failed_pr_with_main = MagicMock(return_value=True)
+    orch._create_milestone = MagicMock()
+    orch._update_workflow = MagicMock()
+
+    orch._start_ci_repair_round(
+        {
+            "dev_round": 1,
+            "ci_repair_attempts": 3,
+            "branch_name": "auto-dev/test",
+        },
+        42,
+        [{"name": "lint", "bucket": "fail"}],
+    )
+
+    orch._sync_failed_pr_with_main.assert_called_once_with(gh, "auto-dev/test", 42, "pr-head")
+    orch._create_milestone.assert_not_called()
+    orch._update_workflow.assert_not_called()
 
 
 def test_nonstandard_report_with_real_test_evidence_does_not_retry():

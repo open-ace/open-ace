@@ -1191,6 +1191,7 @@ MAX_DEV_RETRIES_ON_TEST_FAIL = 2  # max dev round retries for unfixable test fai
 MAX_CI_REPAIR_ATTEMPTS = 3  # max automatic dev-round retries for merge-phase CI failures
 MAX_PRE_COMMIT_CONVERGENCE_PASSES = 3
 PRE_COMMIT_CONVERGENCE_TIMEOUT = 600
+CI_PRE_COMMIT_SKIP = "bandit,no-commit-to-branch"
 MAX_CI_DIAGNOSTICS_ATTEMPTS = 6  # bound scheduler polls when failed job logs stay unavailable
 try:
     MAX_AUTONOMOUS_CHANGED_FILES = int(os.environ.get("AUTONOMOUS_MAX_CHANGED_FILES", "60"))
@@ -2187,6 +2188,52 @@ class AutonomousOrchestrator:
                 return f"{label.capitalize()} {violation}"
         return ""
 
+    def _validate_pre_merge_change_scope(
+        self,
+        gh: GitHubOps,
+        wf: dict,
+        pr_head_sha: str,
+    ) -> str:
+        """Validate the effective PR delta against an immutable main snapshot.
+
+        A conflict resolver can merge months of upstream main history into an
+        old PR branch.  The workflow's original ``base_commit_sha`` must not be
+        used as the pre-merge "current round" boundary after that merge: doing
+        so counts every upstream file as an autonomous edit.  The graph merge
+        base with the just-fetched main commit is the effective PR base both
+        before and after an upstream merge.
+        """
+        if not pr_head_sha:
+            return "Pre-merge change scope could not be verified: missing PR head"
+        try:
+            gh._run_git(["fetch", "origin", "main"])
+            fetched_main_head = gh.resolve_commit("FETCH_HEAD")
+            merge_base_result = gh._run_git(
+                ["merge-base", pr_head_sha, fetched_main_head], check=False
+            )
+            effective_base = merge_base_result.stdout.strip()
+            if merge_base_result.returncode != 0 or not effective_base:
+                raise GitHubOpsError("git merge-base returned no commit")
+        except Exception as exc:
+            return f"Pre-merge change scope could not derive effective PR base: {exc}"
+
+        effective_wf = dict(wf)
+        effective_wf["base_commit_sha"] = effective_base
+        scope_error = self._validate_autonomous_change_scope(
+            gh, effective_wf, effective_base, pr_head_sha
+        )
+        if not scope_error and (wf.get("base_commit_sha") or "").strip() != effective_base:
+            # Once upstream main has been merged, subsequent CI-repair rounds
+            # must use the same effective PR base rather than the stale branch
+            # creation point.  This updates only scope metadata, never usage or
+            # session history.
+            self._update_workflow({"base_commit_sha": effective_base})
+            # _do_merge can enter CI repair later in this same scheduler cycle.
+            # Keep that in-memory snapshot aligned with the persisted value so
+            # its scope validator cannot reuse the stale branch-creation base.
+            wf["base_commit_sha"] = effective_base
+        return scope_error
+
     def _get_ci_repair_prompt(self, wf: dict) -> str:
         """Return merge-phase CI repair context, or empty."""
         context = wf.get("ci_repair_context", "")
@@ -2295,7 +2342,9 @@ class AutonomousOrchestrator:
             "4. 修复后必须重新运行 CI 的完整对应命令，而不是只运行单个 hook、单个文件或你认为相关的子集。\n"
             "5. 如果命令中的 formatter / pre-commit hook 自动修改了文件并以非零状态退出，这只是修复过程，"
             "不代表验证完成；必须保留这些修改并重复运行同一完整命令，直到 exit 0 或确认存在不可自动修复的错误。\n"
-            "6. 对 `pre-commit run --all-files` 这类全仓检查，必须原样保留 `--all-files`，并在结束前取得一次干净的 exit 0。\n"
+            "6. 编排器已先把当前 main 合并进 PR 分支，因此对 "
+            "`SKIP=bandit,no-commit-to-branch pre-commit run --all-files` 必须原样运行并重复至 exit 0；"
+            "Bandit 由 CI 独立检查。\n"
             "7. 不要执行 git add、git commit 或 git push；编排器会在范围校验通过后统一提交并推送。\n"
             "8. 结束时请明确说明：你复现了哪些完整命令、最终 exit code、修复了什么、还剩什么风险。\n"
         )
@@ -2375,9 +2424,13 @@ class AutonomousOrchestrator:
         env = {
             "PATH": guard_bin + os.pathsep + os.environ.get("PATH", ""),
             "OPENACE_REAL_GIT": real_git,
+            "OPENACE_GIT_CACHE_ROOT": str(
+                AutonomousAgentRunner._resolve_home_dir(isolated_account) / ".cache" / "pre-commit"
+            ),
             "OPENACE_PYTHON_COMMAND": json.dumps(runtime_command or [sys.executable]),
             "GH_CONFIG_DIR": "/var/empty/openace-autonomous-gh",
             "GIT_TERMINAL_PROMPT": "0",
+            "SKIP": CI_PRE_COMMIT_SKIP,
         }
         command, cwd = AutonomousAgentRunner._wrap_agent_cmd(
             [pre_commit, "run", "--all-files"],
@@ -2441,8 +2494,10 @@ class AutonomousOrchestrator:
         (#1838 review suggestion 1).
         """
         commit_sha = ""
+        local_start_sha = ""
         try:
             commit_sha = gh.get_current_commit()
+            local_start_sha = commit_sha
         except Exception:
             pass
 
@@ -2472,6 +2527,12 @@ class AutonomousOrchestrator:
             if scope_validator is not None:
                 push_error = str(scope_validator(commit_before, commit_sha) or "")
                 if push_error:
+                    try:
+                        gh.reset_hard_to(local_start_sha or commit_before)
+                    except Exception as exc:
+                        push_error += (
+                            "; failed to discard the rejected local CI-repair commit: " f"{exc}"
+                        )
                     return commit_sha, sha_changed, push_error
             try:
                 gh.git_push(branch=branch_name, force_with_lease=True)
@@ -3400,6 +3461,35 @@ class AutonomousOrchestrator:
         if shutdown_event.wait(CI_POLL_INTERVAL):
             raise WorkflowPaused("Service shutdown interrupted CI polling")
 
+    def _sync_failed_pr_with_main(
+        self,
+        gh: GitHubOps,
+        branch_name: str,
+        pr_number: int,
+        pr_head_sha: str,
+    ) -> bool:
+        """Merge current main into a stale failed PR before spending an AI round.
+
+        GitHub's pull_request checks run against a synthetic merge commit. A
+        stale local PR branch therefore cannot reproduce all-files checks
+        faithfully. Reuse the trusted merge/conflict resolver to update and
+        push the branch first; the resulting CI run becomes authoritative and
+        the next repair cycle sees the same tree locally.
+        """
+        gh._run_git(["fetch", "origin", "main"])
+        main_head = gh.resolve_commit("FETCH_HEAD")
+        contains_main = self._ancestor_check(gh, main_head, pr_head_sha)
+        if contains_main is None:
+            raise GitHubOpsError("Unable to verify whether the failed PR contains current main")
+        if contains_main:
+            return False
+        logger.info(
+            "PR #%s failed CI on a branch behind main; synchronizing main before AI repair",
+            pr_number,
+        )
+        self._resolve_merge_conflicts(gh, branch_name, pr_number)
+        return True
+
     def _start_ci_repair_round(self, wf: dict, pr_number: int, failed_checks: list[dict]) -> None:
         """Repair merge-phase CI failures in-place on the existing PR branch."""
         dev_round = int(wf.get("dev_round", 1) or 1)
@@ -3415,8 +3505,18 @@ class AutonomousOrchestrator:
                 "Failed to resolve PR head SHA for CI repair on PR #%s: %s", pr_number, e
             )
 
-        # Check attempt limit FIRST so the terminal round skips the fingerprint
-        # network fetches (gh run view --log-failed for each failing check).
+        branch_name = (wf.get("branch_name") or "").strip()
+        if (
+            current_head_sha
+            and branch_name
+            and self._sync_failed_pr_with_main(gh, branch_name, pr_number, current_head_sha)
+        ):
+            # The push starts a new synthetic-merge CI run. Do not consume a
+            # bounded AI repair attempt for stale-tree synchronization.
+            return
+
+        # After the non-AI main synchronization above, check the attempt limit
+        # before fingerprint/log fetches (gh run view --log-failed per check).
         # Note: when BOTH "over MAX" and "signature unchanged" would match, this
         # reports "limit reached" (more accurate — the real stop reason is the
         # cap, not the unchanged signature). No downstream code depends on the
@@ -3578,6 +3678,31 @@ class AutonomousOrchestrator:
             return
 
         context = self._build_ci_repair_context(wf, gh, pr_number, failed_checks)
+        restore_worktree = bool(
+            wf.get("branch_strategy") == "worktree"
+            and not wf.get("worktree_path")
+            and preferred_worktree_path
+        )
+        repair_wf = dict(wf)
+        if restore_worktree:
+            repair_wf["preferred_worktree_path"] = preferred_worktree_path
+            repair_wf["worktree_path"] = preferred_worktree_path
+            # Conflict resolution deliberately removes the workflow worktree
+            # while its branch is attached to an isolated resolver worktree.
+            # Restore the PR branch before consuming an attempt or announcing
+            # that repair started. A transient fetch/worktree-add error can
+            # then use the orchestrator's normal retry budget without burning
+            # the bounded AI repair budget or leaving a false milestone.
+            self._ensure_worktree(repair_wf)
+            refreshed_wf = self.workflow
+            if refreshed_wf and refreshed_wf.get("worktree_path"):
+                repair_wf = refreshed_wf
+            # _ensure_worktree can create/rebind the checkout. Discard the
+            # main-repository GitHubOps handle so all repair commits and pushes
+            # are pinned to the restored worktree.
+            self._gh = None
+            gh = self._get_gh()
+
         self._create_milestone(
             phase="merge",
             dev_round=dev_round,
@@ -3601,9 +3726,12 @@ class AutonomousOrchestrator:
         }
         if wf.get("branch_strategy") == "worktree" and preferred_worktree_path:
             updates["preferred_worktree_path"] = preferred_worktree_path
-            updates["worktree_path"] = preferred_worktree_path
+            updates["worktree_path"] = repair_wf.get("worktree_path") or preferred_worktree_path
         self._update_workflow(updates)
-        self._run_merge_ci_repair(self.workflow or wf, gh, pr_number, failed_checks)
+        repair_wf.update(updates)
+        if not restore_worktree:
+            repair_wf = self.workflow or repair_wf
+        self._run_merge_ci_repair(repair_wf, gh, pr_number, failed_checks)
 
     def _update_workflow(self, updates: dict):
         """Update workflow and emit event."""
@@ -8086,9 +8214,7 @@ class AutonomousOrchestrator:
         if pr_number:
             try:
                 pr_head_sha = gh.get_pr_head_sha(pr_number)
-                scope_error = self._validate_autonomous_change_scope(
-                    gh, wf, (wf.get("base_commit_sha") or pr_head_sha), pr_head_sha
-                )
+                scope_error = self._validate_pre_merge_change_scope(gh, wf, pr_head_sha)
             except Exception as exc:
                 scope_error = f"Pre-merge change scope could not be verified: {exc}"
             if scope_error:
@@ -8539,7 +8665,11 @@ class AutonomousOrchestrator:
                 phase="merge",
                 milestone_type="conflicts_pushed",
                 status="completed",
-                title=f"PR #{pr_number} conflicts resolved, waiting for CI to merge",
+                title=(
+                    f"PR #{pr_number} conflicts resolved, waiting for CI to merge"
+                    if conflict_ms_id
+                    else f"PR #{pr_number} synchronized with main, waiting for CI"
+                ),
             )
         finally:
             # Always tear down the temp worktree, even on failure, so it does

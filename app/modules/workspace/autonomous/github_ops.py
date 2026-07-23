@@ -744,6 +744,10 @@ class GitHubOps:
         """
         self._run_git(["reset", "--hard", "HEAD"])
 
+    def reset_hard_to(self, ref: str) -> None:
+        """Discard local CI-repair state and reset to a trusted immutable ref."""
+        self._run_git(["reset", "--hard", ref])
+
     def delete_branch(self, name: str, remote: bool = True) -> None:
         """Delete a branch locally and optionally remotely."""
         self._run_git(["branch", "-D", name], check=False)

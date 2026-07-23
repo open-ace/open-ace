@@ -57,6 +57,7 @@ def _make_orchestrator(wf_data):
         orch = AutonomousOrchestrator(wf_data["workflow_id"])
         orch.repo = mock_repo
         orch.emitter = MagicMock()
+        orch._sync_failed_pr_with_main = MagicMock(return_value=False)
     return orch, mock_repo
 
 
