@@ -8529,6 +8529,31 @@ class AutonomousOrchestrator:
         )
         self._emit("phase_change", {"phase": "completed"})
 
+    def _sync_worktree_to_pr_remote_head(self, wt_gh: "GitHubOps", branch_name: str) -> None:
+        """Sync a merge worktree to the PR branch's authoritative remote head.
+
+        ``add_worktree`` checks out the *local* ``auto-dev/*`` ref, which can
+        drift ahead of the remote tip: a prior merge/repair attempt may have
+        advanced it locally (e.g. a merge commit that already contains main)
+        without ever pushing. A later cycle then re-checks out that stale local
+        branch, the merge into main becomes a no-op ("Already up to date"), and
+        the resolver fails with "made no commit" even though the remote PR head
+        is still behind main and genuinely needs the sync (workflow 1895).
+        Fetch the remote branch and reset the local ref/HEAD to it so the merge
+        starts from the real PR state. Failure is non-fatal: a fetch/reset error
+        leaves the worktree at the local ref, preserving prior behavior.
+        """
+        try:
+            wt_gh._run_git(["fetch", "origin", branch_name])
+            remote_head = wt_gh.resolve_commit("FETCH_HEAD")
+            wt_gh._run_git(["reset", "--hard", remote_head])
+        except Exception as sync_exc:
+            logger.warning(
+                "Could not sync merge worktree to remote head of %s: %s",
+                branch_name,
+                sync_exc,
+            )
+
     def _resolve_merge_conflicts(self, gh: GitHubOps, branch_name: str, pr_number: int):
         """Resolve merge conflicts in an isolated worktree, push, and merge the PR.
 
@@ -8577,6 +8602,9 @@ class AutonomousOrchestrator:
         # All subsequent git ops run inside the temp worktree.
         wt_gh = GitHubOps(temp_wt_path, system_account=system_account)
         try:
+            # Sync the checked-out branch to the PR's authoritative remote head
+            # before merging main (see _sync_worktree_to_pr_remote_head).
+            self._sync_worktree_to_pr_remote_head(wt_gh, branch_name)
             original_pr_head = wt_gh.get_current_commit()
             conflict_ms_id = ""
             milestone_result = {}
