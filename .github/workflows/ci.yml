@@ -30,6 +30,15 @@ jobs:
         if: contains(github.event.pull_request.labels.*.name, 'skip-security-check')
         run: echo "::warning::Security check bypassed with skip-security-check label. This should only be used in emergencies."
 
+      # Issue #1897: API Security Scanner
+      - name: Run API Security Scanner
+        if: "!contains(github.event.pull_request.labels.*.name, 'skip-security-check')"
+        run: python scripts/lint/api_security_scanner.py
+
+      - name: Validate security baseline metadata
+        if: "!contains(github.event.pull_request.labels.*.name, 'skip-security-check')"
+        run: python scripts/lint/validate_baseline_metadata.py
+
       - name: Run pre-commit (excluding Bandit)
         uses: pre-commit/action@v3.0.1
         env:
