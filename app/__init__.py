@@ -222,6 +222,12 @@ def create_app(config=None):
 
     app.wsgi_app = TerminalWebSocketMiddleware(app.wsgi_app)
 
+    # Query parameter sanitizer for sensitive tokens (Issue #1896)
+    # Sanitizes token/session_token/auth/api_key from logs
+    from app.middleware.query_param_sanitizer import QueryParamSanitizer
+
+    app.wsgi_app = QueryParamSanitizer(app.wsgi_app)
+
     # Load configuration
     app.config["TEMPLATES_AUTO_RELOAD"] = True
 

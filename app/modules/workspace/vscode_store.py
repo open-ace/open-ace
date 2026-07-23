@@ -20,7 +20,8 @@ class VSCodeInfoStore:
     def __init__(self, ttl: float = TTL_SECONDS):
         self._lock = threading.Lock()
         self._store: dict[tuple[str, str], dict] = {}
-        self._vscode_index: dict[str, str] = {}
+        self._vscode_index: dict[str, str] = {}  # vscode_id -> machine_id
+        self._token_index: dict[str, tuple[str, str]] = {}  # token -> (machine_id, vscode_id)
         self._ttl = ttl
         self._cleanup_timer: threading.Timer | None = None
         self._timer_started = False
@@ -53,12 +54,31 @@ class VSCodeInfoStore:
                 self._schedule_cleanup()
 
             info["_updated_at"] = time.time()
+
+            # Remove old token from index if exists
+            old_info = self._store.get((machine_id, vscode_id))
+            if old_info:
+                old_token = old_info.get("token", "")
+                if old_token and old_token in self._token_index:
+                    self._token_index.pop(old_token, None)
+
             self._store[(machine_id, vscode_id)] = info
             self._vscode_index[vscode_id] = machine_id
+
+            # Add new token to index
+            new_token = info.get("token", "")
+            if new_token:
+                self._token_index[new_token] = (machine_id, vscode_id)
+
             # Evict oldest entries if over capacity
             if len(self._store) > MAX_ENTRIES:
                 oldest = sorted(self._store.items(), key=lambda kv: kv[1].get("_updated_at", 0))
                 for k, _ in oldest[: len(self._store) - MAX_ENTRIES]:
+                    evicted_info = self._store.get(k)
+                    if evicted_info:
+                        evicted_token = evicted_info.get("token", "")
+                        if evicted_token and evicted_token in self._token_index:
+                            self._token_index.pop(evicted_token, None)
                     del self._store[k]
                     self._vscode_index.pop(k[1], None)
 
@@ -80,6 +100,8 @@ class VSCodeInfoStore:
     def find_by_token(self, token: str) -> tuple[str, str, dict] | None:
         """Find VSCode info by token.
 
+        Uses token index for O(1) lookup.
+
         Args:
             token: Token string to search for.
 
@@ -89,10 +111,15 @@ class VSCodeInfoStore:
         if not token:
             return None
         with self._lock:
-            for (machine_id, vscode_id), info in self._store.items():
-                stored_token = info.get("token", "")
-                if stored_token and stored_token == token:
+            # O(1) lookup via token index
+            key = self._token_index.get(token)
+            if key:
+                machine_id, vscode_id = key
+                info = self._store.get((machine_id, vscode_id))
+                if info is not None:
                     return machine_id, vscode_id, info
+                # Clean up stale index entry
+                self._token_index.pop(token, None)
         return None
 
     def get_tenant_id(self, machine_id: str, vscode_id: str) -> int | None:
@@ -113,7 +140,13 @@ class VSCodeInfoStore:
     def pop(self, machine_id: str, vscode_id: str) -> dict | None:
         with self._lock:
             self._vscode_index.pop(vscode_id, None)
-            return self._store.pop((machine_id, vscode_id), None)
+            info = self._store.pop((machine_id, vscode_id), None)
+            # Clean up token index
+            if info:
+                token = info.get("token", "")
+                if token and token in self._token_index:
+                    self._token_index.pop(token, None)
+            return info
 
     def cleanup_stale(self) -> int:
         """Remove entries older than TTL. Returns number of removed entries."""
@@ -124,6 +157,11 @@ class VSCodeInfoStore:
                 k for k, v in self._store.items() if now - v.get("_updated_at", 0) > self._ttl
             ]
             for k in stale_keys:
+                info = self._store.get(k)
+                if info:
+                    token = info.get("token", "")
+                    if token and token in self._token_index:
+                        self._token_index.pop(token, None)
                 del self._store[k]
                 self._vscode_index.pop(k[1], None)
                 removed += 1
