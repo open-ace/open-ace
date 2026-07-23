@@ -709,6 +709,35 @@ def test_isolated_git_guard_denies_cache_escape(tmp_path):
         env=env,
         check=False,
     )
+    clone_escape = subprocess.run(
+        [
+            str(_source_git_guard()),
+            "clone",
+            "https://example.invalid/hook",
+            str(project / "clone"),
+        ],
+        cwd=cache_repo,
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+    global_config_escape = subprocess.run(
+        [str(_source_git_guard()), "config", "--global", "user.name", "escape"],
+        cwd=cache_repo,
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+    environment_config_escape = subprocess.run(
+        [str(_source_git_guard()), "checkout", "HEAD"],
+        cwd=cache_repo,
+        capture_output=True,
+        text=True,
+        env={**env, "GIT_CONFIG_PARAMETERS": f"'core.worktree'='{project}'"},
+        check=False,
+    )
 
     assert outside_init.returncode == 126
     assert redirected_commit.returncode == 126
@@ -717,6 +746,9 @@ def test_isolated_git_guard_denies_cache_escape(tmp_path):
     assert cache_cwd_init_escape.returncode == 126
     assert object_directory_escape.returncode == 126
     assert unsafe_config_escape.returncode == 126
+    assert clone_escape.returncode == 126
+    assert global_config_escape.returncode == 126
+    assert environment_config_escape.returncode == 126
 
 
 def test_runner_preserves_tool_result_for_test_evidence():
