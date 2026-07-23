@@ -333,6 +333,7 @@ class TestDoMergeDeferredRetry:
     def test_uses_graph_merge_base_and_backfills_stale_scope_base(self):
         wf = _make_workflow(base_commit_sha="old-branch-base")
         o, _ = _make_orchestrator(wf)
+        o._ensure_pr_head_local = MagicMock(return_value=True)
         gh = MagicMock()
         gh.resolve_commit.return_value = "fetched-main-head"
         gh._run_git.side_effect = [
@@ -357,6 +358,7 @@ class TestDoMergeDeferredRetry:
     def test_effective_pr_delta_still_enforces_scope_cap(self):
         wf = _make_workflow(base_commit_sha="old-branch-base")
         o, _ = _make_orchestrator(wf)
+        o._ensure_pr_head_local = MagicMock(return_value=True)
         gh = MagicMock()
         gh.resolve_commit.return_value = "fetched-main-head"
         gh._run_git.side_effect = [
@@ -389,6 +391,30 @@ class TestDoMergeDeferredRetry:
         gh.get_changed_files.assert_not_called()
         o._update_workflow.assert_not_called()
 
+    def test_pre_merge_scope_fails_when_pr_head_missing_locally(self):
+        """A PR head absent from the local object DB must fail closed, not crash.
+
+        Reproduces issue #1895 retry: after the worktree is torn down the PR
+        head SHA (from the GitHub API) is not in the local object DB, so
+        ``git merge-base`` failed. ``_ensure_pr_head_local`` now fetches the PR
+        branch; if the object still cannot be resolved the scope check returns a
+        clear error instead of "git merge-base returned no commit".
+        """
+        wf = _make_workflow(base_commit_sha="old-branch-base")
+        o, _ = _make_orchestrator(wf)
+        gh = MagicMock()
+        gh.resolve_commit.return_value = "fetched-main-head"
+        # PR head object never resolves locally even after a branch fetch.
+        gh._run_git.return_value = MagicMock(returncode=1, stdout="", stderr="")
+
+        error = AutonomousOrchestrator._validate_pre_merge_change_scope(
+            o, gh, wf, "resolved-pr-head"
+        )
+
+        assert "not present in local object DB" in error
+        gh.get_changed_files.assert_not_called()
+        o._update_workflow.assert_not_called()
+
     def test_same_cycle_ci_repair_receives_refreshed_scope_base(self):
         wf = _make_workflow(base_commit_sha="old-branch-base")
         o, _ = _make_orchestrator(wf)
@@ -400,6 +426,7 @@ class TestDoMergeDeferredRetry:
         o._start_ci_repair_round = MagicMock()
         gh = MagicMock()
         o._gh = gh
+        o._ensure_pr_head_local = MagicMock(return_value=True)
         gh.get_pr_head_sha.return_value = "resolved-pr-head"
         gh.resolve_commit.return_value = "fetched-main-head"
         gh._run_git.side_effect = [
