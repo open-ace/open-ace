@@ -1659,6 +1659,7 @@ def test_failed_pr_sync_skips_branch_that_already_contains_main():
     orch = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
     orch._ancestor_check = MagicMock(return_value=True)
     orch._resolve_merge_conflicts = MagicMock()
+    orch._ensure_pr_head_local = MagicMock(return_value=True)
     gh = MagicMock()
     gh.resolve_commit.return_value = "main-head"
 
@@ -1676,6 +1677,7 @@ def test_failed_pr_sync_pushes_main_before_ai_repair():
     orch = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
     orch._ancestor_check = MagicMock(return_value=False)
     orch._resolve_merge_conflicts = MagicMock()
+    orch._ensure_pr_head_local = MagicMock(return_value=True)
     gh = MagicMock()
     gh.resolve_commit.return_value = "main-head"
 
