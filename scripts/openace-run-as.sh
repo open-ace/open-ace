@@ -56,19 +56,19 @@ if [ "$isolated" = true ]; then
         exit 66
     fi
     git_entry_signature() {
-        if [ -L "$project_dir/.git" ]; then
-            printf 'link:%s' "$(readlink "$project_dir/.git")"
-        elif [ -f "$project_dir/.git" ]; then
+        local signature_project="$1"
+        if [ -L "$signature_project/.git" ]; then
+            printf 'link:%s' "$(readlink "$signature_project/.git")"
+        elif [ -f "$signature_project/.git" ]; then
             printf 'file:%s:%s' \
-                "$(stat -c '%d:%i:%a:%U:%G' "$project_dir/.git")" \
-                "$(sha256sum "$project_dir/.git" | cut -d' ' -f1)"
-        elif [ -d "$project_dir/.git" ]; then
-            printf 'dir:%s' "$(stat -c '%d:%i:%a:%U:%G' "$project_dir/.git")"
+                "$(stat -c '%d:%i:%a:%U:%G' "$signature_project/.git")" \
+                "$(sha256sum "$signature_project/.git" | cut -d' ' -f1)"
+        elif [ -d "$signature_project/.git" ]; then
+            printf 'dir:%s' "$(stat -c '%d:%i:%a:%U:%G' "$signature_project/.git")"
         else
             printf 'missing'
         fi
     }
-    git_entry_before="$(git_entry_signature)"
     if ! command -v setfacl >/dev/null 2>&1; then
         echo "openace-run-as: setfacl is required for isolated agent execution" >&2
         exit 66
@@ -93,6 +93,8 @@ if [ "$isolated" = true ]; then
         esac
     done
     acl_registry="/run/openace-agent-acl-${target_uid}"
+    signature_registry="/run/openace-agent-git-signature-${target_uid}"
+    signature_tmp="${signature_registry}.next"
     exec 9>"/run/lock/openace-agent-${target_uid}.lock"
     flock -x 9
 
@@ -125,11 +127,42 @@ if [ "$isolated" = true ]; then
         fi
         : > "$acl_registry"
         chmod 600 "$acl_registry" 2>/dev/null || true
+        rm -f "$signature_tmp"
     }
 
     # Recover safely after a previously interrupted wrapper before granting
-    # this run access to anything. The registry is root-owned under /run.
+    # this run access to anything. The registries are root-owned under /run.
+    #
+    # Capture the prior run's protected .git baseline before cleanup, but only
+    # compare it after cleanup has removed the launcher's own temporary ACLs.
+    # POSIX ACL mask changes are reflected in stat(2)'s mode bits; comparing a
+    # pre-cleanup signature with a post-cleanup signature therefore produced a
+    # false integrity violation even for the read-only project-dir probe.
+    previous_signature_project=""
+    previous_git_signature=""
+    if [ -f "$signature_registry" ]; then
+        IFS= read -r previous_signature_project < "$signature_registry" || true
+        previous_git_signature="$(sed -n '2p' "$signature_registry")"
+    fi
     cleanup_isolated
+    if [ -n "$previous_signature_project" ] && [ -n "$previous_git_signature" ]; then
+        recovered_git_signature="$(git_entry_signature "$previous_signature_project")"
+        if [ "$previous_git_signature" != "$recovered_git_signature" ]; then
+            echo "OPENACE_REPO_INTEGRITY_VIOLATION: .git entry changed during interrupted agent execution" >&2
+            exit 68
+        fi
+        rm -f "$signature_registry"
+    else
+        rm -f "$signature_registry"
+    fi
+
+    # Persist the normalized baseline before granting this run any ACLs. If
+    # the wrapper is interrupted, the next serialized invocation verifies this
+    # exact project after revoking the abandoned grants.
+    git_entry_before="$(git_entry_signature "$project_dir")"
+    printf '%s\n%s\n' "$project_dir" "$git_entry_before" > "$signature_tmp"
+    chmod 600 "$signature_tmp"
+    mv -f "$signature_tmp" "$signature_registry"
     trap cleanup_isolated EXIT
     # Bash services traps promptly while waiting for a background job. With a
     # foreground external command it may defer the trap until that command
@@ -196,18 +229,19 @@ if [ "$isolated" = true ]; then
         "HOME=$target_home" "USER=$target_user" "LOGNAME=$target_user" \
         "LANG=${LANG:-C.UTF-8}" "LC_ALL=${LC_ALL:-}" "TMPDIR=/tmp" \
         "GIT_CONFIG_COUNT=1" "GIT_CONFIG_KEY_0=safe.directory" \
-        "GIT_CONFIG_VALUE_0=$project_dir" "$@" <&0 &
+        "GIT_CONFIG_VALUE_0=$project_dir" "$@" <&0 9>&- &
     agent_child_pid=$!
     wait "$agent_child_pid"
     child_status=$?
     set -e
     cleanup_isolated
     trap - EXIT HUP INT TERM
-    git_entry_after="$(git_entry_signature)"
+    git_entry_after="$(git_entry_signature "$project_dir")"
     if [ "$git_entry_before" != "$git_entry_after" ]; then
         echo "OPENACE_REPO_INTEGRITY_VIOLATION: .git entry changed during agent execution" >&2
         exit 68
     fi
+    rm -f "$signature_registry"
     exit "$child_status"
 fi
 
