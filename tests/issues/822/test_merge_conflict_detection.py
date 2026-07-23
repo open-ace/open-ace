@@ -521,13 +521,15 @@ class TestDoMergeDeferredRetry:
         mock_gh.delete_branch.assert_called_once_with("auto-dev/fc82f22a")
 
     def test_start_ci_repair_round_restores_preferred_worktree(self):
-        """CI repair loop should restore the preferred worktree path for worktree strategy."""
+        """CI repair recreates and binds the PR worktree before launching its agent."""
         wf = _make_workflow(worktree_path="", preferred_worktree_path="/srv/repo/.worktrees/wf-822")
         o, _ = _make_orchestrator(wf)
-        mock_gh = MagicMock()
-        mock_gh.get_pr_head_sha.return_value = "sha-old"
-        mock_gh.get_check_failure_excerpt.return_value = "pytest failed"
-        o._get_gh = MagicMock(return_value=mock_gh)
+        main_gh = MagicMock()
+        main_gh.get_pr_head_sha.return_value = "sha-old"
+        main_gh.get_check_failure_excerpt.return_value = "pytest failed"
+        worktree_gh = MagicMock()
+        o._get_gh = MagicMock(side_effect=[main_gh, worktree_gh])
+        o._ensure_worktree = MagicMock(return_value="/srv/repo/.worktrees/wf-822")
         o._run_merge_ci_repair = MagicMock()
 
         o._start_ci_repair_round(
@@ -543,9 +545,12 @@ class TestDoMergeDeferredRetry:
         assert update_payload["ci_repair_attempts"] == 1
         assert update_payload["worktree_path"] == "/srv/repo/.worktrees/wf-822"
         assert update_payload["preferred_worktree_path"] == "/srv/repo/.worktrees/wf-822"
+        restore_wf = o._ensure_worktree.call_args.args[0]
+        assert restore_wf["worktree_path"] == "/srv/repo/.worktrees/wf-822"
+        assert restore_wf["branch_name"] == "auto-dev/fc82f22a"
         o._run_merge_ci_repair.assert_called_once_with(
-            wf,
-            mock_gh,
+            restore_wf,
+            worktree_gh,
             1103,
             [
                 {
@@ -556,6 +561,41 @@ class TestDoMergeDeferredRetry:
                 }
             ],
         )
+
+    def test_worktree_restore_failure_does_not_consume_ci_repair_attempt(self):
+        """Infrastructure retries must not spend the bounded AI repair budget."""
+        wf = _make_workflow(
+            worktree_path="",
+            preferred_worktree_path="/srv/repo/.worktrees/wf-822",
+        )
+        o, _ = _make_orchestrator(wf)
+        main_gh = MagicMock()
+        main_gh.get_pr_head_sha.return_value = "sha-old"
+        main_gh.get_check_failure_excerpt.return_value = "pytest failed"
+        o._get_gh = MagicMock(return_value=main_gh)
+        o._ensure_worktree = MagicMock(side_effect=GitHubOpsError("network timed out"))
+        o._run_merge_ci_repair = MagicMock()
+
+        with pytest.raises(GitHubOpsError, match="network timed out"):
+            o._start_ci_repair_round(
+                wf,
+                1103,
+                [{"name": "test (3.9)", "bucket": "fail", "state": "failure"}],
+            )
+
+        o._run_merge_ci_repair.assert_not_called()
+        attempt_updates = [
+            call_args.args[0]
+            for call_args in o._update_workflow.call_args_list
+            if call_args.args and "ci_repair_attempts" in call_args.args[0]
+        ]
+        assert attempt_updates == []
+        started_milestones = [
+            call_args.kwargs
+            for call_args in o._create_milestone.call_args_list
+            if call_args.kwargs.get("milestone_type") == "ci_repair_started"
+        ]
+        assert started_milestones == []
 
     def test_start_ci_repair_round_fails_when_signature_repeats(self):
         """A repeated failed-check signature should stop the auto-repair loop.

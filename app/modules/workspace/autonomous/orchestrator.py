@@ -3624,6 +3624,31 @@ class AutonomousOrchestrator:
             return
 
         context = self._build_ci_repair_context(wf, gh, pr_number, failed_checks)
+        restore_worktree = bool(
+            wf.get("branch_strategy") == "worktree"
+            and not wf.get("worktree_path")
+            and preferred_worktree_path
+        )
+        repair_wf = dict(wf)
+        if restore_worktree:
+            repair_wf["preferred_worktree_path"] = preferred_worktree_path
+            repair_wf["worktree_path"] = preferred_worktree_path
+            # Conflict resolution deliberately removes the workflow worktree
+            # while its branch is attached to an isolated resolver worktree.
+            # Restore the PR branch before consuming an attempt or announcing
+            # that repair started. A transient fetch/worktree-add error can
+            # then use the orchestrator's normal retry budget without burning
+            # the bounded AI repair budget or leaving a false milestone.
+            self._ensure_worktree(repair_wf)
+            refreshed_wf = self.workflow
+            if refreshed_wf and refreshed_wf.get("worktree_path"):
+                repair_wf = refreshed_wf
+            # _ensure_worktree can create/rebind the checkout. Discard the
+            # main-repository GitHubOps handle so all repair commits and pushes
+            # are pinned to the restored worktree.
+            self._gh = None
+            gh = self._get_gh()
+
         self._create_milestone(
             phase="merge",
             dev_round=dev_round,
@@ -3647,9 +3672,12 @@ class AutonomousOrchestrator:
         }
         if wf.get("branch_strategy") == "worktree" and preferred_worktree_path:
             updates["preferred_worktree_path"] = preferred_worktree_path
-            updates["worktree_path"] = preferred_worktree_path
+            updates["worktree_path"] = repair_wf.get("worktree_path") or preferred_worktree_path
         self._update_workflow(updates)
-        self._run_merge_ci_repair(self.workflow or wf, gh, pr_number, failed_checks)
+        repair_wf.update(updates)
+        if not restore_worktree:
+            repair_wf = self.workflow or repair_wf
+        self._run_merge_ci_repair(repair_wf, gh, pr_number, failed_checks)
 
     def _update_workflow(self, updates: dict):
         """Update workflow and emit event."""
