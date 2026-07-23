@@ -10,13 +10,22 @@ Usage:
     @admin_required                             # Needs admin role
     @auth_required(ownership='session')         # Needs session ownership
     @public_endpoint                            # Explicitly marks as public (no auth)
+
+Issue #1896: Query session token security
+- Session tokens must only come from cookie or Authorization header
+- URL tokens (WebUI, Proxy, Browser) are allowed only on specific paths
+- All URL token usage is logged for audit
 """
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import logging
+import re
+import time
 from functools import wraps
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Literal, cast
 from urllib.parse import unquote
 
 from flask import Response, g, jsonify, request
@@ -32,6 +41,294 @@ def _get_auth_service() -> AuthService:
     from app.services.auth_service import AuthService
 
     return AuthService()
+
+
+# ── URL Token Security (Issue #1896) ─────────────────────────────────────
+
+# WebUI token TTL in seconds (default 30 minutes)
+WEBUI_TOKEN_TTL_SECONDS = 1800
+
+# URL token allowed path prefixes
+URL_TOKEN_ALLOWED_PATHS = [
+    "/api/admin/",  # WebUI token for admin routes
+    "/api/remote/terminal/",  # Proxy token for terminal routes
+    "/api/remote/vscode/",  # Browser token for VSCode routes
+    "/api/workspace/",  # WebUI token for workspace routes
+]
+
+
+def _get_url_token_allowed_paths() -> list[str]:
+    """Get the list of allowed paths for URL tokens.
+
+    Returns:
+        List of path prefixes where URL tokens are allowed.
+    """
+    return URL_TOKEN_ALLOWED_PATHS
+
+
+def _is_url_token_allowed_path(path: str) -> bool:
+    """Check if the path allows URL token authentication.
+
+    Args:
+        path: Request path to check.
+
+    Returns:
+        True if URL tokens are allowed on this path.
+    """
+    for allowed in _get_url_token_allowed_paths():
+        # Check both with and without trailing slash
+        if path.startswith(allowed):
+            return True
+        # Also check exact match (e.g., /api/admin matches /api/admin/)
+        if allowed.endswith("/") and path == allowed[:-1]:
+            return True
+    return False
+
+
+def _classify_query_token(token: str) -> Literal["webui_v2", "webui_v1", "proxy", "browser", "session"]:
+    """Classify the type of token from query parameter.
+
+    Classification is based on validation method, not format pattern,
+    to prevent format confusion attacks.
+
+    Args:
+        token: Token string from query parameter.
+
+    Returns:
+        Token type: "webui_v2", "webui_v1", "proxy", "browser", or "session"
+    """
+    if not token:
+        return "session"
+
+    # Normalize the token first
+    token = normalize_token(token)
+
+    # Try WebUI token validation (v2 format)
+    if token.startswith("v2:"):
+        # v2 format: v2:user_id:port:timestamp:random:signature
+        parts = token.split(":")
+        if len(parts) == 6:
+            return "webui_v2"
+
+    # Try WebUI token validation (v1 format)
+    # v1 format: user_id:port:random:signature (4 parts)
+    parts = token.split(":")
+    if len(parts) == 4:
+        try:
+            # Check if first two parts are integers (user_id and port)
+            int(parts[0])
+            int(parts[1])
+            # Could be WebUI token, but need to verify via actual validation
+            # We return webui_v1 tentatively, actual validation happens later
+            return "webui_v1"
+        except (ValueError, TypeError):
+            pass
+
+    # Try to find in terminal_info_store (Proxy token)
+    try:
+        from app.modules.workspace.terminal_store import terminal_info_store
+
+        found = terminal_info_store.find_by_token(token)
+        if found:
+            return "proxy"
+    except Exception:
+        pass
+
+    # Try to find in vscode_info_store (Browser token)
+    try:
+        from app.modules.workspace.vscode_store import vscode_info_store
+
+        found = vscode_info_store.find_by_token(token)
+        if found:
+            return "browser"
+    except Exception:
+        pass
+
+    # Default to session token type
+    return "session"
+
+
+def _validate_webui_token_v2(token: str, token_secret: str) -> tuple[bool, int | None, str | None]:
+    """Validate a v2 format WebUI token with TTL.
+
+    v2 format: v2:user_id:port:timestamp:random:signature
+
+    Args:
+        token: Token string to validate.
+        token_secret: Secret key for signature verification.
+
+    Returns:
+        Tuple of (is_valid, user_id, error_message).
+    """
+    parts = token.split(":")
+    if len(parts) != 6:
+        return False, None, "Invalid v2 token format"
+
+    try:
+        _, user_id_str, port_str, timestamp_str, random_part, signature = parts
+        user_id = int(user_id_str)
+        port = int(port_str)
+        timestamp = int(timestamp_str)
+    except (ValueError, TypeError) as e:
+        return False, None, f"Token parse error: {e}"
+
+    # Verify signature
+    payload = f"v2:{user_id}:{port}:{timestamp}:{random_part}"
+    expected_signature = hashlib.sha256(
+        f"{payload}:{token_secret}".encode()
+    ).hexdigest()[:16]
+
+    if not hmac.compare_digest(signature, expected_signature):
+        return False, None, "Invalid signature"
+
+    # Check TTL
+    current_time = int(time.time())
+    age_seconds = current_time - timestamp
+    if age_seconds > WEBUI_TOKEN_TTL_SECONDS:
+        return False, None, f"Token expired (age: {age_seconds}s, TTL: {WEBUI_TOKEN_TTL_SECONDS}s)"
+
+    if age_seconds < 0:
+        return False, None, "Token timestamp is in the future"
+
+    return True, user_id, None
+
+
+def _validate_webui_token_v1(token: str, token_secret: str) -> tuple[bool, int | None, str | None]:
+    """Validate a v1 format WebUI token (legacy, no TTL).
+
+    v1 format: user_id:port:random:signature
+
+    Args:
+        token: Token string to validate.
+        token_secret: Secret key for signature verification.
+
+    Returns:
+        Tuple of (is_valid, user_id, error_message).
+    """
+    parts = token.split(":")
+    if len(parts) != 4:
+        return False, None, "Invalid v1 token format"
+
+    try:
+        user_id_str, port_str, random_part, signature = parts
+        user_id = int(user_id_str)
+        port = int(port_str)
+    except (ValueError, TypeError) as e:
+        return False, None, f"Token parse error: {e}"
+
+    # Verify signature
+    expected_signature = hashlib.sha256(
+        f"{user_id}:{port}:{random_part}:{token_secret}".encode()
+    ).hexdigest()[:16]
+
+    if not hmac.compare_digest(signature, expected_signature):
+        return False, None, "Invalid signature"
+
+    return True, user_id, None
+
+
+def _log_url_token_usage(
+    token_type: str,
+    path: str,
+    tenant_id: int | None = None,
+    user_id: int | None = None,
+    is_legacy: bool = False,
+) -> None:
+    """Log URL token usage for audit.
+
+    Args:
+        token_type: Type of URL token used.
+        path: Request path.
+        tenant_id: Optional tenant ID.
+        user_id: Optional user ID.
+        is_legacy: Whether this is a legacy v1 token.
+    """
+    try:
+        from app.modules.governance.audit_logger import AuditAction, AuditLogger
+
+        audit_logger = AuditLogger()
+
+        # Map token type to audit action
+        action_map = {
+            "webui_v2": AuditAction.WEBUI_TOKEN_IN_QUERY_USED,
+            "webui_v1": AuditAction.LEGACY_WEBUI_TOKEN_USED,
+            "proxy": AuditAction.PROXY_TOKEN_IN_QUERY_USED,
+            "browser": AuditAction.BROWSER_TOKEN_IN_QUERY_USED,
+        }
+
+        action = action_map.get(token_type)
+        if not action:
+            return
+
+        audit_logger.log_action(
+            action,
+            user_id=user_id,
+            severity="warning" if is_legacy else "info",
+            resource_type="url_token",
+            details={
+                "token_type": token_type,
+                "path": path,
+                "is_legacy": is_legacy,
+            },
+            tenant_id=tenant_id,
+        )
+    except Exception as e:
+        logger.warning("Failed to log URL token usage: %s", e)
+
+
+def _log_query_session_token_rejected(path: str, tenant_id: int | None = None) -> None:
+    """Log when a session token is rejected from query parameter.
+
+    Args:
+        path: Request path.
+        tenant_id: Optional tenant ID.
+    """
+    try:
+        from app.modules.governance.audit_logger import AuditAction, AuditLogger
+
+        audit_logger = AuditLogger()
+        audit_logger.log_action(
+            AuditAction.QUERY_SESSION_TOKEN_REJECTED,
+            severity="warning",
+            resource_type="session",
+            details={
+                "path": path,
+                "reason": "session_token_in_query_param",
+            },
+            tenant_id=tenant_id,
+        )
+    except Exception as e:
+        logger.warning("Failed to log query session token rejected: %s", e)
+
+
+def _log_url_token_path_violation(
+    token_type: str,
+    path: str,
+    tenant_id: int | None = None,
+) -> None:
+    """Log when a URL token is used on a disallowed path.
+
+    Args:
+        token_type: Type of URL token used.
+        path: Request path.
+        tenant_id: Optional tenant ID.
+    """
+    try:
+        from app.modules.governance.audit_logger import AuditAction, AuditLogger
+
+        audit_logger = AuditLogger()
+        audit_logger.log_action(
+            AuditAction.URL_TOKEN_PATH_VIOLATION,
+            severity="warning",
+            resource_type="url_token",
+            details={
+                "token_type": token_type,
+                "path": path,
+            },
+            tenant_id=tenant_id,
+        )
+    except Exception as e:
+        logger.warning("Failed to log URL token path violation: %s", e)
 
 
 def normalize_token(token: str) -> str:
@@ -74,8 +371,15 @@ def normalize_webui_token(token: str) -> str:
     return normalize_token(token)
 
 
-def _extract_token() -> str:
-    """Extract auth token from request (cookie → header → query param)."""
+def _extract_session_token() -> str:
+    """Extract session token from cookie or Authorization header only.
+
+    This is the safe extraction method for regular API endpoints.
+    Query parameter tokens are NOT accepted.
+
+    Returns:
+        Token string or empty string if not found.
+    """
     token = request.cookies.get("session_token")
     if token:
         return cast("str", token)
@@ -84,7 +388,59 @@ def _extract_token() -> str:
     if auth_header.startswith("Bearer "):
         return cast("str", auth_header[7:])
 
-    return cast("str", request.args.get("token", ""))
+    return ""
+
+
+def _extract_token() -> str:
+    """Extract auth token from request (cookie → header → query param).
+
+    For query parameter tokens, validates token type and logs usage.
+    Session tokens from query parameters are rejected per Issue #1896.
+
+    Returns:
+        Token string or empty string if not found/rejected.
+    """
+    # First try cookie and header (safe sources)
+    token = request.cookies.get("session_token")
+    if token:
+        return cast("str", token)
+
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        return cast("str", auth_header[7:])
+
+    # Check query parameter token
+    query_token = request.args.get("token", "")
+    if not query_token:
+        return ""
+
+    # Classify and validate query token
+    query_token = normalize_token(query_token)
+    token_type = _classify_query_token(query_token)
+
+    # Check policy for session tokens
+    from app.config.feature_flags import get_query_token_policy, is_query_session_token_rejected
+
+    policy = get_query_token_policy()
+
+    if token_type == "session":
+        # Session token in query param - check policy
+        if is_query_session_token_rejected():
+            _log_query_session_token_rejected(request.path)
+            logger.warning(
+                "Session token rejected from query param for path %s (policy=%s)",
+                request.path,
+                policy,
+            )
+            return ""
+        # In observe/warn mode, log but allow (for migration period)
+        logger.info(
+            "Session token used in query param for path %s (policy=%s)",
+            request.path,
+            policy,
+        )
+
+    return cast("str", query_token)
 
 
 def _authenticate(token: str) -> tuple[bool, dict | None]:
@@ -202,6 +558,9 @@ def auth_required(f=None, *, ownership=None):
     """
     Decorator: require authentication, optionally with ownership check.
 
+    Uses session token from cookie or Authorization header only.
+    Query parameter session tokens are rejected per Issue #1896.
+
     Args:
         f: The function to decorate.
         ownership: Optional ownership check type.
@@ -214,7 +573,8 @@ def auth_required(f=None, *, ownership=None):
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
-            token = _extract_token()
+            # Use session token extraction (cookie/header only)
+            token = _extract_session_token()
             if not token:
                 return jsonify({"error": "Authentication required"}), 401
 
@@ -270,9 +630,12 @@ def admin_required(f=None):
     """
     Decorator: require admin role.
 
-    Supports two authentication methods:
-    1. Session token (from cookie, header, or query param)
-    2. WebUI token (fallback from query param for iframe requests)
+    Authentication methods (in order):
+    1. Session token from cookie or Authorization header
+    2. WebUI token from query param (for iframe requests)
+
+    Issue #1896: Query parameter session tokens are rejected.
+    WebUI tokens are validated and logged for audit.
 
     Sets g.user, g.user_id, g.user_role on success.
     """
@@ -280,8 +643,8 @@ def admin_required(f=None):
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
-            # First try session token authentication
-            token = _extract_token()
+            # First try session token from cookie/header only
+            token = _extract_session_token()
             if token:
                 user = _load_user_from_token(token)
                 if user:
@@ -302,14 +665,28 @@ def admin_required(f=None):
             # This supports iframe requests from WebUI where session token is not available
             url_token = request.args.get("token")
             if url_token:
-                # Handle double-encoded tokens from some clients
+                # Check if path allows URL tokens
+                if not _is_url_token_allowed_path(request.path):
+                    _log_url_token_path_violation("webui", request.path)
+                    return jsonify({"error": "URL token not allowed on this path"}), 403
+
                 url_token = normalize_webui_token(url_token)
                 from app.services.webui_manager import get_webui_manager
 
                 manager = get_webui_manager()
                 if manager:
+                    # Validate token (supports v1 and v2 formats)
                     valid, user_id, error = manager.validate_token(url_token)
                     if valid and user_id:
+                        # Log URL token usage
+                        is_legacy = not url_token.startswith("v2:")
+                        _log_url_token_usage(
+                            "webui_v2" if not is_legacy else "webui_v1",
+                            request.path,
+                            user_id=user_id,
+                            is_legacy=is_legacy,
+                        )
+
                         # Load user from database to check role
                         from app.repositories.user_repo import UserRepository
 

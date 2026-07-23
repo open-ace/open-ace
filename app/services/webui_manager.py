@@ -7,6 +7,7 @@ Each user gets an independent webui process running under their system_account.
 """
 
 import hashlib
+import hmac
 import json
 import logging
 import os
@@ -444,7 +445,8 @@ class WebUIManager:
         """
         Generate an authentication token for a user.
 
-        Token format: {user_id}:{port}:{random}:{signature}
+        Uses v2 format with timestamp for TTL support (Issue #1896):
+        v2:{user_id}:{port}:{timestamp}:{random}:{signature}
 
         Args:
             user_id: User ID.
@@ -453,21 +455,88 @@ class WebUIManager:
         Returns:
             Generated token string.
         """
-        random_part = secrets.token_hex(16)
+        import time
+
+        timestamp = int(time.time())
+        random_part = secrets.token_hex(8)
+        payload = f"v2:{user_id}:{port}:{timestamp}:{random_part}"
         signature = hashlib.sha256(
-            f"{user_id}:{port}:{random_part}:{self.config.token_secret}".encode()
+            f"{payload}:{self.config.token_secret}".encode()
         ).hexdigest()[:16]
-        return f"{user_id}:{port}:{random_part}:{signature}"
+        return f"{payload}:{signature}"
 
     def validate_token(self, token: str) -> tuple[bool, int | None, str | None]:
         """
         Validate an authentication token.
+
+        Supports both v2 format (with TTL) and v1 format (legacy, no TTL).
+        Issue #1896: v2 tokens have 30-minute TTL by default.
+
+        v2 format: v2:{user_id}:{port}:{timestamp}:{random}:{signature}
+        v1 format: {user_id}:{port}:{random}:{signature}
 
         Args:
             token: Token string to validate.
 
         Returns:
             Tuple of (is_valid, user_id, error_message).
+        """
+        if not token:
+            return False, None, "Empty token"
+
+        # v2 format with TTL
+        if token.startswith("v2:"):
+            return self._validate_token_v2(token)
+
+        # v1 format (legacy, no TTL)
+        return self._validate_token_v1(token)
+
+    def _validate_token_v2(self, token: str) -> tuple[bool, int | None, str | None]:
+        """Validate v2 format token with TTL.
+
+        v2 format: v2:{user_id}:{port}:{timestamp}:{random}:{signature}
+        """
+        # TTL in seconds (30 minutes default)
+        TTL_SECONDS = 1800
+
+        try:
+            parts = token.split(":")
+            if len(parts) != 6:
+                return False, None, "Invalid v2 token format"
+
+            _, user_id_str, port_str, timestamp_str, random_part, signature = parts
+            user_id: int = int(user_id_str)
+            port: int = int(port_str)
+            timestamp: int = int(timestamp_str)
+
+            # Verify signature
+            payload = f"v2:{user_id}:{port}:{timestamp}:{random_part}"
+            expected_signature = hashlib.sha256(
+                f"{payload}:{self.config.token_secret}".encode()
+            ).hexdigest()[:16]
+
+            if not hmac.compare_digest(signature, expected_signature):
+                return False, None, "Invalid signature"
+
+            # Check TTL
+            current_time = int(time.time())
+            age_seconds = current_time - timestamp
+
+            if age_seconds > TTL_SECONDS:
+                return False, None, f"Token expired (age: {age_seconds}s, TTL: {TTL_SECONDS}s)"
+
+            if age_seconds < 0:
+                return False, None, "Token timestamp is in the future"
+
+            return True, user_id, None
+
+        except (ValueError, TypeError) as e:
+            return False, None, f"Token parse error: {e}"
+
+    def _validate_token_v1(self, token: str) -> tuple[bool, int | None, str | None]:
+        """Validate v1 format token (legacy, no TTL).
+
+        v1 format: {user_id}:{port}:{random}:{signature}
         """
         try:
             parts = token.split(":")
@@ -482,7 +551,7 @@ class WebUIManager:
                 f"{user_id}:{port}:{random_part}:{self.config.token_secret}".encode()
             ).hexdigest()[:16]
 
-            if signature != expected_signature:
+            if not hmac.compare_digest(signature, expected_signature):
                 return False, None, "Invalid signature"
 
             # Note: We no longer check _port_allocations because each request

@@ -83,6 +83,15 @@ class AuditAction(Enum):
     AGENT_AUTH_FAILURE = "agent_auth_failure"
     AGENT_RECONNECT = "agent_reconnect"
 
+    # URL token security actions (Issue #1896)
+    QUERY_SESSION_TOKEN_REJECTED = "query_session_token_rejected"
+    WEBUI_TOKEN_IN_QUERY_USED = "webui_token_in_query_used"
+    PROXY_TOKEN_IN_QUERY_USED = "proxy_token_in_query_used"
+    BROWSER_TOKEN_IN_QUERY_USED = "browser_token_in_query_used"
+    URL_TOKEN_PATH_VIOLATION = "url_token_path_violation"
+    LEGACY_WEBUI_TOKEN_USED = "legacy_webui_token_used"
+    TOKEN_LEAK_SUSPECTED = "token_leak_suspected"
+
 
 class AuditSeverity(Enum):
     """Severity levels for audit events."""
@@ -904,6 +913,48 @@ def get_action_categories() -> dict[str, dict[str, Any]]:
                     "value": "agent_reconnect",
                     "label": "Agent Reconnect",
                     "i18n_key": "actionAgentReconnect",
+                },
+            ],
+        },
+        "url_token_security": {
+            "label": "URL Token Security",
+            "i18n_key": "categoryUrlTokenSecurity",
+            "resource_types": ["url_token", "session"],
+            "actions": [
+                {
+                    "value": "query_session_token_rejected",
+                    "label": "Query Session Token Rejected",
+                    "i18n_key": "actionQuerySessionTokenRejected",
+                },
+                {
+                    "value": "webui_token_in_query_used",
+                    "label": "WebUI Token in Query Used",
+                    "i18n_key": "actionWebuiTokenInQueryUsed",
+                },
+                {
+                    "value": "proxy_token_in_query_used",
+                    "label": "Proxy Token in Query Used",
+                    "i18n_key": "actionProxyTokenInQueryUsed",
+                },
+                {
+                    "value": "browser_token_in_query_used",
+                    "label": "Browser Token in Query Used",
+                    "i18n_key": "actionBrowserTokenInQueryUsed",
+                },
+                {
+                    "value": "url_token_path_violation",
+                    "label": "URL Token Path Violation",
+                    "i18n_key": "actionUrlTokenPathViolation",
+                },
+                {
+                    "value": "legacy_webui_token_used",
+                    "label": "Legacy WebUI Token Used",
+                    "i18n_key": "actionLegacyWebuiTokenUsed",
+                },
+                {
+                    "value": "token_leak_suspected",
+                    "label": "Token Leak Suspected",
+                    "i18n_key": "actionTokenLeakSuspected",
                 },
             ],
         },

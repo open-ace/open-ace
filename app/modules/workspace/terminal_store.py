@@ -79,6 +79,39 @@ class TerminalInfoStore:
                 self._terminal_index.pop(terminal_id, None)
         return None
 
+    def find_by_token(self, token: str) -> tuple[str, str, dict] | None:
+        """Find terminal info by token.
+
+        Args:
+            token: Token string to search for.
+
+        Returns:
+            Tuple of (machine_id, terminal_id, info) or None if not found.
+        """
+        if not token:
+            return None
+        with self._lock:
+            for (machine_id, terminal_id), info in self._store.items():
+                stored_token = info.get("token", "")
+                if stored_token and stored_token == token:
+                    return machine_id, terminal_id, info
+        return None
+
+    def get_tenant_id(self, machine_id: str, terminal_id: str) -> int | None:
+        """Get tenant_id for a terminal.
+
+        Args:
+            machine_id: Machine ID.
+            terminal_id: Terminal ID.
+
+        Returns:
+            Tenant ID or None if not found.
+        """
+        info = self.get(machine_id, terminal_id)
+        if info:
+            return info.get("tenant_id")
+        return None
+
     def pop(self, machine_id: str, terminal_id: str) -> dict | None:
         with self._lock:
             self._terminal_index.pop(terminal_id, None)

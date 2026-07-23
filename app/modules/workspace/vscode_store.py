@@ -77,6 +77,39 @@ class VSCodeInfoStore:
                 self._vscode_index.pop(vscode_id, None)
         return None
 
+    def find_by_token(self, token: str) -> tuple[str, str, dict] | None:
+        """Find VSCode info by token.
+
+        Args:
+            token: Token string to search for.
+
+        Returns:
+            Tuple of (machine_id, vscode_id, info) or None if not found.
+        """
+        if not token:
+            return None
+        with self._lock:
+            for (machine_id, vscode_id), info in self._store.items():
+                stored_token = info.get("token", "")
+                if stored_token and stored_token == token:
+                    return machine_id, vscode_id, info
+        return None
+
+    def get_tenant_id(self, machine_id: str, vscode_id: str) -> int | None:
+        """Get tenant_id for a VSCode session.
+
+        Args:
+            machine_id: Machine ID.
+            vscode_id: VSCode session ID.
+
+        Returns:
+            Tenant ID or None if not found.
+        """
+        info = self.get(machine_id, vscode_id)
+        if info:
+            return info.get("tenant_id")
+        return None
+
     def pop(self, machine_id: str, vscode_id: str) -> dict | None:
         with self._lock:
             self._vscode_index.pop(vscode_id, None)

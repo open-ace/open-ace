@@ -143,6 +143,21 @@ def load_user():
     return jsonify({"error": "Authentication required"}), 401
 
 
+@remote_bp.after_request
+def add_security_headers(response: Response) -> Response:
+    """Add security headers for responses with token in query parameters.
+
+    Issue #1896: Set Referrer-Policy and Cache-Control headers to prevent
+    token leakage through browser history, referer headers, and caches.
+    """
+    # Check if request has token in query parameters
+    if request.args.get("token"):
+        response.headers.setdefault("Referrer-Policy", "no-referrer")
+        response.headers.setdefault("Cache-Control", "no-store, no-cache, must-revalidate")
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    return response
+
+
 def _validate_agent_bearer(machine_id: str) -> tuple[str | None, tuple[Any, Any] | None]:
     """Validate the Bearer token in the Authorization header.
 

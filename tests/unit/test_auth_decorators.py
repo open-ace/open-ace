@@ -517,3 +517,174 @@ class TestAdminRequiredWebuiToken:
                         assert resp.status_code == 200
                         data = resp.get_json()
                         assert data["role"] == "admin"
+
+
+# ---------------------------------------------------------------------------
+# Issue #1896: Query session token security tests
+# ---------------------------------------------------------------------------
+
+
+class TestQuerySessionTokenSecurity:
+    """Test Issue #1896: Query session token rejection."""
+
+    def test_session_token_from_cookie_accepted(self):
+        """Session token from cookie should be accepted."""
+        app = _make_app()
+
+        with patch(
+            "app.auth.decorators._authenticate",
+            return_value=(True, MOCK_SESSION),
+        ):
+            with app.test_client() as client:
+                client.set_cookie("session_token", "session-token")
+                resp = client.get("/api/user")
+                assert resp.status_code == 200
+                data = resp.get_json()
+                assert data["user_id"] == 42
+
+    def test_session_token_from_header_accepted(self):
+        """Session token from Authorization header should be accepted."""
+        app = _make_app()
+
+        with patch(
+            "app.auth.decorators._authenticate",
+            return_value=(True, MOCK_SESSION),
+        ):
+            with app.test_client() as client:
+                resp = client.get("/api/user", headers={"Authorization": "Bearer session-token"})
+                assert resp.status_code == 200
+                data = resp.get_json()
+                assert data["user_id"] == 42
+
+    def test_session_token_from_query_rejected_in_reject_mode(self):
+        """Session token from query param should be rejected when policy is 'reject'."""
+        app = _make_app()
+
+        with patch("app.config.feature_flags.get_query_token_policy", return_value="reject"):
+            with patch("app.auth.decorators._authenticate", return_value=(True, MOCK_SESSION)):
+                with patch("app.auth.decorators._log_query_session_token_rejected"):
+                    with app.test_client() as client:
+                        resp = client.get("/api/user?token=session-token")
+                        # Should return 401 because no cookie/header token
+                        assert resp.status_code == 401
+
+    def test_extract_session_token_only_cookie_header(self):
+        """_extract_session_token should only extract from cookie and header."""
+        from app.auth.decorators import _extract_session_token
+
+        app = _make_app()
+
+        with app.test_request_context("/?token=query-token"):
+            # Query token should not be extracted
+            assert _extract_session_token() == ""
+
+        with app.test_request_context("/", headers={"Authorization": "Bearer header-token"}):
+            assert _extract_session_token() == "header-token"
+
+    def test_feature_flag_observe_mode(self):
+        """In observe mode, query session token should be logged but not rejected."""
+        from app.auth.decorators import _extract_token
+
+        app = _make_app()
+
+        with patch("app.config.feature_flags.get_query_token_policy", return_value="observe"):
+            with app.test_request_context("/?token=query-token"):
+                # Token should be extracted in observe mode
+                token = _extract_token()
+                assert token == "query-token"
+
+
+class TestWebuiTokenV2:
+    """Test WebUI token v2 format with TTL."""
+
+    def test_v2_token_generation(self):
+        """Test that generate_token produces v2 format."""
+        from app.services.webui_manager import WebUIManager
+
+        manager = WebUIManager()
+        manager.config.token_secret = "test-secret"
+
+        token = manager.generate_token(user_id=1, port=3100)
+
+        # Should start with v2:
+        assert token.startswith("v2:")
+        parts = token.split(":")
+        assert len(parts) == 6  # v2, user_id, port, timestamp, random, signature
+
+    def test_v2_token_validation(self):
+        """Test v2 token validation with TTL."""
+        from app.services.webui_manager import WebUIManager
+
+        manager = WebUIManager()
+        manager.config.token_secret = "test-secret"
+
+        # Generate token
+        token = manager.generate_token(user_id=1, port=3100)
+
+        # Should validate successfully
+        valid, user_id, error = manager.validate_token(token)
+        assert valid is True
+        assert user_id == 1
+        assert error is None
+
+    def test_v1_token_still_valid(self):
+        """Test that v1 format tokens are still accepted (legacy support)."""
+        import hashlib
+
+        from app.services.webui_manager import WebUIManager
+
+        manager = WebUIManager()
+        manager.config.token_secret = "test-secret"
+
+        # Generate v1 format token manually
+        user_id = 1
+        port = 3100
+        random_part = "abc123"
+        signature = hashlib.sha256(
+            f"{user_id}:{port}:{random_part}:{manager.config.token_secret}".encode()
+        ).hexdigest()[:16]
+        v1_token = f"{user_id}:{port}:{random_part}:{signature}"
+
+        # Should validate successfully
+        valid, user_id_result, error = manager.validate_token(v1_token)
+        assert valid is True
+        assert user_id_result == 1
+
+
+class TestQueryParamSanitizer:
+    """Test query parameter sanitization."""
+
+    def test_sanitize_token_param(self):
+        """Test that token parameter is sanitized."""
+        from app.middleware.query_param_sanitizer import sanitize_query_string
+
+        result = sanitize_query_string("token=secret123&other=value")
+        assert result == "token=[REDACTED]&other=value"
+
+    def test_sanitize_session_token_param(self):
+        """Test that session_token parameter is sanitized."""
+        from app.middleware.query_param_sanitizer import sanitize_query_string
+
+        result = sanitize_query_string("session_token=secret123&id=1")
+        assert result == "session_token=[REDACTED]&id=1"
+
+    def test_sanitize_multiple_params(self):
+        """Test that multiple sensitive params are sanitized."""
+        from app.middleware.query_param_sanitizer import sanitize_query_string
+
+        result = sanitize_query_string("token=secret&api_key=key123&normal=value")
+        assert result == "token=[REDACTED]&api_key=[REDACTED]&normal=value"
+
+    def test_sanitize_url(self):
+        """Test URL sanitization."""
+        from app.middleware.query_param_sanitizer import sanitize_url
+
+        result = sanitize_url("https://example.com/path?token=secret&id=1")
+        assert result == "https://example.com/path?token=[REDACTED]&id=1"
+
+    def test_empty_query_string(self):
+        """Test empty query string handling."""
+        from app.middleware.query_param_sanitizer import sanitize_query_string
+
+        result = sanitize_query_string("")
+        assert result == ""
