@@ -3490,7 +3490,7 @@ class AutonomousOrchestrator:
         integrations patch it, but final merge now uses the same synchronization
         gate before asking GitHub to merge.
         """
-        contains_main = self._branch_contains_main(gh, pr_head_sha)
+        contains_main = self._branch_contains_main(gh, pr_head_sha, branch_name)
         if contains_main is None:
             raise GitHubOpsError("Unable to verify whether the failed PR contains current main")
         if contains_main:
@@ -3502,14 +3502,16 @@ class AutonomousOrchestrator:
         self._resolve_merge_conflicts(gh, branch_name, pr_number)
         return True
 
-    def _branch_contains_main(self, gh: "GitHubOps", pr_head_sha: str) -> bool | None:
+    def _branch_contains_main(
+        self, gh: "GitHubOps", pr_head_sha: str, branch_name: str = ""
+    ) -> bool | None:
         """Whether the PR branch already contains current main.
 
         Returns True if the PR head has main as an ancestor (nothing to merge),
         False if the branch is behind main, or None when the probe is
         indeterminate and the caller must fail closed.
         """
-        if not self._ensure_pr_head_local(gh, pr_head_sha):
+        if not self._ensure_pr_head_local(gh, pr_head_sha, branch_name):
             return None
         gh._run_git(["fetch", "origin", "main"])
         main_head = gh.resolve_commit("FETCH_HEAD")
@@ -3535,12 +3537,10 @@ class AutonomousOrchestrator:
         ref = branch_name or self.workflow.get("branch_name", "")
         if ref:
             gh._run_git(["fetch", "origin", ref])
-        if (
+        return bool(
             pr_head_sha
             and gh._run_git(["cat-file", "-e", pr_head_sha], check=False).returncode == 0
-        ):
-            return True
-        return False
+        )
 
     def _start_ci_repair_round(self, wf: dict, pr_number: int, failed_checks: list[dict]) -> None:
         """Repair merge-phase CI failures in-place on the existing PR branch."""
@@ -8401,7 +8401,7 @@ class AutonomousOrchestrator:
                     and not is_conflict_rejection
                     and mergeable is not False
                     and pr_head_sha
-                    and self._branch_contains_main(gh, pr_head_sha) is True
+                    and self._branch_contains_main(gh, pr_head_sha, branch_name) is True
                 ):
                     logger.info(
                         "PR #%s mergeable_state=dirty is stale (branch has main); "
