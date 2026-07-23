@@ -55,6 +55,18 @@ if [ "$isolated" = true ]; then
         echo "openace-run-as: flock and pkill are required for isolated execution" >&2
         exit 66
     fi
+    normalize_group_class_signature() {
+        local signature="$1"
+        local entry_mode
+        if [[ "$signature" =~ ^((file|dir):[^:]+:[^:]+:)([0-7]{3,4})(:.*)$ ]]; then
+            entry_mode="${BASH_REMATCH[3]}"
+            printf '%s%s-%s%s' \
+                "${BASH_REMATCH[1]}" "${entry_mode%??}" "${entry_mode: -1}" "${BASH_REMATCH[4]}"
+        else
+            printf '%s' "$signature"
+        fi
+    }
+
     git_entry_signature() {
         local signature_project="$1"
         if [ -L "$signature_project/.git" ]; then
@@ -69,8 +81,86 @@ if [ "$isolated" = true ]; then
             printf 'missing'
         fi
     }
-    if ! command -v setfacl >/dev/null 2>&1; then
-        echo "openace-run-as: setfacl is required for isolated agent execution" >&2
+
+    git_entry_acl_snapshot() {
+        local signature_project="$1"
+        if [ -f "$signature_project/.git" ] || [ -d "$signature_project/.git" ]; then
+            getfacl -cpE "$signature_project/.git" | base64 -w 0
+        else
+            printf '-'
+        fi
+    }
+
+    acl_snapshot_without_mask() {
+        local acl_snapshot="$1"
+        printf '%s' "$acl_snapshot" | base64 --decode | \
+            grep -v '^mask::' | base64 -w 0
+    }
+
+    acl_snapshot_has_mask() {
+        local acl_snapshot="$1"
+        printf '%s' "$acl_snapshot" | base64 --decode | grep -q '^mask::'
+    }
+
+    verify_and_restore_git_entry() {
+        local signature_project="$1"
+        local expected_signature="$2"
+        local expected_acl_snapshot="${3:-}"
+        local actual_signature
+        local actual_acl_snapshot
+        local restored_signature
+        local restored_acl_snapshot
+
+        actual_signature="$(git_entry_signature "$signature_project")"
+        actual_acl_snapshot="$(git_entry_acl_snapshot "$signature_project")"
+        if [ "$expected_signature" = "$actual_signature" ] && \
+            [ -n "$expected_acl_snapshot" ] && \
+            [ "$expected_acl_snapshot" = "$actual_acl_snapshot" ]; then
+            return 0
+        fi
+
+        # Before restoring launcher-owned ACL state, fail closed on every
+        # structural/content/ownership change. Only the group-class digit may
+        # differ here because POSIX exposes its ACL mask in those mode bits.
+        if [ "$(normalize_group_class_signature "$expected_signature")" != \
+            "$(normalize_group_class_signature "$actual_signature")" ]; then
+            return 1
+        fi
+
+        if [ -n "$expected_acl_snapshot" ] && [ "$expected_acl_snapshot" != "-" ]; then
+            # The launcher may add or recalculate only mask::. All base and
+            # named ACL entries must still exactly match before restoration.
+            if [ "$(acl_snapshot_without_mask "$expected_acl_snapshot")" != \
+                "$(acl_snapshot_without_mask "$actual_acl_snapshot")" ]; then
+                return 1
+            fi
+            printf '%s' "$expected_acl_snapshot" | base64 --decode | \
+                setfacl -n --set-file=- "$signature_project/.git" || return 1
+            restored_signature="$(git_entry_signature "$signature_project")"
+            restored_acl_snapshot="$(git_entry_acl_snapshot "$signature_project")"
+            [ "$expected_signature" = "$restored_signature" ] && \
+                [ "$expected_acl_snapshot" = "$restored_acl_snapshot" ]
+            return
+        fi
+
+        if [ "$expected_acl_snapshot" = "-" ]; then
+            [ "$expected_signature" = "$actual_signature" ]
+            return
+        fi
+
+        # Rolling-upgrade compatibility for a registry written by the previous
+        # release, which has no ACL snapshot. This one-time fallback still
+        # protects type, device/inode, owner/group, owner/other permissions and
+        # content, and is allowed only when the recovered entry actually has
+        # the extended ACL mask responsible for the legacy false positive. A
+        # successful recovery immediately writes the new exact format.
+        acl_snapshot_has_mask "$actual_acl_snapshot"
+    }
+
+    if ! command -v setfacl >/dev/null 2>&1 \
+        || ! command -v getfacl >/dev/null 2>&1 \
+        || ! command -v base64 >/dev/null 2>&1; then
+        echo "openace-run-as: setfacl, getfacl and base64 are required for isolated execution" >&2
         exit 66
     fi
     project_owner="$(stat -c '%U' "$project_dir")"
@@ -140,14 +230,18 @@ if [ "$isolated" = true ]; then
     # false integrity violation even for the read-only project-dir probe.
     previous_signature_project=""
     previous_git_signature=""
+    previous_git_acl_snapshot=""
     if [ -f "$signature_registry" ]; then
         IFS= read -r previous_signature_project < "$signature_registry" || true
         previous_git_signature="$(sed -n '2p' "$signature_registry")"
+        previous_git_acl_snapshot="$(sed -n '3p' "$signature_registry")"
     fi
     cleanup_isolated
     if [ -n "$previous_signature_project" ] && [ -n "$previous_git_signature" ]; then
-        recovered_git_signature="$(git_entry_signature "$previous_signature_project")"
-        if [ "$previous_git_signature" != "$recovered_git_signature" ]; then
+        if ! verify_and_restore_git_entry \
+            "$previous_signature_project" \
+            "$previous_git_signature" \
+            "$previous_git_acl_snapshot"; then
             echo "OPENACE_REPO_INTEGRITY_VIOLATION: .git entry changed during interrupted agent execution" >&2
             exit 68
         fi
@@ -156,11 +250,13 @@ if [ "$isolated" = true ]; then
         rm -f "$signature_registry"
     fi
 
-    # Persist the normalized baseline before granting this run any ACLs. If
-    # the wrapper is interrupted, the next serialized invocation verifies this
-    # exact project after revoking the abandoned grants.
+    # Persist the exact signature and ACL baseline before granting this run any
+    # access. If interrupted, the next invocation first verifies structural
+    # integrity, restores this ACL, and then requires an exact match.
     git_entry_before="$(git_entry_signature "$project_dir")"
-    printf '%s\n%s\n' "$project_dir" "$git_entry_before" > "$signature_tmp"
+    git_acl_before="$(git_entry_acl_snapshot "$project_dir")"
+    printf '%s\n%s\n%s\n' \
+        "$project_dir" "$git_entry_before" "$git_acl_before" > "$signature_tmp"
     chmod 600 "$signature_tmp"
     mv -f "$signature_tmp" "$signature_registry"
     trap cleanup_isolated EXIT
@@ -236,8 +332,7 @@ if [ "$isolated" = true ]; then
     set -e
     cleanup_isolated
     trap - EXIT HUP INT TERM
-    git_entry_after="$(git_entry_signature "$project_dir")"
-    if [ "$git_entry_before" != "$git_entry_after" ]; then
+    if ! verify_and_restore_git_entry "$project_dir" "$git_entry_before" "$git_acl_before"; then
         echo "OPENACE_REPO_INTEGRITY_VIOLATION: .git entry changed during agent execution" >&2
         exit 68
     fi
