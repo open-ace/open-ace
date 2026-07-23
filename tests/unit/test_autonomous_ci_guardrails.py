@@ -313,6 +313,8 @@ def test_cross_user_launch_preserves_nonsecret_guard_environment(monkeypatch, tm
     assert "/usr/bin/env" in command
     assert f"PATH={guard_dir}:/usr/bin" in command
     assert "OPENACE_REAL_GIT=/usr/bin/git" in command
+    expected_cache = str(agent_runner.AutonomousAgentRunner._resolve_home_dir("repo-user"))
+    assert f"OPENACE_GIT_CACHE_ROOT={expected_cache}/.cache/pre-commit" in command
 
 
 def test_terminal_result_closes_stream_json_stdin():
@@ -541,6 +543,146 @@ def test_isolated_git_guard_allows_pre_commit_check_attr(tmp_path):
 
     assert result.returncode == 0
     assert result.stdout.strip() == "check-attr filter -z --stdin"
+
+
+def _fake_real_git(tmp_path):
+    real_git = tmp_path / "real-git"
+    real_git.write_text(
+        f"#!{sys.executable}\nimport sys\nprint(' '.join(sys.argv[1:]))\n",
+        encoding="utf-8",
+    )
+    real_git.chmod(0o755)
+    return real_git
+
+
+def _source_git_guard():
+    from pathlib import Path
+
+    return (
+        Path(__file__).parents[2]
+        / "app"
+        / "modules"
+        / "workspace"
+        / "autonomous"
+        / "agent_bin"
+        / "git"
+    )
+
+
+def test_isolated_git_guard_allows_pre_commit_cache_init(tmp_path):
+    """Global -c options must not hide cache-scoped git init from the guard."""
+    import os
+    import subprocess
+
+    project = tmp_path / "project"
+    project.mkdir()
+    cache_root = tmp_path / "agent-home" / ".cache" / "pre-commit"
+    cache_root.mkdir(parents=True)
+    target = cache_root / "repo123"
+    result = subprocess.run(
+        [
+            str(_source_git_guard()),
+            "-c",
+            "core.useBuiltinFSMonitor=false",
+            "init",
+            "--template=",
+            str(target),
+        ],
+        cwd=project,
+        capture_output=True,
+        text=True,
+        env={
+            **os.environ,
+            "OPENACE_REAL_GIT": str(_fake_real_git(tmp_path)),
+            "OPENACE_GIT_CACHE_ROOT": str(cache_root),
+        },
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert "init --template=" in result.stdout
+    assert str(target) in result.stdout
+
+
+def test_isolated_git_guard_allows_mutation_inside_pre_commit_cache(tmp_path):
+    import os
+    import subprocess
+
+    cache_repo = tmp_path / "agent-home" / ".cache" / "pre-commit" / "repo123"
+    cache_repo.mkdir(parents=True)
+    result = subprocess.run(
+        [str(_source_git_guard()), "remote", "add", "origin", "https://example.invalid/hook"],
+        cwd=cache_repo,
+        capture_output=True,
+        text=True,
+        env={
+            **os.environ,
+            "OPENACE_REAL_GIT": str(_fake_real_git(tmp_path)),
+            "OPENACE_GIT_CACHE_ROOT": str(cache_repo.parent),
+        },
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert result.stdout.strip().startswith("remote add origin")
+
+
+def test_isolated_git_guard_denies_cache_escape(tmp_path):
+    import os
+    import subprocess
+
+    project = tmp_path / "project"
+    project.mkdir()
+    cache_repo = tmp_path / "agent-home" / ".cache" / "pre-commit" / "repo123"
+    cache_repo.mkdir(parents=True)
+    env = {
+        **os.environ,
+        "OPENACE_REAL_GIT": str(_fake_real_git(tmp_path)),
+        "OPENACE_GIT_CACHE_ROOT": str(cache_repo.parent),
+    }
+
+    outside_init = subprocess.run(
+        [str(_source_git_guard()), "init", str(project / "nested")],
+        cwd=project,
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+    redirected_commit = subprocess.run(
+        [str(_source_git_guard()), "-C", str(project), "commit", "-m", "escape"],
+        cwd=cache_repo,
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+    separate_git_dir = subprocess.run(
+        [
+            str(_source_git_guard()),
+            "init",
+            f"--separate-git-dir={project / 'metadata'}",
+            str(cache_repo / "nested"),
+        ],
+        cwd=project,
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+    env_redirect = subprocess.run(
+        [str(_source_git_guard()), "commit", "-m", "escape"],
+        cwd=cache_repo,
+        capture_output=True,
+        text=True,
+        env={**env, "GIT_DIR": str(project / ".git")},
+        check=False,
+    )
+
+    assert outside_init.returncode == 126
+    assert redirected_commit.returncode == 126
+    assert separate_git_dir.returncode == 126
+    assert env_redirect.returncode == 126
 
 
 def test_runner_preserves_tool_result_for_test_evidence():
