@@ -18,8 +18,6 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from flask import jsonify
-
 from app.modules.workspace.model_gateway.attribution import (
     build_attribution_headers,
     build_body_transformer,
@@ -112,7 +110,6 @@ class LitellmGatewayPlanner(GatewayPlanner):
         # Issue #1894: SSRF validation for DB-configured gateway URL
         from app.utils.llm_proxy_url_validator import (
             audit_blocked_url,
-            hash_host_for_audit,
             sanitize_error_message,
             validate_llm_proxy_url,
         )

@@ -164,13 +164,15 @@ def _determine_target_url(
                     reason="dns_rebinding",
                 )
                 return (
-                    jsonify({
-                        "error": {
-                            "message": "Blocked outbound URL: DNS resolution changed",
-                            "type": "ssrf_blocked",
-                            "blocked_host_hash": hash_host_for_audit(target_url),
+                    jsonify(
+                        {
+                            "error": {
+                                "message": "Blocked outbound URL: DNS resolution changed",
+                                "type": "ssrf_blocked",
+                                "blocked_host_hash": hash_host_for_audit(target_url),
+                            }
                         }
-                    }),
+                    ),
                     403,
                 )
 
@@ -192,13 +194,15 @@ def _determine_target_url(
                 reason=result.error or "ssrf_violation",
             )
             return (
-                jsonify({
-                    "error": {
-                        "message": sanitized_error,
-                        "type": "ssrf_blocked",
-                        "blocked_host_hash": hash_host_for_audit(target_url),
+                jsonify(
+                    {
+                        "error": {
+                            "message": sanitized_error,
+                            "type": "ssrf_blocked",
+                            "blocked_host_hash": hash_host_for_audit(target_url),
+                        }
                     }
-                }),
+                ),
                 403,
             )
 
@@ -785,14 +789,17 @@ def _forward_via_gateway(
     # Issue #1894: Handle SSRF blocked gateway URL
     if getattr(plan, "ssrf_blocked", False):
         from app.utils.llm_proxy_url_validator import hash_host_for_audit
+
         return (
-            jsonify({
-                "error": {
-                    "message": plan.ssrf_error or "Blocked outbound URL",
-                    "type": "ssrf_blocked",
-                    "blocked_host_hash": hash_host_for_audit(plan.target_url),
+            jsonify(
+                {
+                    "error": {
+                        "message": plan.ssrf_error or "Blocked outbound URL",
+                        "type": "ssrf_blocked",
+                        "blocked_host_hash": hash_host_for_audit(plan.target_url),
+                    }
                 }
-            }),
+            ),
             403,
         )
 
@@ -1210,17 +1217,20 @@ def handle_llm_proxy_request(
                     # safe_request may raise OutboundUrlBlockedError
                     logger.error("LLM proxy safe_request error: %s", exc)
                     return (
-                        jsonify({
-                            "error": {
-                                "message": "Blocked outbound URL: security policy violation",
-                                "type": "ssrf_blocked",
+                        jsonify(
+                            {
+                                "error": {
+                                    "message": "Blocked outbound URL: security policy violation",
+                                    "type": "ssrf_blocked",
+                                }
                             }
-                        }),
+                        ),
                         403,
                     )
             else:
                 # Default provider URL or private URL in allowlist - use regular request
                 import requests as http_requests
+
                 resp = http_requests.request(
                     method=request.method,
                     url=target_url,

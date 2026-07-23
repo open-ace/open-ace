@@ -13,6 +13,7 @@ import pytest
 
 def _resolver(*addresses):
     """Create a mock DNS resolver that returns specified addresses."""
+
     def resolve(host, port, type=socket.SOCK_STREAM):
         return [
             (
@@ -24,6 +25,7 @@ def _resolver(*addresses):
             )
             for address in addresses
         ]
+
     return resolve
 
 
@@ -118,8 +120,10 @@ class TestGatewayStrictStartup:
         monkeypatch.setenv("OPENACE_MODEL_GATEWAY_API_KEY", "test-key")
         monkeypatch.setenv("OPENACE_MODEL_GATEWAY_STRICT_STARTUP", "true")
 
-        from app.modules.workspace.model_gateway import config
         import importlib
+
+        from app.modules.workspace.model_gateway import config
+
         importlib.reload(config)
 
         with pytest.raises(ValueError, match="blocked"):
@@ -131,8 +135,10 @@ class TestGatewayStrictStartup:
         monkeypatch.setenv("OPENACE_MODEL_GATEWAY_API_KEY", "test-key")
         monkeypatch.setenv("OPENACE_MODEL_GATEWAY_STRICT_STARTUP", "false")
 
-        from app.modules.workspace.model_gateway import config
         import importlib
+
+        from app.modules.workspace.model_gateway import config
+
         importlib.reload(config)
 
         result = config._config_from_env()
@@ -144,8 +150,10 @@ class TestGatewayStrictStartup:
         monkeypatch.setenv("OPENACE_MODEL_GATEWAY_API_KEY", "test-key")
         monkeypatch.setenv("OPENACE_MODEL_GATEWAY_STRICT_STARTUP", "true")
 
-        from app.modules.workspace.model_gateway import config
         import importlib
+
+        from app.modules.workspace.model_gateway import config
+
         importlib.reload(config)
 
         # Use a well-known public URL that should resolve

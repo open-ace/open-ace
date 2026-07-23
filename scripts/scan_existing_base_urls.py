@@ -30,10 +30,12 @@ def _get_db_connection():
     """Get database connection."""
     try:
         from app.repositories.database import get_connection
+
         return get_connection()
     except ImportError:
         # Fallback for standalone execution
         import sqlite3
+
         db_path = Path(__file__).parent.parent / "openace.db"
         if not db_path.exists():
             db_path = Path(__file__).parent.parent / "data" / "openace.db"
@@ -113,51 +115,52 @@ def scan_base_urls(tenant_filter: int | None = None) -> dict[str, Any]:
 
         # Check if already in allowlist
         tenant_allowlist = set(allowed_hosts.get(tenant_id, []))
-        in_global = any(
-            host.lower() in base_url.lower()
-            for host in global_allowlist
-        )
-        in_tenant = any(
-            host.lower() in base_url.lower()
-            for host in tenant_allowlist
-        )
+        in_global = any(host.lower() in base_url.lower() for host in global_allowlist)
+        in_tenant = any(host.lower() in base_url.lower() for host in tenant_allowlist)
 
         if in_global or in_tenant:
-            results["in_allowlist"].append({
-                "key_id": key_id,
-                "tenant_id": tenant_id,
-                "provider": provider,
-                "key_name": key_name,
-                "base_url": base_url,
-                "in_allowlist": "global" if in_global else "tenant",
-            })
+            results["in_allowlist"].append(
+                {
+                    "key_id": key_id,
+                    "tenant_id": tenant_id,
+                    "provider": provider,
+                    "key_name": key_name,
+                    "base_url": base_url,
+                    "in_allowlist": "global" if in_global else "tenant",
+                }
+            )
             continue
 
         # Validate URL
         result = validate_llm_proxy_url(base_url, tenant_id, provider)
 
         if result.allowed:
-            results["allowed"].append({
-                "key_id": key_id,
-                "tenant_id": tenant_id,
-                "provider": provider,
-                "key_name": key_name,
-                "base_url": base_url,
-            })
+            results["allowed"].append(
+                {
+                    "key_id": key_id,
+                    "tenant_id": tenant_id,
+                    "provider": provider,
+                    "key_name": key_name,
+                    "base_url": base_url,
+                }
+            )
         else:
             sanitized_error = sanitize_error_message(result.error or "Invalid URL")
-            results["blocked"].append({
-                "key_id": key_id,
-                "tenant_id": tenant_id,
-                "provider": provider,
-                "key_name": key_name,
-                "base_url": base_url,
-                "reason": result.error,
-                "sanitized_reason": sanitized_error,
-            })
+            results["blocked"].append(
+                {
+                    "key_id": key_id,
+                    "tenant_id": tenant_id,
+                    "provider": provider,
+                    "key_name": key_name,
+                    "base_url": base_url,
+                    "reason": result.error,
+                    "sanitized_reason": sanitized_error,
+                }
+            )
 
             # Add to recommendations
             from urllib.parse import urlparse
+
             try:
                 parsed = urlparse(base_url)
                 host = parsed.hostname or ""
@@ -190,8 +193,12 @@ def print_report(results: dict[str, Any]) -> None:
         print("Blocked Configurations:")
         print("-" * 80)
         for i, entry in enumerate(results["blocked"], 1):
-            print(f"  {i}. tenant_id={entry['tenant_id']}, provider={entry['provider']}, key_name={entry['key_name']}")
-            print(f"     base_url: {entry['base_url'][:80]}{'...' if len(entry['base_url']) > 80 else ''}")
+            print(
+                f"  {i}. tenant_id={entry['tenant_id']}, provider={entry['provider']}, key_name={entry['key_name']}"
+            )
+            print(
+                f"     base_url: {entry['base_url'][:80]}{'...' if len(entry['base_url']) > 80 else ''}"
+            )
             print(f"     reason: {entry['sanitized_reason']}")
             print()
 

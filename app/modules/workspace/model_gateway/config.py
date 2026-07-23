@@ -52,10 +52,7 @@ def _config_from_env() -> GatewayConfig | None:
         return None
 
     # Issue #1894: SSRF validation for gateway URL
-    from app.utils.llm_proxy_url_validator import (
-        sanitize_error_message,
-        validate_llm_proxy_url,
-    )
+    from app.utils.llm_proxy_url_validator import sanitize_error_message, validate_llm_proxy_url
 
     strict_startup = os.environ.get(
         "OPENACE_MODEL_GATEWAY_STRICT_STARTUP", "true"

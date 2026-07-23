@@ -23,7 +23,6 @@ from urllib.parse import urlparse
 
 from app.utils.outbound_url_guard import (
     IPAddress,
-    OutboundUrlValidationResult,
     _is_public_address,
     _parse_ip_address,
     _resolve_addresses,
@@ -435,7 +434,7 @@ def validate_ip_against_stored(
     if not stored_ips:
         return True, None  # No stored IPs means private URL, skip check
 
-    stored_set = set(ip.strip() for ip in stored_ips.split(",") if ip.strip())
+    stored_set = {ip.strip() for ip in stored_ips.split(",") if ip.strip()}
 
     try:
         parsed = urlparse(url)

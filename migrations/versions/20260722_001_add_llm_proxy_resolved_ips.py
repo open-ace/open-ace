@@ -14,7 +14,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "20260722_001_add_llm_proxy_resolved_ips"
-down_revision: str | None = "20260721_001_add_ci_diagnostics_attempts"
+down_revision: str | None = "20260721_003_add_sensitive_keyword_config"
 branch_labels: str | None = None
 depends_on: str | None = None
 

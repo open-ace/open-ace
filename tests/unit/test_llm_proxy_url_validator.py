@@ -27,6 +27,7 @@ from app.utils.llm_proxy_url_validator import (
 
 def _resolver(*addresses):
     """Create a mock DNS resolver that returns specified addresses."""
+
     def resolve(host, port, type=socket.SOCK_STREAM):
         return [
             (
@@ -38,6 +39,7 @@ def _resolver(*addresses):
             )
             for address in addresses
         ]
+
     return resolve
 
 
@@ -144,9 +146,11 @@ class TestValidateLlmProxyUrl:
         monkeypatch.setenv("OPENACE_LLM_PROXY_ALLOWED_HOSTS", "internal-llm.example.com")
         # Force re-read of allowlist
         from app.utils import llm_proxy_url_validator
+
         llm_proxy_url_validator._DNS_CACHE.clear()
 
-        result = validate_llm_proxy_url(
+        # Allowlist bypass should work even if DNS resolution would fail
+        validate_llm_proxy_url(
             "https://internal-llm.example.com/v1/chat",
             tenant_id=1,
             provider="openai",
@@ -161,6 +165,7 @@ class TestValidateLlmProxyUrl:
             '{"1": ["internal-llm.tenant1.com"]}',
         )
         from app.utils import llm_proxy_url_validator
+
         llm_proxy_url_validator._DNS_CACHE.clear()
 
         allowed_hosts = get_allowed_hosts()
@@ -270,7 +275,11 @@ class TestSanitization:
         """Test sanitizing private IP errors."""
         error = sanitize_error_message("Blocked non-public address: 192.168.1.1")
         assert "192.168" not in error
-        assert "private" in error.lower() or "non-public" in error.lower() or "blocked" in error.lower()
+        assert (
+            "private" in error.lower()
+            or "non-public" in error.lower()
+            or "blocked" in error.lower()
+        )
 
     def test_sanitize_localhost_error(self):
         """Test sanitizing localhost errors."""
@@ -306,6 +315,7 @@ class TestAllowlistHosts:
             '{"1": ["tenant1.llm.local"], "2": ["tenant2.llm.local"]}',
         )
         from app.utils import llm_proxy_url_validator
+
         llm_proxy_url_validator._DNS_CACHE.clear()
 
         hosts = get_allowed_hosts()
@@ -317,6 +327,7 @@ class TestAllowlistHosts:
         monkeypatch.delenv("OPENACE_LLM_PROXY_ALLOWED_HOSTS", raising=False)
         monkeypatch.delenv("OPENACE_LLM_PROXY_TENANT_ALLOWLISTS", raising=False)
         from app.utils import llm_proxy_url_validator
+
         llm_proxy_url_validator._DNS_CACHE.clear()
 
         hosts = get_allowed_hosts()
@@ -330,6 +341,7 @@ class TestIsAllowedHost:
         """Test matching host in global allowlist."""
         monkeypatch.setenv("OPENACE_LLM_PROXY_ALLOWED_HOSTS", "allowed.internal")
         from app.utils import llm_proxy_url_validator
+
         llm_proxy_url_validator._DNS_CACHE.clear()
 
         is_allowed, result = is_allowed_host(
@@ -344,6 +356,7 @@ class TestIsAllowedHost:
         monkeypatch.delenv("OPENACE_LLM_PROXY_ALLOWED_HOSTS", raising=False)
         monkeypatch.delenv("OPENACE_LLM_PROXY_TENANT_ALLOWLISTS", raising=False)
         from app.utils import llm_proxy_url_validator
+
         llm_proxy_url_validator._DNS_CACHE.clear()
 
         is_allowed, result = is_allowed_host(

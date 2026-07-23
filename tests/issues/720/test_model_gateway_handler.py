@@ -40,7 +40,9 @@ def remote_app():
 @pytest.fixture(autouse=True)
 def mock_url_validator():
     """Auto-mock URL validator for all tests in this module."""
-    with patch("app.utils.llm_proxy_url_validator.validate_llm_proxy_url", _mock_validate_llm_proxy_url):
+    with patch(
+        "app.utils.llm_proxy_url_validator.validate_llm_proxy_url", _mock_validate_llm_proxy_url
+    ):
         yield
 
 
@@ -65,7 +67,13 @@ def _quota_ok():
 def _mock_proxy():
     mock = MagicMock()
     mock.validate_proxy_token.return_value = _mock_proxy_token()
-    mock.resolve_api_key_for_scope.return_value = ("sk-key", "https://api.openai.com/v1", 1, None, None)
+    mock.resolve_api_key_for_scope.return_value = (
+        "sk-key",
+        "https://api.openai.com/v1",
+        1,
+        None,
+        None,
+    )
     return mock
 
 
