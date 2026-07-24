@@ -25,7 +25,7 @@ export default function CancelRoundModal({
   const cancelMutation = useCancelMilestone();
 
   const handleSubmit = () => {
-    if (!feedback.trim() || feedback.trim().length < 10) return;
+    if (!feedback.trim()) return;
     cancelMutation.mutate(
       { workflowId, milestoneId, feedback: feedback.trim() },
       {
@@ -44,7 +44,7 @@ export default function CancelRoundModal({
     }
   };
 
-  const isValid = feedback.trim().length >= 10;
+  const isValid = feedback.trim().length > 0;
 
   return (
     <Modal isOpen={isOpen} onClose={handleClose} title={t('autoCancelRound', language)}>

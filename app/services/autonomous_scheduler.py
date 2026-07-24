@@ -322,17 +322,20 @@ class AutonomousScheduler:
         workflow = repo.get_workflow(workflow_id)
         batch_id = workflow.get("batch_id") if workflow else None
         workspace, branch = self._conflict_keys(workflow) if workflow else ("", "")
+        # Waiting workflows bypass conflict locks (see _process_workflows).
+        # Capture this so cleanup paths don't release another workflow's keys.
+        was_waiting = bool(workflow and workflow.get("status") == "waiting")
 
         # Acquire DB-level distributed lock
         if not repo.acquire_lock(workflow_id, lock_owner):
             logger.debug("Workflow %s is locked by another instance, skipping", workflow_id[:8])
             with self._in_progress_lock:
                 self._in_progress_ids.discard(workflow_id)
-                if batch_id:
+                if batch_id and not was_waiting:
                     self._in_progress_batch_ids.discard(batch_id)
-                if workspace:
+                if workspace and not was_waiting:
                     self._in_progress_workspaces.discard(workspace)
-                if branch:
+                if branch and not was_waiting:
                     self._in_progress_branches.discard(branch)
             return workflow_id
 
@@ -413,11 +416,11 @@ class AutonomousScheduler:
                 logger.warning("Failed to release lock for workflow %s", workflow_id[:8])
             with self._in_progress_lock:
                 self._in_progress_ids.discard(workflow_id)
-                if batch_id:
+                if batch_id and not was_waiting:
                     self._in_progress_batch_ids.discard(batch_id)
-                if workspace:
+                if workspace and not was_waiting:
                     self._in_progress_workspaces.discard(workspace)
-                if branch:
+                if branch and not was_waiting:
                     self._in_progress_branches.discard(branch)
         return workflow_id
 
@@ -613,15 +616,21 @@ class AutonomousScheduler:
                     continue
                 if wf.get("workflow_id", "") in self._in_progress_ids:
                     continue
+                # Waiting workflows only do a lightweight state transition in
+                # _do_wait (DB update, no agent/git) — bypass batch/workspace/
+                # branch conflict locks so they can resume even while a batch
+                # sibling is still running. The lock re-applies on the next
+                # cycle once the workflow leaves "waiting" status.
+                is_waiting = wf.get("status") == "waiting"
                 # For batch workflows, check if the batch is already being processed
                 batch_id = wf.get("batch_id")
-                if batch_id and batch_id in self._in_progress_batch_ids:
+                if batch_id and batch_id in self._in_progress_batch_ids and not is_waiting:
                     continue
                 # git-conflict guard: same working tree OR same branch (#1002)
                 workspace, branch = self._conflict_keys(wf)
-                if workspace and workspace in self._in_progress_workspaces:
+                if workspace and workspace in self._in_progress_workspaces and not is_waiting:
                     continue
-                if branch and branch in self._in_progress_branches:
+                if branch and branch in self._in_progress_branches and not is_waiting:
                     continue
                 active.append(wf)
 
@@ -651,11 +660,12 @@ class AutonomousScheduler:
                     break
                 batch_id = wf.get("batch_id")
                 workspace, branch = self._conflict_keys(wf)
-                if batch_id and batch_id in selected_batches:
+                is_waiting = wf.get("status") == "waiting"
+                if batch_id and batch_id in selected_batches and not is_waiting:
                     continue
-                if workspace and workspace in selected_workspaces:
+                if workspace and workspace in selected_workspaces and not is_waiting:
                     continue
-                if branch and branch in selected_branches:
+                if branch and branch in selected_branches and not is_waiting:
                     continue
                 to_process.append(wf)
                 if batch_id:
@@ -672,13 +682,17 @@ class AutonomousScheduler:
         with self._in_progress_lock:
             for wf in to_process:
                 self._in_progress_ids.add(wf.get("workflow_id", ""))
+                # Waiting workflows bypass conflict locks — don't reserve their
+                # keys so we don't block other workflows, and don't release
+                # another workflow's keys in _advance_single's finally.
+                is_waiting = wf.get("status") == "waiting"
                 batch_id = wf.get("batch_id")
-                if batch_id:
+                if batch_id and not is_waiting:
                     self._in_progress_batch_ids.add(batch_id)
                 workspace, branch = self._conflict_keys(wf)
-                if workspace:
+                if workspace and not is_waiting:
                     self._in_progress_workspaces.add(workspace)
-                if branch:
+                if branch and not is_waiting:
                     self._in_progress_branches.add(branch)
 
         with ThreadPoolExecutor(

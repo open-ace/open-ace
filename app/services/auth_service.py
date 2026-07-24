@@ -434,9 +434,8 @@ class AuthService:
         # Create session token
         token = secrets.token_hex(32)
         timeout_hours = _get_session_timeout_hours()
-        expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(
-            hours=timeout_hours
-        )
+        # Use local time to match database TIMESTAMP WITHOUT TIME ZONE behavior
+        expires_at = datetime.now() + timedelta(hours=timeout_hours)
 
         if not self.user_repo.create_session(user["id"], token, expires_at):
             logger.error(f"Failed to create session for user - {username}")
@@ -577,7 +576,9 @@ class AuthService:
             return False
         if isinstance(expires_at, str):
             expires_at = datetime.fromisoformat(expires_at)
-        return bool(expires_at < datetime.now(timezone.utc).replace(tzinfo=None))
+        # Use local time to match database TIMESTAMP WITHOUT TIME ZONE behavior
+        # Database stores times as local time without timezone info
+        return bool(expires_at < datetime.now())
 
     def get_user_profile(self, user_id: int) -> dict | None:
         """

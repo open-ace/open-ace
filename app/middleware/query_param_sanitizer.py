@@ -98,6 +98,10 @@ class QueryParamSanitizer:
     This middleware wraps the WSGI application and sanitizes the query
     string before it's logged or stored in access logs.
 
+    IMPORTANT: This middleware now stores the sanitized query string in a
+    separate environ key to avoid breaking request.args. The original
+    QUERY_STRING is preserved for actual request processing.
+
     Usage:
         app = Flask(__name__)
         app.wsgi_app = QueryParamSanitizer(app.wsgi_app)
@@ -112,7 +116,7 @@ class QueryParamSanitizer:
         self.app = app
 
     def __call__(self, environ: dict, start_response: Any) -> Any:
-        """Process the request, sanitizing the query string in environ.
+        """Process the request, creating a sanitized query string for logging.
 
         Args:
             environ: WSGI environ dict.
@@ -121,21 +125,21 @@ class QueryParamSanitizer:
         Returns:
             Response iterator.
         """
-        # Sanitize QUERY_STRING
+        # Create sanitized versions for logging (stored in separate keys)
+        # DO NOT modify the original QUERY_STRING to preserve request.args
         query_string = environ.get("QUERY_STRING", "")
         if query_string:
-            environ["QUERY_STRING"] = sanitize_query_string(query_string)
+            # Store sanitized version for logging
+            environ["SANITIZED_QUERY_STRING"] = sanitize_query_string(query_string)
+        else:
+            environ["SANITIZED_QUERY_STRING"] = ""
 
-        # Sanitize REQUEST_URI if present (for some WSGI servers)
+        # Sanitize REQUEST_URI for logging if present
         request_uri = environ.get("REQUEST_URI", "")
         if request_uri:
-            environ["REQUEST_URI"] = sanitize_url(request_uri)
-
-        # Sanitize PATH_INFO's query string if present
-        path_info = environ.get("PATH_INFO", "")
-        if "?" in path_info:
-            base, query = path_info.split("?", 1)
-            environ["PATH_INFO"] = f"{base}?{sanitize_query_string(query)}"
+            environ["SANITIZED_REQUEST_URI"] = sanitize_url(request_uri)
+        else:
+            environ["SANITIZED_REQUEST_URI"] = ""
 
         return self.app(environ, start_response)
 
