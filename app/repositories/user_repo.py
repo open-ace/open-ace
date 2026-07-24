@@ -463,9 +463,7 @@ class UserRepository:
 
         try:
             # Use local time to match database TIMESTAMP WITHOUT TIME ZONE behavior
-            self.db.execute(
-                query, (user_id, token, datetime.now(), expires_at)
-            )
+            self.db.execute(query, (user_id, token, datetime.now(), expires_at))
             return True
         except Exception as e:
             logger.error(f"Error creating session: {e}")
