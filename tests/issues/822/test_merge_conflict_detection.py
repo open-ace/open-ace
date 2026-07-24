@@ -1763,6 +1763,9 @@ class TestResolveMergeConflictsWorktreeIsolation:
     def test_removes_existing_worktree_before_adding_temp(self, mock_gh_cls):
         """Git forbids the same branch in two worktrees, so the workflow's own
         worktree must be removed first to free the branch for the temp worktree.
+
+        The original worktree is then **restored** in the finally block so
+        subsequent phases operate on the isolated branch, not the main repo.
         """
         # worktree_path is non-empty — simulates a worktree-strategy workflow
         # entering merge resolution with its dev worktree still attached.
@@ -1771,12 +1774,19 @@ class TestResolveMergeConflictsWorktreeIsolation:
         main_gh = MagicMock()
         rebound_gh = MagicMock()  # gh rebound to project_path after worktree removal
         wt_gh = MagicMock()
+        restored_gh = MagicMock()  # gh rebound to restored worktree in finally
         wt_gh._run_git.side_effect = [
             MagicMock(),  # fetch
             MagicMock(returncode=0, stdout="", stderr=""),  # merge clean
         ]
-        # GitHubOps construction order: main_gh, rebound_gh (after removal), wt_gh
-        mock_gh_cls.side_effect = [main_gh, rebound_gh, wt_gh]
+        # GitHubOps construction order:
+        #   1. main_gh (add_worktree / remove_worktree)
+        #   2. rebound_gh (after original worktree removal)
+        #   3. wt_gh (temp worktree ops)
+        #   4. restored_gh (restored worktree gh in finally)
+        mock_gh_cls.side_effect = [main_gh, rebound_gh, wt_gh, restored_gh]
+        # path_exists_as_user returns False → add_worktree is called to recreate
+        main_gh.path_exists_as_user.return_value = False
         _set_valid_merge_result(o, wt_gh, conflict=False)
 
         # caller_gh simulates the stale handle from _do_merge; it should be
@@ -1792,14 +1802,62 @@ class TestResolveMergeConflictsWorktreeIsolation:
         # worktree_path was cleared in DB.
         o._update_workflow.assert_any_call({"worktree_path": ""})
         # Then the temp worktree was added (branch now free).
-        main_gh.add_worktree.assert_called_once()
+        assert main_gh.add_worktree.call_count == 2  # temp + restore
+        temp_path = main_gh.add_worktree.call_args_list[0].args[0]
         # Second removal is the temp worktree (finally cleanup).
-        temp_path = main_gh.add_worktree.call_args.args[0]
         assert remove_calls[1].args[0] == temp_path
+        # Original worktree restored in finally block.
+        restore_path = main_gh.add_worktree.call_args_list[1].args[0]
+        assert restore_path == wf["worktree_path"]
+        o._update_workflow.assert_any_call({"worktree_path": wf["worktree_path"]})
+        # self._gh rebound to the restored worktree.
+        assert o._gh is restored_gh
         # _resolve_merge_conflicts only pushes now — merge is deferred to
         # _do_merge's next cycle. No merge_pr call on either gh.
         rebound_gh.merge_pr.assert_not_called()
         stale_gh.merge_pr.assert_not_called()
+
+    @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
+    def test_restores_worktree_even_on_resolution_failure(self, mock_gh_cls):
+        """The original worktree must be restored in finally even when conflict
+        resolution fails, so the workflow can be retried on its own branch.
+        """
+        wf = _make_workflow(worktree_path="/srv/repo/.worktrees/wf-822")
+        o, _ = _make_orchestrator(wf)
+        main_gh = MagicMock()
+        rebound_gh = MagicMock()
+        wt_gh = MagicMock()
+        restored_gh = MagicMock()
+        wt_gh._run_git.side_effect = [
+            MagicMock(),  # fetch
+            MagicMock(
+                returncode=1,
+                stdout="CONFLICT (content): Merge conflict in app/x.py\n",
+                stderr="",
+            ),  # merge (conflict)
+        ]
+        mock_gh_cls.side_effect = [main_gh, rebound_gh, wt_gh, restored_gh]
+        main_gh.path_exists_as_user.return_value = False
+        _set_valid_merge_result(o, wt_gh)
+
+        o._run_agent = MagicMock()
+        from app.modules.workspace.autonomous.models import AgentTaskResult
+
+        o._run_agent.return_value = AgentTaskResult(
+            session_id="s1", success=False, error="agent failed"
+        )
+        o._resolve_session_line = MagicMock(return_value=("sess", None, False))
+        o._link_session_to_current_milestone = MagicMock()
+
+        with pytest.raises(RuntimeError, match="Conflict resolution failed"):
+            o._resolve_merge_conflicts(MagicMock(), "auto-dev/fc82f22a", 1103)
+
+        # Temp worktree was removed (finally cleanup).
+        main_gh.remove_worktree.assert_called()
+        # Original worktree was restored despite the failure.
+        main_gh.add_worktree.assert_called_with(wf["worktree_path"], "auto-dev/fc82f22a")
+        o._update_workflow.assert_any_call({"worktree_path": wf["worktree_path"]})
+        assert o._gh is restored_gh
 
 
 # ── github_ops.add_worktree (no -b) ──────────────────────────────────────
