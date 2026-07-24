@@ -28,13 +28,17 @@ class TestRedisNetworkPolicyIngress:
         # Find redis-ingress NetworkPolicy
         redis_ingress_np = None
         for doc in documents:
-            if doc and doc.get("kind") == "NetworkPolicy" and doc.get("metadata", {}).get("name") == "redis-ingress":
+            if (
+                doc
+                and doc.get("kind") == "NetworkPolicy"
+                and doc.get("metadata", {}).get("name") == "redis-ingress"
+            ):
                 redis_ingress_np = doc
                 break
 
-        assert redis_ingress_np is not None, (
-            "NetworkPolicy 'redis-ingress' not found in policies.yaml"
-        )
+        assert (
+            redis_ingress_np is not None
+        ), "NetworkPolicy 'redis-ingress' not found in policies.yaml"
 
     def test_redis_network_policy_restricts_to_open_ace_pods(self):
         """Redis NetworkPolicy should only allow pods with app.kubernetes.io/name: open-ace."""
@@ -45,7 +49,11 @@ class TestRedisNetworkPolicyIngress:
 
         redis_ingress_np = None
         for doc in documents:
-            if doc and doc.get("kind") == "NetworkPolicy" and doc.get("metadata", {}).get("name") == "redis-ingress":
+            if (
+                doc
+                and doc.get("kind") == "NetworkPolicy"
+                and doc.get("metadata", {}).get("name") == "redis-ingress"
+            ):
                 redis_ingress_np = doc
                 break
 
@@ -80,7 +88,11 @@ class TestRedisNetworkPolicyIngress:
 
         redis_ingress_np = None
         for doc in documents:
-            if doc and doc.get("kind") == "NetworkPolicy" and doc.get("metadata", {}).get("name") == "redis-ingress":
+            if (
+                doc
+                and doc.get("kind") == "NetworkPolicy"
+                and doc.get("metadata", {}).get("name") == "redis-ingress"
+            ):
                 redis_ingress_np = doc
                 break
 
@@ -90,9 +102,9 @@ class TestRedisNetworkPolicyIngress:
         pod_selector = redis_ingress_np.get("spec", {}).get("podSelector", {})
         match_labels = pod_selector.get("matchLabels", {})
 
-        assert match_labels.get("app.kubernetes.io/component") == "cache", (
-            "NetworkPolicy should target pods with app.kubernetes.io/component: cache"
-        )
+        assert (
+            match_labels.get("app.kubernetes.io/component") == "cache"
+        ), "NetworkPolicy should target pods with app.kubernetes.io/component: cache"
 
     def test_redis_network_policy_allows_port_6379(self):
         """Redis NetworkPolicy should allow port 6379."""
@@ -103,7 +115,11 @@ class TestRedisNetworkPolicyIngress:
 
         redis_ingress_np = None
         for doc in documents:
-            if doc and doc.get("kind") == "NetworkPolicy" and doc.get("metadata", {}).get("name") == "redis-ingress":
+            if (
+                doc
+                and doc.get("kind") == "NetworkPolicy"
+                and doc.get("metadata", {}).get("name") == "redis-ingress"
+            ):
                 redis_ingress_np = doc
                 break
 
@@ -120,9 +136,7 @@ class TestRedisNetworkPolicyIngress:
                     found_port_6379 = True
                     break
 
-        assert found_port_6379, (
-            "NetworkPolicy should allow port 6379 for Redis"
-        )
+        assert found_port_6379, "NetworkPolicy should allow port 6379 for Redis"
 
     def test_redis_network_policy_has_ingress_policy_type(self):
         """Redis NetworkPolicy should have Ingress in policyTypes."""
@@ -133,13 +147,17 @@ class TestRedisNetworkPolicyIngress:
 
         redis_ingress_np = None
         for doc in documents:
-            if doc and doc.get("kind") == "NetworkPolicy" and doc.get("metadata", {}).get("name") == "redis-ingress":
+            if (
+                doc
+                and doc.get("kind") == "NetworkPolicy"
+                and doc.get("metadata", {}).get("name") == "redis-ingress"
+            ):
                 redis_ingress_np = doc
                 break
 
         assert redis_ingress_np is not None, "NetworkPolicy 'redis-ingress' not found"
 
         policy_types = redis_ingress_np.get("spec", {}).get("policyTypes", [])
-        assert "Ingress" in policy_types, (
-            f"NetworkPolicy should have 'Ingress' in policyTypes. Found: {policy_types}"
-        )
+        assert (
+            "Ingress" in policy_types
+        ), f"NetworkPolicy should have 'Ingress' in policyTypes. Found: {policy_types}"

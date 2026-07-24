@@ -33,14 +33,20 @@ class TestRedisAuthenticationEnabled:
         # Find Redis StatefulSet
         redis_sts = None
         for doc in documents:
-            if doc and doc.get("kind") == "StatefulSet" and doc.get("metadata", {}).get("name") == "redis":
+            if (
+                doc
+                and doc.get("kind") == "StatefulSet"
+                and doc.get("metadata", {}).get("name") == "redis"
+            ):
                 redis_sts = doc
                 break
 
         assert redis_sts is not None, "Redis StatefulSet not found in database.yaml"
 
         # Get the command from the container spec
-        containers = redis_sts.get("spec", {}).get("template", {}).get("spec", {}).get("containers", [])
+        containers = (
+            redis_sts.get("spec", {}).get("template", {}).get("spec", {}).get("containers", [])
+        )
         assert len(containers) > 0, "No containers found in Redis StatefulSet"
 
         redis_container = containers[0]
@@ -51,8 +57,7 @@ class TestRedisAuthenticationEnabled:
         command_str = " ".join(str(c) for c in command)
 
         assert "--requirepass" in command_str, (
-            "Redis startup command should include --requirepass. "
-            f"Command: {command_str}"
+            "Redis startup command should include --requirepass. " f"Command: {command_str}"
         )
 
     def test_redis_password_env_from_secret(self):
@@ -64,13 +69,19 @@ class TestRedisAuthenticationEnabled:
 
         redis_sts = None
         for doc in documents:
-            if doc and doc.get("kind") == "StatefulSet" and doc.get("metadata", {}).get("name") == "redis":
+            if (
+                doc
+                and doc.get("kind") == "StatefulSet"
+                and doc.get("metadata", {}).get("name") == "redis"
+            ):
                 redis_sts = doc
                 break
 
         assert redis_sts is not None, "Redis StatefulSet not found in database.yaml"
 
-        containers = redis_sts.get("spec", {}).get("template", {}).get("spec", {}).get("containers", [])
+        containers = (
+            redis_sts.get("spec", {}).get("template", {}).get("spec", {}).get("containers", [])
+        )
         redis_container = containers[0]
         env_vars = redis_container.get("env", [])
 
@@ -85,12 +96,12 @@ class TestRedisAuthenticationEnabled:
 
         # Verify it references the secret
         secret_key_ref = redis_password_env.get("valueFrom", {}).get("secretKeyRef", {})
-        assert secret_key_ref.get("name") == "open-ace-secrets", (
-            "REDIS_PASSWORD should reference 'open-ace-secrets' secret"
-        )
-        assert secret_key_ref.get("key") == "REDIS_PASSWORD", (
-            "REDIS_PASSWORD should reference 'REDIS_PASSWORD' key"
-        )
+        assert (
+            secret_key_ref.get("name") == "open-ace-secrets"
+        ), "REDIS_PASSWORD should reference 'open-ace-secrets' secret"
+        assert (
+            secret_key_ref.get("key") == "REDIS_PASSWORD"
+        ), "REDIS_PASSWORD should reference 'REDIS_PASSWORD' key"
 
     def test_rediscli_auth_password_env_from_secret(self):
         """Redis should have REDISCLI_AUTH_PASSWORD env from secret reference."""
@@ -101,13 +112,19 @@ class TestRedisAuthenticationEnabled:
 
         redis_sts = None
         for doc in documents:
-            if doc and doc.get("kind") == "StatefulSet" and doc.get("metadata", {}).get("name") == "redis":
+            if (
+                doc
+                and doc.get("kind") == "StatefulSet"
+                and doc.get("metadata", {}).get("name") == "redis"
+            ):
                 redis_sts = doc
                 break
 
         assert redis_sts is not None, "Redis StatefulSet not found in database.yaml"
 
-        containers = redis_sts.get("spec", {}).get("template", {}).get("spec", {}).get("containers", [])
+        containers = (
+            redis_sts.get("spec", {}).get("template", {}).get("spec", {}).get("containers", [])
+        )
         redis_container = containers[0]
         env_vars = redis_container.get("env", [])
 
@@ -122,12 +139,12 @@ class TestRedisAuthenticationEnabled:
 
         # Verify it references the secret
         secret_key_ref = auth_env.get("valueFrom", {}).get("secretKeyRef", {})
-        assert secret_key_ref.get("name") == "open-ace-secrets", (
-            "REDISCLI_AUTH_PASSWORD should reference 'open-ace-secrets' secret"
-        )
-        assert secret_key_ref.get("key") == "REDIS_PASSWORD", (
-            "REDISCLI_AUTH_PASSWORD should reference 'REDIS_PASSWORD' key"
-        )
+        assert (
+            secret_key_ref.get("name") == "open-ace-secrets"
+        ), "REDISCLI_AUTH_PASSWORD should reference 'open-ace-secrets' secret"
+        assert (
+            secret_key_ref.get("key") == "REDIS_PASSWORD"
+        ), "REDISCLI_AUTH_PASSWORD should reference 'REDIS_PASSWORD' key"
 
 
 class TestRedisHealthCheckWithAuth:
@@ -142,13 +159,19 @@ class TestRedisHealthCheckWithAuth:
 
         redis_sts = None
         for doc in documents:
-            if doc and doc.get("kind") == "StatefulSet" and doc.get("metadata", {}).get("name") == "redis":
+            if (
+                doc
+                and doc.get("kind") == "StatefulSet"
+                and doc.get("metadata", {}).get("name") == "redis"
+            ):
                 redis_sts = doc
                 break
 
         assert redis_sts is not None, "Redis StatefulSet not found in database.yaml"
 
-        containers = redis_sts.get("spec", {}).get("template", {}).get("spec", {}).get("containers", [])
+        containers = (
+            redis_sts.get("spec", {}).get("template", {}).get("spec", {}).get("containers", [])
+        )
         redis_container = containers[0]
         liveness_probe = redis_container.get("livenessProbe", {})
 
@@ -171,13 +194,19 @@ class TestRedisHealthCheckWithAuth:
 
         redis_sts = None
         for doc in documents:
-            if doc and doc.get("kind") == "StatefulSet" and doc.get("metadata", {}).get("name") == "redis":
+            if (
+                doc
+                and doc.get("kind") == "StatefulSet"
+                and doc.get("metadata", {}).get("name") == "redis"
+            ):
                 redis_sts = doc
                 break
 
         assert redis_sts is not None, "Redis StatefulSet not found in database.yaml"
 
-        containers = redis_sts.get("spec", {}).get("template", {}).get("spec", {}).get("containers", [])
+        containers = (
+            redis_sts.get("spec", {}).get("template", {}).get("spec", {}).get("containers", [])
+        )
         redis_container = containers[0]
         readiness_probe = redis_container.get("readinessProbe", {})
 
@@ -215,15 +244,13 @@ class TestSecretReferenceConsistency:
         secret_keys = set(string_data.keys())
 
         # Verify REDIS_PASSWORD exists
-        assert "REDIS_PASSWORD" in secret_keys, (
-            f"REDIS_PASSWORD key not found in Secret. Keys: {secret_keys}"
-        )
+        assert (
+            "REDIS_PASSWORD" in secret_keys
+        ), f"REDIS_PASSWORD key not found in Secret. Keys: {secret_keys}"
 
         # Verify it's not empty (should have placeholder)
         redis_password_value = string_data.get("REDIS_PASSWORD", "")
-        assert redis_password_value != "", (
-            "REDIS_PASSWORD should not be empty in Secret"
-        )
+        assert redis_password_value != "", "REDIS_PASSWORD should not be empty in Secret"
 
     def test_database_yaml_secret_key_ref_targets_correct_secret(self):
         """Secret reference in database.yaml should point to correct secret and key."""
@@ -234,13 +261,19 @@ class TestSecretReferenceConsistency:
         # Find Redis StatefulSet
         redis_sts = None
         for doc in database_docs:
-            if doc and doc.get("kind") == "StatefulSet" and doc.get("metadata", {}).get("name") == "redis":
+            if (
+                doc
+                and doc.get("kind") == "StatefulSet"
+                and doc.get("metadata", {}).get("name") == "redis"
+            ):
                 redis_sts = doc
                 break
 
         assert redis_sts is not None, "Redis StatefulSet not found"
 
-        containers = redis_sts.get("spec", {}).get("template", {}).get("spec", {}).get("containers", [])
+        containers = (
+            redis_sts.get("spec", {}).get("template", {}).get("spec", {}).get("containers", [])
+        )
         redis_container = containers[0]
         env_vars = redis_container.get("env", [])
 
@@ -305,7 +338,9 @@ class TestRedisPasswordFailClosed:
         from app.utils.security_env import get_redis_password
 
         monkeypatch.setenv("FLASK_ENV", "development")
-        monkeypatch.setenv("REDIS_PASSWORD", "a-strong-64-char-random-password-12345678901234567890")
+        monkeypatch.setenv(
+            "REDIS_PASSWORD", "a-strong-64-char-random-password-12345678901234567890"
+        )
 
         password = get_redis_password()
         assert password == "a-strong-64-char-random-password-12345678901234567890"
@@ -315,7 +350,9 @@ class TestRedisPasswordFailClosed:
         from app.utils.security_env import get_redis_password
 
         monkeypatch.setenv("FLASK_ENV", "production")
-        monkeypatch.setenv("REDIS_PASSWORD", "a-strong-64-char-random-password-12345678901234567890")
+        monkeypatch.setenv(
+            "REDIS_PASSWORD", "a-strong-64-char-random-password-12345678901234567890"
+        )
 
         password = get_redis_password()
         assert password == "a-strong-64-char-random-password-12345678901234567890"
