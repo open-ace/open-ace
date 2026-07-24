@@ -1247,11 +1247,9 @@ def cancel_milestone(workflow_id, milestone_id):
     if not milestone or milestone.get("workflow_id") != workflow_id:
         return jsonify({"error": "Milestone not found"}), 404
 
-    # Parse user feedback (required)
+    # Parse user feedback (optional — cancel may proceed without feedback)
     data = request.get_json(silent=True) or {}
     user_feedback = data.get("user_feedback", "").strip()
-    if not user_feedback:
-        return jsonify({"error": "user_feedback is required"}), 400
     if len(user_feedback) > 5000:
         return jsonify({"error": "user_feedback too long (max 5000 characters)"}), 400
 
