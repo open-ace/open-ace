@@ -162,6 +162,9 @@ def test_get_daily_usage_with_valid_date():
 - [ ] New features have tests
 - [ ] Documentation updated if needed
 - [ ] Commit messages are clear
+- [ ] API security scanner passes (`python scripts/lint/api_security_scanner.py`)
+- [ ] If modifying API routes with ID parameters, ensure ownership checks are in place
+- [ ] If adding baseline suppressions, ensure complete metadata (see `docs/security/api-exceptions.md`)
 
 ## 📚 Documentation
 

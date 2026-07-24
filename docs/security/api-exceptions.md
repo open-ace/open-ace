@@ -1,155 +1,190 @@
-# API Security Scanner Exception Management
+# API Security Exceptions Management
+
+**Issue**: #1897
 
 ## Overview
 
-The API Security Scanner (`scripts/lint/api_security_scanner.py`) detects Flask routes missing authentication or ownership checks. This document describes how to manage exceptions (baseline suppressions) for this scanner.
+This document describes the process for managing API security baseline suppressions and exceptions in the Open ACE project.
 
-**Related Issue**: #1897
+## Security Scanner
 
-## Rules
+The API security scanner (`scripts/lint/api_security_scanner.py`) detects security violations in Flask routes:
 
-The scanner enforces three rules:
+- **SEC001**: Route handler has no authentication
+- **SEC002**: Route with ID parameter missing ownership check
+- **SEC003**: Blueprint missing `@before_request` auth hook
 
-| Rule | Description | Severity |
-|------|-------------|----------|
-| SEC001 | Route handler has no authentication | High |
-| SEC002 | Route with ID parameter lacks ownership check | Medium |
-| SEC003 | Blueprint has no `@before_request` auth hook | Medium |
+## Baseline File
 
-## Managing Exceptions
+Security suppressions are stored in `scripts/lint/security_baseline.json`. Each suppression must have complete metadata:
 
-### Adding a New Exception
-
-1. **Try to fix the code first**. Most violations should be fixed by:
-   - Adding `@auth_required` decorator
-   - Adding `@security_annotated(reason="...")` for non-standard ownership patterns
-   - Implementing proper ownership checks
-
-2. **If exception is necessary**, follow these steps:
-
-   a. Run the scanner to generate the current violations:
-   ```bash
-   python scripts/lint/api_security_scanner.py --baseline > scripts/lint/security_baseline.json
-   ```
-
-   b. Edit `security_baseline.json` to add metadata for the new exception:
-   ```json
-   {
-     "key": "SEC002|app/routes/example.py|/api/example/<int:id>",
-     "rule": "SEC002",
-     "file": "app/routes/example.py",
-     "line": 100,
-     "endpoint": "/api/example/<int:id>",
-     "message": "...",
-     "metadata": {
-       "owner": "@username",
-       "justification": "Business reason for the exception...",
-       "reviewed_at": "YYYY-MM-DD",
-       "expires_at": "YYYY-MM-DDTHH:MM:SSZ",
-       "risk_level": "low|medium|high",
-       "test_coverage": "tests/routes/test_example.py::test_example",
-       "alternative_controls": ["control1", "control2"]
-     }
-   }
-   ```
-
-   c. Validate the metadata:
-   ```bash
-   python scripts/lint/validate_baseline_metadata.py
-   ```
-
-   d. Create a PR with:
-   - The `security_baseline.json` changes
-   - A clear explanation in the PR description
-   - The `security-exception` label (if available)
+```json
+{
+  "key": "SEC002|app/routes/workspace.py|/api/workspace/knowledge/<entry_id>",
+  "rule": "SEC002",
+  "file": "app/routes/workspace.py",
+  "line": 2038,
+  "endpoint": "/api/workspace/knowledge/<entry_id>",
+  "message": "Route ... has ID param(s) ['entry_id'] but no ownership check",
+  "metadata": {
+    "owner": "@team-backend",
+    "justification": "Reason why this suppression is necessary",
+    "reviewed_at": "2026-07-23",
+    "expires_at": "2027-01-23T00:00:00Z",
+    "risk_level": "low",
+    "test_coverage": "tests/routes/test_example.py::test_example",
+    "alternative_controls": [
+      "List of alternative security controls in place"
+    ]
+  }
+}
+```
 
 ### Required Metadata Fields
 
-| Field | Description | Required |
-|-------|-------------|----------|
-| `owner` | GitHub username responsible for this exception | ✅ |
-| `justification` | Business reason why this exception is necessary | ✅ |
-| `test_coverage` | Test file that validates the security control | ✅ |
-| `reviewed_at` | ISO date when this was last reviewed | Recommended |
-| `expires_at` | ISO date when this should be re-reviewed | Recommended |
-| `risk_level` | `low`, `medium`, or `high` | Recommended |
-| `alternative_controls` | List of other security controls in place | Recommended |
+- **owner**: GitHub username or team responsible for this suppression
+- **justification**: Clear explanation of why the exception is necessary
+- **test_coverage**: Test file and test name that validates the security control
 
-### Removing an Exception
+### Optional Metadata Fields
 
-When you fix the code that was suppressed:
+- **reviewed_at**: Date of last review (ISO format)
+- **expires_at**: Expiration date (ISO format) - CI will fail if expired
+- **risk_level**: Risk assessment (low/medium/high)
+- **alternative_controls**: List of security controls in place
+- **automated_check**: Metadata about automated checks
 
-1. Run the scanner to verify no new violations:
-   ```bash
-   python scripts/lint/api_security_scanner.py
-   ```
+## Adding a New Suppression
 
-2. Remove the entry from `security_baseline.json`
+### Step 1: Document the Exception
 
-3. Validate:
-   ```bash
-   python scripts/lint/validate_baseline_metadata.py
-   ```
+Before adding a suppression, ensure:
 
-## Using `@security_annotated` Decorator
+1. You have a valid reason for the exception
+2. Alternative security controls are in place (e.g., workspace-level access control)
+3. Test coverage exists or will be added
 
-For endpoints that have ownership checks implemented in non-standard patterns (inline checks, helper functions, etc.), use the `@security_annotated` decorator to mark them as intentionally secured:
+### Step 2: Use `@security_annotated` Decorator
+
+For endpoints with ownership checks implemented in non-standard patterns:
 
 ```python
 from app.auth.decorators import security_annotated
 
-@security_annotated(reason="Ownership via get_user_project + is_shared flag check")
-def api_get_project(project_id):
-    # ... existing code with ownership check
+@workspace_bp.route("/resource/<int:resource_id>", methods=["GET"])
+@security_annotated(reason="Ownership via get_user_resource + permission check")
+def get_resource(resource_id):
+    # Ownership check implemented inline
+    resource = get_user_resource(user_id, resource_id)
+    if not resource:
+        return jsonify({"error": "Access denied"}), 403
+    ...
 ```
 
-This decorator:
-- Does NOT change runtime behavior
-- Marks the endpoint as secured for the scanner
-- Suppresses SEC002 violations
+### Step 3: Update Baseline
 
-## Quarterly Review Process
+If the scanner still flags the endpoint after adding `@security_annotated`:
 
-A GitHub Actions workflow automatically creates a quarterly audit issue:
+```bash
+python scripts/lint/api_security_scanner.py --baseline > scripts/lint/security_baseline.json
+```
 
-1. Review all baseline suppressions
-2. Check if `expires_at` dates are current
-3. Verify `owner` is still valid
-4. Confirm `justification` is still accurate
-5. Ensure `test_coverage` tests pass
-6. Update metadata as needed
+### Step 4: Add Metadata
+
+Edit `scripts/lint/security_baseline.json` and add complete metadata for the new suppression.
+
+### Step 5: Validate
+
+Run metadata validation:
+
+```bash
+python scripts/lint/validate_baseline_metadata.py
+```
+
+## Removing a Suppression
+
+Suppressions should be removed when:
+
+1. Code is fixed and security issue is resolved
+2. Endpoint is removed
+3. Alternative security controls are no longer necessary
+
+### Step 1: Fix the Issue
+
+Implement proper security controls or remove the endpoint.
+
+### Step 2: Regenerate Baseline
+
+```bash
+python scripts/lint/api_security_scanner.py --baseline > scripts/lint/security_baseline.json
+```
+
+### Step 3: Validate
+
+```bash
+python scripts/lint/api_security_scanner.py
+python scripts/lint/validate_baseline_metadata.py
+```
+
+## CI Integration
+
+The security scanner runs in CI for every pull request:
+
+1. **API Security Scanner**: Detects new violations not in baseline
+2. **Baseline Diff Check**: Detects changes to baseline (requires justification)
+3. **Metadata Validation**: Ensures all suppressions have complete metadata
+
+### Bypassing Security Checks
+
+In emergencies, use the `skip-security-check` label on PRs:
+
+```bash
+gh pr edit --add-label skip-security-check
+```
+
+⚠️ **Warning**: This should only be used in emergencies and requires review by security team.
+
+## Quarterly Audit
+
+Baseline suppressions are audited quarterly:
+
+1. Check `expires_at` dates - CI will fail if expired
+2. Review `owner` and `justification` - ensure they're still accurate
+3. Verify `test_coverage` - ensure tests still pass
+4. Assess `alternative_controls` - ensure they're still effective
+
+Audit reminders are created automatically via GitHub Actions scheduled workflow.
 
 ## Feature Flags
 
-### Prompt Template Ownership (Issue #1897)
+Some security features can be enabled gradually using environment variables:
 
-The prompt template ownership checks support a gradual rollout:
+- `ENFORCE_PROMPT_OWNERSHIP`: Control prompt template ownership enforcement
+  - `true` (default): Enforce ownership checks
+  - `false`: Log only, do not reject requests (for gradual rollout)
 
-```bash
-# Phase 1: Log-only mode (no rejection)
-ENFORCE_PROMPT_OWNERSHIP=false
+## Security Review Checklist
 
-# Phase 2: Full enforcement
-ENFORCE_PROMPT_OWNERSHIP=true  # (default)
-```
+When reviewing PRs with baseline changes:
 
-## Troubleshooting
+- [ ] All new suppressions have complete metadata
+- [ ] `owner` is a valid GitHub user/team
+- [ ] `justification` clearly explains the exception
+- [ ] `test_coverage` exists and tests the security control
+- [ ] `expires_at` is set and not too far in the future
+- [ ] `alternative_controls` are documented and effective
+- [ ] PR description explains why the exception is necessary
 
-### Scanner reports false positives
+## Related Documentation
 
-1. Check if you have `@security_annotated` or `@auth_required` decorators
-2. Ensure ownership patterns are recognized (see `OWNERSHIP_PATTERNS` in scanner)
-3. If needed, add patterns to `scripts/lint/api_security_scanner.py`
+- [Issue #1897](https://github.com/open-ace/open-ace/issues/1897): API Security Baseline Cleanup
+- [API Security Scanner](../../scripts/lint/api_security_scanner.py)
+- [Baseline Metadata Validator](../../scripts/lint/validate_baseline_metadata.py)
+- [Baseline Diff Checker](../../scripts/lint/baseline_diff.py)
 
-### Metadata validation fails
+## Contact
 
-Common issues:
-- Missing required fields
-- `expires_at` not in ISO format
-- `expires_at` date has passed
+For questions about API security exceptions:
 
-### CI blocks PR for security
-
-1. Fix the violation if possible
-2. If exception is valid, follow the "Adding a New Exception" process above
-3. Use `skip-security-check` label only in emergencies
+- Security team: @security
+- Backend team: @team-backend

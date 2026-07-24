@@ -2036,14 +2036,32 @@ def create_knowledge():
 
 
 @workspace_bp.route("/knowledge/<entry_id>", methods=["GET"])
+@security_annotated(reason="Ownership via is_published check + author_id/admin fallback")
 def get_knowledge(entry_id):
-    """Get a knowledge base entry."""
+    """Get a knowledge base entry.
+
+    Issue #1897: Published entries are accessible to all authenticated users.
+    Unpublished entries require author or admin.
+    """
     try:
         manager = get_collaboration_manager()
         entry = manager.get_knowledge_entry(entry_id)
 
         if not entry:
             return jsonify({"success": False, "error": "Entry not found"}), 404
+
+        # Issue #1897: Check access for unpublished entries
+        is_published = getattr(entry, "is_published", False)
+        if not is_published:
+            user_id = g.user.get("id") if hasattr(g, "user") and g.user else None
+            user_role = g.user.get("role") if hasattr(g, "user") and g.user else None
+            author_id = getattr(entry, "author_id", None)
+
+            # Only author or admin can access unpublished entries
+            if user_role != "admin" and user_id != author_id:
+                return jsonify(
+                    {"success": False, "error": "Access denied. Only author or admin can view unpublished entries."}
+                ), 403
 
         return jsonify({"success": True, "data": entry.to_dict()})
     except Exception as e:
