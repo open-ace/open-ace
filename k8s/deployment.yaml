@@ -20,10 +20,6 @@ spec:
       maxUnavailable: 0
   template:
     metadata:
-      annotations:
-        prometheus.io/scrape: "true"
-        prometheus.io/port: "19888"
-        prometheus.io/path: "/health"
       labels:
         app.kubernetes.io/name: open-ace
         app.kubernetes.io/component: web
@@ -38,7 +34,7 @@ spec:
       containers:
         - name: open-ace
           image: open-ace:latest
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           # HA Support (Issue #1851): preStop hook for graceful terminal relay handoff
           lifecycle:
             preStop:
@@ -46,10 +42,12 @@ spec:
                 command: ["sh", "-c", "sleep 30"]
           securityContext:
             allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop:
                 - ALL
+            seccompProfile:
+              type: RuntimeDefault
           ports:
             - name: http
               containerPort: 19888
