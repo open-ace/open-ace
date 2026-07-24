@@ -238,14 +238,23 @@ if [ "$isolated" = true ]; then
     fi
     cleanup_isolated
     if [ -n "$previous_signature_project" ] && [ -n "$previous_git_signature" ]; then
-        if ! verify_and_restore_git_entry \
+        # The signature registry is keyed per-agent-user, not per-project.
+        # When the previous project directory no longer exists, it was removed
+        # by a trusted component (the orchestrator deletes temporary merge
+        # worktrees after each phase). The credentialless agent cannot delete
+        # the project directory or its .git entry, so a missing directory is
+        # not a tamper signal — discard the stale registry and proceed.
+        if [ ! -e "$previous_signature_project" ]; then
+            rm -f "$signature_registry"
+        elif ! verify_and_restore_git_entry \
             "$previous_signature_project" \
             "$previous_git_signature" \
             "$previous_git_acl_snapshot"; then
             echo "OPENACE_REPO_INTEGRITY_VIOLATION: .git entry changed during interrupted agent execution" >&2
             exit 68
+        else
+            rm -f "$signature_registry"
         fi
-        rm -f "$signature_registry"
     else
         rm -f "$signature_registry"
     fi

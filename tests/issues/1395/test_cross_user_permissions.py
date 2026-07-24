@@ -536,6 +536,36 @@ def test_isolated_wrapper_normalizes_recovered_acls_before_git_baseline():
     )
 
 
+def test_stale_signature_registry_skipped_when_previous_project_gone():
+    """A per-user signature registry whose project dir was cleaned up (e.g.
+    a temporary merge worktree removed by the orchestrator) must not trigger
+    OPENACE_REPO_INTEGRITY_VIOLATION for an unrelated subsequent run.
+
+    The credentialless agent cannot delete the project directory, so a missing
+    directory is not a tamper signal — the stale registry is discarded.
+    """
+    from pathlib import Path
+
+    wrapper = Path("scripts/openace-run-as.sh").read_text(encoding="utf-8")
+
+    previous_block = (
+        'if [ -n "$previous_signature_project" ] && [ -n "$previous_git_signature" ]; then'
+    )
+    missing_guard = '[ ! -e "$previous_signature_project" ]'
+    interrupted_violation = (
+        "OPENACE_REPO_INTEGRITY_VIOLATION: .git entry changed during interrupted agent execution"
+    )
+
+    assert previous_block in wrapper
+    block_start = wrapper.index(previous_block)
+
+    # The missing-project guard must appear inside the previous-signature block…
+    assert missing_guard in wrapper[block_start:]
+    guard_pos = wrapper.index(missing_guard, block_start)
+    # …and it must come before the interrupted-execution violation message.
+    assert guard_pos < wrapper.index(interrupted_violation, guard_pos)
+
+
 def test_git_entry_acl_restore_preserves_exact_integrity(tmp_path):
     """Only launcher-shaped mask churn is restored; real changes fail."""
     if sys.platform != "linux":
