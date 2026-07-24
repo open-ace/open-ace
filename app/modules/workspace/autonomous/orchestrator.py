@@ -6148,7 +6148,7 @@ class AutonomousOrchestrator:
         dev_prompt += self._get_ci_repair_prompt(wf)
         dev_prompt += self._get_user_feedback_prompt(wf)
 
-        result = self._run_agent(
+        result = self._run_agent_with_context_recovery(
             wf=wf,
             workflow_id=self._workflow_id,
             cli_tool=wf.get("cli_tool", "claude-code"),
