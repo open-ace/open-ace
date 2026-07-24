@@ -337,6 +337,7 @@ open-ace/
 | 文档 | 说明 |
 |------|------|
 | [架构说明](docs/cn/ARCHITECTURE.md) | 系统架构与核心概念 |
+| [AI 自主开发](docs/cn/AUTONOMOUS-DEVELOPMENT.md) | 功能流程、三会话设计、CI 自愈、隔离执行与维护指南 |
 | [部署指南](docs/cn/DEPLOYMENT.md) | 本地与生产环境部署 |
 | [开发指南](docs/cn/DEVELOPMENT.md) | 参与开发 |
 | [远程工作区](docs/cn/REMOTE-WORKSPACE.md) | 远程机器、Agent、API Key 代理与安全设计 |
@@ -660,6 +661,7 @@ The `docs/` directory is the source of truth for product documentation. The publ
 | Document | Description |
 |----------|-------------|
 | [Architecture](docs/en/ARCHITECTURE.md) | System architecture and concepts |
+| [AI Autonomous Development](docs/en/AUTONOMOUS-DEVELOPMENT.md) | Workflow, three-session design, CI repair, isolation, and maintenance |
 | [Deployment](docs/en/DEPLOYMENT.md) | Local and production deployment |
 | [Development](docs/en/DEVELOPMENT.md) | Contributing guide |
 | [Remote Workspace](docs/en/REMOTE-WORKSPACE.md) | Remote machines, Agent, API Key proxy, and security design |
