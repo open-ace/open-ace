@@ -421,7 +421,9 @@ def test_terminal_result_closes_stream_json_stdin():
     runner._capture_cli_session_id = lambda *_args: "cli-session"
     runner._sync_sidebar_session_totals = lambda *_args, **_kwargs: None
     runner._resolve_sidebar_session = lambda *_args, **_kwargs: "cli-session"
-    process = SimpleNamespace(stdout=FakeStdout(), stdin=FakeStdin(), returncode=None)
+    process = SimpleNamespace(
+        stdout=FakeStdout(), stdin=FakeStdin(), returncode=None, poll=lambda: None
+    )
     session = _LocalSession(session_id="tracking-session", process=process)
 
     with patch(
@@ -910,7 +912,7 @@ def test_claude_embedded_tool_use_pairs_with_test_result():
 
     runner = AutonomousAgentRunner.__new__(AutonomousAgentRunner)
     runner._activity_callback = None
-    process = SimpleNamespace(stdout=FakeStdout(), returncode=None)
+    process = SimpleNamespace(stdout=FakeStdout(), returncode=None, poll=lambda: None)
     session = _LocalSession(session_id="test-session", process=process)
 
     runner._read_stdout(session)
@@ -1565,6 +1567,7 @@ def test_pre_commit_convergence_reruns_modified_hooks_as_isolated_agent():
     from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
 
     orch = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
+    orch._workflow_id = "wf-test"
     orch._resolve_isolated_agent_account = MagicMock(return_value="openace-agent")
     orch._resolve_system_account = MagicMock(return_value="repo-owner")
     orch._select_project_python_runtime = MagicMock(return_value=(["python3"], ""))
@@ -1587,6 +1590,11 @@ def test_pre_commit_convergence_reruns_modified_hooks_as_isolated_agent():
         patch(
             "app.modules.workspace.autonomous.orchestrator.shutil.which",
             side_effect=["/usr/local/bin/pre-commit", "/usr/bin/git"],
+        ),
+        patch.object(
+            AutonomousAgentRunner,
+            "is_isolated_launcher_available",
+            return_value=True,
         ),
         patch.object(
             AutonomousAgentRunner,
@@ -1627,7 +1635,66 @@ def test_pre_commit_convergence_reruns_modified_hooks_as_isolated_agent():
     assert run.call_args.kwargs["env"] is None
 
 
+def test_pre_commit_convergence_falls_back_to_same_user_without_launcher():
+    """When openace-run-as is unavailable (dev/macOS), converge as repo owner."""
+    from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner
+    from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+    orch = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
+    orch._workflow_id = "wf-test"
+    orch._resolve_isolated_agent_account = MagicMock(return_value="openace-agent")
+    orch._resolve_system_account = MagicMock(return_value="repo-owner")
+    orch._select_project_python_runtime = MagicMock(return_value=(["python3"], ""))
+    gh = MagicMock()
+    gh.path_exists_as_user.return_value = True
+
+    modified = MagicMock(
+        returncode=1,
+        stdout="files were modified by this hook\nFixing docker-compose.yml",
+        stderr="",
+    )
+    clean = MagicMock(returncode=0, stdout="All checks passed", stderr="")
+
+    with (
+        patch(
+            "app.modules.workspace.autonomous.orchestrator.shutil.which",
+            side_effect=["/usr/local/bin/pre-commit", "/usr/bin/git"],
+        ),
+        patch.object(
+            AutonomousAgentRunner,
+            "is_isolated_launcher_available",
+            return_value=False,
+        ),
+        patch.object(
+            AutonomousAgentRunner,
+            "_wrap_agent_cmd",
+            return_value=(["same-user-wrapper", "pre-commit"], None),
+        ) as wrap,
+        patch.object(
+            AutonomousAgentRunner,
+            "_resolve_agent_guard_bin",
+            return_value="/usr/local/libexec/openace-agent-bin",
+        ),
+        patch(
+            "app.modules.workspace.autonomous.orchestrator.subprocess.run",
+            side_effect=[modified, clean],
+        ) as run,
+    ):
+        attempted, error = orch._converge_pre_commit_fixes(
+            {"workspace_type": "local", "worktree_path": "/private/repo"},
+            gh,
+            [{"failure_excerpt": "pre-commit hook(s) made changes"}],
+        )
+
+    assert attempted
+    assert error == ""
+    # Same-user fallback passes the repo owner account, NOT the isolated one.
+    assert wrap.call_args.args[2] == "repo-owner"
+    assert run.call_count == 2
+
+
 def test_pre_commit_convergence_rejects_repository_owner_account():
+    from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner
     from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
 
     orch = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
@@ -1640,6 +1707,11 @@ def test_pre_commit_convergence_rejects_repository_owner_account():
         patch(
             "app.modules.workspace.autonomous.orchestrator.shutil.which",
             side_effect=["/usr/local/bin/pre-commit", "/usr/bin/git"],
+        ),
+        patch.object(
+            AutonomousAgentRunner,
+            "is_isolated_launcher_available",
+            return_value=True,
         ),
         patch("app.modules.workspace.autonomous.orchestrator.subprocess.run") as run,
         pytest.raises(RuntimeError, match="repository owner"),

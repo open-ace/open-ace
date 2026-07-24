@@ -870,6 +870,31 @@ class TestStdoutParsing:
             "Final answer"
         ]
 
+    def test_process_exit_without_result_marks_completed_via_poll(self):
+        """When the agent exits without a result event, the finally block
+        must call poll() to populate returncode and set session.completed.
+
+        Regression test for #2031: without poll(), returncode stays None
+        (readline EOF does not set it), session.completed is never set,
+        and _wait_for_completion blocks until the 1-hour timeout.
+        """
+        mock_process = MagicMock()
+        mock_stdout = MagicMock()
+        mock_stdout.readline = MagicMock(side_effect=[b""])  # immediate EOF
+        mock_process.stdout = mock_stdout
+        # returncode is None until poll() is called — simulates a process
+        # that exited but has not been waited on yet.
+        mock_process.returncode = None
+        mock_process.poll = MagicMock(side_effect=lambda: setattr(mock_process, "returncode", 0))
+
+        session = _LocalSession(session_id="s-1", process=mock_process)
+        self.runner._read_stdout(session)
+
+        # poll() must have been called to reap the child process
+        mock_process.poll.assert_called_once()
+        # session.completed must be set so _wait_for_completion returns
+        assert session.completed.is_set()
+
 
 class TestStopSession:
     """Tests for stop_session."""

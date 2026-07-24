@@ -974,6 +974,22 @@ class AutonomousAgentRunner:
             return True
 
     @staticmethod
+    def is_isolated_launcher_available() -> bool:
+        """Whether the privileged ``openace-run-as --isolated`` launcher is
+        installed and executable.
+
+        The isolated-agent path (a credentialless principal + scoped ACLs via
+        ``openace-run-as``) is the security model for multi-user Linux
+        deployments. The launcher is Linux-only (setfacl/getent/runuser) and is
+        not provisioned on dev installs or non-Linux platforms (macOS/Windows),
+        where the service already runs as the repository owner and there is no
+        security benefit to a second account. Callers use this to decide
+        whether to engage isolated-agent mode or fall back to same-user
+        execution (mirroring the Windows single-user downgrade).
+        """
+        return os.path.isfile(_OPENACE_RUN_AS) and os.access(_OPENACE_RUN_AS, os.X_OK)
+
+    @staticmethod
     def _wrap_agent_cmd(
         cmd: list[str],
         project_path: str,
@@ -3619,11 +3635,19 @@ class AutonomousAgentRunner:
         except (OSError, ValueError):
             pass
         finally:
-            # If process exited without sending result, mark completed
+            # If process exited without sending result, mark completed.
+            # poll() must be called to reap the child and populate
+            # returncode — readline() returning EOF does NOT set it
+            # automatically, so without poll() the returncode check
+            # would fail and session.completed would never be set,
+            # causing _wait_for_completion to block until the 1-hour
+            # timeout (#2031).
             if not session.completed.is_set():
                 session._stopped.wait(2.0)
-                if session.process and session.process.returncode is not None:
-                    session.completed.set()
+                if session.process:
+                    session.process.poll()
+                    if session.process.returncode is not None:
+                        session.completed.set()
 
     def _read_stderr(self, session: _LocalSession) -> None:
         """Read stderr from the subprocess."""
