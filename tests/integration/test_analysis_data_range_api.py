@@ -31,7 +31,7 @@ def client(app):
 
 
 # Auth helpers shared with the retention API tests.
-_EXTRACT_TOKEN = "app.auth.decorators._extract_token"
+_EXTRACT_SESSION_TOKEN = "app.auth.decorators._extract_session_token"
 _LOAD_USER = "app.auth.decorators._load_user_from_token"
 _ADMIN_USER = {"id": 1, "role": "admin", "username": "admin"}
 
@@ -41,7 +41,7 @@ class TestDataRangeEndpoint:
         """A populated DB yields 200 with {min_date, max_date}."""
         payload = {"min_date": "2024-01-01", "max_date": "2026-06-17"}
         with (
-            patch(_EXTRACT_TOKEN, return_value="test-token"),
+            patch(_EXTRACT_SESSION_TOKEN, return_value="test-token"),
             patch(_LOAD_USER, return_value=_ADMIN_USER),
             patch(
                 "app.routes.analysis.analysis_service.get_data_range",
@@ -56,7 +56,7 @@ class TestDataRangeEndpoint:
     def test_returns_null_when_no_data(self, client):
         """An empty DB yields 200 with a null body (frontend falls back)."""
         with (
-            patch(_EXTRACT_TOKEN, return_value="test-token"),
+            patch(_EXTRACT_SESSION_TOKEN, return_value="test-token"),
             patch(_LOAD_USER, return_value=_ADMIN_USER),
             patch(
                 "app.routes.analysis.analysis_service.get_data_range",
@@ -70,6 +70,6 @@ class TestDataRangeEndpoint:
 
     def test_requires_authentication(self, client):
         """Missing token -> 401 (blueprint-level @auth_required)."""
-        with patch(_EXTRACT_TOKEN, return_value=None):
+        with patch(_EXTRACT_SESSION_TOKEN, return_value=""):
             resp = client.get("/api/analysis/data-range")
         assert resp.status_code == 401

@@ -59,7 +59,7 @@ def client(app):
             self._client = client
 
         def get(self, *args, **kwargs):
-            with patch("app.auth.decorators._extract_token", return_value="test-token"):
+            with patch("app.auth.decorators._extract_session_token", return_value="test-token"):
                 with patch(
                     "app.auth.decorators._load_user_from_token",
                     return_value={"id": 1, "role": "admin", "username": "test_admin"},
@@ -67,7 +67,7 @@ def client(app):
                     return self._client.get(*args, **kwargs)
 
         def post(self, *args, **kwargs):
-            with patch("app.auth.decorators._extract_token", return_value="test-token"):
+            with patch("app.auth.decorators._extract_session_token", return_value="test-token"):
                 with patch(
                     "app.auth.decorators._load_user_from_token",
                     return_value={"id": 1, "role": "admin", "username": "test_admin"},
@@ -75,7 +75,7 @@ def client(app):
                     return self._client.post(*args, **kwargs)
 
         def put(self, *args, **kwargs):
-            with patch("app.auth.decorators._extract_token", return_value="test-token"):
+            with patch("app.auth.decorators._extract_session_token", return_value="test-token"):
                 with patch(
                     "app.auth.decorators._load_user_from_token",
                     return_value={"id": 1, "role": "admin", "username": "test_admin"},
@@ -83,7 +83,7 @@ def client(app):
                     return self._client.put(*args, **kwargs)
 
         def delete(self, *args, **kwargs):
-            with patch("app.auth.decorators._extract_token", return_value="test-token"):
+            with patch("app.auth.decorators._extract_session_token", return_value="test-token"):
                 with patch(
                     "app.auth.decorators._load_user_from_token",
                     return_value={"id": 1, "role": "admin", "username": "test_admin"},

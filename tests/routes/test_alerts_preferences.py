@@ -45,7 +45,7 @@ def client():
         with (
             app.test_client() as test_client,
             patch("app.routes.alerts.get_alert_notifier", return_value=notifier),
-            patch("app.routes.alerts._extract_token", return_value="test-token"),
+            patch("app.routes.alerts._extract_session_token", return_value="test-token"),
             patch(
                 "app.routes.alerts._load_user_from_token",
                 return_value={"id": 7, "role": "user", "username": "tester"},
