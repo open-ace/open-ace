@@ -49,6 +49,10 @@ def upgrade() -> None:
     # Check current column type
     current_type = get_column_type(conn, "tenant_settings", "auto_provision_users")
 
+    # If column does not exist, skip (baseline databases may not have this column)
+    if current_type is None:
+        return
+
     # If already boolean, no conversion needed (new databases from baseline)
     if current_type == "boolean":
         return
@@ -73,6 +77,10 @@ def downgrade() -> None:
 
     # Check current column type
     current_type = get_column_type(conn, "tenant_settings", "auto_provision_users")
+
+    # If column does not exist, skip
+    if current_type is None:
+        return
 
     # If already integer, no conversion needed
     if current_type == "integer":
