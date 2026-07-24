@@ -53,6 +53,7 @@ URL_TOKEN_ALLOWED_PATHS = [
     "/api/remote/terminal/",  # Proxy token for terminal routes
     "/api/remote/vscode/",  # Browser token for VSCode routes
     "/api/workspace/",  # WebUI token for workspace routes
+    "/api/projects",  # WebUI token for project list (needed for new session dialog)
 ]
 
 
