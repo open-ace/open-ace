@@ -8315,57 +8315,60 @@ class AutonomousOrchestrator:
                 self._update_workflow({"status": "failed", "error_message": scope_error})
                 return
 
-            # Required-branch-update rules reject an immediate merge with the
-            # same generic "repository rule violations" error used for pending
-            # checks. Synchronize a stale PR explicitly before querying the new
-            # head's CI. This reuses the trusted clean/conflict merge path and
-            # returns without consuming a CI-repair attempt.
-            if (
-                branch_name
-                and pr_head_sha
-                and self._sync_failed_pr_with_main(gh, branch_name, pr_number, pr_head_sha)
-            ):
-                return
-
+            # Before syncing or repairing, check whether the PR is already
+            # mergeable despite non-required check failures
+            # (mergeable_state=unstable). If so, skip branch sync and CI
+            # repair — attempt merge directly. Syncing/repairing such PRs is
+            # wasteful and can fail (the agent can't fix dependency
+            # vulnerabilities like Security Audit Gate), causing the workflow
+            # to fail unnecessarily (#2034).
             try:
-                checks = gh.get_pr_checks(pr_number)
-            except Exception as e:
-                raise GitHubOpsError(
-                    f"Unable to query CI checks before merging PR #{pr_number}: {e}"
-                ) from e
-            failed = [c for c in checks if c.get("bucket") == "fail"]
-            if failed:
-                # Before consuming a CI repair attempt, check whether the PR
-                # is mergeable despite the failing checks.
-                # mergeable_state=unstable means only non-required checks are
-                # failing (e.g. Security Audit Gate) and the merge will succeed.
-                # Attempting CI repair on such checks often fails (the agent
-                # can't fix dependency vulnerabilities) and causes the workflow
-                # to fail unnecessarily (#2034).
-                try:
-                    pre_merge_state = gh.get_pr_merge_state(pr_number)
-                    pre_mergeable_state = str(pre_merge_state.get("mergeable_state") or "").lower()
-                except Exception as state_err:
-                    logger.warning(
-                        "PR #%s: failed to query merge state before CI repair: %s",
-                        pr_number,
-                        state_err,
-                    )
-                    pre_mergeable_state = ""
+                pre_merge_state = gh.get_pr_merge_state(pr_number)
+                pre_mergeable_state = str(pre_merge_state.get("mergeable_state") or "").lower()
+            except Exception as state_err:
+                logger.warning(
+                    "PR #%s: failed to query merge state before merge: %s",
+                    pr_number,
+                    state_err,
+                )
+                pre_mergeable_state = ""
 
-                if pre_mergeable_state != "unstable":
+            checks: list[dict] = []
+            if pre_mergeable_state != "unstable":
+                # PR is not mergeable-as-is; sync branch and check CI.
+                # Required-branch-update rules reject an immediate merge with
+                # the same generic "repository rule violations" error used for
+                # pending checks. Synchronize a stale PR explicitly before
+                # querying the new head's CI. This reuses the trusted
+                # clean/conflict merge path and returns without consuming a
+                # CI-repair attempt.
+                if (
+                    branch_name
+                    and pr_head_sha
+                    and self._sync_failed_pr_with_main(gh, branch_name, pr_number, pr_head_sha)
+                ):
+                    return
+
+                try:
+                    checks = gh.get_pr_checks(pr_number)
+                except Exception as e:
+                    raise GitHubOpsError(
+                        f"Unable to query CI checks before merging PR #{pr_number}: {e}"
+                    ) from e
+                failed = [c for c in checks if c.get("bucket") == "fail"]
+                if failed:
                     self._start_ci_repair_round(wf, pr_number, failed)
                     return
-                # mergeable_state == "unstable": fall through to merge attempt
+            else:
                 logger.info(
-                    "PR #%s: %d checks failed but mergeable_state=unstable; "
-                    "attempting merge before CI repair",
+                    "PR #%s: mergeable_state=unstable; skipping branch sync "
+                    "and CI repair, attempting merge directly",
                     pr_number,
-                    len(failed),
                 )
             # If CI is still running, defer this merge to the next scheduler
             # cycle instead of blocking (synchronous poll) or failing. The
             # scheduler re-enters _do_merge every ~10s.
+            # (checks is empty for unstable PRs — no deferral needed.)
             pending = [c for c in checks if c.get("bucket") == "pending"]
             if pending:
                 logger.info(

@@ -1101,6 +1101,10 @@ class TestOrchestratorMerge:
         mock_gh.merge_pr.assert_called_once_with(42, strategy="merge")
         # CI repair should NOT be started
         orch._start_ci_repair_round.assert_not_called()
+        # Branch sync should NOT be called — unstable PRs are mergeable as-is
+        orch._sync_failed_pr_with_main.assert_not_called()
+        # CI checks should NOT be queried — unstable PRs skip the check phase
+        mock_gh.get_pr_checks.assert_not_called()
 
     @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
     def test_merge_blocked_state_triggers_ci_repair(self, mock_gh_cls):
