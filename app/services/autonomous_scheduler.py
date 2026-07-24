@@ -141,6 +141,77 @@ class AutonomousScheduler:
         with self._orchestrator_lock:
             return self._running_orchestrators.get(workflow_id)
 
+    def clear_in_progress(self, workflow_id: str, wf: dict | None = None) -> None:
+        """Clear stale in-progress state for a workflow.
+
+        Called by the retry endpoint to ensure a retried workflow is not
+        permanently skipped by the scheduler due to a stale ``_in_progress_ids``
+        entry left behind by an orchestrator thread that exited without running
+        its ``finally`` cleanup (e.g. hard crash, OOM kill). Also removes any
+        orphaned orchestrator reference, clears git-conflict keys, and releases
+        the DB-level lock so the next scheduler cycle can acquire a fresh lock.
+
+        Args:
+            workflow_id: The workflow to clear.
+            wf: Optional workflow dict for computing conflict keys. When
+                provided, also clears ``_in_progress_workspaces``,
+                ``_in_progress_branches``, and ``_in_progress_batch_ids``.
+        """
+        # Remove any orphaned orchestrator reference. If the orchestrator is
+        # genuinely still running, this is a no-op because the caller (retry
+        # endpoint) already verified status == "failed" — a failed workflow has
+        # no live orchestrator.
+        with self._orchestrator_lock:
+            self._running_orchestrators.pop(workflow_id, None)
+
+        with self._in_progress_lock:
+            self._in_progress_ids.discard(workflow_id)
+            # Also clear git-conflict keys so _process_workflows doesn't skip
+            # the retried workflow on workspace/branch/batch collision. The
+            # workflow dict is available from the retry endpoint.
+            if wf:
+                workspace, branch = self._conflict_keys(wf)
+                if workspace:
+                    self._in_progress_workspaces.discard(workspace)
+                if branch:
+                    self._in_progress_branches.discard(branch)
+                batch_id = wf.get("batch_id")
+                if batch_id:
+                    self._in_progress_batch_ids.discard(batch_id)
+
+        # Release the DB-level lock so the next cycle can acquire it.
+        try:
+            from app.routes.autonomous import _get_repo
+
+            repo = _get_repo()
+            # Force-release regardless of owner — the previous owner is gone.
+            conn = repo.db.get_connection()
+            try:
+                cursor = conn.cursor()
+                import app.repositories.database as _db_mod
+
+                cursor.execute(
+                    _db_mod.adapt_sql(
+                        """
+                        UPDATE autonomous_workflows
+                        SET locked_at = NULL, locked_by = NULL
+                        WHERE workflow_id = ?
+                        """
+                    ),
+                    (workflow_id,),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        except Exception:
+            logger.warning(
+                "Failed to release DB lock for workflow %s during clear_in_progress",
+                workflow_id[:8],
+                exc_info=True,
+            )
+
+        logger.info("Cleared stale in-progress state for workflow %s", workflow_id[:8])
+
     @staticmethod
     def _conflict_keys(wf: dict) -> tuple[str, str]:
         """Git-conflict identity for a workflow: ``(workspace, branch)``.
