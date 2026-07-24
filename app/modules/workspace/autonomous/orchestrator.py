@@ -1697,10 +1697,11 @@ class AutonomousOrchestrator:
         worktree_path = wf.get("worktree_path", "")
 
         # An empty worktree_path is NOT the "dir gone, recreate it" case — it
-        # is set deliberately by merge cleanup (_resolve_merge_conflicts /
-        # _do_merge) when the worktree is removed to free the main repo for
-        # conflict resolution. Treating it as missing would fall back to
-        # project_path as canonical and try `git worktree add <main_repo>`,
+        # is set deliberately by _do_merge final cleanup when the PR is merged
+        # and the worktree is no longer needed. (_resolve_merge_conflicts
+        # restores worktree_path in its finally block, so it no longer leaves
+        # the field empty.) Treating an empty path as missing would fall back
+        # to project_path as canonical and try `git worktree add <main_repo>`,
         # which fails and turns a retried merge into a hard failure. Only a
         # non-empty path whose dir is gone represents external loss (#814).
         if strategy != "worktree" or not project_path or not worktree_path:
@@ -8484,8 +8485,8 @@ class AutonomousOrchestrator:
                 raise
 
         # Clean up branch/worktree. Re-read wf because _resolve_merge_conflicts
-        # may have cleared worktree_path (removed the original worktree to free
-        # the branch for the temp merge worktree); using the stale snapshot
+        # restores worktree_path in its finally block (so the restored value
+        # may differ from the caller's stale snapshot); using the stale snapshot
         # would retry the removal and fail, skipping branch deletion (#1107).
         wf = self.workflow
         branch_name = wf.get("branch_name", "")
@@ -8563,6 +8564,12 @@ class AutonomousOrchestrator:
         on scheduler re-entry). Now a throwaway worktree is created for the
         branch, all merge/resolve/push happens inside it, and it is removed in
         a ``finally`` — the main repo's index and HEAD are never touched.
+
+        The workflow's own worktree is temporarily removed to free the branch
+        for the temp worktree (git forbids the same branch in two worktrees),
+        then **restored** in the ``finally`` block. Without restoration,
+        subsequent phases (PR review push, CI repair re-entry) operate on the
+        main repo (HEAD=main) and fail with a branch mismatch.
         """
         wf = self.workflow
         project_path = wf.get("project_path", "")
@@ -8906,3 +8913,30 @@ class AutonomousOrchestrator:
                 logger.info("Removed temporary merge worktree at %s", temp_wt_path)
             except GitHubOpsError as e:
                 logger.warning("Failed to remove temp worktree %s: %s", temp_wt_path, e)
+
+            # Restore the workflow's original worktree so subsequent phases
+            # (PR review push, CI repair, _do_merge re-entry) operate on the
+            # isolated branch, not the main repo (HEAD=main). Without this,
+            # _do_pr_review's pre-push branch check fails with
+            # "expected auto-dev/xxx, actual main" and the workflow is stuck.
+            if worktree_path:
+                try:
+                    # If remove_worktree succeeded earlier, the dir is gone
+                    # and we recreate it. If it failed, the dir is still
+                    # there and add_worktree would error — check first.
+                    git_file = os.path.join(worktree_path, ".git")
+                    if not main_gh.path_exists_as_user(git_file, file_only=True):
+                        main_gh.add_worktree(worktree_path, branch_name)
+                    # Always restore the DB entry — it was cleared at the top
+                    # of this method regardless of whether remove_worktree
+                    # succeeded.
+                    self._update_workflow({"worktree_path": worktree_path})
+                    self._gh = GitHubOps(worktree_path, system_account=system_account)
+                    logger.info("Restored workflow worktree at %s", worktree_path)
+                except Exception as e:
+                    logger.error(
+                        "Failed to restore worktree %s after merge resolution: %s",
+                        worktree_path,
+                        e,
+                        exc_info=True,
+                    )
