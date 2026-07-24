@@ -837,6 +837,15 @@ _TRANSIENT_ORCHESTRATOR_KEYWORDS = [
     "unable to access",
     "rpc failed",
     "early eof",
+    # --force-with-lease rejects the push when the remote auto-dev tip moved
+    # between git's read of the remote-tracking ref and the actual push (a
+    # concurrent push, or a freshly-fetched ref). The worktree is unchanged, so
+    # a Layer-2 retry that re-reads the remote ref succeeds; treating it as
+    # non-transient strands the workflow on a recoverable race.
+    "stale info",
+    "fetch first",
+    "non-fast-forward",
+    "[rejected]",
 ]
 
 
@@ -2207,6 +2216,14 @@ class AutonomousOrchestrator:
         if not pr_head_sha:
             return "Pre-merge change scope could not be verified: missing PR head"
         try:
+            # The PR head SHA comes from the GitHub API and may not be present
+            # in the local object DB (the worktree can be torn down between
+            # rounds). Fetch the PR branch so merge-base has both objects.
+            if not self._ensure_pr_head_local(gh, pr_head_sha, wf.get("branch_name", "")):
+                return (
+                    "Pre-merge change scope could not be verified: "
+                    "PR head not present in local object DB"
+                )
             gh._run_git(["fetch", "origin", "main"])
             fetched_main_head = gh.resolve_commit("FETCH_HEAD")
             merge_base_result = gh._run_git(
@@ -3482,7 +3499,7 @@ class AutonomousOrchestrator:
         integrations patch it, but final merge now uses the same synchronization
         gate before asking GitHub to merge.
         """
-        contains_main = self._branch_contains_main(gh, pr_head_sha)
+        contains_main = self._branch_contains_main(gh, pr_head_sha, branch_name)
         if contains_main is None:
             raise GitHubOpsError("Unable to verify whether the failed PR contains current main")
         if contains_main:
@@ -3494,16 +3511,45 @@ class AutonomousOrchestrator:
         self._resolve_merge_conflicts(gh, branch_name, pr_number)
         return True
 
-    def _branch_contains_main(self, gh: "GitHubOps", pr_head_sha: str) -> bool | None:
+    def _branch_contains_main(
+        self, gh: "GitHubOps", pr_head_sha: str, branch_name: str = ""
+    ) -> bool | None:
         """Whether the PR branch already contains current main.
 
         Returns True if the PR head has main as an ancestor (nothing to merge),
         False if the branch is behind main, or None when the probe is
         indeterminate and the caller must fail closed.
         """
+        if not self._ensure_pr_head_local(gh, pr_head_sha, branch_name):
+            return None
         gh._run_git(["fetch", "origin", "main"])
         main_head = gh.resolve_commit("FETCH_HEAD")
         return self._ancestor_check(gh, main_head, pr_head_sha)
+
+    def _ensure_pr_head_local(
+        self, gh: "GitHubOps", pr_head_sha: str, branch_name: str = ""
+    ) -> bool:
+        """Ensure ``pr_head_sha`` is present in the local object DB.
+
+        ``get_pr_head_sha`` queries the GitHub API for the SHA without fetching
+        the PR branch, so the object may be absent after the worktree is torn
+        down (or when the head is not reachable from main). A subsequent
+        ``git merge-base`` then fails with "no commit" and fails the workflow.
+        Fetch the branch first so the merge-base probe has both objects.
+        Returns False if the object still cannot be resolved after fetching.
+        """
+        if (
+            pr_head_sha
+            and gh._run_git(["cat-file", "-e", pr_head_sha], check=False).returncode == 0
+        ):
+            return True
+        ref = branch_name or self.workflow.get("branch_name", "")
+        if ref:
+            gh._run_git(["fetch", "origin", ref])
+        return bool(
+            pr_head_sha
+            and gh._run_git(["cat-file", "-e", pr_head_sha], check=False).returncode == 0
+        )
 
     def _start_ci_repair_round(self, wf: dict, pr_number: int, failed_checks: list[dict]) -> None:
         """Repair merge-phase CI failures in-place on the existing PR branch."""
@@ -6102,7 +6148,7 @@ class AutonomousOrchestrator:
         dev_prompt += self._get_ci_repair_prompt(wf)
         dev_prompt += self._get_user_feedback_prompt(wf)
 
-        result = self._run_agent(
+        result = self._run_agent_with_context_recovery(
             wf=wf,
             workflow_id=self._workflow_id,
             cli_tool=wf.get("cli_tool", "claude-code"),
@@ -8364,7 +8410,7 @@ class AutonomousOrchestrator:
                     and not is_conflict_rejection
                     and mergeable is not False
                     and pr_head_sha
-                    and self._branch_contains_main(gh, pr_head_sha) is True
+                    and self._branch_contains_main(gh, pr_head_sha, branch_name) is True
                 ):
                     logger.info(
                         "PR #%s mergeable_state=dirty is stale (branch has main); "
@@ -8483,6 +8529,31 @@ class AutonomousOrchestrator:
         )
         self._emit("phase_change", {"phase": "completed"})
 
+    def _sync_worktree_to_pr_remote_head(self, wt_gh: "GitHubOps", branch_name: str) -> None:
+        """Sync a merge worktree to the PR branch's authoritative remote head.
+
+        ``add_worktree`` checks out the *local* ``auto-dev/*`` ref, which can
+        drift ahead of the remote tip: a prior merge/repair attempt may have
+        advanced it locally (e.g. a merge commit that already contains main)
+        without ever pushing. A later cycle then re-checks out that stale local
+        branch, the merge into main becomes a no-op ("Already up to date"), and
+        the resolver fails with "made no commit" even though the remote PR head
+        is still behind main and genuinely needs the sync (workflow 1895).
+        Fetch the remote branch and reset the local ref/HEAD to it so the merge
+        starts from the real PR state. Failure is non-fatal: a fetch/reset error
+        leaves the worktree at the local ref, preserving prior behavior.
+        """
+        try:
+            wt_gh._run_git(["fetch", "origin", branch_name])
+            remote_head = wt_gh.resolve_commit("FETCH_HEAD")
+            wt_gh._run_git(["reset", "--hard", remote_head])
+        except Exception as sync_exc:
+            logger.warning(
+                "Could not sync merge worktree to remote head of %s: %s",
+                branch_name,
+                sync_exc,
+            )
+
     def _resolve_merge_conflicts(self, gh: GitHubOps, branch_name: str, pr_number: int):
         """Resolve merge conflicts in an isolated worktree, push, and merge the PR.
 
@@ -8531,6 +8602,9 @@ class AutonomousOrchestrator:
         # All subsequent git ops run inside the temp worktree.
         wt_gh = GitHubOps(temp_wt_path, system_account=system_account)
         try:
+            # Sync the checked-out branch to the PR's authoritative remote head
+            # before merging main (see _sync_worktree_to_pr_remote_head).
+            self._sync_worktree_to_pr_remote_head(wt_gh, branch_name)
             original_pr_head = wt_gh.get_current_commit()
             conflict_ms_id = ""
             milestone_result = {}

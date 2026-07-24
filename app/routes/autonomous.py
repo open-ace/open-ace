@@ -1164,6 +1164,18 @@ def retry_workflow(workflow_id):
     phase = workflow.get("current_phase", "preparation")
     status = PHASE_TO_STATUS.get(phase, "pending")
 
+    # Clear stale scheduler in-progress state so the scheduler doesn't skip
+    # this workflow on every cycle. If the previous orchestrator thread exited
+    # without running its finally cleanup (e.g. OOM kill, hard crash), the
+    # workflow_id would be permanently stuck in _in_progress_ids, making retry
+    # ineffective — the DB status changes but the scheduler never advances.
+    try:
+        from app.services.autonomous_scheduler import AutonomousScheduler
+
+        AutonomousScheduler.instance().clear_in_progress(workflow_id, wf=workflow)
+    except Exception as e:
+        logger.warning("Failed to clear in-progress state for %s: %s", workflow_id[:8], e)
+
     _get_repo().update_workflow(
         workflow_id,
         {

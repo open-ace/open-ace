@@ -68,6 +68,9 @@ def _make_orchestrator(wf):
     o._write_phase_usage = MagicMock()
     o._validate_pre_merge_change_scope = MagicMock(return_value="")
     o._sync_failed_pr_with_main = MagicMock(return_value=False)
+    # The remote-head sync runs real git ops; stub it so tests model only the
+    # merge/resolve sequence (the sync itself is unit-tested separately).
+    o._sync_worktree_to_pr_remote_head = MagicMock()
     return o, mock_repo
 
 
@@ -333,6 +336,7 @@ class TestDoMergeDeferredRetry:
     def test_uses_graph_merge_base_and_backfills_stale_scope_base(self):
         wf = _make_workflow(base_commit_sha="old-branch-base")
         o, _ = _make_orchestrator(wf)
+        o._ensure_pr_head_local = MagicMock(return_value=True)
         gh = MagicMock()
         gh.resolve_commit.return_value = "fetched-main-head"
         gh._run_git.side_effect = [
@@ -357,6 +361,7 @@ class TestDoMergeDeferredRetry:
     def test_effective_pr_delta_still_enforces_scope_cap(self):
         wf = _make_workflow(base_commit_sha="old-branch-base")
         o, _ = _make_orchestrator(wf)
+        o._ensure_pr_head_local = MagicMock(return_value=True)
         gh = MagicMock()
         gh.resolve_commit.return_value = "fetched-main-head"
         gh._run_git.side_effect = [
@@ -389,6 +394,30 @@ class TestDoMergeDeferredRetry:
         gh.get_changed_files.assert_not_called()
         o._update_workflow.assert_not_called()
 
+    def test_pre_merge_scope_fails_when_pr_head_missing_locally(self):
+        """A PR head absent from the local object DB must fail closed, not crash.
+
+        Reproduces issue #1895 retry: after the worktree is torn down the PR
+        head SHA (from the GitHub API) is not in the local object DB, so
+        ``git merge-base`` failed. ``_ensure_pr_head_local`` now fetches the PR
+        branch; if the object still cannot be resolved the scope check returns a
+        clear error instead of "git merge-base returned no commit".
+        """
+        wf = _make_workflow(base_commit_sha="old-branch-base")
+        o, _ = _make_orchestrator(wf)
+        gh = MagicMock()
+        gh.resolve_commit.return_value = "fetched-main-head"
+        # PR head object never resolves locally even after a branch fetch.
+        gh._run_git.return_value = MagicMock(returncode=1, stdout="", stderr="")
+
+        error = AutonomousOrchestrator._validate_pre_merge_change_scope(
+            o, gh, wf, "resolved-pr-head"
+        )
+
+        assert "not present in local object DB" in error
+        gh.get_changed_files.assert_not_called()
+        o._update_workflow.assert_not_called()
+
     def test_same_cycle_ci_repair_receives_refreshed_scope_base(self):
         wf = _make_workflow(base_commit_sha="old-branch-base")
         o, _ = _make_orchestrator(wf)
@@ -400,6 +429,7 @@ class TestDoMergeDeferredRetry:
         o._start_ci_repair_round = MagicMock()
         gh = MagicMock()
         o._gh = gh
+        o._ensure_pr_head_local = MagicMock(return_value=True)
         gh.get_pr_head_sha.return_value = "resolved-pr-head"
         gh.resolve_commit.return_value = "fetched-main-head"
         gh._run_git.side_effect = [
@@ -1827,3 +1857,44 @@ class TestAddWorktreeExistingBranch:
         o._branch_contains_main.assert_called_once()
         pause_update = o._update_workflow.call_args.args[0]
         assert pause_update["status"] == "paused"
+
+
+class TestSyncWorktreeToPrRemoteHead:
+    """``_sync_worktree_to_pr_remote_head`` resets the local branch to the remote
+    tip before merging main (workflow 1895: stale local branch ahead of remote)."""
+
+    def test_fetches_branch_and_resets_hard_to_remote_head(self):
+        from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+        o, _ = _make_orchestrator(_make_workflow())
+        # _make_orchestrator stubs this out; restore the real implementation.
+        o._sync_worktree_to_pr_remote_head = (
+            AutonomousOrchestrator._sync_worktree_to_pr_remote_head.__get__(o)
+        )
+        wt_gh = MagicMock()
+        wt_gh.resolve_commit.return_value = "remote-tip-sha"
+
+        o._sync_worktree_to_pr_remote_head(wt_gh, "auto-dev/3c5aefb9")
+
+        # fetch origin <branch>, then reset --hard <remote_head>
+        assert wt_gh._run_git.call_args_list == [
+            call(["fetch", "origin", "auto-dev/3c5aefb9"]),
+            call(["reset", "--hard", "remote-tip-sha"]),
+        ]
+        wt_gh.resolve_commit.assert_called_once_with("FETCH_HEAD")
+
+    def test_sync_failure_is_non_fatal_and_warns(self):
+        """A fetch/reset failure must not raise; it falls back to the local ref."""
+        from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+        o, _ = _make_orchestrator(_make_workflow())
+        o._sync_worktree_to_pr_remote_head = (
+            AutonomousOrchestrator._sync_worktree_to_pr_remote_head.__get__(o)
+        )
+        wt_gh = MagicMock()
+        wt_gh._run_git.side_effect = GitHubOpsError("fetch failed: network down")
+
+        # Should not raise.
+        o._sync_worktree_to_pr_remote_head(wt_gh, "auto-dev/3c5aefb9")
+
+        wt_gh._run_git.assert_called_once_with(["fetch", "origin", "auto-dev/3c5aefb9"])

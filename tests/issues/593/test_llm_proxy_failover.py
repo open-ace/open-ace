@@ -248,6 +248,77 @@ class TestLLMProxyFailover:
     @patch(_HTTP_PATH)
     @patch(_QUOTA_PATH)
     @patch(_PROXY_PATH)
+    def test_failover_on_400_model_not_available(
+        self, mock_get_proxy, mock_quota_cls, mock_http_req, app
+    ):
+        """First key returns 400 'Model not available for this API key',
+        second key returns 200 → succeeds via failover."""
+        mock_proxy = MagicMock()
+        mock_proxy.validate_proxy_token.return_value = _mock_proxy_token()
+        mock_proxy.resolve_api_key_for_scope.side_effect = [
+            ("sk-key1", "https://mintcn.macaron.xin/v1", 21, None, None),
+            ("sk-key2", "https://coding.dashscope.aliyuncs.com/v1", 18, None, None),
+            None,
+        ]
+        mock_get_proxy.return_value = mock_proxy
+        mock_quota_cls.return_value = _make_quota_ok()
+
+        mock_http_req.side_effect = [
+            _mock_upstream_response(
+                400,
+                b'{"error":{"message":"Model glm-5 is not available for this API key",'
+                b'"type":"invalid_request_error"}}',
+            ),
+            _mock_upstream_response(200),
+        ]
+
+        client = app.test_client()
+        resp = client.post(
+            "/api/remote/llm-proxy",
+            json={"model": "glm-5", "messages": [{"role": "user", "content": "hi"}]},
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        assert resp.status_code == 200
+        calls = mock_proxy.resolve_api_key_for_scope.call_args_list
+        assert len(calls) == 2
+        second_exclude = calls[1].kwargs.get("exclude_key_ids", set())
+        assert 21 in second_exclude
+
+    @patch(_HTTP_PATH)
+    @patch(_QUOTA_PATH)
+    @patch(_PROXY_PATH)
+    def test_no_failover_on_generic_400(self, mock_get_proxy, mock_quota_cls, mock_http_req, app):
+        """A generic 400 (not 'Model not available') should NOT trigger failover."""
+        mock_proxy = MagicMock()
+        mock_proxy.validate_proxy_token.return_value = _mock_proxy_token()
+        mock_proxy.resolve_api_key_for_scope.return_value = (
+            "sk-key1",
+            "https://api.openai.com/v1",
+            1,
+            None,
+            None,
+        )
+        mock_get_proxy.return_value = mock_proxy
+        mock_quota_cls.return_value = _make_quota_ok()
+
+        mock_http_req.return_value = _mock_upstream_response(
+            400, b'{"error":{"message":"invalid request body","type":"invalid_request_error"}}'
+        )
+
+        client = app.test_client()
+        resp = client.post(
+            "/api/remote/llm-proxy",
+            json={"model": "gpt-4", "messages": [{"role": "user", "content": "hi"}]},
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        assert resp.status_code == 400
+        assert mock_proxy.resolve_api_key_for_scope.call_count == 1
+
+    @patch(_HTTP_PATH)
+    @patch(_QUOTA_PATH)
+    @patch(_PROXY_PATH)
     def test_ha_pool_failover_is_limited_to_selected_model_keys(
         self, mock_get_proxy, mock_quota_cls, mock_http_req, app
     ):

@@ -536,6 +536,40 @@ def test_isolated_wrapper_normalizes_recovered_acls_before_git_baseline():
     )
 
 
+def test_stale_signature_registry_skipped_for_different_project():
+    """A per-user signature registry left by an interrupted run on a different
+    project (e.g. a throwaway merge-<wf> worktree cleaned up by the
+    orchestrator) must not trigger OPENACE_REPO_INTEGRITY_VIOLATION for an
+    unrelated subsequent run.
+
+    The registry is keyed by the shared isolation account (uid), not the
+    project path, so a stale entry from a different project is discarded
+    instead of being compared against the current project's .git.
+    """
+    from pathlib import Path
+
+    wrapper = Path("scripts/openace-run-as.sh").read_text(encoding="utf-8")
+
+    previous_block = (
+        'if [ -n "$previous_signature_project" ] && [ -n "$previous_git_signature" ]; then'
+    )
+    same_project_guard = '"$previous_signature_project" = "$project_dir"'
+    interrupted_violation = (
+        "OPENACE_REPO_INTEGRITY_VIOLATION: .git entry changed during interrupted agent execution"
+    )
+
+    assert previous_block in wrapper
+    block_start = wrapper.index(previous_block)
+
+    # The same-project guard must appear inside the previous-signature block…
+    assert same_project_guard in wrapper[block_start:]
+    guard_pos = wrapper.index(same_project_guard, block_start)
+    # …and it must come before the interrupted-execution violation message,
+    # so a stale registry from a *different* project is discarded without
+    # triggering the violation.
+    assert guard_pos < wrapper.index(interrupted_violation, guard_pos)
+
+
 def test_git_entry_acl_restore_preserves_exact_integrity(tmp_path):
     """Only launcher-shaped mask churn is restored; real changes fail."""
     if sys.platform != "linux":

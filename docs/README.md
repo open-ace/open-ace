@@ -14,6 +14,7 @@ Documentation files are in the [en/](en/) directory.
 |----------|-------------|
 | [**INTRO**](en/INTRO.md) | Product introduction, core capabilities, and quick start guide |
 | [**ARCHITECTURE**](en/ARCHITECTURE.md) | System architecture overview — backend, frontend, and remote agent layers |
+| [**AUTONOMOUS-DEVELOPMENT**](en/AUTONOMOUS-DEVELOPMENT.md) | AI autonomous development — lifecycle, three-session design, CI repair, isolation, and maintenance |
 | [**API**](en/API.md) | Complete REST API reference for all endpoints |
 | [**DATABASE-SCHEMA**](en/DATABASE-SCHEMA.md) | Database tables, columns, foreign keys, and indexes |
 | [**DATABASE-CONVENTIONS**](en/DATABASE-CONVENTIONS.md) | Naming conventions for database fields and migrations |
@@ -38,6 +39,7 @@ Documentation files are in the [en/](en/) directory.
 | Role | Recommended Reading |
 |------|---------------------|
 | New to Open ACE | INTRO → ARCHITECTURE → DEVELOPMENT |
+| Autonomous development maintainer | AUTONOMOUS-DEVELOPMENT → ARCHITECTURE → DEVELOPMENT |
 | Frontend developer | FRONTEND-GUIDE → DEVELOPMENT |
 | DevOps / Deployment | DEPLOYMENT → KUBERNETES → NGINX |
 | API integrator | API → PERMISSION-MODEL → CONCEPTS |
@@ -56,6 +58,7 @@ Documentation files are in the [en/](en/) directory.
 |------|------|
 | [**INTRO**](cn/INTRO.md) | 产品介绍、核心功能和快速入门指南 |
 | [**ARCHITECTURE**](cn/ARCHITECTURE.md) | 系统架构总览 — 后端、前端和远程代理层 |
+| [**AUTONOMOUS-DEVELOPMENT**](cn/AUTONOMOUS-DEVELOPMENT.md) | AI 自主开发 — 生命周期、三会话设计、CI 修复、隔离执行和维护指南 |
 | [**API**](cn/API.md) | 完整的 REST API 端点参考文档 |
 | [**DATABASE-SCHEMA**](cn/DATABASE-SCHEMA.md) | 数据库表、列、外键和索引 |
 | [**DATABASE-CONVENTIONS**](cn/DATABASE-CONVENTIONS.md) | 数据库字段和迁移的命名规范 |
@@ -80,6 +83,7 @@ Documentation files are in the [en/](en/) directory.
 | 角色 | 推荐阅读顺序 |
 |------|--------------|
 | 初次了解 Open ACE | INTRO → ARCHITECTURE → DEVELOPMENT |
+| 自主开发维护者 | AUTONOMOUS-DEVELOPMENT → ARCHITECTURE → DEVELOPMENT |
 | 前端开发者 | FRONTEND-GUIDE → DEVELOPMENT |
 | 运维 / 部署 | DEPLOYMENT → KUBERNETES → NGINX |
 | API 集成 | API → PERMISSION-MODEL → CONCEPTS |
@@ -93,8 +97,8 @@ Documentation files are in the [en/](en/) directory.
 ```
 docs/
 ├── README.md          ← You are here / 你在这里
-├── en/                # English documentation (17 files)
-├── cn/                # 中文文档（17 个文件）
+├── en/                # English documentation
+├── cn/                # 中文文档
 ├── marketing/         # Launch and outreach materials / 发布传播材料
 └── images/            # Documentation images / 文档图片
 ```

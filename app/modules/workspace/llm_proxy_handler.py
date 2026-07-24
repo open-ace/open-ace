@@ -1313,6 +1313,21 @@ def handle_llm_proxy_request(
                         429,
                     )
 
+                # A 400 "Model not available for this API key" means the
+                # current key's provider doesn't carry the requested model,
+                # but another key/provider in the pool might. Failover so the
+                # agent isn't blocked by a key that simply lacks the model.
+                if (
+                    resp.status_code == 400
+                    and "not available for this api key" in error_text.lower()
+                ):
+                    logger.warning(
+                        "Model not available for key_id=%s; failing over to next key",
+                        key_id,
+                    )
+                    exclude_key_ids.add(key_id)
+                    continue
+
                 if resp.status_code in (401, 403, 429):
                     exclude_key_ids.add(key_id)
                     continue
