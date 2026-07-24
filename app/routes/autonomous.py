@@ -1172,7 +1172,7 @@ def retry_workflow(workflow_id):
     try:
         from app.services.autonomous_scheduler import AutonomousScheduler
 
-        AutonomousScheduler.instance().clear_in_progress(workflow_id)
+        AutonomousScheduler.instance().clear_in_progress(workflow_id, wf=workflow)
     except Exception as e:
         logger.warning("Failed to clear in-progress state for %s: %s", workflow_id[:8], e)
 

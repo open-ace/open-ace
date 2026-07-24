@@ -32,6 +32,29 @@ class TestRetryClearsInProgress:
         sched._running_orchestrators[wf_id] = MagicMock()
         return sched, wf_id
 
+    @pytest.fixture
+    def scheduler_with_wf(self):
+        """Create scheduler with stuck state and a workflow dict for conflict keys."""
+        from app.services.autonomous_scheduler import AutonomousScheduler
+
+        sched = AutonomousScheduler()
+        wf_id = "stuck-workflow-456"
+        wf = {
+            "workflow_id": wf_id,
+            "worktree_path": "/home/repo/.worktrees/stuck-456",
+            "project_path": "/home/repo",
+            "branch_name": "auto-dev/stuck-456",
+            "batch_id": "batch-42",
+            "current_phase": "development",
+        }
+        sched._in_progress_ids.add(wf_id)
+        workspace, branch = sched._conflict_keys(wf)
+        sched._in_progress_workspaces.add(workspace)
+        sched._in_progress_branches.add(branch)
+        sched._in_progress_batch_ids.add("batch-42")
+        sched._running_orchestrators[wf_id] = MagicMock()
+        return sched, wf_id, wf
+
     def test_clear_in_progress_removes_from_in_progress_ids(self, scheduler):
         """clear_in_progress must remove workflow_id from _in_progress_ids."""
         sched, wf_id = scheduler
@@ -53,6 +76,30 @@ class TestRetryClearsInProgress:
             sched.clear_in_progress(wf_id)
 
         assert wf_id not in sched._running_orchestrators
+
+    def test_clear_in_progress_clears_conflict_keys_with_wf(self, scheduler_with_wf):
+        """clear_in_progress must clear workspace/branch/batch keys when wf is provided."""
+        sched, wf_id, wf = scheduler_with_wf
+        workspace, branch = sched._conflict_keys(wf)
+        assert workspace in sched._in_progress_workspaces
+        assert branch in sched._in_progress_branches
+        assert "batch-42" in sched._in_progress_batch_ids
+
+        with patch("app.routes.autonomous._get_repo"):
+            sched.clear_in_progress(wf_id, wf=wf)
+
+        assert workspace not in sched._in_progress_workspaces
+        assert branch not in sched._in_progress_branches
+        assert "batch-42" not in sched._in_progress_batch_ids
+
+    def test_clear_in_progress_skips_conflict_keys_without_wf(self, scheduler):
+        """clear_in_progress without wf should still clear _in_progress_ids."""
+        sched, wf_id = scheduler
+
+        with patch("app.routes.autonomous._get_repo"):
+            sched.clear_in_progress(wf_id)
+
+        assert wf_id not in sched._in_progress_ids
 
     def test_clear_in_progress_releases_db_lock(self, scheduler):
         """clear_in_progress must force-release the DB lock regardless of owner."""
@@ -133,7 +180,10 @@ class TestRetryClearsInProgress:
             with app.test_request_context():
                 retry_workflow(wf_id)
 
-            # Verify clear_in_progress was called
-            mock_sched.clear_in_progress.assert_called_once_with(wf_id)
+            # Verify clear_in_progress was called with workflow dict
+            mock_sched.clear_in_progress.assert_called_once()
+            call_args = mock_sched.clear_in_progress.call_args
+            assert call_args[0][0] == wf_id  # workflow_id positional
+            assert call_args[1]["wf"]["workflow_id"] == wf_id  # wf kwarg
             # Verify DB was still updated
             mock_repo.update_workflow.assert_called_once()
