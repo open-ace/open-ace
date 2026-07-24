@@ -238,18 +238,23 @@ if [ "$isolated" = true ]; then
     fi
     cleanup_isolated
     if [ -n "$previous_signature_project" ] && [ -n "$previous_git_signature" ]; then
-        # The signature registry is keyed per-agent-user, not per-project.
-        # When the previous project directory no longer exists, it was removed
-        # by a trusted component (the orchestrator deletes temporary merge
-        # worktrees after each phase). The credentialless agent cannot delete
-        # the project directory or its .git entry, so a missing directory is
-        # not a tamper signal — discard the stale registry and proceed.
-        if [ ! -e "$previous_signature_project" ]; then
-            rm -f "$signature_registry"
-        elif ! verify_and_restore_git_entry \
-            "$previous_signature_project" \
-            "$previous_git_signature" \
-            "$previous_git_acl_snapshot"; then
+        # The signature registry is keyed by the shared isolation account
+        # (uid), not the project path. Any workflow using this account that is
+        # interrupted leaves a registry behind; the next (possibly different)
+        # workflow would then compare its own .git against the stale entry and
+        # fail with a false integrity violation — most commonly because the
+        # interrupted run's worktree (e.g. a throwaway merge-<wf> worktree) was
+        # already cleaned up, so its .git is now "missing". Only verify when
+        # the previous run operated on the same project as this one; otherwise
+        # the registry belongs to a different, already-finalized run and is
+        # discarded.
+        if [ "$previous_signature_project" = "$project_dir" ] && \
+            verify_and_restore_git_entry \
+                "$previous_signature_project" \
+                "$previous_git_signature" \
+                "$previous_git_acl_snapshot"; then
+            : # integrity verified for the same project
+        elif [ "$previous_signature_project" = "$project_dir" ]; then
             echo "OPENACE_REPO_INTEGRITY_VIOLATION: .git entry changed during interrupted agent execution" >&2
             exit 68
         else
