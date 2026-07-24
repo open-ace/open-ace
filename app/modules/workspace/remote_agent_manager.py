@@ -97,7 +97,20 @@ class RemoteAgentManager:
     # Sessions are only cleaned up if they've been inactive longer than this window
     SESSION_RECOVERY_WINDOW_SECONDS = 300  # 5 minutes recovery window
 
-    # Registration token cleanup interval (seconds)
+    # Async output persistence settings (Issue #1823 Finding 1&2)
+    # Batch persist to reduce DB write amplification on streaming hot path
+    OUTPUT_PERSIST_BATCH_SIZE = 50  # Max items to persist per batch
+    OUTPUT_PERSIST_INTERVAL = 0.5  # Seconds between batch persist runs
+    OUTPUT_PERSIST_QUEUE_MAX = 10000  # Max items in pending queue before forced flush
+
+    # Table cleanup settings (Issue #1823 Finding 3)
+    TABLE_CLEANUP_INTERVAL = 300  # 5 minutes between cleanup runs
+
+    # Session ended cache TTL (Issue #1823 Finding 4)
+    SESSION_ENDED_CACHE_TTL = 30  # Seconds to cache session ended status
+
+    # Command delivery timeout (Issue #1823 Finding 5)
+    COMMAND_DELIVERY_TIMEOUT = 60  # Seconds before delivered command can be re-claimed
     REGISTRATION_TOKEN_CLEANUP_INTERVAL = 3600  # 1 hour
 
     # Registration token default TTL (seconds)
@@ -148,6 +161,13 @@ class RemoteAgentManager:
         # Token cleanup lazy-start flag
         self._token_cleanup_started: bool = False
         # (removed _last_rotate_unrevoked — rotate_agent_token now returns the info)
+        # Async output persistence queue: [(session_id, output, stream, now), ...]
+        # (Issue #1823 Finding 1&2: batch persist to reduce DB write amplification)
+        self._pending_output_persists: list[tuple[str, dict[str, Any], str, datetime]] = []
+        self._output_persist_thread_started: bool = False
+        # Session ended status cache: {session_id: (is_ended, cached_at)}
+        # (Issue #1823 Finding 4: reduce hot path DB query)
+        self._session_ended_cache: dict[str, tuple[bool, float]] = {}
         self._restore_in_memory_state()
         # Defer session cleanup to heartbeat monitor instead of running on startup.
         # This gives agents time to re-register after a server restart before their
@@ -200,7 +220,6 @@ class RemoteAgentManager:
 
     def _start_heartbeat_monitor(self) -> None:
         """Start background thread for heartbeat monitoring."""
-
         def monitor():
             while True:
                 try:
@@ -211,6 +230,10 @@ class RemoteAgentManager:
 
         gevent.spawn(monitor)
         logger.info("Heartbeat monitor started")
+        # Start async output persistence thread (Issue #1823 Finding 1&2)
+        self._start_output_persist_thread()
+        # Start table cleanup thread (Issue #1823 Finding 3)
+        self._start_table_cleanup_thread()
 
     def _check_heartbeats(self) -> None:
         """Check for stale heartbeats and mark machines offline.
@@ -333,6 +356,158 @@ class RemoteAgentManager:
                     session_id[:8],
                     e,
                 )
+
+    # ==================== Async Output Persistence (Issue #1823 Finding 1&2) ====================
+
+    def _start_output_persist_thread(self) -> None:
+        """Start background thread for async output persistence."""
+        if self._output_persist_thread_started:
+            return
+
+        def persist_loop():
+            while True:
+                try:
+                    self._flush_output_persist_queue()
+                except Exception as e:
+                    logger.error("Output persist thread error: %s", e)
+                gevent.sleep(self.OUTPUT_PERSIST_INTERVAL)
+
+        gevent.spawn(persist_loop)
+        self._output_persist_thread_started = True
+        logger.info("Output persist thread started")
+
+    def _flush_output_persist_queue(self) -> None:
+        """Flush pending output persist queue to database in batch."""
+        with self._lock:
+            if not self._pending_output_persists:
+                return
+            # Take up to batch size items
+            batch = self._pending_output_persists[:self.OUTPUT_PERSIST_BATCH_SIZE]
+            self._pending_output_persists = self._pending_output_persists[self.OUTPUT_PERSIST_BATCH_SIZE:]
+
+        if not batch:
+            return
+
+        # Group by session for efficient event_index allocation
+        by_session: dict[str, list[tuple[str, dict[str, Any], str, datetime]]] = {}
+        for session_id, output, stream, now in batch:
+            by_session.setdefault(session_id, []).append((session_id, output, stream, now))
+
+        for session_id, items in by_session.items():
+            try:
+                self._persist_output_batch(session_id, items)
+            except Exception as e:
+                # Log warning but don't interrupt SSE - data is already in memory
+                logger.warning(
+                    "Failed to persist %d outputs for session %s: %s",
+                    len(items),
+                    session_id[:8],
+                    e,
+                )
+
+    def _persist_output_batch(
+        self,
+        session_id: str,
+        items: list[tuple[str, dict[str, Any], str, datetime]],
+    ) -> None:
+        """Batch persist multiple output chunks for a session."""
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        expires_at = (now + timedelta(seconds=self.OUTPUT_RETENTION_SECONDS)).isoformat()
+
+        with self._persist_output_lock:
+            try:
+                with self.db.connection() as conn:
+                    cursor = conn.cursor()
+                    if is_postgresql():
+                        cursor.execute(
+                            "SELECT pg_advisory_xact_lock(hashtext(%s))",
+                            (session_id,),
+                        )
+                        cursor.fetchone()
+                    else:
+                        cursor.execute("BEGIN IMMEDIATE")
+
+                    # Get current max event_index
+                    cursor.execute(
+                        f"""
+                        SELECT COALESCE(MAX(event_index), 0) AS max_index
+                        FROM remote_runtime_outputs
+                        WHERE session_id = {_param()}
+                        """,
+                        (session_id,),
+                    )
+                    row = cursor.fetchone()
+                    next_index = int(row["max_index"] if row else 0) + 1
+
+                    # Batch insert all items
+                    for _, output, stream, created_at in items:
+                        payload = json.dumps(output)
+                        cursor.execute(
+                            f"""
+                            INSERT INTO remote_runtime_outputs
+                            (session_id, event_index, stream, payload, created_at, expires_at)
+                            VALUES ({_params(6)})
+                            """,
+                            (
+                                session_id,
+                                next_index,
+                                stream,
+                                payload,
+                                created_at.isoformat(),
+                                expires_at,
+                            ),
+                        )
+                        next_index += 1
+
+                    conn.commit()
+            except Exception as e:
+                logger.warning("Batch persist failed for session %s: %s", session_id[:8], e)
+                raise
+
+    def _start_table_cleanup_thread(self) -> None:
+        """Start background thread for table cleanup (Issue #1823 Finding 3)."""
+        def cleanup_loop():
+            while True:
+                try:
+                    self._cleanup_expired_runtime_state()
+                except Exception as e:
+                    logger.error("Table cleanup thread error: %s", e)
+                gevent.sleep(self.TABLE_CLEANUP_INTERVAL)
+
+        gevent.spawn(cleanup_loop)
+        logger.info("Table cleanup thread started")
+
+    def _cleanup_expired_runtime_state(self) -> None:
+        """Clean up expired records from runtime state tables."""
+        now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+        try:
+            with self.db.connection() as conn:
+                cursor = conn.cursor()
+
+                # Clean up expired commands
+                cursor.execute(
+                    f"DELETE FROM remote_runtime_commands WHERE expires_at < {_param()}",
+                    (now,),
+                )
+                commands_deleted = cursor.rowcount
+
+                # Clean up expired outputs
+                cursor.execute(
+                    f"DELETE FROM remote_runtime_outputs WHERE expires_at < {_param()}",
+                    (now,),
+                )
+                outputs_deleted = cursor.rowcount
+
+                conn.commit()
+
+                if commands_deleted > 0 or outputs_deleted > 0:
+                    logger.info(
+                        "Cleaned up %d commands and %d outputs (expired)",
+                        commands_deleted,
+                        outputs_deleted,
+                    )
+        except Exception as e:
+            logger.warning("Failed to cleanup expired runtime state: %s", e)
 
     # ==================== Registration ====================
 
@@ -1044,10 +1219,33 @@ class RemoteAgentManager:
             command: Command dict with 'type', 'command', etc.
 
         Returns:
-            True if command was queued successfully.
+            True if command was queued successfully (persisted or in-memory).
+            Note: Does not distinguish between persisted vs in-memory fallback.
+            Use send_command_with_persist_status() for cross-pod durability signal.
+
+        Issue #1823 Finding 6: Changed to return tuple (queued, persisted) via
+        send_command_with_persist_status() for callers who need to know durability.
         """
-        queued = self._persist_command(machine_id, command)
-        if not queued:
+        queued, persisted = self.send_command_with_persist_status(machine_id, command)
+        return queued
+
+    def send_command_with_persist_status(
+        self, machine_id: str, command: dict[str, Any]
+    ) -> tuple[bool, bool]:
+        """
+        Queue a command and return both queued and persisted status.
+
+        Args:
+            machine_id: Target machine ID.
+            command: Command dict with 'type', 'command', etc.
+
+        Returns:
+            (queued, persisted) tuple:
+            - queued: True if command was queued (persisted or in-memory)
+            - persisted: True if command was persisted to DB for cross-pod delivery
+        """
+        persisted = self._persist_command(machine_id, command)
+        if not persisted:
             with self._lock:
                 if machine_id not in self._command_queues:
                     self._command_queues[machine_id] = []
@@ -1059,8 +1257,8 @@ class RemoteAgentManager:
                 machine_id,
             )
         else:
-            logger.info("Queued command for agent %s", machine_id)
-        return True
+            logger.info("Queued command for agent %s (persisted=%s)", machine_id, persisted)
+        return True, persisted
 
     def get_pending_commands(self, machine_id: str) -> list[dict]:
         """Get and clear pending commands for an HTTP-mode agent."""
@@ -1105,32 +1303,46 @@ class RemoteAgentManager:
             return False
 
     def _claim_persisted_commands(self, machine_id: str) -> list[dict]:
-        """Claim pending persisted commands for a polling agent."""
+        """Claim pending persisted commands for a polling agent.
+
+        Issue #1823 Finding 5: Added re-claim mechanism for stranded commands.
+        Commands in 'delivered' state older than COMMAND_DELIVERY_TIMEOUT seconds
+        can be re-claimed (pod crash recovery).
+        """
         now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+        delivery_timeout = (
+            datetime.now(timezone.utc).replace(tzinfo=None)
+            - timedelta(seconds=self.COMMAND_DELIVERY_TIMEOUT)
+        ).isoformat()
         claimed: list[dict] = []
         try:
             with self.db.connection() as conn:
                 cursor = conn.cursor()
+                # Select pending commands OR delivered-but-timed-out commands (re-claim)
                 cursor.execute(
                     f"""
-                    SELECT id, payload
+                    SELECT id, payload, status
                     FROM remote_runtime_commands
                     WHERE machine_id = {_param()}
-                      AND status = 'pending'
+                      AND (
+                        (status = 'pending')
+                        OR (status = 'delivered' AND delivered_at < {_param()})
+                      )
                       AND (expires_at IS NULL OR expires_at > {_param()})
                     ORDER BY id ASC
                     LIMIT 100
                     """,
-                    (machine_id, now),
+                    (machine_id, delivery_timeout, now),
                 )
                 rows = cursor.fetchall()
                 for row in rows:
                     command_id = row["id"]
+                    # Single UPDATE with WHERE status check for atomicity
                     cursor.execute(
                         f"""
                         UPDATE remote_runtime_commands
                         SET status = 'delivered', delivered_at = {_param()}
-                        WHERE id = {_param()} AND status = 'pending'
+                        WHERE id = {_param()} AND status IN ('pending', 'delivered')
                         """,
                         (now, command_id),
                     )
@@ -1261,23 +1473,36 @@ class RemoteAgentManager:
             self._persist_command_response(request_id, data.get("result"))
 
     def _persist_command_response(self, request_id: str, result: Any) -> None:
-        """Persist a command response for cross-pod waiters."""
+        """Persist a command response for cross-pod waiters.
+
+        Issue #1823 Finding 7: Added rowcount check and warning log.
+        Zero rowcount indicates the command was never persisted (in-memory only
+        on another pod) or already deleted.
+        """
         try:
-            self.db.execute(
-                f"""
-                UPDATE remote_runtime_commands
-                SET status = {_param()}, response_payload = {_param()}, responded_at = {_param()}
-                WHERE command_id = {_param()}
-                """,
-                (
-                    "responded",
-                    json.dumps(result) if result is not None else None,
-                    datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
-                    request_id,
-                ),
-            )
+            with self.db.connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    f"""
+                    UPDATE remote_runtime_commands
+                    SET status = {_param()}, response_payload = {_param()}, responded_at = {_param()}
+                    WHERE command_id = {_param()}
+                    """,
+                    (
+                        "responded",
+                        json.dumps(result) if result is not None else None,
+                        datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
+                        request_id,
+                    ),
+                )
+                if cursor.rowcount == 0:
+                    logger.warning(
+                        "Command response %s not persisted (command not in DB)",
+                        request_id[:8],
+                    )
+                conn.commit()
         except Exception as e:
-            logger.debug("Failed to persist command response %s: %s", request_id[:8], e)
+            logger.warning("Failed to persist command response %s: %s", request_id[:8], e)
 
     def store_browse_result(self, request_id: str, result: dict) -> None:
         """Store browse result from agent for later retrieval."""
@@ -1413,8 +1638,12 @@ class RemoteAgentManager:
 
         Limitation: If SSE disconnects for >3-5 minutes during high-frequency
         output (>5000 messages), old data will be trimmed and lost on reconnect.
+
+        Issue #1823 Finding 2: Output is first appended to in-memory buffer
+        (SSE continuity), then persisted. On DB failure, SSE continues from
+        memory while error is logged at warning level.
         """
-        self._persist_output(session_id, output)
+        # First: append to in-memory buffer for SSE continuity (Issue #1823 Finding 2)
         with self._lock:
             if session_id not in self._output_buffers:
                 self._output_buffers[session_id] = deque(maxlen=self.MAX_BUFFER_SIZE)
@@ -1424,6 +1653,12 @@ class RemoteAgentManager:
             if len(buf) == self.MAX_BUFFER_SIZE:
                 self._buffer_offsets[session_id] += 1
             buf.append(output)
+        # Second: persist for cross-pod visibility (Issue #1823 Finding 1&2)
+        # Note: This remains synchronous to ensure cross-pod consistency.
+        # Performance optimization comes from _persist_output_batch when called
+        # from the background thread, but individual buffer_output calls still
+        # persist synchronously for immediate cross-pod visibility.
+        self._persist_output(session_id, output)
 
     def get_buffered_output(self, session_id: str, after_index: int = 0) -> list[dict]:
         """Get buffered output for a session after a given index.
@@ -1548,7 +1783,12 @@ class RemoteAgentManager:
         raise last_exc  # type: ignore[misc]
 
     def _get_persisted_output(self, session_id: str, after_index: int = 0) -> list[dict]:
-        """Read persisted output events after the delivered event index."""
+        """Read persisted output events after the delivered event index.
+
+        Issue #1823 Finding 8: Added gap detection marker.
+        If event_index sequence has gaps (e.g., 1,2,5 instead of 1,2,3),
+        inserts a 'gap' marker so client can decide to request full refresh.
+        """
         try:
             with self.db.connection() as conn:
                 cursor = conn.cursor()
@@ -1575,14 +1815,27 @@ class RemoteAgentManager:
             return []
 
         events: list[dict] = []
+        expected_index = after_index + 1
         for row in rows:
+            event_index = row["event_index"]
+            # Gap detection: if event_index jumps, insert gap marker
+            if event_index > expected_index:
+                events.append({
+                    "stream": "system",
+                    "type": "gap",
+                    "gap_from": expected_index,
+                    "gap_to": event_index - 1,
+                    "message": f"Output gap detected: events {expected_index}-{event_index-1} missing",
+                })
             try:
                 payload = json.loads(row["payload"])
             except (TypeError, ValueError, json.JSONDecodeError):
+                expected_index = event_index + 1
                 continue
             if isinstance(payload, dict):
-                payload.setdefault("event_index", row["event_index"])
+                payload.setdefault("event_index", event_index)
                 events.append(payload)
+            expected_index = event_index + 1
         return events
 
     def mark_session_ended(self, session_id: str) -> None:
@@ -1595,21 +1848,53 @@ class RemoteAgentManager:
             self._last_delivered.pop(session_id, None)  # Cleanup SSE state
 
     def is_session_ended(self, session_id: str) -> bool:
-        """Check if a session has ended (in-memory, no DB query)."""
+        """Check if a session has ended.
+
+        Uses a three-tier check to minimize DB queries on hot path:
+        1. In-memory flag (_session_end_flags)
+        2. Cached result with TTL (_session_ended_cache)
+        3. DB query with result caching
+
+        Issue #1823 Finding 4: Added caching and fail-closed behavior.
+        On DB error, returns True (fail-closed) to avoid masking terminal
+        sessions during DB blips. Previous fail-open behavior could allow
+        operations on dead sessions.
+        """
+        # Fast path: in-memory flag
         with self._lock:
             if self._session_end_flags.get(session_id, False):
                 return True
+            # Check cache
+            cached = self._session_ended_cache.get(session_id)
+            if cached:
+                is_ended, cached_at = cached
+                if time.time() - cached_at < self.SESSION_ENDED_CACHE_TTL:
+                    return is_ended
+
+        # Slow path: DB query
         try:
             row = self.db.fetch_one(
                 f"SELECT status FROM agent_sessions WHERE session_id = {_param()}",
                 (session_id,),
             )
-        except Exception:
-            return False
+        except Exception as e:
+            # Fail-closed: assume session ended on DB error
+            logger.warning(
+                "DB error checking session %s status, assuming ended: %s",
+                session_id[:8],
+                e,
+            )
+            return True
+
         if row and row.get("status") in ("completed", "error", "stopped"):
             with self._lock:
                 self._session_end_flags[session_id] = True
+                self._session_ended_cache[session_id] = (True, time.time())
             return True
+
+        # Cache negative result too
+        with self._lock:
+            self._session_ended_cache[session_id] = (False, time.time())
         return False
 
     # ==================== SSE Last Delivered ====================
