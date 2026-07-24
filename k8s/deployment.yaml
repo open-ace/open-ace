@@ -20,10 +20,6 @@ spec:
       maxUnavailable: 0
   template:
     metadata:
-      annotations:
-        prometheus.io/scrape: "true"
-        prometheus.io/port: "19888"
-        prometheus.io/path: "/health"
       labels:
         app.kubernetes.io/name: open-ace
         app.kubernetes.io/component: web

@@ -28,17 +28,27 @@ class TestKubernetesManifestAlignment:
     def test_deployment_manifest_preserves_ha_and_non_root_runtime_contract(self):
         deployment = (ROOT / "k8s" / "deployment.yaml").read_text(encoding="utf-8")
 
+        # HA configuration
         assert "replicas: 3" in deployment
         assert "containerPort: 19888" in deployment
+        assert "kind: HorizontalPodAutoscaler" in deployment
+        assert "minReplicas: 3" in deployment
+
+        # Non-root runtime contract
         assert "runAsNonRoot: true" in deployment
         assert "runAsUser: 1000" in deployment
         assert "runAsGroup: 1000" in deployment
+
+        # Security hardening (Issue #1821)
         assert "allowPrivilegeEscalation: false" in deployment
+        assert "readOnlyRootFilesystem: true" in deployment
+        assert "drop:\n                - ALL" in deployment or "drop:\n              - ALL" in deployment
+        assert "seccompProfile:" in deployment
+        assert "type: RuntimeDefault" in deployment
+
+        # Volume mounts
         assert "mountPath: /workspace" in deployment
         assert "mountPath: /home/open-ace/.open-ace" in deployment
-        assert "kind: HorizontalPodAutoscaler" in deployment
-        assert "minReplicas: 3" in deployment
-        assert 'prometheus.io/port: "19888"' in deployment
 
     def test_service_and_policy_ports_match_19888_runtime_port(self):
         service = (ROOT / "k8s" / "service.yaml").read_text(encoding="utf-8")
@@ -50,7 +60,8 @@ class TestKubernetesManifestAlignment:
         assert "port: 5001" not in policies
         assert "sessionAffinity: ClientIP" in service
         assert 'nginx.ingress.kubernetes.io/affinity: "cookie"' in service
-        assert "minAvailable: 2" in policies
+        # PDB uses percentage to avoid HPA coupling (Issue #1821)
+        assert "minAvailable: 50%" in policies
 
     def test_k8s_secret_includes_dedicated_encryption_key(self):
         configmap = (ROOT / "k8s" / "configmap.yaml").read_text(encoding="utf-8")
