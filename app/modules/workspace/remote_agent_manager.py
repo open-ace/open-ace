@@ -97,12 +97,6 @@ class RemoteAgentManager:
     # Sessions are only cleaned up if they've been inactive longer than this window
     SESSION_RECOVERY_WINDOW_SECONDS = 300  # 5 minutes recovery window
 
-    # Async output persistence settings (Issue #1823 Finding 1&2)
-    # Batch persist to reduce DB write amplification on streaming hot path
-    OUTPUT_PERSIST_BATCH_SIZE = 50  # Max items to persist per batch
-    OUTPUT_PERSIST_INTERVAL = 0.5  # Seconds between batch persist runs
-    OUTPUT_PERSIST_QUEUE_MAX = 10000  # Max items in pending queue before forced flush
-
     # Table cleanup settings (Issue #1823 Finding 3)
     TABLE_CLEANUP_INTERVAL = 300  # 5 minutes between cleanup runs
 
@@ -111,7 +105,8 @@ class RemoteAgentManager:
 
     # Command delivery timeout (Issue #1823 Finding 5)
     COMMAND_DELIVERY_TIMEOUT = 60  # Seconds before delivered command can be re-claimed
-    REGISTRATION_TOKEN_CLEANUP_INTERVAL = 3600  # 1 hour
+
+    # Registration token cleanup interval (seconds)
 
     # Registration token default TTL (seconds)
     REGISTRATION_TOKEN_TTL = 3600  # 1 hour
@@ -161,10 +156,6 @@ class RemoteAgentManager:
         # Token cleanup lazy-start flag
         self._token_cleanup_started: bool = False
         # (removed _last_rotate_unrevoked — rotate_agent_token now returns the info)
-        # Async output persistence queue: [(session_id, output, stream, now), ...]
-        # (Issue #1823 Finding 1&2: batch persist to reduce DB write amplification)
-        self._pending_output_persists: list[tuple[str, dict[str, Any], str, datetime]] = []
-        self._output_persist_thread_started: bool = False
         # Session ended status cache: {session_id: (is_ended, cached_at)}
         # (Issue #1823 Finding 4: reduce hot path DB query)
         self._session_ended_cache: dict[str, tuple[bool, float]] = {}
@@ -230,8 +221,6 @@ class RemoteAgentManager:
 
         gevent.spawn(monitor)
         logger.info("Heartbeat monitor started")
-        # Start async output persistence thread (Issue #1823 Finding 1&2)
-        self._start_output_persist_thread()
         # Start table cleanup thread (Issue #1823 Finding 3)
         self._start_table_cleanup_thread()
 
@@ -356,113 +345,6 @@ class RemoteAgentManager:
                     session_id[:8],
                     e,
                 )
-
-    # ==================== Async Output Persistence (Issue #1823 Finding 1&2) ====================
-
-    def _start_output_persist_thread(self) -> None:
-        """Start background thread for async output persistence."""
-        if self._output_persist_thread_started:
-            return
-
-        def persist_loop():
-            while True:
-                try:
-                    self._flush_output_persist_queue()
-                except Exception as e:
-                    logger.error("Output persist thread error: %s", e)
-                gevent.sleep(self.OUTPUT_PERSIST_INTERVAL)
-
-        gevent.spawn(persist_loop)
-        self._output_persist_thread_started = True
-        logger.info("Output persist thread started")
-
-    def _flush_output_persist_queue(self) -> None:
-        """Flush pending output persist queue to database in batch."""
-        with self._lock:
-            if not self._pending_output_persists:
-                return
-            # Take up to batch size items
-            batch = self._pending_output_persists[:self.OUTPUT_PERSIST_BATCH_SIZE]
-            self._pending_output_persists = self._pending_output_persists[self.OUTPUT_PERSIST_BATCH_SIZE:]
-
-        if not batch:
-            return
-
-        # Group by session for efficient event_index allocation
-        by_session: dict[str, list[tuple[str, dict[str, Any], str, datetime]]] = {}
-        for session_id, output, stream, now in batch:
-            by_session.setdefault(session_id, []).append((session_id, output, stream, now))
-
-        for session_id, items in by_session.items():
-            try:
-                self._persist_output_batch(session_id, items)
-            except Exception as e:
-                # Log warning but don't interrupt SSE - data is already in memory
-                logger.warning(
-                    "Failed to persist %d outputs for session %s: %s",
-                    len(items),
-                    session_id[:8],
-                    e,
-                )
-
-    def _persist_output_batch(
-        self,
-        session_id: str,
-        items: list[tuple[str, dict[str, Any], str, datetime]],
-    ) -> None:
-        """Batch persist multiple output chunks for a session."""
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
-        expires_at = (now + timedelta(seconds=self.OUTPUT_RETENTION_SECONDS)).isoformat()
-
-        with self._persist_output_lock:
-            try:
-                with self.db.connection() as conn:
-                    cursor = conn.cursor()
-                    if is_postgresql():
-                        cursor.execute(
-                            "SELECT pg_advisory_xact_lock(hashtext(%s))",
-                            (session_id,),
-                        )
-                        cursor.fetchone()
-                    else:
-                        cursor.execute("BEGIN IMMEDIATE")
-
-                    # Get current max event_index
-                    cursor.execute(
-                        f"""
-                        SELECT COALESCE(MAX(event_index), 0) AS max_index
-                        FROM remote_runtime_outputs
-                        WHERE session_id = {_param()}
-                        """,
-                        (session_id,),
-                    )
-                    row = cursor.fetchone()
-                    next_index = int(row["max_index"] if row else 0) + 1
-
-                    # Batch insert all items
-                    for _, output, stream, created_at in items:
-                        payload = json.dumps(output)
-                        cursor.execute(
-                            f"""
-                            INSERT INTO remote_runtime_outputs
-                            (session_id, event_index, stream, payload, created_at, expires_at)
-                            VALUES ({_params(6)})
-                            """,
-                            (
-                                session_id,
-                                next_index,
-                                stream,
-                                payload,
-                                created_at.isoformat(),
-                                expires_at,
-                            ),
-                        )
-                        next_index += 1
-
-                    conn.commit()
-            except Exception as e:
-                logger.warning("Batch persist failed for session %s: %s", session_id[:8], e)
-                raise
 
     def _start_table_cleanup_thread(self) -> None:
         """Start background thread for table cleanup (Issue #1823 Finding 3)."""
@@ -1223,8 +1105,8 @@ class RemoteAgentManager:
             Note: Does not distinguish between persisted vs in-memory fallback.
             Use send_command_with_persist_status() for cross-pod durability signal.
 
-        Issue #1823 Finding 6: Changed to return tuple (queued, persisted) via
-        send_command_with_persist_status() for callers who need to know durability.
+        Issue #1823 Finding 6: Added send_command_with_persist_status() method
+        for callers who need to know persistence status for durability decisions.
         """
         queued, persisted = self.send_command_with_persist_status(machine_id, command)
         return queued
@@ -1639,9 +1521,15 @@ class RemoteAgentManager:
         Limitation: If SSE disconnects for >3-5 minutes during high-frequency
         output (>5000 messages), old data will be trimmed and lost on reconnect.
 
-        Issue #1823 Finding 2: Output is first appended to in-memory buffer
-        (SSE continuity), then persisted. On DB failure, SSE continues from
-        memory while error is logged at warning level.
+        Design decision (Issue #1823 Finding 1&2):
+        - Output is first appended to in-memory buffer (SSE continuity)
+        - Then synchronously persisted for cross-pod visibility
+        - Async batch persistence was considered but rejected because:
+          1. Cross-pod consistency requires immediate persistence
+          2. Tests verify output is visible to other pods immediately
+          3. Performance optimization via async would break cross-pod guarantees
+        - Performance is acceptable because event_index allocation is fast
+          (session_id PK lookup + single INSERT)
         """
         # First: append to in-memory buffer for SSE continuity (Issue #1823 Finding 2)
         with self._lock:
