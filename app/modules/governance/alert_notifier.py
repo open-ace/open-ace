@@ -16,6 +16,7 @@ import hmac
 import ipaddress
 import json
 import logging
+import os
 import socket
 import sqlite3
 import threading
@@ -53,6 +54,27 @@ _WEBHOOK_TIMEOUT_SECONDS = 5
 # until a slot frees.
 _WEBHOOK_MAX_WORKERS = 4
 _webhook_delivery_semaphore = threading.BoundedSemaphore(_WEBHOOK_MAX_WORKERS)
+
+# Webhook delivery resilience (Issue #1831): transient receiver failures
+# (5xx/timeout/connection-reset) are retried with backoff and persisted in the
+# webhook_deliveries table instead of being silently dropped. Defaults mirror
+# the AlertCompensationWorker env-override config pattern.
+_WEBHOOK_DELIVERY_MAX_ATTEMPTS = int(os.environ.get("OPENACE_WEBHOOK_MAX_ATTEMPTS", "3"))
+# Immediate retries performed inside the dispatch worker thread (bounded so a
+# failing receiver can't hold a delivery slot for long). Long-backoff retries
+# are advanced by the AlertCompensationWorker reaper (process_due_deliveries).
+_WEBHOOK_DELIVERY_WORKER_RETRIES = int(os.environ.get("OPENACE_WEBHOOK_WORKER_RETRIES", "1"))
+_WEBHOOK_DELIVERY_SHORT_BACKOFF_SEC = float(
+    os.environ.get("OPENACE_WEBHOOK_SHORT_BACKOFF_SEC", "2")
+)
+# Reaper backoff (seconds) grows linearly per attempt: base * attempts.
+_WEBHOOK_DELIVERY_BACKOFF_BASE_SEC = float(os.environ.get("OPENACE_WEBHOOK_BACKOFF_BASE_SEC", "30"))
+# Reclaim in_flight rows whose owner process died before recording an outcome.
+_WEBHOOK_DELIVERY_STALE_SEC = float(os.environ.get("OPENACE_WEBHOOK_STALE_SEC", "300"))
+_WEBHOOK_DELIVERY_REAPER_ENABLED = (
+    os.environ.get("OPENACE_WEBHOOK_REAPER_ENABLED", "true").lower() == "true"
+)
+_WEBHOOK_DELIVERY_REAPER_BATCH = int(os.environ.get("OPENACE_WEBHOOK_REAPER_BATCH", "50"))
 _FEISHU_WEBHOOK_HOST_SNIPPETS = ("feishu.cn", "larksuite.com", "larkoffice.com")
 _DINGTALK_WEBHOOK_HOST_SNIPPETS = ("dingtalk.com",)
 _DINGTALK_SECRET_QUERY_KEYS = ("openace_dingtalk_secret", "dingtalk_secret")
@@ -200,6 +222,65 @@ def _pin_host_to_url(url: str, pinned_ip: str) -> str:
     port_suffix = f":{parsed.port}" if parsed.port else ""
     netloc = f"{host_header}{port_suffix}"
     return urlunparse(parsed._replace(netloc=netloc))
+
+
+def _hash_webhook_url(webhook_url: str | None) -> str | None:
+    """Return a SHA-256 hex hash of ``webhook_url``, or ``None`` if empty.
+
+    The plaintext webhook URL is never persisted to ``webhook_deliveries``:
+    Feishu/Lark/DingTalk URLs embed bot tokens in the path/query. The hash lets
+    the reaper correlate deliveries to a configured receiver without storing a
+    recoverable credential.
+    """
+    if not webhook_url:
+        return None
+    return hashlib.sha256(webhook_url.strip().encode("utf-8")).hexdigest()
+
+
+@dataclass
+class DeliveryResult:
+    """Structured outcome of a single webhook delivery attempt (Issue #1831).
+
+    Replaces the former "log a warning and swallow" behavior so callers can
+    decide retry/dead-letter policy. ``skipped`` denotes a non-error no-op
+    (prefs disabled / no URL / type filtered) which must NOT be dead-lettered.
+    """
+
+    delivered: bool = False
+    retriable: bool = False
+    skipped: bool = False
+    error_type: str | None = None
+
+
+def _classify_delivery_error(exc: Exception) -> tuple[bool, str | None]:
+    """Classify a webhook delivery exception into ``(retriable, error_type)``.
+
+    Transient receiver failures (timeout / connection reset / 5xx) are
+    retriable; configuration and client errors (4xx) are not. Drives the
+    retry/dead-letter policy for Issue #1831.
+    """
+    if isinstance(exc, requests.exceptions.Timeout):
+        return True, "timeout"
+    if isinstance(exc, requests.exceptions.ConnectionError):
+        return True, "connection"
+    if isinstance(exc, requests.exceptions.SSLError):
+        return True, "ssl"
+    if isinstance(exc, requests.exceptions.HTTPError):
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        if status is not None and 500 <= status < 600:
+            return True, "http_5xx"
+        return False, "http_4xx"
+    return False, type(exc).__name__
+
+
+def _utcnow_naive() -> datetime:
+    """Return the current UTC time as a naive datetime.
+
+    All ``webhook_deliveries`` time columns use this form to stay comparable
+    across SQLite and PostgreSQL (matches ``cleanup_old_alerts`` and
+    ``has_recent_quota_alert``).
+    """
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 class _PinnedWebhookAdapter(HTTPAdapter):
@@ -580,102 +661,474 @@ class AlertNotifier:
             return None
         return hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
 
-    def _send_webhook_notification(self, alert: Alert, user_id: int) -> None:
-        """Send a webhook notification for an alert if user preferences allow.
+    def _send_webhook_notification(self, alert: Alert, user_id: int) -> DeliveryResult:
+        """Deliver one webhook notification attempt if user preferences allow.
 
-        This runs on a background worker thread (see :meth:`create_alert`) so a
-        slow or hanging receiver never blocks the user-facing request that
-        triggered the alert.
+        Returns a :class:`DeliveryResult` so the caller (the dispatch worker or
+        the delivery reaper) can persist delivery state and apply retry /
+        dead-letter policy (Issue #1831). This runs on a background worker
+        thread (see :meth:`create_alert`) so a slow/hanging receiver never
+        blocks the user-facing request that triggered the alert.
         """
-        # Bound ``prefs`` before the try so the broad-except handler below can
-        # safely read it even when ``get_notification_preferences`` itself
-        # raises (e.g. a DB error). Otherwise referencing ``prefs`` there would
-        # raise UnboundLocalError and mask the real exception.
+        # Bound ``prefs`` before the try so the handler below can safely read it
+        # even when ``get_notification_preferences`` itself raises (e.g. a DB
+        # error). Otherwise referencing ``prefs`` there would raise
+        # UnboundLocalError and mask the real exception.
         prefs: NotificationPreference | None = None
         try:
             prefs = self.get_notification_preferences(user_id)
 
             if not prefs.push_enabled:
                 logger.debug("Webhook notifications disabled for user %s", user_id)
-                return
+                return DeliveryResult(skipped=True)
 
             if not prefs.webhook_url:
                 logger.debug("No webhook URL configured for user %s", user_id)
-                return
+                return DeliveryResult(skipped=True)
 
             if not self._matches_notification_preferences(alert, prefs, "webhook"):
-                return
+                return DeliveryResult(skipped=True)
 
-            # Pin the validated IP into the actual request so the system resolver
-            # cannot rebind the destination to a private address between
-            # validation and the dial (DNS-rebinding / SSRF TOCTOU).
-            pinned_ips, error = self._resolve_webhook_target_ips(prefs.webhook_url)
-            if not pinned_ips:
-                logger.warning(
-                    "Skipping webhook notification for user %s alert %s: %s",
-                    user_id,
-                    alert.alert_id,
-                    error,
-                )
-                return
-
-            payload = self._build_webhook_payload(alert, prefs.webhook_url)
-            body = json.dumps(payload).encode("utf-8")
-            # Issue #1829, F6: pass the ENCRYPTED per-user DingTalk secret so
-            # each tenant signs with its own key (priority 1), falling back to
-            # global config (priority 2) then URL query (priority 3) inside
-            # _prepare_webhook_url. The ciphertext is decrypted lazily there;
-            # prefs already carries it from get_notification_preferences, so no
-            # extra DB query is needed.
-            outbound_url = self._prepare_webhook_url(
-                prefs.webhook_url, prefs.dingtalk_webhook_secret
-            )
-            pinned_url = _pin_host_to_url(outbound_url, pinned_ips[0])
-            headers = {
-                "User-Agent": "Open-ACE Alert Webhook",
-                "Host": urlparse(outbound_url).hostname,
-                "Content-Type": "application/json",
-            }
-            # Sign generic payloads so receivers can verify authenticity.
-            signature = self._sign_webhook_body(body)
-            if signature is not None:
-                headers["X-OpenACE-Signature"] = signature
-            session = requests.Session()
-            try:
-                session.mount("https://", _PinnedWebhookAdapter(allowed_ips=pinned_ips))
-                session.mount("http://", _PinnedWebhookAdapter(allowed_ips=pinned_ips))
-                response = session.post(
-                    pinned_url,
-                    data=body,
-                    timeout=_WEBHOOK_TIMEOUT_SECONDS,
-                    allow_redirects=False,
-                    headers=headers,
-                )
-            finally:
-                session.close()
-            response.raise_for_status()
-            logger.info(
-                "Webhook notification delivered for alert %s to user %s",
-                alert.alert_id,
-                user_id,
-            )
+            return self._post_webhook_secure(alert, prefs)
         except Exception as e:
-            # Log the exception TYPE + a redacted host only. ``requests``
-            # ConnectionError / HTTPError embed the full request URL, which for
-            # Feishu/Lark contains the bot token in the path — never interpolate
-            # the raw exception. ``prefs`` is pre-bound to None above so this is
-            # safe even when get_notification_preferences itself raised.
+            # Log exception TYPE + redacted host only. ``requests`` ConnectionError
+            # / HTTPError embed the full request URL, which for Feishu/Lark
+            # contains the bot token in the path — never interpolate the raw
+            # exception. ``prefs`` is pre-bound to None above so this is safe
+            # even when get_notification_preferences itself raised.
             webhook_url = prefs.webhook_url if prefs and prefs.webhook_url else None
             redacted_host = _redact_webhook_credentials(webhook_url) if webhook_url else None
             host = (urlparse(redacted_host).hostname if redacted_host else None) or "unknown"
+            retriable, error_type = _classify_delivery_error(e)
             logger.warning(
                 "Failed to deliver webhook notification for alert %s to user %s "
-                "(host=%s, error=%s)",
+                "(host=%s, retriable=%s, error=%s)",
                 alert.alert_id,
                 user_id,
                 host,
-                type(e).__name__,
+                retriable,
+                error_type or type(e).__name__,
             )
+            return DeliveryResult(retriable=retriable, error_type=error_type)
+
+    def _post_webhook_secure(self, alert: Alert, prefs: NotificationPreference) -> DeliveryResult:
+        """POST the alert to ``prefs.webhook_url`` with SSRF IP-pinning.
+
+        Assumes the caller has already applied the preference gates (push
+        enabled, URL present, type/severity match). Never raises: classifies the
+        outcome into a :class:`DeliveryResult`. Shared by the dispatch worker
+        and the delivery reaper so both use the identical secure delivery path.
+        """
+        # ``prefs.webhook_url`` is ``str | None`` on the preference model. The
+        # caller gates on it, but bind a local ``str`` here so the helpers below
+        # (which require ``str``) type-check — mypy does not narrow attribute
+        # access across the ``if not prefs.webhook_url`` guard in the caller.
+        webhook_url = prefs.webhook_url
+        if not webhook_url:
+            return DeliveryResult(skipped=True)
+        # Pin the validated IP into the actual request so the system resolver
+        # cannot rebind the destination to a private address between validation
+        # and the dial (DNS-rebinding / SSRF TOCTOU).
+        pinned_ips, error = self._resolve_webhook_target_ips(webhook_url)
+        if not pinned_ips:
+            # Resolution / SSRF rejection is a configuration problem, not a
+            # transient receiver failure — do not retry forever.
+            logger.warning(
+                "Skipping webhook notification for user %s alert %s: %s",
+                prefs.user_id,
+                alert.alert_id,
+                error,
+            )
+            return DeliveryResult(retriable=False, error_type="unresolved_target")
+
+        payload = self._build_webhook_payload(alert, webhook_url)
+        body = json.dumps(payload).encode("utf-8")
+        # Issue #1829, F6: pass the ENCRYPTED per-user DingTalk secret so each
+        # tenant signs with its own key (priority 1), falling back to global
+        # config (priority 2) then URL query (priority 3) inside
+        # _prepare_webhook_url. The ciphertext is decrypted lazily there; prefs
+        # already carries it from get_notification_preferences.
+        outbound_url = self._prepare_webhook_url(webhook_url, prefs.dingtalk_webhook_secret)
+        pinned_url = _pin_host_to_url(outbound_url, pinned_ips[0])
+        headers = {
+            "User-Agent": "Open-ACE Alert Webhook",
+            "Host": urlparse(outbound_url).hostname,
+            "Content-Type": "application/json",
+        }
+        # Sign generic payloads so receivers can verify authenticity.
+        signature = self._sign_webhook_body(body)
+        if signature is not None:
+            headers["X-OpenACE-Signature"] = signature
+        session = requests.Session()
+        try:
+            session.mount("https://", _PinnedWebhookAdapter(allowed_ips=pinned_ips))
+            session.mount("http://", _PinnedWebhookAdapter(allowed_ips=pinned_ips))
+            response = session.post(
+                pinned_url,
+                data=body,
+                timeout=_WEBHOOK_TIMEOUT_SECONDS,
+                allow_redirects=False,
+                headers=headers,
+            )
+        except Exception as e:
+            retriable, error_type = _classify_delivery_error(e)
+            return DeliveryResult(retriable=retriable, error_type=error_type)
+        finally:
+            session.close()
+        try:
+            response.raise_for_status()
+        except Exception as e:
+            retriable, error_type = _classify_delivery_error(e)
+            return DeliveryResult(retriable=retriable, error_type=error_type)
+        logger.info(
+            "Webhook notification delivered for alert %s to user %s",
+            alert.alert_id,
+            prefs.user_id,
+        )
+        return DeliveryResult(delivered=True)
+
+    # ------------------------------------------------------------------
+    # Webhook delivery-state repository (Issue #1831)
+    #
+    # Every delivery-state DB op here is best-effort: a failure is logged and
+    # swallowed so the absence of the ``webhook_deliveries`` table (or a DB
+    # error) can never prevent the actual webhook POST. The POST is the
+    # important side effect; the row only tracks retry state.
+    # ------------------------------------------------------------------
+
+    def _delivery_enqueue(self, alert: Alert, user_id: int) -> int | None:
+        """Persist a new ``in_flight`` delivery row; return its id or ``None``.
+
+        ``None`` means "untracked delivery" — the caller still POSTs, just
+        without retry state. The webhook URL hash is computed from the user's
+        stored prefs so deliveries can be correlated to a receiver without
+        persisting the plaintext (token-bearing) URL.
+        """
+        webhook_url_hash: str | None = None
+        try:
+            prefs = self.get_notification_preferences(user_id)
+            webhook_url_hash = _hash_webhook_url(prefs.webhook_url)
+        except Exception:
+            # Don't let hash computation block enqueue; leave it null.
+            webhook_url_hash = None
+        now = _utcnow_naive().isoformat()
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            if is_postgresql():
+                cursor.execute(
+                    adapt_sql(
+                        """
+                        INSERT INTO webhook_deliveries
+                            (alert_id, user_id, webhook_url_hash, status, attempts,
+                             max_attempts, next_retry_at, created_at, updated_at)
+                        VALUES (?, ?, ?, 'in_flight', 0, ?, NULL, ?, ?)
+                        RETURNING id
+                        """
+                    ),
+                    (
+                        alert.alert_id,
+                        user_id,
+                        webhook_url_hash,
+                        _WEBHOOK_DELIVERY_MAX_ATTEMPTS,
+                        now,
+                        now,
+                    ),
+                )
+                row = cursor.fetchone()
+                delivery_id = row["id"] if row is not None else None
+            else:
+                cursor.execute(
+                    adapt_sql(
+                        """
+                        INSERT INTO webhook_deliveries
+                            (alert_id, user_id, webhook_url_hash, status, attempts,
+                             max_attempts, next_retry_at, created_at, updated_at)
+                        VALUES (?, ?, ?, 'in_flight', 0, ?, NULL, ?, ?)
+                        """
+                    ),
+                    (
+                        alert.alert_id,
+                        user_id,
+                        webhook_url_hash,
+                        _WEBHOOK_DELIVERY_MAX_ATTEMPTS,
+                        now,
+                        now,
+                    ),
+                )
+                delivery_id = cursor.lastrowid
+            conn.commit()
+            conn.close()
+            return delivery_id
+        except Exception as e:
+            logger.warning(
+                "Failed to enqueue webhook delivery for alert %s: %s",
+                alert.alert_id,
+                e,
+            )
+            return None
+
+    def _delivery_set_outcome(
+        self,
+        delivery_id: int | None,
+        result: DeliveryResult,
+        *,
+        attempt: int,
+        final: bool,
+    ) -> None:
+        """Record the outcome of an attempt on the delivery row.
+
+        ``final`` collapses three terminal states: ``delivered`` (success or a
+        prefs-gated skip — both resolved, never retried), ``dead`` (non-retriable
+        failure such as 4xx / unresolved target / exhausted retries). ``final``
+        being false schedules a reaper retry with linear backoff.
+        """
+        if delivery_id is None:
+            return
+        now = _utcnow_naive()
+        now_iso = now.isoformat()
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            if result.delivered or result.skipped:
+                cursor.execute(
+                    adapt_sql(
+                        "UPDATE webhook_deliveries "
+                        "SET status = 'delivered', attempts = ?, "
+                        "    last_error_type = NULL, last_error_at = NULL, "
+                        "    next_retry_at = NULL, updated_at = ? "
+                        "WHERE id = ?"
+                    ),
+                    (attempt, now_iso, delivery_id),
+                )
+            elif final:
+                cursor.execute(
+                    adapt_sql(
+                        "UPDATE webhook_deliveries "
+                        "SET status = 'dead', attempts = ?, "
+                        "    last_error_type = ?, last_error_at = ?, "
+                        "    next_retry_at = NULL, updated_at = ? "
+                        "WHERE id = ?"
+                    ),
+                    (attempt, result.error_type, now_iso, now_iso, delivery_id),
+                )
+            else:
+                # Linear backoff: base * attempt. attempt is the count just
+                # performed, so the next attempt is base * attempt seconds out.
+                backoff = _WEBHOOK_DELIVERY_BACKOFF_BASE_SEC * max(1, attempt)
+                next_retry = (now + timedelta(seconds=backoff)).isoformat()
+                cursor.execute(
+                    adapt_sql(
+                        "UPDATE webhook_deliveries "
+                        "SET status = 'pending', attempts = ?, "
+                        "    last_error_type = ?, last_error_at = ?, "
+                        "    next_retry_at = ?, updated_at = ? "
+                        "WHERE id = ?"
+                    ),
+                    (attempt, result.error_type, now_iso, next_retry, now_iso, delivery_id),
+                )
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            logger.warning(
+                "Failed to record webhook delivery outcome (id=%s): %s",
+                delivery_id,
+                e,
+            )
+
+    def _delivery_reclaim_stale(self) -> int:
+        """Reset ``in_flight`` rows whose owner died before recording an outcome.
+
+        A row is stale when ``updated_at`` is older than
+        ``_WEBHOOK_DELIVERY_STALE_SEC`` (the worker claimed it but never wrote a
+        terminal outcome, e.g. the process was killed mid-delivery). Reclaiming
+        flips it back to ``pending`` with ``next_retry_at = now`` so the next
+        claim sweep picks it up immediately.
+        """
+        now = _utcnow_naive()
+        stale_cutoff = now - timedelta(seconds=_WEBHOOK_DELIVERY_STALE_SEC)
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                adapt_sql(
+                    "UPDATE webhook_deliveries "
+                    "SET status = 'pending', next_retry_at = ?, updated_at = ? "
+                    "WHERE status = 'in_flight' AND updated_at < ?"
+                ),
+                (now.isoformat(), now.isoformat(), stale_cutoff.isoformat()),
+            )
+            count = cursor.rowcount
+            conn.commit()
+            conn.close()
+            return count
+        except Exception as e:
+            logger.warning("Failed to reclaim stale webhook deliveries: %s", e)
+            return 0
+
+    def _delivery_claim_due(self, limit: int) -> list[Any]:
+        """Atomically claim up to ``limit`` due pending deliveries as ``in_flight``.
+
+        Cross-process safe: on PostgreSQL the candidate rows are locked with
+        ``FOR UPDATE SKIP LOCKED`` inside the claim UPDATE so concurrent reapers
+        never take the same row; on SQLite ``BEGIN IMMEDIATE`` serializes writers
+        (single-writer engine) and the claim is SELECT-ids-then-UPDATE-by-id
+        under that write lock. Returns the claimed rows (key-accessible).
+        """
+        now = _utcnow_naive().isoformat()
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            if is_postgresql():
+                cursor.execute(
+                    adapt_sql(
+                        """
+                        UPDATE webhook_deliveries
+                        SET status = 'in_flight', next_retry_at = NULL, updated_at = ?
+                        WHERE id IN (
+                            SELECT id FROM webhook_deliveries
+                            WHERE status = 'pending'
+                              AND (next_retry_at IS NULL OR next_retry_at <= ?)
+                              AND attempts < max_attempts
+                            ORDER BY next_retry_at NULLS FIRST
+                            LIMIT ?
+                            FOR UPDATE SKIP LOCKED
+                        )
+                        RETURNING *
+                        """
+                    ),
+                    (now, now, limit),
+                )
+                rows = cursor.fetchall()
+                conn.commit()
+                conn.close()
+                return list(rows)
+            # SQLite: manual transaction control so BEGIN IMMEDIATE is honored.
+            conn.isolation_level = None
+            cursor.execute("BEGIN IMMEDIATE")
+            try:
+                cursor.execute(
+                    adapt_sql(
+                        """
+                        SELECT id FROM webhook_deliveries
+                        WHERE status = 'pending'
+                          AND (next_retry_at IS NULL OR next_retry_at <= ?)
+                          AND attempts < max_attempts
+                        ORDER BY (next_retry_at IS NULL), next_retry_at
+                        LIMIT ?
+                        """
+                    ),
+                    (now, limit),
+                )
+                ids = [r["id"] for r in cursor.fetchall()]
+                if not ids:
+                    cursor.execute("COMMIT")
+                    conn.close()
+                    return []
+                placeholders = ",".join("?" for _ in ids)
+                cursor.execute(
+                    adapt_sql(
+                        "UPDATE webhook_deliveries "
+                        "SET status = 'in_flight', next_retry_at = NULL, updated_at = ? "
+                        f"WHERE id IN ({placeholders})"
+                    ),
+                    (now, *ids),
+                )
+                cursor.execute(
+                    adapt_sql(f"SELECT * FROM webhook_deliveries WHERE id IN ({placeholders})"),
+                    tuple(ids),
+                )
+                rows = cursor.fetchall()
+                cursor.execute("COMMIT")
+                conn.close()
+                return list(rows)
+            except Exception:
+                try:
+                    cursor.execute("ROLLBACK")
+                except Exception:
+                    pass
+                conn.close()
+                raise
+        except Exception as e:
+            logger.warning("Failed to claim due webhook deliveries: %s", e)
+            return []
+
+    def _get_alert_by_id(self, alert_id: str) -> Alert | None:
+        """Reload an alert from the DB for reaper redelivery (best-effort)."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(adapt_sql("SELECT * FROM alerts WHERE alert_id = ?"), (alert_id,))
+            row = cursor.fetchone()
+            conn.close()
+            return self._row_to_alert(row) if row is not None else None
+        except Exception as e:
+            logger.warning("Failed to load alert %s for redelivery: %s", alert_id, e)
+            return None
+
+    def _redeliver(self, row: Any) -> None:
+        """Retry one claimed delivery, then record a terminal or scheduled outcome."""
+        delivery_id = row["id"]
+        attempt = (row["attempts"] or 0) + 1
+        max_attempts = row["max_attempts"] or _WEBHOOK_DELIVERY_MAX_ATTEMPTS
+        alert = self._get_alert_by_id(row["alert_id"])
+        if alert is None:
+            # Source alert deleted between enqueue and retry — stop retrying.
+            self._delivery_set_outcome(
+                delivery_id,
+                DeliveryResult(retriable=False, error_type="alert_gone"),
+                attempt=attempt,
+                final=True,
+            )
+            return
+        result = self._send_webhook_notification(alert, row["user_id"])
+        # _send_webhook_notification applies the prefs gate (disabled / no URL /
+        # type filtered → skipped) and never raises.
+        if result.delivered or result.skipped or not result.retriable or attempt >= max_attempts:
+            self._delivery_set_outcome(delivery_id, result, attempt=attempt, final=True)
+        else:
+            self._delivery_set_outcome(delivery_id, result, attempt=attempt, final=False)
+
+    def process_due_deliveries(self, limit: int | None = None) -> int:
+        """Reaper entry point: retry due webhook deliveries (Issue #1831).
+
+        Invoked by :class:`AlertCompensationWorker`. Returns the number of
+        deliveries attempted this cycle. Idempotent and cross-process safe
+        (see :meth:`_delivery_claim_due`).
+        """
+        if not _WEBHOOK_DELIVERY_REAPER_ENABLED:
+            return 0
+        batch = limit or _WEBHOOK_DELIVERY_REAPER_BATCH
+        self._delivery_reclaim_stale()
+        rows = self._delivery_claim_due(batch)
+        for row in rows:
+            try:
+                self._redeliver(row)
+            except Exception as e:  # pragma: no cover - defensive
+                logger.warning("Reaper redelivery failed for delivery %s: %s", row["id"], e)
+        return len(rows)
+
+    def cleanup_old_deliveries(self, days: int = 30) -> int:
+        """Delete terminal (``delivered``/``dead``) delivery rows older than ``days``."""
+        cutoff = (_utcnow_naive() - timedelta(days=days)).isoformat()
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                adapt_sql(
+                    "DELETE FROM webhook_deliveries "
+                    "WHERE status IN ('delivered', 'dead') AND updated_at < ?"
+                ),
+                (cutoff,),
+            )
+            count = cursor.rowcount
+            conn.commit()
+            conn.close()
+            logger.info("Cleaned up %s old webhook deliveries", count)
+            return count
+        except Exception as e:
+            logger.warning("Failed to clean up old webhook deliveries: %s", e)
+            return 0
 
     def _get_connection(self) -> sqlite3.Connection | Any:
         """Get database connection (SQLite or PostgreSQL)."""
@@ -773,6 +1226,49 @@ class AlertNotifier:
             """
             CREATE INDEX IF NOT EXISTS idx_alerts_read
             ON alerts(read)
+        """
+        )
+
+        # Webhook delivery-state table (Issue #1831). Mirrors the Alembic
+        # migration ``20260725_001_add_webhook_deliveries``: durable record of
+        # outbound webhook attempts so transient receiver failures (5xx /
+        # timeout / reset) are retried with backoff by the reaper instead of
+        # being silently dropped. Only the URL *hash* is stored.
+        cursor.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS webhook_deliveries (
+                id {id_type},
+                alert_id TEXT NOT NULL,
+                user_id INTEGER NOT NULL,
+                webhook_url_hash TEXT,
+                status TEXT NOT NULL,
+                attempts INTEGER NOT NULL DEFAULT 0,
+                max_attempts INTEGER NOT NULL DEFAULT 3,
+                next_retry_at TIMESTAMP,
+                last_error_type TEXT,
+                last_error_at TIMESTAMP,
+                created_at TIMESTAMP NOT NULL,
+                updated_at TIMESTAMP NOT NULL,
+                CHECK (status IN ('pending', 'in_flight', 'delivered', 'dead'))
+            )
+        """
+        )
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_status_retry
+            ON webhook_deliveries(status, next_retry_at)
+        """
+        )
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_user
+            ON webhook_deliveries(user_id)
+        """
+        )
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_alert
+            ON webhook_deliveries(alert_id)
         """
         )
 
@@ -909,9 +1405,22 @@ class AlertNotifier:
 
         Runs out of band with the request that created the alert. Concurrency is
         capped by a process-wide bounded semaphore so a burst of alerts can't
-        spawn unbounded threads. Any exception raised by the worker is already
-        swallowed/logged inside ``_send_webhook_notification``; the thread body
-        also releases the semaphore in a ``finally`` so a slot is never leaked.
+        spawn unbounded threads.
+
+        Issue #1831: the worker performs the first attempt plus a bounded number
+        of immediate short-backoff retries. A resolved delivery (success or a
+        prefs-gated skip) needs no tracking, so it returns without touching the
+        DB — this keeps the success path as fast as the pre-resilience path.
+        Only a *failure* persists a delivery-state row: a non-retriable failure
+        is dead-lettered, and a retriable failure that exhausts the worker's
+        immediate retries is handed to the delivery reaper with backoff.
+        Delivery-state writes are defensive (best-effort): if the table is
+        unavailable the notification is still delivered, just untracked.
+
+        Ordering matters: the POST happens *before* any delivery-state DB write.
+        Persisting first would add a DB round-trip before the POST, deferring the
+        (time-sensitive, mocked-in-tests) preference read and letting a daemon
+        thread deliver one test's alert during another test's window.
         """
 
         def _worker():
@@ -919,7 +1428,29 @@ class AlertNotifier:
             try:
                 _webhook_delivery_semaphore.acquire()
                 acquired = True
-                self._send_webhook_notification(alert, user_id)
+                attempt = 0
+                while True:
+                    attempt += 1
+                    result = self._send_webhook_notification(alert, user_id)
+                    if result.delivered or result.skipped:
+                        # Resolved (success or prefs-gated no-op) — no retry
+                        # tracking needed. Return without a DB write.
+                        return
+                    if not result.retriable:
+                        # Non-retriable failure (4xx / unresolved target) →
+                        # dead-letter for audit, never silently dropped.
+                        did = self._delivery_enqueue(alert, user_id)
+                        self._delivery_set_outcome(did, result, attempt=attempt, final=True)
+                        return
+                    # Retriable failure: one bounded immediate short-backoff
+                    # retry inside the worker, then hand long backoff to the
+                    # reaper so a failing receiver can't hold a slot for long.
+                    if attempt <= _WEBHOOK_DELIVERY_WORKER_RETRIES:
+                        time.sleep(_WEBHOOK_DELIVERY_SHORT_BACKOFF_SEC)
+                        continue
+                    did = self._delivery_enqueue(alert, user_id)
+                    self._delivery_set_outcome(did, result, attempt=attempt, final=False)
+                    return
             except Exception as e:  # pragma: no cover - defensive
                 logger.error(
                     "Unexpected error dispatching webhook for alert %s: %s",
@@ -1284,6 +1815,21 @@ class AlertNotifier:
 
         cursor.execute(adapt_sql("DELETE FROM alerts WHERE alert_id = ?"), (alert_id,))
         success = cursor.rowcount > 0
+        if success:
+            # Cascade delivery-state cleanup so a reaped alert leaves no orphan
+            # delivery rows for the reaper to keep retrying (alert gone → the
+            # reaper would otherwise dead-letter each on its next attempt).
+            try:
+                cursor.execute(
+                    adapt_sql("DELETE FROM webhook_deliveries WHERE alert_id = ?"),
+                    (alert_id,),
+                )
+            except Exception as e:
+                logger.warning(
+                    "Failed to cascade-delete webhook deliveries for alert %s: %s",
+                    alert_id,
+                    e,
+                )
         conn.commit()
         conn.close()
 
