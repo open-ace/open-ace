@@ -34,7 +34,7 @@ def client(app):
     return app.test_client()
 
 
-_EXTRACT_TOKEN = "app.auth.decorators._extract_token"
+_EXTRACT_SESSION_TOKEN = "app.auth.decorators._extract_session_token"
 _LOAD_USER = "app.auth.decorators._load_user_from_token"
 _ADMIN_USER = {"id": 1, "role": "admin", "username": "admin"}
 
@@ -53,7 +53,7 @@ class TestSessionStatsEndpoints:
             "conversation_stats": {"total_conversations": 4242},
         }
         with (
-            patch(_EXTRACT_TOKEN, return_value="test-token"),
+            patch(_EXTRACT_SESSION_TOKEN, return_value="test-token"),
             patch(_LOAD_USER, return_value=_ADMIN_USER),
             patch(
                 "app.routes.analysis.analysis_service.get_batch_analysis",
@@ -70,7 +70,7 @@ class TestSessionStatsEndpoints:
     def test_key_metrics_surfaces_real_session_count(self, client):
         key_metrics_payload = {"total_sessions": 4242, "total_tokens": 1000000}
         with (
-            patch(_EXTRACT_TOKEN, return_value="test-token"),
+            patch(_EXTRACT_SESSION_TOKEN, return_value="test-token"),
             patch(_LOAD_USER, return_value=_ADMIN_USER),
             patch(
                 "app.routes.analysis.analysis_service.get_key_metrics",
@@ -87,7 +87,7 @@ class TestSessionStatsEndpoints:
         the full-range real count."""
         conv_payload = {"total_conversations": 4242, "total_messages": 20000}
         with (
-            patch(_EXTRACT_TOKEN, return_value="test-token"),
+            patch(_EXTRACT_SESSION_TOKEN, return_value="test-token"),
             patch(_LOAD_USER, return_value=_ADMIN_USER),
             patch(
                 "app.routes.analysis.analysis_service.get_conversation_stats",
@@ -100,6 +100,6 @@ class TestSessionStatsEndpoints:
         assert resp.get_json()["total_conversations"] == 4242
 
     def test_batch_requires_authentication(self, client):
-        with patch(_EXTRACT_TOKEN, return_value=None):
+        with patch(_EXTRACT_SESSION_TOKEN, return_value=""):
             resp = client.get("/api/analysis/batch")
         assert resp.status_code == 401
