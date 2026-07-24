@@ -257,8 +257,9 @@ if [ "$isolated" = true ]; then
         elif [ "$previous_signature_project" = "$project_dir" ]; then
             echo "OPENACE_REPO_INTEGRITY_VIOLATION: .git entry changed during interrupted agent execution" >&2
             exit 68
+        else
+            rm -f "$signature_registry"
         fi
-        rm -f "$signature_registry"
     else
         rm -f "$signature_registry"
     fi
