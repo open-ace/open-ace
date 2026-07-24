@@ -22,7 +22,6 @@ from __future__ import annotations
 import hashlib
 import hmac
 import logging
-import re
 import time
 from functools import wraps
 from typing import TYPE_CHECKING, Literal, cast
@@ -85,7 +84,9 @@ def _is_url_token_allowed_path(path: str) -> bool:
     return False
 
 
-def _classify_query_token(token: str) -> Literal["webui_v2", "webui_v1", "proxy", "browser", "session"]:
+def _classify_query_token(
+    token: str,
+) -> Literal["webui_v2", "webui_v1", "proxy", "browser", "session"]:
     """Classify the type of token from query parameter.
 
     Classification is based on validation method, not format pattern,
@@ -174,9 +175,7 @@ def _validate_webui_token_v2(token: str, token_secret: str) -> tuple[bool, int |
 
     # Verify signature
     payload = f"v2:{user_id}:{port}:{timestamp}:{random_part}"
-    expected_signature = hashlib.sha256(
-        f"{payload}:{token_secret}".encode()
-    ).hexdigest()[:16]
+    expected_signature = hashlib.sha256(f"{payload}:{token_secret}".encode()).hexdigest()[:16]
 
     if not hmac.compare_digest(signature, expected_signature):
         return False, None, "Invalid signature"

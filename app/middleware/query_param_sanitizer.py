@@ -9,24 +9,25 @@ Issue #1896: URL token security.
 from __future__ import annotations
 
 import logging
-import re
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 # Sensitive query parameter names to sanitize
-SENSITIVE_PARAMS = frozenset([
-    "token",
-    "session_token",
-    "auth",
-    "api_key",
-    "secret",
-    "password",
-    "access_token",
-    "refresh_token",
-    "api-key",
-    "apikey",
-])
+SENSITIVE_PARAMS = frozenset(
+    [
+        "token",
+        "session_token",
+        "auth",
+        "api_key",
+        "secret",
+        "password",
+        "access_token",
+        "refresh_token",
+        "api-key",
+        "apikey",
+    ]
+)
 
 # Replacement text for sanitized values
 REDACTED = "[REDACTED]"

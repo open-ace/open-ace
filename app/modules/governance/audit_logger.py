@@ -83,7 +83,7 @@ class AuditAction(Enum):
     AGENT_AUTH_FAILURE = "agent_auth_failure"
     AGENT_RECONNECT = "agent_reconnect"
 
-# SSRF protection actions (Issue #1894)
+    # SSRF protection actions (Issue #1894)
     LLM_PROXY_URL_BLOCKED = "llm_proxy_url_blocked"
     ALLOWLIST_ENTRY_INVALID = "allowlist_entry_invalid"
     IP_RESOLVED_MISMATCH = "ip_resolved_mismatch"

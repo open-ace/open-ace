@@ -460,9 +460,9 @@ class WebUIManager:
         timestamp = int(time.time())
         random_part = secrets.token_hex(8)
         payload = f"v2:{user_id}:{port}:{timestamp}:{random_part}"
-        signature = hashlib.sha256(
-            f"{payload}:{self.config.token_secret}".encode()
-        ).hexdigest()[:16]
+        signature = hashlib.sha256(f"{payload}:{self.config.token_secret}".encode()).hexdigest()[
+            :16
+        ]
         return f"{payload}:{signature}"
 
     def validate_token(self, token: str) -> tuple[bool, int | None, str | None]:
