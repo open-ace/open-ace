@@ -97,7 +97,7 @@ In `Manage -> Quota Alerts -> Notification Preferences`, set the webhook URL to 
 https://oapi.dingtalk.com/robot/send?access_token=xxxxxxxx
 ```
 
-Open ACE sends DingTalk-compatible `text` payloads for alert notifications. If the DingTalk robot requires signing, set `alerts.dingtalk_webhook_secret` in `config.json`. As a per-webhook fallback, `openace_dingtalk_secret=<secret>` can be added to the saved URL; Open ACE strips that parameter before sending and adds DingTalk's `timestamp` / `sign` parameters.
+Open ACE sends DingTalk-compatible `text` payloads for alert notifications. If the DingTalk robot requires signing, the signing secret is resolved by priority: (1) **a per-user secret** — save `openace_dingtalk_secret=<secret>` in the webhook URL under your alert preferences and Open ACE encrypts it (Fernet/AES) into that user's preferences, so each tenant/user signs with their own key, isolated from others; (2) **the global** `alerts.dingtalk_webhook_secret` in `config.json` (shared across all users); (3) `openace_dingtalk_secret=<secret>` carried in the saved URL (legacy fallback). Open ACE strips that parameter before sending and adds DingTalk's `timestamp` / `sign` parameters. The per-user secret is stored only as ciphertext and decrypted solely at signing time; it is never persisted in plaintext or echoed back.
 
 ## Cache management
 

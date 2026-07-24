@@ -45,12 +45,34 @@ class UserToolAccountRepository:
         return self._row_to_model(row) if row else None
 
     def get_unmapped_tool_accounts(self) -> list[dict]:
-        """Get sender_names from daily_messages that are not mapped to any user."""
+        """Get sender_names from daily_messages that are not mapped to any user.
+
+        Also returns the ``message_source`` for each sender, resolved as the
+        source of that sender_name's most recent row (Issue #1829, F3). This
+        lets the caller classify tool_type from the structured source resolved
+        during import instead of brittle sender_name substrings (e.g.
+        ``-dingtalk``).
+
+        The "most recent row" is computed with a correlated subquery ordered by
+        ``date DESC, message_source DESC`` so the result is deterministic and
+        identical across SQLite and PostgreSQL (avoiding ``MODE() WITH GROUP``,
+        which is PostgreSQL-only). The ``message_source DESC`` tie-break picks
+        the lexicographically largest source when two rows share the same date.
+        """
         query = """
-            SELECT DISTINCT dm.sender_name,
+            SELECT dm.sender_name,
                    COUNT(*) as message_count,
                    MIN(dm.date) as first_date,
-                   MAX(dm.date) as last_date
+                   MAX(dm.date) as last_date,
+                   (
+                       SELECT dm2.message_source
+                       FROM daily_messages dm2
+                       WHERE dm2.sender_name = dm.sender_name
+                         AND dm2.message_source IS NOT NULL
+                         AND dm2.message_source != ''
+                       ORDER BY dm2.date DESC, dm2.message_source DESC
+                       LIMIT 1
+                   ) AS message_source
             FROM daily_messages dm
             WHERE dm.sender_name IS NOT NULL
               AND dm.sender_name != ''
