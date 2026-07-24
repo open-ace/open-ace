@@ -74,7 +74,7 @@ export default function ForkFromHereModal({
           disabled={forkMutation.isPending}
         />
         {!isValid && feedback.length > 0 && (
-          <div className="form-text text-danger">{t('autoFeedbackRequired', language)}</div>
+          <div className="form-text text-danger">{t('autoForkFeedbackRequired', language)}</div>
         )}
       </div>
 

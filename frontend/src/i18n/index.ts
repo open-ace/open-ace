@@ -1590,6 +1590,7 @@ export const translations: Record<Language, Translations> = {
     autoForkDesc:
       'Create a new workflow starting from this point. Both workflows can run in parallel with different approaches.',
     autoForkInstructionsLabel: 'Fork Instructions',
+    autoForkFeedbackRequired: 'Please provide feedback (at least 10 characters)',
     autoForkBranchLabel: 'New Branch Name (optional)',
     autoForkPauseOriginal: 'Pause original workflow',
     autoForkContinueOriginal: 'Continue both in parallel',
@@ -3277,6 +3278,7 @@ export const translations: Record<Language, Translations> = {
     autoFeedbackRequired: '请输入有效反馈',
     autoForkDesc: '从此点创建新的工作流。两个工作流可以用不同方案并行运行。',
     autoForkInstructionsLabel: '分叉指令',
+    autoForkFeedbackRequired: '请提供反馈（至少10个字符）',
     autoForkBranchLabel: '新分支名称（可选）',
     autoForkPauseOriginal: '暂停原始工作流',
     autoForkContinueOriginal: '两者并行运行',
@@ -4752,6 +4754,7 @@ export const translations: Record<Language, Translations> = {
     autoForkDesc:
       'このポイントから新しいワークフローを作成します。異なるアプローチで並行実行できます。',
     autoForkInstructionsLabel: '分岐の指示',
+    autoForkFeedbackRequired: 'フィードバックを入力してください（10文字以上）',
     autoForkBranchLabel: '新しいブランチ名（任意）',
     autoForkPauseOriginal: '元のワークフローを一時停止',
     autoForkContinueOriginal: '両方を並行して続行',
@@ -6311,6 +6314,7 @@ export const translations: Record<Language, Translations> = {
     autoForkDesc:
       '이 지점에서 새 워크플로우를 생성합니다. 다른 접근 방식으로 병렬 실행할 수 있습니다.',
     autoForkInstructionsLabel: '분기 지시사항',
+    autoForkFeedbackRequired: '피드백을 입력해주세요 (최소 10자)',
     autoForkBranchLabel: '새 브랜치 이름 (선택)',
     autoForkPauseOriginal: '원본 워크플로우 일시정지',
     autoForkContinueOriginal: '둘 다 병렬로 계속',
