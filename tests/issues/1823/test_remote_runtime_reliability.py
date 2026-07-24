@@ -23,7 +23,7 @@ def runtime_db(tmp_path, monkeypatch):
     return db_path, Database(db_url=f"sqlite:///{db_path}")
 
 
-class TestAsyncOutputPersistence:
+class TestOutputPersistence:
     """Tests for Finding 1&2: buffer_output persistence order."""
 
     @pytest.fixture
@@ -31,8 +31,6 @@ class TestAsyncOutputPersistence:
         """Create a RemoteAgentManager with temp database."""
         db_path, db = runtime_db
         manager = RemoteAgentManager(db_path=str(db_path))
-        # Stop background threads for testing
-        manager._output_persist_thread_started = True
         return manager
 
     def test_buffer_output_writes_to_memory_first(self, manager):
@@ -179,7 +177,6 @@ class TestSessionEndedCache:
         """Create a RemoteAgentManager with temp database."""
         db_path, db = runtime_db
         manager = RemoteAgentManager(db_path=str(db_path))
-        manager._output_persist_thread_started = True
         return manager
 
     def test_session_ended_caches_positive_result(self, manager):
@@ -295,7 +292,6 @@ class TestSendCommandReturnValue:
         """Create a RemoteAgentManager with temp database."""
         db_path, db = runtime_db
         manager = RemoteAgentManager(db_path=str(db_path))
-        manager._output_persist_thread_started = True
         return manager
 
     def test_send_command_returns_true_on_success(self, manager):
@@ -352,7 +348,6 @@ class TestOutputReplayGapDetection:
         """Create a RemoteAgentManager with temp database."""
         db_path, db = runtime_db
         manager = RemoteAgentManager(db_path=str(db_path))
-        manager._output_persist_thread_started = True
         return manager
 
     def test_gap_marker_inserted_on_missing_events(self, manager):
