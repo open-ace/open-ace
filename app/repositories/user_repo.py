@@ -462,9 +462,8 @@ class UserRepository:
         """
 
         try:
-            self.db.execute(
-                query, (user_id, token, datetime.now(timezone.utc).replace(tzinfo=None), expires_at)
-            )
+            # Use local time to match database TIMESTAMP WITHOUT TIME ZONE behavior
+            self.db.execute(query, (user_id, token, datetime.now(), expires_at))
             return True
         except Exception as e:
             logger.error(f"Error creating session: {e}")
@@ -487,7 +486,8 @@ class UserRepository:
             WHERE s.token = ? AND s.expires_at > ?
         """
 
-        return self.db.fetch_one(query, (token, datetime.now(timezone.utc).replace(tzinfo=None)))
+        # Use local time to match database TIMESTAMP WITHOUT TIME ZONE behavior
+        return self.db.fetch_one(query, (token, datetime.now()))
 
     def delete_session(self, token: str) -> bool:
         """
