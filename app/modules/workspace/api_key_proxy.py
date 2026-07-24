@@ -15,7 +15,7 @@ import sqlite3
 import threading
 from base64 import b64decode, b64encode
 from copy import deepcopy
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Any, cast
 
 from app.modules.workspace.api_key_router import APIKeyRouter
@@ -488,7 +488,7 @@ class APIKeyProxyService:
         """Revoke every active proxy token issued for a session id."""
         if not session_id:
             return 0
-        now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+        now = datetime.now().isoformat()
         conn = self._get_connection()
         try:
             cursor = conn.cursor()
@@ -1782,9 +1782,7 @@ class APIKeyProxyService:
             if expires_minutes is not None
             else self._get_default_proxy_token_ttl_minutes(session_type)
         )
-        expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(
-            minutes=effective_ttl
-        )
+        expires_at = datetime.now() + timedelta(minutes=effective_ttl)
         payload = {
             "user_id": user_id,
             "session_id": session_id,
@@ -1954,7 +1952,7 @@ class APIKeyProxyService:
                 logger.warning("Proxy token revoked: %s", jti[:8])
                 return None
 
-            now = datetime.now(timezone.utc).replace(tzinfo=None)
+            now = datetime.now()
             exp = datetime.fromisoformat(str(payload["exp"]))
             session_id = payload.get("session_id")
             session_type = payload.get("session_type", "agent")
@@ -2139,7 +2137,7 @@ class APIKeyProxyService:
         conn = self._get_connection()
         try:
             cursor = conn.cursor()
-            now = datetime.now(timezone.utc).replace(tzinfo=None)
+            now = datetime.now()
 
             # Delete expired records older than days_old
             # Delete consumed records older than 1 day
