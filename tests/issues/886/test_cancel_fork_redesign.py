@@ -267,11 +267,12 @@ def _make_milestone(**overrides):
 class TestCancelMilestoneWithFeedback:
     """Tests for POST /api/autonomous/workflows/<id>/milestones/<id>/cancel."""
 
-    def test_cancel_requires_feedback(self, client):
-        """Cancel endpoint returns 400 if user_feedback is missing."""
+    def test_cancel_without_feedback_succeeds(self, client):
+        """Cancel endpoint accepts missing user_feedback (optional)."""
         repo = _make_repo()
         repo.get_workflow.return_value = _make_workflow()
         repo.get_milestone.return_value = _make_milestone()
+        repo.cancel_milestones_after.return_value = []
 
         with _mock_auth():
             with patch("app.routes.autonomous.auto_repo", repo):
@@ -280,15 +281,16 @@ class TestCancelMilestoneWithFeedback:
                     json={},
                 )
 
-        assert resp.status_code == 400
+        assert resp.status_code == 200
         data = resp.get_json()
-        assert "feedback" in data.get("error", "").lower()
+        assert data["success"] is True
 
-    def test_cancel_empty_feedback_rejected(self, client):
-        """Cancel endpoint returns 400 if user_feedback is empty string."""
+    def test_cancel_empty_feedback_succeeds(self, client):
+        """Cancel endpoint accepts empty/whitespace user_feedback (optional)."""
         repo = _make_repo()
         repo.get_workflow.return_value = _make_workflow()
         repo.get_milestone.return_value = _make_milestone()
+        repo.cancel_milestones_after.return_value = []
 
         with _mock_auth():
             with patch("app.routes.autonomous.auto_repo", repo):
@@ -297,7 +299,7 @@ class TestCancelMilestoneWithFeedback:
                     json={"user_feedback": "   "},
                 )
 
-        assert resp.status_code == 400
+        assert resp.status_code == 200
 
     def test_cancel_stores_feedback_on_workflow(self, client):
         """Cancel stores user_feedback on the workflow and sets wait phase."""
