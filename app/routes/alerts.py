@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from flask import Blueprint, g, jsonify, request
 
 from app.auth.decorators import (
-    _extract_token,
+    _extract_session_token,
     _load_user_from_token,
     enforce_password_change_requirement,
 )
@@ -35,7 +35,7 @@ alerts_bp = Blueprint("alerts", __name__)
 @alerts_bp.before_request
 def load_user():
     """Load the current user from session token before each request."""
-    token = _extract_token()
+    token = _extract_session_token()
     if token:
         user = _load_user_from_token(token)
         if user:
