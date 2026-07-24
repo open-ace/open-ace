@@ -15,7 +15,7 @@ import sqlite3
 import threading
 from base64 import b64decode, b64encode
 from copy import deepcopy
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Any, cast
 
 from app.modules.workspace.api_key_router import APIKeyRouter
@@ -1782,9 +1782,7 @@ class APIKeyProxyService:
             if expires_minutes is not None
             else self._get_default_proxy_token_ttl_minutes(session_type)
         )
-        expires_at = datetime.now() + timedelta(
-            minutes=effective_ttl
-        )
+        expires_at = datetime.now() + timedelta(minutes=effective_ttl)
         payload = {
             "user_id": user_id,
             "session_id": session_id,
