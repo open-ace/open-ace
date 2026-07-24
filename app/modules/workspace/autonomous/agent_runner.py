@@ -974,6 +974,22 @@ class AutonomousAgentRunner:
             return True
 
     @staticmethod
+    def is_isolated_launcher_available() -> bool:
+        """Whether the privileged ``openace-run-as --isolated`` launcher is
+        installed and executable.
+
+        The isolated-agent path (a credentialless principal + scoped ACLs via
+        ``openace-run-as``) is the security model for multi-user Linux
+        deployments. The launcher is Linux-only (setfacl/getent/runuser) and is
+        not provisioned on dev installs or non-Linux platforms (macOS/Windows),
+        where the service already runs as the repository owner and there is no
+        security benefit to a second account. Callers use this to decide
+        whether to engage isolated-agent mode or fall back to same-user
+        execution (mirroring the Windows single-user downgrade).
+        """
+        return os.path.isfile(_OPENACE_RUN_AS) and os.access(_OPENACE_RUN_AS, os.X_OK)
+
+    @staticmethod
     def _wrap_agent_cmd(
         cmd: list[str],
         project_path: str,
