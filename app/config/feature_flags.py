@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Literal
+from typing import Literal, cast
 
 from flask import g
 
@@ -40,7 +40,7 @@ def get_query_token_policy() -> QuerySessionTokenPolicy:
     """
     # Check request context cache first
     if hasattr(g, "_query_token_policy"):
-        return g._query_token_policy
+        return cast(QuerySessionTokenPolicy, g._query_token_policy)
 
     # Read from environment variable
     policy = os.environ.get(ENV_VAR_NAME, DEFAULT_POLICY)
