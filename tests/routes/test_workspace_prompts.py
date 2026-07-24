@@ -237,64 +237,36 @@ class TestPromptTemplatePermissions:
             is_public=False,
         )
 
-    def test_author_get_own_private_template(self, private_template, author_user):
+    def test_author_get_own_private_template(self, private_template, author_user, app):
         """Scenario 1: Author GET own private template -> 200."""
-        # This is tested via the _check_prompt_ownership function
         from app.routes.workspace import _check_prompt_ownership
-        from flask import g
 
-        # Mock g.user
-        class MockG:
-            user = author_user
-
-        # Temporarily set g
-        import app.routes.workspace as workspace_module
-        old_g = getattr(workspace_module, "g", None)
-        workspace_module.g = MockG()
-
-        try:
+        with app.app_context():
+            from flask import g
+            g.user = author_user
             has_access, error = _check_prompt_ownership(private_template, allow_public=True)
             assert has_access is True
             assert error == ""
-        finally:
-            if old_g:
-                workspace_module.g = old_g
 
-    def test_author_get_own_public_template(self, public_template, author_user):
+    def test_author_get_own_public_template(self, public_template, author_user, app):
         """Scenario 2: Author GET own public template -> 200."""
         from app.routes.workspace import _check_prompt_ownership
 
-        class MockG:
-            user = author_user
-
-        import app.routes.workspace as workspace_module
-        old_g = getattr(workspace_module, "g", None)
-        workspace_module.g = MockG()
-
-        try:
+        with app.app_context():
+            from flask import g
+            g.user = author_user
             has_access, error = _check_prompt_ownership(public_template, allow_public=True)
             assert has_access is True
-        finally:
-            if old_g:
-                workspace_module.g = old_g
 
-    def test_non_author_get_public_template(self, public_template, non_author_user):
+    def test_non_author_get_public_template(self, public_template, non_author_user, app):
         """Scenario 3: Non-author GET public template -> 200."""
         from app.routes.workspace import _check_prompt_ownership
 
-        class MockG:
-            user = non_author_user
-
-        import app.routes.workspace as workspace_module
-        old_g = getattr(workspace_module, "g", None)
-        workspace_module.g = MockG()
-
-        try:
+        with app.app_context():
+            from flask import g
+            g.user = non_author_user
             has_access, error = _check_prompt_ownership(public_template, allow_public=True)
             assert has_access is True
-        finally:
-            if old_g:
-                workspace_module.g = old_g
 
     def test_non_author_get_private_template_denied(self, private_template, non_author_user, app):
         """Scenario 4: Non-author GET private template -> 403."""
@@ -326,24 +298,16 @@ class TestPromptTemplatePermissions:
             else:
                 os.environ.pop("ENFORCE_PROMPT_OWNERSHIP", None)
 
-    def test_author_put_own_template(self, public_template, author_user):
+    def test_author_put_own_template(self, public_template, author_user, app):
         """Scenario 5: Author PUT own template -> 200."""
         from app.routes.workspace import _check_prompt_ownership
 
-        class MockG:
-            user = author_user
-
-        import app.routes.workspace as workspace_module
-        old_g = getattr(workspace_module, "g", None)
-        workspace_module.g = MockG()
-
-        try:
+        with app.app_context():
+            from flask import g
+            g.user = author_user
             # PUT uses allow_public=False
             has_access, error = _check_prompt_ownership(public_template, allow_public=False)
             assert has_access is True
-        finally:
-            if old_g:
-                workspace_module.g = old_g
 
     def test_non_author_put_public_template_denied(self, public_template, non_author_user, app):
         """Scenario 6: Non-author PUT public template -> 403."""
@@ -372,23 +336,15 @@ class TestPromptTemplatePermissions:
             else:
                 os.environ.pop("ENFORCE_PROMPT_OWNERSHIP", None)
 
-    def test_admin_put_any_template(self, private_template, admin_user):
+    def test_admin_put_any_template(self, private_template, admin_user, app):
         """Scenario 7: Admin PUT any template -> 200."""
         from app.routes.workspace import _check_prompt_ownership
 
-        class MockG:
-            user = admin_user
-
-        import app.routes.workspace as workspace_module
-        old_g = getattr(workspace_module, "g", None)
-        workspace_module.g = MockG()
-
-        try:
+        with app.app_context():
+            from flask import g
+            g.user = admin_user
             has_access, error = _check_prompt_ownership(private_template, allow_public=False)
             assert has_access is True
-        finally:
-            if old_g:
-                workspace_module.g = old_g
 
     def test_author_delete_own_template(self, private_template, author_user):
         """Scenario 8: Author DELETE own template -> 200."""
@@ -421,42 +377,26 @@ class TestPromptTemplatePermissions:
         # Admin can delete any template
         assert "admin" in source
 
-    def test_author_render_own_private_template(self, private_template, author_user):
+    def test_author_render_own_private_template(self, private_template, author_user, app):
         """Scenario 11: Author render own private template -> 200."""
         from app.routes.workspace import _check_prompt_ownership
 
-        class MockG:
-            user = author_user
-
-        import app.routes.workspace as workspace_module
-        old_g = getattr(workspace_module, "g", None)
-        workspace_module.g = MockG()
-
-        try:
+        with app.app_context():
+            from flask import g
+            g.user = author_user
             # render uses allow_public=True
             has_access, error = _check_prompt_ownership(private_template, allow_public=True)
             assert has_access is True
-        finally:
-            if old_g:
-                workspace_module.g = old_g
 
-    def test_non_author_render_public_template(self, public_template, non_author_user):
+    def test_non_author_render_public_template(self, public_template, non_author_user, app):
         """Scenario 12: Non-author render public template -> 200."""
         from app.routes.workspace import _check_prompt_ownership
 
-        class MockG:
-            user = non_author_user
-
-        import app.routes.workspace as workspace_module
-        old_g = getattr(workspace_module, "g", None)
-        workspace_module.g = MockG()
-
-        try:
+        with app.app_context():
+            from flask import g
+            g.user = non_author_user
             has_access, error = _check_prompt_ownership(public_template, allow_public=True)
             assert has_access is True
-        finally:
-            if old_g:
-                workspace_module.g = old_g
 
     def test_non_author_render_private_template_denied(self, private_template, non_author_user, app):
         """Scenario 13: Non-author render private template -> 403."""
@@ -484,42 +424,26 @@ class TestPromptTemplatePermissions:
             else:
                 os.environ.pop("ENFORCE_PROMPT_OWNERSHIP", None)
 
-    def test_author_copy_own_private_template(self, private_template, author_user):
+    def test_author_copy_own_private_template(self, private_template, author_user, app):
         """Scenario 14: Author copy own private template -> 200."""
         from app.routes.workspace import _check_prompt_ownership
 
-        class MockG:
-            user = author_user
-
-        import app.routes.workspace as workspace_module
-        old_g = getattr(workspace_module, "g", None)
-        workspace_module.g = MockG()
-
-        try:
+        with app.app_context():
+            from flask import g
+            g.user = author_user
             # copy uses allow_public=True
             has_access, error = _check_prompt_ownership(private_template, allow_public=True)
             assert has_access is True
-        finally:
-            if old_g:
-                workspace_module.g = old_g
 
-    def test_non_author_copy_public_template(self, public_template, non_author_user):
+    def test_non_author_copy_public_template(self, public_template, non_author_user, app):
         """Scenario 15: Non-author copy public template -> 200."""
         from app.routes.workspace import _check_prompt_ownership
 
-        class MockG:
-            user = non_author_user
-
-        import app.routes.workspace as workspace_module
-        old_g = getattr(workspace_module, "g", None)
-        workspace_module.g = MockG()
-
-        try:
+        with app.app_context():
+            from flask import g
+            g.user = non_author_user
             has_access, error = _check_prompt_ownership(public_template, allow_public=True)
             assert has_access is True
-        finally:
-            if old_g:
-                workspace_module.g = old_g
 
 
 if __name__ == "__main__":

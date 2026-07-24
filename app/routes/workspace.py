@@ -92,9 +92,10 @@ def _check_prompt_ownership(template: PromptTemplate, allow_public: bool = True)
     # Log for gradual rollout monitoring (Issue #1897)
     if not _ENFORCE_PROMPT_OWNERSHIP:
         logger.warning(
-            f"[Prompt Ownership] Access would be denied for user {user_id} to template {template.id} "
+            f"[Prompt Ownership] Access check logging only (enforcement disabled). "
+            f"User {user_id} would be denied access to template {template.id} "
             f"(author={author_id}, is_public={is_public}, allow_public={allow_public}). "
-            f"ENFORCE_PROMPT_OWNERSHIP=false - logging only."
+            f"Set ENFORCE_PROMPT_OWNERSHIP=true to enforce."
         )
         return True, ""  # Allow access in logging-only mode
 
@@ -2036,12 +2037,18 @@ def create_knowledge():
 
 
 @workspace_bp.route("/knowledge/<entry_id>", methods=["GET"])
-@security_annotated(reason="Ownership via is_published check + author_id/admin fallback")
+@security_annotated(reason="Ownership via is_published check + author_id/admin fallback. Workspace-level auth via @before_request.")
 def get_knowledge(entry_id):
     """Get a knowledge base entry.
 
     Issue #1897: Published entries are accessible to all authenticated users.
     Unpublished entries require author or admin.
+
+    Security Model:
+    - Workspace-level authentication: All requests pass through @before_request hook
+    - Published entries (is_published=True): Accessible to all workspace members
+    - Unpublished entries (is_published=False): Only author or admin can access
+    - Team scoping: entry.team_id is used for organization, not access control
     """
     try:
         manager = get_collaboration_manager()
@@ -2059,6 +2066,10 @@ def get_knowledge(entry_id):
 
             # Only author or admin can access unpublished entries
             if user_role != "admin" and user_id != author_id:
+                logger.info(
+                    f"Knowledge access denied: user={user_id}, entry={entry_id}, "
+                    f"author={author_id}, is_published={is_published}"
+                )
                 return jsonify(
                     {"success": False, "error": "Access denied. Only author or admin can view unpublished entries."}
                 ), 403

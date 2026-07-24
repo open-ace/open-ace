@@ -159,9 +159,42 @@ Audit reminders are created automatically via GitHub Actions scheduled workflow.
 
 Some security features can be enabled gradually using environment variables:
 
-- `ENFORCE_PROMPT_OWNERSHIP`: Control prompt template ownership enforcement
-  - `true` (default): Enforce ownership checks
-  - `false`: Log only, do not reject requests (for gradual rollout)
+### ENFORCE_PROMPT_OWNERSHIP
+
+Controls prompt template ownership enforcement:
+
+- `true` (default): Enforce ownership checks
+- `false`: Log only, do not reject requests (for gradual rollout)
+
+#### Gradual Rollout Plan
+
+**Phase 1: Logging Only (1-2 weeks)**
+- Set `ENFORCE_PROMPT_OWNERSHIP=false`
+- Monitor logs for "[Prompt Ownership] Access check logging only" messages
+- Track 403 error rates to assess impact
+- Identify and communicate with affected users
+
+**Phase 2: Enforcement**
+- Set `ENFORCE_PROMPT_OWNERSHIP=true`
+- Monitor 403 error rates and user feedback
+- Be prepared to rollback if critical issues arise
+
+**Rollback Procedure**
+```bash
+# If issues arise during enforcement phase
+export ENFORCE_PROMPT_OWNERSHIP=false
+# Restart application to pick up environment variable
+```
+
+**Monitoring Metrics**
+- 403 error rate on `/api/workspace/prompts/*` endpoints
+- Log volume for "[Prompt Ownership]" warnings
+- User support tickets related to template access
+
+**Success Criteria**
+- < 0.1% increase in 403 error rate
+- No user complaints about legitimate access being denied
+- All audit requirements met
 
 ## Security Review Checklist
 
