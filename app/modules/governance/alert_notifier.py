@@ -25,7 +25,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from enum import Enum
-from typing import Any
+from typing import Any, cast
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import requests
@@ -1491,7 +1491,9 @@ class AlertNotifier:
                 return None
             if "dingtalk_webhook_secret" not in set(row.keys()):
                 return None
-            return row["dingtalk_webhook_secret"]
+            # row[...] is typed Any (RealDictRow / sqlite3.Row); the column holds
+            # the Fernet ciphertext (str) or NULL — narrow for mypy no-any-return.
+            return cast("str | None", row["dingtalk_webhook_secret"])
         finally:
             conn.close()
 
