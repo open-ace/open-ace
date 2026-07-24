@@ -8335,8 +8335,34 @@ class AutonomousOrchestrator:
                 ) from e
             failed = [c for c in checks if c.get("bucket") == "fail"]
             if failed:
-                self._start_ci_repair_round(wf, pr_number, failed)
-                return
+                # Before consuming a CI repair attempt, check whether the PR
+                # is mergeable despite the failing checks.
+                # mergeable_state=unstable means only non-required checks are
+                # failing (e.g. Security Audit Gate) and the merge will succeed.
+                # Attempting CI repair on such checks often fails (the agent
+                # can't fix dependency vulnerabilities) and causes the workflow
+                # to fail unnecessarily (#2034).
+                try:
+                    pre_merge_state = gh.get_pr_merge_state(pr_number)
+                    pre_mergeable_state = str(pre_merge_state.get("mergeable_state") or "").lower()
+                except Exception as state_err:
+                    logger.warning(
+                        "PR #%s: failed to query merge state before CI repair: %s",
+                        pr_number,
+                        state_err,
+                    )
+                    pre_mergeable_state = ""
+
+                if pre_mergeable_state != "unstable":
+                    self._start_ci_repair_round(wf, pr_number, failed)
+                    return
+                # mergeable_state == "unstable": fall through to merge attempt
+                logger.info(
+                    "PR #%s: %d checks failed but mergeable_state=unstable; "
+                    "attempting merge before CI repair",
+                    pr_number,
+                    len(failed),
+                )
             # If CI is still running, defer this merge to the next scheduler
             # cycle instead of blocking (synchronous poll) or failing. The
             # scheduler re-enters _do_merge every ~10s.
