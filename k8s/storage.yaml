@@ -36,7 +36,7 @@ metadata:
     app.kubernetes.io/name: open-ace
 rules:
   - apiGroups: [""]
-    resources: ["configmaps", "secrets"]
+    resources: ["configmaps"]
     verbs: ["get", "list", "watch"]
   - apiGroups: [""]
     resources: ["pods"]
