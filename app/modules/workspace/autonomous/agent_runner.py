@@ -3635,11 +3635,19 @@ class AutonomousAgentRunner:
         except (OSError, ValueError):
             pass
         finally:
-            # If process exited without sending result, mark completed
+            # If process exited without sending result, mark completed.
+            # poll() must be called to reap the child and populate
+            # returncode — readline() returning EOF does NOT set it
+            # automatically, so without poll() the returncode check
+            # would fail and session.completed would never be set,
+            # causing _wait_for_completion to block until the 1-hour
+            # timeout (#2031).
             if not session.completed.is_set():
                 session._stopped.wait(2.0)
-                if session.process and session.process.returncode is not None:
-                    session.completed.set()
+                if session.process:
+                    session.process.poll()
+                    if session.process.returncode is not None:
+                        session.completed.set()
 
     def _read_stderr(self, session: _LocalSession) -> None:
         """Read stderr from the subprocess."""
