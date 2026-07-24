@@ -1,6 +1,6 @@
 """Add dingtalk_webhook_secret column to notification_preferences
 
-Revision ID: 20260725_001_add_dingtalk_signing_key_to_notification_preferences
+Revision ID: 20260725_001_add_dingtalk_signing_key_col
 Revises: 20260722_001_add_llm_proxy_resolved_ips
 Create Date: 2026-07-25
 
@@ -13,12 +13,19 @@ behaving as before (signing falls back to the global
 is lifted out of the webhook URL query at write time, encrypted, and decrypted
 lazily only when signing an outbound DingTalk webhook (see
 ``AlertNotifier._prepare_webhook_url``).
+
+The added column is named ``dingtalk_webhook_secret`` (content, not a path, so
+it is unaffected by the repo's ``*secret*`` .gitignore rule). The revision id
+and filename deliberately avoid the substring "secret" so the migration source
+file itself is tracked by git, and are kept to 44 chars so they fit
+``alembic_version.version_num`` (``VERSION_NUM_LENGTH = 64`` in
+migrations/version_table.py).
 """
 
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "20260725_001_add_dingtalk_signing_key_to_notification_preferences"
+revision: str = "20260725_001_add_dingtalk_signing_key_col"
 down_revision: str | None = "20260722_001_add_llm_proxy_resolved_ips"
 branch_labels: str | None = None
 depends_on: str | None = None
