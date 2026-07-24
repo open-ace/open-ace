@@ -2370,11 +2370,10 @@ def attach_terminal(terminal_id):
     stored_key_id = context.get("key_id")
 
     # Generate fresh API tokens for LLM proxy auth
+    # Note: We don't revoke old tokens here because the terminal_server
+    # process might still be using them. Tokens have a TTL (240 minutes)
+    # and will expire naturally. Only revoke if we need to restart the server.
     api_proxy = get_api_key_proxy_service()
-    api_proxy.revoke_proxy_tokens_for_session(
-        terminal_id,
-        reason="terminal_tokens_rotated",
-    )
 
     # Determine token generation based on stored model/key selection
     anthropic_token = None
