@@ -24,6 +24,7 @@ from app.modules.sso.manager import SSOManager
 from app.modules.workspace.collaboration import CollaborationManager
 from app.repositories.database import Database, release_postgresql_connection
 from app.repositories.user_repo import UserRepository
+from app.services._org_sync_lock import force_release_lock, get_running_sync_state
 from app.utils.config import get_config_value
 
 logger = logging.getLogger(__name__)
@@ -38,6 +39,22 @@ FEISHU_PROVISIONED_SYSTEM_ACCOUNT = "feishu_org_sync"
 # workers cannot run concurrent syncs. Picked as a fixed constant so all
 # workers contend on the same lock; fits in a signed int64.
 _FEISHU_SYNC_LOCK_KEY = 88342611905720321
+# Bound on the username-collision retry loop in _build_username; beyond this we
+# fall back to a uuid-suffixed candidate rather than looping without limit.
+_USERNAME_MAX_ATTEMPTS = 100
+# Feishu API codes that mean the cached tenant_access_token is bad/expired ->
+# invalidate the cached token and retry the call once with a freshly-exchanged
+# token (WP-3 auth-fail retry). 99991661/99991664 = invalid/expired token,
+# 99991663 = invalid app secret, 99991668 = token missing.
+FEISHU_AUTH_ERROR_CODES = {99991661, 99991663, 99991664, 99991668}
+
+
+@dataclass
+class _CachedToken:
+    """A cached provider access token with an absolute expiry timestamp."""
+
+    value: str
+    expires_at: datetime
 
 
 @dataclass
@@ -105,6 +122,12 @@ class FeishuOrgSyncService:
     _sync_lock = threading.Lock()
     _schedule_lock = threading.Lock()
     _last_scheduled_sync_at: datetime | None = None
+    # Per-process start timestamp of the in-flight sync; used only as the
+    # SQLite fallback for the max-runtime watchdog (single-process). On Postgres
+    # the authoritative "is a sync running / for how long" signal is derived
+    # cross-process from pg_locks + pg_stat_activity (see _org_sync_lock), so
+    # this class var is NOT relied on for multi-worker detection.
+    _sync_started_at: datetime | None = None
     # Class-level handle exposed for tests/observability; see
     # _acquire_sync_lock. WARNING: do NOT change this value once deployed. It
     # is the Postgres advisory-lock key shared by every worker process for
@@ -128,6 +151,12 @@ class FeishuOrgSyncService:
         self.collaboration_manager = collaboration_manager or CollaborationManager()
         self.config_override = config_override
         self.http = http_session or requests
+        # Per-instance TTL token cache keyed by app credential, plus the active
+        # credentials for the in-flight sync (used by _request_json's auth-fail
+        # retry). Token caching avoids re-exchanging every sync run (WP-3).
+        self._token_cache: dict[str, _CachedToken] = {}
+        self._active_app_id: str | None = None
+        self._active_app_secret: str | None = None
 
     def sync_org(self, tenant_id: int | None = None) -> FeishuOrgSyncResult:
         """Run a full Feishu org sync."""
@@ -143,79 +172,158 @@ class FeishuOrgSyncService:
             started_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
         )
 
-        with self._acquire_sync_lock():
-            self._ensure_supporting_tables()
-            token = self._get_tenant_access_token(app_id, app_secret)
-            departments, users = self._fetch_directory_snapshot(token)
-            result.departments_seen = len(departments)
-            result.users_seen = len(users)
+        # Publish the active credentials so _request_json can re-exchange the
+        # tenant token on an auth-failure code (WP-3). Cleared in the finally
+        # below so a later direct call (e.g. in tests) does not pick up stale creds.
+        self._active_app_id = app_id
+        self._active_app_secret = app_secret
+        try:
+            with self._acquire_sync_lock():
+                # Record the in-flight start for the SQLite max-runtime watchdog
+                # fallback (single-process). On Postgres the authoritative signal
+                # is derived cross-process from pg_locks (see _org_sync_lock).
+                self.__class__._sync_started_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                try:
+                    self._ensure_supporting_tables()
+                    token = self._get_tenant_access_token(app_id, app_secret)
+                    departments, users = self._fetch_directory_snapshot(token)
+                    result.departments_seen = len(departments)
+                    result.users_seen = len(users)
 
-            team_ids_by_department: dict[str, str] = {}
-            for department in departments:
-                team_id, created = self._upsert_department_team(department)
-                team_ids_by_department[department.department_id] = team_id
-                if created:
-                    result.teams_created += 1
-                else:
-                    result.teams_updated += 1
+                    # Cache the synced-team index once per run instead of re-scanning
+                    # the whole teams table per department (WP-1). Newly created teams
+                    # are appended so later iterations in the same run see them.
+                    synced_teams_index = self._load_synced_teams()
+                    team_ids_by_department: dict[str, str] = {}
+                    for department in departments:
+                        team_id, created = self._upsert_department_team(
+                            department, existing_teams=synced_teams_index
+                        )
+                        team_ids_by_department[department.department_id] = team_id
+                        if created:
+                            result.teams_created += 1
+                        else:
+                            result.teams_updated += 1
 
-            expected_memberships: set[tuple[str, int]] = set()
-            seen_provider_user_ids: set[str] = set()
-            for user in users:
-                seen_provider_user_ids.add(user.open_id)
-                user_id, created, linked, updated = self._resolve_local_user(
-                    user=user,
-                    tenant_id=effective_tenant_id,
-                    result=result,
-                )
-                if user_id is None:
-                    continue
-                if created:
-                    result.users_created += 1
-                elif linked:
-                    result.users_linked += 1
-                if updated:
-                    result.users_updated += 1
+                    expected_memberships: set[tuple[str, int]] = set()
+                    seen_provider_user_ids: set[str] = set()
+                    for user in users:
+                        seen_provider_user_ids.add(user.open_id)
+                        user_id, created, linked, updated = self._resolve_local_user(
+                            user=user,
+                            tenant_id=effective_tenant_id,
+                            result=result,
+                        )
+                        if user_id is None:
+                            continue
+                        if created:
+                            result.users_created += 1
+                        elif linked:
+                            result.users_linked += 1
+                        if updated:
+                            result.users_updated += 1
 
-                for department_id in user.department_ids:
-                    membership_team_id = team_ids_by_department.get(department_id)
-                    if membership_team_id:
-                        expected_memberships.add((membership_team_id, user_id))
+                        for department_id in user.department_ids:
+                            membership_team_id = team_ids_by_department.get(department_id)
+                            if membership_team_id:
+                                expected_memberships.add((membership_team_id, user_id))
 
-            self._sync_memberships(
-                expected_memberships=expected_memberships,
-                synced_team_ids=set(team_ids_by_department.values()),
-                result=result,
-            )
+                    self._sync_memberships(
+                        expected_memberships=expected_memberships,
+                        synced_team_ids=set(team_ids_by_department.values()),
+                        result=result,
+                    )
 
-            self._reconcile_removed_users(
-                provider_name=FEISHU_PROVIDER_NAME,
-                seen_provider_user_ids=seen_provider_user_ids,
-                tenant_id=effective_tenant_id,
-                result=result,
-            )
+                    self._reconcile_removed_users(
+                        provider_name=FEISHU_PROVIDER_NAME,
+                        seen_provider_user_ids=seen_provider_user_ids,
+                        tenant_id=effective_tenant_id,
+                        result=result,
+                    )
 
-            result.finished_at = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
-            return result
+                    result.finished_at = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+                    return result
+                finally:
+                    self.__class__._sync_started_at = None
+        finally:
+            self._active_app_id = None
+            self._active_app_secret = None
 
     def maybe_sync_from_scheduler(self) -> FeishuOrgSyncResult | None:
-        """Run scheduled sync when enabled and the interval has elapsed."""
+        """Run scheduled sync when enabled, the interval has elapsed, and no other
+        tick is already in flight.
+
+        The schedule lock is acquired **non-blocking**: if another scheduler tick
+        already holds it (a prior sync is still running, or ticks overlap), this
+        tick skips entirely instead of queueing behind it. A max-runtime watchdog
+        runs first: if the previous sync still appears to be running past the
+        configured ceiling, it is logged and (when ``org_sync_auto_recover`` is
+        opted in) forcibly released before this run proceeds.
+        """
         config = self._get_feishu_config()
         if not bool(config.get("org_sync_enabled", False)):
             return None
 
         interval_minutes = max(int(config.get("org_sync_interval_minutes") or 60), 5)
+        max_runtime_seconds = int(config.get("org_sync_max_runtime_seconds") or 1800)
+        auto_recover = bool(config.get("org_sync_auto_recover", False))
         now = datetime.now(timezone.utc).replace(tzinfo=None)
 
-        with self._schedule_lock:
+        if not self._schedule_lock.acquire(blocking=False):
+            return None
+        try:
             if self._last_scheduled_sync_at and (now - self._last_scheduled_sync_at) < timedelta(
                 minutes=interval_minutes
             ):
                 return None
 
+            self._check_stale_sync(max_runtime_seconds, auto_recover)
+
             result = self.sync_org(tenant_id=config.get("org_sync_tenant_id"))
             self.__class__._last_scheduled_sync_at = now
             return result
+        finally:
+            self._schedule_lock.release()
+
+    def _check_stale_sync(self, max_runtime_seconds: int, auto_recover: bool) -> None:
+        """Detect a sync that has run past ``max_runtime_seconds`` and recover it.
+
+        On Postgres the running state is derived cross-process from ``pg_locks``
+        (authoritative across workers); on SQLite it falls back to the in-process
+        ``_sync_started_at`` timestamp. A stale run is always logged; when
+        ``auto_recover`` is set, ``force_release_lock`` terminates the holder pid
+        (Postgres only) so the next sync can proceed.
+        """
+        state = get_running_sync_state(self.db, self._DB_SYNC_LOCK_KEY)
+        if state is None:
+            # Non-Postgres: use the in-process start timestamp fallback.
+            started = self.__class__._sync_started_at
+            if started is None:
+                return
+            hold_seconds = (
+                datetime.now(timezone.utc).replace(tzinfo=None) - started
+            ).total_seconds()
+            pid = None
+        else:
+            hold_seconds = float(state.get("hold_seconds", 0.0) or 0.0)
+            pid = state.get("pid")
+
+        if hold_seconds <= max_runtime_seconds:
+            return
+        logger.warning(
+            "Feishu org sync appears hung (running ~%.0fs, max=%ss, pid=%s)",
+            hold_seconds,
+            max_runtime_seconds,
+            pid,
+        )
+        if not auto_recover:
+            return
+        released = force_release_lock(self.db, self._DB_SYNC_LOCK_KEY)
+        logger.warning(
+            "Feishu org sync auto-recover force_release_lock(key=%s) -> %s",
+            self._DB_SYNC_LOCK_KEY,
+            released,
+        )
 
     def _ensure_supporting_tables(self) -> None:
         """Ensure dependent tables exist before syncing."""
@@ -375,10 +483,26 @@ class FeishuOrgSyncService:
         config.setdefault("org_sync_enabled", False)
         config.setdefault("org_sync_tenant_id", 1)
         config.setdefault("org_sync_interval_minutes", 60)
+        # Watchdog ceiling for a single sync run; a run exceeding this is treated
+        # as hung. Opt-in auto-recover force-releases the advisory lock so the next
+        # tick can proceed (default off -- destructive, only for known-stuck deploys).
+        config.setdefault("org_sync_max_runtime_seconds", 1800)
+        config.setdefault("org_sync_auto_recover", False)
         return config
 
     def _get_tenant_access_token(self, app_id: str, app_secret: str) -> str:
-        """Exchange app credentials for a Feishu tenant access token."""
+        """Exchange app credentials for a Feishu tenant access token, cached with a TTL.
+
+        Feishu tenant tokens are valid for ~2 hours; re-exchanging on every sync
+        run (and on every auth-fail retry) is wasteful. The token is cached per
+        app_id until one minute before its real expiry (``expire``, in seconds).
+        """
+        cache_key = app_id
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        cached = self._token_cache.get(cache_key)
+        if cached and cached.expires_at > now:
+            return cached.value
+
         response = self.http.post(
             "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
             json={"app_id": app_id, "app_secret": app_secret},
@@ -388,7 +512,27 @@ class FeishuOrgSyncService:
         data = response.json()
         if data.get("code") != 0 or not data.get("tenant_access_token"):
             raise RuntimeError(f"Failed to get Feishu tenant access token: {data}")
-        return str(data["tenant_access_token"])
+        token = str(data["tenant_access_token"])
+
+        # Feishu returns expire in seconds; cap it so a bogus value can't pin the
+        # cache forever, and floor it so a near-zero value can't thrash.
+        expire = data.get("expire") or 7200
+        try:
+            expire = int(expire)
+        except (TypeError, ValueError):
+            expire = 7200
+        expire = min(max(expire, 60), 7200)
+        # Refresh a minute before the real expiry so a call made near the deadline
+        # doesn't race the token's remaining lifetime.
+        self._token_cache[cache_key] = _CachedToken(
+            value=token,
+            expires_at=now + timedelta(seconds=max(expire - 60, 30)),
+        )
+        return token
+
+    def _invalidate_tenant_access_token(self, app_id: str) -> None:
+        """Drop the cached tenant token so the next call re-exchanges it (auth-fail)."""
+        self._token_cache.pop(app_id, None)
 
     def _fetch_directory_snapshot(
         self, token: str
@@ -560,7 +704,25 @@ class FeishuOrgSyncService:
         params: dict[str, Any] | None = None,
         json_payload: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Call a Feishu JSON API and return its data payload."""
+        """Call a Feishu JSON API and return its data payload.
+
+        On an auth-failure code (bad/expired token) the cached tenant token is
+        invalidated and the call retried once with a freshly-exchanged token --
+        but only when active credentials are known (a real sync is driving the
+        call) AND a token was sent (the token-exchange endpoint itself takes no
+        Authorization header, so an auth code there is not a stale-token issue).
+        """
+        return self._request_json_once(method, url, token, params, json_payload, retried=False)
+
+    def _request_json_once(
+        self,
+        method: str,
+        url: str,
+        token: str | None,
+        params: dict[str, Any] | None,
+        json_payload: dict[str, Any] | None,
+        retried: bool,
+    ) -> dict[str, Any]:
         headers = {"Content-Type": "application/json"}
         if token:
             headers["Authorization"] = f"Bearer {token}"
@@ -575,9 +737,20 @@ class FeishuOrgSyncService:
         )
         response.raise_for_status()
         payload = response.json()
-        if payload.get("code") != 0:
-            raise RuntimeError(f"Feishu API request failed: {payload}")
-        return payload.get("data") or {}
+        code = payload.get("code")
+        if code == 0:
+            return payload.get("data") or {}
+        if (
+            not retried
+            and code in FEISHU_AUTH_ERROR_CODES
+            and token
+            and self._active_app_id
+            and self._active_app_secret
+        ):
+            self._invalidate_tenant_access_token(self._active_app_id)
+            fresh = self._get_tenant_access_token(self._active_app_id, self._active_app_secret)
+            return self._request_json_once(method, url, fresh, params, json_payload, retried=True)
+        raise RuntimeError(f"Feishu API request failed: {payload}")
 
     @staticmethod
     def _extract_items(data: dict[str, Any], keys: tuple[str, ...]) -> list[dict[str, Any]]:
@@ -588,9 +761,21 @@ class FeishuOrgSyncService:
                 return [item for item in value if isinstance(item, dict)]
         return []
 
-    def _upsert_department_team(self, department: FeishuDepartment) -> tuple[str, bool]:
-        """Create or update a local team representing a Feishu department."""
-        existing_teams = self._load_synced_teams()
+    def _upsert_department_team(
+        self,
+        department: FeishuDepartment,
+        existing_teams: dict[str, dict[str, Any]] | None = None,
+    ) -> tuple[str, bool]:
+        """Create or update a local team representing a Feishu department.
+
+        ``existing_teams`` is the per-run synced-team index (built once by
+        ``_load_synced_teams`` and threaded through the department loop). When a
+        new team is created it is appended to that dict so later iterations in
+        the same run -- and the membership reconcile -- see it without re-scanning
+        the whole ``teams`` table (WP-1).
+        """
+        if existing_teams is None:
+            existing_teams = self._load_synced_teams()
         existing = existing_teams.get(department.department_id)
         now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
 
@@ -634,6 +819,13 @@ class FeishuOrgSyncService:
                 now,
             ),
         )
+        # Make the new team visible to later iterations of this run without another
+        # full-table scan of teams (WP-1).
+        existing_teams[department.department_id] = {
+            "team_id": team_id,
+            "name": department.name,
+            "settings": settings_json,
+        }
         return team_id, True
 
     def _load_synced_teams(self) -> dict[str, dict[str, Any]]:
@@ -768,12 +960,19 @@ class FeishuOrgSyncService:
         if not synced_team_ids:
             return
 
-        all_rows = self.db.fetch_all("SELECT team_id, user_id, role FROM team_members")
-        current_memberships = {
-            (str(row["team_id"]), int(row["user_id"]))
-            for row in all_rows
-            if str(row["team_id"]) in synced_team_ids
-        }
+        # Scope the membership scan to the synced teams only (WP-1): a full
+        # ``team_members`` scan filters every unrelated team's rows in Python.
+        placeholders = ",".join("?" for _ in synced_team_ids)
+        rows = self.db.fetch_all(
+            f"SELECT team_id, user_id, role FROM team_members WHERE team_id IN ({placeholders})",
+            tuple(synced_team_ids),
+        )
+        role_by_membership: dict[tuple[str, int], str] = {}
+        current_memberships: set[tuple[str, int]] = set()
+        for row in rows:
+            key = (str(row["team_id"]), int(row["user_id"]))
+            current_memberships.add(key)
+            role_by_membership[key] = str(row.get("role") or "member")
 
         to_remove = current_memberships - expected_memberships
         # Preserve any manually-promoted role (owner/leader/...) so that when a
@@ -783,13 +982,9 @@ class FeishuOrgSyncService:
         # not of a single row) and restored when that user is re-inserted.
         preserved_roles: dict[int, str] = {}
         for team_id, user_id in sorted(to_remove):
-            prior_role = None
-            for row in all_rows:
-                if str(row["team_id"]) == team_id and int(row["user_id"]) == user_id:
-                    prior_role = row.get("role")
-                    break
+            prior_role = role_by_membership.get((team_id, user_id))
             if prior_role and prior_role != "member":
-                preserved_roles.setdefault(user_id, str(prior_role))
+                preserved_roles.setdefault(user_id, prior_role)
             self.db.execute(
                 "DELETE FROM team_members WHERE team_id = ? AND user_id = ?",
                 (team_id, user_id),
@@ -817,7 +1012,14 @@ class FeishuOrgSyncService:
             result.memberships_added += 1
 
     def _build_username(self, display_name: str, email: str | None, open_id: str) -> str:
-        """Generate a stable, unique username for a synced Feishu user."""
+        """Generate a stable, unique username for a synced Feishu user.
+
+        The check-then-insert loop is inherently racy across processes, so it is
+        bounded: after ``_USERNAME_MAX_ATTEMPTS`` collisions we fall back to a
+        uuid-suffixed candidate (effectively globally unique) instead of looping
+        forever. ``create_user`` still swallows a last-hop unique-constraint
+        violation (returns None) and ``_resolve_local_user`` warns-and-skips.
+        """
         base = ""
         if email and "@" in email:
             base = email.split("@", 1)[0]
@@ -829,8 +1031,10 @@ class FeishuOrgSyncService:
             slug = f"feishu_{open_id[-8:]}"
 
         candidate = slug
-        counter = 1
-        while self.user_repo.get_user_by_username(candidate):
+        for counter in range(1, _USERNAME_MAX_ATTEMPTS):
+            if not self.user_repo.get_user_by_username(candidate):
+                return candidate
             candidate = f"{slug}_{counter}"
-            counter += 1
-        return candidate
+        # Exhausted bounded attempts: append a short uuid fragment so the final
+        # candidate is unique with overwhelming probability (no unbounded loop).
+        return f"{slug}_{uuid.uuid4().hex[:8]}"

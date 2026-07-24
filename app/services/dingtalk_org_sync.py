@@ -10,8 +10,10 @@ import json
 import logging
 import re
 import threading
+import time
 import uuid
 from collections import deque
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, cast
@@ -20,15 +22,62 @@ import requests
 
 from app.modules.sso.manager import SSOManager
 from app.modules.workspace.collaboration import CollaborationManager
-from app.repositories.database import Database
+from app.repositories.database import Database, release_postgresql_connection
 from app.repositories.user_repo import UserRepository
+from app.services._org_sync_lock import force_release_lock, get_running_sync_state
 from app.utils.config import get_config_value
+
+# Injectable sleep used by the page-level transient retry so tests can avoid
+# real waiting (WP-6). Reassigned via monkeypatch, never call time.sleep directly.
+_TRANSIENT_SLEEP = time.sleep
 
 logger = logging.getLogger(__name__)
 
 DINGTALK_PROVIDER_NAME = "dingtalk"
 DINGTALK_ROOT_DEPARTMENT_ID = "1"
 DINGTALK_PLACEHOLDER_EMAIL_DOMAIN = "dingtalk.local"
+# Stable key for the Postgres advisory lock guarding DingTalk sync_org so that
+# multiple workers cannot run concurrent syncs. Picked as a fixed constant so
+# all workers contend on the same lock; fits in a signed int64. WARNING: do NOT
+# change this once deployed, and it MUST differ from Feishu's
+# _FEISHU_SYNC_LOCK_KEY (88342611905720321) and tenant_aggregation's
+# AGGREGATION_LOCK_ID (12345) -- shared/adjacent keys would let unrelated locks
+# block each other or two providers race on the same lock.
+_DINGTALK_SYNC_LOCK_KEY = 61740164982374657
+# Bound on the username-collision retry loop in _build_username; beyond this we
+# fall back to a uuid-suffixed candidate rather than looping without limit.
+_USERNAME_MAX_ATTEMPTS = 100
+# DingTalk errcodes that mean the cached access token is bad -> invalidate and
+# retry once with a freshly-exchanged token (WP-3 auth-fail retry).
+DINGTALK_AUTH_ERRCODES = {40001, 40014, 42001}
+# DingTalk errcodes that are transient (rate-limit / momentary) -> bounded retry
+# with backoff at the call site (WP-6 page-level retry).
+DINGTALK_TRANSIENT_ERRCODES = {-1}
+# How many times a transient page error is retried, and the base backoff.
+_TRANSIENT_MAX_RETRIES = 3
+_TRANSIENT_BACKOFF_BASE = 0.2
+
+
+class DingTalkApiError(RuntimeError):
+    """Raised when a DingTalk oapi call returns a non-zero errcode.
+
+    Carries only ``errcode``/``errmsg`` (never the raw payload) so transient
+    errors are debuggable without echoing request bodies. Subclasses
+    RuntimeError so existing ``pytest.raises(RuntimeError)`` still match.
+    """
+
+    def __init__(self, errcode: Any, errmsg: str):
+        self.errcode = errcode
+        self.errmsg = errmsg
+        super().__init__(f"DingTalk API request failed (errcode={errcode}): {errmsg}")
+
+
+@dataclass
+class _CachedToken:
+    """A cached provider access token with an absolute expiry timestamp."""
+
+    value: str
+    expires_at: datetime
 
 
 @dataclass
@@ -95,6 +144,19 @@ class DingTalkOrgSyncService:
     _sync_lock = threading.Lock()
     _schedule_lock = threading.Lock()
     _last_scheduled_sync_at: datetime | None = None
+    # Per-process start timestamp of the in-flight sync; used only as the
+    # SQLite fallback for the max-runtime watchdog (single-process). On Postgres
+    # the authoritative "is a sync running / for how long" signal is derived
+    # cross-process from pg_locks + pg_stat_activity (see _org_sync_lock), so
+    # this class var is NOT relied on for multi-worker detection.
+    _sync_started_at: datetime | None = None
+    # Class-level handle exposed for tests/observability; see _acquire_sync_lock.
+    # WARNING: do NOT change this value once deployed. It is the Postgres
+    # advisory-lock key shared by every worker process for cross-process mutual
+    # exclusion; changing it would make old and new workers lock on different
+    # keys and run overlapping syncs. Must remain distinct from Feishu's
+    # _FEISHU_SYNC_LOCK_KEY and tenant_aggregation's AGGREGATION_LOCK_ID.
+    _DB_SYNC_LOCK_KEY: int = _DINGTALK_SYNC_LOCK_KEY
 
     def __init__(
         self,
@@ -111,6 +173,12 @@ class DingTalkOrgSyncService:
         self.collaboration_manager = collaboration_manager or CollaborationManager()
         self.config_override = config_override
         self.http = http_session or requests
+        # Per-instance TTL token cache keyed by app credential, plus the active
+        # credentials for the in-flight sync (used by _request_oapi's auth-fail
+        # retry). Token caching avoids re-exchanging every sync run (WP-3).
+        self._token_cache: dict[str, _CachedToken] = {}
+        self._active_app_key: str | None = None
+        self._active_app_secret: str | None = None
 
     def sync_org(self, tenant_id: int | None = None) -> DingTalkOrgSyncResult:
         """Run a full DingTalk org sync."""
@@ -127,88 +195,247 @@ class DingTalkOrgSyncService:
             started_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
         )
 
-        with self._sync_lock:
-            self._ensure_supporting_tables()
-            token = self._get_access_token(app_key, app_secret)
-            departments, users = self._fetch_directory_snapshot(
-                token, root_department_id, warnings=result.warnings
-            )
-            result.departments_seen = len(departments)
-            result.users_seen = len(users)
+        # Publish the active credentials so _request_oapi can re-exchange the token
+        # on an auth-failure errcode (WP-3). Cleared in the finally below so a later
+        # direct call to _request_oapi (e.g. in tests) does not pick up stale creds.
+        self._active_app_key = app_key
+        self._active_app_secret = app_secret
+        try:
+            with self._acquire_sync_lock():
+                # Record the in-flight start for the SQLite max-runtime watchdog
+                # fallback (single-process). On Postgres the authoritative signal is
+                # derived cross-process from pg_locks (see _org_sync_lock).
+                self.__class__._sync_started_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                try:
+                    self._ensure_supporting_tables()
+                    token = self._get_access_token(app_key, app_secret)
+                    departments, users = self._fetch_directory_snapshot(
+                        token, root_department_id, warnings=result.warnings
+                    )
+                    result.departments_seen = len(departments)
+                    result.users_seen = len(users)
 
-            team_ids_by_department: dict[str, str] = {}
-            for department in departments:
-                team_id, created = self._upsert_department_team(department)
-                team_ids_by_department[department.department_id] = team_id
-                if created:
-                    result.teams_created += 1
-                else:
-                    result.teams_updated += 1
+                    # Cache the synced-team index once per run instead of re-scanning
+                    # the whole teams table per department (WP-1). Newly created teams
+                    # are appended so later iterations in the same run see them.
+                    synced_teams_index = self._load_synced_teams()
+                    team_ids_by_department: dict[str, str] = {}
+                    for department in departments:
+                        team_id, created = self._upsert_department_team(
+                            department, existing_teams=synced_teams_index
+                        )
+                        team_ids_by_department[department.department_id] = team_id
+                        if created:
+                            result.teams_created += 1
+                        else:
+                            result.teams_updated += 1
 
-            expected_memberships: set[tuple[str, int]] = set()
-            seen_provider_user_ids: set[str] = set()
-            for user in users:
-                user_id, created, linked, updated = self._resolve_local_user(
-                    user=user,
-                    tenant_id=effective_tenant_id,
-                    result=result,
-                )
-                if user_id is None:
-                    continue
-                seen_provider_user_ids.add(user.user_id)
-                if created:
-                    result.users_created += 1
-                elif linked:
-                    result.users_linked += 1
-                if updated:
-                    result.users_updated += 1
+                    expected_memberships: set[tuple[str, int]] = set()
+                    seen_provider_user_ids: set[str] = set()
+                    for user in users:
+                        user_id, created, linked, updated = self._resolve_local_user(
+                            user=user,
+                            tenant_id=effective_tenant_id,
+                            result=result,
+                        )
+                        if user_id is None:
+                            continue
+                        seen_provider_user_ids.add(user.user_id)
+                        if created:
+                            result.users_created += 1
+                        elif linked:
+                            result.users_linked += 1
+                        if updated:
+                            result.users_updated += 1
 
-                for department_id in user.department_ids:
-                    membership_team_id = team_ids_by_department.get(department_id)
-                    if membership_team_id:
-                        expected_memberships.add((membership_team_id, user_id))
+                        for department_id in user.department_ids:
+                            membership_team_id = team_ids_by_department.get(department_id)
+                            if membership_team_id:
+                                expected_memberships.add((membership_team_id, user_id))
 
-            self._sync_memberships(
-                expected_memberships=expected_memberships,
-                synced_team_ids=set(team_ids_by_department.values()),
-                result=result,
-            )
+                    self._sync_memberships(
+                        expected_memberships=expected_memberships,
+                        synced_team_ids=set(team_ids_by_department.values()),
+                        result=result,
+                    )
 
-            # Deactivate/unlink DingTalk users that were synced previously but are no
-            # longer in the directory. DingTalk recycles userids, so leaving a stale
-            # SSO identity row would let a recycled id re-resolve to the old account.
-            self._deactivate_departed_users(
-                tenant_id=effective_tenant_id,
-                seen_provider_user_ids=seen_provider_user_ids,
-                result=result,
-            )
+                    # Deactivate/unlink DingTalk users that were synced previously but are no
+                    # longer in the directory. DingTalk recycles userids, so leaving a stale
+                    # SSO identity row would let a recycled id re-resolve to the old account.
+                    self._deactivate_departed_users(
+                        tenant_id=effective_tenant_id,
+                        seen_provider_user_ids=seen_provider_user_ids,
+                        result=result,
+                    )
 
-            result.finished_at = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
-            return result
+                    result.finished_at = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+                    return result
+                finally:
+                    self.__class__._sync_started_at = None
+        finally:
+            self._active_app_key = None
+            self._active_app_secret = None
 
     def maybe_sync_from_scheduler(self) -> DingTalkOrgSyncResult | None:
-        """Run scheduled sync when enabled and the interval has elapsed."""
+        """Run scheduled sync when enabled, the interval has elapsed, and no other
+        tick is already in flight.
+
+        The schedule lock is acquired **non-blocking**: if another scheduler tick
+        already holds it (a prior sync is still running, or ticks overlap), this
+        tick skips entirely instead of queueing behind it -- overlapping ticks
+        would only pile up load without producing an earlier sync. A max-runtime
+        watchdog runs first: if the previous sync still appears to be running
+        past the configured ceiling, it is logged and (when ``org_sync_auto_recover``
+        is opted in) forcibly released before this run proceeds.
+        """
         config = self._get_dingtalk_config()
         if not bool(config.get("org_sync_enabled", False)):
             return None
 
         interval_minutes = max(int(config.get("org_sync_interval_minutes") or 60), 5)
+        max_runtime_seconds = int(config.get("org_sync_max_runtime_seconds") or 1800)
+        auto_recover = bool(config.get("org_sync_auto_recover", False))
         now = datetime.now(timezone.utc).replace(tzinfo=None)
 
-        with self._schedule_lock:
+        if not self._schedule_lock.acquire(blocking=False):
+            return None
+        try:
             if self._last_scheduled_sync_at and (now - self._last_scheduled_sync_at) < timedelta(
                 minutes=interval_minutes
             ):
                 return None
 
+            self._check_stale_sync(max_runtime_seconds, auto_recover)
+
             result = self.sync_org(tenant_id=config.get("org_sync_tenant_id"))
             self.__class__._last_scheduled_sync_at = now
             return result
+        finally:
+            self._schedule_lock.release()
+
+    def _check_stale_sync(self, max_runtime_seconds: int, auto_recover: bool) -> None:
+        """Detect a sync that has run past ``max_runtime_seconds`` and recover it.
+
+        On Postgres the running state is derived cross-process from ``pg_locks``
+        (authoritative across workers); on SQLite it falls back to the in-process
+        ``_sync_started_at`` timestamp. A stale run is always logged; when
+        ``auto_recover`` is set, ``force_release_lock`` terminates the holder pid
+        (Postgres only) so the next sync can proceed.
+        """
+        state = get_running_sync_state(self.db, self._DB_SYNC_LOCK_KEY)
+        if state is None:
+            # Non-Postgres: use the in-process start timestamp fallback.
+            started = self.__class__._sync_started_at
+            if started is None:
+                return
+            hold_seconds = (
+                datetime.now(timezone.utc).replace(tzinfo=None) - started
+            ).total_seconds()
+            pid = None
+        else:
+            hold_seconds = float(state.get("hold_seconds", 0.0) or 0.0)
+            pid = state.get("pid")
+
+        if hold_seconds <= max_runtime_seconds:
+            return
+        logger.warning(
+            "DingTalk org sync appears hung (running ~%.0fs, max=%ss, pid=%s)",
+            hold_seconds,
+            max_runtime_seconds,
+            pid,
+        )
+        if not auto_recover:
+            return
+        released = force_release_lock(self.db, self._DB_SYNC_LOCK_KEY)
+        logger.warning(
+            "DingTalk org sync auto-recover force_release_lock(key=%s) -> %s",
+            self._DB_SYNC_LOCK_KEY,
+            released,
+        )
 
     def _ensure_supporting_tables(self) -> None:
         """Ensure dependent tables exist before syncing."""
         self.sso_manager._ensure_tables()
         self.collaboration_manager._ensure_tables()
+
+    @contextmanager
+    def _acquire_sync_lock(self):
+        """Acquire mutual-exclusion for sync_org.
+
+        On PostgreSQL a **session-level** advisory lock is taken so that
+        concurrent workers (separate processes) cannot run overlapping syncs.
+        The lock is bound to a single dedicated connection held open across the
+        entire critical section (the ``yield``) and only released afterwards;
+        this is essential because ``Database`` commits per statement and returns
+        pooled connections after every call, so a transaction-level lock would
+        be freed the instant ``fetch_one`` returned -- before the sync body
+        started. The in-process threading.Lock is still acquired first as a
+        cheap fence to avoid needless DB round-trips within a single worker. On
+        SQLite (and other non-Postgres backends) the advisory lock is
+        unavailable, so the threading.Lock remains the only guard; SQLite
+        deployments are single-process by nature.
+        """
+        with self._sync_lock:
+            conn = None
+            if self.db.is_postgresql:
+                conn = self.db.get_connection()
+                try:
+                    cur = conn.cursor()
+                    cur.execute(
+                        "SELECT pg_try_advisory_lock(%s)",
+                        (self._DB_SYNC_LOCK_KEY,),
+                    )
+                    # Database.get_connection() returns a PgConnectionWrapper
+                    # that forces cursor_factory=RealDictCursor, so fetchone()
+                    # yields a dict keyed by the SELECT column name -- NOT a
+                    # positional tuple. Indexing it as [0] raises KeyError: 0.
+                    ok = cur.fetchone()["pg_try_advisory_lock"]
+                    if not ok:
+                        raise RuntimeError("Another DingTalk org sync is already running")
+                    try:
+                        yield
+                    finally:
+                        # Session-level locks survive transaction end, so they
+                        # MUST be released explicitly on the same connection.
+                        # A failure here would leak the advisory lock and wedge
+                        # every future sync until the backend connection dies,
+                        # so we log loudly instead of silently swallowing it.
+                        try:
+                            unlock_cur = conn.cursor()
+                            unlock_cur.execute(
+                                "SELECT pg_advisory_unlock(%s)",
+                                (self._DB_SYNC_LOCK_KEY,),
+                            )
+                            unlocked = unlock_cur.fetchone()
+                            if not unlocked or not unlocked.get("pg_advisory_unlock"):
+                                logger.warning(
+                                    "pg_advisory_unlock(%s) reported the lock "
+                                    "was not held by this session; a prior "
+                                    "error may have leaked it",
+                                    self._DB_SYNC_LOCK_KEY,
+                                )
+                        except Exception:
+                            logger.warning(
+                                "Failed to release DingTalk org sync advisory "
+                                "lock key=%s; the lock may leak and block "
+                                "future syncs until the connection is closed",
+                                self._DB_SYNC_LOCK_KEY,
+                                exc_info=True,
+                            )
+                        try:
+                            conn.commit()
+                        except Exception:
+                            logger.warning(
+                                "Failed to commit after releasing DingTalk org "
+                                "sync advisory lock key=%s",
+                                self._DB_SYNC_LOCK_KEY,
+                                exc_info=True,
+                            )
+                finally:
+                    if conn is not None:
+                        release_postgresql_connection(conn)
+            else:
+                yield
 
     def _get_dingtalk_config(self) -> dict[str, Any]:
         """Load DingTalk config from override or app config."""
@@ -237,10 +464,26 @@ class DingTalkOrgSyncService:
         config.setdefault("org_sync_tenant_id", 1)
         config.setdefault("org_sync_interval_minutes", 60)
         config.setdefault("org_sync_root_dept_id", DINGTALK_ROOT_DEPARTMENT_ID)
+        # Watchdog ceiling for a single sync run; a run exceeding this is treated
+        # as hung. Opt-in auto-recover force-releases the advisory lock so the next
+        # tick can proceed (default off -- destructive, only for known-stuck deploys).
+        config.setdefault("org_sync_max_runtime_seconds", 1800)
+        config.setdefault("org_sync_auto_recover", False)
         return config
 
     def _get_access_token(self, app_key: str, app_secret: str) -> str:
-        """Exchange app credentials for a DingTalk access token."""
+        """Exchange app credentials for a DingTalk access token, cached with a TTL.
+
+        DingTalk tokens are valid for ~2 hours; re-exchanging on every sync run
+        (and on every auth-fail retry) is wasteful and rate-limit-prone. The token
+        is cached per app_key until one minute before its real expiry.
+        """
+        cache_key = app_key
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        cached = self._token_cache.get(cache_key)
+        if cached and cached.expires_at > now:
+            return cached.value
+
         response = self.http.post(
             "https://api.dingtalk.com/v1.0/oauth2/accessToken",
             json={"appKey": app_key, "appSecret": app_secret},
@@ -251,7 +494,30 @@ class DingTalkOrgSyncService:
         token = data.get("accessToken") or data.get("access_token")
         if not token:
             raise RuntimeError(f"Failed to get DingTalk access token: {data}")
-        return str(token)
+        token = str(token)
+
+        # DingTalk documents expireIn in milliseconds, but some paths return
+        # seconds; disambiguate by magnitude (>100000 => ms) and cap at the 2h
+        # ceiling so a bogus value can't pin the cache forever.
+        expire_in = data.get("expireIn") or data.get("expires_in") or 7200
+        try:
+            expire_in = int(expire_in)
+        except (TypeError, ValueError):
+            expire_in = 7200
+        if expire_in > 100000:
+            expire_in = expire_in // 1000
+        expire_in = min(max(expire_in, 60), 7200)
+        # Refresh a minute before the real expiry so a call made near the deadline
+        # doesn't race the token's remaining lifetime.
+        self._token_cache[cache_key] = _CachedToken(
+            value=token,
+            expires_at=now + timedelta(seconds=max(expire_in - 60, 30)),
+        )
+        return token
+
+    def _invalidate_access_token(self, app_key: str) -> None:
+        """Drop the cached token so the next call re-exchanges it (auth-fail path)."""
+        self._token_cache.pop(app_key, None)
 
     def _fetch_directory_snapshot(
         self,
@@ -345,85 +611,121 @@ class DingTalkOrgSyncService:
         department_id: str,
         warnings: list[str] | None = None,
     ) -> list[DingTalkUser]:
-        """Fetch users directly under a DingTalk department."""
-        user_ids: list[str] = []
-        cursor = 0
+        """Fetch users directly under a DingTalk department.
 
+        Uses the batched ``topapi/v2/user/list`` endpoint (one call per page of up
+        to 100 users) instead of the prior ``user/listid`` + per-user ``user/get``
+        N+1 pattern: each page already returns full user detail records, so no
+        follow-up per-user call is needed. Page-level transient errors (rate-limit
+        ``errcode -1``) are retried with bounded backoff; a non-transient error on
+        a page warns and stops paging that department without aborting the run.
+        """
+        users: list[DingTalkUser] = []
+        cursor = 0
         while True:
-            data = self._request_oapi(
-                "https://oapi.dingtalk.com/topapi/user/listid",
-                token=token,
-                json_payload={
-                    "dept_id": self._coerce_dept_id(department_id),
-                    "cursor": cursor,
-                    "size": 100,
-                },
-            )
+            data = self._fetch_user_page(token, department_id, cursor, warnings=warnings)
+            if data is None:
+                # Page failed (non-transient errcode or retries exhausted): keep
+                # whatever users were already collected and stop paging this dept.
+                return users
             result = data.get("result") if isinstance(data.get("result"), dict) else data
             if not isinstance(result, dict):
                 result = {}
-            values = result.get("userid_list") or result.get("userids") or []
-            if isinstance(values, list):
-                user_ids.extend(str(value) for value in values if value)
+            page = result.get("list") or result.get("userlist") or []
+            if isinstance(page, list):
+                for detail in page:
+                    if not isinstance(detail, dict):
+                        continue
+                    user = self._user_from_detail(detail, default_department_id=department_id)
+                    if user is not None:
+                        users.append(user)
             if not result.get("has_more"):
                 break
             next_cursor = result.get("next_cursor")
             if next_cursor is None:
                 break
             cursor = int(next_cursor)
+        return users
 
-        users: list[DingTalkUser] = []
-        for user_id in sorted(set(user_ids)):
+    def _fetch_user_page(
+        self,
+        token: str,
+        department_id: str,
+        cursor: int,
+        warnings: list[str] | None = None,
+    ) -> dict[str, Any] | None:
+        """Fetch one page of department users.
+
+        Retries transient errcodes (``DINGTALK_TRANSIENT_ERRCODES``) with bounded
+        exponential backoff. Returns the parsed payload on success, or None if the
+        page ultimately failed (non-transient errcode, retries exhausted, or a
+        transport-level error) -- in which case a warning is appended.
+        """
+        last_err: DingTalkApiError | None = None
+        for attempt in range(_TRANSIENT_MAX_RETRIES + 1):
             try:
-                user_info = self._fetch_user_info(token, user_id)
-            except Exception as exc:
-                # A transient DingTalk error (rate-limit, quota) on one user must not
-                # abort the whole sync; warn and skip that user.
-                msg = f"Skipped DingTalk user {user_id}: {exc}"
+                return self._request_oapi(
+                    "https://oapi.dingtalk.com/topapi/v2/user/list",
+                    token=token,
+                    json_payload={
+                        "dept_id": self._coerce_dept_id(department_id),
+                        "cursor": cursor,
+                        "size": 100,
+                    },
+                )
+            except DingTalkApiError as exc:
+                last_err = exc
+                if exc.errcode in DINGTALK_TRANSIENT_ERRCODES and attempt < _TRANSIENT_MAX_RETRIES:
+                    # Exponential backoff: base * 2^attempt (0.2, 0.4, 0.8, ...).
+                    _TRANSIENT_SLEEP(_TRANSIENT_BACKOFF_BASE * (2**attempt))
+                    continue
+                break
+            except Exception as exc:  # network / JSON parse / transport error
+                msg = f"Skipped DingTalk department {department_id} users: {exc}"
                 logger.warning(msg)
                 if warnings is not None:
                     warnings.append(msg)
-                continue
-            if not user_info:
-                continue
-
-            department_ids = user_info.get("dept_id_list") or user_info.get("dept_id_list_ext")
-            if not isinstance(department_ids, list):
-                department_ids = [department_id]
-
-            email = user_info.get("email") or user_info.get("org_email")
-            status = {
-                "active": user_info.get("active"),
-                "admin": user_info.get("admin"),
-                "boss": user_info.get("boss"),
-            }
-
-            users.append(
-                DingTalkUser(
-                    user_id=user_id,
-                    name=str(
-                        user_info.get("name")
-                        or user_info.get("nick")
-                        or user_info.get("nickname")
-                        or user_id
-                    ),
-                    email=str(email) if email else None,
-                    department_ids=[str(dep_id) for dep_id in department_ids if dep_id],
-                    status={k: v for k, v in status.items() if v is not None},
-                )
-            )
-
-        return users
-
-    def _fetch_user_info(self, token: str, user_id: str) -> dict[str, Any]:
-        """Fetch a DingTalk user detail record."""
-        data = self._request_oapi(
-            "https://oapi.dingtalk.com/topapi/v2/user/get",
-            token=token,
-            json_payload={"userid": user_id},
+                return None
+        # Non-transient errcode or transient retries exhausted.
+        msg = (
+            f"Skipped DingTalk department {department_id} users "
+            f"(errcode={last_err.errcode if last_err else '?'}): "
+            f"{last_err.errmsg if last_err else 'unknown error'}"
         )
-        result = data.get("result")
-        return result if isinstance(result, dict) else {}
+        logger.warning(msg)
+        if warnings is not None:
+            warnings.append(msg)
+        return None
+
+    def _user_from_detail(
+        self,
+        detail: dict[str, Any],
+        default_department_id: str,
+    ) -> DingTalkUser | None:
+        """Build a DingTalkUser from a v2/user/list (or user/get) detail record."""
+        user_id = detail.get("userid") or detail.get("user_id")
+        if not user_id:
+            return None
+        user_id = str(user_id)
+
+        department_ids = detail.get("dept_id_list") or detail.get("dept_id_list_ext")
+        if not isinstance(department_ids, list):
+            department_ids = [default_department_id]
+
+        email = detail.get("email") or detail.get("org_email")
+        status = {
+            "active": detail.get("active"),
+            "admin": detail.get("admin"),
+            "boss": detail.get("boss"),
+        }
+
+        return DingTalkUser(
+            user_id=user_id,
+            name=str(detail.get("name") or detail.get("nick") or detail.get("nickname") or user_id),
+            email=str(email) if email else None,
+            department_ids=[str(dep_id) for dep_id in department_ids if dep_id],
+            status={k: v for k, v in status.items() if v is not None},
+        )
 
     def _request_oapi(
         self,
@@ -431,7 +733,23 @@ class DingTalkOrgSyncService:
         token: str,
         json_payload: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Call a DingTalk oapi endpoint and return the response payload."""
+        """Call a DingTalk oapi endpoint and return the response payload.
+
+        On an auth-failure errcode (bad/expired token) the cached token is
+        invalidated and the call retried once with a freshly-exchanged token --
+        but only when active credentials are known (a real sync is driving the
+        call). Without active credentials (e.g. a direct unit-test call) the
+        error surfaces immediately, preserving the prior raise-on-error behavior.
+        """
+        return self._request_oapi_once(url, token, json_payload, retried=False)
+
+    def _request_oapi_once(
+        self,
+        url: str,
+        token: str,
+        json_payload: dict[str, Any] | None,
+        retried: bool,
+    ) -> dict[str, Any]:
         response = self.http.post(
             url,
             params={"access_token": token},
@@ -440,14 +758,22 @@ class DingTalkOrgSyncService:
         )
         response.raise_for_status()
         payload = cast("dict[str, Any]", response.json())
-        if payload.get("errcode", 0) != 0:
-            # Surface only the errcode/errmsg (not the whole payload, which callers may
-            # log) so transient errors (rate-limit -1, quota 88) are debuggable without
-            # echoing request bodies.
-            errcode = payload.get("errcode")
-            errmsg = payload.get("errmsg") or payload.get("message") or "unknown error"
-            raise RuntimeError(f"DingTalk API request failed (errcode={errcode}): {errmsg}")
-        return payload
+        errcode = payload.get("errcode", 0)
+        if errcode == 0:
+            return payload
+        # Surface only errcode/errmsg (never the whole payload) so transient errors
+        # are debuggable without echoing request bodies.
+        errmsg = payload.get("errmsg") or payload.get("message") or "unknown error"
+        if (
+            not retried
+            and errcode in DINGTALK_AUTH_ERRCODES
+            and self._active_app_key
+            and self._active_app_secret
+        ):
+            self._invalidate_access_token(self._active_app_key)
+            fresh = self._get_access_token(self._active_app_key, self._active_app_secret)
+            return self._request_oapi_once(url, fresh, json_payload, retried=True)
+        raise DingTalkApiError(errcode, errmsg)
 
     @staticmethod
     def _extract_items(data: dict[str, Any], keys: tuple[str, ...]) -> list[dict[str, Any]]:
@@ -470,9 +796,21 @@ class DingTalkOrgSyncService:
         except (TypeError, ValueError):
             return value
 
-    def _upsert_department_team(self, department: DingTalkDepartment) -> tuple[str, bool]:
-        """Create or update a local team representing a DingTalk department."""
-        existing_teams = self._load_synced_teams()
+    def _upsert_department_team(
+        self,
+        department: DingTalkDepartment,
+        existing_teams: dict[str, dict[str, Any]] | None = None,
+    ) -> tuple[str, bool]:
+        """Create or update a local team representing a DingTalk department.
+
+        ``existing_teams`` is the per-run synced-team index (built once by
+        ``_load_synced_teams`` and threaded through the department loop). When a
+        new team is created it is appended to that dict so later iterations in the
+        same run -- and the membership reconcile -- see it without re-scanning the
+        whole ``teams`` table (WP-1).
+        """
+        if existing_teams is None:
+            existing_teams = self._load_synced_teams()
         existing = existing_teams.get(department.department_id)
         now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
 
@@ -532,6 +870,13 @@ class DingTalkOrgSyncService:
                 now,
             ),
         )
+        # Make the new team visible to later iterations of this run without another
+        # full-table scan of teams (WP-1).
+        existing_teams[department.department_id] = {
+            "team_id": team_id,
+            "name": department.name,
+            "settings": settings_json,
+        }
         return team_id, True
 
     def _load_synced_teams(self) -> dict[str, dict[str, Any]]:
@@ -674,21 +1019,21 @@ class DingTalkOrgSyncService:
         if not synced_team_ids:
             return
 
-        all_rows = self.db.fetch_all("SELECT team_id, user_id, role FROM team_members")
-        current_memberships = {
-            (str(row["team_id"]), int(row["user_id"]))
-            for row in all_rows
-            if str(row["team_id"]) in synced_team_ids
-        }
+        # Scope the membership scan to the synced teams only (WP-1): a full
+        # ``team_members`` scan filters every unrelated team's rows in Python.
+        placeholders = ",".join("?" for _ in synced_team_ids)
+        rows = self.db.fetch_all(
+            f"SELECT team_id, user_id, role FROM team_members WHERE team_id IN ({placeholders})",
+            tuple(synced_team_ids),
+        )
+        current_memberships = {(str(row["team_id"]), int(row["user_id"])) for row in rows}
 
         # Persist any manually-promoted role for members we are about to remove, so a
         # user who leaves then rejoins a synced department does not silently lose an
         # owner/leader role. Stored on the team's settings JSON (keyed by user_id).
         preserved_by_team = self._load_preserved_roles(synced_team_ids)
-        for row in all_rows:
+        for row in rows:
             team_id = str(row["team_id"])
-            if team_id not in synced_team_ids:
-                continue
             role = str(row.get("role") or "member")
             if role == "member":
                 continue
@@ -884,7 +1229,14 @@ class DingTalkOrgSyncService:
             )
 
     def _build_username(self, display_name: str, email: str | None, user_id: str) -> str:
-        """Generate a stable, unique username for a synced DingTalk user."""
+        """Generate a stable, unique username for a synced DingTalk user.
+
+        The check-then-insert loop is inherently racy across processes, so it is
+        bounded: after ``_USERNAME_MAX_ATTEMPTS`` collisions we fall back to a
+        uuid-suffixed candidate (effectively globally unique) instead of looping
+        forever. ``create_user`` still swallows a last-hop unique-constraint
+        violation (returns None) and ``_resolve_local_user`` warns-and-skips.
+        """
         base = ""
         if email and "@" in email:
             base = email.split("@", 1)[0]
@@ -896,8 +1248,10 @@ class DingTalkOrgSyncService:
             slug = f"dingtalk_{user_id[-8:]}"
 
         candidate = slug
-        counter = 1
-        while self.user_repo.get_user_by_username(candidate):
+        for counter in range(1, _USERNAME_MAX_ATTEMPTS):
+            if not self.user_repo.get_user_by_username(candidate):
+                return candidate
             candidate = f"{slug}_{counter}"
-            counter += 1
-        return candidate
+        # Exhausted bounded attempts: append a short uuid fragment so the final
+        # candidate is unique with overwhelming probability (no unbounded loop).
+        return f"{slug}_{uuid.uuid4().hex[:8]}"
