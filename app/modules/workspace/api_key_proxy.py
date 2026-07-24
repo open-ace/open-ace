@@ -31,6 +31,19 @@ except ModuleNotFoundError:  # pragma: no cover - Python < 3.11
 logger = logging.getLogger(__name__)
 
 # ─────────────────────────────────────────────────────────────────────
+# Configuration Constants for Issue #1822
+# ─────────────────────────────────────────────────────────────────────
+
+# Clock skew configuration (Finding 2, 8)
+CLOCK_SKEW_MAX_SECONDS = 60  # Hard-coded upper limit for security
+CLOCK_SKEW_DEFAULT_SECONDS = 30  # Default value, consistent with JWT libraries
+
+# TTL minimum configuration (Finding 9)
+MIN_TTL_ABSOLUTE_MINUTES = 1  # Hard-coded absolute minimum
+MIN_TTL_DEFAULT_MINUTES = 5  # Recommended minimum
+
+
+# ─────────────────────────────────────────────────────────────────────
 # CLI Tools and Protocol Definitions
 # Shared with remote-agent/terminal_menu.py and frontend
 # ─────────────────────────────────────────────────────────────────────
@@ -300,7 +313,10 @@ class APIKeyProxyService:
             return default
 
     def _get_default_proxy_token_ttl_minutes(self, session_type: str) -> int:
-        """Return the configured default TTL for a proxy-token session type."""
+        """Return the configured default TTL for a proxy-token session type.
+
+        Issue #1822: Added minimum TTL validation and clamping.
+        """
         session_env = f"OPENACE_PROXY_TOKEN_TTL_{session_type.upper()}_MINUTES"
         for env_name in (session_env, "OPENACE_PROXY_TOKEN_TTL_MINUTES"):
             raw_value = os.environ.get(env_name, "").strip()
@@ -315,14 +331,64 @@ class APIKeyProxyService:
                     raw_value,
                 )
                 continue
-            if parsed > 0:
-                return parsed
-            logger.warning(
-                "Proxy token TTL override %s=%r must be positive; using fallback",
-                env_name,
-                raw_value,
-            )
+            if parsed <= 0:
+                logger.warning(
+                    "Proxy token TTL override %s=%r must be positive; using fallback",
+                    env_name,
+                    raw_value,
+                )
+                continue
+
+            # Issue #1822: Apply minimum TTL clamping
+            # Get configured minimum TTL (default 5 minutes)
+            min_ttl_config = os.environ.get("OPENACE_PROXY_TOKEN_MIN_TTL_MINUTES", "5")
+            try:
+                min_ttl = max(MIN_TTL_ABSOLUTE_MINUTES, int(min_ttl_config))
+            except ValueError:
+                min_ttl = MIN_TTL_DEFAULT_MINUTES
+
+            # Clamp if below minimum
+            if parsed < min_ttl:
+                logger.warning(
+                    "Proxy token TTL (%d min) below minimum (%d min), clamped to %d min",
+                    parsed,
+                    min_ttl,
+                    min_ttl
+                )
+                return min_ttl
+
+            return parsed
         return self.DEFAULT_PROXY_TOKEN_TTL_MINUTES
+
+    def _get_clock_skew_seconds(self) -> int:
+        """Get clock skew configuration for token validation.
+
+        Issue #1822: Added clock skew tolerance for cross-pod validation.
+
+        Returns:
+            Clock skew in seconds (default 30s, max 60s).
+        """
+        clock_skew_config = os.environ.get("OPENACE_PROXY_TOKEN_CLOCK_SKEW_SECONDS", "30")
+        try:
+            clock_skew = int(clock_skew_config)
+            # Apply hard-coded upper limit for security
+            if clock_skew > CLOCK_SKEW_MAX_SECONDS:
+                logger.warning(
+                    "Clock skew %ds exceeds hard limit %ds, capped",
+                    clock_skew,
+                    CLOCK_SKEW_MAX_SECONDS
+                )
+                return CLOCK_SKEW_MAX_SECONDS
+            # Warn if exceeding recommended value
+            if clock_skew > CLOCK_SKEW_DEFAULT_SECONDS:
+                logger.warning(
+                    "Clock skew %ds exceeds recommended %ds",
+                    clock_skew,
+                    CLOCK_SKEW_DEFAULT_SECONDS
+                )
+            return max(0, clock_skew)  # Ensure non-negative
+        except ValueError:
+            return CLOCK_SKEW_DEFAULT_SECONDS
 
     def _normalize_proxy_token_reuse_mode(self, reuse_mode: Any) -> str:
         """Normalize the configured token reuse mode."""
@@ -482,6 +548,11 @@ class APIKeyProxyService:
         finally:
             conn.close()
 
+    # NOTE: Revocation is per-HTTP-request granular (Issue #1822 Finding 5,7)
+    # An SSE stream already authorized will continue until it drains.
+    # This is acceptable for most threat models; fixing would require
+    # per-stream token re-validation which is non-trivial.
+    # For high-security scenarios, consider connection timeout limits.
     def revoke_proxy_tokens_for_session(
         self, session_id: str, reason: str = "session_revoked"
     ) -> int:
@@ -1861,8 +1932,15 @@ class APIKeyProxyService:
 
         # payload exp is a fast pre-filter; the DB expires_at checked in
         # validate_proxy_token is authoritative for non-webui sessions.
-        if now > exp:
-            logger.warning("Proxy token expired")
+        # Issue #1822: Added session_id and session_type context for observability
+        # Issue #1822: Added clock skew tolerance for cross-pod validation
+        clock_skew = self._get_clock_skew_seconds()
+        if now > (exp + timedelta(seconds=clock_skew)):
+            logger.warning(
+                "Proxy token expired: session_id=%s, session_type=%s",
+                session_id[:8] if session_id else "N/A",
+                session_type or "unknown"
+            )
             return False
 
         if not session_id or session_type == "ha_pool":
@@ -1959,11 +2037,24 @@ class APIKeyProxyService:
             user_id = payload.get("user_id")
             record_exp_raw = self._row_get(record, "expires_at")
             record_exp = datetime.fromisoformat(str(record_exp_raw)) if record_exp_raw else exp
+
+            # Issue #1822: Extract reuse_mode early (before expiry check)
+            # Needed for single-use token expiry marking
+            reuse_mode = self._normalize_proxy_token_reuse_mode(
+                self._row_get(record, "reuse_mode", payload.get("reuse_mode"))
+            )
+
             # WebUI tokens ride the instance lifecycle: an alive instance keeps an
             # otherwise-expired token valid, so skip the server-record expiry hard
             # reject for live webui sessions and let _session_allows_proxy_token
             # (which also gates on instance-alive) make the call.
-            if now > record_exp and not self._webui_instance_alive(session_id, user_id):
+            # Issue #1822: Added clock skew tolerance for cross-pod validation
+            clock_skew = self._get_clock_skew_seconds()
+            if (now > (record_exp + timedelta(seconds=clock_skew)) and
+                not self._webui_instance_alive(session_id, user_id)):
+                # Issue #1822: Mark single-use tokens as expired for audit trail
+                if reuse_mode == "single_use":
+                    self._mark_expired_single_use_token(conn, jti, now)
                 logger.warning("Proxy token server record expired: %s", jti[:8])
                 return None
 
@@ -1977,9 +2068,7 @@ class APIKeyProxyService:
             ):
                 return None
 
-            reuse_mode = self._normalize_proxy_token_reuse_mode(
-                self._row_get(record, "reuse_mode", payload.get("reuse_mode"))
-            )
+            # Issue #1822: reuse_mode already extracted above
             if reuse_mode == "single_use":
                 if not self._consume_single_use_proxy_token_with_conn(conn, jti, now):
                     logger.warning("Single-use proxy token replay rejected: %s", jti[:8])
@@ -2053,8 +2142,15 @@ class APIKeyProxyService:
 
         # payload exp is a fast pre-filter; the DB expires_at checked in
         # validate_proxy_token is authoritative for non-webui sessions.
-        if now > exp:
-            logger.warning("Proxy token expired")
+        # Issue #1822: Added session_id and session_type context for observability
+        # Issue #1822: Added clock skew tolerance for cross-pod validation
+        clock_skew = self._get_clock_skew_seconds()
+        if now > (exp + timedelta(seconds=clock_skew)):
+            logger.warning(
+                "Proxy token expired: session_id=%s, session_type=%s",
+                session_id[:8] if session_id else "N/A",
+                session_type or "unknown"
+            )
             return False
 
         if not session_id or session_type == "ha_pool":
@@ -2107,6 +2203,34 @@ class APIKeyProxyService:
         )
         conn.commit()
 
+    def _mark_expired_single_use_token(self, conn: Any, jti: str, now: datetime) -> bool:
+        """Mark a single-use proxy token as expired for audit trail.
+
+        Issue #1822: Added to distinguish 'issued+expired unused' from 'consumed'.
+
+        Args:
+            conn: Database connection
+            jti: Token JTI
+            now: Current timestamp
+
+        Returns:
+            True if token was marked, False if not found or already marked
+        """
+        cursor = conn.cursor()
+        cursor.execute(
+            f"""
+            UPDATE proxy_token_jtis
+            SET expired_at = {_param()}
+            WHERE jti = {_param()}
+              AND consumed_at IS NULL
+              AND revoked_at IS NULL
+              AND expired_at IS NULL
+        """,
+            (now.isoformat(), jti),
+        )
+        # Don't commit here - will be committed by caller
+        return int(cursor.rowcount or 0) > 0
+
     def _consume_single_use_proxy_token_with_conn(self, conn: Any, jti: str, now: datetime) -> bool:
         """Atomically consume a single-use token and reject replays (with connection)."""
         cursor = conn.cursor()
@@ -2128,6 +2252,8 @@ class APIKeyProxyService:
         """
         Clean up expired/consumed/revoked proxy token records.
 
+        Issue #1822: Added expired_at cleanup condition.
+
         Args:
             days_old: Delete records older than this many days (default: 7).
 
@@ -2145,36 +2271,62 @@ class APIKeyProxyService:
             threshold_expired = (now - timedelta(days=days_old)).isoformat()
             threshold_consumed = (now - timedelta(days=1)).isoformat()
 
+            # Issue #1822: Check if expired_at column exists
+            # For backward compatibility with databases that haven't run migration yet
+            has_expired_at_column = False
+            try:
+                if is_postgresql():
+                    cursor.execute("""
+                        SELECT column_name FROM information_schema.columns
+                        WHERE table_name = 'proxy_token_jtis' AND column_name = 'expired_at'
+                    """)
+                    has_expired_at_column = cursor.fetchone() is not None
+                else:
+                    cursor.execute("PRAGMA table_info(proxy_token_jtis)")
+                    columns = [row[1] for row in cursor.fetchall()]
+                    has_expired_at_column = 'expired_at' in columns
+            except Exception:
+                # If check fails, assume column exists (safer to try)
+                has_expired_at_column = True
+
             if is_postgresql():
                 # PostgreSQL: Use subquery with LIMIT
-                cursor.execute(
-                    f"""
+                # Issue #1822: Added expired_at cleanup condition (if column exists)
+                expired_condition = f"OR (expired_at IS NOT NULL AND expired_at < {_param()})" if has_expired_at_column else ""
+                sql = f"""
                     DELETE FROM proxy_token_jtis
                     WHERE ctid IN (
                         SELECT ctid FROM proxy_token_jtis
                         WHERE (expires_at < {_param()})
                            OR (consumed_at IS NOT NULL AND consumed_at < {_param()})
                            OR (revoked_at IS NOT NULL AND revoked_at < {_param()})
+                           {expired_condition}
                         LIMIT 1000
                     )
-                """,
-                    (threshold_expired, threshold_consumed, threshold_consumed),
-                )
+                """
+                params = [threshold_expired, threshold_consumed, threshold_consumed]
+                if has_expired_at_column:
+                    params.append(threshold_expired)
+                cursor.execute(sql, params)
             else:
                 # SQLite: Use rowid subquery with LIMIT
-                cursor.execute(
-                    f"""
+                # Issue #1822: Added expired_at cleanup condition (if column exists)
+                expired_condition = f"OR (expired_at IS NOT NULL AND expired_at < {_param()})" if has_expired_at_column else ""
+                sql = f"""
                     DELETE FROM proxy_token_jtis
                     WHERE rowid IN (
                         SELECT rowid FROM proxy_token_jtis
                         WHERE (expires_at < {_param()})
                            OR (consumed_at IS NOT NULL AND consumed_at < {_param()})
                            OR (revoked_at IS NOT NULL AND revoked_at < {_param()})
+                           {expired_condition}
                         LIMIT 1000
                     )
-                """,
-                    (threshold_expired, threshold_consumed, threshold_consumed),
-                )
+                """
+                params = [threshold_expired, threshold_consumed, threshold_consumed]
+                if has_expired_at_column:
+                    params.append(threshold_expired)
+                cursor.execute(sql, params)
 
             deleted = cursor.rowcount
             conn.commit()
