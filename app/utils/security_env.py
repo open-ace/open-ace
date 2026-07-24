@@ -97,3 +97,40 @@ def get_upload_auth_key() -> str | None:
         return None
 
     return upload_auth_key
+
+
+_DEV_REDIS_PASSWORD = "dev-redis-password"  # nosec B105 - explicit development-only fallback
+
+
+def get_redis_password(redis_password: str | None = None) -> str:
+    """
+    Return a validated Redis password.
+
+    In production, empty or weak passwords are rejected (fail-closed).
+    In development, a development-only password is used with a warning.
+
+    Args:
+        redis_password: Optional password override. If None, reads from REDIS_PASSWORD env.
+
+    Returns:
+        A validated Redis password.
+
+    Raises:
+        RuntimeError: In production when password is empty or weak.
+    """
+    if redis_password is None:
+        redis_password = os.environ.get("REDIS_PASSWORD")
+
+    if not redis_password:
+        if is_production_environment():
+            raise RuntimeError("REDIS_PASSWORD must be set to a strong value in production!")
+        logger.warning("Using development REDIS_PASSWORD - DO NOT use in production!")
+        return _DEV_REDIS_PASSWORD
+
+    if is_production_environment() and is_weak_secret_value(redis_password):
+        raise RuntimeError("REDIS_PASSWORD must be set to a strong, unique value in production!")
+
+    if is_weak_secret_value(redis_password):
+        logger.warning("Using weak development REDIS_PASSWORD - DO NOT use in production!")
+
+    return redis_password

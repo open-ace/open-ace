@@ -129,14 +129,26 @@ spec:
           ports:
             - containerPort: 6379
               name: redis
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: open-ace-secrets
+                  key: REDIS_PASSWORD
+            - name: REDISCLI_AUTH_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: open-ace-secrets
+                  key: REDIS_PASSWORD
           command:
-            - redis-server
-            - --appendonly
-            - "yes"
-            - --maxmemory
-            - "256mb"
-            - --maxmemory-policy
-            - "allkeys-lru"
+            - /bin/sh
+            - -c
+            - |
+              redis-server \
+                --appendonly yes \
+                --maxmemory 256mb \
+                --maxmemory-policy allkeys-lru \
+                --requirepass "$REDIS_PASSWORD"
           resources:
             requests:
               cpu: "50m"

@@ -54,4 +54,4 @@ stringData:
   UPLOAD_AUTH_KEY: "replace-with-random-upload-auth-key"
   DB_USER: "openace"
   DB_PASSWORD: "replace-with-random-database-password"
-  REDIS_PASSWORD: ""
+  REDIS_PASSWORD: "replace-with-random-redis-password"
