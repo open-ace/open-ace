@@ -421,7 +421,9 @@ def test_terminal_result_closes_stream_json_stdin():
     runner._capture_cli_session_id = lambda *_args: "cli-session"
     runner._sync_sidebar_session_totals = lambda *_args, **_kwargs: None
     runner._resolve_sidebar_session = lambda *_args, **_kwargs: "cli-session"
-    process = SimpleNamespace(stdout=FakeStdout(), stdin=FakeStdin(), returncode=None)
+    process = SimpleNamespace(
+        stdout=FakeStdout(), stdin=FakeStdin(), returncode=None, poll=lambda: None
+    )
     session = _LocalSession(session_id="tracking-session", process=process)
 
     with patch(
@@ -910,7 +912,7 @@ def test_claude_embedded_tool_use_pairs_with_test_result():
 
     runner = AutonomousAgentRunner.__new__(AutonomousAgentRunner)
     runner._activity_callback = None
-    process = SimpleNamespace(stdout=FakeStdout(), returncode=None)
+    process = SimpleNamespace(stdout=FakeStdout(), returncode=None, poll=lambda: None)
     session = _LocalSession(session_id="test-session", process=process)
 
     runner._read_stdout(session)
