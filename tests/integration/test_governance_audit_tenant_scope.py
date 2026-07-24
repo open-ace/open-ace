@@ -29,7 +29,7 @@ def _insert_admin(tmp_db, username: str, tenant_id: int) -> int:
 
 
 def _login_as(monkeypatch, user_id: int, tenant_id: int, username: str) -> None:
-    monkeypatch.setattr(auth_module, "_extract_token", lambda: "session-token")
+    monkeypatch.setattr(auth_module, "_extract_session_token", lambda: "session-token")
     monkeypatch.setattr(
         auth_module,
         "_load_user_from_token",

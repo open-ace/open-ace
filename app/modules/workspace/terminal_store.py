@@ -25,7 +25,8 @@ class TerminalInfoStore:
     def __init__(self, ttl: float = TTL_SECONDS):
         self._lock = threading.Lock()
         self._store: dict[tuple[str, str], dict] = {}
-        self._terminal_index: dict[str, str] = {}
+        self._terminal_index: dict[str, str] = {}  # terminal_id -> machine_id
+        self._token_index: dict[str, tuple[str, str]] = {}  # token -> (machine_id, terminal_id)
         self._ttl = ttl
         self._cleanup_timer: threading.Timer | None = None
 
@@ -52,12 +53,31 @@ class TerminalInfoStore:
         evicted_terminal_ids: list[str] = []
         with self._lock:
             info["_updated_at"] = time.time()
+
+            # Remove old token from index if exists
+            old_info = self._store.get((machine_id, terminal_id))
+            if old_info:
+                old_token = old_info.get("token", "")
+                if old_token and old_token in self._token_index:
+                    self._token_index.pop(old_token, None)
+
             self._store[(machine_id, terminal_id)] = info
             self._terminal_index[terminal_id] = machine_id
+
+            # Add new token to index
+            new_token = info.get("token", "")
+            if new_token:
+                self._token_index[new_token] = (machine_id, terminal_id)
+
             # Evict oldest entries if over capacity
             if len(self._store) > MAX_ENTRIES:
                 oldest = sorted(self._store.items(), key=lambda kv: kv[1].get("_updated_at", 0))
                 for k, _ in oldest[: len(self._store) - MAX_ENTRIES]:
+                    evicted_info = self._store.get(k)
+                    if evicted_info:
+                        evicted_token = evicted_info.get("token", "")
+                        if evicted_token and evicted_token in self._token_index:
+                            self._token_index.pop(evicted_token, None)
                     del self._store[k]
                     self._terminal_index.pop(k[1], None)
                     evicted_terminal_ids.append(k[1])
@@ -79,10 +99,55 @@ class TerminalInfoStore:
                 self._terminal_index.pop(terminal_id, None)
         return None
 
+    def find_by_token(self, token: str) -> tuple[str, str, dict] | None:
+        """Find terminal info by token.
+
+        Uses token index for O(1) lookup.
+
+        Args:
+            token: Token string to search for.
+
+        Returns:
+            Tuple of (machine_id, terminal_id, info) or None if not found.
+        """
+        if not token:
+            return None
+        with self._lock:
+            # O(1) lookup via token index
+            key = self._token_index.get(token)
+            if key:
+                machine_id, terminal_id = key
+                info = self._store.get((machine_id, terminal_id))
+                if info is not None:
+                    return machine_id, terminal_id, info
+                # Clean up stale index entry
+                self._token_index.pop(token, None)
+        return None
+
+    def get_tenant_id(self, machine_id: str, terminal_id: str) -> int | None:
+        """Get tenant_id for a terminal.
+
+        Args:
+            machine_id: Machine ID.
+            terminal_id: Terminal ID.
+
+        Returns:
+            Tenant ID or None if not found.
+        """
+        info = self.get(machine_id, terminal_id)
+        if info:
+            return info.get("tenant_id")
+        return None
+
     def pop(self, machine_id: str, terminal_id: str) -> dict | None:
         with self._lock:
             self._terminal_index.pop(terminal_id, None)
             info = self._store.pop((machine_id, terminal_id), None)
+            # Clean up token index
+            if info:
+                token = info.get("token", "")
+                if token and token in self._token_index:
+                    self._token_index.pop(token, None)
         if info is not None:
             self._close_bridges(terminal_id)
         return info
@@ -97,6 +162,11 @@ class TerminalInfoStore:
                 k for k, v in self._store.items() if now - v.get("_updated_at", 0) > self._ttl
             ]
             for k in stale_keys:
+                info = self._store.get(k)
+                if info:
+                    token = info.get("token", "")
+                    if token and token in self._token_index:
+                        self._token_index.pop(token, None)
                 del self._store[k]
                 self._terminal_index.pop(k[1], None)
                 stale_terminal_ids.append(k[1])

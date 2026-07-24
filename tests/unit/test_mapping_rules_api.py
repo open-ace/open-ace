@@ -47,7 +47,7 @@ def admin_client(app):
             )
 
         def _token_patch(self):
-            return patch("app.auth.decorators._extract_token", return_value="test-token")
+            return patch("app.auth.decorators._extract_session_token", return_value="test-token")
 
         def get(self, *args, **kwargs):
             with self._token_patch():
@@ -94,7 +94,7 @@ def non_admin_client(app):
             )
 
         def _token_patch(self):
-            return patch("app.auth.decorators._extract_token", return_value="test-token")
+            return patch("app.auth.decorators._extract_session_token", return_value="test-token")
 
         def get(self, *args, **kwargs):
             with self._token_patch():
