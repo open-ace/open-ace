@@ -23,6 +23,7 @@ import uuid
 from datetime import datetime, timezone
 
 from app.modules.workspace.autonomous.agent_runner import (
+    _OPENACE_RUN_AS,
     DEFAULT_TASK_TIMEOUT,
     AutonomousAgentRunner,
 )
@@ -2432,12 +2433,25 @@ class AutonomousOrchestrator:
             logger.warning("Skipping isolated pre-commit convergence: executable unavailable")
             return False, ""
 
-        isolated_account = self._resolve_isolated_agent_account()
         project_system_account = self._resolve_system_account(wf)
-        if project_system_account and isolated_account == project_system_account:
-            raise RuntimeError(
-                "Autonomous validation account must differ from the repository owner account"
+        # Engage the credentialless isolated-agent principal only when the
+        # privileged launcher is provisioned (Linux multi-user). On dev/macOS
+        # installs without openace-run-as, fall back to the repository owner
+        # account in same-user mode — mirroring _run_agent's downgrade.
+        if AutonomousAgentRunner.is_isolated_launcher_available():
+            isolated_account = self._resolve_isolated_agent_account()
+            if project_system_account and isolated_account == project_system_account:
+                raise RuntimeError(
+                    "Autonomous validation account must differ from the repository owner account"
+                )
+        else:
+            logger.warning(
+                "Workflow %s: isolated agent launcher unavailable; running pre-commit "
+                "convergence as the repository owner (%s) in same-user mode.",
+                getattr(self, "_workflow_id", ""),
+                project_system_account or "(unknown)",
             )
+            isolated_account = project_system_account
         runtime_command, _ = self._select_project_python_runtime(project_path, gh)
         guard_bin = AutonomousAgentRunner._resolve_agent_guard_bin()
         env = {
@@ -4392,22 +4406,40 @@ class AutonomousOrchestrator:
                         "contains embedded credentials; configure a credential helper instead"
                     ),
                 )
-            isolated_account = self._resolve_isolated_agent_account()
-            try:
-                service_account = pwd.getpwuid(os.getuid()).pw_name
-            except (KeyError, OverflowError):
-                service_account = ""
-            if isolated_account in {project_system_account, service_account}:
-                return AgentTaskResult(
-                    session_id=tracking_session_id,
-                    tracking_session_id=tracking_session_id,
-                    success=False,
-                    error=(
-                        "Autonomous agent isolation is invalid: the credentialless agent "
-                        "account must differ from the service and repository owner accounts"
-                    ),
+            # Engage the credentialless isolated-agent principal only when the
+            # privileged launcher (openace-run-as --isolated) is actually
+            # provisioned. The launcher is Linux-only (setfacl/getent/runuser)
+            # and absent on dev/macOS installs where the service already runs as
+            # the repo owner; in that same-user case isolation provides no
+            # benefit and cannot run. Mirrors the Windows single-user downgrade.
+            if AutonomousAgentRunner.is_isolated_launcher_available():
+                isolated_account = self._resolve_isolated_agent_account()
+                try:
+                    service_account = pwd.getpwuid(os.getuid()).pw_name
+                except (KeyError, OverflowError):
+                    service_account = ""
+                if isolated_account in {project_system_account, service_account}:
+                    return AgentTaskResult(
+                        session_id=tracking_session_id,
+                        tracking_session_id=tracking_session_id,
+                        success=False,
+                        error=(
+                            "Autonomous agent isolation is invalid: the credentialless agent "
+                            "account must differ from the service and repository owner accounts"
+                        ),
+                    )
+                kwargs["system_account"] = isolated_account
+            else:
+                logger.warning(
+                    "Workflow %s: isolated agent launcher %s unavailable; running the "
+                    "agent as the repository owner (%s) in same-user mode. This is expected "
+                    "on dev/macOS installs where the service runs as the repo owner; "
+                    "isolated agent mode requires the openace-run-as launcher "
+                    "(Linux multi-user only).",
+                    self._workflow_id,
+                    _OPENACE_RUN_AS,
+                    project_system_account or "(unknown)",
                 )
-            kwargs["system_account"] = isolated_account
 
         with self._session_lock:
             self._current_session_id = tracking_session_id
