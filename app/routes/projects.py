@@ -21,7 +21,7 @@ from app.auth.decorators import (
     enforce_password_change_requirement,
     normalize_webui_token,
     require_tenant_scope,
-    security_annotated,  # Issue #1897: Security annotation decorator
+    security_annotated,
 )
 from app.repositories.project_repo import ProjectRepository
 from app.repositories.user_repo import UserRepository

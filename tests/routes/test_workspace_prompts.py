@@ -109,7 +109,12 @@ class TestValidateBaselineMetadata:
         """Test that validation script exists."""
         from pathlib import Path
 
-        script_path = Path(__file__).parent.parent.parent / "scripts" / "lint" / "validate_baseline_metadata.py"
+        script_path = (
+            Path(__file__).parent.parent.parent
+            / "scripts"
+            / "lint"
+            / "validate_baseline_metadata.py"
+        )
         assert script_path.exists()
 
     def test_validation_passes(self):
@@ -243,6 +248,7 @@ class TestPromptTemplatePermissions:
 
         with app.app_context():
             from flask import g
+
             g.user = author_user
             has_access, error = _check_prompt_ownership(private_template, allow_public=True)
             assert has_access is True
@@ -254,6 +260,7 @@ class TestPromptTemplatePermissions:
 
         with app.app_context():
             from flask import g
+
             g.user = author_user
             has_access, error = _check_prompt_ownership(public_template, allow_public=True)
             assert has_access is True
@@ -264,6 +271,7 @@ class TestPromptTemplatePermissions:
 
         with app.app_context():
             from flask import g
+
             g.user = non_author_user
             has_access, error = _check_prompt_ownership(public_template, allow_public=True)
             assert has_access is True
@@ -274,11 +282,13 @@ class TestPromptTemplatePermissions:
 
         with app.app_context():
             from flask import g
+
             g.user = non_author_user
 
             # Mock feature flag as true
-            import os
             import importlib
+            import os
+
             import app.routes.workspace as workspace_module
 
             old_flag = os.environ.get("ENFORCE_PROMPT_OWNERSHIP")
@@ -304,6 +314,7 @@ class TestPromptTemplatePermissions:
 
         with app.app_context():
             from flask import g
+
             g.user = author_user
             # PUT uses allow_public=False
             has_access, error = _check_prompt_ownership(public_template, allow_public=False)
@@ -315,10 +326,12 @@ class TestPromptTemplatePermissions:
 
         with app.app_context():
             from flask import g
+
             g.user = non_author_user
 
-            import os
             import importlib
+            import os
+
             import app.routes.workspace as workspace_module
 
             old_flag = os.environ.get("ENFORCE_PROMPT_OWNERSHIP")
@@ -342,6 +355,7 @@ class TestPromptTemplatePermissions:
 
         with app.app_context():
             from flask import g
+
             g.user = admin_user
             has_access, error = _check_prompt_ownership(private_template, allow_public=False)
             assert has_access is True
@@ -351,6 +365,7 @@ class TestPromptTemplatePermissions:
         # DELETE endpoint checks ownership in delete_template function
         # We verify the logic exists in workspace.py
         import inspect
+
         from app.routes import workspace
 
         source = inspect.getsource(workspace.delete_prompt)
@@ -361,6 +376,7 @@ class TestPromptTemplatePermissions:
         """Scenario 9: Non-author DELETE public template -> 403."""
         # DELETE endpoint checks ownership
         import inspect
+
         from app.routes import workspace
 
         source = inspect.getsource(workspace.delete_prompt)
@@ -371,6 +387,7 @@ class TestPromptTemplatePermissions:
     def test_admin_delete_any_template(self, private_template, admin_user):
         """Scenario 10: Admin DELETE any template -> 200."""
         import inspect
+
         from app.routes import workspace
 
         source = inspect.getsource(workspace.delete_prompt)
@@ -383,6 +400,7 @@ class TestPromptTemplatePermissions:
 
         with app.app_context():
             from flask import g
+
             g.user = author_user
             # render uses allow_public=True
             has_access, error = _check_prompt_ownership(private_template, allow_public=True)
@@ -394,20 +412,25 @@ class TestPromptTemplatePermissions:
 
         with app.app_context():
             from flask import g
+
             g.user = non_author_user
             has_access, error = _check_prompt_ownership(public_template, allow_public=True)
             assert has_access is True
 
-    def test_non_author_render_private_template_denied(self, private_template, non_author_user, app):
+    def test_non_author_render_private_template_denied(
+        self, private_template, non_author_user, app
+    ):
         """Scenario 13: Non-author render private template -> 403."""
         from app.routes.workspace import _check_prompt_ownership
 
         with app.app_context():
             from flask import g
+
             g.user = non_author_user
 
-            import os
             import importlib
+            import os
+
             import app.routes.workspace as workspace_module
 
             old_flag = os.environ.get("ENFORCE_PROMPT_OWNERSHIP")
@@ -430,6 +453,7 @@ class TestPromptTemplatePermissions:
 
         with app.app_context():
             from flask import g
+
             g.user = author_user
             # copy uses allow_public=True
             has_access, error = _check_prompt_ownership(private_template, allow_public=True)
@@ -441,6 +465,7 @@ class TestPromptTemplatePermissions:
 
         with app.app_context():
             from flask import g
+
             g.user = non_author_user
             has_access, error = _check_prompt_ownership(public_template, allow_public=True)
             assert has_access is True

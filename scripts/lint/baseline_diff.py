@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Compare security baseline between PR and main branch.
 
@@ -128,7 +127,7 @@ def main() -> int:
     diff = compare_baselines(current_baseline, main_baseline)
 
     # Report results
-    print(f"Baseline comparison results:")
+    print("Baseline comparison results:")
     print(f"  Added: {len(diff.added)} suppression(s)")
     print(f"  Removed: {len(diff.removed)} suppression(s)")
     print(f"  Unchanged: {len(diff.unchanged)} suppression(s)")

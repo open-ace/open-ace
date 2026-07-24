@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Validate security baseline metadata completeness.
 
@@ -58,7 +57,7 @@ def validate_baseline() -> tuple[bool, list[str]]:
     now = datetime.now(timezone.utc)
 
     for i, item in enumerate(data):
-        item_id = f"item {i}" if "key" not in item else item["key"]
+        item_id = item.get("key", f"item {i}")
 
         # Check for metadata field
         metadata = item.get("metadata")
@@ -83,9 +82,7 @@ def validate_baseline() -> tuple[bool, list[str]]:
             try:
                 exp_date = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
                 if exp_date < now:
-                    errors.append(
-                        f"{item_id}: metadata.expires_at ({expires_at}) has expired"
-                    )
+                    errors.append(f"{item_id}: metadata.expires_at ({expires_at}) has expired")
             except (ValueError, TypeError):
                 errors.append(f"{item_id}: metadata.expires_at is not a valid ISO date")
 

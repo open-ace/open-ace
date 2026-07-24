@@ -20,7 +20,7 @@ from app.auth.decorators import (
     _extract_token,
     _load_user_from_token,
     enforce_password_change_requirement,
-    security_annotated,  # Issue #1897: Security annotation decorator
+    security_annotated,
 )
 from app.modules.workspace.api_key_proxy import get_api_key_proxy_service
 from app.modules.workspace.collaboration import SharePermission, get_collaboration_manager
@@ -51,7 +51,9 @@ _SESSION_REFRESH_THRESHOLD_MINUTES = 10
 _ENFORCE_PROMPT_OWNERSHIP = os.environ.get("ENFORCE_PROMPT_OWNERSHIP", "true").lower() == "true"
 
 
-def _check_prompt_ownership(template: PromptTemplate, allow_public: bool = True) -> tuple[bool, str]:
+def _check_prompt_ownership(
+    template: PromptTemplate, allow_public: bool = True
+) -> tuple[bool, str]:
     """Check if the current user can access a prompt template.
 
     Args:
@@ -2037,7 +2039,9 @@ def create_knowledge():
 
 
 @workspace_bp.route("/knowledge/<entry_id>", methods=["GET"])
-@security_annotated(reason="Ownership via is_published check + author_id/admin fallback. Workspace-level auth via @before_request.")
+@security_annotated(
+    reason="Ownership via is_published check + author_id/admin fallback. Workspace-level auth via @before_request."
+)
 def get_knowledge(entry_id):
     """Get a knowledge base entry.
 
@@ -2070,9 +2074,15 @@ def get_knowledge(entry_id):
                     f"Knowledge access denied: user={user_id}, entry={entry_id}, "
                     f"author={author_id}, is_published={is_published}"
                 )
-                return jsonify(
-                    {"success": False, "error": "Access denied. Only author or admin can view unpublished entries."}
-                ), 403
+                return (
+                    jsonify(
+                        {
+                            "success": False,
+                            "error": "Access denied. Only author or admin can view unpublished entries.",
+                        }
+                    ),
+                    403,
+                )
 
         return jsonify({"success": True, "data": entry.to_dict()})
     except Exception as e:
