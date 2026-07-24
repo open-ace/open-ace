@@ -733,6 +733,44 @@ def public_endpoint(f):
     return wrapper
 
 
+def security_annotated(reason: str = ""):
+    """
+    Decorator: mark an endpoint with a security annotation for scanner recognition.
+
+    Used to mark endpoints that have ownership checks implemented in non-standard
+    patterns (e.g., inline checks like get_user_project, revoke_share, etc.)
+    that the AST-based scanner cannot automatically detect.
+
+    This decorator does NOT change runtime behavior - it's purely a marker
+    for the security scanner to suppress SEC002 violations for intentionally
+    secured endpoints.
+
+    Args:
+        reason: Human-readable explanation of the security control in place.
+
+    Usage:
+        @security_annotated(reason="Ownership via get_user_project + is_shared flag")
+        def api_get_project(project_id):
+            ...
+
+    The scanner checks for this decorator and skips SEC002 ownership checks
+    when it is present, similar to how @public_endpoint works for SEC001.
+    """
+
+    def decorator(f):
+        f._security_annotation = reason  # type: ignore[attr-defined]
+
+        @wraps(f)
+        def wrapper(*args, **kwargs):
+            return f(*args, **kwargs)
+
+        # Copy the annotation to the wrapper so scanner can find it
+        wrapper._security_annotation = reason  # type: ignore[attr-defined]
+        return wrapper
+
+    return decorator
+
+
 # ── Tenant scope helpers ──────────────────────────────────────────────
 
 

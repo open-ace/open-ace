@@ -10,6 +10,7 @@ API endpoints for workspace functionality including:
 """
 
 import logging
+import os
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -19,6 +20,7 @@ from app.auth.decorators import (
     _extract_token,
     _load_user_from_token,
     enforce_password_change_requirement,
+    security_annotated,
 )
 from app.modules.workspace.api_key_proxy import get_api_key_proxy_service
 from app.modules.workspace.collaboration import SharePermission, get_collaboration_manager
@@ -43,6 +45,63 @@ TOKEN_QUOTA_MULTIPLIER = 1_000_000
 
 # Only refresh session when it has less than this many minutes remaining
 _SESSION_REFRESH_THRESHOLD_MINUTES = 10
+
+# Issue #1897: Feature flag for prompt ownership enforcement
+# Set ENFORCE_PROMPT_OWNERSHIP=false for gradual rollout (logs only, no rejection)
+_ENFORCE_PROMPT_OWNERSHIP = os.environ.get("ENFORCE_PROMPT_OWNERSHIP", "true").lower() == "true"
+
+
+def _check_prompt_ownership(
+    template: PromptTemplate, allow_public: bool = True
+) -> tuple[bool, str]:
+    """Check if the current user can access a prompt template.
+
+    Args:
+        template: The PromptTemplate to check access for.
+        allow_public: If True, public templates are accessible to all authenticated users.
+                     If False, only author/admin can access regardless of is_public.
+
+    Returns:
+        Tuple of (has_access, error_message). If has_access is False, error_message
+        contains the reason and caller should return 403.
+
+    Usage:
+        template = library.get_template(template_id)
+        has_access, error = _check_prompt_ownership(template, allow_public=True)
+        if not has_access:
+            return jsonify({"success": False, "error": error}), 403
+    """
+    user_id = g.user.get("id") if hasattr(g, "user") and g.user else None
+    user_role = g.user.get("role") if hasattr(g, "user") and g.user else None
+
+    # Admin can access any template
+    if user_role == "admin":
+        return True, ""
+
+    # Check if user is the author
+    author_id = getattr(template, "author_id", None)
+    is_author = author_id is not None and user_id == author_id
+
+    # Author can always access their own templates
+    if is_author:
+        return True, ""
+
+    # For public templates with allow_public=True, any authenticated user can access
+    is_public = getattr(template, "is_public", False)
+    if allow_public and is_public:
+        return True, ""
+
+    # Log for gradual rollout monitoring (Issue #1897)
+    if not _ENFORCE_PROMPT_OWNERSHIP:
+        logger.warning(
+            f"[Prompt Ownership] Access check logging only (enforcement disabled). "
+            f"User {user_id} would be denied access to template {template.id} "
+            f"(author={author_id}, is_public={is_public}, allow_public={allow_public}). "
+            f"Set ENFORCE_PROMPT_OWNERSHIP=true to enforce."
+        )
+        return True, ""  # Allow access in logging-only mode
+
+    return False, "Access denied. Only the author or admin can access this template."
 
 
 def format_datetime(dt):
@@ -438,13 +497,22 @@ def create_prompt():
 
 @workspace_bp.route("/prompts/<int:template_id>", methods=["GET"])
 def get_prompt(template_id):
-    """Get a prompt template."""
+    """Get a prompt template.
+
+    Issue #1897: Public templates are accessible to all authenticated users.
+    Private templates require author or admin.
+    """
     try:
         library = get_prompt_library()
         template = library.get_template(template_id)
 
         if not template:
             return jsonify({"success": False, "error": "Template not found"}), 404
+
+        # Issue #1897: Check ownership for private templates
+        has_access, error = _check_prompt_ownership(template, allow_public=True)
+        if not has_access:
+            return jsonify({"success": False, "error": error}), 403
 
         return jsonify({"success": True, "data": template.to_dict()})
     except Exception as e:
@@ -454,7 +522,10 @@ def get_prompt(template_id):
 
 @workspace_bp.route("/prompts/<int:template_id>", methods=["PUT"])
 def update_prompt(template_id):
-    """Update a prompt template."""
+    """Update a prompt template.
+
+    Issue #1897: Only author or admin can modify templates (regardless of is_public).
+    """
     try:
         data = request.get_json()
         if not data:
@@ -465,6 +536,11 @@ def update_prompt(template_id):
 
         if not template:
             return jsonify({"success": False, "error": "Template not found"}), 404
+
+        # Issue #1897: Only author or admin can modify (even public templates)
+        has_access, error = _check_prompt_ownership(template, allow_public=False)
+        if not has_access:
+            return jsonify({"success": False, "error": error}), 403
 
         # Update fields
         template.name = data.get("name", template.name)
@@ -505,7 +581,11 @@ def delete_prompt(template_id):
 
 @workspace_bp.route("/prompts/<int:template_id>/render", methods=["POST"])
 def render_prompt(template_id):
-    """Render a prompt template with variables."""
+    """Render a prompt template with variables.
+
+    Issue #1897: Public templates can be rendered by all authenticated users.
+    Private templates require author or admin.
+    """
     try:
         data = request.get_json() or {}
         variables = data.get("variables", {})
@@ -515,6 +595,11 @@ def render_prompt(template_id):
 
         if not template:
             return jsonify({"success": False, "error": "Template not found"}), 404
+
+        # Issue #1897: Check ownership for private templates
+        has_access, error = _check_prompt_ownership(template, allow_public=True)
+        if not has_access:
+            return jsonify({"success": False, "error": error}), 403
 
         # Validate required variables
         missing = template.validate_variables(**variables)
@@ -540,13 +625,22 @@ def render_prompt(template_id):
 
 @workspace_bp.route("/prompts/<int:template_id>/copy", methods=["POST"])
 def copy_prompt(template_id):
-    """Record a prompt copy action (increments use count)."""
+    """Record a prompt copy action (increments use count).
+
+    Issue #1897: Public templates can be copied by all authenticated users.
+    Private templates require author or admin.
+    """
     try:
         library = get_prompt_library()
         template = library.get_template(template_id)
 
         if not template:
             return jsonify({"success": False, "error": "Template not found"}), 404
+
+        # Issue #1897: Check ownership for private templates
+        has_access, error = _check_prompt_ownership(template, allow_public=True)
+        if not has_access:
+            return jsonify({"success": False, "error": error}), 403
 
         # Increment use count
         library.increment_use_count(template_id)
@@ -1798,6 +1892,7 @@ def create_share():
 
 
 @workspace_bp.route("/shares/<share_id>", methods=["DELETE"])
+@security_annotated(reason="Ownership via revoke_share(share_id, user_id) check")
 def revoke_share(share_id):
     """Revoke a share."""
     try:
@@ -1944,14 +2039,50 @@ def create_knowledge():
 
 
 @workspace_bp.route("/knowledge/<entry_id>", methods=["GET"])
+@security_annotated(
+    reason="Ownership via is_published check + author_id/admin fallback. Workspace-level auth via @before_request."
+)
 def get_knowledge(entry_id):
-    """Get a knowledge base entry."""
+    """Get a knowledge base entry.
+
+    Issue #1897: Published entries are accessible to all authenticated users.
+    Unpublished entries require author or admin.
+
+    Security Model:
+    - Workspace-level authentication: All requests pass through @before_request hook
+    - Published entries (is_published=True): Accessible to all workspace members
+    - Unpublished entries (is_published=False): Only author or admin can access
+    - Team scoping: entry.team_id is used for organization, not access control
+    """
     try:
         manager = get_collaboration_manager()
         entry = manager.get_knowledge_entry(entry_id)
 
         if not entry:
             return jsonify({"success": False, "error": "Entry not found"}), 404
+
+        # Issue #1897: Check access for unpublished entries
+        is_published = getattr(entry, "is_published", False)
+        if not is_published:
+            user_id = g.user.get("id") if hasattr(g, "user") and g.user else None
+            user_role = g.user.get("role") if hasattr(g, "user") and g.user else None
+            author_id = getattr(entry, "author_id", None)
+
+            # Only author or admin can access unpublished entries
+            if user_role != "admin" and user_id != author_id:
+                logger.info(
+                    f"Knowledge access denied: user={user_id}, entry={entry_id}, "
+                    f"author={author_id}, is_published={is_published}"
+                )
+                return (
+                    jsonify(
+                        {
+                            "success": False,
+                            "error": "Access denied. Only author or admin can view unpublished entries.",
+                        }
+                    ),
+                    403,
+                )
 
         return jsonify({"success": True, "data": entry.to_dict()})
     except Exception as e:

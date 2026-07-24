@@ -21,6 +21,7 @@ from app.auth.decorators import (
     enforce_password_change_requirement,
     normalize_webui_token,
     require_tenant_scope,
+    security_annotated,
 )
 from app.repositories.project_repo import ProjectRepository
 from app.repositories.user_repo import UserRepository
@@ -287,6 +288,7 @@ def api_create_project():
 
 
 @projects_bp.route("/projects/<int:project_id>", methods=["GET"])
+@security_annotated(reason="Ownership via get_user_project + is_shared flag check")
 def api_get_project(project_id):
     """Get project details."""
     tenant_id = _current_tenant_id()
@@ -391,6 +393,7 @@ def api_get_all_project_stats():
 
 
 @projects_bp.route("/projects/<int:project_id>/daily", methods=["GET"])
+@security_annotated(reason="Ownership via get_user_project + is_shared + admin check")
 def api_get_project_daily_stats(project_id):
     """Get daily statistics for a project."""
     tenant_id = _current_tenant_id()

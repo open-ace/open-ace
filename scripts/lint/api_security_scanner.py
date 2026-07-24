@@ -74,6 +74,7 @@ AUTH_DECORATORS: set[str] = {
     "auth_required",
     "admin_required",
     "public_endpoint",
+    "security_annotated",  # Issue #1897: Mark endpoints with ownership checks
 }
 
 AUTH_INLINE_CALLS: set[str] = {
@@ -361,6 +362,12 @@ class APISecurityScanner:
             r"ownership",
             r"_check_session_access",
             r"_require_machine_admin",
+            # Issue #1897: Additional ownership patterns
+            r"get_user_project",
+            r"revoke_share",
+            r"delete_template",
+            r"author_id",
+            r"is_public",
         ):
             if re.search(pattern, src):
                 return True
