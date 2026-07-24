@@ -42,6 +42,7 @@ from app.repositories.database import (
 from app.services.email_notification_service import get_email_notification_service
 from app.utils.config import get_config_value
 from app.utils.outbound_url_guard import is_public_address
+from app.utils.smtp_crypto import get_password_manager
 
 logger = logging.getLogger(__name__)
 
@@ -84,16 +85,20 @@ def _redact_webhook_credentials(webhook_url, *, mask_feishu=True):
     Two credential shapes are handled:
 
     * DingTalk signing secret query params (``openace_dingtalk_secret`` /
-      ``dingtalk_secret``) — always stripped. The outbound signer reads the
-      secret from the global ``alerts.dingtalk_webhook_secret`` config instead,
-      so stripping it is lossless on the write path.
+      ``dingtalk_secret``) — always stripped. The write path
+      (:func:`set_notification_preferences`) lifts this secret into the per-user
+      encrypted column first (Issue #1829, F6), and the outbound signer
+      (:meth:`AlertNotifier._prepare_webhook_url`) rebuilds the signature from
+      the per-user secret (falling back to global config then the URL query), so
+      stripping it is lossless on the write path.
     * Feishu/Lark bot webhooks, which carry the bot token in the final URL path
       segment (``/open-apis/bot/v2/hook/<TOKEN>``). When ``mask_feishu`` is true
       the token is replaced with ``<redacted>``.
 
     The two credential shapes are *not* symmetric on the persistence path. The
-    DingTalk secret lives in the query string and is rebuilt from global config
-    on outbound signing, so it can safely be stripped before writing to the DB.
+    DingTalk secret lives in the query string and is rebuilt from the per-user
+    (or global) secret on outbound signing, so it can safely be stripped before
+    writing to the DB.
     The Feishu token lives only in the path and has no global-config equivalent
     (``alerts.webhook_secret``/``alerts.dingtalk_webhook_secret`` are unrelated),
     so it must NOT be masked on the write path — otherwise it is destroyed and
@@ -139,6 +144,47 @@ def _redact_webhook_credentials(webhook_url, *, mask_feishu=True):
 # path token). The write path now calls ``_redact_webhook_credentials(...,
 # mask_feishu=False)`` directly so the Feishu token survives persistence.
 _redact_dingtalk_secret = _redact_webhook_credentials
+
+
+def _extract_dingtalk_secret_from_url(webhook_url: str | None) -> str | None:
+    """Return the DingTalk signing secret carried in ``webhook_url``'s query.
+
+    Recognizes the ``openace_dingtalk_secret`` / ``dingtalk_secret`` query keys.
+    Returns ``None`` when the URL carries no secret. Used on the write path to
+    lift the secret out of the URL *before* :func:`_redact_webhook_credentials`
+    strips it, so it can be encrypted into the per-user column (Issue #1829, F6).
+    """
+    if not webhook_url:
+        return None
+    try:
+        parsed = urlparse(webhook_url)
+    except ValueError:
+        return None
+    if not parsed.query:
+        return None
+    for key, value in parse_qsl(parsed.query, keep_blank_values=True):
+        if key in _DINGTALK_SECRET_QUERY_KEYS and value:
+            return value
+    return None
+
+
+def _table_has_column(cursor, table_name: str, column_name: str) -> bool:
+    """Return whether ``table_name`` currently has ``column_name``.
+
+    Cross-dialect (SQLite via PRAGMA, PostgreSQL via information_schema) so
+    :meth:`AlertNotifier._ensure_tables` can back-fill a column added in a later
+    revision onto a database created by an earlier one, where
+    ``CREATE TABLE IF NOT EXISTS`` is a no-op.
+    """
+    if is_postgresql():
+        cursor.execute(
+            "SELECT 1 FROM information_schema.columns "
+            "WHERE table_name = %s AND column_name = %s",
+            (table_name, column_name),
+        )
+        return bool(cursor.fetchone())
+    cursor.execute(f"PRAGMA table_info({table_name})")
+    return any(row[1] == column_name for row in cursor.fetchall())
 
 
 def _pin_host_to_url(url: str, pinned_ip: str) -> str:
@@ -252,6 +298,14 @@ class NotificationPreference:
     min_severity: str = "warning"  # info, warning, critical
     notification_email: str | None = None  # User's notification email address
     email_verified: bool = False  # Whether email has been verified
+    # Issue #1829, F6: per-user DingTalk signing secret, stored ENCRYPTED
+    # (Fernet via PasswordManager). ``None`` means "no per-user secret; fall
+    # back to the global alerts.dingtalk_webhook_secret config". The cleartext
+    # is decrypted lazily at signing time in _prepare_webhook_url, never on
+    # read/echo, so the persistence and GET paths never pay decryption cost and
+    # never surface the plaintext. This gives each tenant its own signing secret
+    # instead of all users sharing one global secret.
+    dingtalk_webhook_secret: str | None = None
 
 
 class AlertNotifier:
@@ -462,14 +516,39 @@ class AlertNotifier:
             "alert": self._webhook_alert_view(alert),
         }
 
-    def _prepare_webhook_url(self, webhook_url: str) -> str:
-        """Return the outbound webhook URL, applying DingTalk signing when configured."""
+    def _prepare_webhook_url(
+        self, webhook_url: str, user_secret_encrypted: str | None = None
+    ) -> str:
+        """Return the outbound webhook URL, applying DingTalk signing when configured.
+
+        Issue #1829, F6: signing-secret priority is (1) the per-user secret,
+        then (2) the global ``alerts.dingtalk_webhook_secret`` config, then (3)
+        a secret carried in the URL query (legacy fallback).
+        ``user_secret_encrypted`` is the ENCRYPTED per-user secret from
+        notification_preferences; it is decrypted here (lazily, only when
+        signing a DingTalk webhook) so the read/echo path never pays decryption
+        cost and the plaintext never leaves this method. Decryption failures
+        silently fall through to the lower-priority sources rather than aborting
+        delivery — and never log the secret value.
+        """
         if not self._is_dingtalk_webhook(webhook_url):
             return webhook_url
 
         parsed = urlparse(webhook_url)
         query_items = parse_qsl(parsed.query, keep_blank_values=True)
-        secret = str(get_config_value("alerts", "dingtalk_webhook_secret", "") or "").strip()
+        secret = ""
+        # (1) Per-user decrypted secret — highest priority, enables multi-tenant
+        # isolation (each tenant signs with its own secret).
+        if user_secret_encrypted:
+            try:
+                secret = get_password_manager().decrypt(user_secret_encrypted).strip()
+            except Exception:
+                # Never log the secret; fall through to lower-priority sources.
+                secret = ""
+        # (2) Global config secret (shared across all users).
+        if not secret:
+            secret = str(get_config_value("alerts", "dingtalk_webhook_secret", "") or "").strip()
+        # (3) URL query fallback (legacy / one-off delivery).
         sanitized_items: list[tuple[str, str]] = []
         for key, value in query_items:
             if key in _DINGTALK_SECRET_QUERY_KEYS:
@@ -542,7 +621,15 @@ class AlertNotifier:
 
             payload = self._build_webhook_payload(alert, prefs.webhook_url)
             body = json.dumps(payload).encode("utf-8")
-            outbound_url = self._prepare_webhook_url(prefs.webhook_url)
+            # Issue #1829, F6: pass the ENCRYPTED per-user DingTalk secret so
+            # each tenant signs with its own key (priority 1), falling back to
+            # global config (priority 2) then URL query (priority 3) inside
+            # _prepare_webhook_url. The ciphertext is decrypted lazily there;
+            # prefs already carries it from get_notification_preferences, so no
+            # extra DB query is needed.
+            outbound_url = self._prepare_webhook_url(
+                prefs.webhook_url, prefs.dingtalk_webhook_secret
+            )
             pinned_url = _pin_host_to_url(outbound_url, pinned_ips[0])
             headers = {
                 "User-Agent": "Open-ACE Alert Webhook",
@@ -654,10 +741,20 @@ class AlertNotifier:
                 alert_types TEXT,
                 min_severity TEXT DEFAULT 'warning',
                 notification_email TEXT,
-                email_verified {bool_false}
+                email_verified {bool_false},
+                dingtalk_webhook_secret TEXT
             )
         """
         )
+        # Issue #1829, F6: back-fill the per-user DingTalk signing-secret column
+        # on databases created before this revision (CREATE TABLE IF NOT EXISTS
+        # is a no-op there). The column holds the Fernet-encrypted per-user
+        # secret; nullable so existing rows simply fall back to the global
+        # alerts.dingtalk_webhook_secret config at signing time.
+        if not _table_has_column(cursor, "notification_preferences", "dingtalk_webhook_secret"):
+            cursor.execute(
+                "ALTER TABLE notification_preferences ADD COLUMN dingtalk_webhook_secret TEXT"
+            )
 
         # Create indexes
         cursor.execute(
@@ -1264,6 +1361,13 @@ class AlertNotifier:
                 email_verified=bool(
                     row["email_verified"] if "email_verified" in columns else False
                 ),
+                # Issue #1829, F6: carry the ENCRYPTED per-user DingTalk secret
+                # through as ciphertext; _prepare_webhook_url decrypts it lazily
+                # at signing time. The read/echo path never decrypts, so the
+                # plaintext never leaves the signing code path.
+                dingtalk_webhook_secret=(
+                    row["dingtalk_webhook_secret"] if "dingtalk_webhook_secret" in columns else None
+                ),
             )
 
         # Return default preferences
@@ -1279,13 +1383,29 @@ class AlertNotifier:
         Returns:
             True if successful.
         """
+        # Issue #1829, F6: lift any DingTalk signing secret out of the incoming
+        # webhook_url BEFORE redaction strips it, and encrypt it into the
+        # per-user column. This lets each tenant sign with its own secret instead
+        # of every user sharing the global alerts.dingtalk_webhook_secret. When
+        # the URL carries no secret (e.g. the caller is only toggling email),
+        # preserve the previously-stored secret so an unrelated update can't wipe
+        # it. Only the URL-derived path and an explicit non-None inbound value
+        # can set the secret; a ``None`` inbound value alone never clears it.
+        extracted_secret = _extract_dingtalk_secret_from_url(preferences.webhook_url)
+        if extracted_secret is not None:
+            preferences.dingtalk_webhook_secret = get_password_manager().encrypt(extracted_secret)
+        elif preferences.dingtalk_webhook_secret is None:
+            preferences.dingtalk_webhook_secret = self._get_existing_dingtalk_secret(
+                preferences.user_id
+            )
+
         # On the persistence path strip only the DingTalk query signing secret —
-        # it is rebuildable from global config on outbound signing. The Feishu/
-        # Lark bot token lives in the URL path and has no global-config
-        # equivalent, so it must be preserved verbatim here or every Feishu
-        # delivery would POST to ``/.../<redacted>`` and be rejected. The token
-        # is masked only on the read/echo path (get_notification_preferences)
-        # and in delivery-failure logs.
+        # it is rebuildable (from the per-user or global secret) on outbound
+        # signing. The Feishu/Lark bot token lives in the URL path and has no
+        # global-config equivalent, so it must be preserved verbatim here or
+        # every Feishu delivery would POST to ``/.../<redacted>`` and be
+        # rejected. The token is masked only on the read/echo path
+        # (get_notification_preferences) and in delivery-failure logs.
         preferences.webhook_url = _redact_webhook_credentials(
             preferences.webhook_url, mask_feishu=False
         )
@@ -1298,8 +1418,8 @@ class AlertNotifier:
                 """
                 INSERT INTO notification_preferences
                 (user_id, email_enabled, push_enabled, webhook_url, alert_types,
-                 min_severity, notification_email, email_verified)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                 min_severity, notification_email, email_verified, dingtalk_webhook_secret)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (user_id) DO UPDATE SET
                     email_enabled = EXCLUDED.email_enabled,
                     push_enabled = EXCLUDED.push_enabled,
@@ -1307,7 +1427,8 @@ class AlertNotifier:
                     alert_types = EXCLUDED.alert_types,
                     min_severity = EXCLUDED.min_severity,
                     notification_email = EXCLUDED.notification_email,
-                    email_verified = EXCLUDED.email_verified
+                    email_verified = EXCLUDED.email_verified,
+                    dingtalk_webhook_secret = EXCLUDED.dingtalk_webhook_secret
             """,
                 (
                     preferences.user_id,
@@ -1318,6 +1439,7 @@ class AlertNotifier:
                     preferences.min_severity,
                     preferences.notification_email,
                     preferences.email_verified,
+                    preferences.dingtalk_webhook_secret,
                 ),
             )
         else:
@@ -1325,8 +1447,8 @@ class AlertNotifier:
                 """
                 INSERT OR REPLACE INTO notification_preferences
                 (user_id, email_enabled, push_enabled, webhook_url, alert_types,
-                 min_severity, notification_email, email_verified)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                 min_severity, notification_email, email_verified, dingtalk_webhook_secret)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
                 (
                     preferences.user_id,
@@ -1337,6 +1459,7 @@ class AlertNotifier:
                     preferences.min_severity,
                     preferences.notification_email,
                     1 if preferences.email_verified else 0,
+                    preferences.dingtalk_webhook_secret,
                 ),
             )
 
@@ -1344,6 +1467,33 @@ class AlertNotifier:
         conn.close()
 
         return True
+
+    def _get_existing_dingtalk_secret(self, user_id: int) -> str | None:
+        """Return the previously-stored ENCRYPTED DingTalk secret for ``user_id``.
+
+        Used by :meth:`set_notification_preferences` to preserve the secret when
+        an update doesn't supply one in the URL. Returns the ciphertext (never
+        decrypts) and ``None`` when the user has no preference row yet or the
+        column is absent on an older schema. (Issue #1829, F6.)
+        """
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                adapt_sql(
+                    "SELECT dingtalk_webhook_secret FROM notification_preferences "
+                    "WHERE user_id = ?"
+                ),
+                (user_id,),
+            )
+            row = cursor.fetchone()
+            if not row:
+                return None
+            if "dingtalk_webhook_secret" not in set(row.keys()):
+                return None
+            return row["dingtalk_webhook_secret"]
+        finally:
+            conn.close()
 
     def _row_to_alert(self, row: sqlite3.Row) -> Alert:
         """Convert a database row to Alert."""

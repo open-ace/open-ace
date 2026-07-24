@@ -66,24 +66,43 @@ def get_unmapped_tool_accounts():
     """Get sender_names that are not mapped to any user."""
     unmapped = tool_account_repo.get_unmapped_tool_accounts()
 
-    # Group by type pattern
+    # Issue #1829, F3: classify tool_type primarily from the structured
+    # ``message_source`` resolved during import, instead of the brittle
+    # ``-dingtalk`` substring (real DingTalk userids don't follow a -dingtalk
+    # convention, so that heuristic rarely matched real data). The Feishu/Lark
+    # ``ou_`` prefix and the openclaw-family tool-name tokens are kept as
+    # fallbacks: ``ou_`` is Feishu's stable OpenAPI id convention, and
+    # openclaw-family sub-tools (qwen/claude/openclaw) all share
+    # message_source="openclaw", so the tool-name token is the only way to tell
+    # them apart.
+    source_to_tool_type = {
+        "dingtalk": "dingtalk",
+        "feishu": "feishu",
+        "slack": "slack",
+    }
+
     result = []
     for item in unmapped:
         sender_name = item.get("sender_name")
+        message_source = item.get("message_source")
 
-        # Try to identify tool type from sender_name
-        tool_type = None
-        if sender_name:
-            if "-qwen" in sender_name:
-                tool_type = "qwen"
-            elif "-claude" in sender_name:
-                tool_type = "claude"
-            elif "-openclaw" in sender_name:
-                tool_type = "openclaw"
-            elif sender_name.startswith("ou_"):
-                tool_type = "feishu"
-            elif "-dingtalk" in sender_name:
-                tool_type = "dingtalk"
+        tool_type = source_to_tool_type.get(message_source or "")
+        # Feishu/Lark OpenAPI sender ids use the stable ou_ prefix; kept as a
+        # fallback for rows whose message_source wasn't resolved.
+        if not tool_type and sender_name and sender_name.startswith("ou_"):
+            tool_type = "feishu"
+        # openclaw-family sub-tools carry the tool name in sender_name (e.g.
+        # "user-host-qwen"); message_source is "openclaw" and carries no
+        # sub-tool signal, so the token is the only discriminator here.
+        if not tool_type and sender_name:
+            for token, ttype in (
+                ("-qwen", "qwen"),
+                ("-claude", "claude"),
+                ("-openclaw", "openclaw"),
+            ):
+                if token in sender_name:
+                    tool_type = ttype
+                    break
 
         result.append(
             {

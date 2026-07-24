@@ -97,7 +97,7 @@ python3 scripts/shared/dingtalk_group_cache.py test chatabcd1234 <app_key> <app_
 https://oapi.dingtalk.com/robot/send?access_token=xxxxxxxx
 ```
 
-Open ACE 会为告警通知发送钉钉兼容的 `text` payload。如果钉钉机器人启用了加签，请在 `config.json` 中设置 `alerts.dingtalk_webhook_secret`。如果需要按单个 webhook 配置，也可以在保存的 URL 中加入 `openace_dingtalk_secret=<secret>`；Open ACE 发送前会移除该参数，并自动追加钉钉要求的 `timestamp` / `sign` 参数。
+Open ACE 会为告警通知发送钉钉兼容的 `text` payload。如果钉钉机器人启用了加签，加签密钥按以下优先级解析：(1) **按用户密钥**——在「告警偏好」里把 `openace_dingtalk_secret=<secret>` 写进 webhook URL 保存，Open ACE 会把该密钥加密（Fernet/AES）存入当前用户的偏好，每个租户/用户使用各自的密钥、彼此隔离；(2) **全局** `alerts.dingtalk_webhook_secret`（在 `config.json` 中设置，所有用户共用）；(3) 保存的 URL 中的 `openace_dingtalk_secret=<secret>`（兼容回退）。Open ACE 发送前会移除该参数，并自动追加钉钉要求的 `timestamp` / `sign` 参数；按用户密钥仅以密文落库、仅在签名时解密使用，不会以明文持久化或回显。
 
 ## 缓存管理
 
