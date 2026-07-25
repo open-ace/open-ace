@@ -39,11 +39,16 @@ let whitelisted = [];
 for (const [name, info] of entries) {
   const via = info.via || [];
   for (const v of via) {
-    if (typeof v === "object" && v.source === "GHSA") {
-      if (!whitelist.includes(v.id)) {
-        unhandled.push({id: v.id, name: name, severity: info.severity});
-      } else {
-        whitelisted.push(v.id);
+    if (typeof v === "object" && v.url) {
+      // Extract GHSA ID from URL: https://github.com/advisories/GHSA-xxxx-xxxx-xxxx
+      const match = v.url.match(/GHSA-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}/);
+      if (match) {
+        const ghsaId = match[0];
+        if (whitelist.includes(ghsaId)) {
+          whitelisted.push(ghsaId);
+        } else {
+          unhandled.push({id: ghsaId, name: name, severity: info.severity});
+        }
       }
     }
   }
