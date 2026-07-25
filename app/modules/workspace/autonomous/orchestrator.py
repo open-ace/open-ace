@@ -4755,8 +4755,17 @@ class AutonomousOrchestrator:
             # Accumulate usage from the failed attempt so tokens aren't lost.
             for key in retry_usage:
                 retry_usage[key] += int(getattr(result, key, 0) or 0)
+            # Refresh session bookkeeping to match the retry-loop pattern so a
+            # concurrent reader does not observe a stale _current_session_id
+            # during the recovery retry, and _session_usage_offsets carries the
+            # accumulated totals for _write_phase_usage (#2035 follow-up).
+            kwargs["session_id"] = tracking_session_id
             kwargs["resume"] = False
             kwargs["resume_session_id"] = None
+            usage_session_ids.add(tracking_session_id)
+            with self._session_lock:
+                self._current_session_id = tracking_session_id
+                self._session_usage_offsets[tracking_session_id] = dict(retry_usage)
             result = self._runner.run_agent_task(**kwargs)
             if result.session_id:
                 self._link_session_to_current_milestone(tracking_session_id)
