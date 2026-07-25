@@ -8795,7 +8795,15 @@ class AutonomousOrchestrator:
         # is cleared only AFTER git confirms removal, temp creation lives inside
         # the try, and a restore failure fails closed.
         main_gh = GitHubOps(project_path, system_account=system_account)
-        temp_wt_path = os.path.normpath(f"{project_path}/../merge-{self._workflow_id[:8]}")
+        # Place the temp merge worktree inside the project's .worktrees/ dir
+        # (the same convention as normal workflow worktrees — see
+        # _get_preferred_worktree_path). The previous ../merge-{id} sibling
+        # path failed on macOS with EPERM "could not create leading
+        # directories" because the server process lacks TCC/write permission
+        # to create new directories directly under ~/workspace (#1827).
+        temp_wt_path = os.path.normpath(
+            os.path.join(project_path, ".worktrees", f"merge-{self._workflow_id[:8]}")
+        )
         original_removed = False
         temp_created = False
         try:
