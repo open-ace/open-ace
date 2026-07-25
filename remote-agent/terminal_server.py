@@ -447,6 +447,19 @@ class SinglePtyTerminalServer:
         loop = asyncio.get_event_loop()
         while self._pty_alive and self.process is not None and self.process.stdout is not None:
             try:
+                # Prefer read1() ("return as soon as any data is available, do
+                # not block waiting to fill the buffer"). With bufsize=0 the
+                # pipe stdout is typically a raw io.FileIO which has NO read1,
+                # so we fall back to FileIO.read(n) -- itself a single readinto
+                # that also returns as soon as any bytes are available. The
+                # fallback therefore does NOT widen the blocking window (it
+                # never blocks until 65536 bytes arrive); the earlier "read
+                # blocks to fill the buffer" reasoning was wrong. Either way,
+                # neither read1 nor read returns until the write-end closes
+                # (EOF), so the reliable unblock lever is the process-tree kill
+                # in kill_pty() (which closes every write-end), not the choice
+                # of read call here. Verified by inspecting stdout's type at
+                # runtime; no extra non-blocking refactor introduced.
                 reader = getattr(self.process.stdout, "read1", self.process.stdout.read)
                 data = await loop.run_in_executor(None, reader, 65536)
                 if data:
