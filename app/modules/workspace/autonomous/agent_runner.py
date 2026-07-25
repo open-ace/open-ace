@@ -479,6 +479,17 @@ def _extract_cli_result_error(parsed: dict, stderr_hint: str = "") -> tuple[str 
     if "no conversation found with session id" in normalized:
         return "resume_session_not_found", message
 
+    # Session resume failure: the CLI could not open the session transcript
+    # file. On macOS, ``com.apple.provenance`` xattr or TCC restrictions can
+    # cause EPERM even when the file is owner-readable. The transcript is
+    # inaccessible but the task itself may still succeed on a fresh session,
+    # so classify distinctly from generic CLI errors to let the orchestrator
+    # recover by dropping ``--resume`` and starting a new session (#2035).
+    if "failed to resume session" in normalized or (
+        "eperm" in normalized and "resume" in normalized
+    ):
+        return "resume_session_failed", message
+
     if "not logged in" in normalized or "/login" in normalized:
         return "cli_auth_failed", message or "Not logged in · Please run /login"
 
