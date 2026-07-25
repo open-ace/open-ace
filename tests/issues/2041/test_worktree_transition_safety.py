@@ -83,7 +83,9 @@ def _db_updates(o):
 def _temp_path(wf):
     import os
 
-    return os.path.normpath(f"{wf['project_path']}/../merge-{wf['workflow_id'][:8]}")
+    return os.path.normpath(
+        os.path.join(wf["project_path"], ".worktrees", f"merge-{wf['workflow_id'][:8]}")
+    )
 
 
 class TestWorktreeTransitionSafety:
