@@ -2093,3 +2093,62 @@ def test_model_pass_summary_without_tool_result_is_inconclusive():
     updates = [call.args[0] for call in orch._update_workflow.call_args_list]
     assert any(update.get("test_retries") == 1 for update in updates)
     assert not any(update.get("status") == "pr_review" for update in updates)
+
+
+def test_text_pass_evidence_fallback_when_tool_result_missing():
+    """#1830: tool_result capture can be incomplete (stream-json truncation,
+    per-event size limit). When the agent invoked a real test command AND the
+    visible text contains a "N passed" pattern, accept it as strong evidence
+    that tests ran and passed — even without structured tool_result events."""
+    from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+    orch = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
+    orch._workflow_id = "wf-1830-fallback"
+    orch.repo = MagicMock()
+    orch._create_milestone = MagicMock(return_value={"milestone_id": "ms-test"})
+    orch._build_test_execution_context = MagicMock(return_value="targeted")
+    orch._accumulate_tokens = MagicMock()
+    orch._post_github_comment = MagicMock()
+    orch._emit = MagicMock()
+    orch._update_workflow = MagicMock()
+    # Agent invoked pytest (tool_calls present) and text reports "162 passed",
+    # but event_log has no tool_result entry (truncated/incomplete capture).
+    orch._run_agent = MagicMock(
+        return_value=AgentTaskResult(
+            success=True,
+            response_text="Ran the test suite.\n\n162 passed in 3.45s",
+            tool_calls=[
+                {
+                    "tool": {
+                        "name": "Bash",
+                        "input": {"command": "python -m pytest"},
+                        "id": "tool-1830-1",
+                    }
+                }
+            ],
+            event_log=[
+                {
+                    "type": "tool_use",
+                    "tool_name": "Bash",
+                    "tool_input": {"command": "python -m pytest"},
+                    "tool_use_id": "tool-1830-1",
+                },
+                # NOTE: no tool_result entry — simulates stream-json truncation
+            ],
+        )
+    )
+    wf = {
+        "workflow_id": "wf-1830-fallback",
+        "project_path": "/tmp/repo",
+        "worktree_path": "/tmp/repo",
+        "cli_tool": "claude-code",
+        "dev_round": 1,
+        "branch_name": "auto-dev/wf-1830-fallback",
+    }
+
+    orch._run_test_phase(wf, 1, MagicMock())
+
+    updates = [call.args[0] for call in orch._update_workflow.call_args_list]
+    # Should advance to pr_review (tests considered as run), NOT be inconclusive
+    assert any(update.get("status") == "pr_review" for update in updates)
+    assert not any(update.get("test_retries") == 1 for update in updates)
