@@ -100,5 +100,3 @@ if [ "$HAS_UNHANDLED" = "1" ]; then
 fi
 
 echo "✅ Security audit passed"
-
-
