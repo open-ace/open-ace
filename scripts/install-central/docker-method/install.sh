@@ -729,6 +729,32 @@ install_run_as_wrapper() {
     fi
     chown root:root "$dst" 2>/dev/null || true
     chmod 755 "$dst"
+
+    # Issue #2018: install the launch validator (account pin + path confinement)
+    # consumed by openace-run-as --isolated, plus the root:root 0640 constraint
+    # conf. The wrapper fail-closes without them, so a host that bind-mounts
+    # /usr/local/bin (or /etc/openace) into the container must provision both
+    # alongside the wrapper. Validator source lives next to the wrapper.
+    local validate_src
+    validate_src="$(dirname "$src")/openace-validate-launch"
+    local validate_dst="/usr/local/libexec/openace-validate-launch"
+    if [ -f "$validate_src" ]; then
+        install -d -o root -g root -m 755 "$(dirname "$validate_dst")" 2>/dev/null || true
+        install -o root -g root -m 755 "$validate_src" "$validate_dst" 2>/dev/null \
+            || print_warning "安装 openace-validate-launch 到 $validate_dst 失败"
+    else
+        print_warning "未找到 openace-validate-launch（与 $src 同目录），跳过 validator 安装"
+    fi
+    local agent_account="${OPENACE_AUTONOMOUS_AGENT_ACCOUNT:-openace-agent}"
+    install -d -o root -g root -m 755 /etc/openace 2>/dev/null || true
+    cat > /etc/openace/agent-launcher.conf 2>/dev/null <<CONF_EOF || print_warning "写入 agent-launcher.conf 失败"
+# Issue #2018: constraints for openace-run-as --isolated.
+# root:root 0640 — the openace service account cannot edit this file.
+OPENACE_AUTONOMOUS_AGENT_ACCOUNT="${agent_account}"
+ALLOWED_WORKSPACE_ROOTS="/home /workspace"
+CONF_EOF
+    chown root:root /etc/openace/agent-launcher.conf 2>/dev/null || true
+    chmod 0640 /etc/openace/agent-launcher.conf 2>/dev/null || true
     print_success "已安装 run-as wrapper 到 $dst"
     return 0
 }

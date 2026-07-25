@@ -513,6 +513,77 @@ class TestDoMergeDeferredRetry:
         o._start_ci_repair_round.assert_called_once()
 
     @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
+    def test_pre_merge_state_query_failure_falls_back_to_ci_repair(self, mock_gh_cls):
+        """A failing pre-merge ``get_pr_merge_state`` query must fail safe:
+        treat the PR as not-unstable and run the normal CI check / CI repair
+        path instead of assuming it is mergeable-as-is and skipping checks.
+        """
+        o, _ = _make_orchestrator(_make_workflow())
+        mock_gh = MagicMock()
+        mock_gh_cls.return_value = mock_gh
+        o._gh = mock_gh
+        o._start_ci_repair_round = MagicMock()
+        mock_gh.get_pr_head_sha.return_value = "pr-head"
+        # Pre-merge state query raises — fail-safe must not skip CI checks.
+        mock_gh.get_pr_merge_state.side_effect = RuntimeError("state query timed out")
+        mock_gh.get_pr_checks.return_value = [
+            {"name": "test (3.9)", "bucket": "fail"},
+        ]
+
+        o._do_merge(_make_workflow())
+
+        # State query was attempted; on failure CI checks were still queried...
+        mock_gh.get_pr_merge_state.assert_called_once()
+        mock_gh.get_pr_checks.assert_called_once()
+        # ...and the failing check consumed a CI repair round instead of
+        # attempting a merge we could not validate.
+        o._start_ci_repair_round.assert_called_once()
+        mock_gh.merge_pr.assert_not_called()
+
+    @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
+    def test_unstable_with_pending_checks_defers_after_rejection(self, mock_gh_cls):
+        """``mergeable_state=unstable`` coexisting with pending checks after a
+        merge rejection defers to the next scheduler cycle — pending checks are
+        transient, so the scheduler keeps polling without consuming a CI repair
+        attempt or treating the PR as conflicting.
+        """
+        o, _ = _make_orchestrator(_make_workflow())
+        mock_gh = MagicMock()
+        mock_gh_cls.return_value = mock_gh
+        o._gh = mock_gh
+        o._start_ci_repair_round = MagicMock()
+        o._resolve_merge_conflicts = MagicMock()
+        # Pre-merge state is unstable -> skip sync/CI, attempt merge directly.
+        # merge_pr then rejects; refreshed checks show a pending required check
+        # while mergeable_state stays unstable.
+        mock_gh.get_pr_merge_state.return_value = {
+            "mergeable": True,
+            "mergeable_state": "unstable",
+        }
+        mock_gh.merge_pr.side_effect = GitHubOpsError("GraphQL: Repository rule violations found")
+        mock_gh.get_pr_checks.return_value = [
+            {"name": "new head check", "bucket": "pending"},
+        ]
+
+        o._do_merge(_make_workflow())
+
+        # Merge was attempted once (unstable -> direct merge) then rejected.
+        mock_gh.merge_pr.assert_called_once()
+        # Pre-merge unstable skips CI checks; only the post-rejection refresh
+        # queries checks (exactly one call).
+        mock_gh.get_pr_checks.assert_called_once()
+        # Pending checks deferred the merge — no CI repair, no conflict resolution.
+        o._start_ci_repair_round.assert_not_called()
+        o._resolve_merge_conflicts.assert_not_called()
+        # No pause recorded for a transient pending state.
+        paused_updates = [
+            call_args
+            for call_args in o._update_workflow.call_args_list
+            if call_args.args[0].get("status") == "paused"
+        ]
+        assert not paused_updates
+
+    @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
     def test_clean_conflict_goes_straight_to_resolve(self, mock_gh_cls):
         """A conflict error (not policy) goes straight to resolution."""
         o, _ = _make_orchestrator(_make_workflow())
@@ -1787,6 +1858,10 @@ class TestResolveMergeConflictsWorktreeIsolation:
         mock_gh_cls.side_effect = [main_gh, rebound_gh, wt_gh, restored_gh]
         # path_exists_as_user returns False → add_worktree is called to recreate
         main_gh.path_exists_as_user.return_value = False
+        # Issue #2041: post-restore verification reads `git worktree list`.
+        main_gh.list_worktrees.return_value = [
+            {"path": wf["worktree_path"], "branch": "auto-dev/fc82f22a"}
+        ]
         _set_valid_merge_result(o, wt_gh, conflict=False)
 
         # caller_gh simulates the stale handle from _do_merge; it should be
@@ -1838,6 +1913,10 @@ class TestResolveMergeConflictsWorktreeIsolation:
         ]
         mock_gh_cls.side_effect = [main_gh, rebound_gh, wt_gh, restored_gh]
         main_gh.path_exists_as_user.return_value = False
+        # Issue #2041: post-restore verification reads `git worktree list`.
+        main_gh.list_worktrees.return_value = [
+            {"path": wf["worktree_path"], "branch": "auto-dev/fc82f22a"}
+        ]
         _set_valid_merge_result(o, wt_gh)
 
         o._run_agent = MagicMock()

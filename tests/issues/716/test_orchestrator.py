@@ -1064,8 +1064,81 @@ class TestOrchestratorMerge:
         status_updates = [c for c in update_calls if c[0][1].get("status") == "completed"]
         assert len(status_updates) > 0
 
+    @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
+    def test_merge_unstable_skips_ci_repair(self, mock_gh_cls):
+        """PR with mergeable_state=unstable should merge directly, skipping
+        CI repair. Non-required failing checks (e.g. Security Audit Gate)
+        should not block the merge or consume a CI repair attempt (#2034).
+        """
+        wf = _make_workflow(
+            current_phase="merge",
+            github_pr_number=42,
+            branch_name="feature/test",
+        )
+        orch, mock_repo = self._make_orchestrator(wf)
 
-# ── _do_development Tests ─────────────────────────────────────────────
+        mock_gh = MagicMock()
+        mock_gh.merge_pr.return_value = {"merged": True}
+        mock_gh.get_pr_head_sha.return_value = "pr-head"
+        # Security Audit Gate fails but is non-required
+        mock_gh.get_pr_checks.return_value = [
+            {"name": "test", "bucket": "pass"},
+            {"name": "Security Audit Gate", "bucket": "fail"},
+        ]
+        mock_gh.get_pr_merge_state.return_value = {
+            "mergeable": True,
+            "mergeable_state": "unstable",
+        }
+        mock_gh_cls.return_value = mock_gh
+        orch._gh = mock_gh
+        orch._validate_pre_merge_change_scope = MagicMock(return_value="")
+        orch._sync_failed_pr_with_main = MagicMock(return_value=False)
+        orch._start_ci_repair_round = MagicMock()
+
+        orch._do_merge(wf)
+
+        # Merge should be attempted despite the failing non-required check
+        mock_gh.merge_pr.assert_called_once_with(42, strategy="merge")
+        # CI repair should NOT be started
+        orch._start_ci_repair_round.assert_not_called()
+        # Branch sync should NOT be called — unstable PRs are mergeable as-is
+        orch._sync_failed_pr_with_main.assert_not_called()
+        # CI checks should NOT be queried — unstable PRs skip the check phase
+        mock_gh.get_pr_checks.assert_not_called()
+
+    @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
+    def test_merge_blocked_state_triggers_ci_repair(self, mock_gh_cls):
+        """PR with mergeable_state=blocked should start CI repair as usual
+        when required checks fail (#2034).
+        """
+        wf = _make_workflow(
+            current_phase="merge",
+            github_pr_number=43,
+            branch_name="feature/test",
+        )
+        orch, _ = self._make_orchestrator(wf)
+
+        mock_gh = MagicMock()
+        mock_gh.get_pr_head_sha.return_value = "pr-head"
+        mock_gh.get_pr_checks.return_value = [
+            {"name": "lint", "bucket": "fail"},
+        ]
+        mock_gh.get_pr_merge_state.return_value = {
+            "mergeable": False,
+            "mergeable_state": "blocked",
+        }
+        mock_gh_cls.return_value = mock_gh
+        orch._gh = mock_gh
+        orch._validate_pre_merge_change_scope = MagicMock(return_value="")
+        orch._sync_failed_pr_with_main = MagicMock(return_value=False)
+        orch._start_ci_repair_round = MagicMock()
+
+        orch._do_merge(wf)
+
+        # CI repair should be started for blocked PRs
+        orch._start_ci_repair_round.assert_called_once()
+        # Merge should NOT be attempted
+        mock_gh.merge_pr.assert_not_called()
 
 
 class TestOrchestratorDevelopment:

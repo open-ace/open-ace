@@ -221,9 +221,21 @@ export const Workspace: React.FC = () => {
               const userWebUIResponse = await workspaceApi.getUserWebUIUrl();
               if (userWebUIResponse.success) {
                 setUserWebUI(userWebUIResponse);
+              } else {
+                // Log the error when API returns success: false
+                console.error('[Workspace] getUserWebUIUrl failed:', userWebUIResponse.error);
+                // In multi-user mode, token is required - show error to user
+                if (workspaceConfig.multi_user_mode) {
+                  setError('WebUI authentication failed. Please refresh the page.');
+                }
               }
-            } catch {
-              // In single-user mode, token may not be critical for local tabs
+            } catch (error) {
+              // Log the error when API call fails
+              console.error('[Workspace] getUserWebUIUrl error:', error);
+              // In multi-user mode, token is required for authentication
+              if (workspaceConfig.multi_user_mode) {
+                setError('WebUI authentication failed. Please refresh the page.');
+              }
             }
           }
           setLoadingStage('ready');
@@ -627,7 +639,13 @@ export const Workspace: React.FC = () => {
       };
 
       // Multi-user mode: use user-specific URL with token and openace_url
-      if (config.multi_user_mode && userWebUI?.success) {
+      if (config.multi_user_mode) {
+        // Issue #2037: In multi-user mode, token is required for WebUI authentication
+        // If userWebUI is not available, return empty string to prevent creating invalid iframe
+        if (!userWebUI?.success || !userWebUI.token) {
+          console.error('[Workspace] getEffectiveUrl: userWebUI not available in multi-user mode');
+          return '';
+        }
         const baseUrl = applyProjectsPath(userWebUI.url);
         const token = userWebUI.token;
         const openaceUrl = userWebUI.openace_url;
@@ -745,6 +763,13 @@ export const Workspace: React.FC = () => {
 
     // Skip if tabs already initialized
     if (tabsInitialized) return;
+
+    // In multi-user mode, userWebUI must be successfully loaded before creating tabs
+    // Otherwise iframe URL will lack the required token parameter (Issue #2037)
+    if (config.multi_user_mode && !userWebUI?.success) {
+      console.warn('[Workspace] Waiting for userWebUI in multi-user mode');
+      return;
+    }
 
     // Check for session restore parameters from URL
     // API returns: /work/workspace?sessionId=xxx&encodedProjectName=yyy&toolName=zzz

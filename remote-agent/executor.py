@@ -26,6 +26,8 @@ from typing import TYPE_CHECKING, Any
 from cli_adapters import get_adapter
 from cli_adapters.base import collect_custom_envkeys
 from cli_adapters.zcode import ZCodeAdapter
+from constants import LLM_PROVIDER_ENV_KEYS, SENSITIVE_ENV_KEYS, collect_dynamic_env_keys
+from env_security import build_secure_agent_env
 from zcode_app_server import ZCodeAppServerSession
 
 if TYPE_CHECKING:
@@ -740,6 +742,8 @@ class ProcessExecutor:
         cli_tool: str,
         proxy_token: str,
         model: str | None = None,
+        *,
+        allow_empty_token: bool = False,
     ) -> dict[str, str]:
         """
         Build environment variables for the CLI subprocess.
@@ -752,6 +756,8 @@ class ProcessExecutor:
             cli_tool: CLI tool identifier (e.g. 'qwen-code-cli').
             proxy_token: Short-lived proxy token for LLM API authentication.
             model: Optional model name.
+            allow_empty_token: True for crash-recovery restore, which rebuilds
+                a token-less env and has a fresh token minted before use.
 
         Returns:
             Dict of environment variable name -> value.
@@ -763,8 +769,6 @@ class ProcessExecutor:
 
         # Ask the adapter for tool-specific env vars
         adapter = get_adapter(cli_tool)
-        adapter_env = adapter.get_env_vars(proxy_url, proxy_token)
-        env.update(adapter_env)
 
         # Disable SSL verification for Node.js CLI tools when using HTTPS
         # (needed for self-signed or private CA certificates)
@@ -779,25 +783,45 @@ class ProcessExecutor:
         env["PYTHONIOENCODING"] = "utf-8"
         env["PYTHONUTF8"] = "1"
 
-        # Also set generic Open ACE env vars that any tool can read
-        env["OPENACE_PROXY_URL"] = proxy_url
-        env["OPENACE_PROXY_TOKEN"] = proxy_token
-
-        if model:
-            env["OPENACE_MODEL"] = model
-
-        # Fallback: read settings to inject any custom envKeys that
-        # modelProviders may reference (e.g. BAILIAN_CODING_PLAN_API_KEY).
-        # Normally _write_qwen_settings normalizes envKey → OPENAI_API_KEY,
-        # but this catches cases where settings were edited after that step.
+        # Issue #2019: scrub every raw credential (static ∪ dynamic custom
+        # envKeys) BEFORE injecting the proxy token, and fail closed when no
+        # proxy token was provided. The agent must never inherit a real key.
+        dynamic_env_keys: set[str] = set()
         try:
             settings_path = adapter.get_settings_path()
             if settings_path:
-                env.update(collect_custom_envkeys(settings_path, proxy_token))
+                with open(settings_path, encoding="utf-8") as f:
+                    dynamic_env_keys = collect_dynamic_env_keys(json.load(f))
         except Exception:
-            pass  # Non-critical fallback; proxy token is already set via adapter
+            pass
+        sensitive_keys = set(SENSITIVE_ENV_KEYS) | dynamic_env_keys
 
-        return env
+        proxy_env_vars: dict[str, str] = {"OPENACE_PROXY_URL": proxy_url}
+        if proxy_token:
+            proxy_env_vars.update(adapter.get_env_vars(proxy_url, proxy_token))
+            # Custom modelProvider envKeys (e.g. BAILIAN_CODING_PLAN_API_KEY) →
+            # proxy token so the CLI reads the token regardless of envKey.
+            try:
+                settings_path = adapter.get_settings_path()
+                if settings_path:
+                    proxy_env_vars.update(collect_custom_envkeys(settings_path, proxy_token))
+            except Exception:
+                pass  # Non-critical; proxy token already set via adapter
+            proxy_env_vars["OPENACE_PROXY_TOKEN"] = proxy_token
+            if model:
+                proxy_env_vars["OPENACE_MODEL"] = model
+
+        return build_secure_agent_env(
+            base_env=env,
+            sensitive_keys=sensitive_keys,
+            llm_provider_keys=set(LLM_PROVIDER_ENV_KEYS) | dynamic_env_keys,
+            proxy_env_vars=proxy_env_vars,
+            proxy_ok=bool(proxy_token),
+            is_production=os.environ.get("FLASK_ENV", "development").strip().lower()
+            == "production",
+            raw_fallback_allowed=os.environ.get("OPENACE_ALLOW_RAW_KEY_FALLBACK") == "1",
+            allow_empty_token=allow_empty_token,
+        )
 
     def _find_executable(self, cli_tool: str) -> str | None:
         """
@@ -1787,8 +1811,9 @@ class ProcessExecutor:
 
             # Rebuild env without saved proxy token — the server will
             # provide a fresh one on the next start_session command.
-            # For now, build minimal env from adapter defaults.
-            env = self._build_env(info["cli_tool"], "", info.get("model"))
+            # allow_empty_token: scrub creds and don't fail closed (no agent is
+            # launched with inherited raw keys; a fresh token arrives before use).
+            env = self._build_env(info["cli_tool"], "", info.get("model"), allow_empty_token=True)
             # Merge any saved non-token env vars
             if info.get("env"):
                 env.update(info["env"])

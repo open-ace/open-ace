@@ -21,21 +21,11 @@ def _scheduler() -> AutonomousScheduler:
 
 
 class TestWaitingBypassFiltering:
-    """Replicates the _process_workflows conflict filter to verify waiting
-    workflows are not blocked by batch/workspace/branch locks."""
-
-    def _would_block(self, sched: AutonomousScheduler, wf: dict) -> bool:
-        """Replicate the git-conflict + batch filter in _process_workflows."""
-        is_waiting = wf.get("status") == "waiting"
-        batch_id = wf.get("batch_id")
-        if batch_id and batch_id in sched._in_progress_batch_ids and not is_waiting:
-            return True
-        workspace, branch = sched._conflict_keys(wf)
-        if workspace and workspace in sched._in_progress_workspaces and not is_waiting:
-            return True
-        if branch and branch in sched._in_progress_branches and not is_waiting:
-            return True
-        return False
+    """Verifies waiting workflows are not blocked by batch/workspace/branch
+    conflict locks, by calling the real ``_workflow_blocked_by_conflict_locks``
+    filter extracted from ``_process_workflows`` (PR #2016 review suggestion
+    #2 — previously these tests re-implemented the filter locally, which would
+    silently pass if the production filter drifted)."""
 
     def test_waiting_bypasses_batch_lock(self):
         sched = _scheduler()
@@ -47,7 +37,7 @@ class TestWaitingBypassFiltering:
             "project_path": "/proj",
             "branch_name": "shared/branch",
         }
-        assert not self._would_block(sched, waiting_wf)
+        assert not sched._workflow_blocked_by_conflict_locks(waiting_wf)
 
     def test_waiting_bypasses_workspace_lock(self):
         sched = _scheduler()
@@ -59,7 +49,7 @@ class TestWaitingBypassFiltering:
             "project_path": "/proj",
             "branch_name": "shared/branch",
         }
-        assert not self._would_block(sched, waiting_wf)
+        assert not sched._workflow_blocked_by_conflict_locks(waiting_wf)
 
     def test_waiting_bypasses_branch_lock(self):
         sched = _scheduler()
@@ -71,7 +61,7 @@ class TestWaitingBypassFiltering:
             "project_path": "/proj",
             "branch_name": "shared/branch",
         }
-        assert not self._would_block(sched, waiting_wf)
+        assert not sched._workflow_blocked_by_conflict_locks(waiting_wf)
 
     def test_developing_still_blocked_by_batch_lock(self):
         sched = _scheduler()
@@ -83,7 +73,7 @@ class TestWaitingBypassFiltering:
             "project_path": "/proj",
             "branch_name": "shared/branch",
         }
-        assert self._would_block(sched, developing_wf)
+        assert sched._workflow_blocked_by_conflict_locks(developing_wf)
 
     def test_developing_still_blocked_by_workspace_lock(self):
         sched = _scheduler()
@@ -95,7 +85,7 @@ class TestWaitingBypassFiltering:
             "project_path": "/proj",
             "branch_name": "auto-dev/x",
         }
-        assert self._would_block(sched, developing_wf)
+        assert sched._workflow_blocked_by_conflict_locks(developing_wf)
 
     def test_developing_still_blocked_by_branch_lock(self):
         sched = _scheduler()
@@ -107,7 +97,7 @@ class TestWaitingBypassFiltering:
             "project_path": "/proj",
             "branch_name": "shared/branch",
         }
-        assert self._would_block(sched, developing_wf)
+        assert sched._workflow_blocked_by_conflict_locks(developing_wf)
 
 
 # ── _advance_single: waiting workflows don't clobber locks ──────────────

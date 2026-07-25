@@ -76,14 +76,25 @@ class ClaudeCodeAdapter(BaseCLIAdapter):
         if model:
             args.extend(["--model", model])
 
-        # Map internal permission_mode to Claude CLI --permission-mode flag
-        # Choices: "acceptEdits", "auto", "bypassPermissions", "default"
-        if permission_mode:
+        # Map internal permission_mode to Claude CLI flags.
+        #
+        # bypass/full-auto: use --dangerously-skip-permissions, the only flag
+        # that disables the Bash tool's macOS sandbox (sandbox-exec profile).
+        # --permission-mode bypassPermissions alone still enforces the Bash
+        # sandbox, which blocks writes to ~/.claude/session-env/ and prevents
+        # the agent from running ANY shell command — including tests (#1828,
+        # #1830). This mirrors the codex adapter's use of
+        # --dangerously-bypass-approvals-and-sandbox for auto mode. The
+        # settings.json skipDangerousModePermissionPrompt flag suppresses the
+        # interactive confirmation that this flag would otherwise require.
+        # acceptEdits/auto: keep the sandbox; these modes are for safer
+        # interactive-style runs where the Bash sandbox is desirable.
+        if permission_mode in ("bypass", "full-auto"):
+            args.append("--dangerously-skip-permissions")
+        elif permission_mode:
             mode_map = {
                 "auto-edit": "acceptEdits",
                 "auto": "auto",
-                "bypass": "bypassPermissions",
-                "full-auto": "bypassPermissions",
             }
             cli_mode = mode_map.get(permission_mode)
             if cli_mode:

@@ -445,8 +445,11 @@ class WebUIManager:
         """
         Generate an authentication token for a user.
 
-        Uses v2 format with timestamp for TTL support (Issue #1896):
+        Uses v2 format with timestamp for TTL support:
         v2:{user_id}:{port}:{timestamp}:{random}:{signature}
+
+        The v2 format is supported by qwen-code-webui PR #210.
+        Tokens expire after TOKEN_TTL_SECONDS (1800s = 30 minutes).
 
         Args:
             user_id: User ID.

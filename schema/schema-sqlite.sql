@@ -506,7 +506,8 @@ CREATE TABLE notification_preferences (
  alert_types text,
  min_severity text DEFAULT 'warning',
  notification_email text,
- email_verified INTEGER DEFAULT 0
+ email_verified INTEGER DEFAULT 0,
+ dingtalk_webhook_secret text
 );
 
 CREATE TABLE policy_decisions (

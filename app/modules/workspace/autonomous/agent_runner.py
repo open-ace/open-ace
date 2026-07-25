@@ -25,7 +25,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from app.modules.workspace.autonomous.artifact_text import pick_best_artifact_text
 from app.modules.workspace.autonomous.models import AgentTaskResult
@@ -478,6 +478,17 @@ def _extract_cli_result_error(parsed: dict, stderr_hint: str = "") -> tuple[str 
 
     if "no conversation found with session id" in normalized:
         return "resume_session_not_found", message
+
+    # Session resume failure: the CLI could not open the session transcript
+    # file. On macOS, ``com.apple.provenance`` xattr or TCC restrictions can
+    # cause EPERM even when the file is owner-readable. The transcript is
+    # inaccessible but the task itself may still succeed on a fresh session,
+    # so classify distinctly from generic CLI errors to let the orchestrator
+    # recover by dropping ``--resume`` and starting a new session (#2035).
+    if "failed to resume session" in normalized or (
+        "eperm" in normalized and "resume" in normalized
+    ):
+        return "resume_session_failed", message
 
     if "not logged in" in normalized or "/login" in normalized:
         return "cli_auth_failed", message or "Not logged in · Please run /login"
@@ -974,6 +985,47 @@ class AutonomousAgentRunner:
             return True
 
     @staticmethod
+    def isolated_launcher_path() -> str:
+        """Return the configured path to the ``openace-run-as`` launcher.
+
+        Exposed as a public getter so cross-module callers (e.g. the
+        orchestrator's warning log) don't have to reach into the private
+        ``_OPENACE_RUN_AS`` module attribute.
+        """
+        return _OPENACE_RUN_AS
+
+    @staticmethod
+    def is_isolated_launcher_available() -> bool:
+        """Whether the privileged ``openace-run-as --isolated`` launcher is
+        installed and executable.
+
+        The isolated-agent path (a credentialless principal + scoped ACLs via
+        ``openace-run-as``) is the security model for multi-user Linux
+        deployments. The launcher is Linux-only (setfacl/getent/runuser) and is
+        not provisioned on dev installs or non-Linux platforms (macOS/Windows),
+        where the service already runs as the repository owner and there is no
+        security benefit to a second account. Callers use this to decide
+        whether to engage isolated-agent mode or fall back to same-user
+        execution (mirroring the Windows single-user downgrade).
+
+        Design tradeoff (fail-open on Linux multi-user): if the launcher is
+        accidentally removed or loses its exec bit on a multi-user Linux host,
+        this returns ``False`` and the workflow silently degrades to same-user
+        mode (running as the repo owner with credentials) rather than failing
+        closed. This is a conscious tradeoff: the dev/macOS single-user case is
+        the common path and must not be blocked, and a fail-closed policy would
+        make the launcher a single point of failure for every workflow on the
+        host. The ``logger.warning`` in the caller's ``else`` branch surfaces
+        the degradation; operators in security-sensitive multi-user deployments
+        should monitor that log and/or install the launcher via a package
+        manager so it cannot drift. Hardening this to fail-closed on Linux
+        would require a platform check (``sys.platform.startswith("linux")``)
+        combined with a multi-user detection heuristic, which is tracked as a
+        future enhancement rather than a blocking issue.
+        """
+        return os.path.isfile(_OPENACE_RUN_AS) and os.access(_OPENACE_RUN_AS, os.X_OK)
+
+    @staticmethod
     def _wrap_agent_cmd(
         cmd: list[str],
         project_path: str,
@@ -1118,10 +1170,14 @@ class AutonomousAgentRunner:
         / ANTHROPIC_BASE_URL for claude-code). Mirrors executor._build_env but
         runs in-process, without an HTTP round-trip.
 
-        Falls back to dict(os.environ) when proxy setup is unavailable (e.g. no
-        API key configured for this tool) so a dev box with env-injected keys
-        keeps working.
+        Issue #2019: every raw credential (provider/GitHub/SSH/cloud + dynamic
+        custom envKeys) is scrubbed before the proxy token is injected, and a
+        proxy-token minting failure fails closed (raises) — in production always,
+        in development unless OPENACE_ALLOW_RAW_KEY_FALLBACK=1 is set. The agent
+        never inherits a real key from the service env.
         """
+        from app.utils.security_env import is_production_environment
+
         env = dict(os.environ)
         guard_bin = AutonomousAgentRunner._resolve_agent_guard_bin()
         real_git = shutil.which("git", path=env.get("PATH"))
@@ -1138,11 +1194,6 @@ class AutonomousAgentRunner:
         env["OPENACE_GIT_CACHE_ROOT"] = str(agent_home / ".cache" / "pre-commit")
         # The orchestrator owns all remote mutations. Agent subprocesses use
         # the LLM proxy for model auth and do not need GitHub credentials.
-        # This environment cleanup is defense-in-depth; the actual credential
-        # boundary is the dedicated OS principal selected by the orchestrator
-        # and the isolated run-as wrapper's clean environment/worktree ACLs.
-        for key in ("GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "SSH_AUTH_SOCK"):
-            env.pop(key, None)
         # CI-only hook exclusions are set explicitly by the orchestrator's
         # convergence command. Never let a service-level SKIP leak into a
         # normal autonomous agent and silently suppress repository hooks.
@@ -1150,6 +1201,24 @@ class AutonomousAgentRunner:
         env["GH_CONFIG_DIR"] = "/var/empty/openace-autonomous-gh"
         env["GIT_TERMINAL_PROMPT"] = "0"
         env["PATH"] = guard_bin + os.pathsep + env.get("PATH", "")
+
+        # Issue #2019: scrub every raw credential (provider/GitHub/SSH/cloud +
+        # dynamic custom envKeys) BEFORE injecting the proxy token, and fail
+        # closed if the proxy token could not be minted. The agent must never
+        # inherit a real key from the service env.
+        (
+            sensitive_env_keys,
+            llm_provider_env_keys,
+            collect_dynamic_env_keys,
+            build_secure_agent_env,
+        ) = AutonomousAgentRunner._import_env_security()
+        adapter_settings = AutonomousAgentRunner._load_adapter_settings(adapter)
+        dynamic_env_keys = collect_dynamic_env_keys(adapter_settings)
+        sensitive_keys = set(sensitive_env_keys) | dynamic_env_keys
+        llm_keys = set(llm_provider_env_keys) | dynamic_env_keys
+
+        proxy_env_vars: dict[str, str] = {}
+        proxy_ok = False
         try:
             from app.modules.workspace.api_key_proxy import get_api_key_proxy_service
             from app.utils.config import get_config_value
@@ -1185,18 +1254,69 @@ class AutonomousAgentRunner:
                 provider=provider,
                 session_type="agent",
             )
-            env.update(adapter.get_env_vars(proxy_url, proxy_token))
-            env["OPENACE_PROXY_URL"] = proxy_url
-            env["OPENACE_PROXY_TOKEN"] = proxy_token
+            proxy_env_vars.update(adapter.get_env_vars(proxy_url, proxy_token))
+            # Re-add custom modelProvider envKeys (e.g. BAILIAN_CODING_PLAN_API_KEY)
+            # as the proxy token so qwen reads the token regardless of envKey.
+            for env_key in dynamic_env_keys:
+                if env_key != "OPENAI_API_KEY":
+                    proxy_env_vars[env_key] = proxy_token
+            proxy_env_vars["OPENACE_PROXY_URL"] = proxy_url
+            proxy_env_vars["OPENACE_PROXY_TOKEN"] = proxy_token
             if model:
-                env["OPENACE_MODEL"] = model
+                proxy_env_vars["OPENACE_MODEL"] = model
+            proxy_ok = True
         except Exception as e:
-            logger.warning(
-                "Could not set up LLM proxy auth for %s (falling back to env): %s",
-                cli_tool,
-                e,
-            )
-        return env
+            # Fail closed below; never fall back to inheriting raw keys silently.
+            logger.error("LLM proxy setup failed for %s: %s", cli_tool, e)
+
+        return cast(
+            "dict[str, str]",
+            build_secure_agent_env(
+                base_env=env,
+                sensitive_keys=sensitive_keys,
+                llm_provider_keys=llm_keys,
+                proxy_env_vars=proxy_env_vars,
+                proxy_ok=proxy_ok,
+                is_production=is_production_environment(),
+                raw_fallback_allowed=os.environ.get("OPENACE_ALLOW_RAW_KEY_FALLBACK") == "1",
+            ),
+        )
+
+    @staticmethod
+    def _import_env_security():
+        """Import the shared env-security helpers from the remote-agent subtree.
+
+        ``remote-agent/`` ships with the app and is added to ``sys.path`` at
+        runtime, mirroring the ``cli_adapters`` import in ``_run_local_agent_task``.
+        """
+        import sys
+
+        remote_agent_dir = os.path.normpath(
+            os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "remote-agent")
+        )
+        if remote_agent_dir not in sys.path:
+            sys.path.insert(0, remote_agent_dir)
+        from constants import LLM_PROVIDER_ENV_KEYS, SENSITIVE_ENV_KEYS, collect_dynamic_env_keys
+        from env_security import build_secure_agent_env
+
+        return (
+            SENSITIVE_ENV_KEYS,
+            LLM_PROVIDER_ENV_KEYS,
+            collect_dynamic_env_keys,
+            build_secure_agent_env,
+        )
+
+    @staticmethod
+    def _load_adapter_settings(adapter: Any) -> dict:
+        """Best-effort load of the CLI adapter's settings.json (for dynamic envKeys)."""
+        try:
+            settings_path = adapter.get_settings_path()
+            if settings_path:
+                with open(settings_path, encoding="utf-8") as f:
+                    return cast("dict[str, Any]", json.load(f))
+        except Exception:
+            pass
+        return {}
 
     @staticmethod
     def _encode_project_path(project_path: str) -> str:
@@ -3619,11 +3739,19 @@ class AutonomousAgentRunner:
         except (OSError, ValueError):
             pass
         finally:
-            # If process exited without sending result, mark completed
+            # If process exited without sending result, mark completed.
+            # poll() must be called to reap the child and populate
+            # returncode — readline() returning EOF does NOT set it
+            # automatically, so without poll() the returncode check
+            # would fail and session.completed would never be set,
+            # causing _wait_for_completion to block until the 1-hour
+            # timeout (#2031).
             if not session.completed.is_set():
                 session._stopped.wait(2.0)
-                if session.process and session.process.returncode is not None:
-                    session.completed.set()
+                if session.process:
+                    session.process.poll()
+                    if session.process.returncode is not None:
+                        session.completed.set()
 
     def _read_stderr(self, session: _LocalSession) -> None:
         """Read stderr from the subprocess."""
