@@ -249,6 +249,12 @@ class AutonomousScheduler:
         sibling is actively running. Extracted from ``_process_workflows`` so
         tests can assert against the real filter instead of re-implementing it
         (PR #2016 review suggestion #2).
+
+        Thread-safety: reads ``_in_progress_batch_ids`` /
+        ``_in_progress_workspaces`` / ``_in_progress_branches``, so the caller
+        must hold ``self._in_progress_lock`` (as ``_process_workflows`` does)
+        to avoid a TOCTOU race where a sibling workflow reserves/releases keys
+        between this check and the reservation step.
         """
         is_waiting = wf.get("status") == "waiting"
         batch_id = wf.get("batch_id")
