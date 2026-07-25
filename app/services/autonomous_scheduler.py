@@ -240,6 +240,27 @@ class AutonomousScheduler:
 
         return workspace, branch
 
+    def _workflow_blocked_by_conflict_locks(self, wf: dict) -> bool:
+        """Return True if *wf* must be skipped this cycle due to a batch /
+        workspace / branch conflict lock held by an in-progress workflow.
+
+        Waiting workflows bypass all conflict locks (see ``_do_wait``'s
+        no-git-mutation invariant) so they can resume even while a batch
+        sibling is actively running. Extracted from ``_process_workflows`` so
+        tests can assert against the real filter instead of re-implementing it
+        (PR #2016 review suggestion #2).
+        """
+        is_waiting = wf.get("status") == "waiting"
+        batch_id = wf.get("batch_id")
+        if batch_id and batch_id in self._in_progress_batch_ids and not is_waiting:
+            return True
+        workspace, branch = self._conflict_keys(wf)
+        if workspace and workspace in self._in_progress_workspaces and not is_waiting:
+            return True
+        if branch and branch in self._in_progress_branches and not is_waiting:
+            return True
+        return False
+
     def _reclaim_paused_slots(self, repo) -> None:
         """Release git-conflict keys held by workflows that have since been paused.
 
@@ -628,16 +649,7 @@ class AutonomousScheduler:
                 # branch conflict locks so they can resume even while a batch
                 # sibling is still running. The lock re-applies on the next
                 # cycle once the workflow leaves "waiting" status.
-                is_waiting = wf.get("status") == "waiting"
-                # For batch workflows, check if the batch is already being processed
-                batch_id = wf.get("batch_id")
-                if batch_id and batch_id in self._in_progress_batch_ids and not is_waiting:
-                    continue
-                # git-conflict guard: same working tree OR same branch (#1002)
-                workspace, branch = self._conflict_keys(wf)
-                if workspace and workspace in self._in_progress_workspaces and not is_waiting:
-                    continue
-                if branch and branch in self._in_progress_branches and not is_waiting:
+                if self._workflow_blocked_by_conflict_locks(wf):
                     continue
                 active.append(wf)
 

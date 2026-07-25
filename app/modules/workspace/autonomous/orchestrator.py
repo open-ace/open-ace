@@ -23,7 +23,6 @@ import uuid
 from datetime import datetime, timezone
 
 from app.modules.workspace.autonomous.agent_runner import (
-    _OPENACE_RUN_AS,
     DEFAULT_TASK_TIMEOUT,
     AutonomousAgentRunner,
 )
@@ -4437,7 +4436,7 @@ class AutonomousOrchestrator:
                     "isolated agent mode requires the openace-run-as launcher "
                     "(Linux multi-user only).",
                     self._workflow_id,
-                    _OPENACE_RUN_AS,
+                    AutonomousAgentRunner.isolated_launcher_path(),
                     project_system_account or "(unknown)",
                 )
 
