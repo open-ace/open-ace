@@ -4709,6 +4709,58 @@ class AutonomousOrchestrator:
                     else (result.tracking_session_id or result.session_id)
                 )
 
+        # Session-resume failure recovery: if the agent failed because it
+        # couldn't resume a stale or inaccessible session (EPERM on macOS
+        # ``com.apple.provenance`` xattr, or "No conversation found" for a
+        # deleted/mismatched session id), clear the stale cli_session_id
+        # mapping and retry once with a fresh session on the same tracking
+        # line. This prevents permanent workflow failure from
+        # transient/environmental session-access issues (#2035).
+        if (
+            not result.success
+            and field
+            and result.error_code in ("resume_session_not_found", "resume_session_failed")
+            and not self._is_shutdown_requested()
+            and (self.workflow or {}).get("status") not in ("failed", "cancelled", "paused")
+        ):
+            logger.warning(
+                "Session resume failed (error_code=%s) on line %s; clearing "
+                "cli_session_id mapping and retrying with a fresh session",
+                result.error_code,
+                session_line,
+            )
+            self._emit(
+                "session_resume_recovery",
+                {
+                    "error_code": result.error_code,
+                    "session_line": session_line,
+                },
+            )
+            # Clear the stale cli_session_id so _resolve_session_line on the
+            # next advance() does not pick up the same broken resume target.
+            try:
+                if (
+                    getattr(self._runner, "session_manager", None) is not None
+                    and tracking_session_id
+                ):
+                    self._runner.session_manager.update_session_fields(
+                        tracking_session_id, {"cli_session_id": ""}
+                    )
+            except Exception:
+                logger.warning(
+                    "Failed to clear cli_session_id for %s",
+                    tracking_session_id[:8],
+                    exc_info=True,
+                )
+            # Accumulate usage from the failed attempt so tokens aren't lost.
+            for key in retry_usage:
+                retry_usage[key] += int(getattr(result, key, 0) or 0)
+            kwargs["resume"] = False
+            kwargs["resume_session_id"] = None
+            result = self._runner.run_agent_task(**kwargs)
+            if result.session_id:
+                self._link_session_to_current_milestone(tracking_session_id)
+
         # A transient-error body (e.g. a 529 "overloaded" returned as
         # assistant_text with no tokens generated) must not be handed back as a
         # success — callers would store it as plan/review content. The tokens==0
