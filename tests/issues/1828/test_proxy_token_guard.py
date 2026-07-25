@@ -14,7 +14,6 @@ from __future__ import annotations
 import logging
 
 import pytest
-
 from _helpers import PROXY_BASE_URL, PROXY_TOKEN, load_cli_settings, make_proxy_token
 
 
@@ -52,7 +51,7 @@ def test_requires_exactly_one_dot(cli_settings):
     assert cli_settings._is_proxy_token_format("onlybase64") is False  # 0 dots
     assert cli_settings._is_proxy_token_format(PROXY_TOKEN) is True  # exactly 1
     assert cli_settings._is_proxy_token_format("a.b.c") is False  # 2 dots
-    assert cli_settings._is_proxy_token_format("a.b") is False  # right not hex
+    assert cli_settings._is_proxy_token_format("a.g") is False  # right not hex ('g' is past 'f')
 
 
 def test_rejects_empty_or_non_string(cli_settings):

@@ -9,14 +9,7 @@ routing) and lands the correct on-disk config.
 
 from __future__ import annotations
 
-from _helpers import (
-    PROXY_TOKEN,
-    REMOTE_AGENT_DIR,
-    load_agent_module,
-    load_cli_settings,
-    make_agent,
-)
-
+from _helpers import PROXY_TOKEN, REMOTE_AGENT_DIR, load_agent_module, load_cli_settings, make_agent
 
 # ---------------------------------------------------------------------------
 # V8a: source-level contract (robust against os.name monkeypatch hazards)

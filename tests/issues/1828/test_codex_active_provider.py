@@ -11,7 +11,6 @@ non-active provider.
 from __future__ import annotations
 
 import pytest
-
 from _helpers import PROXY_BASE_URL, PROXY_TOKEN, load_cli_settings
 
 
@@ -67,9 +66,7 @@ def test_write_default_provider_still_openace(cli_settings, tmp_path):
     )
     parsed = cli_settings.tomllib.loads(config_path.read_text(encoding="utf-8"))
     assert parsed["model_provider"] == "openace"
-    assert (
-        parsed["model_providers"]["openace"]["experimental_bearer_token"] == PROXY_TOKEN
-    )
+    assert parsed["model_providers"]["openace"]["experimental_bearer_token"] == PROXY_TOKEN
 
 
 # ---------------------------------------------------------------------------
@@ -83,10 +80,10 @@ def test_clear_only_scrubs_active_provider_token(cli_settings, tmp_path):
     config_path.parent.mkdir(parents=True, exist_ok=True)
     config_path.write_text(
         'model_provider = "my-proxy"\n\n'
-        '[model_providers.openace]\n'
+        "[model_providers.openace]\n"
         'name = "Open ACE"\n'
         'experimental_bearer_token = "stale-third-party"\n\n'
-        '[model_providers.my-proxy]\n'
+        "[model_providers.my-proxy]\n"
         'name = "Mine"\n'
         f'experimental_bearer_token = "{PROXY_TOKEN}"\n',
         encoding="utf-8",
@@ -100,10 +97,7 @@ def test_clear_only_scrubs_active_provider_token(cli_settings, tmp_path):
     assert "experimental_bearer_token" not in mine
     assert mine["env_key"] == "OPENAI_API_KEY"
     # Non-active provider's token is PRESERVED (no full-scan scrub).
-    assert (
-        parsed["model_providers"]["openace"]["experimental_bearer_token"]
-        == "stale-third-party"
-    )
+    assert parsed["model_providers"]["openace"]["experimental_bearer_token"] == "stale-third-party"
 
 
 def test_clear_default_openace_provider_still_works(cli_settings, tmp_path):

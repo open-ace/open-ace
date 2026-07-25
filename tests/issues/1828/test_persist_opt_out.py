@@ -14,7 +14,6 @@ from __future__ import annotations
 import logging
 
 import pytest
-
 from _helpers import PROXY_BASE_URL, PROXY_TOKEN, load_cli_settings
 
 

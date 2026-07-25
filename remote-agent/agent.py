@@ -26,11 +26,7 @@ from datetime import datetime
 from typing import Any
 
 import requests
-from cli_settings import (
-    apply_cli_settings,
-    clear_codex_bearer_token,
-    resolve_codex_bearer_token,
-)
+from cli_settings import apply_cli_settings, clear_codex_bearer_token, resolve_codex_bearer_token
 from executor import ProcessExecutor
 from session_sync import SessionSyncService
 from system_info import get_capabilities

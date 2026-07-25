@@ -27,11 +27,7 @@ AGENT_DIR = Path(__file__).resolve().parent
 if str(AGENT_DIR) not in sys.path:
     sys.path.insert(0, str(AGENT_DIR))
 
-from cli_settings import (
-    apply_cli_settings,
-    clear_codex_bearer_token,
-    resolve_codex_bearer_token,
-)
+from cli_settings import apply_cli_settings, clear_codex_bearer_token, resolve_codex_bearer_token
 from tls_config import TLSConfig
 
 AGENT_CONFIG_PATH = AGENT_DIR / "config.json"
