@@ -265,6 +265,10 @@ def test_fetch_directory_snapshot_uses_dingtalk_department_and_user_apis():
     class FakeHttp:
         def __init__(self):
             self.calls = []
+            # Track how many pages we fetched per department so we can assert the
+            # batched v2/user/list endpoint (one call per page) replaced the old
+            # listid + per-user user/get N+1 pattern.
+            self.user_list_pages = 0
 
         def post(self, url, **kwargs):
             self.calls.append((url, kwargs))
@@ -278,27 +282,27 @@ def test_fetch_directory_snapshot_uses_dingtalk_department_and_user_apis():
                         }
                     )
                 return FakeResponse({"errcode": 0, "result": []})
-            if url.endswith("/user/listid"):
+            if url.endswith("/user/list"):
+                self.user_list_pages += 1
                 dept_id = kwargs["json"]["dept_id"]
-                userids = ["manager123"] if dept_id == 100 else []
-                return FakeResponse(
-                    {
-                        "errcode": 0,
-                        "result": {"userid_list": userids, "has_more": False},
-                    }
-                )
-            if url.endswith("/user/get"):
-                return FakeResponse(
-                    {
-                        "errcode": 0,
-                        "result": {
-                            "userid": "manager123",
-                            "name": "Alice DingTalk",
-                            "email": "alice@example.com",
-                            "dept_id_list": [100],
-                        },
-                    }
-                )
+                if dept_id == 100:
+                    return FakeResponse(
+                        {
+                            "errcode": 0,
+                            "result": {
+                                "has_more": False,
+                                "list": [
+                                    {
+                                        "userid": "manager123",
+                                        "name": "Alice DingTalk",
+                                        "email": "alice@example.com",
+                                        "dept_id_list": [100],
+                                    }
+                                ],
+                            },
+                        }
+                    )
+                return FakeResponse({"errcode": 0, "result": {"has_more": False, "list": []}})
             raise AssertionError(f"unexpected URL {url}")
 
     service = DingTalkOrgSyncService(
@@ -318,3 +322,10 @@ def test_fetch_directory_snapshot_uses_dingtalk_department_and_user_apis():
             status={},
         )
     ]
+    # Exactly one user-list page per department visited (root + Engineering), and
+    # no per-user user/get calls remain -- the N+1 pattern is gone.
+    assert service.http.user_list_pages == 2
+    assert all(
+        not url.endswith("/user/get") and not url.endswith("/user/listid")
+        for url, _ in service.http.calls
+    )
