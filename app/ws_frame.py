@@ -52,18 +52,69 @@ class WebSocketProtocolError(ValueError):
     """Raised when a WebSocket frame violates RFC 6455 protocol rules."""
 
 
-def get_max_message_size() -> int:
-    """Get the inbound WebSocket message cap in bytes."""
-    raw_value = os.environ.get("OPENACE_WS_MAX_MESSAGE_BYTES", "").strip()
-    if not raw_value:
-        return DEFAULT_MAX_MESSAGE_SIZE
+# Module-level cache for the parsed WS message cap: ``(stripped_raw, value)``.
+# ``None`` means "no entry yet". ``get_max_message_size`` reads this on every
+# call and overwrites it with a single tuple assignment when the (stripped) raw
+# env value changes — see the docstring there for the self-invalidation model.
+_cache: tuple[str, int] | None = None
 
+
+def _parse_max_message_size(raw: str) -> int:
+    """Parse the stripped ``OPENACE_WS_MAX_MESSAGE_BYTES`` raw string.
+
+    Behaviour is identical to the pre-cache implementation: an empty string,
+    a non-integer, or a non-positive integer all fall back to
+    ``DEFAULT_MAX_MESSAGE_SIZE``. Factored out as a named module-level function
+    purely so the caching layer can observe whether a parse happened — the perf
+    goal is otherwise untestable (the builtin ``int`` cannot be monkeypatched).
+    """
+    if not raw:
+        return DEFAULT_MAX_MESSAGE_SIZE
     try:
-        value = int(raw_value)
+        value = int(raw)
     except ValueError:
         return DEFAULT_MAX_MESSAGE_SIZE
-
     return value if value > 0 else DEFAULT_MAX_MESSAGE_SIZE
+
+
+def get_max_message_size() -> int:
+    """Return the inbound WebSocket message cap in bytes.
+
+    Cached so that repeated calls under an unchanged environment skip
+    re-parsing: this runs once per ``recv_message`` (i.e. once per inbound
+    message), and the original implementation re-read and re-parsed the env on
+    every call.
+
+    The cache is *self-invalidating*: every call reads the current stripped raw
+    env value and compares it against the cached key, re-parsing only on a
+    mismatch. The runtime env-mutation tests in issues #559 and #1746 restore
+    ``OPENACE_WS_MAX_MESSAGE_BYTES`` in a ``finally`` block without clearing the
+    cache, and rely on this self-invalidation to refresh on the next call —
+    they therefore keep passing with zero changes.
+
+    Drift direction (deliberately retained): because the env is re-read on
+    every call, a mid-session env change still takes effect immediately. The
+    only observable effect of a stale cache entry is that the *previous, larger*
+    value may be honoured for one extra call when the env is lowered — i.e. the
+    frame cap may be briefly *relaxed*, never tightened. In a production process
+    the env is never mutated after startup, so this path is not reachable; it is
+    documented to prevent the drift from being misread as "closed".
+
+    Implementation note: the body assigns to the module-level ``_cache``, so
+    ``global _cache`` MUST be declared at the top. Omitting it makes Python
+    treat ``_cache`` as a function-local name for the entire function, and the
+    very first call raises ``UnboundLocalError`` — a loud crash, not a silent
+    miss — so a missing ``global`` is caught immediately rather than silently
+    disabling the cache.
+    """
+    global _cache
+    raw = os.environ.get("OPENACE_WS_MAX_MESSAGE_BYTES", "").strip()
+    cached = _cache
+    if cached is not None and cached[0] == raw:
+        return cached[1]
+    value = _parse_max_message_size(raw)
+    _cache = (raw, value)
+    return value
 
 
 def _compute_accept_key(client_key: str) -> str:
