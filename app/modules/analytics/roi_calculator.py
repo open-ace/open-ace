@@ -125,15 +125,19 @@ class ROIAssumptions:
             normalized_currency = currency.strip().upper() or self.currency
 
         return ROIAssumptions(
-            hourly_labor_cost=hourly_labor_cost
-            if hourly_labor_cost is not None
-            else self.hourly_labor_cost,
-            productivity_multiplier=productivity_multiplier
-            if productivity_multiplier is not None
-            else self.productivity_multiplier,
-            avg_time_saved_per_request=avg_time_saved_per_request
-            if avg_time_saved_per_request is not None
-            else self.avg_time_saved_per_request,
+            hourly_labor_cost=(
+                hourly_labor_cost if hourly_labor_cost is not None else self.hourly_labor_cost
+            ),
+            productivity_multiplier=(
+                productivity_multiplier
+                if productivity_multiplier is not None
+                else self.productivity_multiplier
+            ),
+            avg_time_saved_per_request=(
+                avg_time_saved_per_request
+                if avg_time_saved_per_request is not None
+                else self.avg_time_saved_per_request
+            ),
             currency=normalized_currency,
         )
 
