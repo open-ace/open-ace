@@ -1866,6 +1866,31 @@ install_run_as_wrapper() {
             return 1
         }
     fi
+
+    # Issue #2018: install the launch-validation helper (account pin + path
+    # confinement) consumed by openace-run-as --isolated. Autonomous-dev only.
+    local validate_src="$install_dir/scripts/openace-validate-launch"
+    local validate_dst="/usr/local/libexec/openace-validate-launch"
+    if [ ! -f "$validate_src" ]; then
+        print_warning "openace-validate-launch not found at $validate_src"
+        return 1
+    fi
+    install -d -o root -g root -m 755 "$(dirname "$validate_dst")" || return 1
+    install -o root -g root -m 755 "$validate_src" "$validate_dst" || return 1
+
+    # Single source of truth for the account pin + workspace roots, shared by
+    # the wrapper and its sudoers provisioning. root:root 0640 so the openace
+    # service account cannot alter the constraints.
+    local agent_account="${OPENACE_AUTONOMOUS_AGENT_ACCOUNT:-openace-agent}"
+    install -d -o root -g root -m 755 /etc/openace || return 1
+    cat > /etc/openace/agent-launcher.conf <<CONF_EOF
+# Issue #2018: constraints for openace-run-as --isolated.
+# root:root 0640 — the openace service account cannot edit this file.
+OPENACE_AUTONOMOUS_AGENT_ACCOUNT="${agent_account}"
+ALLOWED_WORKSPACE_ROOTS="/home /workspace"
+CONF_EOF
+    chown root:root /etc/openace/agent-launcher.conf 2>/dev/null || true
+    chmod 0640 /etc/openace/agent-launcher.conf
     print_success "Installed run-as wrapper to $dst"
     return 0
 }
@@ -1907,24 +1932,40 @@ configure_autonomous_agent_remote() {
     local remote="$1"
     local target_path="$2"
     local staged_wrapper
+    local staged_validate
 
     staged_wrapper=$(ssh "$remote" "mktemp /tmp/openace-run-as.XXXXXX") || return 1
     if ! [[ "$staged_wrapper" =~ ^/tmp/openace-run-as\.[A-Za-z0-9]+$ ]]; then
         print_warning "Remote host returned an invalid wrapper staging path"
         return 1
     fi
-    if ! scp "$SOURCE_DIR/scripts/openace-run-as.sh" "$remote:$staged_wrapper"; then
+    staged_validate=$(ssh "$remote" "mktemp /tmp/openace-validate-launch.XXXXXX") || {
         ssh "$remote" "rm -f '$staged_wrapper'" 2>/dev/null || true
         return 1
+    }
+    if ! [[ "$staged_validate" =~ ^/tmp/openace-validate-launch\.[A-Za-z0-9]+$ ]]; then
+        print_warning "Remote host returned an invalid validate-launch staging path"
+        ssh "$remote" "rm -f '$staged_wrapper' '$staged_validate'" 2>/dev/null || true
+        return 1
     fi
-    if ! ssh "$remote" "bash -s -- '$staged_wrapper' '$DEPLOY_USER' '$target_path'" <<'REMOTE_AUTONOMOUS_SETUP'
+    if ! scp "$SOURCE_DIR/scripts/openace-run-as.sh" "$remote:$staged_wrapper"; then
+        ssh "$remote" "rm -f '$staged_wrapper' '$staged_validate'" 2>/dev/null || true
+        return 1
+    fi
+    if ! scp "$SOURCE_DIR/scripts/openace-validate-launch" "$remote:$staged_validate"; then
+        ssh "$remote" "rm -f '$staged_wrapper' '$staged_validate'" 2>/dev/null || true
+        return 1
+    fi
+    if ! ssh "$remote" "bash -s -- '$staged_wrapper' '$staged_validate' '$DEPLOY_USER' '$target_path'" <<'REMOTE_AUTONOMOUS_SETUP'
 set -euo pipefail
 staged_wrapper="$1"
-deploy_user="$2"
-target_path="$3"
+staged_validate="$2"
+deploy_user="$3"
+target_path="$4"
 rule_tmp=""
+conf_tmp=""
 cleanup_remote_setup() {
-    rm -f "$staged_wrapper" "$rule_tmp"
+    rm -f "$staged_wrapper" "$staged_validate" "$rule_tmp" "$conf_tmp"
 }
 trap cleanup_remote_setup EXIT HUP INT TERM
 as_root() {
@@ -1936,6 +1977,8 @@ as_root() {
 }
 
 as_root install -o root -g root -m 755 "$staged_wrapper" /usr/local/bin/openace-run-as
+as_root install -d -o root -g root -m 755 /usr/local/libexec
+as_root install -o root -g root -m 755 "$staged_validate" /usr/local/libexec/openace-validate-launch
 guard_src="$target_path/app/modules/workspace/autonomous/agent_bin"
 guard_dst="/usr/local/libexec/openace-agent-bin"
 [ -d "$guard_src" ] || { echo "Missing autonomous agent command guards: $guard_src" >&2; exit 1; }
@@ -1949,6 +1992,21 @@ if ! id openace-agent >/dev/null 2>&1; then
     as_root useradd --system --create-home --home-dir /var/lib/openace-agent \
         --shell "$nologin_shell" openace-agent
 fi
+
+# Issue #2018: write the constraint conf (account pin + workspace roots) shared
+# by the wrapper. Stage to a dot-file then rename atomically so interruption
+# cannot leave a partial conf that fail-closes the launcher.
+agent_account="${OPENACE_AUTONOMOUS_AGENT_ACCOUNT:-openace-agent}"
+conf_tmp="$(mktemp)"
+cat > "$conf_tmp" <<CONF_EOF
+# Issue #2018: constraints for openace-run-as --isolated.
+# root:root 0640 — the openace service account cannot edit this file.
+OPENACE_AUTONOMOUS_AGENT_ACCOUNT="${agent_account}"
+ALLOWED_WORKSPACE_ROOTS="/home /workspace"
+CONF_EOF
+as_root install -d -o root -g root -m 755 /etc/openace
+as_root install -o root -g root -m 640 "$conf_tmp" /etc/openace/.agent-launcher.conf.new
+as_root mv /etc/openace/.agent-launcher.conf.new /etc/openace/agent-launcher.conf
 
 service_user="$(systemctl show open-ace.service -p User --value 2>/dev/null || true)"
 [ -n "$service_user" ] || service_user="$deploy_user"
