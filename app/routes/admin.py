@@ -555,7 +555,13 @@ def api_feishu_sync_lock_state():
     """Inspect the Feishu org-sync advisory lock (holder pid + hold time)."""
     from app.services.feishu_org_sync import FeishuOrgSyncService
 
-    return jsonify(_org_sync_lock_state_payload("feishu", FeishuOrgSyncService._DB_SYNC_LOCK_KEY))
+    try:
+        return jsonify(
+            _org_sync_lock_state_payload("feishu", FeishuOrgSyncService._DB_SYNC_LOCK_KEY)
+        )
+    except Exception as e:
+        logger.exception("Failed to inspect Feishu org-sync lock: %s", e)
+        return jsonify({"error": "Failed to inspect Feishu org-sync lock"}), 500
 
 
 @admin_bp.route("/admin/feishu/sync/release-lock", methods=["POST"])
@@ -579,9 +585,13 @@ def api_dingtalk_sync_lock_state():
     """Inspect the DingTalk org-sync advisory lock (holder pid + hold time)."""
     from app.services.dingtalk_org_sync import DingTalkOrgSyncService
 
-    return jsonify(
-        _org_sync_lock_state_payload("dingtalk", DingTalkOrgSyncService._DB_SYNC_LOCK_KEY)
-    )
+    try:
+        return jsonify(
+            _org_sync_lock_state_payload("dingtalk", DingTalkOrgSyncService._DB_SYNC_LOCK_KEY)
+        )
+    except Exception as e:
+        logger.exception("Failed to inspect DingTalk org-sync lock: %s", e)
+        return jsonify({"error": "Failed to inspect DingTalk org-sync lock"}), 500
 
 
 @admin_bp.route("/admin/dingtalk/sync/release-lock", methods=["POST"])

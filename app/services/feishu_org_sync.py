@@ -49,6 +49,20 @@ _USERNAME_MAX_ATTEMPTS = 100
 FEISHU_AUTH_ERROR_CODES = {99991661, 99991663, 99991664, 99991668}
 
 
+class FeishuApiError(RuntimeError):
+    """Raised when a Feishu API call returns a non-zero code.
+
+    Carries only ``code``/``msg`` (never the raw payload) so transient errors are
+    debuggable without echoing request bodies into logs/exceptions. Subclasses
+    RuntimeError so existing ``pytest.raises(RuntimeError)`` still match.
+    """
+
+    def __init__(self, code: Any, msg: str):
+        self.code = code
+        self.msg = msg
+        super().__init__(f"Feishu API request failed (code={code}): {msg}")
+
+
 @dataclass
 class _CachedToken:
     """A cached provider access token with an absolute expiry timestamp."""
@@ -750,7 +764,10 @@ class FeishuOrgSyncService:
             self._invalidate_tenant_access_token(self._active_app_id)
             fresh = self._get_tenant_access_token(self._active_app_id, self._active_app_secret)
             return self._request_json_once(method, url, fresh, params, json_payload, retried=True)
-        raise RuntimeError(f"Feishu API request failed: {payload}")
+        # Surface only code/msg (never the whole payload) so transient errors are
+        # debuggable without echoing request bodies into logs/exceptions.
+        msg = payload.get("msg") or payload.get("message") or "unknown error"
+        raise FeishuApiError(code, msg)
 
     @staticmethod
     def _extract_items(data: dict[str, Any], keys: tuple[str, ...]) -> list[dict[str, Any]]:

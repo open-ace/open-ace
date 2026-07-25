@@ -429,6 +429,39 @@ def test_feishu_request_json_retries_once_on_auth_fail():
     assert 99991661 in FEISHU_AUTH_ERROR_CODES
 
 
+def test_feishu_request_json_error_does_not_echo_payload():
+    """A non-zero Feishu code must raise FeishuApiError carrying only code/msg,
+    never the whole payload (avoid leaking request bodies / log noise) (WP-3)."""
+    from app.services.feishu_org_sync import FeishuApiError
+
+    class FakeHttp:
+        def request(self, method, url, headers=None, params=None, json=None, timeout=None):
+            return _FakeResponse(
+                {
+                    "code": 99991663,
+                    "msg": "invalid app secret",
+                    "request_id": "SECRET-trace-id",
+                    "extra_field": "should-not-leak",
+                }
+            )
+
+    service = FeishuOrgSyncService(
+        config_override={"feishu": {"app_id": "i", "app_secret": "s"}},
+        http_session=FakeHttp(),
+    )
+    # No active creds + a token sent -> the auth-retry guard skips, so the call
+    # raises immediately rather than retrying.
+    with pytest.raises(FeishuApiError) as exc_info:
+        service._request_json(
+            "GET", "https://open.feishu.cn/open-apis/contact/v3/x", token="t"
+        )
+    assert exc_info.value.code == 99991663
+    assert "invalid app secret" in exc_info.value.msg
+    # The full payload must NOT be echoed into the exception text.
+    assert "SECRET-trace-id" not in str(exc_info.value)
+    assert "should-not-leak" not in str(exc_info.value)
+
+
 # ===========================================================================
 # Finding #4: non-blocking scheduler guard + max-runtime watchdog
 # ===========================================================================
@@ -532,6 +565,64 @@ def test_feishu_scheduler_skips_when_schedule_lock_held(sqlite_db):
         assert service.maybe_sync_from_scheduler() is None
     finally:
         service._schedule_lock.release()
+
+
+def test_feishu_check_stale_sync_warns_when_overrun_sqlite(sqlite_db, caplog):
+    """On SQLite, a sync whose in-process start timestamp is older than the
+    max-runtime ceiling must log a hung-warning (WP-4 watchdog fallback)."""
+    service = _FakeFeishu(
+        db=sqlite_db,
+        user_repo=UserRepository(db=sqlite_db),
+        config_override=_feishu_config(),
+    )
+    service.__class__._sync_started_at = datetime.now(timezone.utc).replace(
+        tzinfo=None
+    ) - timedelta(seconds=100)
+    try:
+        with caplog.at_level(logging.WARNING, logger="app.services.feishu_org_sync"):
+            service._check_stale_sync(max_runtime_seconds=1, auto_recover=False)
+        assert any("appears hung" in r.getMessage() for r in caplog.records)
+    finally:
+        service.__class__._sync_started_at = None
+
+
+def test_feishu_check_stale_sync_auto_recover_calls_force_release(sqlite_db, monkeypatch):
+    """With auto_recover on, an over-run sync triggers force_release_lock (WP-4)."""
+    service = _FakeFeishu(
+        db=sqlite_db,
+        user_repo=UserRepository(db=sqlite_db),
+        config_override=_feishu_config(),
+    )
+    service.__class__._sync_started_at = datetime.now(timezone.utc).replace(
+        tzinfo=None
+    ) - timedelta(seconds=100)
+    called: list[int] = []
+    monkeypatch.setattr(
+        fs_module,
+        "force_release_lock",
+        lambda db, key, **kw: called.append(1) or True,
+    )
+    try:
+        service._check_stale_sync(max_runtime_seconds=1, auto_recover=True)
+        assert called == [1], "auto_recover must call force_release_lock"
+    finally:
+        service.__class__._sync_started_at = None
+
+
+def test_feishu_check_stale_sync_noop_when_within_budget(sqlite_db, caplog):
+    """A sync within the runtime budget must not be flagged (WP-4)."""
+    service = _FakeFeishu(
+        db=sqlite_db,
+        user_repo=UserRepository(db=sqlite_db),
+        config_override=_feishu_config(),
+    )
+    service.__class__._sync_started_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    try:
+        with caplog.at_level(logging.WARNING, logger="app.services.feishu_org_sync"):
+            service._check_stale_sync(max_runtime_seconds=1800, auto_recover=True)
+        assert not any("appears hung" in r.getMessage() for r in caplog.records)
+    finally:
+        service.__class__._sync_started_at = None
 
 
 # ===========================================================================

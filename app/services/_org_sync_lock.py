@@ -128,8 +128,17 @@ def force_release_lock(
     (``pg_terminate_backend`` is asynchronous -- the holder only dies once it
     reaches a cancel point). Returns True if the lock is gone on return.
 
-    ``exclude_pid`` defaults to the current backend so a worker never terminates
-    itself. Postgres only; returns False on other backends.
+    ``exclude_pid`` defaults to the current backend so a worker avoids terminating
+    itself. This is best-effort, not a guarantee: ``Database`` checks out a fresh
+    pooled connection per call, so the pid returned by :func:`current_backend_pid`
+    and the connection used for the subsequent ``pg_terminate_backend`` may be
+    different backends -- ``exclude_pid`` only filters the *find-holder* query,
+    not the terminate call itself. There is also an inherent TOCTOU window
+    between finding the holder and terminating it: if the holder releases
+    naturally in that gap and its pid is reused by the pool for an unrelated
+    backend, that backend would be killed. Acceptable because this path is
+    admin-triggered (or behind an opt-in auto-recover flag) for a known-stuck
+    lock. Postgres only; returns False on other backends.
 
     ``sleep`` is injectable so tests can avoid real waiting.
     """
