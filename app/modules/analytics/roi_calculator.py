@@ -111,16 +111,33 @@ class ROIAssumptions:
         avg_time_saved_per_request: float | None = None,
         currency: str | None = None,
     ) -> "ROIAssumptions":
-        """Return a copy with per-request overrides applied."""
+        """Return a copy with per-request overrides applied.
+
+        The float fields use an explicit ``is not None`` check rather than
+        truthiness, so the legitimate falsy value ``0.0`` is preserved instead
+        of being silently replaced by the default. ``currency`` deliberately
+        keeps an ``or`` short-circuit inside its ``is not None`` branch: an
+        empty currency string is invalid and should fall back to the default,
+        unlike ``0.0`` labor cost which is a legal value.
+        """
         normalized_currency = self.currency
         if currency is not None:
             normalized_currency = currency.strip().upper() or self.currency
 
         return ROIAssumptions(
-            hourly_labor_cost=hourly_labor_cost or self.hourly_labor_cost,
-            productivity_multiplier=productivity_multiplier or self.productivity_multiplier,
-            avg_time_saved_per_request=avg_time_saved_per_request
-            or self.avg_time_saved_per_request,
+            hourly_labor_cost=(
+                hourly_labor_cost if hourly_labor_cost is not None else self.hourly_labor_cost
+            ),
+            productivity_multiplier=(
+                productivity_multiplier
+                if productivity_multiplier is not None
+                else self.productivity_multiplier
+            ),
+            avg_time_saved_per_request=(
+                avg_time_saved_per_request
+                if avg_time_saved_per_request is not None
+                else self.avg_time_saved_per_request
+            ),
             currency=normalized_currency,
         )
 
