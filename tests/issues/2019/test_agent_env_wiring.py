@@ -123,7 +123,7 @@ def test_build_agent_env_proxy_fail_in_dev_without_opt_in_raises(monkeypatch):
         )
 
 
-def test_build_agent_env_proxy_fail_in_dev_with_opt_in_keeps_raw(monkeypatch):
+def test_build_agent_env_proxy_fail_in_dev_with_opt_in_keeps_llm_only(monkeypatch):
     from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner
 
     _seed_raw_env(monkeypatch)
@@ -135,9 +135,12 @@ def test_build_agent_env_proxy_fail_in_dev_with_opt_in_keeps_raw(monkeypatch):
         _FakeAdapter(), "claude-code", None, "sess-1", "model-x"
     )
 
-    # Explicit unsafe fallback: raw keys inherited (caller logs a loud warning).
+    # The named fallback retains only LLM provider keys…
     assert env["OPENAI_API_KEY"] == "raw-openai_api_key"
-    assert env["GH_TOKEN"] == "raw-gh_token"
+    # …non-LLM creds (GitHub/SSH/cloud) are STILL scrubbed — the agent never
+    # needs them.
+    assert "GH_TOKEN" not in env
+    assert "AWS_SECRET_ACCESS_KEY" not in env
 
 
 # ── executor._build_env (remote autonomous) ───────────────────────────────
@@ -168,3 +171,24 @@ def test_executor_build_env_empty_token_in_production_raises(monkeypatch):
     self_obj = SimpleNamespace(server_url="http://test:5000")
     with pytest.raises(RuntimeError):
         executor.ProcessExecutor._build_env(self_obj, "claude-code", "", "model-x")
+
+
+def test_executor_build_env_allow_empty_token_restores_scrubbed(monkeypatch):
+    # Crash-recovery restore: an empty token must NOT raise (even in production)
+    # and must return a fully scrubbed env — no agent launches with inherited
+    # raw creds; a fresh token is minted before use.
+    import executor
+
+    monkeypatch.setenv("FLASK_ENV", "production")
+    monkeypatch.setenv("OPENAI_API_KEY", "raw-openai")
+    monkeypatch.setenv("GH_TOKEN", "raw-gh")
+    monkeypatch.delenv("OPENACE_ALLOW_RAW_KEY_FALLBACK", raising=False)
+    monkeypatch.setattr(executor, "get_adapter", lambda cli: _FakeAdapter())
+
+    self_obj = SimpleNamespace(server_url="http://test:5000")
+    env = executor.ProcessExecutor._build_env(
+        self_obj, "claude-code", "", "model-x", allow_empty_token=True
+    )
+    assert "OPENAI_API_KEY" not in env
+    assert "GH_TOKEN" not in env
+    assert "OPENACE_PROXY_TOKEN" not in env

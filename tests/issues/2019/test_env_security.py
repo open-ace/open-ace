@@ -1,12 +1,11 @@
 """Tests for the autonomous-agent env security policy (Issue #2019).
 
 ``build_secure_agent_env`` is the pure policy shared by
-``agent_runner._build_agent_env`` (local autonomous) and
-``executor._build_env`` (remote autonomous). It guarantees an agent subprocess
-never inherits raw provider/GitHub/SSH credentials: sensitive keys are scrubbed
-before the proxy token is injected, and a proxy-token failure fail-closes
-(raises) in production and in dev unless an explicit opt-in raw-key fallback is
-set.
+``agent_runner._build_agent_env`` (local autonomous) and ``executor._build_env``
+(remote autonomous). It guarantees an agent subprocess never inherits raw
+provider/GitHub/SSH credentials: sensitive keys are scrubbed before the proxy
+token is injected, and a proxy-token failure fail-closes (raises) in production
+and in dev unless an explicit opt-in raw-key fallback is set.
 """
 
 import sys
@@ -37,16 +36,15 @@ def _base_env_with_raw_keys() -> dict[str, str]:
     }
 
 
-SENSITIVE = {
+LLM_KEYS = {
     "OPENAI_API_KEY",
     "ANTHROPIC_API_KEY",
     "GEMINI_API_KEY",
     "BAILIAN_CODING_PLAN_API_KEY",
     "ZAI_API_KEY",
-    "GH_TOKEN",
-    "SSH_AUTH_SOCK",
-    "AWS_SECRET_ACCESS_KEY",
 }
+NON_LLM_KEYS = {"GH_TOKEN", "SSH_AUTH_SOCK", "AWS_SECRET_ACCESS_KEY"}
+SENSITIVE = LLM_KEYS | NON_LLM_KEYS
 
 PROXY_VARS = {
     "ANTHROPIC_API_KEY": "proxy-token",
@@ -64,6 +62,7 @@ class TestBuildSecureAgentEnv:
         env = build_secure_agent_env(
             base_env=raw,
             sensitive_keys=SENSITIVE,
+            llm_provider_keys=LLM_KEYS,
             proxy_env_vars=PROXY_VARS,
             proxy_ok=True,
             is_production=True,
@@ -79,6 +78,7 @@ class TestBuildSecureAgentEnv:
         env = build_secure_agent_env(
             base_env=_base_env_with_raw_keys(),
             sensitive_keys=SENSITIVE,
+            llm_provider_keys=LLM_KEYS,
             proxy_env_vars=PROXY_VARS,
             proxy_ok=True,
             is_production=True,
@@ -92,6 +92,7 @@ class TestBuildSecureAgentEnv:
         env = build_secure_agent_env(
             base_env=_base_env_with_raw_keys(),
             sensitive_keys=SENSITIVE,
+            llm_provider_keys=LLM_KEYS,
             proxy_env_vars=PROXY_VARS,
             proxy_ok=True,
             is_production=True,
@@ -105,6 +106,7 @@ class TestBuildSecureAgentEnv:
         env = build_secure_agent_env(
             base_env={"ZAI_API_KEY": "raw", "PATH": "/x"},
             sensitive_keys={"ZAI_API_KEY"},
+            llm_provider_keys={"ZAI_API_KEY"},
             proxy_env_vars={},
             proxy_ok=True,
             is_production=False,
@@ -117,6 +119,7 @@ class TestBuildSecureAgentEnv:
             build_secure_agent_env(
                 base_env=_base_env_with_raw_keys(),
                 sensitive_keys=SENSITIVE,
+                llm_provider_keys=LLM_KEYS,
                 proxy_env_vars={},
                 proxy_ok=False,
                 is_production=True,
@@ -128,34 +131,59 @@ class TestBuildSecureAgentEnv:
             build_secure_agent_env(
                 base_env=_base_env_with_raw_keys(),
                 sensitive_keys=SENSITIVE,
+                llm_provider_keys=LLM_KEYS,
                 proxy_env_vars={},
                 proxy_ok=False,
                 is_production=False,
                 raw_fallback_allowed=False,
             )
 
-    def test_proxy_fail_in_dev_with_opt_in_keeps_raw_keys(self):
+    def test_proxy_fail_dev_opt_in_keeps_llm_scrubs_non_llm(self):
         env = build_secure_agent_env(
             base_env=_base_env_with_raw_keys(),
             sensitive_keys=SENSITIVE,
+            llm_provider_keys=LLM_KEYS,
             proxy_env_vars={},
             proxy_ok=False,
             is_production=False,
             raw_fallback_allowed=True,
         )
-        # Explicit unsafe fallback: raw keys are inherited (with a loud warning
-        # logged by the caller). None of them are scrubbed.
+        # The named "raw key fallback" retains only the LLM provider keys…
         assert env["OPENAI_API_KEY"] == "sk-raw-openai"
-        assert env["GH_TOKEN"] == "ghs_raw_github"
+        assert env["ZAI_API_KEY"] == "raw-zai"
+        # …and STILL scrubs non-LLM creds (GitHub/SSH/cloud) — the agent never
+        # needs those.
+        for key in NON_LLM_KEYS:
+            assert key not in env, f"non-LLM credential {key} leaked via opt-in fallback"
 
     def test_proxy_fail_never_returns_proxy_token(self):
         # On failure there is no token; the returned env must not carry one.
         env = build_secure_agent_env(
             base_env=_base_env_with_raw_keys(),
             sensitive_keys=SENSITIVE,
+            llm_provider_keys=LLM_KEYS,
             proxy_env_vars={},
             proxy_ok=False,
             is_production=False,
             raw_fallback_allowed=True,
         )
         assert "OPENACE_PROXY_TOKEN" not in env
+
+    def test_allow_empty_token_returns_scrubbed_env_without_raising(self):
+        # Crash-recovery restore path: rebuild a token-less env without failing
+        # closed. It must still carry NO raw credential (a fresh token is minted
+        # before the agent uses it).
+        env = build_secure_agent_env(
+            base_env=_base_env_with_raw_keys(),
+            sensitive_keys=SENSITIVE,
+            llm_provider_keys=LLM_KEYS,
+            proxy_env_vars={},
+            proxy_ok=False,
+            is_production=True,  # even in production, restore must not raise
+            raw_fallback_allowed=False,
+            allow_empty_token=True,
+        )
+        for key in SENSITIVE:
+            assert key not in env, f"{key} leaked into restored env"
+        assert "OPENACE_PROXY_TOKEN" not in env
+        assert env["PATH"] == "/usr/bin:/bin"

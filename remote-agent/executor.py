@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, Any
 from cli_adapters import get_adapter
 from cli_adapters.base import collect_custom_envkeys
 from cli_adapters.zcode import ZCodeAdapter
-from constants import SENSITIVE_ENV_KEYS, collect_dynamic_env_keys
+from constants import LLM_PROVIDER_ENV_KEYS, SENSITIVE_ENV_KEYS, collect_dynamic_env_keys
 from env_security import build_secure_agent_env
 from zcode_app_server import ZCodeAppServerSession
 
@@ -742,6 +742,8 @@ class ProcessExecutor:
         cli_tool: str,
         proxy_token: str,
         model: str | None = None,
+        *,
+        allow_empty_token: bool = False,
     ) -> dict[str, str]:
         """
         Build environment variables for the CLI subprocess.
@@ -754,6 +756,8 @@ class ProcessExecutor:
             cli_tool: CLI tool identifier (e.g. 'qwen-code-cli').
             proxy_token: Short-lived proxy token for LLM API authentication.
             model: Optional model name.
+            allow_empty_token: True for crash-recovery restore, which rebuilds
+                a token-less env and has a fresh token minted before use.
 
         Returns:
             Dict of environment variable name -> value.
@@ -810,10 +814,13 @@ class ProcessExecutor:
         return build_secure_agent_env(
             base_env=env,
             sensitive_keys=sensitive_keys,
+            llm_provider_keys=set(LLM_PROVIDER_ENV_KEYS) | dynamic_env_keys,
             proxy_env_vars=proxy_env_vars,
             proxy_ok=bool(proxy_token),
-            is_production=os.environ.get("FLASK_ENV") == "production",
+            is_production=os.environ.get("FLASK_ENV", "development").strip().lower()
+            == "production",
             raw_fallback_allowed=os.environ.get("OPENACE_ALLOW_RAW_KEY_FALLBACK") == "1",
+            allow_empty_token=allow_empty_token,
         )
 
     def _find_executable(self, cli_tool: str) -> str | None:
@@ -1804,8 +1811,9 @@ class ProcessExecutor:
 
             # Rebuild env without saved proxy token — the server will
             # provide a fresh one on the next start_session command.
-            # For now, build minimal env from adapter defaults.
-            env = self._build_env(info["cli_tool"], "", info.get("model"))
+            # allow_empty_token: scrub creds and don't fail closed (no agent is
+            # launched with inherited raw keys; a fresh token arrives before use).
+            env = self._build_env(info["cli_tool"], "", info.get("model"), allow_empty_token=True)
             # Merge any saved non-token env vars
             if info.get("env"):
                 env.update(info["env"])

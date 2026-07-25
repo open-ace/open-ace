@@ -22,33 +22,51 @@ def build_secure_agent_env(
     *,
     base_env: dict[str, str],
     sensitive_keys: set[str],
+    llm_provider_keys: set[str],
     proxy_env_vars: dict[str, str],
     proxy_ok: bool,
     is_production: bool,
     raw_fallback_allowed: bool,
+    allow_empty_token: bool = False,
 ) -> dict[str, str]:
     """Return an agent env that carries only proxy-token credentials.
 
     Args:
         base_env: ``dict(os.environ)`` snapshot of the service process. Still
             holds raw credentials when the caller has not scrubbed it.
-        sensitive_keys: static ∪ dynamic credential env-key names to strip.
+        sensitive_keys: static ∪ dynamic credential env-key names to strip on
+            success.
+        llm_provider_keys: subset of ``sensitive_keys`` that the dev-only raw
+            fallback may retain. Non-LLM creds (GitHub/SSH/cloud) are ALWAYS
+            scrubbed, even in the fallback.
         proxy_env_vars: adapter proxy vars (``ANTHROPIC_API_KEY=token``,
             ``OPENACE_PROXY_TOKEN``, …). Injected only when ``proxy_ok``.
         proxy_ok: True iff a short-lived proxy token was minted successfully.
-        is_production: True iff ``FLASK_ENV=production``.
+        is_production: True iff running in production mode.
         raw_fallback_allowed: True iff the dev-only
             ``OPENACE_ALLOW_RAW_KEY_FALLBACK=1`` opt-in is set.
+        allow_empty_token: True for crash-recovery restore, which intentionally
+            rebuilds a token-less env and has a fresh token minted before use.
+            Returns a fully scrubbed env (no raw creds, no token) without
+            raising.
 
     Returns:
         A scrubbed env with proxy vars injected on success.
 
     Raises:
-        RuntimeError: if ``proxy_ok`` is False and either ``is_production`` or
-            not ``raw_fallback_allowed`` — the agent must not launch with raw
-            credentials inherited from the service env.
+        RuntimeError: if ``proxy_ok`` is False, ``allow_empty_token`` is False,
+            and either ``is_production`` or not ``raw_fallback_allowed`` — the
+            agent must not launch with raw credentials inherited from the
+            service env.
     """
     if not proxy_ok:
+        if allow_empty_token:
+            # Restore path: scrub all credentials and mint no token here (a
+            # fresh token is provided before the agent uses it). Never raise —
+            # this is crash recovery.
+            env = {key: value for key, value in base_env.items() if key not in sensitive_keys}
+            env.update(proxy_env_vars)
+            return env
         if is_production or not raw_fallback_allowed:
             raise RuntimeError(
                 "LLM proxy setup failed; refusing to launch autonomous agent "
@@ -57,9 +75,12 @@ def build_secure_agent_env(
             )
         logger.error(
             "SECURITY: OPENACE_ALLOW_RAW_KEY_FALLBACK=1 set — autonomous agent "
-            "is inheriting raw provider/GitHub credentials from the service env."
+            "is inheriting raw LLM provider keys from the service env."
         )
-        env = dict(base_env)
+        # Raw fallback: scrub non-LLM credentials ALWAYS (the agent never needs
+        # GitHub/SSH/cloud); only the LLM provider keys are retained.
+        scrub_on_fallback = sensitive_keys - llm_provider_keys
+        env = {key: value for key, value in base_env.items() if key not in scrub_on_fallback}
         env.update(proxy_env_vars)
         return env
 

@@ -1176,6 +1176,8 @@ class AutonomousAgentRunner:
         in development unless OPENACE_ALLOW_RAW_KEY_FALLBACK=1 is set. The agent
         never inherits a real key from the service env.
         """
+        from app.utils.security_env import is_production_environment
+
         env = dict(os.environ)
         guard_bin = AutonomousAgentRunner._resolve_agent_guard_bin()
         real_git = shutil.which("git", path=env.get("PATH"))
@@ -1204,12 +1206,16 @@ class AutonomousAgentRunner:
         # dynamic custom envKeys) BEFORE injecting the proxy token, and fail
         # closed if the proxy token could not be minted. The agent must never
         # inherit a real key from the service env.
-        sensitive_env_keys, collect_dynamic_env_keys, build_secure_agent_env = (
-            AutonomousAgentRunner._import_env_security()
-        )
+        (
+            sensitive_env_keys,
+            llm_provider_env_keys,
+            collect_dynamic_env_keys,
+            build_secure_agent_env,
+        ) = AutonomousAgentRunner._import_env_security()
         adapter_settings = AutonomousAgentRunner._load_adapter_settings(adapter)
         dynamic_env_keys = collect_dynamic_env_keys(adapter_settings)
         sensitive_keys = set(sensitive_env_keys) | dynamic_env_keys
+        llm_keys = set(llm_provider_env_keys) | dynamic_env_keys
 
         proxy_env_vars: dict[str, str] = {}
         proxy_ok = False
@@ -1268,9 +1274,10 @@ class AutonomousAgentRunner:
             build_secure_agent_env(
                 base_env=env,
                 sensitive_keys=sensitive_keys,
+                llm_provider_keys=llm_keys,
                 proxy_env_vars=proxy_env_vars,
                 proxy_ok=proxy_ok,
-                is_production=os.environ.get("FLASK_ENV") == "production",
+                is_production=is_production_environment(),
                 raw_fallback_allowed=os.environ.get("OPENACE_ALLOW_RAW_KEY_FALLBACK") == "1",
             ),
         )
@@ -1289,10 +1296,15 @@ class AutonomousAgentRunner:
         )
         if remote_agent_dir not in sys.path:
             sys.path.insert(0, remote_agent_dir)
-        from constants import SENSITIVE_ENV_KEYS, collect_dynamic_env_keys
+        from constants import LLM_PROVIDER_ENV_KEYS, SENSITIVE_ENV_KEYS, collect_dynamic_env_keys
         from env_security import build_secure_agent_env
 
-        return SENSITIVE_ENV_KEYS, collect_dynamic_env_keys, build_secure_agent_env
+        return (
+            SENSITIVE_ENV_KEYS,
+            LLM_PROVIDER_ENV_KEYS,
+            collect_dynamic_env_keys,
+            build_secure_agent_env,
+        )
 
     @staticmethod
     def _load_adapter_settings(adapter: Any) -> dict:

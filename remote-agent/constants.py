@@ -9,9 +9,13 @@ from typing import Any
 # a short-lived LLM proxy token (Issue #2019). Both _build_agent_env (local)
 # and executor._build_env (remote) scrub static ∪ dynamic (collect_dynamic_env_keys)
 # before injecting the proxy token.
-SENSITIVE_ENV_KEYS = frozenset(
+#
+# Split into LLM-provider keys vs non-LLM credentials: the dev-only
+# OPENACE_ALLOW_RAW_KEY_FALLBACK escape hatch may retain ONLY the LLM provider
+# keys (the named "raw key fallback"). GitHub/SSH/cloud credentials are ALWAYS
+# scrubbed — the agent never needs them (the orchestrator owns remote mutations).
+LLM_PROVIDER_ENV_KEYS = frozenset(
     {
-        # LLM provider keys + base URLs + tokens
         "OPENAI_API_KEY",
         "OPENAI_BASE_URL",
         "OPENAI_TOKEN",
@@ -24,6 +28,11 @@ SENSITIVE_ENV_KEYS = frozenset(
         "OPENCLAW_API_KEY",
         "OPENCLAW_BASE_URL",
         "ZAI_API_KEY",
+    }
+)
+
+NON_LLM_CREDENTIAL_KEYS = frozenset(
+    {
         # GitHub / SSH — the orchestrator owns all remote mutations
         "GH_TOKEN",
         "GITHUB_TOKEN",
@@ -37,6 +46,8 @@ SENSITIVE_ENV_KEYS = frozenset(
         "AZURE_CLIENT_SECRET",
     }
 )
+
+SENSITIVE_ENV_KEYS = LLM_PROVIDER_ENV_KEYS | NON_LLM_CREDENTIAL_KEYS
 
 
 def collect_dynamic_env_keys(settings: dict[str, Any]) -> set[str]:
