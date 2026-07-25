@@ -240,6 +240,33 @@ class AutonomousScheduler:
 
         return workspace, branch
 
+    def _workflow_blocked_by_conflict_locks(self, wf: dict) -> bool:
+        """Return True if *wf* must be skipped this cycle due to a batch /
+        workspace / branch conflict lock held by an in-progress workflow.
+
+        Waiting workflows bypass all conflict locks (see ``_do_wait``'s
+        no-git-mutation invariant) so they can resume even while a batch
+        sibling is actively running. Extracted from ``_process_workflows`` so
+        tests can assert against the real filter instead of re-implementing it
+        (PR #2016 review suggestion #2).
+
+        Thread-safety: reads ``_in_progress_batch_ids`` /
+        ``_in_progress_workspaces`` / ``_in_progress_branches``, so the caller
+        must hold ``self._in_progress_lock`` (as ``_process_workflows`` does)
+        to avoid a TOCTOU race where a sibling workflow reserves/releases keys
+        between this check and the reservation step.
+        """
+        is_waiting = wf.get("status") == "waiting"
+        batch_id = wf.get("batch_id")
+        if batch_id and batch_id in self._in_progress_batch_ids and not is_waiting:
+            return True
+        workspace, branch = self._conflict_keys(wf)
+        if workspace and workspace in self._in_progress_workspaces and not is_waiting:
+            return True
+        if branch and branch in self._in_progress_branches and not is_waiting:
+            return True
+        return False
+
     def _reclaim_paused_slots(self, repo) -> None:
         """Release git-conflict keys held by workflows that have since been paused.
 
@@ -324,6 +351,13 @@ class AutonomousScheduler:
         workspace, branch = self._conflict_keys(workflow) if workflow else ("", "")
         # Waiting workflows bypass conflict locks (see _process_workflows).
         # Capture this so cleanup paths don't release another workflow's keys.
+        #
+        # Load-bearing invariant: this advance-time read of ``status == waiting``
+        # agrees with the selection-time read in ``_process_workflows`` only
+        # because the ``waiting -> developing/merging`` transition happens inside
+        # ``advance()`` below — no other actor flips the status between selection
+        # and this point. If that ever changes, the finally cleanup below could
+        # release (or fail to release) the wrong workflow's conflict keys.
         was_waiting = bool(workflow and workflow.get("status") == "waiting")
 
         # Acquire DB-level distributed lock
@@ -621,16 +655,7 @@ class AutonomousScheduler:
                 # branch conflict locks so they can resume even while a batch
                 # sibling is still running. The lock re-applies on the next
                 # cycle once the workflow leaves "waiting" status.
-                is_waiting = wf.get("status") == "waiting"
-                # For batch workflows, check if the batch is already being processed
-                batch_id = wf.get("batch_id")
-                if batch_id and batch_id in self._in_progress_batch_ids and not is_waiting:
-                    continue
-                # git-conflict guard: same working tree OR same branch (#1002)
-                workspace, branch = self._conflict_keys(wf)
-                if workspace and workspace in self._in_progress_workspaces and not is_waiting:
-                    continue
-                if branch and branch in self._in_progress_branches and not is_waiting:
+                if self._workflow_blocked_by_conflict_locks(wf):
                     continue
                 active.append(wf)
 

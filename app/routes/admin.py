@@ -503,3 +503,107 @@ def api_sync_dingtalk_org():
     except Exception as e:
         logger.exception("Failed to sync DingTalk org: %s", e)
         return jsonify({"error": "Failed to sync DingTalk org"}), 500
+
+
+def _org_sync_lock_state_payload(provider: str, key: int) -> dict:
+    """Inspect (without releasing) an org-sync advisory lock.
+
+    Returns the holder pid and approximate hold time, or ``running: None`` when
+    nothing holds the lock (or on non-Postgres, where there is no cross-process
+    lock to inspect). Used by both Feishu and DingTalk lock-state endpoints.
+    """
+    from app.repositories.database import Database
+    from app.services._org_sync_lock import get_running_sync_state
+
+    db = Database()
+    state = get_running_sync_state(db, key)
+    return {
+        "provider": provider,
+        "key": key,
+        "is_postgresql": bool(getattr(db, "is_postgresql", False)),
+        "running": state,
+    }
+
+
+def _release_org_sync_lock_payload(provider: str, key: int) -> dict:
+    """Forcefully release a stuck org-sync advisory lock.
+
+    Reports the holder state before the release and whether the lock was gone on
+    return. Used to recover from a hung sync whose advisory lock would otherwise
+    block every future run. Postgres only (terminates the holder backend via
+    ``pg_terminate_backend`` then polls until the lock row disappears); on other
+    backends there is no cross-process lock, so ``released`` is True trivially.
+    """
+    from app.repositories.database import Database
+    from app.services._org_sync_lock import force_release_lock, get_running_sync_state
+
+    db = Database()
+    before = get_running_sync_state(db, key)
+    released = force_release_lock(db, key)
+    return {
+        "provider": provider,
+        "key": key,
+        "is_postgresql": bool(getattr(db, "is_postgresql", False)),
+        "before": before,
+        "released": bool(released),
+    }
+
+
+@admin_bp.route("/admin/feishu/sync/lock-state", methods=["GET"])
+@admin_required
+def api_feishu_sync_lock_state():
+    """Inspect the Feishu org-sync advisory lock (holder pid + hold time)."""
+    from app.services.feishu_org_sync import FeishuOrgSyncService
+
+    try:
+        return jsonify(
+            _org_sync_lock_state_payload("feishu", FeishuOrgSyncService._DB_SYNC_LOCK_KEY)
+        )
+    except Exception as e:
+        logger.exception("Failed to inspect Feishu org-sync lock: %s", e)
+        return jsonify({"error": "Failed to inspect Feishu org-sync lock"}), 500
+
+
+@admin_bp.route("/admin/feishu/sync/release-lock", methods=["POST"])
+@admin_required
+def api_release_feishu_sync_lock():
+    """Forcefully release a stuck Feishu org-sync advisory lock."""
+    from app.services.feishu_org_sync import FeishuOrgSyncService
+
+    try:
+        return jsonify(
+            _release_org_sync_lock_payload("feishu", FeishuOrgSyncService._DB_SYNC_LOCK_KEY)
+        )
+    except Exception as e:
+        logger.exception("Failed to release Feishu org-sync lock: %s", e)
+        return jsonify({"error": "Failed to release Feishu org-sync lock"}), 500
+
+
+@admin_bp.route("/admin/dingtalk/sync/lock-state", methods=["GET"])
+@admin_required
+def api_dingtalk_sync_lock_state():
+    """Inspect the DingTalk org-sync advisory lock (holder pid + hold time)."""
+    from app.services.dingtalk_org_sync import DingTalkOrgSyncService
+
+    try:
+        return jsonify(
+            _org_sync_lock_state_payload("dingtalk", DingTalkOrgSyncService._DB_SYNC_LOCK_KEY)
+        )
+    except Exception as e:
+        logger.exception("Failed to inspect DingTalk org-sync lock: %s", e)
+        return jsonify({"error": "Failed to inspect DingTalk org-sync lock"}), 500
+
+
+@admin_bp.route("/admin/dingtalk/sync/release-lock", methods=["POST"])
+@admin_required
+def api_release_dingtalk_sync_lock():
+    """Forcefully release a stuck DingTalk org-sync advisory lock."""
+    from app.services.dingtalk_org_sync import DingTalkOrgSyncService
+
+    try:
+        return jsonify(
+            _release_org_sync_lock_payload("dingtalk", DingTalkOrgSyncService._DB_SYNC_LOCK_KEY)
+        )
+    except Exception as e:
+        logger.exception("Failed to release DingTalk org-sync lock: %s", e)
+        return jsonify({"error": "Failed to release DingTalk org-sync lock"}), 500

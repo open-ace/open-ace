@@ -3,6 +3,9 @@
 
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
 import importlib.util
 import stat
 import sys
@@ -19,6 +22,27 @@ def load_cli_settings():
     assert spec and spec.loader
     spec.loader.exec_module(module)
     return module
+
+
+def _make_proxy_token(
+    payload: bytes | str = b'{"user_id":"u1"}',
+    secret: bytes = b"openace-test-secret",
+) -> str:
+    """Build a realistic Open ACE proxy token: ``{base64(payload)}.{hmac hex}``.
+
+    Mirrors ``api_key_proxy.generate_proxy_token`` so the Issue #1828 #3 format
+    guard accepts the fixtures below: a standard-base64 payload joined by a
+    single ``.`` to an HMAC-SHA256 hex signature. The pre-#1828 placeholder
+    ``PROXY_TOKEN`` would now be degraded to ``None`` by the guard.
+    """
+    if isinstance(payload, str):
+        payload = payload.encode()
+    payload_b64 = base64.b64encode(payload).decode()
+    signature = hmac.new(secret, payload_b64.encode(), hashlib.sha256).hexdigest()
+    return f"{payload_b64}.{signature}"
+
+
+PROXY_TOKEN = _make_proxy_token()
 
 
 def test_write_codex_settings_merges_existing_and_injects_proxy(tmp_path):
@@ -66,14 +90,12 @@ def test_write_codex_settings_uses_bearer_token_on_windows(tmp_path):
         {},
         proxy_base_url="https://openace.example/api/remote/llm-proxy/v1",
         home_dir=tmp_path,
-        bearer_token="test-bearer-token-123",
+        bearer_token=PROXY_TOKEN,
     )
 
     parsed = cli_settings.tomllib.loads(config_path.read_text(encoding="utf-8"))
     # Should use experimental_bearer_token instead of env_key
-    assert (
-        parsed["model_providers"]["openace"]["experimental_bearer_token"] == "test-bearer-token-123"
-    )
+    assert parsed["model_providers"]["openace"]["experimental_bearer_token"] == PROXY_TOKEN
     assert "env_key" not in parsed["model_providers"]["openace"]
     # Should have secure file permissions (0600)
     assert stat.S_IMODE(config_path.stat().st_mode) == 0o600
@@ -96,12 +118,12 @@ env_key = "OPENAI_API_KEY"
         {},
         proxy_base_url="https://openace.example/api/remote/llm-proxy/v1",
         home_dir=tmp_path,
-        bearer_token="test-bearer-token-123",
+        bearer_token=PROXY_TOKEN,
     )
 
     parsed = cli_settings.tomllib.loads(config_path.read_text(encoding="utf-8"))
     openace = parsed["model_providers"]["openace"]
-    assert openace["experimental_bearer_token"] == "test-bearer-token-123"
+    assert openace["experimental_bearer_token"] == PROXY_TOKEN
     assert "env_key" not in openace
 
 
