@@ -1650,17 +1650,6 @@ class AutonomousOrchestrator:
                 # only when the move is a forward update to a remote-sourced
                 # commit (a benign pull); a local escape commit (not pushed),
                 # a reset/rollback, or a non-fast-forward rewrite is blocked.
-                #
-                # The branch-equality guard (before.branch == after.branch)
-                # skips the check entirely when the developer switched the main
-                # repo to another branch during the agent run (e.g. to work on
-                # a fix PR from the same checkout on a dev/single-user host).
-                # In that case the "HEAD moved" signal is from the branch
-                # switch, not an agent escape, and the worktree-only validation
-                # above already confirms the agent stayed inside its worktree.
-                # Without this guard, any local (unpushed) commit on the
-                # feature branch trips after_on_remote=False and produces a
-                # false-positive escape report (#1831 regression).
                 if self._main_drift_is_benign_pull(
                     ctx.get("project_path", ""),
                     before_main.get("head"),
@@ -1680,30 +1669,79 @@ class AutonomousOrchestrator:
                     "HEAD did not move; the agent likely executed git commands outside "
                     "the workflow worktree."
                 )
+            after_main_branch = after_main.get("branch", "")
             if (
                 before_main.get("head")
                 and after_main.get("head")
                 and before_main.get("head") != after_main.get("head")
-                and before_main.get("branch") != after_main.get("branch")
+                and before_main.get("branch") != after_main_branch
                 and before_effective.get("head") == after_effective.get("head")
             ):
-                # Main repo HEAD moved because the developer switched branches
-                # (e.g. checked out a feature branch to work on a fix PR while
-                # a workflow was running on the same host). This is not an
-                # agent escape — the agent runs inside the worktree and cannot
-                # affect the main repo's checked-out branch. Log and allow;
-                # the worktree-only validation above already confirmed the
-                # agent stayed inside its worktree (#1831).
-                logger.info(
-                    "Workflow %s: main repo branch changed %s..%s during agent run "
-                    "(developer switched branches: %s -> %s); skipping main-HEAD-drift "
-                    "check, allowing.",
-                    self._workflow_id,
-                    before_main.get("head", "")[:8],
-                    after_main.get("head", "")[:8],
-                    before_main.get("branch", ""),
-                    after_main.get("branch", ""),
-                )
+                # Main repo HEAD moved AND its checked-out branch changed
+                # during the agent run. On a dev/single-user host this is the
+                # common case: the developer checked out a feature branch to
+                # work on a fix PR while a workflow was running against the
+                # same repo, and the feature branch's local (unpushed) commits
+                # would otherwise trip after_on_remote=False in the
+                # benign-pull probe (#1831 false positive).
+                #
+                # Security tradeoff: this skip is ambiguous on same-user
+                # deployments (macOS / dev installs without the
+                # openace-run-as launcher). In same-user mode the agent has no
+                # command guard and COULD theoretically `cd` to the main repo
+                # and `git checkout <branch> && git commit`. The worktree-only
+                # validation above (repo root / branch / origin / git_dir)
+                # does NOT catch this — it only confirms the worktree was not
+                # modified, not that the agent stayed inside the worktree.
+                # Mitigations:
+                #   - auto-dev/* branches are NOT skipped (see below), since
+                #     those are workflow branches and a switch to one in the
+                #     main repo is more likely an escape than developer work.
+                #   - The branch change is logged at WARNING so operators on
+                #     security-sensitive multi-user hosts can monitor it.
+                #   - On multi-user Linux hosts with the launcher, the agent
+                #     runs as a credentialless principal and CANNOT touch the
+                #     main repo, so this tradeoff is dev-host-only.
+                if after_main_branch.startswith("auto-dev/"):
+                    # A switch to an auto-dev/* branch in the main repo is
+                    # suspicious — workflow branches belong in worktrees, not
+                    # the main checkout. Run the benign-pull probe; if it
+                    # doesn't pass, block as a likely escape.
+                    logger.warning(
+                        "Workflow %s: main repo branch changed to %s (an auto-dev/* "
+                        "workflow branch) during agent run; running drift check.",
+                        self._workflow_id,
+                        after_main_branch,
+                    )
+                    if self._main_drift_is_benign_pull(
+                        ctx.get("project_path", ""),
+                        before_main.get("head"),
+                        after_main.get("head"),
+                        system_account,
+                    ):
+                        return ""
+                    return (
+                        "Detected commits on the main repository while the workflow "
+                        "worktree HEAD did not move; the main repo branch changed to "
+                        f"{after_main_branch} (an auto-dev/* workflow branch), which "
+                        "is not a developer action — the agent likely executed git "
+                        "commands outside the workflow worktree."
+                    )
+                else:
+                    logger.warning(
+                        "Workflow %s: main repo branch changed %s..%s during agent "
+                        "run (developer switched branches: %s -> %s); skipping "
+                        "main-HEAD-drift check. NOTE: on same-user deployments this "
+                        "skip cannot distinguish developer action from an agent "
+                        "escape via branch switch — monitor this log on "
+                        "security-sensitive hosts.",
+                        self._workflow_id,
+                        before_main.get("head", "")[:8],
+                        after_main.get("head", "")[:8],
+                        before_main.get("branch", ""),
+                        after_main_branch,
+                    )
+                    return ""
         return ""
 
     def _ensure_worktree(self, wf: dict) -> str:

@@ -326,3 +326,46 @@ class TestRepoDriftValidation:
 
         err = o._validate_repo_context_after_run(before, system_account=None)
         assert "Detected commits on the main repository" in err
+
+    def test_branch_switch_to_auto_dev_is_blocked(self, monkeypatch):
+        # Security hardening: a branch switch to an auto-dev/* workflow
+        # branch in the main repo is suspicious — workflow branches belong in
+        # worktrees, not the main checkout. Even though the branch changed,
+        # the drift check must still run and block when the commit is local
+        # (not on origin/main). This prevents an agent escape via
+        # `git checkout auto-dev/<wf> && git commit` from hiding behind the
+        # branch-switch exemption.
+        _install_fake_gh(
+            monkeypatch,
+            after_main_head=MAIN_AFTER_LOCAL,  # forward, NOT on origin/main
+            effective_head=WORKTREE_HEAD,  # worktree did not move
+            moved_forward=True,
+            after_on_remote=False,
+            after_main_branch="auto-dev/wf-drift",  # workflow branch!
+        )
+        o = _make_orchestrator()
+        before = _before_state(MAIN_BEFORE)
+
+        err = o._validate_repo_context_after_run(before, system_account=None)
+        assert "Detected commits on the main repository" in err
+        assert "auto-dev/* workflow branch" in err
+
+    def test_branch_switch_to_auto_dev_with_benign_pull_is_allowed(self, monkeypatch):
+        # Edge case: if the main repo switched to an auto-dev/* branch AND the
+        # new HEAD happens to be a forward update from origin/main (e.g. the
+        # developer pushed the workflow branch and pulled it on main), the
+        # benign-pull probe should still allow it. This locks in that the
+        # auto-dev path runs the probe rather than unconditionally blocking.
+        _install_fake_gh(
+            monkeypatch,
+            after_main_head=MAIN_AFTER_PULL,  # forward + on origin/main
+            effective_head=WORKTREE_HEAD,
+            moved_forward=True,
+            after_on_remote=True,
+            after_main_branch="auto-dev/some-wf",
+        )
+        o = _make_orchestrator()
+        before = _before_state(MAIN_BEFORE)
+
+        err = o._validate_repo_context_after_run(before, system_account=None)
+        assert err == ""
