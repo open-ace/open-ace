@@ -23,7 +23,6 @@ import uuid
 from datetime import datetime, timezone
 
 from app.modules.workspace.autonomous.agent_runner import (
-    _OPENACE_RUN_AS,
     DEFAULT_TASK_TIMEOUT,
     AutonomousAgentRunner,
 )
@@ -4437,7 +4436,7 @@ class AutonomousOrchestrator:
                     "isolated agent mode requires the openace-run-as launcher "
                     "(Linux multi-user only).",
                     self._workflow_id,
-                    _OPENACE_RUN_AS,
+                    AutonomousAgentRunner.isolated_launcher_path(),
                     project_system_account or "(unknown)",
                 )
 
@@ -8211,6 +8210,13 @@ class AutonomousOrchestrator:
         resume immediately from the cancelled milestone's phase.
 
         If auto_merge is enabled and PR exists, skip waiting and proceed to merge.
+
+        Invariant: must not mutate the git working tree — relied on by the
+        scheduler's waiting-bypass. ``autonomous_scheduler._process_workflows``
+        skips batch/workspace/branch conflict locks for ``status == waiting``
+        workflows on the assumption that this phase only touches DB/API state.
+        Any git or agent work must happen in a later phase, after the workflow
+        has left ``waiting``.
         """
         # Check for stored user feedback (from cancel-with-feedback)
         user_feedback = wf.get("user_feedback", "")

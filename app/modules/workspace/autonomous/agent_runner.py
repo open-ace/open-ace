@@ -985,6 +985,16 @@ class AutonomousAgentRunner:
             return True
 
     @staticmethod
+    def isolated_launcher_path() -> str:
+        """Return the configured path to the ``openace-run-as`` launcher.
+
+        Exposed as a public getter so cross-module callers (e.g. the
+        orchestrator's warning log) don't have to reach into the private
+        ``_OPENACE_RUN_AS`` module attribute.
+        """
+        return _OPENACE_RUN_AS
+
+    @staticmethod
     def is_isolated_launcher_available() -> bool:
         """Whether the privileged ``openace-run-as --isolated`` launcher is
         installed and executable.
@@ -997,6 +1007,21 @@ class AutonomousAgentRunner:
         security benefit to a second account. Callers use this to decide
         whether to engage isolated-agent mode or fall back to same-user
         execution (mirroring the Windows single-user downgrade).
+
+        Design tradeoff (fail-open on Linux multi-user): if the launcher is
+        accidentally removed or loses its exec bit on a multi-user Linux host,
+        this returns ``False`` and the workflow silently degrades to same-user
+        mode (running as the repo owner with credentials) rather than failing
+        closed. This is a conscious tradeoff: the dev/macOS single-user case is
+        the common path and must not be blocked, and a fail-closed policy would
+        make the launcher a single point of failure for every workflow on the
+        host. The ``logger.warning`` in the caller's ``else`` branch surfaces
+        the degradation; operators in security-sensitive multi-user deployments
+        should monitor that log and/or install the launcher via a package
+        manager so it cannot drift. Hardening this to fail-closed on Linux
+        would require a platform check (``sys.platform.startswith("linux")``)
+        combined with a multi-user detection heuristic, which is tracked as a
+        future enhancement rather than a blocking issue.
         """
         return os.path.isfile(_OPENACE_RUN_AS) and os.access(_OPENACE_RUN_AS, os.X_OK)
 
