@@ -138,6 +138,48 @@ The terminal server provides WebSocket-based terminal access:
 
 On Windows, `openace menu` uses a numbered text menu instead of the Unix arrow-key raw-terminal UI so the same workflow remains available in PowerShell/cmd and browser terminals.
 
+### Known limitations of the Windows pipe mode
+
+On Linux/macOS the terminal server spawns the shell on a real PTY. On Windows it
+uses a piped subprocess instead (stdin/stdout are anonymous pipes, not a
+pseudo-terminal). Because there is no tty attached to stdin, the Windows pipe
+mode has these limitations — this is expected behavior, not a regression:
+
+- **No interactive tty semantics on stdin** — there is no echo, no line editing,
+  no Tab completion, and no prompt redraw. Input is forwarded to the shell as
+  raw bytes once the client submits it (typically on Enter).
+- **Raw-byte CJK / wide-char input** — multi-byte input is sent as raw bytes
+  into a non-tty stdin, so IME composition and wide-char readline handling are
+  not available the way they are on a Unix PTY.
+- **Resize does not take effect** — there is no tty to apply a window-size
+  change to, so `{"type":"resize",...}` only records the requested size and the
+  shell keeps wrapping output at the original width. The server logs a one-time
+  notice on the first resize. Writing an ANSI size sequence is deliberately
+  avoided: stdin is a pipe, so those bytes would be consumed as shell input and
+  pollute the session. Real resize support requires ConPTY (`pywinpty`/winpty
+  or the Win32 API) and is tracked as future work.
+- **Persistence and history still work** — the piped shell still persists across
+  WebSocket reconnects, and the 64KB output history is replayed for screen
+  restore on reconnection.
+
+### Process-tree cleanup (Windows)
+
+To make shutdown reliable, the Windows terminal server binds the shell process
+tree to a Win32 Job Object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`. When the
+server exits (normal shutdown, hard-kill, or crash), the kernel reaps the whole
+tree — including grandchildren holding the stdout write-end — which is what lets
+the output relay stop cleanly. The soft-kill path (`kill_pty`) closes the Job
+handle first, falling back to `taskkill /T /F` only when no Job is bound.
+
+Narrow residual (accepted): if Job creation *and* `taskkill /T` both fail, the
+shell tree may be orphaned (it then needs manual cleanup; the agent's
+`proc.kill()` targets the terminal server, not the orphaned shell), and the
+output relay may stay pinned until the process is force-killed. An
+agent-initiated `stop_terminal` is reaped by the agent's `proc.kill()` watchdog;
+agent shutdown intentionally leaves terminal servers running, so a natural-exit
+under this dual-failure may wedge a terminal server until that terminal is
+restarted.
+
 ## Session Sync
 
 The agent scans session history directories every 30s and syncs to the server:

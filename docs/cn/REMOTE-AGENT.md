@@ -132,6 +132,38 @@ curl --cacert /path/to/ca.pem -fsSL https://<server>/api/remote/agent/install.sh
 
 在 Windows 上，`openace menu` 会使用编号式文本菜单，而不是 Unix 上基于原始终端的方向键菜单，这样在 PowerShell/cmd 和浏览器终端里都可以继续使用同一套流程。
 
+### Windows pipe 模式已知限制
+
+在 Linux/macOS 上，终端服务器在真正的 PTY 上启动 shell。Windows 上则改用管道
+子进程（stdin/stdout 是匿名管道，而非伪终端）。由于 stdin 没有挂接 tty，Windows
+pipe 模式存在以下限制 —— 这是预期行为，不是回归：
+
+- **stdin 不具备交互式 tty 语义** —— 没有回显、没有行编辑、没有 Tab 补全、也没有
+  提示符重绘。输入以原始字节的形式在客户端提交时（通常是按下回车）转发给 shell。
+- **原始字节 CJK / 宽字符输入** —— 多字节输入以原始字节送入非 tty 的 stdin，因此
+  无法像 Unix PTY 那样支持 IME 组合输入与宽字符 readline 处理。
+- **resize 不生效** —— 没有 tty 可用于应用窗口尺寸变更，因此
+  `{"type":"resize",...}` 仅记录请求的尺寸，shell 仍按原宽度换行。服务器会在首次
+  resize 时打印一次提示。刻意不写入 ANSI 尺寸序列：stdin 是管道，这些字节会被当作
+  shell 输入消费、污染会话。真正的 resize 支持需要 ConPTY（`pywinpty`/winpty 或
+  Win32 API），列为后续工作。
+- **持久化与历史仍可用** —— 管道 shell 仍可跨 WebSocket 重连保持，并在重连时回放
+  64KB 输出历史以恢复屏幕。
+
+### 进程树清理（Windows）
+
+为了让关闭更可靠，Windows 终端服务器用 `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` 把
+shell 进程树绑定到 Win32 Job Object。服务器退出时（正常关闭、硬杀或崩溃），内核会
+回收整棵树 —— 包括持有 stdout 写端的孙进程 —— 这正是让输出 relay 干净停止的关键。
+软杀路径（`kill_pty`）优先关闭 Job 句柄，仅在没有绑定 Job 时才回退到
+`taskkill /T /F`。
+
+窄边界残留（已接受）：如果 Job 创建**且** `taskkill /T` 同时失败，shell 树可能孤儿
+化（届时需要人工清理；agent 的 `proc.kill()` 针对的是 terminal server，而非孤儿
+shell），输出 relay 也可能滞留直到进程被强杀。agent 主动发起的 `stop_terminal` 由
+agent 的 `proc.kill()` 看门狗兜底；agent 关闭按设计会保留 terminal server 运行，因此
+在此双失败下自然退出可能让某个 terminal server 卡住，直到该 terminal 被重启。
+
 ## 会话同步
 
 代理每 30 秒扫描会话历史目录并同步到服务器：
