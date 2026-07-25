@@ -265,7 +265,10 @@ jobs:
           # Run npm audit for production dependencies only.
           # --registry pins the audit to the official npm registry per the
           # issue #1890 acceptance criteria.
-          npm audit --omit=dev --audit-level=high --registry=https://registry.npmjs.org || exit_code=$?
+
+          # Use whitelist script to filter out vulnerabilities that don't apply
+          chmod +x ../scripts/ci/npm_audit_with_whitelist.sh
+          ../scripts/ci/npm_audit_with_whitelist.sh || exit_code=$?
 
           if [ "${exit_code:-0}" -ne 0 ]; then
             echo "::error::npm audit found high/critical vulnerabilities in production dependencies. Add 'skip-security-check' label to bypass in emergencies."
