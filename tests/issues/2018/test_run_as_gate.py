@@ -129,3 +129,39 @@ class TestRunAsGate:
         line = audit.read_text()
         assert "SECRET" not in line
         assert "/usr/bin/true" not in line
+
+    def test_target_user_newline_rejected_before_audit(self, tmp_path):
+        # R1: a newline in target_user is a cron-injection vector via the audit
+        # log, so it must be rejected BEFORE any log_audit call — the payload
+        # never reaches a (possibly swapped) audit file.
+        audit_log = tmp_path / "audit.log"
+        env = {
+            **os.environ,
+            "OPENACE_VALIDATE_LAUNCH": str(_fake_validator(tmp_path, "accept")),
+            "OPENACE_LAUNCHER_CONF": str(tmp_path / "absent.conf"),
+            "OPENACE_AUDIT_LOG": str(audit_log),
+        }
+        env.pop("OPENACE_RUN_AS", None)
+        result = subprocess.run(
+            [
+                "bash",
+                str(_WRAPPER),
+                "--isolated",
+                "openace-agent\nevil",
+                "/home/some/repo",
+                "/usr/bin/true",
+            ],
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=20,
+        )
+        assert result.returncode == 64
+        assert "invalid characters" in result.stderr
+        assert not audit_log.exists() or audit_log.read_text() == ""
+
+    def test_target_user_bad_shape_rejected(self, tmp_path):
+        # Non-POSIX account names (spaces, etc.) are rejected before the gate.
+        result, _ = _run_wrapper(tmp_path, _fake_validator(tmp_path, "accept"), account="bad user")
+        assert result.returncode == 64
+        assert "invalid characters" in result.stderr

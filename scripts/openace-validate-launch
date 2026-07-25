@@ -43,12 +43,15 @@ def load_conf(conf_path, *, _stat=os.stat):
     Roots are compared lexically downstream, so the installer realpath's them
     when writing the conf.
     """
+    # os.stat follows symlinks, so S_ISLNK on its result can never be true for
+    # a real link. Use os.path.islink (lstat-backed) for the symlink guard and
+    # keep _stat (os.stat) for the owner/mode check on the resolved target.
+    if os.path.islink(conf_path):
+        raise ConfError("conf is a symlink")
     try:
         st = _stat(conf_path)
     except OSError as exc:
         raise ConfError(f"conf missing: {exc}") from exc
-    if stat.S_ISLNK(st.st_mode):
-        raise ConfError("conf is a symlink")
     if not stat.S_ISREG(st.st_mode):
         raise ConfError("conf is not a regular file")
     if st.st_uid != 0:
@@ -96,8 +99,11 @@ def confine_path(project_dir, roots, *, _lstat=os.lstat):
     if ".." in parts:
         return False, "reject_path: dotdot component"
     # Walk every prefix component, rejecting any symlink. `cur` ends as the
-    # cleaned, link-free absolute path used for the beneath-root + mount checks.
+    # cleaned, link-free absolute path used for the beneath-root + mount checks;
+    # reuse the loop's last stat for the leaf device instead of re-lstat'ing it
+    # (closes a small TOCTOU window between the walk and the mount check).
     cur = ""
+    leaf_stat = None
     for part in parts:
         if part == "" or part == ".":
             continue
@@ -108,7 +114,8 @@ def confine_path(project_dir, roots, *, _lstat=os.lstat):
             return False, f"reject_path: missing component {cur}"
         if stat.S_ISLNK(cst.st_mode):
             return False, f"reject_path: symlink component {cur}"
-    if cur == "":
+        leaf_stat = cst
+    if cur == "" or leaf_stat is None:
         return False, "reject_path: empty path"
 
     matched = None
@@ -127,11 +134,10 @@ def confine_path(project_dir, roots, *, _lstat=os.lstat):
         return False, "reject_path: outside allowlist"
 
     try:
-        path_dev = _lstat(cur).st_dev
         root_dev = _lstat(matched).st_dev
     except OSError:
         return False, "reject_path: stat failed"
-    if path_dev != root_dev:
+    if leaf_stat.st_dev != root_dev:
         return False, "reject_path: mount crossing"
     return True, "accept"
 

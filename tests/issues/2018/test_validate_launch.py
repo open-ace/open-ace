@@ -94,9 +94,15 @@ class TestLoadConf:
         assert account == "openace-agent"
         assert roots == ["/home"]
 
-    def test_rejects_symlink_conf(self, mod, conf):
+    def test_rejects_symlink_conf(self, mod, tmp_path):
+        # Plant a REAL symlink: os.stat would follow it and report S_ISREG, so
+        # the guard must be os.path.islink (lstat-backed), not S_ISLNK on _stat.
+        real = tmp_path / "real.conf"
+        _write_conf(real)
+        link = tmp_path / "link.conf"
+        link.symlink_to(real)
         with pytest.raises(mod.ConfError, match="symlink"):
-            mod.load_conf(conf, _stat=lambda _p: _FakeStat(mode=0o640, kind="link"))
+            mod.load_conf(link)
 
     def test_rejects_non_root_owned(self, mod, conf):
         with pytest.raises(mod.ConfError, match="root"):

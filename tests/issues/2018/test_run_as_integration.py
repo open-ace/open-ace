@@ -1,21 +1,24 @@
 """End-to-end integration tests for ``openace-run-as --isolated`` (Issue #2018).
 
-These exercise the REAL helper + a root-owned conf + the real ``openace-agent``
+These exercise the REAL installed validator + conf + the real ``openace-agent``
 account through the full wrapper gate, on a Linux host running as root with
-``setfacl``. They cover the acceptance criteria that unit tests can only model:
+``setfacl``. The wrapper hardcodes its paths when euid==0 (env overrides are
+ignored), so this suite tests the actual provisioning installed by
+``install.sh`` / the ``Dockerfile`` rather than a faked environment.
+
+Acceptance coverage that unit tests can only model:
 
   * legit launch under a registered root is authorized (exit 0, child runs);
   * a non-configured account is rejected (exit 67, no ACL granted);
   * a path outside the allowlist is rejected (exit 64);
   * a symlink component in the path is rejected (exit 64).
 
-Everything else (account pin, path confinement, mount crossing, conf tampering)
-is covered by ``test_validate_launch.py``. The ACL grant/rollback logic itself
-is unchanged pre-existing code.
+Everything else (account pin shape, path confinement, mount crossing, conf
+tampering) is covered by ``test_validate_launch.py``; the gate exit-code/audit
+mapping by ``test_run_as_gate.py``. The ACL grant/rollback logic itself is
+unchanged pre-existing code.
 
-These SKIP on macOS / non-root / without setfacl / without the openace-agent
-account. Run them on a Linux-root CI lane (or locally in a privileged
-container) with::
+These SKIP unless the host is a provisioned Linux-root lane. Run with::
 
     sudo pytest tests/issues/2018/test_run_as_integration.py
 """
@@ -30,15 +33,40 @@ import pytest
 
 _ROOT = Path(__file__).resolve().parents[3]
 _WRAPPER = _ROOT / "scripts" / "openace-run-as.sh"
-_HELPER = _ROOT / "scripts" / "openace-validate-launch"
+_INSTALLED_VALIDATOR = Path("/usr/local/libexec/openace-validate-launch")
+_INSTALLED_CONF = Path("/etc/openace/agent-launcher.conf")
+_AUDIT_LOG = Path("/var/log/openace/run-as-audit.log")
 
-_LINUX_ROOT = sys.platform.startswith("linux") and os.geteuid() == 0
-_HAS_SETFACL = shutil.which("setfacl") is not None
-_HAS_AGENT = subprocess.run(["id", "openace-agent"], capture_output=True).returncode == 0
+
+def _linux_root() -> bool:
+    return sys.platform.startswith("linux") and os.geteuid() == 0
+
+
+def _has_setfacl() -> bool:
+    return shutil.which("setfacl") is not None
+
+
+def _has_agent() -> bool:
+    return subprocess.run(["id", "openace-agent"], capture_output=True).returncode == 0
+
+
+def _conf_allows_home() -> bool:
+    try:
+        return "/home" in _INSTALLED_CONF.read_text(encoding="utf-8")
+    except OSError:
+        return False
+
 
 pytestmark = pytest.mark.skipif(
-    not (_LINUX_ROOT and _HAS_SETFACL and _HAS_AGENT and _HELPER.exists()),
-    reason="requires Linux + root + setfacl + openace-agent account + helper",
+    not (
+        _linux_root()
+        and _has_setfacl()
+        and _has_agent()
+        and _INSTALLED_VALIDATOR.exists()
+        and _INSTALLED_CONF.exists()
+        and _conf_allows_home()
+    ),
+    reason="requires Linux + root + setfacl + openace-agent + installed validator/conf (conf allows /home)",
 )
 
 
@@ -54,31 +82,17 @@ def isolated_root(tmp_path):
         shutil.rmtree(base, ignore_errors=True)
 
 
-@pytest.fixture
-def conf(tmp_path):
-    """A root-owned launcher conf scoping the allowlist to /home."""
-    conf_dir = tmp_path / "openace-conf"
-    conf_dir.mkdir()
-    conf_path = conf_dir / "agent-launcher.conf"
-    conf_path.write_text(
-        "# Issue #2018 test conf\n"
-        'OPENACE_AUTONOMOUS_AGENT_ACCOUNT="openace-agent"\n'
-        'ALLOWED_WORKSPACE_ROOTS="/home"\n',
-        encoding="utf-8",
-    )
-    os.chown(conf_path, 0, 0)
-    os.chmod(conf_path, 0o640)
-    return conf_path
-
-
-def _run(conf, account, project_dir, audit_log):
-    env = {
-        **os.environ,
-        "OPENACE_VALIDATE_LAUNCH": str(_HELPER),
-        "OPENACE_LAUNCHER_CONF": str(conf),
-        "OPENACE_AUDIT_LOG": str(audit_log),
-    }
-    env.pop("OPENACE_RUN_AS", None)
+def _run(account, project_dir):
+    """Run the wrapper as root. It hardcodes validator/conf/audit paths (env
+    overrides ignored when euid==0), so this hits the real install."""
+    env = dict(os.environ)
+    for key in (
+        "OPENACE_RUN_AS",
+        "OPENACE_VALIDATE_LAUNCH",
+        "OPENACE_LAUNCHER_CONF",
+        "OPENACE_AUDIT_LOG",
+    ):
+        env.pop(key, None)
     return subprocess.run(
         [
             "bash",
@@ -97,36 +111,41 @@ def _run(conf, account, project_dir, audit_log):
     )
 
 
-def test_legit_launch_under_home_is_authorized(isolated_root, conf, tmp_path):
-    audit = tmp_path / "audit.log"
-    result = _run(conf, "openace-agent", isolated_root, audit)
+def _audit_text():
+    if not _AUDIT_LOG.exists():
+        return ""
+    return _AUDIT_LOG.read_text(encoding="utf-8", errors="replace")
+
+
+def test_legit_launch_under_home_is_authorized(isolated_root):
+    result = _run("openace-agent", isolated_root)
     assert result.returncode == 0, result.stderr
-    assert "result=accept" in audit.read_text()
+    text = _audit_text()
+    assert f"path={isolated_root}" in text
+    assert "result=accept" in text
 
 
-def test_non_configured_account_rejected(isolated_root, conf, tmp_path):
-    audit = tmp_path / "audit.log"
-    # 'nobody' is a non-configured, non-admin account that exists on every Linux.
-    result = _run(conf, "nobody", isolated_root, audit)
+def test_non_configured_account_rejected(isolated_root):
+    # 'nobody' is a non-configured, valid-shape, non-admin account on every Linux.
+    result = _run("nobody", isolated_root)
     assert result.returncode == 67
-    assert "reject_account" in audit.read_text()
-    # And no ACL was granted to nobody on the tree (no setfacl side effect).
+    text = _audit_text()
+    assert f"path={isolated_root}" in text
+    assert "reject_account" in text
 
 
-def test_path_outside_allowlist_rejected(conf, tmp_path):
-    audit = tmp_path / "audit.log"
-    result = _run(conf, "openace-agent", "/etc", audit)
+def test_path_outside_allowlist_rejected():
+    result = _run("openace-agent", "/etc")
     assert result.returncode == 64
-    assert "reject_path" in audit.read_text()
+    assert "path=/etc result=reject_path" in _audit_text()
 
 
-def test_symlink_component_rejected(isolated_root, conf, tmp_path):
-    audit = tmp_path / "audit.log"
+def test_symlink_component_rejected(isolated_root):
     link = isolated_root.parent / "evil-link"
     try:
         os.symlink("/etc", link)
-        result = _run(conf, "openace-agent", str(link), audit)
+        result = _run("openace-agent", str(link))
         assert result.returncode == 64
-        assert "reject_path" in audit.read_text()
+        assert f"path={link} result=reject_path" in _audit_text()
     finally:
         link.unlink(missing_ok=True)

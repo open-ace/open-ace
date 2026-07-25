@@ -47,14 +47,29 @@ shift 2
 # credentialless openace-agent and confines the project path to a registered
 # workspace root (no symlink components, no '..', no mount crossing).
 # Autonomous-dev only; the local/remote workspace path does not call this
-# wrapper. Paths are overridable for tests.
-_OPENACE_VALIDATE_LAUNCH="${OPENACE_VALIDATE_LAUNCH:-/usr/local/libexec/openace-validate-launch}"
-_OPENACE_LAUNCHER_CONF="${OPENACE_LAUNCHER_CONF:-/etc/openace/agent-launcher.conf}"
-AUDIT_LOG="${OPENACE_AUDIT_LOG:-/app/logs/run-as-audit.log}"
+# wrapper.
+#
+# When invoked as root (the real sudo'd production path) the constraint paths
+# are HARD-CODED and env overrides are IGNORED, so no future sudoers
+# `env_keep += OPENACE_*` drift or SETENV grant can redirect the gate or the
+# audit log. The OPENACE_* overrides are honored only for non-root test
+# invocation (`bash $WRAPPER`).
+if [ "$(id -u)" -eq 0 ]; then
+    _OPENACE_VALIDATE_LAUNCH="/usr/local/libexec/openace-validate-launch"
+    _OPENACE_LAUNCHER_CONF="/etc/openace/agent-launcher.conf"
+    AUDIT_LOG="/var/log/openace/run-as-audit.log"
+else
+    _OPENACE_VALIDATE_LAUNCH="${OPENACE_VALIDATE_LAUNCH:-/usr/local/libexec/openace-validate-launch}"
+    _OPENACE_LAUNCHER_CONF="${OPENACE_LAUNCHER_CONF:-/etc/openace/agent-launcher.conf}"
+    AUDIT_LOG="${OPENACE_AUDIT_LOG:-/var/log/openace/run-as-audit.log}"
+fi
 
 # Security audit trail (mirrors scripts/openace-chown.sh). Logs only caller,
 # account, path and outcome — never the command or its args, which may carry
-# proxy tokens via env_keep.
+# proxy tokens via env_keep. The default log lives under a root-owned dir so a
+# compromised service account cannot swap the file; the target_user guard below
+# strips the log-injection vector (a newline in the account could otherwise
+# become a cron entry via a swapped audit file).
 log_audit() {
     local outcome="$1"
     local log_entry
@@ -70,6 +85,15 @@ log_audit() {
 if [ "$isolated" = true ]; then
     if [[ "$project_dir" != /* || "$project_dir" == *$'\n'* ]]; then
         echo "openace-run-as: isolated project path must be absolute and single-line" >&2
+        exit 64
+    fi
+    # target_user reaches the audit log verbatim, so reject embedded newlines
+    # or CR (log injection → root cron via a swapped audit file) and any name
+    # outside POSIX user-name shape BEFORE any log_audit call. This mirrors the
+    # shape the orchestrator already validates for the agent account.
+    if [[ "$target_user" == *$'\n'* || "$target_user" == *$'\r'* ]] || \
+       ! [[ "$target_user" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]; then
+        echo "openace-run-as: isolated target account has invalid characters" >&2
         exit 64
     fi
     # Authorize the launch (account pin + path confinement) BEFORE touching the
