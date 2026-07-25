@@ -836,7 +836,7 @@ class AlertNotifier:
                     ),
                 )
                 row = cursor.fetchone()
-                delivery_id = row["id"] if row is not None else None
+                delivery_id = cast("int | None", row["id"]) if row is not None else None
             else:
                 cursor.execute(
                     adapt_sql(

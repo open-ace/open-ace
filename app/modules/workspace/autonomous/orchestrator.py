@@ -4143,7 +4143,7 @@ class AutonomousOrchestrator:
         *,
         remove_worktree: bool = True,
         remove_branch: bool = False,
-    ) -> None:
+    ) -> bool:
         """Remove the workflow's worktree dir and/or git branch.
 
         Extracted from ``_do_merge``'s post-merge cleanup (Issue #1831 finding
