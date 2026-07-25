@@ -1858,6 +1858,10 @@ class TestResolveMergeConflictsWorktreeIsolation:
         mock_gh_cls.side_effect = [main_gh, rebound_gh, wt_gh, restored_gh]
         # path_exists_as_user returns False → add_worktree is called to recreate
         main_gh.path_exists_as_user.return_value = False
+        # Issue #2041: post-restore verification reads `git worktree list`.
+        main_gh.list_worktrees.return_value = [
+            {"path": wf["worktree_path"], "branch": "auto-dev/fc82f22a"}
+        ]
         _set_valid_merge_result(o, wt_gh, conflict=False)
 
         # caller_gh simulates the stale handle from _do_merge; it should be
@@ -1909,6 +1913,10 @@ class TestResolveMergeConflictsWorktreeIsolation:
         ]
         mock_gh_cls.side_effect = [main_gh, rebound_gh, wt_gh, restored_gh]
         main_gh.path_exists_as_user.return_value = False
+        # Issue #2041: post-restore verification reads `git worktree list`.
+        main_gh.list_worktrees.return_value = [
+            {"path": wf["worktree_path"], "branch": "auto-dev/fc82f22a"}
+        ]
         _set_valid_merge_result(o, wt_gh)
 
         o._run_agent = MagicMock()

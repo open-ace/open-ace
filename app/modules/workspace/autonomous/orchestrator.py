@@ -8788,29 +8788,36 @@ class AutonomousOrchestrator:
         # Git forbids checking out the same branch in two worktrees, so the
         # workflow's own worktree (if still present) must be removed first to
         # free the branch for the temp worktree below.
+        #
+        # Issue #2041: the whole transition (remove original → create temp →
+        # resolve → remove temp → restore original) is one outer try/finally so
+        # no step can leave the workflow operating on the main checkout. The DB
+        # is cleared only AFTER git confirms removal, temp creation lives inside
+        # the try, and a restore failure fails closed.
         main_gh = GitHubOps(project_path, system_account=system_account)
-        if worktree_path:
-            try:
-                main_gh.remove_worktree(worktree_path)
-            except GitHubOpsError as e:
-                logger.warning("Could not remove existing worktree %s: %s", worktree_path, e)
-            self._update_workflow({"worktree_path": ""})
-            # The caller's gh still points at the now-deleted worktree dir as
-            # its cwd. Rebind it (and the cached self._gh) to the main repo so
-            # the later merge_pr / _do_merge cleanup don't run subprocess with
-            # a gone cwd (#1107 review).
-            gh = GitHubOps(project_path, system_account=system_account)
-            self._gh = gh
-
-        # Create an isolated worktree for the existing PR branch. Use the main
-        # repo's gh so the worktree is registered against the real .git.
         temp_wt_path = os.path.normpath(f"{project_path}/../merge-{self._workflow_id[:8]}")
-        main_gh.add_worktree(temp_wt_path, branch_name)
-        logger.info("Created temporary merge worktree at %s", temp_wt_path)
-
-        # All subsequent git ops run inside the temp worktree.
-        wt_gh = GitHubOps(temp_wt_path, system_account=system_account)
+        original_removed = False
         try:
+            if worktree_path:
+                # Fail closed on removal failure: only clear the DB once git has
+                # actually freed the branch, and never assume removal succeeded.
+                self._remove_worktree_idempotent(main_gh, worktree_path)
+                self._update_workflow({"worktree_path": ""})
+                # The caller's gh still points at the now-deleted worktree dir
+                # as its cwd. Rebind it (and cached self._gh) to the main repo
+                # so later cleanup doesn't run subprocess with a gone cwd (#1107).
+                gh = GitHubOps(project_path, system_account=system_account)
+                self._gh = gh
+                original_removed = True
+
+            # Create an isolated worktree for the existing PR branch. Use the
+            # main repo's gh so the worktree is registered against the real .git.
+            # Lives inside the try so a creation failure still triggers restore.
+            main_gh.add_worktree(temp_wt_path, branch_name)
+            logger.info("Created temporary merge worktree at %s", temp_wt_path)
+
+            # All subsequent git ops run inside the temp worktree.
+            wt_gh = GitHubOps(temp_wt_path, system_account=system_account)
             # Sync the checked-out branch to the PR's authoritative remote head
             # before merging main (see _sync_worktree_to_pr_remote_head).
             self._sync_worktree_to_pr_remote_head(wt_gh, branch_name)
@@ -9121,7 +9128,12 @@ class AutonomousOrchestrator:
             # isolated branch, not the main repo (HEAD=main). Without this,
             # _do_pr_review's pre-push branch check fails with
             # "expected auto-dev/xxx, actual main" and the workflow is stuck.
-            if worktree_path:
+            #
+            # Only restore if we actually removed it (Issue #2041): a failed
+            # removal leaves the original worktree live in git, and an attempted
+            # restore would error. A restore failure fails CLOSED — never let a
+            # later phase run on the main checkout.
+            if original_removed:
                 try:
                     # If remove_worktree succeeded earlier, the dir is gone
                     # and we recreate it. If it failed, the dir is still
@@ -9129,9 +9141,7 @@ class AutonomousOrchestrator:
                     git_file = os.path.join(worktree_path, ".git")
                     if not main_gh.path_exists_as_user(git_file, file_only=True):
                         main_gh.add_worktree(worktree_path, branch_name)
-                    # Always restore the DB entry — it was cleared at the top
-                    # of this method regardless of whether remove_worktree
-                    # succeeded.
+                    self._verify_worktree_restored(main_gh, worktree_path, branch_name)
                     self._update_workflow({"worktree_path": worktree_path})
                     self._gh = GitHubOps(worktree_path, system_account=system_account)
                     logger.info("Restored workflow worktree at %s", worktree_path)
@@ -9142,3 +9152,48 @@ class AutonomousOrchestrator:
                         e,
                         exc_info=True,
                     )
+                    self._update_workflow(
+                        {
+                            "status": "failed",
+                            "error_message": (
+                                f"worktree restore failed after merge resolution: {e}"
+                            ),
+                        }
+                    )
+                    raise
+
+    def _remove_worktree_idempotent(self, gh: GitHubOps, path: str) -> None:
+        """Remove a worktree, treating "already absent" as success (Issue #2041).
+
+        ``git worktree remove`` errors if the worktree is already gone (e.g. it
+        was cleaned up externally or by a previous partial run). That is not a
+        failure: the branch is already free. Only re-raise if the worktree is
+        still registered, which means the removal genuinely failed and the
+        branch is still occupied.
+        """
+        try:
+            gh.remove_worktree(path)
+        except GitHubOpsError as exc:
+            still_registered = any(w.get("path") == path for w in gh.list_worktrees())
+            if still_registered:
+                raise
+            logger.info("Worktree %s already absent (treated as removed): %s", path, exc)
+
+    def _verify_worktree_restored(self, gh: GitHubOps, path: str, branch: str) -> None:
+        """Post-restore verification (Issue #2041 acceptance #6).
+
+        Confirms the restored worktree is registered in ``git worktree list`` on
+        the expected branch. (The restore gate above already ensured the linked
+        ``.git`` pointer exists before reaching here.) Any failure propagates so
+        the caller can fail closed.
+        """
+        entries = [w for w in gh.list_worktrees() if w.get("path") == path]
+        if not entries:
+            raise RuntimeError(f"restored worktree {path} missing from `git worktree list`")
+        actual = entries[0].get("branch")
+        # git may report either "branch" or "refs/heads/branch" depending on version.
+        if actual not in (branch, f"refs/heads/{branch}"):
+            raise RuntimeError(
+                f"restored worktree {path} on wrong branch: "
+                f"expected={branch!r}, actual={actual!r}"
+            )
