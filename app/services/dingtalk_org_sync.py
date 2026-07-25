@@ -491,10 +491,10 @@ class DingTalkOrgSyncService:
         )
         response.raise_for_status()
         data = response.json()
-        token = data.get("accessToken") or data.get("access_token")
+        # response.json() is Any; annotate + str() so the return type stays str.
+        token: str = str(data.get("accessToken") or data.get("access_token") or "")
         if not token:
             raise RuntimeError(f"Failed to get DingTalk access token: {data}")
-        token = str(token)
 
         # DingTalk documents expireIn in milliseconds, but some paths return
         # seconds; disambiguate by magnitude (>100000 => ms) and cap at the 2h

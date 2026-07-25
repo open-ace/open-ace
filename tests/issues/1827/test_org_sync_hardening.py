@@ -452,9 +452,7 @@ def test_feishu_request_json_error_does_not_echo_payload():
     # No active creds + a token sent -> the auth-retry guard skips, so the call
     # raises immediately rather than retrying.
     with pytest.raises(FeishuApiError) as exc_info:
-        service._request_json(
-            "GET", "https://open.feishu.cn/open-apis/contact/v3/x", token="t"
-        )
+        service._request_json("GET", "https://open.feishu.cn/open-apis/contact/v3/x", token="t")
     assert exc_info.value.code == 99991663
     assert "invalid app secret" in exc_info.value.msg
     # The full payload must NOT be echoed into the exception text.
