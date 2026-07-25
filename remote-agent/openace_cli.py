@@ -27,7 +27,11 @@ AGENT_DIR = Path(__file__).resolve().parent
 if str(AGENT_DIR) not in sys.path:
     sys.path.insert(0, str(AGENT_DIR))
 
-from cli_settings import apply_cli_settings, clear_codex_bearer_token
+from cli_settings import (
+    apply_cli_settings,
+    clear_codex_bearer_token,
+    resolve_codex_bearer_token,
+)
 from tls_config import TLSConfig
 
 AGENT_CONFIG_PATH = AGENT_DIR / "config.json"
@@ -287,12 +291,12 @@ def _apply_local_cli_settings(terminal: dict[str, Any]) -> None:
     if not cli_settings or not proxy_url:
         return
 
-    # Windows UWP: Codex desktop cannot read system environment variables.
-    # Use experimental_bearer_token in config.toml instead of env_key.
-    codex_token = None
-    if os.name == "nt":
-        tokens = terminal.get("tokens") or {}
-        codex_token = tokens.get("openai")
+    # Windows UWP: Codex desktop cannot read system environment variables, so
+    # on Windows we persist the proxy token as experimental_bearer_token in
+    # config.toml. resolve_codex_bearer_token is the single source of truth for
+    # that os.name gate (Issue #1828 finding #1).
+    tokens = terminal.get("tokens") or {}
+    codex_token = resolve_codex_bearer_token(tokens.get("openai"))
 
     apply_cli_settings(
         cli_settings,
