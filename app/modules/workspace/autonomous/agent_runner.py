@@ -25,7 +25,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from app.modules.workspace.autonomous.artifact_text import pick_best_artifact_text
 from app.modules.workspace.autonomous.models import AgentTaskResult
@@ -1170,10 +1170,14 @@ class AutonomousAgentRunner:
         / ANTHROPIC_BASE_URL for claude-code). Mirrors executor._build_env but
         runs in-process, without an HTTP round-trip.
 
-        Falls back to dict(os.environ) when proxy setup is unavailable (e.g. no
-        API key configured for this tool) so a dev box with env-injected keys
-        keeps working.
+        Issue #2019: every raw credential (provider/GitHub/SSH/cloud + dynamic
+        custom envKeys) is scrubbed before the proxy token is injected, and a
+        proxy-token minting failure fails closed (raises) — in production always,
+        in development unless OPENACE_ALLOW_RAW_KEY_FALLBACK=1 is set. The agent
+        never inherits a real key from the service env.
         """
+        from app.utils.security_env import is_production_environment
+
         env = dict(os.environ)
         guard_bin = AutonomousAgentRunner._resolve_agent_guard_bin()
         real_git = shutil.which("git", path=env.get("PATH"))
@@ -1190,11 +1194,6 @@ class AutonomousAgentRunner:
         env["OPENACE_GIT_CACHE_ROOT"] = str(agent_home / ".cache" / "pre-commit")
         # The orchestrator owns all remote mutations. Agent subprocesses use
         # the LLM proxy for model auth and do not need GitHub credentials.
-        # This environment cleanup is defense-in-depth; the actual credential
-        # boundary is the dedicated OS principal selected by the orchestrator
-        # and the isolated run-as wrapper's clean environment/worktree ACLs.
-        for key in ("GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "SSH_AUTH_SOCK"):
-            env.pop(key, None)
         # CI-only hook exclusions are set explicitly by the orchestrator's
         # convergence command. Never let a service-level SKIP leak into a
         # normal autonomous agent and silently suppress repository hooks.
@@ -1202,6 +1201,24 @@ class AutonomousAgentRunner:
         env["GH_CONFIG_DIR"] = "/var/empty/openace-autonomous-gh"
         env["GIT_TERMINAL_PROMPT"] = "0"
         env["PATH"] = guard_bin + os.pathsep + env.get("PATH", "")
+
+        # Issue #2019: scrub every raw credential (provider/GitHub/SSH/cloud +
+        # dynamic custom envKeys) BEFORE injecting the proxy token, and fail
+        # closed if the proxy token could not be minted. The agent must never
+        # inherit a real key from the service env.
+        (
+            sensitive_env_keys,
+            llm_provider_env_keys,
+            collect_dynamic_env_keys,
+            build_secure_agent_env,
+        ) = AutonomousAgentRunner._import_env_security()
+        adapter_settings = AutonomousAgentRunner._load_adapter_settings(adapter)
+        dynamic_env_keys = collect_dynamic_env_keys(adapter_settings)
+        sensitive_keys = set(sensitive_env_keys) | dynamic_env_keys
+        llm_keys = set(llm_provider_env_keys) | dynamic_env_keys
+
+        proxy_env_vars: dict[str, str] = {}
+        proxy_ok = False
         try:
             from app.modules.workspace.api_key_proxy import get_api_key_proxy_service
             from app.utils.config import get_config_value
@@ -1237,18 +1254,69 @@ class AutonomousAgentRunner:
                 provider=provider,
                 session_type="agent",
             )
-            env.update(adapter.get_env_vars(proxy_url, proxy_token))
-            env["OPENACE_PROXY_URL"] = proxy_url
-            env["OPENACE_PROXY_TOKEN"] = proxy_token
+            proxy_env_vars.update(adapter.get_env_vars(proxy_url, proxy_token))
+            # Re-add custom modelProvider envKeys (e.g. BAILIAN_CODING_PLAN_API_KEY)
+            # as the proxy token so qwen reads the token regardless of envKey.
+            for env_key in dynamic_env_keys:
+                if env_key != "OPENAI_API_KEY":
+                    proxy_env_vars[env_key] = proxy_token
+            proxy_env_vars["OPENACE_PROXY_URL"] = proxy_url
+            proxy_env_vars["OPENACE_PROXY_TOKEN"] = proxy_token
             if model:
-                env["OPENACE_MODEL"] = model
+                proxy_env_vars["OPENACE_MODEL"] = model
+            proxy_ok = True
         except Exception as e:
-            logger.warning(
-                "Could not set up LLM proxy auth for %s (falling back to env): %s",
-                cli_tool,
-                e,
-            )
-        return env
+            # Fail closed below; never fall back to inheriting raw keys silently.
+            logger.error("LLM proxy setup failed for %s: %s", cli_tool, e)
+
+        return cast(
+            "dict[str, str]",
+            build_secure_agent_env(
+                base_env=env,
+                sensitive_keys=sensitive_keys,
+                llm_provider_keys=llm_keys,
+                proxy_env_vars=proxy_env_vars,
+                proxy_ok=proxy_ok,
+                is_production=is_production_environment(),
+                raw_fallback_allowed=os.environ.get("OPENACE_ALLOW_RAW_KEY_FALLBACK") == "1",
+            ),
+        )
+
+    @staticmethod
+    def _import_env_security():
+        """Import the shared env-security helpers from the remote-agent subtree.
+
+        ``remote-agent/`` ships with the app and is added to ``sys.path`` at
+        runtime, mirroring the ``cli_adapters`` import in ``_run_local_agent_task``.
+        """
+        import sys
+
+        remote_agent_dir = os.path.normpath(
+            os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "remote-agent")
+        )
+        if remote_agent_dir not in sys.path:
+            sys.path.insert(0, remote_agent_dir)
+        from constants import LLM_PROVIDER_ENV_KEYS, SENSITIVE_ENV_KEYS, collect_dynamic_env_keys
+        from env_security import build_secure_agent_env
+
+        return (
+            SENSITIVE_ENV_KEYS,
+            LLM_PROVIDER_ENV_KEYS,
+            collect_dynamic_env_keys,
+            build_secure_agent_env,
+        )
+
+    @staticmethod
+    def _load_adapter_settings(adapter: Any) -> dict:
+        """Best-effort load of the CLI adapter's settings.json (for dynamic envKeys)."""
+        try:
+            settings_path = adapter.get_settings_path()
+            if settings_path:
+                with open(settings_path, encoding="utf-8") as f:
+                    return cast("dict[str, Any]", json.load(f))
+        except Exception:
+            pass
+        return {}
 
     @staticmethod
     def _encode_project_path(project_path: str) -> str:

@@ -114,6 +114,7 @@ $files = @(
     "agent.py",
     "config.py",
     "constants.py",
+    "env_security.py",
     "executor.py",
     "system_info.py",
     "requirements.txt",
