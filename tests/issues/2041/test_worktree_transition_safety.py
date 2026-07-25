@@ -250,3 +250,45 @@ class TestWorktreeTransitionSafety:
 
         # Workflow fail-closed: status=failed persisted with an error message.
         assert any(u.get("status") == "failed" and u.get("error_message") for u in _db_updates(o))
+
+
+# ── contract: verify accepts the real porcelain-parsed shape ──────────────
+
+
+def test_verify_worktree_restored_accepts_refs_heads_branch_format():
+    """``_verify_worktree_restored`` must accept the ``refs/heads/<name>`` shape
+    that ``GitHubOps.list_worktrees`` actually emits (locked by the porcelain
+    parser test in tests/issues/716). The orchestrator-side tests above mock
+    the bare branch name; this locks the cross-module contract so a parser or
+    git-version change can't silently break the verify while tests stay green.
+    """
+    o, _ = _make_orchestrator(_make_workflow())
+    gh = MagicMock()
+    gh.list_worktrees.return_value = [{"path": WT_PATH, "branch": f"refs/heads/{BRANCH}"}]
+    # Must not raise on the porcelain-parsed shape.
+    o._verify_worktree_restored(gh, WT_PATH, BRANCH)
+
+
+def test_verify_worktree_restored_rejects_wrong_branch():
+    """A restored worktree registered on the wrong branch must fail verification."""
+    o, _ = _make_orchestrator(_make_workflow())
+    gh = MagicMock()
+    gh.list_worktrees.return_value = [{"path": WT_PATH, "branch": "refs/heads/main"}]
+    with pytest.raises(RuntimeError, match="(?i)wrong branch"):
+        o._verify_worktree_restored(gh, WT_PATH, BRANCH)
+
+
+def test_remove_worktree_idempotent_preserves_original_error_when_probe_fails():
+    """If the ``list_worktrees`` probe itself errors inside the except handler,
+    the ORIGINAL removal error must be re-raised (not masked by the probe's)."""
+    from app.modules.workspace.autonomous.github_ops import GitHubOpsError
+
+    o, _ = _make_orchestrator(_make_workflow())
+    gh = MagicMock()
+    removal_error = GitHubOpsError("remove failed")
+    gh.remove_worktree.side_effect = removal_error
+    gh.list_worktrees.side_effect = GitHubOpsError("probe also failed")
+
+    with pytest.raises(GitHubOpsError) as exc_info:
+        o._remove_worktree_idempotent(gh, WT_PATH)
+    assert "remove failed" in str(exc_info.value)

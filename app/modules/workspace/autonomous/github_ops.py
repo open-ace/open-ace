@@ -812,7 +812,14 @@ class GitHubOps:
         return {"removed": path}
 
     def list_worktrees(self) -> list:
-        """List all worktrees."""
+        """List all worktrees.
+
+        Returns entries as ``{"path": …, "branch": "refs/heads/<name>"}`` (no
+        ``branch`` key when detached). The ``refs/heads/`` branch format is a
+        contract: ``AutonomousOrchestrator._verify_worktree_restored`` matches
+        against both ``<name>`` and ``refs/heads/<name>``. Parsing is locked by
+        ``tests/issues/716/test_github_ops.py::test_list_worktrees``.
+        """
         result = self._run_git(["worktree", "list", "--porcelain"])
         worktrees = []
         current = {}

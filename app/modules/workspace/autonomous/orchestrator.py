@@ -8797,6 +8797,7 @@ class AutonomousOrchestrator:
         main_gh = GitHubOps(project_path, system_account=system_account)
         temp_wt_path = os.path.normpath(f"{project_path}/../merge-{self._workflow_id[:8]}")
         original_removed = False
+        temp_created = False
         try:
             if worktree_path:
                 # Fail closed on removal failure: only clear the DB once git has
@@ -8815,6 +8816,7 @@ class AutonomousOrchestrator:
             # Lives inside the try so a creation failure still triggers restore.
             main_gh.add_worktree(temp_wt_path, branch_name)
             logger.info("Created temporary merge worktree at %s", temp_wt_path)
+            temp_created = True
 
             # All subsequent git ops run inside the temp worktree.
             wt_gh = GitHubOps(temp_wt_path, system_account=system_account)
@@ -9114,14 +9116,17 @@ class AutonomousOrchestrator:
                 ),
             )
         finally:
-            # Always tear down the temp worktree, even on failure, so it does
-            # not leak and block future runs. Use the main repo's gh because
-            # a worktree cannot remove itself.
-            try:
-                main_gh.remove_worktree(temp_wt_path)
-                logger.info("Removed temporary merge worktree at %s", temp_wt_path)
-            except GitHubOpsError as e:
-                logger.warning("Failed to remove temp worktree %s: %s", temp_wt_path, e)
+            # Tear down the temp worktree if it was actually created, so it does
+            # not leak and block future runs. Use the main repo's gh because a
+            # worktree cannot remove itself. Skip when it was never created
+            # (e.g. the original worktree removal failed first) to avoid a
+            # spurious "failed to remove" warning on a path that doesn't exist.
+            if temp_created:
+                try:
+                    main_gh.remove_worktree(temp_wt_path)
+                    logger.info("Removed temporary merge worktree at %s", temp_wt_path)
+                except GitHubOpsError as e:
+                    logger.warning("Failed to remove temp worktree %s: %s", temp_wt_path, e)
 
             # Restore the workflow's original worktree so subsequent phases
             # (PR review push, CI repair, _do_merge re-entry) operate on the
@@ -9174,7 +9179,13 @@ class AutonomousOrchestrator:
         try:
             gh.remove_worktree(path)
         except GitHubOpsError as exc:
-            still_registered = any(w.get("path") == path for w in gh.list_worktrees())
+            # Probe the registry to distinguish "already gone" from a real
+            # failure. If the probe itself errors, re-raise the ORIGINAL
+            # removal error so it isn't masked by a less actionable one.
+            try:
+                still_registered = any(w.get("path") == path for w in gh.list_worktrees())
+            except Exception:
+                raise exc
             if still_registered:
                 raise
             logger.info("Worktree %s already absent (treated as removed): %s", path, exc)
