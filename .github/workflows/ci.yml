@@ -267,8 +267,8 @@ jobs:
           # issue #1890 acceptance criteria.
 
           # Use whitelist script to filter out vulnerabilities that don't apply
-          chmod +x scripts/ci/npm_audit_with_whitelist.sh
-          ./scripts/ci/npm_audit_with_whitelist.sh || exit_code=$?
+          chmod +x ../scripts/ci/npm_audit_with_whitelist.sh
+          ../scripts/ci/npm_audit_with_whitelist.sh || exit_code=$?
 
           if [ "${exit_code:-0}" -ne 0 ]; then
             echo "::error::npm audit found high/critical vulnerabilities in production dependencies. Add 'skip-security-check' label to bypass in emergencies."
