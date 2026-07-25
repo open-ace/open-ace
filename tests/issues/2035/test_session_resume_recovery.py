@@ -657,36 +657,47 @@ class TestRunAgentSessionResumeRecoveryFollowup:
     def test_recovery_updates_session_usage_offsets_and_current_session_id(self):
         """The recovery block must update _session_usage_offsets and
         _current_session_id before the retry call, matching the retry-loop
-        pattern. Verify by checking that _clear_session_usage_offsets receives
-        the tracking_session_id (added via usage_session_ids.add) and that
-        _session_usage_offsets carries the accumulated retry_usage
-        (#2035 follow-up, Nit 2)."""
+        pattern. Verify by directly asserting _session_usage_offsets carries
+        the accumulated retry_usage from the failed attempt
+        (#2035 follow-up, Nit 2).
+
+        Note: usage_session_ids is initialized with tracking_session_id at
+        line 4313, so checking membership in _clear_session_usage_offsets is
+        trivially true. Instead, assert the _session_usage_offsets dict
+        content — it is initialized to all-zeros at line 4446, then the
+        recovery block (line 4756-4757) accumulates the failed attempt's
+        tokens and writes the updated dict at line 4768. Because
+        _clear_session_usage_offsets is mocked, the value persists."""
         wf = self._make_wf()
         orch, _ = self._make_orchestrator_with_mock_runner(wf)
 
-        # Initialize _session_usage_offsets so the recovery block can update it
-        orch._session_usage_offsets = {}
-        orch._current_session_id = None
-
+        # Use a failure result with non-zero tokens so the accumulation is
+        # observable in _session_usage_offsets.
+        failed_with_tokens = AgentTaskResult(
+            session_id="tracking-sess-1",
+            tracking_session_id="tracking-sess-1",
+            success=False,
+            error="Failed to resume session: EPERM",
+            error_code="resume_session_failed",
+            total_tokens=120,
+            total_input_tokens=80,
+            total_output_tokens=40,
+        )
         orch._runner.run_agent_task.side_effect = [
-            _make_resume_failure_result("resume_session_failed"),
+            failed_with_tokens,
             _make_success_result(),
         ]
 
         self._run_default(orch, wf)
 
-        # _clear_session_usage_offsets is called with usage_session_ids, which
-        # must include tracking_session_id (added by the recovery block).
-        assert orch._clear_session_usage_offsets.called
-        cleared_ids = orch._clear_session_usage_offsets.call_args.args[0]
-        assert "tracking-sess-1" in cleared_ids
-
-        # _session_usage_offsets was updated with the accumulated retry_usage
-        # before the retry call. After _clear_session_usage_offsets runs, the
-        # entry is removed — but the fact that tracking_session_id was in the
-        # clear set proves it was added to usage_session_ids in the recovery
-        # block (the original retry loop also adds it, but only when it
-        # retries; resume_session_failed breaks before that point).
+        # _session_usage_offsets[tracking_session_id] must reflect the
+        # accumulated retry_usage (120 tokens from the failed attempt).
+        # _clear_session_usage_offsets is mocked so the entry is not removed.
+        offsets = getattr(orch, "_session_usage_offsets", {})
+        assert "tracking-sess-1" in offsets
+        assert offsets["tracking-sess-1"]["total_tokens"] == 120
+        assert offsets["tracking-sess-1"]["total_input_tokens"] == 80
+        assert offsets["tracking-sess-1"]["total_output_tokens"] == 40
 
     def test_recovery_block_guard_directly_blocks_failed_status(self):
         """Directly exercise the recovery block's own defensive guard
@@ -725,3 +736,7 @@ class TestRunAgentSessionResumeRecoveryFollowup:
         # Only one call — recovery block guard suppressed the retry
         assert orch._runner.run_agent_task.call_count == 1
         orch._runner.session_manager.update_session_fields.assert_not_called()
+        # Confirm get_workflow was called exactly twice (retry-loop check +
+        # recovery-block guard), verifying we exercised the recovery block's
+        # own guard rather than the retry loop's status check.
+        assert call_count[0] == 2
