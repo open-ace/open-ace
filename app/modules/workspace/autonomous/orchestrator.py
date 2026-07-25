@@ -1641,6 +1641,7 @@ class AutonomousOrchestrator:
                 before_main.get("head")
                 and after_main.get("head")
                 and before_main.get("head") != after_main.get("head")
+                and before_main.get("branch") == after_main.get("branch")
                 and before_effective.get("head") == after_effective.get("head")
             ):
                 # main HEAD moved but the worktree did not. This is either an
@@ -1649,6 +1650,17 @@ class AutonomousOrchestrator:
                 # only when the move is a forward update to a remote-sourced
                 # commit (a benign pull); a local escape commit (not pushed),
                 # a reset/rollback, or a non-fast-forward rewrite is blocked.
+                #
+                # The branch-equality guard (before.branch == after.branch)
+                # skips the check entirely when the developer switched the main
+                # repo to another branch during the agent run (e.g. to work on
+                # a fix PR from the same checkout on a dev/single-user host).
+                # In that case the "HEAD moved" signal is from the branch
+                # switch, not an agent escape, and the worktree-only validation
+                # above already confirms the agent stayed inside its worktree.
+                # Without this guard, any local (unpushed) commit on the
+                # feature branch trips after_on_remote=False and produces a
+                # false-positive escape report (#1831 regression).
                 if self._main_drift_is_benign_pull(
                     ctx.get("project_path", ""),
                     before_main.get("head"),
@@ -1667,6 +1679,30 @@ class AutonomousOrchestrator:
                     "Detected commits on the main repository while the workflow worktree "
                     "HEAD did not move; the agent likely executed git commands outside "
                     "the workflow worktree."
+                )
+            if (
+                before_main.get("head")
+                and after_main.get("head")
+                and before_main.get("head") != after_main.get("head")
+                and before_main.get("branch") != after_main.get("branch")
+                and before_effective.get("head") == after_effective.get("head")
+            ):
+                # Main repo HEAD moved because the developer switched branches
+                # (e.g. checked out a feature branch to work on a fix PR while
+                # a workflow was running on the same host). This is not an
+                # agent escape — the agent runs inside the worktree and cannot
+                # affect the main repo's checked-out branch. Log and allow;
+                # the worktree-only validation above already confirmed the
+                # agent stayed inside its worktree (#1831).
+                logger.info(
+                    "Workflow %s: main repo branch changed %s..%s during agent run "
+                    "(developer switched branches: %s -> %s); skipping main-HEAD-drift "
+                    "check, allowing.",
+                    self._workflow_id,
+                    before_main.get("head", "")[:8],
+                    after_main.get("head", "")[:8],
+                    before_main.get("branch", ""),
+                    after_main.get("branch", ""),
                 )
         return ""
 
