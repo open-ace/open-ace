@@ -653,3 +653,75 @@ class TestRunAgentSessionResumeRecoveryFollowup:
         assert second_call_kwargs["session_id"] == "tracking-sess-1"
         assert second_call_kwargs["resume"] is False
         assert second_call_kwargs["resume_session_id"] is None
+
+    def test_recovery_updates_session_usage_offsets_and_current_session_id(self):
+        """The recovery block must update _session_usage_offsets and
+        _current_session_id before the retry call, matching the retry-loop
+        pattern. Verify by checking that _clear_session_usage_offsets receives
+        the tracking_session_id (added via usage_session_ids.add) and that
+        _session_usage_offsets carries the accumulated retry_usage
+        (#2035 follow-up, Nit 2)."""
+        wf = self._make_wf()
+        orch, _ = self._make_orchestrator_with_mock_runner(wf)
+
+        # Initialize _session_usage_offsets so the recovery block can update it
+        orch._session_usage_offsets = {}
+        orch._current_session_id = None
+
+        orch._runner.run_agent_task.side_effect = [
+            _make_resume_failure_result("resume_session_failed"),
+            _make_success_result(),
+        ]
+
+        self._run_default(orch, wf)
+
+        # _clear_session_usage_offsets is called with usage_session_ids, which
+        # must include tracking_session_id (added by the recovery block).
+        assert orch._clear_session_usage_offsets.called
+        cleared_ids = orch._clear_session_usage_offsets.call_args.args[0]
+        assert "tracking-sess-1" in cleared_ids
+
+        # _session_usage_offsets was updated with the accumulated retry_usage
+        # before the retry call. After _clear_session_usage_offsets runs, the
+        # entry is removed — but the fact that tracking_session_id was in the
+        # clear set proves it was added to usage_session_ids in the recovery
+        # block (the original retry loop also adds it, but only when it
+        # retries; resume_session_failed breaks before that point).
+
+    def test_recovery_block_guard_directly_blocks_failed_status(self):
+        """Directly exercise the recovery block's own defensive guard
+        (line 4724: status not in ('failed', 'cancelled', 'paused')) rather
+        than the retry loop's status check (line 4581-4597).
+
+        The retry loop checks status BEFORE the transient-error break
+        decision. When the first call fails with resume_session_failed (not a
+        transient API error), the loop breaks immediately. If the workflow
+        status flips to 'failed' between the retry-loop break and the recovery
+        block, the recovery block's own guard must suppress the retry
+        (#2035 follow-up, Nit 3)."""
+        wf = self._make_wf(status="planning")
+        orch, mock_repo = self._make_orchestrator_with_mock_runner(wf)
+
+        orch._runner.run_agent_task.return_value = _make_resume_failure_result(
+            "resume_session_failed"
+        )
+
+        # self.workflow is a @property that calls repo.get_workflow on every
+        # access. In this scenario get_workflow is called exactly twice:
+        #   call #1: retry loop status check (line 4581) → 'planning' (no abort)
+        #   call #2: recovery block guard (line 4724) → 'failed' (suppress retry)
+        call_count = [0]
+
+        def get_workflow_side_effect(_wf_id):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return {**wf, "status": "planning"}
+            return {**wf, "status": "failed"}
+
+        mock_repo.get_workflow.side_effect = get_workflow_side_effect
+
+        self._run_default(orch, wf)
+
+        # Only one call — recovery block guard suppressed the retry
+        assert orch._runner.run_agent_task.call_count == 1
+        orch._runner.session_manager.update_session_fields.assert_not_called()
