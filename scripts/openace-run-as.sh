@@ -42,6 +42,27 @@ target_user="$1"
 project_dir="$2"
 shift 2
 
+# Issue #2018: the isolated launcher is authorized by an external helper before
+# any root ACL grant. The helper pins the target account to the configured
+# credentialless openace-agent and confines the project path to a registered
+# workspace root (no symlink components, no '..', no mount crossing).
+# Autonomous-dev only; the local/remote workspace path does not call this
+# wrapper. Paths are overridable for tests.
+_OPENACE_VALIDATE_LAUNCH="${OPENACE_VALIDATE_LAUNCH:-/usr/local/libexec/openace-validate-launch}"
+_OPENACE_LAUNCHER_CONF="${OPENACE_LAUNCHER_CONF:-/etc/openace/agent-launcher.conf}"
+AUDIT_LOG="${OPENACE_AUDIT_LOG:-/app/logs/run-as-audit.log}"
+
+# Security audit trail (mirrors scripts/openace-chown.sh). Logs only caller,
+# account, path and outcome — never the command or its args, which may carry
+# proxy tokens via env_keep.
+log_audit() {
+    local outcome="$1"
+    local log_entry
+    log_entry="[$(date '+%Y-%m-%d %H:%M:%S')] caller=$(id -un) target=${target_user} path=${project_dir} ${outcome}"
+    mkdir -p "$(dirname "$AUDIT_LOG")" 2>/dev/null || true
+    echo "$log_entry" >> "$AUDIT_LOG" 2>/dev/null || true
+}
+
 # Autonomous agents use a dedicated credentialless principal.  Unlike the
 # legacy repo-owner launch, this account receives write ACLs only on worktree
 # files; Git metadata is read-only so it cannot install hooks, rewrite remotes,
@@ -51,6 +72,28 @@ if [ "$isolated" = true ]; then
         echo "openace-run-as: isolated project path must be absolute and single-line" >&2
         exit 64
     fi
+    # Authorize the launch (account pin + path confinement) BEFORE touching the
+    # filesystem. Fail closed — including when the helper or conf is absent, so
+    # a missing constraint source can never degrade into an unvalidated grant.
+    if [ ! -x "$_OPENACE_VALIDATE_LAUNCH" ]; then
+        echo "openace-run-as: launch validator unavailable at $_OPENACE_VALIDATE_LAUNCH" >&2
+        log_audit "result=reject_missing_validator"
+        exit 66
+    fi
+    set +e
+    validate_msg="$("$_OPENACE_VALIDATE_LAUNCH" "$_OPENACE_LAUNCHER_CONF" "$target_user" "$project_dir" 2>&1)"
+    validate_rc=$?
+    set -e
+    if [ "$validate_rc" -ne 0 ]; then
+        echo "openace-run-as: isolated launch rejected: ${validate_msg}" >&2
+        case "$validate_msg" in
+            *reject_account*) log_audit "result=reject_account"; exit 67 ;;
+            *reject_conf*)    log_audit "result=reject_conf"; exit 66 ;;
+            *reject_path*)    log_audit "result=reject_path"; exit 64 ;;
+            *)                log_audit "result=reject_unknown"; exit 67 ;;
+        esac
+    fi
+    log_audit "result=accept"
     if ! command -v flock >/dev/null 2>&1 || ! command -v pkill >/dev/null 2>&1; then
         echo "openace-run-as: flock and pkill are required for isolated execution" >&2
         exit 66

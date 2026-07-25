@@ -1,0 +1,162 @@
+#!/usr/bin/env python3
+# openace-validate-launch — authorize an ``openace-run-as --isolated`` launch.
+#
+# Issue #2018: the root helper used to accept any non-admin account and any
+# absolute path, then recursively grant ACLs as root. A compromised openace
+# service account could abuse that to grant a chosen account rwx on an
+# arbitrary directory tree (``/etc``, another user's home, ...). This helper is
+# the single security gate invoked BEFORE any ACL grant: it pins the target
+# account to the configured credentialless ``openace-agent`` and confines the
+# project path to a registered workspace root — no symlink components, no
+# ``..``/``.``, no mount crossing.
+#
+# Scope: autonomous-dev only. The local/remote workspace (qwen-code-webui)
+# path uses a separate wrapper set (openace-chown/cat/mkdir/write-as) and does
+# NOT call this helper or openace-run-as.
+#
+# Pure stdlib so the decision logic is unit-testable without root. The bash
+# wrapper keeps ownership of ACL arithmetic + runuser privilege drop; this
+# helper only answers "is this launch authorized".
+#
+# Usage: openace-validate-launch <conf> <account> <project_dir>
+# Exit: 0 = authorized; 1 = rejected (reason on stderr); 2 = usage error.
+
+import os
+import stat
+import sys
+
+
+class ConfError(Exception):
+    """The launcher conf is missing, tampered, or incomplete."""
+
+
+def load_conf(conf_path, *, _stat=os.stat):
+    """Load and validate the launcher conf. Returns ``(account, roots)``.
+
+    The conf must be a regular file owned by root with no group/other write
+    bits and not a symlink, so the compromised service account cannot alter the
+    constraints. Required keys:
+
+      OPENACE_AUTONOMOUS_AGENT_ACCOUNT  — the single allowed agent principal
+      ALLOWED_WORKSPACE_ROOTS           — canonical absolute roots (space-sep)
+
+    Roots are compared lexically downstream, so the installer realpath's them
+    when writing the conf.
+    """
+    try:
+        st = _stat(conf_path)
+    except OSError as exc:
+        raise ConfError(f"conf missing: {exc}") from exc
+    if stat.S_ISLNK(st.st_mode):
+        raise ConfError("conf is a symlink")
+    if not stat.S_ISREG(st.st_mode):
+        raise ConfError("conf is not a regular file")
+    if st.st_uid != 0:
+        raise ConfError("conf not root-owned")
+    if st.st_mode & 0o022:
+        raise ConfError("conf is group/other writable")
+
+    account = None
+    roots = []
+    with open(conf_path, encoding="utf-8") as fh:
+        for raw in fh:
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            if "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            key = key.strip()
+            value = value.strip().strip('"').strip("'")
+            if key == "OPENACE_AUTONOMOUS_AGENT_ACCOUNT":
+                account = value
+            elif key == "ALLOWED_WORKSPACE_ROOTS":
+                roots = value.split()
+    if not account:
+        raise ConfError("conf missing OPENACE_AUTONOMOUS_AGENT_ACCOUNT")
+    if not roots:
+        raise ConfError("conf missing ALLOWED_WORKSPACE_ROOTS")
+    return account, roots
+
+
+def confine_path(project_dir, roots, *, _lstat=os.lstat):
+    """Return ``(ok, reason)``. ok iff ``project_dir`` is absolute, strictly
+    beneath exactly one registered root, has no ``.``/``..`` or symlink
+    components, and does not cross a mount boundary (``st_dev`` mismatch vs the
+    matched root).
+
+    The no-follow component walk is defense-in-depth. The account pin is the
+    primary boundary: even if a residual TOCTOU swapped a path component after
+    this check, the ACL grant targets only the credentialless ``openace-agent``
+    account, so it cannot elevate the compromised service account.
+    """
+    if not os.path.isabs(project_dir):
+        return False, "reject_path: not absolute"
+    parts = project_dir.split("/")
+    if ".." in parts:
+        return False, "reject_path: dotdot component"
+    # Walk every prefix component, rejecting any symlink. `cur` ends as the
+    # cleaned, link-free absolute path used for the beneath-root + mount checks.
+    cur = ""
+    for part in parts:
+        if part == "" or part == ".":
+            continue
+        cur = cur + "/" + part
+        try:
+            cst = _lstat(cur)
+        except OSError:
+            return False, f"reject_path: missing component {cur}"
+        if stat.S_ISLNK(cst.st_mode):
+            return False, f"reject_path: symlink component {cur}"
+    if cur == "":
+        return False, "reject_path: empty path"
+
+    matched = None
+    for root in roots:
+        root = root.rstrip("/")
+        if root == "":
+            continue
+        if cur == root:
+            # Granting ACLs on the root itself (/home) would be catastrophic;
+            # the project dir must be strictly beneath a registered root.
+            return False, "reject_path: equals root"
+        if cur.startswith(root + "/"):
+            matched = root
+            break
+    if matched is None:
+        return False, "reject_path: outside allowlist"
+
+    try:
+        path_dev = _lstat(cur).st_dev
+        root_dev = _lstat(matched).st_dev
+    except OSError:
+        return False, "reject_path: stat failed"
+    if path_dev != root_dev:
+        return False, "reject_path: mount crossing"
+    return True, "accept"
+
+
+def validate(account, project_dir, conf_path, *, _lstat=os.lstat, _conf_stat=os.stat):
+    """Authorize an isolated launch. Returns ``(ok, reason)``."""
+    try:
+        allowed_account, roots = load_conf(conf_path, _stat=_conf_stat)
+    except ConfError as exc:
+        return False, f"reject_conf: {exc}"
+    if account != allowed_account:
+        return False, f"reject_account: expected {allowed_account}"
+    return confine_path(project_dir, roots, _lstat=_lstat)
+
+
+def main(argv):
+    if len(argv) != 4:
+        sys.stderr.write("usage: openace-validate-launch <conf> <account> <project_dir>\n")
+        return 2
+    ok, reason = validate(argv[2], argv[3], argv[1])
+    if not ok:
+        sys.stderr.write(f"openace-validate-launch: {reason}\n")
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
