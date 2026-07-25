@@ -7048,7 +7048,20 @@ class AutonomousOrchestrator:
         has_passing_tool_result = _has_passing_test_tool_result(
             test_result.event_log or [], framework_type
         )
-        tests_actually_run = has_passing_tool_result
+        # Fallback: if the event log's tool_result capture is incomplete (e.g.
+        # Claude Code stream-json truncation on long pytest output, or tool
+        # results exceeding the per-event size limit), accept text-based
+        # evidence: a real test tool call in the event log PLUS a "N passed"
+        # pattern in the agent's visible text. The tool call proves the agent
+        # invoked a test command; the "N passed" pattern proves it reported
+        # passing results. Together they provide strong evidence that tests
+        # ran and passed, even without structured tool_result events (#1830).
+        has_text_pass_evidence = has_test_result and bool(
+            re.search(r"\b[1-9]\d*\s+passed\b", test_response_text, re.IGNORECASE)
+        )
+        tests_actually_run = has_passing_tool_result or (
+            has_test_tool_call and has_text_pass_evidence
+        )
         test_result_inconclusive = (
             test_result.success
             and (has_test_tool_call or has_test_result or test_status_tag in ("passed", "failed"))
