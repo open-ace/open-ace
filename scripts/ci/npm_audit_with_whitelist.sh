@@ -26,7 +26,7 @@ if echo "$AUDIT_OUTPUT" | grep -q "vulnerabilities"; then
       AUDIT_OUTPUT=$(echo "$AUDIT_OUTPUT" | grep -v "$ghsa" || true)
     fi
   done
-  
+
   # Check if there are still unhandled vulnerabilities
   if echo "$AUDIT_OUTPUT" | grep -E "[0-9]+ (high|critical) severity"; then
     echo "::error::npm audit found high/critical vulnerabilities in production dependencies."
