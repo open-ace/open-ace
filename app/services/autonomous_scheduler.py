@@ -324,6 +324,13 @@ class AutonomousScheduler:
         workspace, branch = self._conflict_keys(workflow) if workflow else ("", "")
         # Waiting workflows bypass conflict locks (see _process_workflows).
         # Capture this so cleanup paths don't release another workflow's keys.
+        #
+        # Load-bearing invariant: this advance-time read of ``status == waiting``
+        # agrees with the selection-time read in ``_process_workflows`` only
+        # because the ``waiting -> developing/merging`` transition happens inside
+        # ``advance()`` below — no other actor flips the status between selection
+        # and this point. If that ever changes, the finally cleanup below could
+        # release (or fail to release) the wrong workflow's conflict keys.
         was_waiting = bool(workflow and workflow.get("status") == "waiting")
 
         # Acquire DB-level distributed lock

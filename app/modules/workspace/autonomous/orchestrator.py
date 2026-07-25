@@ -8211,6 +8211,13 @@ class AutonomousOrchestrator:
         resume immediately from the cancelled milestone's phase.
 
         If auto_merge is enabled and PR exists, skip waiting and proceed to merge.
+
+        Invariant: must not mutate the git working tree — relied on by the
+        scheduler's waiting-bypass. ``autonomous_scheduler._process_workflows``
+        skips batch/workspace/branch conflict locks for ``status == waiting``
+        workflows on the assumption that this phase only touches DB/API state.
+        Any git or agent work must happen in a later phase, after the workflow
+        has left ``waiting``.
         """
         # Check for stored user feedback (from cancel-with-feedback)
         user_feedback = wf.get("user_feedback", "")
