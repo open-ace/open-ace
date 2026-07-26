@@ -757,3 +757,68 @@ class TestDeliveryIdentity:
         assert (
             row["next_retry_at"] is not None
         )  # backoff scheduled — claimable later (attempts 2 < max 3)
+
+    def test_first_non_retriable_post_records_one_attempt(self, notifier):
+        """P2: a first-shot non-retriable POST failure records attempts=1, not 0."""
+        url_x = "https://open.feishu.cn/open-apis/bot/v2/hook/TOKEN-X"
+        notifier.set_notification_preferences(
+            NotificationPreference(
+                user_id=1, push_enabled=True, webhook_url=url_x, alert_types=["quota"]
+            )
+        )
+        alert = _insert_alert_direct(notifier, 1, "p2-attempts-1")
+
+        class _SyncThread:
+            def __init__(self, **kwargs):
+                self._target = kwargs.get("target")
+
+            def start(self):
+                self._target()
+
+        with (
+            patch.object(
+                notifier,
+                "_deliver_to_prefs",
+                return_value=DeliveryResult(retriable=False, error_type="http_4xx"),
+            ),
+            patch("app.modules.governance.alert_notifier.threading.Thread", _SyncThread),
+        ):
+            notifier._dispatch_webhook_async(alert, 1)
+
+        row = _all_delivery_rows(notifier)[0]
+        assert row["status"] == "dead"
+        assert row["attempts"] == 1  # the single POST attempt was counted
+
+    def test_non_retriable_after_retry_records_total_post_attempts(self, notifier):
+        """P2: a retriable failure + immediate retry, then a non-retriable failure,
+        records the total POST attempts (2)."""
+        url_x = "https://open.feishu.cn/open-apis/bot/v2/hook/TOKEN-X"
+        notifier.set_notification_preferences(
+            NotificationPreference(
+                user_id=1, push_enabled=True, webhook_url=url_x, alert_types=["quota"]
+            )
+        )
+        alert = _insert_alert_direct(notifier, 1, "p2-attempts-2")
+
+        results = [
+            DeliveryResult(retriable=True, error_type="timeout"),  # attempt 1
+            DeliveryResult(retriable=False, error_type="http_4xx"),  # attempt 2
+        ]
+
+        class _SyncThread:
+            def __init__(self, **kwargs):
+                self._target = kwargs.get("target")
+
+            def start(self):
+                self._target()
+
+        with (
+            patch.object(notifier, "_deliver_to_prefs", side_effect=results),
+            patch("app.modules.governance.alert_notifier.time.sleep"),
+            patch("app.modules.governance.alert_notifier.threading.Thread", _SyncThread),
+        ):
+            notifier._dispatch_webhook_async(alert, 1)
+
+        row = _all_delivery_rows(notifier)[0]
+        assert row["status"] == "dead"
+        assert row["attempts"] == 2  # both POST attempts counted

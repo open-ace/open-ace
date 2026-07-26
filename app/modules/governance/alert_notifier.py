@@ -1596,6 +1596,10 @@ class AlertNotifier:
                         # Resolved (success or prefs-gated no-op) — no retry
                         # tracking needed. Return without a DB write.
                         return
+                    # The POST attempt failed (retriable or not) — count it so
+                    # the row records the true number of delivery attempts even
+                    # on a first-shot non-retriable failure (review P2).
+                    post_failures += 1
                     if not result.retriable:
                         # Non-retriable failure (4xx / unresolved target) →
                         # dead-letter for audit, never silently dropped.
@@ -1605,7 +1609,6 @@ class AlertNotifier:
                     # Retriable POST failure: bounded immediate retry in-worker,
                     # then hand long backoff to the reaper so a failing receiver
                     # can't hold a slot for long.
-                    post_failures += 1
                     if post_failures <= _WEBHOOK_DELIVERY_WORKER_RETRIES:
                         time.sleep(_WEBHOOK_DELIVERY_SHORT_BACKOFF_SEC)
                         continue
