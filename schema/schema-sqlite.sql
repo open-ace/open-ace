@@ -301,8 +301,6 @@ CREATE TABLE autonomous_workflows (
  last_ci_failure_signature text DEFAULT '',
  last_ci_failure_head_sha text DEFAULT '',
  ci_diagnostics_attempts integer DEFAULT 0,
- -- Worktree transition journal for SIGKILL-resilient recovery (#2050).
- -- NULL worktree_transition_state = no transition in progress (stable).
  worktree_transition_state text,
  transition_original_path text,
  transition_temp_path text,
