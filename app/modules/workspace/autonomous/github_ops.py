@@ -805,11 +805,61 @@ class GitHubOps:
         """Discard local CI-repair state and reset to a trusted immutable ref."""
         self._run_git(["reset", "--hard", ref])
 
-    def delete_branch(self, name: str, remote: bool = True) -> None:
-        """Delete a branch locally and optionally remotely."""
-        self._run_git(["branch", "-D", name], check=False)
+    def delete_branch(self, name: str, remote: bool = True) -> dict:
+        """Delete a branch locally and optionally remotely.
+
+        Returns a structured result so callers can distinguish a real failure
+        from an already-absent branch (#2043). Previously both commands used
+        ``check=False`` and returned ``None``, silently swallowing failures —
+        the caller could not tell whether deletion succeeded.
+
+        Result shape::
+
+            {"local": "deleted"|"absent"|"failed",
+             "remote": "deleted"|"absent"|"failed"|"skipped",
+             "errors": [str, ...]}
+
+        ``absent`` is success-equivalent (the resource was already gone).
+        ``failed`` means a real error warranting retry; ``errors`` carries the
+        truncated stderr for diagnostics.
+
+        Existence is checked via returncode-based probes (``show-ref`` locally,
+        ``ls-remote`` remotely) rather than parsing stderr text, which varies
+        across git versions and server implementations (GitHub.com / GitLab /
+        GHES). A non-zero delete that follows a confirmed-existing resource is a
+        real failure; a delete of an already-absent resource is reported absent.
+        """
+        # Local existence check: show-ref returncode is stable across git versions.
+        local_exists = (
+            self._run_git(
+                ["show-ref", "--verify", "--quiet", f"refs/heads/{name}"], check=False
+            ).returncode
+            == 0
+        )
+        local_res = self._run_git(["branch", "-D", name], check=False)
+        if local_res.returncode == 0:
+            local = "deleted"
+        elif not local_exists:
+            local = "absent"
+        else:
+            local = "failed"
+        result: dict = {"local": local, "remote": "skipped", "errors": []}
+        if local == "failed":
+            result["errors"].append((local_res.stderr or "").strip()[:500])
         if remote:
-            self._run_git(["push", "origin", "--delete", name], check=False)
+            # Remote existence check: ls-remote returncode is stable; an empty
+            # stdout means the ref does not exist on the remote.
+            ls_res = self._run_git(["ls-remote", "origin", name], check=False)
+            remote_exists = ls_res.returncode == 0 and bool((ls_res.stdout or "").strip())
+            remote_res = self._run_git(["push", "origin", "--delete", name], check=False)
+            if remote_res.returncode == 0:
+                result["remote"] = "deleted"
+            elif not remote_exists:
+                result["remote"] = "absent"
+            else:
+                result["remote"] = "failed"
+                result["errors"].append((remote_res.stderr or "").strip()[:500])
+        return result
 
     # ── Worktree Operations ─────────────────────────────────────────
 

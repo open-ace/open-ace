@@ -632,6 +632,11 @@ class AutonomousScheduler:
         # Release git-conflict keys held by workflows paused mid-advance, so a
         # forked child sharing the parent's project_path isn't starved (#1002).
         self._reclaim_paused_slots(repo)
+        # Retry Git cleanup for delivered-but-uncleaned workflows (#2043). Runs
+        # each tick so transient cleanup failures converge without waiting for a
+        # restart; honors per-workflow backoff via cleanup_next_retry_at. Reuses
+        # the scheduler's own repo so test mocks of _get_repo stay effective.
+        _retry_pending_git_cleanups(repo)
 
         try:
             workflows = repo.get_active_workflows()
@@ -878,12 +883,71 @@ def _reconcile_pending_transitions():
         logger.error("Worktree transition reconcile sweep failed: %s", e, exc_info=True)
 
 
+def _retry_pending_git_cleanups(repo=None):
+    """Re-attempt post-merge Git cleanup for delivered workflows (#2043).
+
+    Walks every ``status='completed'`` workflow with ``cleanup_status='pending'``
+    and re-runs the idempotent ``_perform_git_cleanup``. Honors the per-workflow
+    ``cleanup_next_retry_at`` backoff so a transient failure is not retried every
+    tick. This is shared by the startup sweep and the periodic scheduler tick so
+    both converge leaked worktrees/branches without a separate worker. Failures
+    are isolated per workflow.
+
+    ``repo`` lets the periodic tick reuse the scheduler's own (mock-friendly)
+    repository; the startup sweep omits it and constructs one.
+    """
+    try:
+        from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+        if repo is None:
+            from app.repositories.autonomous_repo import AutonomousWorkflowRepository
+            from app.repositories.database import Database
+
+            repo = AutonomousWorkflowRepository(Database())
+        pending = repo.get_workflows_pending_cleanup()
+        if not pending:
+            return
+
+        now = datetime.now(timezone.utc)
+        for wf in pending:
+            wf_id = wf.get("workflow_id")
+            if not isinstance(wf_id, str) or not wf_id:
+                continue
+            # Backoff: skip until cleanup_next_retry_at has passed.
+            next_retry = wf.get("cleanup_next_retry_at") or ""
+            if next_retry:
+                try:
+                    due = datetime.strptime(next_retry, "%Y-%m-%d %H:%M:%S").replace(
+                        tzinfo=timezone.utc
+                    )
+                except ValueError:
+                    due = now
+                if due > now:
+                    continue
+            try:
+                orchestrator = AutonomousOrchestrator(wf_id)
+                orchestrator._perform_git_cleanup()
+            except Exception as e:  # noqa: BLE001
+                logger.error(
+                    "Git cleanup retry raised for workflow %s: %s",
+                    (wf_id or "")[:8],
+                    e,
+                    exc_info=True,
+                )
+
+        logger.info("Processed %d pending Git cleanup(s)", len(pending))
+    except Exception as e:  # noqa: BLE001
+        logger.error("Git cleanup retry sweep failed: %s", e, exc_info=True)
+
+
 def init_autonomous_scheduler():
     """Initialize and start the autonomous scheduler."""
     # Clean up orphaned processes from previous server run
     _cleanup_orphan_processes()
     # Recover any worktree transitions interrupted by a prior SIGKILL/restart
     _reconcile_pending_transitions()
+    # Retry Git cleanup for workflows delivered but not yet cleaned up (#2043)
+    _retry_pending_git_cleanups()
 
     scheduler = AutonomousScheduler.instance()
     scheduler.start()

@@ -1215,6 +1215,17 @@ MAX_PRE_COMMIT_CONVERGENCE_PASSES = 3
 PRE_COMMIT_CONVERGENCE_TIMEOUT = 600
 CI_PRE_COMMIT_SKIP = "bandit,no-commit-to-branch"
 MAX_CI_DIAGNOSTICS_ATTEMPTS = 6  # bound scheduler polls when failed job logs stay unavailable
+MAX_CLEANUP_ATTEMPTS = 10  # post-merge Git cleanup retries before giving up (#2043)
+
+
+def _cleanup_backoff_time(attempts: int) -> str:
+    """ISO timestamp for the next cleanup retry; exponential backoff capped at 1h (#2043)."""
+    from datetime import timedelta
+
+    delay = min(60 * (2 ** max(attempts - 1, 0)), 3600)
+    return (datetime.now(timezone.utc) + timedelta(seconds=delay)).strftime("%Y-%m-%d %H:%M:%S")
+
+
 try:
     MAX_AUTONOMOUS_CHANGED_FILES = int(os.environ.get("AUTONOMOUS_MAX_CHANGED_FILES", "60"))
 except ValueError:
@@ -4235,7 +4246,22 @@ class AutonomousOrchestrator:
                 self._update_workflow({"worktree_path": ""})
             if remove_branch and branch_name:
                 gh = GitHubOps(project_path, system_account=system_account)
-                gh.delete_branch(branch_name)
+                result = gh.delete_branch(branch_name)
+                # delete_branch returns a structured {local, remote, errors} dict
+                # (#2043). 'absent' is success-equivalent; only 'failed' counts.
+                if result.get("local") == "failed" or result.get("remote") == "failed":
+                    failed_parts = [
+                        p
+                        for p, v in (
+                            ("local", result.get("local")),
+                            ("remote", result.get("remote")),
+                        )
+                        if v == "failed"
+                    ]
+                    raise GitHubOpsError(
+                        f"Branch deletion failed ({'/'.join(failed_parts)}): "
+                        + "; ".join(result.get("errors") or [])[:300]
+                    )
                 self._update_workflow({"branch_name": ""})
         except GitHubOpsError as e:
             logger.warning("Cleanup (%s) failed: %s", reason, e)
@@ -4244,6 +4270,57 @@ class AutonomousOrchestrator:
             logger.warning("Cleanup (%s) raised: %s", reason, e)
             return False
         return True
+
+    def _perform_git_cleanup(self) -> tuple[str, str]:
+        """Retry entry point for post-merge Git cleanup (#2043).
+
+        Wraps :meth:`_cleanup_worktree_and_branch` and persists the
+        ``cleanup_*`` tracking fields so delivery completion and resource
+        convergence stay independent. Idempotent: a workflow whose worktree and
+        branch are already gone reports ``completed``. Returns
+        ``(status, error)`` where status is ``completed`` or ``failed``.
+        """
+        wf = self.workflow or {}
+        attempts = int(wf.get("cleanup_attempts") or 0) + 1
+        now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        ok = self._cleanup_worktree_and_branch(
+            reason="completed", remove_worktree=True, remove_branch=True
+        )
+        if ok:
+            self._update_workflow(
+                {
+                    "cleanup_status": "completed",
+                    "cleanup_attempts": attempts,
+                    "cleanup_error": "",
+                    "cleanup_updated_at": now_iso,
+                    "cleanup_next_retry_at": "",
+                }
+            )
+            # Record a cleaned_up milestone when a retry converges, so the audit
+            # trail shows the eventual success (not just the prior cleanup_pending
+            # failure). The immediate-success path in _do_merge records its own
+            # cleaned_up milestone; this covers the retry-recovered case.
+            if attempts > 1:
+                self._create_milestone(
+                    phase="merge",
+                    milestone_type="cleaned_up",
+                    status="completed",
+                    title=f"Git cleanup recovered after {attempts} attempt(s)",
+                )
+            return "completed", ""
+        # Transient/partial failure — schedule a backoff retry unless exhausted.
+        error = wf.get("error_message") or "Git cleanup failed (worktree or branch)"
+        status = "pending" if attempts < MAX_CLEANUP_ATTEMPTS else "failed"
+        self._update_workflow(
+            {
+                "cleanup_status": status,
+                "cleanup_attempts": attempts,
+                "cleanup_error": error[:500],
+                "cleanup_updated_at": now_iso,
+                "cleanup_next_retry_at": _cleanup_backoff_time(attempts),
+            }
+        )
+        return status, error
 
     def _mark_failed(self, error_message: str, *, phase: str | None = None) -> None:
         """Record a terminal workflow failure (status + error event) only.
@@ -9240,31 +9317,43 @@ class AutonomousOrchestrator:
                 # error so the workflow fails visibly instead of spinning.
                 raise
 
-        # Clean up branch/worktree. Re-read wf because _resolve_merge_conflicts
-        # restores worktree_path in its finally block (so the restored value
-        # may differ from the caller's stale snapshot); using the stale snapshot
-        # would retry the removal and fail, skipping branch deletion (#1107).
-        # _cleanup_worktree_and_branch re-reads self.workflow itself, so it sees
-        # the restored value. The branch IS removed here — the PR is merged.
-        cleanup_ok = self._cleanup_worktree_and_branch(
-            reason="completed", remove_worktree=True, remove_branch=True
+        # Persist delivery completion FIRST, independent of cleanup outcome
+        # (#2043). Previously a cleanup failure only logged a warning and the
+        # workflow still went completed — but with no record that resources were
+        # still leaked. Now cleanup_status tracks resource convergence so the
+        # scheduler/startup sweep can retry; the business status is already final.
+        self._update_workflow(
+            {
+                "status": "completed",
+                "completed_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+                "cleanup_status": "pending",
+                "cleanup_updated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+            }
         )
-        if cleanup_ok:
+        self._emit("phase_change", {"phase": "completed"})
+
+        # Best-effort immediate cleanup. _perform_git_cleanup persists the
+        # cleanup_* fields (completed on success, pending/failed on retry).
+        # Re-reads self.workflow so it sees the restored worktree_path value
+        # (#1107: _resolve_merge_conflicts restores it in its finally block).
+        cleanup_status, cleanup_error = self._perform_git_cleanup()
+        if cleanup_status == "completed":
             self._create_milestone(
                 phase="merge",
                 milestone_type="cleaned_up",
                 status="completed",
                 title="Branch/worktree cleaned up",
             )
-
-        # Mark workflow completed
-        self._update_workflow(
-            {
-                "status": "completed",
-                "completed_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
-            }
-        )
-        self._emit("phase_change", {"phase": "completed"})
+        else:
+            # cleanup_status is pending or failed — record why without faking
+            # a cleaned_up milestone. The scheduler sweep retries pending ones.
+            self._create_milestone(
+                phase="merge",
+                milestone_type="cleanup_pending",
+                status="failed",
+                title="Git cleanup pending retry",
+                error_message=(cleanup_error or "")[:300],
+            )
 
     def _sync_worktree_to_pr_remote_head(self, wt_gh: "GitHubOps", branch_name: str) -> None:
         """Sync a merge worktree to the PR branch's authoritative remote head.
