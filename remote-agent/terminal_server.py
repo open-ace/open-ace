@@ -135,9 +135,7 @@ else:  # pragma: no cover - exercised by Windows runtime/tests via monkeypatch
         return handle
 
     def _assign_pid_to_job(handle, pid):  # type: ignore[no-redef]  # pragma: no cover
-        proc_handle = _kernel32.OpenProcess(
-            PROCESS_SET_QUOTA | PROCESS_TERMINATE, False, pid
-        )
+        proc_handle = _kernel32.OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, False, pid)
         if not proc_handle:
             raise ctypes.WinError(ctypes.get_last_error())
         try:
@@ -157,6 +155,7 @@ else:  # pragma: no cover - exercised by Windows runtime/tests via monkeypatch
             check=False,
         )
         return True
+
 
 from cli_adapters.base import collect_custom_envkeys
 
@@ -597,9 +596,7 @@ class SinglePtyTerminalServer:
                 try:
                     self.process.wait(timeout=5)
                 except subprocess.TimeoutExpired:
-                    logger.warning(
-                        "Terminal process pid=%d still alive after escalation", pid
-                    )
+                    logger.warning("Terminal process pid=%d still alive after escalation", pid)
             except Exception as e:
                 logger.warning("Failed to kill terminal process: %s", e)
         # 3. Close remaining handles (cleanup; not relied on to interrupt reads).

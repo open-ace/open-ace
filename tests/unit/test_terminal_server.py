@@ -456,12 +456,8 @@ async def test_run_server_finally_calls_kill_pty_when_relay_blocks(monkeypatch):
     """
     terminal_server = load_terminal_server()
 
-    monkeypatch.setattr(
-        terminal_server.SinglePtyTerminalServer, "spawn_pty", lambda self: True
-    )
-    monkeypatch.setattr(
-        terminal_server.SinglePtyTerminalServer, "is_pty_alive", lambda self: False
-    )
+    monkeypatch.setattr(terminal_server.SinglePtyTerminalServer, "spawn_pty", lambda self: True)
+    monkeypatch.setattr(terminal_server.SinglePtyTerminalServer, "is_pty_alive", lambda self: False)
 
     async def _blocking_relay(self):
         # Models a relay blocked on a read that never returns EOF.
@@ -524,7 +520,8 @@ def test_resize_non_pty_warns_once_and_does_not_write_stdin(monkeypatch, caplog)
     assert proc.stdin.closed is False
     # Exactly one info-level resize notice (one-shot guard).
     resize_msgs = [
-        r for r in caplog.records
+        r
+        for r in caplog.records
         if r.levelno == logging.INFO and "resize" in r.getMessage().lower()
     ]
     assert len(resize_msgs) == 1
