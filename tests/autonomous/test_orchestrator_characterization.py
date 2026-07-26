@@ -441,3 +441,125 @@ class TestPhaseResultContract:
         )
         assert ctx.cancellation is ev
         assert ctx.workflow["current_phase"] == "planning"
+
+
+# ── 8. _commit_phase_result: the unified commit entrypoint (step 3) ─────────
+
+
+class TestCommitPhaseResult:
+    """The single authoritative path for phase/status transition (step 3).
+
+    These pin the #2044 acceptance criteria:
+      test_phase_result_is_only_phase_status_transition_path
+      test_phase_failure_does_not_partially_commit_next_phase
+    by driving the entrypoint directly with crafted PhaseResult values."""
+
+    def test_completed_advances_phase_and_derives_status(self):
+        o = _make_orchestrator(_active_workflow(phase="planning"))
+        o._commit_phase_result(PhaseResult.completed("development"))
+        # update_workflow(workflow_id, updates): last call carries the transition.
+        last_updates = o.repo.update_workflow.call_args_list[-1].args[1]
+        assert last_updates["current_phase"] == "development"
+        # next_status was None → derived from PHASE_STATUS_MAP.
+        assert last_updates["status"] == PHASE_STATUS_MAP["development"]
+
+    def test_completed_merges_workflow_patch_into_same_write(self):
+        o = _make_orchestrator(_active_workflow(phase="planning"))
+        o._commit_phase_result(
+            PhaseResult.completed("development", workflow_patch={"dev_round": 2})
+        )
+        last_updates = o.repo.update_workflow.call_args_list[-1].args[1]
+        assert last_updates["dev_round"] == 2
+        assert last_updates["current_phase"] == "development"
+
+    def test_failed_does_not_advance_phase(self):
+        # The core anti-regression: a failing phase must NOT write the next
+        # phase. Only status=failed (+ error_message) is committed.
+        o = _make_orchestrator(_active_workflow(phase="development"))
+        o._commit_phase_result(PhaseResult.failed(structured_error={"message": "conflict"}))
+        last_updates = o.repo.update_workflow.call_args_list[-1].args[1]
+        assert "current_phase" not in last_updates
+        assert last_updates["status"] == "failed"
+        assert last_updates["error_message"] == "conflict"
+
+    def test_pause_does_not_advance_phase_and_sets_paused_at(self):
+        o = _make_orchestrator(_active_workflow(phase="planning"))
+        o._commit_phase_result(PhaseResult.pause())
+        last_updates = o.repo.update_workflow.call_args_list[-1].args[1]
+        assert "current_phase" not in last_updates
+        assert last_updates["status"] == "paused"
+        assert "paused_at" in last_updates
+
+    def test_wait_sets_waiting_without_advancing(self):
+        o = _make_orchestrator(_active_workflow(phase="report"))
+        o._commit_phase_result(PhaseResult.wait())
+        last_updates = o.repo.update_workflow.call_args_list[-1].args[1]
+        assert "current_phase" not in last_updates
+        assert last_updates["status"] == "waiting"
+
+    def test_retry_writes_only_the_patch(self):
+        # retry leaves phase/status untouched; only explicit patch fields apply.
+        o = _make_orchestrator(_active_workflow(phase="planning"))
+        o._commit_phase_result(PhaseResult.retry(workflow_patch={"transient_retry_count": 1}))
+        last_updates = o.repo.update_workflow.call_args_list[-1].args[1]
+        assert last_updates == {"transient_retry_count": 1}
+
+    def test_completed_without_next_phase_is_rejected(self):
+        # A handler that claims success but names no next phase is a bug; the
+        # entrypoint fails loudly rather than stranding the workflow.
+        o = _make_orchestrator(_active_workflow())
+        with pytest.raises(ValueError, match="requires next_phase"):
+            o._commit_phase_result(PhaseResult.completed(None))
+
+    def test_completed_with_unknown_next_phase_is_rejected(self):
+        o = _make_orchestrator(_active_workflow())
+        with pytest.raises(ValueError, match="not in PHASE_ORDER"):
+            o._commit_phase_result(PhaseResult.completed("nope"))
+
+    def test_completed_terminal_status_signal(self):
+        # next_phase="completed" is the terminal signal → status=completed.
+        o = _make_orchestrator(_active_workflow(phase="merge"))
+        o._commit_phase_result(PhaseResult.completed("completed"))
+        last_updates = o.repo.update_workflow.call_args_list[-1].args[1]
+        assert last_updates["status"] == "completed"
+
+    def test_milestones_committed_after_workflow_patch(self):
+        # Milestones flow through _create_milestone (idempotent) and are applied
+        # after the phase/status patch so timeline observers see the advance.
+        o = _make_orchestrator(_active_workflow(phase="planning"))
+        # _create_milestone emits an event that JSON-serializes the returned
+        # milestone, so the mocks must return plain values (not MagicMocks):
+        # idempotency check finds nothing → create path → returns a dict.
+        o._find_existing_milestone = MagicMock(return_value=None)
+        o.repo.create_milestone.return_value = {"milestone_id": "ms-1"}
+        ms_kwargs = {"phase": "planning", "milestone_type": "plan_finalized"}
+        o._commit_phase_result(PhaseResult.completed("development", milestone_events=[ms_kwargs]))
+        o.repo.create_milestone.assert_called_once()
+        # The workflow write happened before the milestone write.
+        assert o.repo.update_workflow.called
+
+    def test_advance_routes_phase_result_through_commit_entrypoint(self):
+        # End-to-end of the adapter: a migrated phase returns a PhaseResult and
+        # advance() commits it via _commit_phase_result (not inline writes).
+        o = _make_orchestrator(_active_workflow(phase="report"))
+        o._ensure_worktree = MagicMock()
+        o._get_gh = MagicMock()
+        o._reconcile_worktree_transition = MagicMock()
+        committed: dict = {}
+
+        def fake_report(wf):
+            # A migrated phase: no inline _update_workflow; just return a result.
+            return PhaseResult.completed("wait", workflow_patch={"current_round": 0})
+
+        o._do_report = fake_report
+        original_commit = o._commit_phase_result
+
+        def spy(result):
+            committed["result"] = result
+            original_commit(result)
+
+        o._commit_phase_result = spy
+        o.advance()
+
+        assert committed["result"].outcome == "completed"
+        assert committed["result"].next_phase == "wait"
