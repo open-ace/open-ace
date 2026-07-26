@@ -29,6 +29,10 @@ from typing import Any, cast
 
 from app.modules.workspace.autonomous.artifact_text import pick_best_artifact_text
 from app.modules.workspace.autonomous.models import AgentTaskResult
+from app.modules.workspace.autonomous.task_isolation import (
+    DEFAULT_TASK_ROOT,
+    ensure_task_runtime_dirs,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -736,6 +740,74 @@ class AutonomousAgentRunner:
         """Whether this task should resolve to the real sidebar Claude session."""
         return workspace_type == "local" and cli_tool == "claude-code"
 
+    # Issue #2020: structured error codes for resource/isolation failures.
+    # The launcher emits distinct exit codes + stderr sentinels; these classify
+    # them so the orchestrator sees a structured reason, not an opaque exit.
+    TASK_WALL_CLOCK_TIMEOUT_ERROR_CODE = "task_wall_clock_timeout"
+
+    @staticmethod
+    def _resource_policy_configured() -> bool:
+        """Whether agent-launcher.conf sets a non-zero memory/pids/cpu limit.
+
+        Used to gate signal-kill classification: ``task_resource_limit_exceeded``
+        should mean a configured limit was actually hit, not an unrelated kill.
+        """
+        try:
+            from app.modules.workspace.autonomous.task_isolation import read_agent_task_policy
+
+            conf = os.environ.get("OPENACE_LAUNCHER_CONF", "/etc/openace/agent-launcher.conf")
+            policy = read_agent_task_policy(conf)
+        except Exception:
+            return False
+        return bool(policy.memory_max_bytes or policy.pids_max or policy.cpu_max)
+
+    @staticmethod
+    def _classify_isolated_exit_code(
+        return_code: int | None,
+        stderr: str = "",
+        *,
+        orchestrator_initiated: bool = False,
+        resource_policy_configured: bool = False,
+    ) -> tuple[str | None, str | None]:
+        """Map an isolated-launcher child exit to a structured error code.
+
+        Returns ``(error_code, message)`` where both may be ``None`` for a
+        clean or generic non-isolation failure. Recognized cases:
+
+        * ``OPENACE_CGROUP_REQUIRED`` stderr sentinel → resource policy
+          unavailable (cgroup forced on but unwritable). Matched by sentinel
+          only — exit 66 is overloaded in the launcher for unrelated
+          pre-flight failures (validator/flock/base64/reject_conf).
+        * exit 68 / ``OPENACE_REPO_INTEGRITY_VIOLATION`` → .git tamper.
+        * a resource-limit breach: only when the orchestrator did NOT
+          initiate the kill, a resource policy is configured, and the kernel
+          killed the process with an exhaustion signal (SIGKILL/SIGXCPU).
+          Python ``subprocess.Popen.returncode`` encodes signal deaths as
+          negative values (-signum); SIGTERM(-15)/SIGINT(-2) are the
+          orchestrator's own stop/timeout signals and are never a resource
+          breach, so timeouts/stops are never misreported here.
+        """
+        lowered = (stderr or "").lower()
+        if "openace_cgroup_required" in lowered:
+            return (
+                "task_resource_policy_unavailable",
+                "Task resource policy could not be enforced (cgroup unavailable)",
+            )
+        if return_code == 68 or "openace_repo_integrity_violation" in lowered:
+            return ("repo_integrity_violation", None)
+        if (
+            not orchestrator_initiated
+            and resource_policy_configured
+            and return_code is not None
+            and return_code < 0
+            and -return_code in (signal.SIGKILL, signal.SIGXCPU)
+        ):
+            return (
+                "task_resource_limit_exceeded",
+                "Agent process killed by signal (possible resource-limit breach)",
+            )
+        return (None, None)
+
     @staticmethod
     def _classify_sidebar_start_failure(
         return_code: int | None,
@@ -1031,6 +1103,7 @@ class AutonomousAgentRunner:
         project_path: str,
         system_account: str | None,
         env: dict[str, str] | None = None,
+        task_id: str | None = None,
     ) -> tuple[list[str], str | None]:
         """Wrap an agent CLI command for cross-user launch (Issue #1395).
 
@@ -1079,13 +1152,21 @@ class AutonomousAgentRunner:
                 if env and env.get(key):
                     guard_env.append(f"{key}={env[key]}")
             guarded_cmd = ["/usr/bin/env", *guard_env, *cmd] if guard_env else cmd
+            # Issue #2020: pass a sanitized per-attempt task_id so the launcher
+            # can key HOME/TMP/XDG/flock/cgroup off the attempt rather than the
+            # shared Agent UID. Omitted for legacy callers without a task_id.
+            launcher_opts: list[str] = ["--isolated"]
+            if task_id:
+                from app.modules.workspace.autonomous.task_isolation import sanitize_task_id
+
+                launcher_opts += ["--task-id", sanitize_task_id(task_id)]
             wrapped = [
                 "sudo",
                 "-n",
                 "-u",
                 "root",
                 _OPENACE_RUN_AS,
-                "--isolated",
+                *launcher_opts,
                 system_account,
                 project_path,
                 *guarded_cmd,
@@ -1160,6 +1241,7 @@ class AutonomousAgentRunner:
         session_id: str,
         model: str,
         runtime_python_command: list[str] | None = None,
+        task_id: str | None = None,
     ) -> dict[str, str]:
         """Build subprocess env with LLM proxy auth for a local agent.
 
@@ -1201,6 +1283,29 @@ class AutonomousAgentRunner:
         env["GH_CONFIG_DIR"] = "/var/empty/openace-autonomous-gh"
         env["GIT_TERMINAL_PROMPT"] = "0"
         env["PATH"] = guard_bin + os.pathsep + env.get("PATH", "")
+
+        # Issue #2020 Phase A: per-attempt HOME/TMP/XDG runtime tree keyed by
+        # task_id, so concurrent attempts on the same Agent UID never share
+        # HOME/TMP/cache. The cross-user launcher re-derives the same paths
+        # from ``--task-id`` (its env -i overrides these); on the same-user
+        # path these env vars are authoritative. OPENACE_GIT_CACHE_ROOT
+        # (pre-commit baseline cache) is relocated to the per-task cache dir
+        # for full isolation (decision: 2026-07-26). When task_id is absent
+        # (legacy callers) the shared defaults above stand.
+        if task_id:
+            task_root = os.environ.get("OPENACE_AGENT_TASK_ROOT", DEFAULT_TASK_ROOT)
+            # Create the tree when the root is writable (same-user/dev path,
+            # where the launcher is not invoked). On the cross-user path the
+            # root launcher creates it under root-owned /run; this returns None
+            # there and we leave HOME untouched so the launcher sets it.
+            task_dirs = ensure_task_runtime_dirs(task_id, task_root)
+            if task_dirs is not None:
+                env["HOME"] = task_dirs["home"]
+                env["TMPDIR"] = task_dirs["tmp"]
+                env["XDG_CACHE_HOME"] = task_dirs["cache"]
+                env["XDG_CONFIG_HOME"] = task_dirs["config"]
+                env["XDG_DATA_HOME"] = task_dirs["data"]
+                env["OPENACE_GIT_CACHE_ROOT"] = str(Path(task_dirs["cache"]) / "pre-commit")
 
         # Issue #2019: scrub every raw credential (provider/GitHub/SSH/cloud +
         # dynamic custom envKeys) BEFORE injecting the proxy token, and fail
@@ -2009,10 +2114,18 @@ class AutonomousAgentRunner:
         # Open ACE (short-lived proxy token, never the raw API key).
         env = (
             self._build_agent_env(
-                adapter, cli_tool, user_id, session_id, model, runtime_python_command
+                adapter,
+                cli_tool,
+                user_id,
+                session_id,
+                model,
+                runtime_python_command,
+                task_id=session_id,
             )
             if runtime_python_command
-            else self._build_agent_env(adapter, cli_tool, user_id, session_id, model)
+            else self._build_agent_env(
+                adapter, cli_tool, user_id, session_id, model, task_id=session_id
+            )
         )
 
         # Build command
@@ -2055,9 +2168,9 @@ class AutonomousAgentRunner:
         # system_account (claude-code/qwen-code infer project root from cwd
         # and have no --cwd flag). Same-user runs verbatim with cwd=project.
         cmd, cwd = (
-            self._wrap_agent_cmd(cmd, project_path, system_account, env)
+            self._wrap_agent_cmd(cmd, project_path, system_account, env, task_id=session_id)
             if self._is_cross_user(system_account)
-            else self._wrap_agent_cmd(cmd, project_path, system_account)
+            else self._wrap_agent_cmd(cmd, project_path, system_account, task_id=session_id)
         )
 
         logger.info("Launching local agent: %s", " ".join(cmd))
@@ -2167,9 +2280,24 @@ class AutonomousAgentRunner:
 
         if session._stderr_thread:
             session._stderr_thread.join(timeout=1)
-        if process.returncode == 68 or "OPENACE_REPO_INTEGRITY_VIOLATION" in session.last_stderr:
-            session.error_code = "repo_integrity_violation"
-            session.error = "Protected .git entry changed during autonomous agent execution"
+        # Issue #2020: classify isolated-launcher exits (repo integrity,
+        # resource-policy unavailable, signal-killed) into a structured code.
+        if not session.error_code:
+            # orchestrator_initiated: a timeout (`not completed`) or an
+            # explicit stop (`session._stopped`) means WE killed it — never a
+            # resource breach, so the wall-clock/stop code below is preserved.
+            cls_code, cls_msg = self._classify_isolated_exit_code(
+                process.returncode,
+                session.last_stderr,
+                orchestrator_initiated=(not completed) or session._stopped.is_set(),
+                resource_policy_configured=self._resource_policy_configured(),
+            )
+            if cls_code:
+                session.error_code = cls_code
+                if cls_code == "repo_integrity_violation":
+                    session.error = "Protected .git entry changed during autonomous agent execution"
+                elif cls_msg:
+                    session.error = cls_msg
 
         if (
             completed
@@ -2234,7 +2362,8 @@ class AutonomousAgentRunner:
                 tool_calls=session.tool_calls,
                 success=False,
                 error=f"Agent task timed out after {timeout}s",
-                error_code=session.error_code,
+                error_code=session.error_code
+                or AutonomousAgentRunner.TASK_WALL_CLOCK_TIMEOUT_ERROR_CODE,
             )
 
         return _build_agent_task_result(
@@ -2324,10 +2453,18 @@ class AutonomousAgentRunner:
 
         env = (
             self._build_agent_env(
-                adapter, cli_tool, user_id, session_id, model, runtime_python_command
+                adapter,
+                cli_tool,
+                user_id,
+                session_id,
+                model,
+                runtime_python_command,
+                task_id=session_id,
             )
             if runtime_python_command
-            else self._build_agent_env(adapter, cli_tool, user_id, session_id, model)
+            else self._build_agent_env(
+                adapter, cli_tool, user_id, session_id, model, task_id=session_id
+            )
         )
         # Resolve the ZCode session mode. The --mode CLI flag is ignored by
         # app-server (verified: sessions always start in "build" mode regardless
@@ -2348,9 +2485,9 @@ class AutonomousAgentRunner:
         )
         # Cross-user launch via run-as wrapper (zcode needs cwd=project too).
         cmd, cwd = (
-            self._wrap_agent_cmd(cmd, project_path, system_account, env)
+            self._wrap_agent_cmd(cmd, project_path, system_account, env, task_id=session_id)
             if self._is_cross_user(system_account)
-            else self._wrap_agent_cmd(cmd, project_path, system_account)
+            else self._wrap_agent_cmd(cmd, project_path, system_account, task_id=session_id)
         )
 
         logger.info("Launching ZCode app-server (mode=%s): %s", zcode_mode, " ".join(cmd))
@@ -2516,6 +2653,7 @@ class AutonomousAgentRunner:
                 tool_calls=collector.tool_calls,
                 success=False,
                 error=f"Agent task timed out after {timeout}s",
+                error_code=AutonomousAgentRunner.TASK_WALL_CLOCK_TIMEOUT_ERROR_CODE,
             )
 
         return _build_agent_task_result(
@@ -2753,18 +2891,26 @@ class AutonomousAgentRunner:
         cmd = [executable] + (args[1:] if len(args) > 1 and args[0] == exe_name else args)
         env = (
             self._build_agent_env(
-                adapter, cli_tool, user_id, session_id, model, runtime_python_command
+                adapter,
+                cli_tool,
+                user_id,
+                session_id,
+                model,
+                runtime_python_command,
+                task_id=session_id,
             )
             if runtime_python_command
-            else self._build_agent_env(adapter, cli_tool, user_id, session_id, model)
+            else self._build_agent_env(
+                adapter, cli_tool, user_id, session_id, model, task_id=session_id
+            )
         )
 
         # Cross-user launch via run-as wrapper (single-shot CLIs also need
         # cwd=project; openclaw documents it relies on the caller's cwd).
         cmd, cwd = (
-            self._wrap_agent_cmd(cmd, project_path, system_account, env)
+            self._wrap_agent_cmd(cmd, project_path, system_account, env, task_id=session_id)
             if self._is_cross_user(system_account)
-            else self._wrap_agent_cmd(cmd, project_path, system_account)
+            else self._wrap_agent_cmd(cmd, project_path, system_account, task_id=session_id)
         )
 
         logger.info("Launching single-shot agent (%s): %s", cli_tool, " ".join(cmd))
@@ -2814,6 +2960,7 @@ class AutonomousAgentRunner:
                 tool_calls=tool_calls,
                 success=False,
                 error=f"Agent task timed out after {timeout}s",
+                error_code=AutonomousAgentRunner.TASK_WALL_CLOCK_TIMEOUT_ERROR_CODE,
             )
         except (OSError, subprocess.SubprocessError) as e:
             return AgentTaskResult(
@@ -2834,9 +2981,21 @@ class AutonomousAgentRunner:
         error_code = None
         if not success:
             error = stderr_text or f"Command exited with code {proc.returncode}"
-            if proc.returncode == 68 or "OPENACE_REPO_INTEGRITY_VIOLATION" in stderr_text:
-                error_code = "repo_integrity_violation"
-                error = "Protected .git entry changed during autonomous agent execution"
+            # Issue #2020: structured classification of isolated-launcher exits.
+            # Single-shot runs synchronously; its timeout is handled by the
+            # subprocess.run(timeout=...) branch above, so a signal death here
+            # was not orchestrator-initiated.
+            cls_code, cls_msg = self._classify_isolated_exit_code(
+                proc.returncode,
+                stderr_text,
+                resource_policy_configured=self._resource_policy_configured(),
+            )
+            if cls_code:
+                error_code = cls_code
+                if cls_code == "repo_integrity_violation":
+                    error = "Protected .git entry changed during autonomous agent execution"
+                elif cls_msg:
+                    error = cls_msg
 
         return _build_agent_task_result(
             session_id=session_id,

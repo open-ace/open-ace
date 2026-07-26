@@ -27,6 +27,24 @@ logger = logging.getLogger(__name__)
 # Maximum concurrent workflow executions
 MAX_CONCURRENT_WORKFLOWS = 3
 
+# Issue #2020: the concurrency cap is configurable via the same
+# agent-launcher.conf the launcher reads. The constant above is the default
+# when the conf is absent or the key is missing/invalid.
+_AGENT_LAUNCHER_CONF = os.environ.get("OPENACE_LAUNCHER_CONF", "/etc/openace/agent-launcher.conf")
+
+
+def get_max_concurrent_workflows() -> int:
+    """Resolve the concurrency cap from agent-launcher.conf (default 3)."""
+    try:
+        from app.modules.workspace.autonomous.task_isolation import read_agent_task_policy
+
+        return read_agent_task_policy(
+            _AGENT_LAUNCHER_CONF, concurrency_default=MAX_CONCURRENT_WORKFLOWS
+        ).max_concurrent_workflows
+    except Exception:
+        return MAX_CONCURRENT_WORKFLOWS
+
+
 # Active workflow statuses for user concurrent limit check.
 # Includes 'waiting' because waiting workflows still occupy user's active slots.
 ACTIVE_WORKFLOW_STATUSES = {
@@ -680,7 +698,7 @@ class AutonomousScheduler:
         # multiple newly auto-resumed siblings from one batch (or workflows
         # sharing a worktree/branch) can all enter ``to_process`` together.
         with self._in_progress_lock:
-            slots_available = MAX_CONCURRENT_WORKFLOWS - len(self._in_progress_ids)
+            slots_available = get_max_concurrent_workflows() - len(self._in_progress_ids)
             selected_batches: set[str] = set()
             selected_workspaces: set[str] = set()
             selected_branches: set[str] = set()
@@ -726,7 +744,7 @@ class AutonomousScheduler:
                     self._in_progress_branches.add(branch)
 
         with ThreadPoolExecutor(
-            max_workers=min(MAX_CONCURRENT_WORKFLOWS, len(to_process)),
+            max_workers=min(get_max_concurrent_workflows(), len(to_process)),
             thread_name_prefix="auto-wf",
         ) as executor:
             futures = {
