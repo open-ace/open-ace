@@ -2152,3 +2152,69 @@ def test_text_pass_evidence_fallback_when_tool_result_missing():
     # Should advance to pr_review (tests considered as run), NOT be inconclusive
     assert any(update.get("status") == "pr_review" for update in updates)
     assert not any(update.get("test_retries") == 1 for update in updates)
+
+
+def test_review_fix_commits_dirty_worktree_instead_of_refusing():
+    """#1828/#1830: when the worktree is dirty before a review-fix agent run
+    (e.g. a previous dev/CI-repair round left formatting edits uncommitted),
+    the orchestrator should commit those pre-existing changes and proceed,
+    not refuse and leave the workflow in a dead-end."""
+    from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+    orch = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
+    orch._workflow_id = "wf-dirty-guard"
+    orch.repo = MagicMock()
+    orch.emitter = MagicMock()
+    orch._create_milestone = MagicMock(return_value={"milestone_id": "ms-fix"})
+    orch._accumulate_tokens = MagicMock()
+    orch._abort_on_repo_integrity_violation = MagicMock(return_value=False)
+    orch._is_context_overflow = MagicMock(return_value=False)
+    orch._artifact_text = MagicMock(return_value="fixed")
+    orch._clean_agent_text = MagicMock(return_value="review feedback")
+    orch._validate_autonomous_change_scope = MagicMock(return_value="")
+    orch._post_github_comment = MagicMock()
+    orch._run_agent_with_context_recovery = MagicMock(
+        return_value=AgentTaskResult(
+            success=True,
+            response_text="Applied review fixes.",
+        )
+    )
+
+    gh = MagicMock()
+    gh.has_uncommitted_changes.side_effect = [True, False, False]
+    gh.git_add_all = MagicMock()
+    gh.git_commit = MagicMock()
+    gh.get_current_commit.side_effect = [
+        "commit-before",
+        "commit-after-stage",
+        "commit-after-stage",
+        "commit-after-fix",
+    ]
+    gh.get_changed_files.return_value = ["app/foo.py"]
+    gh.get_diff_stats.return_value = {"files": 1, "insertions": 5, "deletions": 2}
+    gh.get_commit_diff_stats.return_value = {"files": 1, "insertions": 5, "deletions": 2}
+    gh.git_push = MagicMock()
+
+    wf = {
+        "workflow_id": "wf-dirty-guard",
+        "worktree_path": "/tmp/repo",
+        "project_path": "/tmp/repo",
+        "cli_tool": "claude-code",
+        "dev_round": 1,
+        "branch_name": "auto-dev/wf-dirty-guard",
+    }
+
+    orch._apply_pr_review_fix(wf, gh, 1, 1, "looks good", [], 1234)
+
+    # Key assertion: pre-existing dirty changes were committed, NOT refused
+    gh.git_add_all.assert_called()
+    gh.git_commit.assert_called()
+    # Must NOT have failed with the old "worktree already had uncommitted
+    # changes" refusal message
+    failed_updates = [
+        call.args[0]
+        for call in orch.repo.update_workflow.call_args_list
+        if call.args[0].get("status") == "failed"
+    ]
+    for update in failed_updates:
+        assert "worktree already had uncommitted changes" not in update.get("error_message", "")

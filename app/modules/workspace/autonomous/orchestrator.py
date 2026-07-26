@@ -5100,7 +5100,7 @@ class AutonomousOrchestrator:
                         "skip_retries": skip_retries,
                         "dev_retries_on_test_fail": dev_retries,
                         "status": "paused",
-                        "paused_at": datetime.now(timezone.utc),
+                        "paused_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
                     }
                 )
                 logger.info(
@@ -8001,16 +8001,28 @@ class AutonomousOrchestrator:
             )
 
         # A review-fix call can only attribute and auto-stage changes safely
-        # when it starts from a clean tree. Never let an unrelated test/manual
-        # edit hitchhike on a successful recovery or a no-op agent response.
+        # when it starts from a clean tree. If the worktree is dirty (e.g. a
+        # previous dev/CI-repair round left formatting edits uncommitted), commit
+        # those pre-existing changes first so the fix agent starts from a clean
+        # tree. Refusing to proceed creates a dead-end: retrying hits the same
+        # dirty worktree (#1828/#1830).
         try:
             dirty_before = gh.has_uncommitted_changes()
         except Exception as exc:
             return fail_fix(f"Unable to verify clean worktree before PR review fix: {exc}")
         if dirty_before is True:
-            return fail_fix(
-                "PR review fix refused: worktree already had uncommitted changes before agent run"
-            )
+            try:
+                gh.git_add_all()
+                gh.git_commit("auto: stage pre-existing worktree changes before review fix")
+                logger.warning(
+                    "Workflow %s: worktree was dirty before review fix; "
+                    "committed pre-existing changes before running fix agent",
+                    self._workflow_id[:8],
+                )
+            except Exception as exc:
+                return fail_fix(
+                    f"Worktree was dirty and auto-staging pre-existing changes failed: {exc}"
+                )
 
         commit_before = ""
         try:
