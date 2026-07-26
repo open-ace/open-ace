@@ -91,19 +91,23 @@ def _normalize_cgroup_enabled(raw: str) -> str:
     return "auto"
 
 
-def read_agent_task_policy(conf_path: str) -> AgentTaskPolicy:
+def read_agent_task_policy(conf_path: str, *, concurrency_default: int = 3) -> AgentTaskPolicy:
     """Parse the agent-launcher.conf keys into an :class:`AgentTaskPolicy`.
 
     Missing or unreadable file → all defaults. Malformed integer values fall
     back to the default for that field. The format is simple ``key=value``
     lines (one per line); comments start with ``#`` and blank lines are
     ignored. Values are whitespace-trimmed and surrounding quotes removed.
+
+    ``concurrency_default`` is the value used when the conf does not set
+    ``agent_max_concurrent_workflows``; the scheduler passes its own
+    (monkeypatchable) module constant so tests that tweak the cap still work.
     """
-    fields: dict[str, object] = {}
+    fields: dict[str, object] = {"max_concurrent_workflows": concurrency_default}
     try:
         text = Path(conf_path).read_text(encoding="utf-8")
     except OSError:
-        return AgentTaskPolicy()
+        return AgentTaskPolicy(**fields)  # type: ignore[arg-type]
 
     for line in text.splitlines():
         line = line.strip()
@@ -125,7 +129,9 @@ def read_agent_task_policy(conf_path: str) -> AgentTaskPolicy:
         elif key == "agent_task_cpu_max":
             fields["cpu_max"] = value
         elif key == "agent_max_concurrent_workflows":
-            fields["max_concurrent_workflows"] = max(1, _parse_int_or_default(value, 3))
+            fields["max_concurrent_workflows"] = max(
+                1, _parse_int_or_default(value, concurrency_default)
+            )
 
     return AgentTaskPolicy(**fields)  # type: ignore[arg-type]
 

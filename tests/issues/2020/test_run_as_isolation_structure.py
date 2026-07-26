@@ -45,10 +45,13 @@ def test_launcher_keys_registries_off_isolation_key():
 
 def test_launcher_has_task_scoped_kill():
     src = _src()
-    # cgroup v2 kill (preferred) and/or the child process group (fallback).
+    # cgroup v2 kill is the precise task-scoped mechanism; the recorded child
+    # is also signaled directly as defense-in-depth. The child is NOT placed in
+    # its own session (no setsid) so the orchestrator's os.killpg(<sudo_pid>)
+    # still reaches the agent tree.
     assert "cgroup.kill" in src
-    # child pgid kill via a negative pid
-    assert 'kill -KILL -- "-${' in src or 'kill -KILL -- "-${' in src
+    assert 'kill -KILL "${agent_child_pid}"' in src
+    assert "setsid" not in src
 
 
 def test_launcher_sets_per_task_home_tmp_xdg():

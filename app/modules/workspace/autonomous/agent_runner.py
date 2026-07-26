@@ -737,6 +737,42 @@ class AutonomousAgentRunner:
         """Whether this task should resolve to the real sidebar Claude session."""
         return workspace_type == "local" and cli_tool == "claude-code"
 
+    # Issue #2020: structured error codes for resource/isolation failures.
+    # The launcher emits distinct exit codes + stderr sentinels; these classify
+    # them so the orchestrator sees a structured reason, not an opaque exit.
+    TASK_WALL_CLOCK_TIMEOUT_ERROR_CODE = "task_wall_clock_timeout"
+
+    @staticmethod
+    def _classify_isolated_exit_code(
+        return_code: int | None, stderr: str = ""
+    ) -> tuple[str | None, str | None]:
+        """Map an isolated-launcher child exit to a structured error code.
+
+        Returns ``(error_code, message)`` where both may be ``None`` for a clean
+        or generic non-isolation failure. Recognized cases:
+
+        * exit 66 + ``OPENACE_CGROUP_REQUIRED`` → resource policy unavailable
+          (cgroup forced on but unwritable).
+        * exit 68 + ``OPENACE_REPO_INTEGRITY_VIOLATION`` → .git tamper.
+        * exit >= 128 (killed by signal, e.g. cgroup OOM / SIGXCPU / prlimit)
+          → resource-limit exceeded (best-effort; the launcher cannot always
+          distinguish OOM from an external SIGKILL).
+        """
+        lowered = (stderr or "").lower()
+        if return_code == 66 or "openace_cgroup_required" in lowered:
+            return (
+                "task_resource_policy_unavailable",
+                "Task resource policy could not be enforced (cgroup unavailable)",
+            )
+        if return_code == 68 or "openace_repo_integrity_violation" in lowered:
+            return ("repo_integrity_violation", None)
+        if return_code is not None and return_code >= 128:
+            return (
+                "task_resource_limit_exceeded",
+                "Agent process killed by signal (possible resource-limit breach)",
+            )
+        return (None, None)
+
     @staticmethod
     def _classify_sidebar_start_failure(
         return_code: int | None,
@@ -2204,9 +2240,18 @@ class AutonomousAgentRunner:
 
         if session._stderr_thread:
             session._stderr_thread.join(timeout=1)
-        if process.returncode == 68 or "OPENACE_REPO_INTEGRITY_VIOLATION" in session.last_stderr:
-            session.error_code = "repo_integrity_violation"
-            session.error = "Protected .git entry changed during autonomous agent execution"
+        # Issue #2020: classify isolated-launcher exits (repo integrity,
+        # resource-policy unavailable, signal-killed) into a structured code.
+        if not session.error_code:
+            cls_code, cls_msg = self._classify_isolated_exit_code(
+                process.returncode, session.last_stderr
+            )
+            if cls_code:
+                session.error_code = cls_code
+                if cls_code == "repo_integrity_violation":
+                    session.error = "Protected .git entry changed during autonomous agent execution"
+                elif cls_msg:
+                    session.error = cls_msg
 
         if (
             completed
@@ -2271,7 +2316,8 @@ class AutonomousAgentRunner:
                 tool_calls=session.tool_calls,
                 success=False,
                 error=f"Agent task timed out after {timeout}s",
-                error_code=session.error_code,
+                error_code=session.error_code
+                or AutonomousAgentRunner.TASK_WALL_CLOCK_TIMEOUT_ERROR_CODE,
             )
 
         return _build_agent_task_result(
@@ -2561,6 +2607,7 @@ class AutonomousAgentRunner:
                 tool_calls=collector.tool_calls,
                 success=False,
                 error=f"Agent task timed out after {timeout}s",
+                error_code=AutonomousAgentRunner.TASK_WALL_CLOCK_TIMEOUT_ERROR_CODE,
             )
 
         return _build_agent_task_result(
@@ -2867,6 +2914,7 @@ class AutonomousAgentRunner:
                 tool_calls=tool_calls,
                 success=False,
                 error=f"Agent task timed out after {timeout}s",
+                error_code=AutonomousAgentRunner.TASK_WALL_CLOCK_TIMEOUT_ERROR_CODE,
             )
         except (OSError, subprocess.SubprocessError) as e:
             return AgentTaskResult(
@@ -2887,9 +2935,14 @@ class AutonomousAgentRunner:
         error_code = None
         if not success:
             error = stderr_text or f"Command exited with code {proc.returncode}"
-            if proc.returncode == 68 or "OPENACE_REPO_INTEGRITY_VIOLATION" in stderr_text:
-                error_code = "repo_integrity_violation"
-                error = "Protected .git entry changed during autonomous agent execution"
+            # Issue #2020: structured classification of isolated-launcher exits.
+            cls_code, cls_msg = self._classify_isolated_exit_code(proc.returncode, stderr_text)
+            if cls_code:
+                error_code = cls_code
+                if cls_code == "repo_integrity_violation":
+                    error = "Protected .git entry changed during autonomous agent execution"
+                elif cls_msg:
+                    error = cls_msg
 
         return _build_agent_task_result(
             session_id=session_id,

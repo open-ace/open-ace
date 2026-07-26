@@ -395,14 +395,15 @@ if [ "$isolated" = true ]; then
     cleanup_isolated() {
         # Issue #2020: kill exactly THIS attempt's processes. Never pkill by
         # UID — that would reap other concurrent attempts sharing the Agent
-        # account. Prefer the task cgroup (kills every descendant regardless of
-        # session); fall back to the child's own process group (each attempt is
-        # launched via setsid, so its pid is its pgid).
+        # account. Prefer the task cgroup (kills every cgroup member and their
+        # descendants); as defense-in-depth also signal the recorded child.
+        # The orchestrator's os.killpg(<sudo_pid>) handles the no-cgroup case
+        # because the child remains in the launcher's process group.
         if [ -n "$task_cgroup" ] && [ -w "$task_cgroup/cgroup.kill" ]; then
             echo 1 > "$task_cgroup/cgroup.kill" 2>/dev/null || true
         fi
         if [ -n "${agent_child_pid:-}" ] && kill -0 "${agent_child_pid}" 2>/dev/null; then
-            kill -KILL -- "-${agent_child_pid}" 2>/dev/null || true
+            kill -KILL "${agent_child_pid}" 2>/dev/null || true
         fi
         if [ -f "$acl_registry" ]; then
             while IFS= read -r protected_path; do
@@ -549,10 +550,11 @@ if [ "$isolated" = true ]; then
         "GIT_CONFIG_VALUE_0=$project_dir"
     )
     set +e
-    # setsid makes the child its own session/process-group leader (pgid == pid)
-    # so cleanup can target exactly this attempt via ``kill -- -<pid>`` even when
-    # a task cgroup is unavailable.
-    setsid /usr/sbin/runuser -u "$target_user" -- /usr/bin/env -i \
+    # The child stays in this launcher's process group (= the sudo session the
+    # Python side created via start_new_session=True), so the orchestrator's
+    # ``os.killpg(<sudo_pid>)`` reaches the whole agent tree directly. A task
+    # cgroup (when available) gives the launcher a precise cgroup.kill on top.
+    /usr/sbin/runuser -u "$target_user" -- /usr/bin/env -i \
         "${env_args[@]}" "$@" <&0 9>&- &
     agent_child_pid=$!
     if [ -n "$task_cgroup" ]; then
