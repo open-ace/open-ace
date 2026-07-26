@@ -1,7 +1,7 @@
 """Add webhook delivery-state tracking table
 
 Revision ID: 20260725_001_add_webhook_deliveries
-Revises: 20260726_001_add_worktree_transition_journal
+Revises: 20260726_002_add_command_execution_evidence
 Create Date: 2026-07-25
 
 Issue: #1831
@@ -16,7 +16,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "20260725_001_add_webhook_deliveries"
-down_revision: str | None = "20260726_001_add_worktree_transition_journal"
+down_revision: str | None = "20260726_002_add_command_execution_evidence"
 branch_labels: str | None = None
 depends_on: str | None = None
 
