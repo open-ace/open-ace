@@ -110,11 +110,32 @@ class GitHubOpsError(Exception):
     pass
 
 
+def _assert_path_contained(child: str, parent: str, *, label: str) -> None:
+    """Reject ``/repo`` vs ``/repo-evil`` prefix confusion via commonpath().
+
+    Canonicalizes both paths with ``os.path.realpath`` (resolving symlinks
+    and ``.``/``..``) before comparing, so ``/repo-evil/x`` is correctly
+    rejected as not under ``/repo`` even though it is a string prefix.
+    Raises ``GitHubOpsError`` if ``child`` escapes ``parent`` or if the
+    comparison cannot be made (different drives on Windows).
+    """
+    if not child or not parent:
+        raise GitHubOpsError(f"{label} containment check failed: empty path")
+    c_child = os.path.realpath(child)
+    c_parent = os.path.realpath(parent)
+    if not c_child or not c_parent:
+        raise GitHubOpsError(f"{label} containment check failed: empty path")
+    try:
+        if os.path.commonpath((c_child, c_parent)) != c_parent:
+            raise GitHubOpsError(f"{label} escapes containment: {c_child} not under {c_parent}")
+    except ValueError:
+        # Different drives / cannot relativize — fail closed.
+        raise GitHubOpsError(f"{label} containment check failed: {c_child} vs {c_parent}")
+
+
 class GitHubOps:
     """GitHub operations using the gh CLI."""
 
-    # Class-level cache: track which system_accounts have safe.directory configured
-    _safe_directory_configured: set[str] = set()
     # Trusted Git contexts are captured by the orchestrator before an
     # untrusted agent starts.  Subsequent GitHubOps instances for that
     # worktree bypass the replaceable ``.git`` directory entry and address the
@@ -169,11 +190,18 @@ class GitHubOps:
             raise GitHubOpsError("Cannot register an invalid trusted Git context")
         if not git_identity or not common_identity:
             raise GitHubOpsError("Cannot register Git context without filesystem identity")
+        # Containment: the common git dir must live under the canonical repo
+        # root. For a main repo common_dir == <repo>/.git; for a linked
+        # worktree common_dir also points at <repo>/.git. This rejects a
+        # common_dir that escapes the repo (e.g. via a symlink or a malicious
+        # /repo-evil-style prefix) before we pin it as trusted.
+        real_common_dir = os.path.realpath(common_dir)
+        _assert_path_contained(real_common_dir, real_repo, label="trusted common_dir")
         cls._trusted_git_contexts[real_repo] = {
             "git_dir": real_git_dir,
             "work_tree": real_repo,
             "git_identity": git_identity,
-            "common_dir": os.path.realpath(common_dir),
+            "common_dir": real_common_dir,
             "common_identity": common_identity,
         }
 
@@ -383,6 +411,26 @@ class GitHubOps:
         """
         self._verify_trusted_git_context()
         kwargs = self._build_subprocess_kwargs()
+        # gh has no `-c <key>=<val>` flag, so on the same-user path we trust the
+        # canonical repo via GIT_CONFIG_COUNT env (per-command, never written to
+        # a config file). This replaces the old global ``safe.directory *``.
+        # _build_subprocess_kwargs only sets ``env`` when an AI token is
+        # configured, so fall back to a copy of os.environ to ensure the vars
+        # reach gh (and the git it shells out to) on the no-token path too.
+        #
+        # Under ``sudo -u`` this env is stripped by sudo's default env_reset,
+        # but that is intentional and safe: the sudo path drops cwd (gh has no
+        # ``-C``) and targets the repo explicitly via ``-R owner/repo``, so gh
+        # has no local repo cwd that would trigger a dubious-ownership check.
+        # Any git operation gh needs (e.g. resolving the remote) is routed
+        # through _resolve_owner_repo -> _run_git, which carries the per-command
+        # ``-c safe.directory=`` inline and does reach the sudo child. Issue
+        # #2021.
+        env = kwargs.get("env") or dict(os.environ)
+        env["GIT_CONFIG_COUNT"] = "1"
+        env["GIT_CONFIG_KEY_0"] = "safe.directory"
+        env["GIT_CONFIG_VALUE_0"] = os.path.realpath(self.repo_path)
+        kwargs["env"] = env
         account = self.system_account
         if self._needs_sudo():
             # gh has no `-C <path>` flag (that is git-only), so under a sudo
@@ -448,53 +496,9 @@ class GitHubOps:
                 raise GitHubOpsError("gh CLI not found. Please install and authenticate gh.")
         raise last_error or GitHubOpsError(f"gh {' '.join(args)} failed after retries")
 
-    def _ensure_safe_directory(self) -> None:
-        """Ensure git safe.directory is configured for Docker volume mounts.
-
-        In Docker environments, git may reject operations on directories owned
-        by different users (volume mounts). This configures safe.directory for
-        the effective user (current user or sudo target user), preventing
-        'dubious ownership' errors.
-
-        Note: --global config writes to the executing user's ~/.gitconfig.
-        When using sudo wrapper, we must run the config command as the target
-        user so it writes to their ~/.gitconfig.
-        """
-        # Cache key: system_account or "default" for no sudo wrapper
-        cache_key = self.system_account or "default"
-        if cache_key in GitHubOps._safe_directory_configured:
-            return
-
-        # Build the git config command
-        # Use wildcard for Docker environments with multiple mount paths
-        safe_cmd: list[str] = ["git", "config", "--global", "--add", "safe.directory", "*"]
-
-        # Wrap with sudo only when actually cross-user (same logic as _run_git).
-        # This ensures the config is written to the target user's ~/.gitconfig.
-        account = self.system_account
-        if self._needs_sudo():
-            assert account is not None  # _needs_sudo() guarantees non-empty
-            safe_cmd = ["sudo", "-u", account] + safe_cmd
-
-        # Execute without cwd (global config doesn't need repo context) and
-        # without the default 120s timeout — pass our own shorter one. Both
-        # must be dropped from _build_subprocess_kwargs() to avoid passing
-        # `timeout` twice (a hard TypeError in Python, surfaced as a warning
-        # here and which silently prevented safe.directory from ever being set).
-        base_kwargs = self._build_subprocess_kwargs()
-        safe_kwargs = {k: v for k, v in base_kwargs.items() if k not in ("cwd", "timeout")}
-        try:
-            subprocess.run(safe_cmd, **safe_kwargs, check=False, timeout=5)
-            GitHubOps._safe_directory_configured.add(cache_key)
-            logger.debug("Configured git safe.directory for user: %s", cache_key)
-        except Exception as e:
-            logger.warning("Failed to configure safe.directory for %s: %s", cache_key, e)
-
     def _run_git(self, args: list[str], check: bool = True) -> subprocess.CompletedProcess:
         """Run a git command with transient-network-error retry."""
         self._verify_trusted_git_context()
-        # Ensure safe.directory is configured for Docker volume mounts
-        self._ensure_safe_directory()
         kwargs = self._build_subprocess_kwargs()
         account = self.system_account
         trusted_args: list[str] = []
@@ -503,6 +507,28 @@ class GitHubOps:
                 f"--git-dir={self._trusted_git_dir}",
                 f"--work-tree={self._trusted_work_tree or os.path.realpath(self.repo_path)}",
             ]
+        # Trust the canonical repo via per-command ``-c`` (never the global
+        # ``safe.directory *`` that used to be written via
+        # _ensure_safe_directory). git's dubious-ownership check covers every
+        # path it touches — the work tree, the git dir, and the (shared)
+        # common dir — so we emit one ``-c safe.directory=<path>`` per trusted
+        # path rather than a single entry. De-duplicated and absolute; the
+        # work tree, git dir, and common dir are often distinct (e.g. a linked
+        # worktree's git dir lives under <repo>/.git/worktrees/<name>, while
+        # the common dir is <repo>/.git), and in cross-user/isolated
+        # deployments they can be owned by different accounts. Issue #2021.
+        safe_paths: list[str] = []
+        for p in (
+            self._trusted_work_tree or os.path.realpath(self.repo_path),
+            self._trusted_git_dir,
+            self._trusted_common_dir,
+        ):
+            rp = os.path.realpath(p) if p else ""
+            if rp and rp not in safe_paths:
+                safe_paths.append(rp)
+        safe_cfgs: list[str] = []
+        for p in safe_paths:
+            safe_cfgs += ["-c", f"safe.directory={p}"]
         if self._needs_sudo():
             # git supports `-C <path>` (unlike gh), so we use it to set the
             # working directory under a sudo wrapper where cwd would trigger a
@@ -519,6 +545,7 @@ class GitHubOps:
                     "core.hooksPath=/dev/null",
                     "-c",
                     "core.fsmonitor=false",
+                    *safe_cfgs,
                 ]
                 + ([] if trusted_args else ["-C", self.repo_path])
                 + args
@@ -532,6 +559,7 @@ class GitHubOps:
                 "core.hooksPath=/dev/null",
                 "-c",
                 "core.fsmonitor=false",
+                *safe_cfgs,
             ] + args
         last_error: GitHubOpsError | None = None
         for attempt in range(GIT_NETWORK_RETRY_COUNT):
@@ -787,6 +815,7 @@ class GitHubOps:
 
     def create_worktree(self, path: str, branch: str, base: str = "HEAD") -> dict:
         """Create a git worktree with a new branch."""
+        self._assert_worktree_contained(path)
         self.clear_trusted_git_context(path)
         self._run_git(["worktree", "add", "-b", branch, path, base])
         logger.info("Created worktree at %s on branch %s", path, branch)
@@ -799,6 +828,7 @@ class GitHubOps:
         the PR branch without touching the main repo's index/HEAD. For a
         remote-only branch git auto-creates a local tracking branch.
         """
+        self._assert_worktree_contained(path)
         self.clear_trusted_git_context(path)
         self._run_git(["worktree", "add", path, branch])
         logger.info("Added worktree at %s for existing branch %s", path, branch)
@@ -806,10 +836,19 @@ class GitHubOps:
 
     def remove_worktree(self, path: str) -> dict:
         """Remove a git worktree."""
+        self._assert_worktree_contained(path)
         self._run_git(["worktree", "remove", path, "--force"])
         self.clear_trusted_git_context(path)
         logger.info("Removed worktree at %s", path)
         return {"removed": path}
+
+    def _assert_worktree_contained(self, path: str) -> None:
+        """Reject worktree paths that escape the canonical repo root.
+
+        Catches ``/repo`` vs ``/repo-evil`` prefix confusion, symlink escapes,
+        and traversal before the path reaches ``git worktree add/remove``.
+        """
+        _assert_path_contained(path, os.path.realpath(self.repo_path), label="worktree")
 
     def list_worktrees(self) -> list:
         """List all worktrees.
@@ -819,21 +858,32 @@ class GitHubOps:
         contract: ``AutonomousOrchestrator._verify_worktree_restored`` matches
         against both ``<name>`` and ``refs/heads/<name>``. Parsing is locked by
         ``tests/issues/716/test_github_ops.py::test_list_worktrees``.
+
+        Uses ``--porcelain -z`` so paths containing spaces or newlines are
+        parsed correctly: each worktree record is NUL-terminated, and fields
+        within a record are LF-separated. The plain LF-split parser used
+        previously would split a newline-bearing path across records.
         """
-        result = self._run_git(["worktree", "list", "--porcelain"])
-        worktrees = []
-        current = {}
-        for line in result.stdout.strip().split("\n"):
-            if line.startswith("worktree "):
-                if current:
-                    worktrees.append(current)
-                current = {"path": line.split(" ", 1)[1]}
-            elif line.startswith("branch "):
-                current["branch"] = line.split(" ", 1)[1]
-            elif line == "bare":
-                current["bare"] = True
-        if current:
-            worktrees.append(current)
+        result = self._run_git(["worktree", "list", "--porcelain", "-z"])
+        worktrees: list[dict] = []
+        current: dict = {}
+        for record in result.stdout.split("\0"):
+            if not record:
+                continue
+            # Each NUL-terminated record describes one worktree; its fields
+            # are LF-separated and the first is always "worktree <path>".
+            for line in record.split("\n"):
+                if line.startswith("worktree "):
+                    if current:
+                        worktrees.append(current)
+                    current = {"path": line[len("worktree ") :]}
+                elif line.startswith("branch "):
+                    current["branch"] = line[len("branch ") :]
+                elif line == "bare":
+                    current["bare"] = True
+            if current:
+                worktrees.append(current)
+                current = {}
         return worktrees
 
     # ── PR Operations ───────────────────────────────────────────────
