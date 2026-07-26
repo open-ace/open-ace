@@ -1894,11 +1894,27 @@ class RemoteAgent:
 
             def _reader() -> None:
                 try:
-                    raw = proc.stdout.readline()
-                    if isinstance(raw, bytes):
-                        result["line"] = raw.decode(errors="replace").strip()
-                    else:
-                        result["line"] = raw.strip()
+                    # Loop past non-READY banner lines. A single readline()
+                    # would capture only the first stdout line, so a startup
+                    # banner (or a partial read) before the READY:<port> line
+                    # would be misclassified as failure. Give up on EOF (empty
+                    # line) or after a bounded number of banner lines. The
+                    # thread is a daemon, so the narrow case where the process
+                    # neither prints READY nor closes stdout does not block
+                    # process exit.
+                    max_banner_lines = 64
+                    for _ in range(max_banner_lines):
+                        raw = proc.stdout.readline()
+                        if not raw:  # EOF / process closed stdout
+                            break
+                        if isinstance(raw, bytes):
+                            line = raw.decode(errors="replace").strip()
+                        else:
+                            line = raw.strip()
+                        if line.startswith("READY:"):
+                            result["line"] = line
+                            break
+                        # Otherwise it is a banner line; keep reading.
                 except Exception as exc:  # pragma: no cover - defensive
                     result["error"] = exc
                 finally:
@@ -1915,7 +1931,11 @@ class RemoteAgent:
 
             line = str(result.get("line") or "")
             if line.startswith("READY:"):
-                return int(line.split(":")[1])
+                # Strict numeric validation: a banner that coincidentally
+                # contains "READY:" with non-numeric text must be rejected
+                # (int() raises ValueError, caught by the outer handler).
+                port_str = line.split(":", 1)[1]
+                return int(port_str)
         except Exception as e:
             logger.error("Failed to read terminal port: %s", e)
         return None
