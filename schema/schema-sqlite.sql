@@ -310,6 +310,35 @@ CREATE TABLE autonomous_workflows (
  expected_head_sha text
 );
 
+CREATE TABLE command_execution_evidence (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ command_id text NOT NULL,
+ workflow_id text DEFAULT '' NOT NULL,
+ session_id text DEFAULT '' NOT NULL,
+ milestone_id text DEFAULT '' NOT NULL,
+ sandbox_id text,
+ sandbox_generation integer,
+ tool_name text DEFAULT '' NOT NULL,
+ argv text,
+ shell_command text,
+ cwd text DEFAULT '' NOT NULL,
+ execution_profile text DEFAULT '' NOT NULL,
+ started_at TIMESTAMP,
+ completed_at TIMESTAMP,
+ exit_code integer,
+ signal integer,
+ timed_out INTEGER DEFAULT 0,
+ cancelled INTEGER DEFAULT 0,
+ terminal_reason text DEFAULT '' NOT NULL,
+ stdout_digest text,
+ stderr_digest text,
+ stdout_artifact text,
+ stderr_artifact text,
+ output_excerpt text DEFAULT '' NOT NULL,
+ tenant_id integer DEFAULT 1 NOT NULL,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE compliance_reports (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  report_id text NOT NULL,
@@ -1218,6 +1247,8 @@ CREATE UNIQUE INDEX tenant_settings_tenant_id_key ON tenant_settings (tenant_id)
 
 CREATE UNIQUE INDEX tenants_slug_key ON tenants (slug);
 
+CREATE UNIQUE INDEX uq_command_evidence_session_command ON command_execution_evidence (session_id, command_id);
+
 CREATE UNIQUE INDEX uq_daily_messages_date_tool_msg_host ON daily_messages (date, tool_name, message_id, host_name);
 
 CREATE UNIQUE INDEX uq_daily_stats_date_tool_host_sender ON daily_stats (date, tool_name, host_name, sender_name);
@@ -1317,6 +1348,10 @@ CREATE INDEX idx_audit_tenant_id ON audit_logs (tenant_id);
 CREATE INDEX idx_audit_timestamp ON audit_logs ("timestamp");
 
 CREATE INDEX idx_audit_user_id ON audit_logs (user_id);
+
+CREATE INDEX idx_command_evidence_session_command ON command_execution_evidence (session_id, command_id);
+
+CREATE INDEX idx_command_evidence_workflow_milestone ON command_execution_evidence (workflow_id, milestone_id);
 
 CREATE INDEX idx_consistency_violations_detected ON consistency_violations (detected_at);
 
