@@ -31,6 +31,7 @@ from app.modules.workspace.autonomous.artifact_text import (
     pick_best_artifact_text,
     sanitize_artifact_text,
 )
+from app.modules.workspace.autonomous.command_evidence.recorder import emit_command_evidence
 from app.modules.workspace.autonomous.event_emitter import AutonomousEventEmitter
 from app.modules.workspace.autonomous.evidence import Verdict
 from app.modules.workspace.autonomous.evidence_service import EvidenceService
@@ -3934,6 +3935,67 @@ class AutonomousOrchestrator:
         """Refresh workflow totals from the sessions linked to milestones."""
         self.repo.refresh_workflow_usage_from_sessions(self._workflow_id)
 
+    def _shadow_compare_evidence(
+        self,
+        *,
+        test_result: AgentTaskResult,
+        milestone_id: str,
+        heuristic_passed: bool,
+    ) -> None:
+        """Compare the heuristic test verdict against structured evidence (#2046).
+
+        Phase A shadow comparison: persists a ``workflow_events`` row + warning
+        when the structured verdict (derived purely from
+        ``CommandExecutionEvidence`` rows) disagrees with the heuristic
+        verdict. Does NOT influence the gate — the heuristic stays
+        authoritative until #2022 lands (Phase B).
+        """
+        try:
+            from app.modules.workspace.autonomous.command_evidence.recorder import (
+                compare_verdicts,
+                get_command_evidence_recorder,
+            )
+
+            recorder = get_command_evidence_recorder()
+            recorder.flush(timeout=1.0)
+            repo = recorder.repo
+            session_id = test_result.session_id or test_result.tracking_session_id or ""
+            if not session_id:
+                return
+            evidence_rows = repo.query_by_session(session_id)
+            comparison = compare_verdicts(
+                heuristic_passed=heuristic_passed, evidence_rows=evidence_rows
+            )
+            if not comparison.get("divergence"):
+                return
+            import json
+
+            self.repo.create_event(
+                {
+                    "workflow_id": self._workflow_id,
+                    "milestone_id": milestone_id,
+                    "event_type": "evidence_shadow_divergence",
+                    "event_data": json.dumps(
+                        {
+                            "heuristic_verdict": comparison.get("heuristic_verdict"),
+                            "structured_verdict": comparison.get("structured_verdict"),
+                            "reason": comparison.get("reason"),
+                            "command_verdicts": comparison.get("command_verdicts", []),
+                            "evidence_count": len(evidence_rows),
+                        }
+                    ),
+                }
+            )
+            logger.warning(
+                "evidence shadow divergence for %s: heuristic=%s structured=%s (%s)",
+                self._workflow_id,
+                comparison.get("heuristic_verdict"),
+                comparison.get("structured_verdict"),
+                comparison.get("reason", ""),
+            )
+        except Exception as e:
+            logger.debug("evidence shadow comparison failed: %s", e)
+
     def _on_pid_registered(self, session_id: str, pid: int):
         """Persist agent subprocess PID to database for reliable cancel/pause."""
         try:
@@ -6869,6 +6931,16 @@ class AutonomousOrchestrator:
 
         self._accumulate_tokens(test_result)
 
+        # #2046 Phase A dual-write: persist structured CommandExecutionEvidence
+        # from the same event_log the heuristics below consume. Shadow-only —
+        # does not influence the verdict (Phase B migrates the gate to this).
+        emit_command_evidence(
+            session_id=test_result.session_id or test_result.tracking_session_id or "",
+            workflow_id=self._workflow_id,
+            milestone_id=test_ms.get("milestone_id", ""),
+            event_log=test_result.event_log or [],
+        )
+
         if self._abort_on_repo_integrity_violation(test_result, test_ms.get("milestone_id", "")):
             return
 
@@ -7119,6 +7191,15 @@ class AutonomousOrchestrator:
             test_result.success
             and (has_test_tool_call or has_test_result or test_status_tag in ("passed", "failed"))
             and not tests_actually_run
+        )
+
+        # #2046 Phase A shadow comparison: compare the heuristic verdict against
+        # structured CommandExecutionEvidence. Records divergence but does NOT
+        # influence the verdict (Phase B migrates the gate to evidence).
+        self._shadow_compare_evidence(
+            test_result=test_result,
+            milestone_id=test_ms.get("milestone_id", ""),
+            heuristic_passed=tests_actually_run,
         )
 
         # Issue #1547: Validate test report format

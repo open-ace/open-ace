@@ -1751,6 +1751,44 @@ CREATE SEQUENCE web_user_auth_sessions_id_seq
     CACHE 1;
 
 ALTER SEQUENCE web_user_auth_sessions_id_seq OWNED BY web_user_auth_sessions.id;
+CREATE TABLE command_execution_evidence (
+    id integer NOT NULL,
+    command_id text NOT NULL,
+    workflow_id text DEFAULT ''::text NOT NULL,
+    session_id text DEFAULT ''::text NOT NULL,
+    milestone_id text DEFAULT ''::text NOT NULL,
+    sandbox_id text,
+    sandbox_generation integer,
+    tool_name text DEFAULT ''::text NOT NULL,
+    argv text,
+    shell_command text,
+    cwd text DEFAULT ''::text NOT NULL,
+    execution_profile text DEFAULT ''::text NOT NULL,
+    started_at timestamp without time zone,
+    completed_at timestamp without time zone,
+    exit_code integer,
+    signal integer,
+    timed_out boolean DEFAULT false,
+    cancelled boolean DEFAULT false,
+    terminal_reason text DEFAULT ''::text NOT NULL,
+    stdout_digest text,
+    stderr_digest text,
+    stdout_artifact text,
+    stderr_artifact text,
+    output_excerpt text DEFAULT ''::text NOT NULL,
+    tenant_id integer DEFAULT 1 NOT NULL,
+    created_at timestamp without time zone DEFAULT now()
+);
+
+CREATE SEQUENCE command_execution_evidence_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE command_execution_evidence_id_seq OWNED BY command_execution_evidence.id;
 CREATE TABLE workflow_events (
     id integer NOT NULL,
     workflow_id character varying(36) NOT NULL,
@@ -2288,6 +2326,12 @@ ALTER TABLE ONLY web_user_auth_sessions
 ALTER TABLE ONLY workflow_events
     ADD CONSTRAINT workflow_events_pkey PRIMARY KEY (id);
 
+ALTER TABLE ONLY command_execution_evidence
+    ADD CONSTRAINT command_execution_evidence_pkey PRIMARY KEY (id);
+
+ALTER TABLE ONLY command_execution_evidence
+    ADD CONSTRAINT uq_command_evidence_session_command UNIQUE (session_id, command_id);
+
 ALTER TABLE ONLY workflow_milestones
     ADD CONSTRAINT workflow_milestones_milestone_id_key UNIQUE (milestone_id);
 
@@ -2781,6 +2825,10 @@ CREATE INDEX idx_run_events_run_id ON agent_run_events USING btree (run_id);
 --
 
 CREATE INDEX idx_run_events_session_id ON agent_run_events USING btree (session_id, id);
+
+CREATE INDEX idx_command_evidence_session_command ON command_execution_evidence USING btree (session_id, command_id);
+
+CREATE INDEX idx_command_evidence_workflow_milestone ON command_execution_evidence USING btree (workflow_id, milestone_id);
 
 CREATE INDEX idx_security_settings_key ON security_settings USING btree (setting_key);
 

@@ -1107,6 +1107,36 @@ CREATE TABLE web_user_auth_sessions (
  expires_at TIMESTAMP NOT NULL
 );
 
+CREATE TABLE command_execution_evidence (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ command_id TEXT NOT NULL,
+ workflow_id TEXT NOT NULL DEFAULT '',
+ session_id TEXT NOT NULL DEFAULT '',
+ milestone_id TEXT NOT NULL DEFAULT '',
+ sandbox_id TEXT,
+ sandbox_generation INTEGER,
+ tool_name TEXT NOT NULL DEFAULT '',
+ argv TEXT,
+ shell_command TEXT,
+ cwd TEXT NOT NULL DEFAULT '',
+ execution_profile TEXT NOT NULL DEFAULT '',
+ started_at TIMESTAMP,
+ completed_at TIMESTAMP,
+ exit_code INTEGER,
+ signal INTEGER,
+ timed_out INTEGER DEFAULT 0,
+ cancelled INTEGER DEFAULT 0,
+ terminal_reason TEXT NOT NULL DEFAULT '',
+ stdout_digest TEXT,
+ stderr_digest TEXT,
+ stdout_artifact TEXT,
+ stderr_artifact TEXT,
+ output_excerpt TEXT NOT NULL DEFAULT '',
+ tenant_id INTEGER NOT NULL DEFAULT 1,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+ UNIQUE (session_id, command_id)
+);
+
 CREATE TABLE workflow_events (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  workflow_id TEXT NOT NULL,
@@ -1490,6 +1520,10 @@ CREATE INDEX idx_run_events_event_type ON agent_run_events (event_type);
 CREATE INDEX idx_run_events_run_id ON agent_run_events (run_id);
 
 CREATE INDEX idx_run_events_session_id ON agent_run_events (session_id, id);
+
+CREATE INDEX idx_command_evidence_session_command ON command_execution_evidence (session_id, command_id);
+
+CREATE INDEX idx_command_evidence_workflow_milestone ON command_execution_evidence (workflow_id, milestone_id);
 
 CREATE INDEX idx_security_settings_key ON security_settings (setting_key);
 
