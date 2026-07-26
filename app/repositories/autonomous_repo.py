@@ -91,6 +91,13 @@ class AutonomousWorkflowRepository:
         "ci_diagnostics_attempts",
         "last_ci_failure_signature",
         "last_ci_failure_head_sha",
+        # Worktree transition journal for SIGKILL-resilient recovery (#2050).
+        "worktree_transition_state",
+        "transition_original_path",
+        "transition_temp_path",
+        "transition_error",
+        "transition_started_at",
+        "transition_updated_at",
     }
     ALLOWED_MILESTONE_FIELDS = {
         "phase",
@@ -160,6 +167,30 @@ class AutonomousWorkflowRepository:
                     """
                 ),
                 list(active_statuses),
+            )
+            cols = [d[0] for d in cursor.description]
+            return [dict(zip(cols, row)) for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
+    def get_workflows_with_active_transition(self) -> list[dict]:
+        """Find workflows with an in-progress worktree transition (#2050).
+
+        A non-NULL ``worktree_transition_state`` means the merge-conflict
+        worktree transition was interrupted (SIGKILL / restart / crash) before
+        the journal was cleared. The startup reconcile walks these to restore
+        the original worktree or fail closed.
+        """
+        conn = self.db.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                adapt_sql(
+                    """
+                    SELECT * FROM autonomous_workflows
+                    WHERE worktree_transition_state IS NOT NULL
+                    """
+                )
             )
             cols = [d[0] for d in cursor.description]
             return [dict(zip(cols, row)) for row in cursor.fetchall()]

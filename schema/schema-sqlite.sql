@@ -300,7 +300,13 @@ CREATE TABLE autonomous_workflows (
  ci_repair_attempts integer DEFAULT 0,
  last_ci_failure_signature text DEFAULT '',
  last_ci_failure_head_sha text DEFAULT '',
- ci_diagnostics_attempts integer DEFAULT 0
+ ci_diagnostics_attempts integer DEFAULT 0,
+ worktree_transition_state text,
+ transition_original_path text,
+ transition_temp_path text,
+ transition_error text,
+ transition_started_at text,
+ transition_updated_at text
 );
 
 CREATE TABLE compliance_reports (
