@@ -312,7 +312,13 @@ CREATE TABLE autonomous_workflows (
  cleanup_attempts integer,
  cleanup_error text,
  cleanup_updated_at text,
- cleanup_next_retry_at text
+ cleanup_next_retry_at text,
+ sandbox_provider text,
+ sandbox_id text,
+ sandbox_generation integer,
+ sandbox_state text,
+ sandbox_policy_digest text,
+ sandbox_last_error text
 );
 
 CREATE TABLE command_execution_evidence (

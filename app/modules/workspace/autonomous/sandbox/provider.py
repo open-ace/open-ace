@@ -57,6 +57,25 @@ def require_capabilities(
         raise CapabilityUnsupported(missing)
 
 
+def is_current_generation(
+    handle_generation: int | None,
+    workflow_generation: int | None,
+) -> bool:
+    """True iff a handle's generation matches the workflow's current one.
+
+    The workflow's ``sandbox_generation`` bumps on reconciliation/restart; a
+    handle minted before that bump (gen N) is stale against the new generation
+    (N+1) and must not operate on a future sandbox. Used by Phase 3/4 providers
+    to reject stale handles, and by the Phase 2 reconciliation sweep's tests.
+
+    ``None`` on either side cannot be confirmed current → ``False`` (fail safe:
+    providers reject the op rather than risk acting on a stale handle).
+    """
+    if handle_generation is None or workflow_generation is None:
+        return False
+    return handle_generation == workflow_generation
+
+
 class SandboxProvider(Protocol):
     """Stable execution contract independent of the sandboxing backend.
 

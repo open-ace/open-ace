@@ -54,6 +54,13 @@ class AutonomousWorkflow:
     cleanup_error: str | None = None  # Last cleanup error message (Issue #2043)
     cleanup_updated_at: str | None = None  # ISO timestamp of last cleanup attempt
     cleanup_next_retry_at: str | None = None  # ISO timestamp; backoff-gated
+    # SandboxProvider state (#2022 P2). NULL = never ran under a provider.
+    sandbox_provider: str | None = None  # legacy_posix | remote_machine | future
+    sandbox_id: str | None = None  # provider-minted sandbox id
+    sandbox_generation: int | None = None  # bumped on reconcile/restart (stale-handle guard)
+    sandbox_state: str | None = None  # created|running|paused|stopped|destroyed|error
+    sandbox_policy_digest: str | None = None  # digest of the SandboxSpec policy
+    sandbox_last_error: str | None = None  # last sandbox error / reconcile reason
     auto_merge: bool = True  # Auto merge PR and proceed to next workflow in batch
     definition_snapshot: dict | None = None
     current_phase: str = (
@@ -137,6 +144,12 @@ class AutonomousWorkflow:
             "cleanup_error": self.cleanup_error,
             "cleanup_updated_at": self.cleanup_updated_at,
             "cleanup_next_retry_at": self.cleanup_next_retry_at,
+            "sandbox_provider": self.sandbox_provider,
+            "sandbox_id": self.sandbox_id,
+            "sandbox_generation": self.sandbox_generation,
+            "sandbox_state": self.sandbox_state,
+            "sandbox_policy_digest": self.sandbox_policy_digest,
+            "sandbox_last_error": self.sandbox_last_error,
             "auto_merge": self.auto_merge,
             "definition_snapshot": self.definition_snapshot,
             "current_phase": self.current_phase,
@@ -200,6 +213,12 @@ class AutonomousWorkflow:
             cleanup_error=data.get("cleanup_error"),
             cleanup_updated_at=data.get("cleanup_updated_at"),
             cleanup_next_retry_at=data.get("cleanup_next_retry_at"),
+            sandbox_provider=data.get("sandbox_provider"),
+            sandbox_id=data.get("sandbox_id"),
+            sandbox_generation=data.get("sandbox_generation"),
+            sandbox_state=data.get("sandbox_state"),
+            sandbox_policy_digest=data.get("sandbox_policy_digest"),
+            sandbox_last_error=data.get("sandbox_last_error"),
             auto_merge=bool(data.get("auto_merge", True)),
             definition_snapshot=data.get("definition_snapshot"),
             current_phase=data.get("current_phase", "preparation"),
