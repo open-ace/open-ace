@@ -26,7 +26,7 @@ from datetime import datetime
 from typing import Any
 
 import requests
-from cli_settings import apply_cli_settings, clear_codex_bearer_token
+from cli_settings import apply_cli_settings, clear_codex_bearer_token, resolve_codex_bearer_token
 from executor import ProcessExecutor
 from session_sync import SessionSyncService
 from system_info import get_capabilities
@@ -826,12 +826,12 @@ class RemoteAgent:
 
         logger.info("Starting terminal %s: work_dir=%s", terminal_id[:8], work_dir)
 
-        # Apply CLI settings before starting terminal
-        # Windows UWP: Codex desktop cannot read system environment variables.
-        # Use experimental_bearer_token in config.toml instead of env_key.
-        codex_token = None
-        if os.name == "nt" and openai_token:
-            codex_token = openai_token
+        # Apply CLI settings before starting terminal.
+        # Windows UWP: Codex desktop cannot read system environment variables,
+        # so on Windows we persist the proxy token as experimental_bearer_token
+        # in config.toml. resolve_codex_bearer_token is the single source of
+        # truth for that os.name gate (Issue #1828 finding #1).
+        codex_token = resolve_codex_bearer_token(openai_token)
 
         if cli_settings:
             self._apply_cli_settings(cli_settings, codex_bearer_token=codex_token)

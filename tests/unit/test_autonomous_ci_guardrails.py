@@ -421,7 +421,9 @@ def test_terminal_result_closes_stream_json_stdin():
     runner._capture_cli_session_id = lambda *_args: "cli-session"
     runner._sync_sidebar_session_totals = lambda *_args, **_kwargs: None
     runner._resolve_sidebar_session = lambda *_args, **_kwargs: "cli-session"
-    process = SimpleNamespace(stdout=FakeStdout(), stdin=FakeStdin(), returncode=None)
+    process = SimpleNamespace(
+        stdout=FakeStdout(), stdin=FakeStdin(), returncode=None, poll=lambda: None
+    )
     session = _LocalSession(session_id="tracking-session", process=process)
 
     with patch(
@@ -910,7 +912,7 @@ def test_claude_embedded_tool_use_pairs_with_test_result():
 
     runner = AutonomousAgentRunner.__new__(AutonomousAgentRunner)
     runner._activity_callback = None
-    process = SimpleNamespace(stdout=FakeStdout(), returncode=None)
+    process = SimpleNamespace(stdout=FakeStdout(), returncode=None, poll=lambda: None)
     session = _LocalSession(session_id="test-session", process=process)
 
     runner._read_stdout(session)
@@ -1565,6 +1567,7 @@ def test_pre_commit_convergence_reruns_modified_hooks_as_isolated_agent():
     from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
 
     orch = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
+    orch._workflow_id = "wf-test"
     orch._resolve_isolated_agent_account = MagicMock(return_value="openace-agent")
     orch._resolve_system_account = MagicMock(return_value="repo-owner")
     orch._select_project_python_runtime = MagicMock(return_value=(["python3"], ""))
@@ -1587,6 +1590,11 @@ def test_pre_commit_convergence_reruns_modified_hooks_as_isolated_agent():
         patch(
             "app.modules.workspace.autonomous.orchestrator.shutil.which",
             side_effect=["/usr/local/bin/pre-commit", "/usr/bin/git"],
+        ),
+        patch.object(
+            AutonomousAgentRunner,
+            "is_isolated_launcher_available",
+            return_value=True,
         ),
         patch.object(
             AutonomousAgentRunner,
@@ -1627,7 +1635,259 @@ def test_pre_commit_convergence_reruns_modified_hooks_as_isolated_agent():
     assert run.call_args.kwargs["env"] is None
 
 
+def test_pre_commit_convergence_falls_back_to_same_user_without_launcher():
+    """When openace-run-as is unavailable (dev/macOS), converge as repo owner."""
+    from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner
+    from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+    orch = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
+    orch._workflow_id = "wf-test"
+    orch._resolve_isolated_agent_account = MagicMock(return_value="openace-agent")
+    orch._resolve_system_account = MagicMock(return_value="repo-owner")
+    orch._select_project_python_runtime = MagicMock(return_value=(["python3"], ""))
+    gh = MagicMock()
+    gh.path_exists_as_user.return_value = True
+
+    modified = MagicMock(
+        returncode=1,
+        stdout="files were modified by this hook\nFixing docker-compose.yml",
+        stderr="",
+    )
+    clean = MagicMock(returncode=0, stdout="All checks passed", stderr="")
+
+    with (
+        patch(
+            "app.modules.workspace.autonomous.orchestrator.shutil.which",
+            side_effect=["/usr/local/bin/pre-commit", "/usr/bin/git"],
+        ),
+        patch.object(
+            AutonomousAgentRunner,
+            "is_isolated_launcher_available",
+            return_value=False,
+        ),
+        patch.object(
+            AutonomousAgentRunner,
+            "_wrap_agent_cmd",
+            return_value=(["same-user-wrapper", "pre-commit"], None),
+        ) as wrap,
+        patch.object(
+            AutonomousAgentRunner,
+            "_resolve_agent_guard_bin",
+            return_value="/usr/local/libexec/openace-agent-bin",
+        ),
+        patch(
+            "app.modules.workspace.autonomous.orchestrator.subprocess.run",
+            side_effect=[modified, clean],
+        ) as run,
+    ):
+        attempted, error = orch._converge_pre_commit_fixes(
+            {"workspace_type": "local", "worktree_path": "/private/repo"},
+            gh,
+            [{"failure_excerpt": "pre-commit hook(s) made changes"}],
+        )
+
+    assert attempted
+    assert error == ""
+    # Same-user fallback passes the repo owner account, NOT the isolated one.
+    assert wrap.call_args.args[2] == "repo-owner"
+    assert run.call_count == 2
+
+
+def _make_run_agent_orchestrator():
+    """Build a lightly-initialized ``AutonomousOrchestrator`` whose ``_run_agent``
+    dependencies are mocked enough to reach the isolation-check branch and the
+    runner call. Shared by the launcher-available / launcher-unavailable
+    ``_run_agent`` tests so their setup cannot drift apart (PR #2035 review
+    suggestion). Returns ``(orch, wf)``.
+    """
+    from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+    with (
+        patch("app.modules.workspace.autonomous.orchestrator.Database"),
+        patch(
+            "app.modules.workspace.autonomous.orchestrator.AutonomousWorkflowRepository"
+        ) as mock_repo_cls,
+    ):
+        mock_repo = MagicMock()
+        mock_repo.get_workflow.return_value = {
+            "workflow_id": "wf-test",
+            "cli_tool": "claude-code",
+            "model": "claude-sonnet-4-6",
+            "main_session_id": "tracking-sess-1",
+            "current_phase": "planning",
+            "status": "planning",
+            "user_id": 1,
+        }
+        mock_repo.list_milestones.return_value = []
+        mock_repo.create_milestone.return_value = {
+            "milestone_id": "ms-1",
+            "workflow_id": "wf-test",
+        }
+        mock_repo.create_event.return_value = {"id": 1}
+        mock_repo.update_workflow.return_value = {}
+        mock_repo_cls.return_value = mock_repo
+
+        orch = AutonomousOrchestrator("wf-test")
+        orch.repo = mock_repo
+
+    orch.emitter = MagicMock()
+    orch._runner = MagicMock()
+    orch._runner.session_manager = MagicMock()
+    orch._runner._uses_sidebar_session_source.return_value = False
+    orch._link_session_to_current_milestone = MagicMock()
+    orch._write_phase_usage = MagicMock()
+    orch._clear_session_usage_offsets = MagicMock()
+    orch._synthesize_transient_failure = MagicMock()
+    orch._validate_repo_context_after_run = MagicMock(return_value="")
+    orch._is_shutdown_requested = MagicMock(return_value=False)
+    orch._is_upstream_hard_quota_exhausted = MagicMock(return_value=False)
+    orch._resolve_effective_repo_context = MagicMock(
+        return_value={"repo_path": "/tmp/test-project"}
+    )
+    orch._resolve_system_account = MagicMock(return_value="repo-owner")
+    # If the fallback is working correctly, this is never called. If the
+    # fallback regresses, it would return the isolated principal and the
+    # assertion on runner kwargs would catch it.
+    orch._resolve_isolated_agent_account = MagicMock(return_value="openace-agent")
+    orch._update_workflow = MagicMock()
+    orch._emit = MagicMock()
+    orch._accumulate_tokens = MagicMock()
+    orch._artifact_text = MagicMock(return_value="plan text")
+    orch._artifact_tldr = MagicMock(return_value="tldr")
+    orch._artifact_visible_text = MagicMock(return_value="visible")
+    orch._post_github_comment = MagicMock()
+    orch._create_milestone = MagicMock(
+        return_value={"milestone_id": "ms-1", "workflow_id": "wf-test"}
+    )
+    orch._update_milestone = MagicMock()
+    # Bypass trusted-git-context snapshot — tests use synthetic /tmp paths
+    # that don't have a real .git directory (same pattern as
+    # tests/issues/2035/test_session_resume_recovery.py).
+    orch._snapshot_repo_context = MagicMock(
+        return_value={
+            "context": {"repo_path": "/tmp/test-project"},
+            "effective": {
+                "repo_path": "/tmp/test-project",
+                "top_level": "/tmp/test-project",
+                "git_dir": "/tmp/test-project/.git",
+                "git_identity": "1:1",
+                "common_dir": "/tmp/test-project/.git",
+                "common_identity": "1:1",
+                "origin": "",
+            },
+        }
+    )
+    orch._get_gh = MagicMock(return_value=None)
+    orch._select_project_python_runtime = MagicMock(return_value=(None, None))
+    orch._build_repo_execution_contract = MagicMock(return_value="")
+
+    orch._runner.run_agent_task.return_value = AgentTaskResult(
+        session_id="tracking-sess-1",
+        tracking_session_id="tracking-sess-1",
+        source_session_id="new-cli-sess-xyz",
+        response_text="Plan: do the thing",
+        success=True,
+        total_tokens=500,
+    )
+
+    wf = {
+        "workflow_id": "wf-test",
+        "cli_tool": "claude-code",
+        "model": "claude-sonnet-4-6",
+        "main_session_id": "tracking-sess-1",
+        "current_phase": "planning",
+        "status": "planning",
+        "user_id": 1,
+    }
+    return orch, wf
+
+
+def _run_agent_call_kwargs(orch, wf):
+    """Invoke ``_run_agent`` with the standard test arguments and return the
+    result. Centralizes the call so the two tests differ only in their patches
+    and assertions."""
+    return orch._run_agent(
+        wf=wf,
+        workflow_id="wf-test",
+        cli_tool="claude-code",
+        model="claude-sonnet-4-6",
+        project_path="/tmp/test-project",
+        prompt="Plan this",
+        workspace_type="local",
+        permission_mode="read-only",
+        allowed_tools=[],
+        session_line="main",
+        milestone_id="ms-1",
+    )
+
+
+def test_run_agent_falls_back_to_same_user_without_launcher():
+    """When ``openace-run-as`` is unavailable (dev/macOS), ``_run_agent`` must
+    NOT call ``_resolve_isolated_agent_account`` and must keep
+    ``system_account`` as the repo owner (same-user fallback).
+
+    This covers the ``_run_agent`` fallback path — the
+    ``_converge_pre_commit_fixes`` fallback was already covered by
+    ``test_pre_commit_convergence_falls_back_to_same_user_without_launcher``,
+    but the more core ``_run_agent`` path (PR #2026 review suggestion #1) was
+    not. The assertion verifies both that the isolated-account resolver is
+    skipped and that the kwargs handed to the runner carry the repo owner
+    identity, so downstream ``_wrap_agent_cmd`` / ``_ensure_project_dir`` see
+    ``_is_cross_user`` return False and stay on the same-user branch.
+    """
+    from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner
+
+    orch, wf = _make_run_agent_orchestrator()
+
+    with patch.object(
+        AutonomousAgentRunner,
+        "is_isolated_launcher_available",
+        return_value=False,
+    ):
+        result = _run_agent_call_kwargs(orch, wf)
+
+    assert result.success is True
+    # The isolated-account resolver must NOT be called when the launcher is
+    # unavailable — the workflow falls back to same-user mode.
+    orch._resolve_isolated_agent_account.assert_not_called()
+    # system_account passed to the runner stays as the repo owner, NOT the
+    # isolated "openace-agent" principal.
+    runner_kwargs = orch._runner.run_agent_task.call_args.kwargs
+    assert runner_kwargs["system_account"] == "repo-owner"
+
+
+def test_run_agent_uses_isolated_account_when_launcher_available():
+    """Counter-test: when ``openace-run-as`` IS available, ``_run_agent`` must
+    call ``_resolve_isolated_agent_account`` and pass the isolated principal
+    as ``system_account``. This locks in the symmetric behavior so the
+    fallback test above cannot pass trivially (e.g. if the isolation block
+    were accidentally removed entirely).
+    """
+    from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner
+
+    orch, wf = _make_run_agent_orchestrator()
+
+    with (
+        patch.object(
+            AutonomousAgentRunner,
+            "is_isolated_launcher_available",
+            return_value=True,
+        ),
+        patch("app.modules.workspace.autonomous.orchestrator.pwd") as mock_pwd,
+    ):
+        # Service account differs from both repo owner and isolated principal
+        # so the isolation-validity guard does not reject the configuration.
+        mock_pwd.getpwuid.return_value.pw_name = "service-user"
+        result = _run_agent_call_kwargs(orch, wf)
+
+    assert result.success is True
+    orch._resolve_isolated_agent_account.assert_called_once()
+    runner_kwargs = orch._runner.run_agent_task.call_args.kwargs
+    assert runner_kwargs["system_account"] == "openace-agent"
+
+
 def test_pre_commit_convergence_rejects_repository_owner_account():
+    from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner
     from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
 
     orch = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
@@ -1640,6 +1900,11 @@ def test_pre_commit_convergence_rejects_repository_owner_account():
         patch(
             "app.modules.workspace.autonomous.orchestrator.shutil.which",
             side_effect=["/usr/local/bin/pre-commit", "/usr/bin/git"],
+        ),
+        patch.object(
+            AutonomousAgentRunner,
+            "is_isolated_launcher_available",
+            return_value=True,
         ),
         patch("app.modules.workspace.autonomous.orchestrator.subprocess.run") as run,
         pytest.raises(RuntimeError, match="repository owner"),
@@ -1828,3 +2093,204 @@ def test_model_pass_summary_without_tool_result_is_inconclusive():
     updates = [call.args[0] for call in orch._update_workflow.call_args_list]
     assert any(update.get("test_retries") == 1 for update in updates)
     assert not any(update.get("status") == "pr_review" for update in updates)
+
+
+def test_text_pass_evidence_fallback_when_tool_result_missing():
+    """#1830: tool_result capture can be incomplete (stream-json truncation,
+    per-event size limit). When the agent invoked a real test command AND the
+    visible text contains a "N passed" pattern, accept it as strong evidence
+    that tests ran and passed — even without structured tool_result events."""
+    from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+    orch = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
+    orch._workflow_id = "wf-1830-fallback"
+    orch.repo = MagicMock()
+    orch._create_milestone = MagicMock(return_value={"milestone_id": "ms-test"})
+    orch._build_test_execution_context = MagicMock(return_value="targeted")
+    orch._accumulate_tokens = MagicMock()
+    orch._post_github_comment = MagicMock()
+    orch._emit = MagicMock()
+    orch._update_workflow = MagicMock()
+    # Agent invoked pytest (tool_calls present) and text reports "162 passed",
+    # but event_log has no tool_result entry (truncated/incomplete capture).
+    orch._run_agent = MagicMock(
+        return_value=AgentTaskResult(
+            success=True,
+            response_text="Ran the test suite.\n\n162 passed in 3.45s",
+            tool_calls=[
+                {
+                    "tool": {
+                        "name": "Bash",
+                        "input": {"command": "python -m pytest"},
+                        "id": "tool-1830-1",
+                    }
+                }
+            ],
+            event_log=[
+                {
+                    "type": "tool_use",
+                    "tool_name": "Bash",
+                    "tool_input": {"command": "python -m pytest"},
+                    "tool_use_id": "tool-1830-1",
+                },
+                # NOTE: no tool_result entry — simulates stream-json truncation
+            ],
+        )
+    )
+    wf = {
+        "workflow_id": "wf-1830-fallback",
+        "project_path": "/tmp/repo",
+        "worktree_path": "/tmp/repo",
+        "cli_tool": "claude-code",
+        "dev_round": 1,
+        "branch_name": "auto-dev/wf-1830-fallback",
+    }
+
+    orch._run_test_phase(wf, 1, MagicMock())
+
+    updates = [call.args[0] for call in orch._update_workflow.call_args_list]
+    # Should advance to pr_review (tests considered as run), NOT be inconclusive
+    assert any(update.get("status") == "pr_review" for update in updates)
+    assert not any(update.get("test_retries") == 1 for update in updates)
+
+
+def test_review_fix_commits_dirty_worktree_instead_of_refusing():
+    """#1828/#1830: when the worktree is dirty before a review-fix agent run
+    (e.g. a previous dev/CI-repair round left formatting edits uncommitted),
+    the orchestrator should commit those pre-existing changes and proceed,
+    not refuse and leave the workflow in a dead-end. Pre-existing changes
+    are scope-validated before the fix agent runs."""
+    from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+    orch = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
+    orch._workflow_id = "wf-dirty-guard"
+    orch.repo = MagicMock()
+    orch.emitter = MagicMock()
+    orch._create_milestone = MagicMock(return_value={"milestone_id": "ms-fix"})
+    orch._accumulate_tokens = MagicMock()
+    orch._abort_on_repo_integrity_violation = MagicMock(return_value=False)
+    orch._is_context_overflow = MagicMock(return_value=False)
+    orch._artifact_text = MagicMock(return_value="fixed")
+    orch._clean_agent_text = MagicMock(return_value="review feedback")
+    orch._validate_autonomous_change_scope = MagicMock(return_value="")
+    orch._post_github_comment = MagicMock()
+    orch._run_agent_with_context_recovery = MagicMock(
+        return_value=AgentTaskResult(
+            success=True,
+            response_text="Applied review fixes.",
+        )
+    )
+
+    gh = MagicMock()
+    # dirty before staging → dirty after agent (triggers salvage auto-commit)
+    gh.has_uncommitted_changes.side_effect = [True, True]
+    gh.git_add_all = MagicMock()
+    gh.git_commit = MagicMock()
+    # commit_before_staging → staged_sha → commit_before → after-agent → after-salvage
+    gh.get_current_commit.side_effect = [
+        "commit-pre-staging",
+        "commit-after-stage",
+        "commit-after-stage",
+        "commit-after-stage",
+        "commit-after-fix",
+    ]
+    gh.get_changed_files.return_value = ["app/foo.py"]
+    gh.get_diff_stats.return_value = {"files": 1, "insertions": 5, "deletions": 2}
+    gh.get_commit_diff_stats.return_value = {"files": 1, "insertions": 5, "deletions": 2}
+    gh.git_push = MagicMock()
+
+    wf = {
+        "workflow_id": "wf-dirty-guard",
+        "worktree_path": "/tmp/repo",
+        "project_path": "/tmp/repo",
+        "cli_tool": "claude-code",
+        "dev_round": 1,
+        "branch_name": "auto-dev/wf-dirty-guard",
+    }
+
+    orch._apply_pr_review_fix(wf, gh, 1, 1, "looks good", [], 1234)
+
+    # Key assertion: pre-existing dirty changes were committed, NOT refused
+    gh.git_add_all.assert_called()
+    gh.git_commit.assert_called()
+    # Commit message must be the expected one (regression guard)
+    commit_call = gh.git_commit.call_args_list[0]
+    assert "stage pre-existing worktree changes" in commit_call.args[0]
+    assert commit_call.kwargs.get("no_verify") is True
+    # Pre-existing changes MUST be scope-validated (review concern: don't
+    # bypass scope check for pre-existing dirty content)
+    scope_calls = orch._validate_autonomous_change_scope.call_args_list
+    assert len(scope_calls) >= 2  # one for staging, one for fix agent
+    # First scope call validates the pre-existing (staging) diff
+    assert scope_calls[0].args[1:] == (wf, "commit-pre-staging", "commit-after-stage")
+    # Fix agent must actually have been invoked (proves we proceeded past guard)
+    orch._run_agent_with_context_recovery.assert_called_once()
+    # Must NOT have failed with the old "worktree already had uncommitted
+    # changes" refusal message
+    failed_updates = [
+        call.args[0]
+        for call in orch.repo.update_workflow.call_args_list
+        if call.args[0].get("status") == "failed"
+    ]
+    for update in failed_updates:
+        assert "worktree already had uncommitted changes" not in update.get("error_message", "")
+
+
+def test_review_fix_rejects_dirty_worktree_when_pre_existing_changes_out_of_scope():
+    """#1828/#1830: pre-existing dirty changes must NOT bypass scope validation.
+    If the pre-existing content touches files outside the autonomous scope, the
+    orchestrator must reset the staging commit and fail — never push
+    out-of-scope content to the PR branch."""
+    from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+    orch = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
+    orch._workflow_id = "wf-scope-reject"
+    orch.repo = MagicMock()
+    orch.emitter = MagicMock()
+    orch._create_milestone = MagicMock(return_value={"milestone_id": "ms-fix"})
+    orch._accumulate_tokens = MagicMock()
+    orch._abort_on_repo_integrity_violation = MagicMock(return_value=False)
+    orch._is_context_overflow = MagicMock(return_value=False)
+    orch._artifact_text = MagicMock(return_value="fixed")
+    orch._clean_agent_text = MagicMock(return_value="review feedback")
+    # Pre-existing changes are out of scope — must be rejected
+    orch._validate_autonomous_change_scope = MagicMock(
+        return_value="Pre-existing changes: 5 files changed (limit 3)"
+    )
+    orch._post_github_comment = MagicMock()
+    # Fix agent must NOT be invoked when staging is rejected
+    orch._run_agent_with_context_recovery = MagicMock()
+
+    gh = MagicMock()
+    gh.has_uncommitted_changes.return_value = True  # dirty before agent
+    gh.git_add_all = MagicMock()
+    gh.git_commit = MagicMock()
+    gh.get_current_commit.side_effect = ["commit-pre-staging", "commit-after-stage"]
+    gh.reset_hard_to = MagicMock()
+
+    wf = {
+        "workflow_id": "wf-scope-reject",
+        "worktree_path": "/tmp/repo",
+        "project_path": "/tmp/repo",
+        "cli_tool": "claude-code",
+        "dev_round": 1,
+        "branch_name": "auto-dev/wf-scope-reject",
+    }
+
+    result = orch._apply_pr_review_fix(wf, gh, 1, 1, "looks good", [], 1234)
+
+    # Must have failed
+    assert result is False
+    # Staging commit must have been reset (out-of-scope content discarded)
+    gh.reset_hard_to.assert_called_once_with("commit-pre-staging")
+    # Fix agent must NOT have been invoked
+    orch._run_agent_with_context_recovery.assert_not_called()
+    # Must NOT have pushed anything
+    gh.git_push.assert_not_called()
+    # Workflow must be marked failed with scope error
+    failed_updates = []
+    for call in orch.repo.update_workflow.call_args_list:
+        updates = call.args[1] if len(call.args) > 1 else call.args[0]
+        if isinstance(updates, dict) and updates.get("status") == "failed":
+            failed_updates.append(updates)
+    assert any("scope validation" in u.get("error_message", "") for u in failed_updates)

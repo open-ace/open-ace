@@ -698,6 +698,113 @@ def extract_content_from_entry(entry: dict) -> tuple:
     return ("", None, None, "openclaw", None, None, None)
 
 
+def _block_message_source(data: dict) -> str | None:
+    """Determine the chat source a single JSON metadata block belongs to.
+
+    Used by :func:`_extract_sender_from_json_blocks` to enforce per-block source
+    guarding (Issue #1829, F2): sender fields are only read from blocks whose own
+    source matches the envelope-detected source, preventing a quoted cross-source
+    message (e.g. a Feishu ``ou_`` block pasted into a DingTalk session) from
+    being adopted as the DingTalk sender.
+    """
+    src = data.get("message_source") or data.get("source")
+    if isinstance(src, str) and src.strip():
+        return src.strip().lower()
+    block_id = data.get("id", "")
+    if isinstance(block_id, str) and (
+        block_id.startswith("ou_") or block_id.startswith("on_") or block_id.startswith("oc_")
+    ):
+        # Feishu/Lark sender metadata blocks carry an ou_/on_/oc_ id and usually
+        # no explicit message_source field.
+        return "feishu"
+    return None
+
+
+def _extract_sender_from_json_blocks(text: str, expected_source: str | None = None) -> dict:
+    """Extract sender/metadata fields from JSON metadata blocks in ``text``.
+
+    Replaces the previous whole-text ``re.search`` on ``"label"``/``"sender_id"``
+    (Issue #1829, F2), which searched the entire message and could adopt a quoted
+    cross-source JSON block as the sender. Sender fields are only read from
+    blocks whose own source matches ``expected_source`` (per-block source guard).
+
+    When ``expected_source`` is None (the Step-6 fallback path, where no
+    ``System: [...] X[...]`` envelope matched), the effective source is resolved
+    from the first block carrying a ``message_source`` field, and sender fields
+    are then only read from blocks matching that resolved source.
+    """
+    import re
+
+    sender_id: str | None = None
+    sender_name: str | None = None
+    conversation_label: str | None = None
+    group_subject: str | None = None
+    is_group_chat = None
+    resolved_source = expected_source
+
+    json_blocks = re.findall(r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}", text, re.DOTALL)
+
+    # First pass (only when the envelope didn't pin a source): resolve the
+    # effective source from the first block that declares one.
+    if resolved_source is None:
+        for full_block in json_blocks:
+            try:
+                data = json.loads(full_block)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(data, dict):
+                continue
+            src = _block_message_source(data)
+            if src:
+                resolved_source = src
+                break
+
+    # Second pass: extract fields with the per-block source guard.
+    for full_block in json_blocks:
+        try:
+            data = json.loads(full_block)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(data, dict):
+            continue
+
+        block_src = _block_message_source(data)
+        # Per-block source guard: only read sender fields from blocks whose own
+        # source matches the resolved source. When no source could be resolved
+        # (plain openclaw text with no source-declaring block), accept any block
+        # to preserve prior fallback behavior.
+        source_ok = resolved_source is None or block_src == resolved_source
+
+        if source_ok:
+            if "sender_id" in data and not sender_id:
+                sender_id = data.get("sender_id")
+            if "sender" in data and not sender_id:
+                sender_id = data.get("sender")
+            if "label" in data and data.get("label") != sender_id and not sender_name:
+                sender_name = data.get("label")
+            if "name" in data and data.get("name") != sender_id and not sender_name:
+                sender_name = data.get("name")
+
+        # conversation_label / group_subject / is_group_chat are not
+        # sender-identity fields and don't carry the same cross-source
+        # contamination risk, so they are read from any block.
+        if "conversation_label" in data and not conversation_label:
+            conversation_label = data.get("conversation_label")
+        if "group_subject" in data and not group_subject:
+            group_subject = data.get("group_subject")
+        if "is_group_chat" in data and is_group_chat is None:
+            is_group_chat = data.get("is_group_chat")
+
+    return {
+        "sender_id": sender_id,
+        "sender_name": sender_name,
+        "message_source": resolved_source,
+        "conversation_label": conversation_label,
+        "group_subject": group_subject,
+        "is_group_chat": is_group_chat,
+    }
+
+
 def extract_user_message_metadata(text: str) -> dict | None:
     """Extract sender info and clean content from user message.
 
@@ -726,11 +833,19 @@ def extract_user_message_metadata(text: str) -> dict | None:
     is_group_chat = None
 
     # ========== Step 1: Detect message source ==========
-    if '"message_source": "dingtalk"' in text or "DingTalk" in text or "钉钉" in text:
+    # Issue #1829, F1: anchor source detection on STRUCTURED signals only. The
+    # previous loose substrings ("DingTalk"/"钉钉"/"Feishu"/"Slack") flipped the
+    # source whenever those words appeared literally in the content (e.g. a user
+    # message that merely mentions 钉钉), triggering unnecessary provider API
+    # calls + token fetches for non-matching sessions. The authoritative source
+    # is still resolved by the envelope branches (Step 2/3/4) and by the
+    # JSON-block parser in Step 6 (which reads each block's own "message_source"
+    # field); Step 1 here is only a fast-path hint.
+    if '"message_source": "dingtalk"' in text:
         message_source = "dingtalk"
-    elif "conversation_label" in text or "Feishu" in text:
+    elif '"message_source": "feishu"' in text or "conversation_label" in text:
         message_source = "feishu"
-    elif "Slack" in text:
+    elif '"message_source": "slack"' in text:
         message_source = "slack"
 
     # ========== Step 2: Handle Feishu System message format ==========
@@ -750,15 +865,22 @@ def extract_user_message_metadata(text: str) -> dict | None:
             sender_id = prefix_match.group(1)
             actual_content = prefix_match.group(2).strip()
         cleaned_content = actual_content
-        # Extract sender name from Sender metadata block
-        sender_name_match = re.search(r'"label":\s*"([^"]+)"', text)
-        if sender_name_match:
-            sender_name = sender_name_match.group(1)
+        # Issue #1829, F2: resolve sender (and group metadata) from JSON blocks
+        # via the shared helper, scoped to the feishu source so a quoted
+        # cross-source block (e.g. a DingTalk block) cannot be adopted as the
+        # Feishu sender. Replaces the whole-text ``re.search('"label":...', text)``
+        # that searched the entire message.
+        extracted = _extract_sender_from_json_blocks(text, expected_source="feishu")
+        sender_id = sender_id or extracted["sender_id"]
+        sender_name = extracted["sender_name"]
         return {
             "sender_id": sender_id,
             "sender_name": sender_name,
             "cleaned_content": cleaned_content,
             "message_source": "feishu",
+            "conversation_label": extracted["conversation_label"],
+            "group_subject": extracted["group_subject"],
+            "is_group_chat": extracted["is_group_chat"],
         }
 
     # ========== Step 3: Handle DingTalk System message format ==========
@@ -769,17 +891,21 @@ def extract_user_message_metadata(text: str) -> dict | None:
     )
     if dingtalk_system_match:
         actual_content = dingtalk_system_match.group(1).strip()
-        sender_name_match = re.search(r'"label":\s*"([^"]+)"', text)
-        if sender_name_match:
-            sender_name = sender_name_match.group(1)
-        sender_id_match = re.search(r'"sender_id":\s*"([^"]+)"', text)
-        if sender_id_match:
-            sender_id = sender_id_match.group(1)
+        # Issue #1829, F2: resolve sender via the shared helper scoped to the
+        # dingtalk source, instead of whole-text regexes on "label"/"sender_id"
+        # that could adopt a quoted cross-source JSON block as the DingTalk
+        # sender.
+        extracted = _extract_sender_from_json_blocks(text, expected_source="dingtalk")
+        sender_id = extracted["sender_id"]
+        sender_name = extracted["sender_name"]
         return {
             "sender_id": sender_id,
             "sender_name": sender_name,
             "cleaned_content": actual_content,
             "message_source": "dingtalk",
+            "conversation_label": extracted["conversation_label"],
+            "group_subject": extracted["group_subject"],
+            "is_group_chat": extracted["is_group_chat"],
         }
 
     # DingTalk user messages that aren't wrapped in the "System: [...] DingTalk[...]"
@@ -823,16 +949,21 @@ def extract_user_message_metadata(text: str) -> dict | None:
         extracted_content = slack_match.group(2).strip()
         # Remove user mention tags like <@U0AE9GW0KLJ>
         extracted_content = re.sub(r"<@[A-Z0-9]+>", "", extracted_content).strip()
-        # Try to extract sender_id from metadata
+        # Issue #1829, F2: resolve sender_id via the shared helper scoped to the
+        # slack source, instead of a whole-text regex on "sender_id" that could
+        # adopt a cross-source block. Slack sender ids are U[A-Z0-9]+.
+        extracted = _extract_sender_from_json_blocks(text, expected_source="slack")
         slack_sender_id = None
-        slack_id_match = re.search(r'"sender_id":\s*"(U[A-Z0-9]+)"', text)
-        if slack_id_match:
-            slack_sender_id = slack_id_match.group(1)
+        if extracted["sender_id"] and re.fullmatch(r"U[A-Z0-9]+", str(extracted["sender_id"])):
+            slack_sender_id = extracted["sender_id"]
         return {
             "sender_id": slack_sender_id,
             "sender_name": extracted_name,
             "cleaned_content": extracted_content,
             "message_source": "slack",
+            "conversation_label": extracted["conversation_label"],
+            "group_subject": extracted["group_subject"],
+            "is_group_chat": extracted["is_group_chat"],
         }
 
     # ========== Step 5: Handle simple sender_id: content format ==========
@@ -936,46 +1067,29 @@ def extract_user_message_metadata(text: str) -> dict | None:
     if cleaned_lines:
         cleaned_content = "\n".join(cleaned_lines).strip()
 
-    # Try to extract sender_id from JSON metadata
+    # Issue #1829, F2: resolve sender/metadata from JSON blocks via the shared
+    # helper, which enforces a per-block source guard. This replaces the previous
+    # loop whose ``sender_id`` extraction (formerly here) had NO source guard --
+    # any block's ``sender_id`` overwrote -- and whose ``sender_name`` guard
+    # keyed off the *global* ``message_source``: once ``message_source`` became
+    # ``dingtalk`` every block (including a Feishu ``ou_`` block) satisfied it
+    # and could overwrite ``sender_name``. The helper instead resolves the
+    # effective source from the first source-declaring block and reads sender
+    # fields only from blocks whose own source matches it.
     try:
-        json_blocks = re.findall(r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}", text, re.DOTALL)
-        for full_block in json_blocks:
-            try:
-                data = json.loads(full_block)
-                if isinstance(data, dict):
-                    if "sender_id" in data:
-                        sender_id = data.get("sender_id")
-                    if "sender" in data and not sender_id:
-                        sender_id = data.get("sender")
-                    source_value = data.get("message_source") or data.get("source")
-                    if isinstance(source_value, str) and source_value.lower() == "dingtalk":
-                        message_source = "dingtalk"
-                    # Only extract sender_name from Sender metadata blocks (have 'id' field starting with ou_/on_/oc_)
-                    # or from DingTalk sender metadata once source is known.
-                    block_id = data.get("id", "")
-                    if (
-                        block_id
-                        and isinstance(block_id, str)
-                        and (
-                            block_id.startswith("ou_")
-                            or block_id.startswith("on_")
-                            or block_id.startswith("oc_")
-                            or message_source == "dingtalk"
-                        )
-                    ):
-                        if "label" in data and data.get("label") != sender_id:
-                            sender_name = data.get("label")
-                        if "name" in data and data.get("name") != sender_id:
-                            sender_name = data.get("name")
-                    # Extract conversation info
-                    if "conversation_label" in data and not conversation_label:
-                        conversation_label = data.get("conversation_label")
-                    if "group_subject" in data and not group_subject:
-                        group_subject = data.get("group_subject")
-                    if "is_group_chat" in data and is_group_chat is None:
-                        is_group_chat = data.get("is_group_chat")
-            except json.JSONDecodeError:
-                continue
+        extracted = _extract_sender_from_json_blocks(text, expected_source=None)
+        if extracted["sender_id"]:
+            sender_id = extracted["sender_id"]
+        if extracted["sender_name"]:
+            sender_name = extracted["sender_name"]
+        if extracted["message_source"]:
+            message_source = extracted["message_source"]
+        if extracted["conversation_label"]:
+            conversation_label = extracted["conversation_label"]
+        if extracted["group_subject"]:
+            group_subject = extracted["group_subject"]
+        if extracted["is_group_chat"] is not None:
+            is_group_chat = extracted["is_group_chat"]
     except Exception:
         pass
 
@@ -1394,6 +1508,41 @@ def process_jsonl_file(
     return dict(daily), messages
 
 
+def _summarize_sender_resolution(messages: list) -> dict[str, dict[str, int]]:
+    """Tally sender-resolution coverage by message_source (Issue #1829, F5).
+
+    Only ``user`` messages are counted -- assistant senders are attributed from
+    the corresponding user message, so counting them would double-count. For
+    each source returns total / with_sender_id / resolved / unresolved, where:
+
+      - with_sender_id: ``sender_id`` is present (non-empty)
+      - resolved: ``sender_name`` was resolved and differs from ``sender_id``
+      - unresolved: ``sender_id`` is absent (entry imported with no attribution)
+
+    This makes the previously-silent "imported with sender_id=None" case
+    observable so operators can tell how many DingTalk sessions resolved a
+    sender vs. were imported with no attribution.
+    """
+    summary: dict[str, dict[str, int]] = defaultdict(
+        lambda: {"total": 0, "with_sender_id": 0, "resolved": 0, "unresolved": 0}
+    )
+    for msg in messages:
+        if msg.get("role") != "user":
+            continue
+        source = msg.get("message_source") or "openclaw"
+        sender_id = msg.get("sender_id")
+        sender_name = msg.get("sender_name")
+        bucket = summary[source]
+        bucket["total"] += 1
+        if sender_id:
+            bucket["with_sender_id"] += 1
+            if sender_name and sender_name != sender_id:
+                bucket["resolved"] += 1
+        else:
+            bucket["unresolved"] += 1
+    return dict(summary)
+
+
 def update_agent_sessions_stats(messages: list, tool_name: str = "openclaw") -> int:
     """
     Update agent_sessions table statistics from collected messages.
@@ -1698,6 +1847,20 @@ def update_agent_sessions_stats(messages: list, tool_name: str = "openclaw") -> 
             print(f"Updated {updated} agent sessions")
         if messages_inserted > 0:
             print(f"Inserted {messages_inserted} session messages")
+
+        # Issue #1829, F5: end-of-import sender-resolution summary, grouped by
+        # message_source, so the previously-silent "imported with no sender_id"
+        # case is observable to operators.
+        summary = _summarize_sender_resolution(messages)
+        if summary:
+            print("Sender resolution summary (by message_source):")
+            for source, counts in sorted(summary.items()):
+                print(
+                    f"  {source}: total={counts['total']}, "
+                    f"with_sender_id={counts['with_sender_id']}, "
+                    f"resolved={counts['resolved']}, "
+                    f"unresolved={counts['unresolved']}"
+                )
 
     finally:
         cursor.close()

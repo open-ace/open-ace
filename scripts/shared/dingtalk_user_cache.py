@@ -55,8 +55,33 @@ def save_cache(cache: dict):
         json.dump(cache, f, ensure_ascii=False, indent=2)
 
 
+# Process-local access-token cache (Issue #1829, F4). DingTalk access tokens
+# are valid ~7200s but were previously fetched once per uncached user and
+# immediately discarded, so importing N new users triggered N
+# oauth2/accessToken calls (which DingTalk rate-limits). Keyed by
+# (app_key, app_secret); value is (token, expires_at). ``expires_at`` uses the
+# real ``expireIn`` returned by the API minus a safety margin, so we never
+# serve a token in its final seconds. Failures are NOT cached (a failed fetch
+# still returns None and leaves the slot empty for the next attempt).
+_ACCESS_TOKEN_SAFETY_MARGIN_SECONDS = 300
+_access_token_cache: dict[tuple[str, str], tuple[str, float]] = {}
+
+
 def get_dingtalk_access_token(app_key: str, app_secret: str) -> str | None:
-    """Get DingTalk access token for an internal application."""
+    """Get DingTalk access token for an internal application.
+
+    The token is cached in-process keyed by ``(app_key, app_secret)`` until the
+    API's ``expireIn`` (minus a safety margin) elapses. This means N user
+    lookups during a single import session make at most one oauth2/accessToken
+    call instead of N. The public signature is intentionally unchanged so all
+    existing callers (``get_user_info``, ``dingtalk_group_cache`` wrapper) and
+    their tests benefit automatically.
+    """
+    cache_key = (app_key, app_secret)
+    cached = _access_token_cache.get(cache_key)
+    if cached and cached[1] > time.time():
+        return cached[0]
+
     url = "https://api.dingtalk.com/v1.0/oauth2/accessToken"
     payload = {"appKey": app_key, "appSecret": app_secret}
 
@@ -64,7 +89,16 @@ def get_dingtalk_access_token(app_key: str, app_secret: str) -> str | None:
         response = requests.post(url, json=payload, timeout=10)
         response.raise_for_status()
         data = response.json()
-        return cast(str | None, data.get("accessToken"))
+        token = cast(str | None, data.get("accessToken"))
+        if token:
+            # DingTalk returns expireIn (~7200s). Fall back to 7200 if absent,
+            # and never cache a slot shorter than 1s to avoid thrashing.
+            expire_in = int(data.get("expireIn") or 7200)
+            _access_token_cache[cache_key] = (
+                token,
+                time.time() + max(expire_in - _ACCESS_TOKEN_SAFETY_MARGIN_SECONDS, 1),
+            )
+        return token
     except Exception as e:
         logger.error("Error getting DingTalk access token: %s", e)
         return None

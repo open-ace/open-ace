@@ -12,11 +12,17 @@ import os
 import pwd
 import re
 import subprocess
+import sys
 import time
 from pathlib import Path
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
+
+# macOS BSD ``stat`` takes the format via ``-f``; GNU ``stat`` (Linux) uses
+# ``-c``.  ``-L`` (follow symlinks) is supported by both.  Hard-coded
+# ``stat -c`` breaks on macOS with "illegal option -- c".
+_STAT_FORMAT_FLAG = "-f" if sys.platform == "darwin" else "-c"
 
 _GITHUB_ACTIONS_JOB_PATH_RE = re.compile(
     r"^/[^/]+/[^/]+/actions/runs/(?P<run_id>\d+)/job/(?P<job_id>\d+)(?:/|$)"
@@ -199,15 +205,38 @@ class GitHubOps:
         self._owner_repo_resolved = False
 
     def get_path_identity(self, path: str) -> str:
-        """Return device+inode for ``path`` using the repository owner identity."""
+        """Return device+inode for ``path`` using the repository owner identity.
+
+        Uses an in-process ``os.stat`` (cross-platform, follows symlinks like
+        ``stat -L``) when the service already runs as the repo owner — the
+        common same-user case.  Only the cross-user case shells out through
+        ``sudo -u <account> stat ...``, where the GNU ``-c`` vs BSD ``-f``
+        format-flag split is handled per platform: macOS BSD ``stat`` rejects
+        ``-c`` with "illegal option -- c", which previously made every local
+        workflow fail at the trusted-Git-context snapshot on macOS.
+        """
+        if not self._needs_sudo():
+            try:
+                st = os.stat(path)  # follows symlinks, matching ``stat -L``
+            except OSError as e:
+                raise GitHubOpsError(f"Cannot verify protected Git path {path}: {e}")
+            return f"{st.st_dev}:{st.st_ino}"
         kwargs = self._build_subprocess_kwargs()
         kwargs.pop("cwd", None)
         kwargs["timeout"] = 10
-        command = ["stat", "-Lc", "%d:%i", path]
-        if self._needs_sudo():
-            account = self.system_account
-            assert account is not None  # _needs_sudo() guarantees non-empty
-            command = ["sudo", "-n", "-u", account, *command]
+        account = self.system_account
+        assert account is not None  # _needs_sudo() guarantees non-empty
+        command = [
+            "sudo",
+            "-n",
+            "-u",
+            account,
+            "stat",
+            "-L",
+            _STAT_FORMAT_FLAG,
+            "%d:%i",
+            path,
+        ]
         result = subprocess.run(command, **kwargs)
         if result.returncode != 0 or not result.stdout.strip():
             raise GitHubOpsError(
@@ -783,7 +812,14 @@ class GitHubOps:
         return {"removed": path}
 
     def list_worktrees(self) -> list:
-        """List all worktrees."""
+        """List all worktrees.
+
+        Returns entries as ``{"path": …, "branch": "refs/heads/<name>"}`` (no
+        ``branch`` key when detached). The ``refs/heads/`` branch format is a
+        contract: ``AutonomousOrchestrator._verify_worktree_restored`` matches
+        against both ``<name>`` and ``refs/heads/<name>``. Parsing is locked by
+        ``tests/issues/716/test_github_ops.py::test_list_worktrees``.
+        """
         result = self._run_git(["worktree", "list", "--porcelain"])
         worktrees = []
         current = {}

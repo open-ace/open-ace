@@ -15,6 +15,9 @@ persisted to ``~/.codex/config.toml`` and never removed:
 
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
 import importlib.util
 import stat
 import sys
@@ -51,6 +54,31 @@ def load_openace_cli():
     return module
 
 
+def _make_proxy_token(
+    payload: bytes | str = b'{"user_id":"u1"}',
+    secret: bytes = b"openace-test-secret",
+) -> str:
+    """Build a realistic Open ACE proxy token: ``{base64(payload)}.{hmac hex}``.
+
+    Mirrors ``api_key_proxy.generate_proxy_token`` so the Issue #1828 #3 format
+    guard accepts these fixtures: a standard-base64 payload (which may legally
+    contain ``+``/``/``/``=``) joined by a single ``.`` to an HMAC-SHA256 hex
+    signature. Replaces the pre-#1828 placeholders ("proxy-token-123" etc.)
+    that the guard would now silently degrade to ``None``.
+    """
+    if isinstance(payload, str):
+        payload = payload.encode()
+    payload_b64 = base64.b64encode(payload).decode()
+    signature = hmac.new(secret, payload_b64.encode(), hashlib.sha256).hexdigest()
+    return f"{payload_b64}.{signature}"
+
+
+# Realistic proxy tokens (see _make_proxy_token) used wherever a bearer token
+# is seeded into ~/.codex/config.toml.
+PROXY_TOKEN = _make_proxy_token()
+WRITER_TOKEN = _make_proxy_token(b'{"user_id":"writer"}')
+
+
 def _seed_codex_token(cli_settings, tmp_path: Path, token: str) -> Path:
     """Write a config.toml carrying an experimental_bearer_token."""
     config_path = tmp_path / ".codex" / "config.toml"
@@ -71,7 +99,7 @@ def _seed_codex_token(cli_settings, tmp_path: Path, token: str) -> Path:
 
 def test_clear_codex_bearer_token_removes_persisted_token(tmp_path):
     cli_settings = load_cli_settings()
-    config_path = _seed_codex_token(cli_settings, tmp_path, "proxy-token-123")
+    config_path = _seed_codex_token(cli_settings, tmp_path, PROXY_TOKEN)
 
     cli_settings.clear_codex_bearer_token(home_dir=tmp_path)
 
@@ -136,7 +164,7 @@ def test_write_codex_settings_skips_chmod_on_windows(tmp_path):
         {},
         proxy_base_url="https://openace.example/api/remote/llm-proxy/v1",
         home_dir=tmp_path,
-        bearer_token="proxy-token-123",
+        bearer_token=PROXY_TOKEN,
     )
     assert stat.S_IMODE(config_path.stat().st_mode) == 0o600
 
@@ -149,7 +177,7 @@ def test_write_codex_settings_chmods_on_posix(tmp_path, monkeypatch):
         {},
         proxy_base_url="https://openace.example/api/remote/llm-proxy/v1",
         home_dir=tmp_path,
-        bearer_token="proxy-token-123",
+        bearer_token=PROXY_TOKEN,
     )
 
     assert stat.S_IMODE(config_path.stat().st_mode) == 0o600
@@ -165,7 +193,7 @@ def _fake_terminal() -> dict:
         "session_id": "term-123",
         "proxy_url": "https://openace.example/api/remote/llm-proxy",
         "cli_settings": {"codex-cli": {"model_provider": "openace"}},
-        "tokens": {"openai": "proxy-token-123"},
+        "tokens": {"openai": PROXY_TOKEN},
         "source": "ssh_cli",
     }
 
@@ -432,7 +460,7 @@ def test_codex_config_writes_are_serialized(tmp_path, monkeypatch):
     """
     cli_settings = load_cli_settings()
 
-    config_path = _seed_codex_token(cli_settings, tmp_path, "proxy-token-123")
+    config_path = _seed_codex_token(cli_settings, tmp_path, PROXY_TOKEN)
     assert config_path.exists()
 
     import threading
@@ -466,7 +494,7 @@ def test_codex_config_writes_are_serialized(tmp_path, monkeypatch):
             {"model_provider": "openace"},
             proxy_base_url="https://openace.example/api/remote/llm-proxy/v1",
             home_dir=tmp_path,
-            bearer_token="writer-token-999",
+            bearer_token=WRITER_TOKEN,
         )
         writer_done.set()
 
@@ -480,7 +508,7 @@ def test_codex_config_writes_are_serialized(tmp_path, monkeypatch):
     parsed = cli_settings.tomllib.loads(config_path.read_text(encoding="utf-8"))
     openace = parsed["model_providers"]["openace"]
     # The writer's bearer token must survive the clearer's stale rewrite.
-    assert openace.get("experimental_bearer_token") == "writer-token-999", (
+    assert openace.get("experimental_bearer_token") == WRITER_TOKEN, (
         "writer's field was lost to a concurrent read-modify-write race "
         "(missing serialization lock on ~/.codex/config.toml)"
     )

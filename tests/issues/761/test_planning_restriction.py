@@ -126,6 +126,90 @@ class TestClaudeCodeAdapterAllowedTools:
         assert "--allowedTools" not in args
 
 
+class TestClaudeCodeAdapterPermissionMode:
+    """Verify Claude Code adapter maps permission_mode to the right CLI flags.
+
+    bypass/full-auto must use --dangerously-skip-permissions (the only way to
+    disable the macOS Bash sandbox that blocks ~/.claude/session-env/ writes,
+    #1828/#1830). acceptEdits/auto keep --permission-mode (sandbox stays on).
+    """
+
+    @pytest.fixture(autouse=True)
+    def _add_remote_agent_to_path(self):
+        import os
+        import sys
+
+        ra = os.path.normpath(
+            os.path.join(os.path.dirname(__file__), "..", "..", "..", "remote-agent")
+        )
+        if ra not in sys.path:
+            sys.path.insert(0, ra)
+
+    def test_bypass_uses_dangerously_skip_permissions(self):
+        from cli_adapters.claude_code import ClaudeCodeAdapter
+
+        adapter = ClaudeCodeAdapter()
+        args = adapter.build_start_args(
+            session_id="sess-123",
+            project_path="/tmp/project",
+            permission_mode="bypass",
+        )
+        assert "--dangerously-skip-permissions" in args
+        # Should NOT also pass --permission-mode bypassPermissions
+        assert "--permission-mode" not in args
+
+    def test_full_auto_uses_dangerously_skip_permissions(self):
+        from cli_adapters.claude_code import ClaudeCodeAdapter
+
+        adapter = ClaudeCodeAdapter()
+        args = adapter.build_start_args(
+            session_id="sess-123",
+            project_path="/tmp/project",
+            permission_mode="full-auto",
+        )
+        assert "--dangerously-skip-permissions" in args
+        assert "--permission-mode" not in args
+
+    def test_auto_edit_uses_accept_edits_mode(self):
+        from cli_adapters.claude_code import ClaudeCodeAdapter
+
+        adapter = ClaudeCodeAdapter()
+        args = adapter.build_start_args(
+            session_id="sess-123",
+            project_path="/tmp/project",
+            permission_mode="auto-edit",
+        )
+        assert "--permission-mode" in args
+        idx = args.index("--permission-mode")
+        assert args[idx + 1] == "acceptEdits"
+        assert "--dangerously-skip-permissions" not in args
+
+    def test_auto_uses_auto_mode(self):
+        from cli_adapters.claude_code import ClaudeCodeAdapter
+
+        adapter = ClaudeCodeAdapter()
+        args = adapter.build_start_args(
+            session_id="sess-123",
+            project_path="/tmp/project",
+            permission_mode="auto",
+        )
+        assert "--permission-mode" in args
+        idx = args.index("--permission-mode")
+        assert args[idx + 1] == "auto"
+        assert "--dangerously-skip-permissions" not in args
+
+    def test_no_permission_mode_adds_neither_flag(self):
+        from cli_adapters.claude_code import ClaudeCodeAdapter
+
+        adapter = ClaudeCodeAdapter()
+        args = adapter.build_start_args(
+            session_id="sess-123",
+            project_path="/tmp/project",
+        )
+        assert "--permission-mode" not in args
+        assert "--dangerously-skip-permissions" not in args
+
+
 class TestQwenCodeAdapterAllowedTools:
     """Verify Qwen Code adapter still works with --allowed-tools."""
 

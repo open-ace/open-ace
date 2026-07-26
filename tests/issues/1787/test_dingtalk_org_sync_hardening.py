@@ -282,10 +282,18 @@ def test_departed_users_are_deactivated(sync_env):
 # ---- LOW: errcode aborts whole run with raw payload ----
 
 
-def test_transient_user_lookup_errcode_warns_and_skips():
-    """A non-zero errcode on one user lookup must warn-and-skip, not raise and abort
-    the entire sync run with a raw payload.
+def test_transient_user_lookup_errcode_warns_and_skips(monkeypatch):
+    """A transient errcode on a user-list page must warn-and-skip the department,
+    not raise and abort the entire sync run with a raw payload.
+
+    The page-level retry (bounded backoff) is exercised here: a persistently
+    transient errcode (-1) is retried a bounded number of times, then the
+    department is skipped with a warning.
     """
+    import app.services.dingtalk_org_sync as dt_module
+
+    # Avoid real sleeping during the bounded transient retry.
+    monkeypatch.setattr(dt_module, "_TRANSIENT_SLEEP", lambda _s: None)
 
     class FakeResponse:
         def __init__(self, payload):
@@ -298,13 +306,13 @@ def test_transient_user_lookup_errcode_warns_and_skips():
             return self._payload
 
     class FlakyHttp:
+        def __init__(self):
+            self.user_list_calls = 0
+
         def post(self, url, **kwargs):
-            if url.endswith("/user/listid"):
-                return FakeResponse(
-                    {"errcode": 0, "result": {"userid_list": ["dt_erin"], "has_more": False}}
-                )
-            if url.endswith("/user/get"):
-                # Transient DingTalk error (rate-limit / quota).
+            if url.endswith("/user/list"):
+                self.user_list_calls += 1
+                # Transient DingTalk error (rate-limit / quota) on the page.
                 return FakeResponse({"errcode": -1, "errmsg": "rate limit"})
             raise AssertionError(f"unexpected URL {url}")
 
@@ -316,10 +324,13 @@ def test_transient_user_lookup_errcode_warns_and_skips():
     warnings: list[str] = []
     # Must NOT raise.
     users = service._fetch_department_users("token", "100", warnings=warnings)
-    assert users == [], "expected the flaky user to be skipped, not returned"
+    assert users == [], "expected the flaky department's users to be skipped, not returned"
     assert any(
-        "dt_erin" in w for w in warnings
-    ), f"expected a warning about the failed user; got {warnings}"
+        "100" in w and "errcode=-1" in w for w in warnings
+    ), f"expected a warning about the failed department; got {warnings}"
+    # The transient errcode was retried the configured number of times before
+    # giving up (1 initial attempt + _TRANSIENT_MAX_RETRIES retries).
+    assert service.http.user_list_calls == dt_module._TRANSIENT_MAX_RETRIES + 1
 
 
 def test_request_oapi_error_message_does_not_echo_raw_payload():

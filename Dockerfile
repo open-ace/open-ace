@@ -179,16 +179,28 @@ RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 # chdir'ing as root then runuser -u <owner>. Owned by root so the sudoers rule
 # (ALL=(root) NOPASSWD) above can apply.
 COPY scripts/openace-run-as.sh /usr/local/bin/openace-run-as
+COPY scripts/openace-validate-launch /usr/local/libexec/openace-validate-launch
 COPY app/modules/workspace/autonomous/agent_bin/ /usr/local/libexec/openace-agent-bin/
 RUN chmod 755 /usr/local/bin/openace-run-as \
+        /usr/local/libexec/openace-validate-launch \
         /usr/local/libexec/openace-agent-bin/_guard_exec.py \
         /usr/local/libexec/openace-agent-bin/git \
         /usr/local/libexec/openace-agent-bin/gh \
         /usr/local/libexec/openace-agent-bin/python \
         /usr/local/libexec/openace-agent-bin/python3 \
         /usr/local/libexec/openace-agent-bin/pytest && \
-    chown root:root /usr/local/bin/openace-run-as && \
+    chown root:root /usr/local/bin/openace-run-as \
+        /usr/local/libexec/openace-validate-launch && \
     chown -R root:root /usr/local/libexec/openace-agent-bin && \
+    mkdir -p /etc/openace && \
+    printf '%s\n' \
+        '# Issue #2018: constraints shared by openace-run-as and its sudoers' \
+        '# rule. root:root 0640 — the openace service account cannot edit it.' \
+        'OPENACE_AUTONOMOUS_AGENT_ACCOUNT="openace-agent"' \
+        'ALLOWED_WORKSPACE_ROOTS="/home /workspace"' \
+        > /etc/openace/agent-launcher.conf && \
+    chown root:root /etc/openace/agent-launcher.conf && \
+    chmod 0640 /etc/openace/agent-launcher.conf && \
     printf '%s\n' \
         '# Credentialless autonomous agent launcher' \
         'open-ace ALL=(root) NOPASSWD: /usr/local/bin/openace-run-as --isolated *' \

@@ -1641,6 +1641,7 @@ class AutonomousOrchestrator:
                 before_main.get("head")
                 and after_main.get("head")
                 and before_main.get("head") != after_main.get("head")
+                and before_main.get("branch") == after_main.get("branch")
                 and before_effective.get("head") == after_effective.get("head")
             ):
                 # main HEAD moved but the worktree did not. This is either an
@@ -1668,6 +1669,79 @@ class AutonomousOrchestrator:
                     "HEAD did not move; the agent likely executed git commands outside "
                     "the workflow worktree."
                 )
+            after_main_branch = after_main.get("branch", "")
+            if (
+                before_main.get("head")
+                and after_main.get("head")
+                and before_main.get("head") != after_main.get("head")
+                and before_main.get("branch") != after_main_branch
+                and before_effective.get("head") == after_effective.get("head")
+            ):
+                # Main repo HEAD moved AND its checked-out branch changed
+                # during the agent run. On a dev/single-user host this is the
+                # common case: the developer checked out a feature branch to
+                # work on a fix PR while a workflow was running against the
+                # same repo, and the feature branch's local (unpushed) commits
+                # would otherwise trip after_on_remote=False in the
+                # benign-pull probe (#1831 false positive).
+                #
+                # Security tradeoff: this skip is ambiguous on same-user
+                # deployments (macOS / dev installs without the
+                # openace-run-as launcher). In same-user mode the agent has no
+                # command guard and COULD theoretically `cd` to the main repo
+                # and `git checkout <branch> && git commit`. The worktree-only
+                # validation above (repo root / branch / origin / git_dir)
+                # does NOT catch this — it only confirms the worktree was not
+                # modified, not that the agent stayed inside the worktree.
+                # Mitigations:
+                #   - auto-dev/* branches are NOT skipped (see below), since
+                #     those are workflow branches and a switch to one in the
+                #     main repo is more likely an escape than developer work.
+                #   - The branch change is logged at WARNING so operators on
+                #     security-sensitive multi-user hosts can monitor it.
+                #   - On multi-user Linux hosts with the launcher, the agent
+                #     runs as a credentialless principal and CANNOT touch the
+                #     main repo, so this tradeoff is dev-host-only.
+                if after_main_branch.startswith("auto-dev/"):
+                    # A switch to an auto-dev/* branch in the main repo is
+                    # suspicious — workflow branches belong in worktrees, not
+                    # the main checkout. Run the benign-pull probe; if it
+                    # doesn't pass, block as a likely escape.
+                    logger.warning(
+                        "Workflow %s: main repo branch changed to %s (an auto-dev/* "
+                        "workflow branch) during agent run; running drift check.",
+                        self._workflow_id,
+                        after_main_branch,
+                    )
+                    if self._main_drift_is_benign_pull(
+                        ctx.get("project_path", ""),
+                        before_main.get("head"),
+                        after_main.get("head"),
+                        system_account,
+                    ):
+                        return ""
+                    return (
+                        "Detected commits on the main repository while the workflow "
+                        "worktree HEAD did not move; the main repo branch changed to "
+                        f"{after_main_branch} (an auto-dev/* workflow branch), which "
+                        "is not a developer action — the agent likely executed git "
+                        "commands outside the workflow worktree."
+                    )
+                else:
+                    logger.warning(
+                        "Workflow %s: main repo branch changed %s..%s during agent "
+                        "run (developer switched branches: %s -> %s); skipping "
+                        "main-HEAD-drift check. NOTE: on same-user deployments this "
+                        "skip cannot distinguish developer action from an agent "
+                        "escape via branch switch — monitor this log on "
+                        "security-sensitive hosts.",
+                        self._workflow_id,
+                        before_main.get("head", "")[:8],
+                        after_main.get("head", "")[:8],
+                        before_main.get("branch", ""),
+                        after_main_branch,
+                    )
+                    return ""
         return ""
 
     def _ensure_worktree(self, wf: dict) -> str:
@@ -2432,12 +2506,25 @@ class AutonomousOrchestrator:
             logger.warning("Skipping isolated pre-commit convergence: executable unavailable")
             return False, ""
 
-        isolated_account = self._resolve_isolated_agent_account()
         project_system_account = self._resolve_system_account(wf)
-        if project_system_account and isolated_account == project_system_account:
-            raise RuntimeError(
-                "Autonomous validation account must differ from the repository owner account"
+        # Engage the credentialless isolated-agent principal only when the
+        # privileged launcher is provisioned (Linux multi-user). On dev/macOS
+        # installs without openace-run-as, fall back to the repository owner
+        # account in same-user mode — mirroring _run_agent's downgrade.
+        if AutonomousAgentRunner.is_isolated_launcher_available():
+            isolated_account = self._resolve_isolated_agent_account()
+            if project_system_account and isolated_account == project_system_account:
+                raise RuntimeError(
+                    "Autonomous validation account must differ from the repository owner account"
+                )
+        else:
+            logger.warning(
+                "Workflow %s: isolated agent launcher unavailable; running pre-commit "
+                "convergence as the repository owner (%s) in same-user mode.",
+                getattr(self, "_workflow_id", ""),
+                project_system_account or "(unknown)",
             )
+            isolated_account = project_system_account
         runtime_command, _ = self._select_project_python_runtime(project_path, gh)
         guard_bin = AutonomousAgentRunner._resolve_agent_guard_bin()
         env = {
@@ -4392,22 +4479,40 @@ class AutonomousOrchestrator:
                         "contains embedded credentials; configure a credential helper instead"
                     ),
                 )
-            isolated_account = self._resolve_isolated_agent_account()
-            try:
-                service_account = pwd.getpwuid(os.getuid()).pw_name
-            except (KeyError, OverflowError):
-                service_account = ""
-            if isolated_account in {project_system_account, service_account}:
-                return AgentTaskResult(
-                    session_id=tracking_session_id,
-                    tracking_session_id=tracking_session_id,
-                    success=False,
-                    error=(
-                        "Autonomous agent isolation is invalid: the credentialless agent "
-                        "account must differ from the service and repository owner accounts"
-                    ),
+            # Engage the credentialless isolated-agent principal only when the
+            # privileged launcher (openace-run-as --isolated) is actually
+            # provisioned. The launcher is Linux-only (setfacl/getent/runuser)
+            # and absent on dev/macOS installs where the service already runs as
+            # the repo owner; in that same-user case isolation provides no
+            # benefit and cannot run. Mirrors the Windows single-user downgrade.
+            if AutonomousAgentRunner.is_isolated_launcher_available():
+                isolated_account = self._resolve_isolated_agent_account()
+                try:
+                    service_account = pwd.getpwuid(os.getuid()).pw_name
+                except (KeyError, OverflowError):
+                    service_account = ""
+                if isolated_account in {project_system_account, service_account}:
+                    return AgentTaskResult(
+                        session_id=tracking_session_id,
+                        tracking_session_id=tracking_session_id,
+                        success=False,
+                        error=(
+                            "Autonomous agent isolation is invalid: the credentialless agent "
+                            "account must differ from the service and repository owner accounts"
+                        ),
+                    )
+                kwargs["system_account"] = isolated_account
+            else:
+                logger.warning(
+                    "Workflow %s: isolated agent launcher %s unavailable; running the "
+                    "agent as the repository owner (%s) in same-user mode. This is expected "
+                    "on dev/macOS installs where the service runs as the repo owner; "
+                    "isolated agent mode requires the openace-run-as launcher "
+                    "(Linux multi-user only).",
+                    self._workflow_id,
+                    AutonomousAgentRunner.isolated_launcher_path(),
+                    project_system_account or "(unknown)",
                 )
-            kwargs["system_account"] = isolated_account
 
         with self._session_lock:
             self._current_session_id = tracking_session_id
@@ -4677,6 +4782,67 @@ class AutonomousOrchestrator:
                     else (result.tracking_session_id or result.session_id)
                 )
 
+        # Session-resume failure recovery: if the agent failed because it
+        # couldn't resume a stale or inaccessible session (EPERM on macOS
+        # ``com.apple.provenance`` xattr, or "No conversation found" for a
+        # deleted/mismatched session id), clear the stale cli_session_id
+        # mapping and retry once with a fresh session on the same tracking
+        # line. This prevents permanent workflow failure from
+        # transient/environmental session-access issues (#2035).
+        if (
+            not result.success
+            and field
+            and result.error_code in ("resume_session_not_found", "resume_session_failed")
+            and not self._is_shutdown_requested()
+            and (self.workflow or {}).get("status") not in ("failed", "cancelled", "paused")
+        ):
+            logger.warning(
+                "Session resume failed (error_code=%s) on line %s; clearing "
+                "cli_session_id mapping and retrying with a fresh session",
+                result.error_code,
+                session_line,
+            )
+            self._emit(
+                "session_resume_recovery",
+                {
+                    "error_code": result.error_code,
+                    "session_line": session_line,
+                },
+            )
+            # Clear the stale cli_session_id so _resolve_session_line on the
+            # next advance() does not pick up the same broken resume target.
+            try:
+                if (
+                    getattr(self._runner, "session_manager", None) is not None
+                    and tracking_session_id
+                ):
+                    self._runner.session_manager.update_session_fields(
+                        tracking_session_id, {"cli_session_id": ""}
+                    )
+            except Exception:
+                logger.warning(
+                    "Failed to clear cli_session_id for %s",
+                    tracking_session_id[:8],
+                    exc_info=True,
+                )
+            # Accumulate usage from the failed attempt so tokens aren't lost.
+            for key in retry_usage:
+                retry_usage[key] += int(getattr(result, key, 0) or 0)
+            # Refresh session bookkeeping to match the retry-loop pattern so a
+            # concurrent reader does not observe a stale _current_session_id
+            # during the recovery retry, and _session_usage_offsets carries the
+            # accumulated totals for _write_phase_usage (#2035 follow-up).
+            kwargs["session_id"] = tracking_session_id
+            kwargs["resume"] = False
+            kwargs["resume_session_id"] = None
+            usage_session_ids.add(tracking_session_id)
+            with self._session_lock:
+                self._current_session_id = tracking_session_id
+                self._session_usage_offsets[tracking_session_id] = dict(retry_usage)
+            result = self._runner.run_agent_task(**kwargs)
+            if result.session_id:
+                self._link_session_to_current_milestone(tracking_session_id)
+
         # A transient-error body (e.g. a 529 "overloaded" returned as
         # assistant_text with no tokens generated) must not be handed back as a
         # success — callers would store it as plan/review content. The tokens==0
@@ -4934,7 +5100,7 @@ class AutonomousOrchestrator:
                         "skip_retries": skip_retries,
                         "dev_retries_on_test_fail": dev_retries,
                         "status": "paused",
-                        "paused_at": datetime.now(timezone.utc),
+                        "paused_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
                     }
                 )
                 logger.info(
@@ -6882,7 +7048,20 @@ class AutonomousOrchestrator:
         has_passing_tool_result = _has_passing_test_tool_result(
             test_result.event_log or [], framework_type
         )
-        tests_actually_run = has_passing_tool_result
+        # Fallback: if the event log's tool_result capture is incomplete (e.g.
+        # Claude Code stream-json truncation on long pytest output, or tool
+        # results exceeding the per-event size limit), accept text-based
+        # evidence: a real test tool call in the event log PLUS a "N passed"
+        # pattern in the agent's visible text. The tool call proves the agent
+        # invoked a test command; the "N passed" pattern proves it reported
+        # passing results. Together they provide strong evidence that tests
+        # ran and passed, even without structured tool_result events (#1830).
+        has_text_pass_evidence = has_test_result and bool(
+            re.search(r"\b[1-9]\d*\s+passed\b", test_response_text, re.IGNORECASE)
+        )
+        tests_actually_run = has_passing_tool_result or (
+            has_test_tool_call and has_text_pass_evidence
+        )
         test_result_inconclusive = (
             test_result.success
             and (has_test_tool_call or has_test_result or test_status_tag in ("passed", "failed"))
@@ -7822,16 +8001,65 @@ class AutonomousOrchestrator:
             )
 
         # A review-fix call can only attribute and auto-stage changes safely
-        # when it starts from a clean tree. Never let an unrelated test/manual
-        # edit hitchhike on a successful recovery or a no-op agent response.
+        # when it starts from a clean tree. If the worktree is dirty (e.g. a
+        # previous dev/CI-repair round left formatting edits uncommitted), commit
+        # those pre-existing changes first so the fix agent starts from a clean
+        # tree. Refusing to proceed creates a dead-end: retrying hits the same
+        # dirty worktree (#1828/#1830).
+        #
+        # Scope safety: capture commit_before BEFORE staging so the pre-existing
+        # diff is also validated by _validate_autonomous_change_scope below
+        # (called with commit_before_staging..commit_after_staging). Without
+        # this, unrelated/unreviewed content in the dirty tree would be pushed
+        # to the PR branch without scope validation.
+        commit_before_staging = ""
         try:
             dirty_before = gh.has_uncommitted_changes()
         except Exception as exc:
             return fail_fix(f"Unable to verify clean worktree before PR review fix: {exc}")
         if dirty_before is True:
-            return fail_fix(
-                "PR review fix refused: worktree already had uncommitted changes before agent run"
-            )
+            try:
+                commit_before_staging = gh.get_current_commit()
+                gh.git_add_all()
+                gh.git_commit(
+                    "auto: stage pre-existing worktree changes before review fix",
+                    no_verify=True,
+                )
+                staged_sha = gh.get_current_commit()
+                # Validate the pre-existing changes against the autonomous
+                # scope guard. If they touch files outside the allowed scope
+                # (e.g. unrelated test/manual edits), refuse — do NOT push
+                # out-of-scope content to the PR branch.
+                pre_scope_error = self._validate_autonomous_change_scope(
+                    gh, wf, commit_before_staging, staged_sha
+                )
+                if pre_scope_error:
+                    try:
+                        gh.reset_hard_to(commit_before_staging)
+                    except Exception as reset_exc:
+                        pre_scope_error += (
+                            "; failed to discard the rejected pre-existing commit: " f"{reset_exc}"
+                        )
+                    return fail_fix(
+                        f"Pre-existing worktree changes failed scope validation: {pre_scope_error}"
+                    )
+                logger.warning(
+                    "Workflow %s: worktree was dirty before review fix; "
+                    "committed and scope-validated pre-existing changes before "
+                    "running fix agent",
+                    self._workflow_id[:8],
+                )
+            except Exception as exc:
+                # On any failure during staging, reset to the pre-staging
+                # commit so we don't leave the tree in a half-staged state.
+                if commit_before_staging:
+                    try:
+                        gh.reset_hard_to(commit_before_staging)
+                    except Exception:
+                        pass
+                return fail_fix(
+                    f"Worktree was dirty and auto-staging pre-existing changes failed: {exc}"
+                )
 
         commit_before = ""
         try:
@@ -8118,6 +8346,13 @@ class AutonomousOrchestrator:
         resume immediately from the cancelled milestone's phase.
 
         If auto_merge is enabled and PR exists, skip waiting and proceed to merge.
+
+        Invariant: must not mutate the git working tree — relied on by the
+        scheduler's waiting-bypass. ``autonomous_scheduler._process_workflows``
+        skips batch/workspace/branch conflict locks for ``status == waiting``
+        workflows on the assumption that this phase only touches DB/API state.
+        Any git or agent work must happen in a later phase, after the workflow
+        has left ``waiting``.
         """
         # Check for stored user feedback (from cancel-with-feedback)
         user_feedback = wf.get("user_feedback", "")
@@ -8283,31 +8518,60 @@ class AutonomousOrchestrator:
                 self._update_workflow({"status": "failed", "error_message": scope_error})
                 return
 
-            # Required-branch-update rules reject an immediate merge with the
-            # same generic "repository rule violations" error used for pending
-            # checks. Synchronize a stale PR explicitly before querying the new
-            # head's CI. This reuses the trusted clean/conflict merge path and
-            # returns without consuming a CI-repair attempt.
-            if (
-                branch_name
-                and pr_head_sha
-                and self._sync_failed_pr_with_main(gh, branch_name, pr_number, pr_head_sha)
-            ):
-                return
-
+            # Before syncing or repairing, check whether the PR is already
+            # mergeable despite non-required check failures
+            # (mergeable_state=unstable). If so, skip branch sync and CI
+            # repair — attempt merge directly. Syncing/repairing such PRs is
+            # wasteful and can fail (the agent can't fix dependency
+            # vulnerabilities like Security Audit Gate), causing the workflow
+            # to fail unnecessarily (#2034).
             try:
-                checks = gh.get_pr_checks(pr_number)
-            except Exception as e:
-                raise GitHubOpsError(
-                    f"Unable to query CI checks before merging PR #{pr_number}: {e}"
-                ) from e
-            failed = [c for c in checks if c.get("bucket") == "fail"]
-            if failed:
-                self._start_ci_repair_round(wf, pr_number, failed)
-                return
+                pre_merge_state = gh.get_pr_merge_state(pr_number)
+                pre_mergeable_state = str(pre_merge_state.get("mergeable_state") or "").lower()
+            except Exception as state_err:
+                logger.warning(
+                    "PR #%s: failed to query merge state before merge: %s",
+                    pr_number,
+                    state_err,
+                )
+                pre_mergeable_state = ""
+
+            checks: list[dict] = []
+            if pre_mergeable_state != "unstable":
+                # PR is not mergeable-as-is; sync branch and check CI.
+                # Required-branch-update rules reject an immediate merge with
+                # the same generic "repository rule violations" error used for
+                # pending checks. Synchronize a stale PR explicitly before
+                # querying the new head's CI. This reuses the trusted
+                # clean/conflict merge path and returns without consuming a
+                # CI-repair attempt.
+                if (
+                    branch_name
+                    and pr_head_sha
+                    and self._sync_failed_pr_with_main(gh, branch_name, pr_number, pr_head_sha)
+                ):
+                    return
+
+                try:
+                    checks = gh.get_pr_checks(pr_number)
+                except Exception as e:
+                    raise GitHubOpsError(
+                        f"Unable to query CI checks before merging PR #{pr_number}: {e}"
+                    ) from e
+                failed = [c for c in checks if c.get("bucket") == "fail"]
+                if failed:
+                    self._start_ci_repair_round(wf, pr_number, failed)
+                    return
+            else:
+                logger.info(
+                    "PR #%s: mergeable_state=unstable; skipping branch sync "
+                    "and CI repair, attempting merge directly",
+                    pr_number,
+                )
             # If CI is still running, defer this merge to the next scheduler
             # cycle instead of blocking (synchronous poll) or failing. The
             # scheduler re-enters _do_merge every ~10s.
+            # (checks is empty for unstable PRs — no deferral needed.)
             pending = [c for c in checks if c.get("bucket") == "pending"]
             if pending:
                 logger.info(
@@ -8586,29 +8850,46 @@ class AutonomousOrchestrator:
         # Git forbids checking out the same branch in two worktrees, so the
         # workflow's own worktree (if still present) must be removed first to
         # free the branch for the temp worktree below.
+        #
+        # Issue #2041: the whole transition (remove original → create temp →
+        # resolve → remove temp → restore original) is one outer try/finally so
+        # no step can leave the workflow operating on the main checkout. The DB
+        # is cleared only AFTER git confirms removal, temp creation lives inside
+        # the try, and a restore failure fails closed.
         main_gh = GitHubOps(project_path, system_account=system_account)
-        if worktree_path:
-            try:
-                main_gh.remove_worktree(worktree_path)
-            except GitHubOpsError as e:
-                logger.warning("Could not remove existing worktree %s: %s", worktree_path, e)
-            self._update_workflow({"worktree_path": ""})
-            # The caller's gh still points at the now-deleted worktree dir as
-            # its cwd. Rebind it (and the cached self._gh) to the main repo so
-            # the later merge_pr / _do_merge cleanup don't run subprocess with
-            # a gone cwd (#1107 review).
-            gh = GitHubOps(project_path, system_account=system_account)
-            self._gh = gh
-
-        # Create an isolated worktree for the existing PR branch. Use the main
-        # repo's gh so the worktree is registered against the real .git.
-        temp_wt_path = os.path.normpath(f"{project_path}/../merge-{self._workflow_id[:8]}")
-        main_gh.add_worktree(temp_wt_path, branch_name)
-        logger.info("Created temporary merge worktree at %s", temp_wt_path)
-
-        # All subsequent git ops run inside the temp worktree.
-        wt_gh = GitHubOps(temp_wt_path, system_account=system_account)
+        # Place the temp merge worktree inside the project's .worktrees/ dir
+        # (the same convention as normal workflow worktrees — see
+        # _get_preferred_worktree_path). The previous ../merge-{id} sibling
+        # path failed on macOS with EPERM "could not create leading
+        # directories" because the server process lacks TCC/write permission
+        # to create new directories directly under ~/workspace (#1827).
+        temp_wt_path = os.path.normpath(
+            os.path.join(project_path, ".worktrees", f"merge-{self._workflow_id[:8]}")
+        )
+        original_removed = False
+        temp_created = False
         try:
+            if worktree_path:
+                # Fail closed on removal failure: only clear the DB once git has
+                # actually freed the branch, and never assume removal succeeded.
+                self._remove_worktree_idempotent(main_gh, worktree_path)
+                self._update_workflow({"worktree_path": ""})
+                # The caller's gh still points at the now-deleted worktree dir
+                # as its cwd. Rebind it (and cached self._gh) to the main repo
+                # so later cleanup doesn't run subprocess with a gone cwd (#1107).
+                gh = GitHubOps(project_path, system_account=system_account)
+                self._gh = gh
+                original_removed = True
+
+            # Create an isolated worktree for the existing PR branch. Use the
+            # main repo's gh so the worktree is registered against the real .git.
+            # Lives inside the try so a creation failure still triggers restore.
+            main_gh.add_worktree(temp_wt_path, branch_name)
+            logger.info("Created temporary merge worktree at %s", temp_wt_path)
+            temp_created = True
+
+            # All subsequent git ops run inside the temp worktree.
+            wt_gh = GitHubOps(temp_wt_path, system_account=system_account)
             # Sync the checked-out branch to the PR's authoritative remote head
             # before merging main (see _sync_worktree_to_pr_remote_head).
             self._sync_worktree_to_pr_remote_head(wt_gh, branch_name)
@@ -8905,21 +9186,29 @@ class AutonomousOrchestrator:
                 ),
             )
         finally:
-            # Always tear down the temp worktree, even on failure, so it does
-            # not leak and block future runs. Use the main repo's gh because
-            # a worktree cannot remove itself.
-            try:
-                main_gh.remove_worktree(temp_wt_path)
-                logger.info("Removed temporary merge worktree at %s", temp_wt_path)
-            except GitHubOpsError as e:
-                logger.warning("Failed to remove temp worktree %s: %s", temp_wt_path, e)
+            # Tear down the temp worktree if it was actually created, so it does
+            # not leak and block future runs. Use the main repo's gh because a
+            # worktree cannot remove itself. Skip when it was never created
+            # (e.g. the original worktree removal failed first) to avoid a
+            # spurious "failed to remove" warning on a path that doesn't exist.
+            if temp_created:
+                try:
+                    main_gh.remove_worktree(temp_wt_path)
+                    logger.info("Removed temporary merge worktree at %s", temp_wt_path)
+                except GitHubOpsError as e:
+                    logger.warning("Failed to remove temp worktree %s: %s", temp_wt_path, e)
 
             # Restore the workflow's original worktree so subsequent phases
             # (PR review push, CI repair, _do_merge re-entry) operate on the
             # isolated branch, not the main repo (HEAD=main). Without this,
             # _do_pr_review's pre-push branch check fails with
             # "expected auto-dev/xxx, actual main" and the workflow is stuck.
-            if worktree_path:
+            #
+            # Only restore if we actually removed it (Issue #2041): a failed
+            # removal leaves the original worktree live in git, and an attempted
+            # restore would error. A restore failure fails CLOSED — never let a
+            # later phase run on the main checkout.
+            if original_removed:
                 try:
                     # If remove_worktree succeeded earlier, the dir is gone
                     # and we recreate it. If it failed, the dir is still
@@ -8927,9 +9216,7 @@ class AutonomousOrchestrator:
                     git_file = os.path.join(worktree_path, ".git")
                     if not main_gh.path_exists_as_user(git_file, file_only=True):
                         main_gh.add_worktree(worktree_path, branch_name)
-                    # Always restore the DB entry — it was cleared at the top
-                    # of this method regardless of whether remove_worktree
-                    # succeeded.
+                    self._verify_worktree_restored(main_gh, worktree_path, branch_name)
                     self._update_workflow({"worktree_path": worktree_path})
                     self._gh = GitHubOps(worktree_path, system_account=system_account)
                     logger.info("Restored workflow worktree at %s", worktree_path)
@@ -8940,3 +9227,54 @@ class AutonomousOrchestrator:
                         e,
                         exc_info=True,
                     )
+                    self._update_workflow(
+                        {
+                            "status": "failed",
+                            "error_message": (
+                                f"worktree restore failed after merge resolution: {e}"
+                            ),
+                        }
+                    )
+                    raise
+
+    def _remove_worktree_idempotent(self, gh: GitHubOps, path: str) -> None:
+        """Remove a worktree, treating "already absent" as success (Issue #2041).
+
+        ``git worktree remove`` errors if the worktree is already gone (e.g. it
+        was cleaned up externally or by a previous partial run). That is not a
+        failure: the branch is already free. Only re-raise if the worktree is
+        still registered, which means the removal genuinely failed and the
+        branch is still occupied.
+        """
+        try:
+            gh.remove_worktree(path)
+        except GitHubOpsError as exc:
+            # Probe the registry to distinguish "already gone" from a real
+            # failure. If the probe itself errors, re-raise the ORIGINAL
+            # removal error so it isn't masked by a less actionable one.
+            try:
+                still_registered = any(w.get("path") == path for w in gh.list_worktrees())
+            except Exception:
+                raise exc
+            if still_registered:
+                raise
+            logger.info("Worktree %s already absent (treated as removed): %s", path, exc)
+
+    def _verify_worktree_restored(self, gh: GitHubOps, path: str, branch: str) -> None:
+        """Post-restore verification (Issue #2041 acceptance #6).
+
+        Confirms the restored worktree is registered in ``git worktree list`` on
+        the expected branch. (The restore gate above already ensured the linked
+        ``.git`` pointer exists before reaching here.) Any failure propagates so
+        the caller can fail closed.
+        """
+        entries = [w for w in gh.list_worktrees() if w.get("path") == path]
+        if not entries:
+            raise RuntimeError(f"restored worktree {path} missing from `git worktree list`")
+        actual = entries[0].get("branch")
+        # git may report either "branch" or "refs/heads/branch" depending on version.
+        if actual not in (branch, f"refs/heads/{branch}"):
+            raise RuntimeError(
+                f"restored worktree {path} on wrong branch: "
+                f"expected={branch!r}, actual={actual!r}"
+            )
