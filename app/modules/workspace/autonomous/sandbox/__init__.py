@@ -11,6 +11,7 @@ from app.modules.workspace.autonomous.sandbox.provider import (
     CapabilityUnsupported,
     SandboxError,
     SandboxProvider,
+    is_current_generation,
     require_capabilities,
 )
 from app.modules.workspace.autonomous.sandbox.types import (
@@ -35,5 +36,6 @@ __all__ = [
     "SandboxProvider",
     "SandboxSpec",
     "SandboxStatus",
+    "is_current_generation",
     "require_capabilities",
 ]

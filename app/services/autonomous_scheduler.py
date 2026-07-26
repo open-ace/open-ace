@@ -958,6 +958,59 @@ def _retry_pending_git_cleanups(repo=None):
         logger.error("Git cleanup retry sweep failed: %s", e, exc_info=True)
 
 
+def _reconcile_orphan_sandboxes(repo=None):
+    """Reset orphan sandbox state at startup (#2022 P2).
+
+    Walks workflows whose ``sandbox_state`` claims an active sandbox
+    (created/running/paused) but whose owning process is gone — the server
+    crashed/restarted mid-task before the sandbox was destroyed. At startup
+    nothing is running, so every active-sandbox-state row is an orphan.
+
+    For each: reset ``sandbox_state`` to ``destroyed``, bump
+    ``sandbox_generation`` (so a handle minted before the restart is stale and
+    a future provider rejects it), clear ``sandbox_id``, and record the
+    reconcile reason. This is STATE reconciliation only — there is no real
+    ``provider.destroy()`` until P3 (LegacyPosixProvider), which will add
+    actual per-task resource teardown to this sweep.
+    """
+    logger.info("Reconciling orphan sandbox state...")
+
+    try:
+        if repo is None:
+            from app.repositories.autonomous_repo import AutonomousWorkflowRepository
+            from app.repositories.database import Database
+
+            repo = AutonomousWorkflowRepository(Database())
+
+        workflows = repo.get_workflows_with_active_sandbox()
+        if not workflows:
+            logger.info("No orphan sandbox state found")
+            return
+
+        for wf in workflows:
+            current_gen = int(wf.get("sandbox_generation") or 0)
+            repo.update_workflow(
+                wf["workflow_id"],
+                {
+                    "sandbox_state": "destroyed",
+                    "sandbox_generation": current_gen + 1,
+                    "sandbox_id": None,
+                    "sandbox_last_error": (
+                        "reconciled at startup: orphan sandbox "
+                        "(state reset; provider destroy lands in P3)"
+                    ),
+                },
+            )
+            logger.info(
+                "Reconciled orphan sandbox for workflow %s (generation %d -> %d)",
+                wf["workflow_id"][:8],
+                current_gen,
+                current_gen + 1,
+            )
+    except Exception as e:  # noqa: BLE001
+        logger.error("Sandbox reconciliation sweep failed: %s", e, exc_info=True)
+
+
 def init_autonomous_scheduler():
     """Initialize and start the autonomous scheduler."""
     # Clean up orphaned processes from previous server run
@@ -966,6 +1019,8 @@ def init_autonomous_scheduler():
     _reconcile_pending_transitions()
     # Retry Git cleanup for workflows delivered but not yet cleaned up (#2043)
     _retry_pending_git_cleanups()
+    # Reset orphan sandbox state from a prior crash/restart (#2022 P2)
+    _reconcile_orphan_sandboxes()
 
     scheduler = AutonomousScheduler.instance()
     scheduler.start()

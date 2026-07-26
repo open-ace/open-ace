@@ -105,6 +105,13 @@ class AutonomousWorkflowRepository:
         "cleanup_error",
         "cleanup_updated_at",
         "cleanup_next_retry_at",
+        # SandboxProvider state (#2022 P2).
+        "sandbox_provider",
+        "sandbox_id",
+        "sandbox_generation",
+        "sandbox_state",
+        "sandbox_policy_digest",
+        "sandbox_last_error",
     }
     ALLOWED_MILESTONE_FIELDS = {
         "phase",
@@ -196,6 +203,33 @@ class AutonomousWorkflowRepository:
                     """
                     SELECT * FROM autonomous_workflows
                     WHERE worktree_transition_state IS NOT NULL
+                    """
+                )
+            )
+            cols = [d[0] for d in cursor.description]
+            return [dict(zip(cols, row)) for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
+    def get_workflows_with_active_sandbox(self) -> list[dict]:
+        """Find workflows whose sandbox claims to be active (#2022 P2).
+
+        A non-NULL ``sandbox_state`` in the active set (created/running/paused)
+        means a SandboxProvider created a sandbox that was never destroyed —
+        e.g. the server crashed/restarted mid-task. The startup reconciliation
+        sweep walks these to reset the state and bump the generation so a stale
+        handle cannot operate on a future sandbox. ``destroyed``/``error`` and
+        NULL rows are not active orphans.
+        """
+        conn = self.db.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                adapt_sql(
+                    """
+                    SELECT * FROM autonomous_workflows
+                    WHERE sandbox_state IS NOT NULL
+                      AND sandbox_state IN ('created', 'running', 'paused')
                     """
                 )
             )
