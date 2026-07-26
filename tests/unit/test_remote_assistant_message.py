@@ -62,6 +62,21 @@ class TestAssistantMessageAccumulation(unittest.TestCase):
             or (len(call.args) > 1 and call.args[1] == "assistant")
         ]
 
+    def _make_session_autonomous(self):
+        """Make ``get_session`` return an autonomous workflow session.
+
+        Structured tool/thinking evidence and user ``tool_result`` folding are
+        autonomous-additive policies (see #2047); the default mock session is
+        an ordinary interactive session, so tests that exercise those policies
+        must opt in here.
+        """
+        from app.modules.workspace.session_manager import SessionType
+
+        autonomous_session = MagicMock()
+        autonomous_session.session_type = SessionType.WORKFLOW.value
+        autonomous_session.context = {"workflow_id": "wf-test-1"}
+        self.mock_session_mgr.get_session.return_value = autonomous_session
+
     # --- Tests ---
 
     def test_single_assistant_turn_accumulated_and_flushed(self):
@@ -218,8 +233,60 @@ class TestAssistantMessageAccumulation(unittest.TestCase):
         self._send_output("system info", stream="system", is_complete=False)
         self.mock_session_mgr.append_transcript_message.assert_not_called()
 
+    def test_empty_text_not_stored(self):
+        """An ordinary interactive tool-only turn writes no assistant row.
+
+        Restores the pre-#1939 contract for interactive remote sessions: a
+        turn that produced structured blocks but no visible text must not
+        create an empty assistant bubble or inflate message_count (#2047).
+        """
+        self._send_output(
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "message": {
+                        "content": [{"type": "tool_use", "id": "tu1", "name": "bash", "input": {}}]
+                    },
+                }
+            )
+        )
+        self._send_output(json.dumps({"type": "result", "subtype": "success"}))
+
+        msgs = self._get_stored_assistant_messages()
+        self.assertEqual(len(msgs), 0)
+        self.mock_session_mgr.increment_session_usage.assert_not_called()
+
+    def test_interactive_user_tool_result_ignored(self):
+        """Ordinary interactive sessions do not fold user tool_result blocks."""
+        self._send_output(
+            json.dumps(
+                {
+                    "type": "user",
+                    "message": {
+                        "content": [
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": "test-1",
+                                "content": "9 passed in 0.8s",
+                                "is_error": False,
+                            }
+                        ]
+                    },
+                }
+            )
+        )
+        self._send_output(json.dumps({"type": "result", "subtype": "success"}))
+
+        msgs = self._get_stored_assistant_messages()
+        self.assertEqual(len(msgs), 0)
+
     def test_tool_only_turn_stores_structured_evidence(self):
-        """A tool-only turn must retain evidence even without visible text."""
+        """An autonomous tool-only turn retains evidence even without text.
+
+        The structured-evidence policy is autonomous-additive (#1939 / #2047):
+        only workflow sessions keep tool_use blocks as transcript evidence.
+        """
+        self._make_session_autonomous()
         self._send_output(
             json.dumps(
                 {
@@ -238,6 +305,8 @@ class TestAssistantMessageAccumulation(unittest.TestCase):
         self.assertEqual(msgs[0].kwargs["metadata"]["content_blocks"][0]["type"], "tool_use")
 
     def test_claude_user_tool_result_is_preserved(self):
+        """Autonomous workflow sessions fold user tool_result into the turn."""
+        self._make_session_autonomous()
         self._send_output(
             json.dumps(
                 {
