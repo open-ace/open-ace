@@ -3577,10 +3577,22 @@ class AutonomousOrchestrator:
                     f"is not in PHASE_ORDER={PHASE_ORDER}"
                 )
             # The "completed" pseudo-phase is a terminal workflow status, not a
-            # real phase. A handler signals it by next_phase="completed".
+            # real phase. A handler signals it by next_phase="completed" (the
+            # sentinel mirrors how _do_merge writes status="completed" +
+            # completed_at + emits phase_change{"phase":"completed"}).
+            #
+            # completed_at is written here, symmetric with paused_at on the
+            # pause branch, so a migrated merge handler cannot silently drop
+            # the completion timestamp (review feedback on #2065).
+            #
+            # phase_change events are NOT emitted by this entrypoint: the legacy
+            # _do_* methods emit them inline with phase-specific payloads (e.g.
+            # {"phase":"merge","auto_merge":True}), which the entrypoint cannot
+            # reconstruct. A migrated handler must emit its own phase_change.
             if result.next_phase == "completed":
                 patch["current_phase"] = "merge"
                 patch["status"] = "completed"
+                patch["completed_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
             else:
                 patch["current_phase"] = result.next_phase
                 patch["status"] = result.next_status or PHASE_STATUS_MAP.get(
@@ -3613,9 +3625,16 @@ class AutonomousOrchestrator:
             self._create_milestone(**ms_kwargs)
 
         if result.usage_delta is not None:
-            # _accumulate_tokens refreshes totals from linked sessions; a
-            # concrete delta (when wired in Phase B) would update directly.
-            self._accumulate_tokens(result.usage_delta)
+            # Refresh workflow totals from linked sessions. The delta value is
+            # currently unused — _accumulate_tokens ignores its argument and
+            # recomputes from sessions — so passing it is a no-op today.
+            #
+            # TODO(#2044 Phase B): when an evidence service (#2046) produces a
+            # real structured delta, either teach _accumulate_tokens to apply
+            # it (fixing its unused _result param / the object-vs-AgentTaskResult
+            # type smell) or route usage updates through a dedicated method.
+            # review feedback on #2065.
+            self._accumulate_tokens(result.usage_delta)  # type: ignore[arg-type]
 
     def _build_workflow_context(self, wf: dict) -> WorkflowContext:
         """Assemble the read-only snapshot a phase handler receives.

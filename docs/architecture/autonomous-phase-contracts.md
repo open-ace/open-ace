@@ -230,8 +230,16 @@ resolution sub-workflow. Uses the **test session line** for conflict resolution.
 - **recovery behavior**: conflict → fork → parent paused → child resolves →
   parent resumes merge. Reconciliation fail-closes (status=failed) rather than
   running a phase against the wrong checkout.
-- **terminal outcomes**: `completed` → terminal (workflow completed); `pause`
-  (conflict fork); `failed` on unrecoverable conflict/merge error.
+- **terminal outcomes**: `completed` → terminal (workflow completed, writes
+  `status=completed` + `completed_at`, symmetric with `pause`'s `paused_at`);
+  `pause` (conflict fork); `failed` on unrecoverable conflict/merge error.
+
+> **phase_change emit contract**: `_commit_phase_result` does **not** emit
+> `phase_change` events. The legacy `_do_*` methods emit them inline with
+> phase-specific payloads (e.g. `{"phase":"merge","auto_merge":True}`) that the
+> entrypoint cannot reconstruct. A migrated handler must emit its own
+> `phase_change`. A migrated merge handler returning `completed("completed")`
+> must also emit `phase_change{"phase":"completed"}` to match the legacy path.
 
 ---
 

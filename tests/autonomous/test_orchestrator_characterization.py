@@ -517,11 +517,19 @@ class TestCommitPhaseResult:
             o._commit_phase_result(PhaseResult.completed("nope"))
 
     def test_completed_terminal_status_signal(self):
-        # next_phase="completed" is the terminal signal → status=completed.
+        # next_phase="completed" is the terminal signal → status=completed,
+        # AND it must carry completed_at (symmetric with pause's paused_at) so
+        # a migrated merge handler cannot silently drop the completion
+        # timestamp (review feedback on #2065).
         o = _make_orchestrator(_active_workflow(phase="merge"))
         o._commit_phase_result(PhaseResult.completed("completed"))
         last_updates = o.repo.update_workflow.call_args_list[-1].args[1]
         assert last_updates["status"] == "completed"
+        assert last_updates["current_phase"] == "merge"
+        assert "completed_at" in last_updates
+        # Same format as _do_merge's completed_at (YYYY-MM-DD HH:MM:SS strftime,
+        # not ISO), so the terminal write stays symmetric with the legacy path.
+        assert len(last_updates["completed_at"]) == 19
 
     def test_milestones_committed_after_workflow_patch(self):
         # Milestones flow through _create_milestone (idempotent) and are applied
