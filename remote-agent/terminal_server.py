@@ -68,6 +68,8 @@ else:  # pragma: no cover - exercised by Windows runtime/tests via monkeypatch
     PROCESS_TERMINATE = 0x0001
 
     class IO_COUNTERS(ctypes.Structure):  # pragma: no cover
+        """I/O accounting counters for a job object."""
+
         _fields_ = [
             ("ReadOperationCount", ctypes.c_ulonglong),
             ("WriteOperationCount", ctypes.c_ulonglong),
@@ -78,6 +80,8 @@ else:  # pragma: no cover - exercised by Windows runtime/tests via monkeypatch
         ]
 
     class JOBOBJECT_BASIC_LIMIT_INFORMATION(ctypes.Structure):  # pragma: no cover
+        """Basic resource limits for a job object."""
+
         _fields_ = [
             ("PerProcessUserTimeLimit", ctypes.c_int64),
             ("PerJobUserTimeLimit", ctypes.c_int64),
@@ -91,6 +95,8 @@ else:  # pragma: no cover - exercised by Windows runtime/tests via monkeypatch
         ]
 
     class JOBOBJECT_EXTENDED_LIMIT_INFORMATION(ctypes.Structure):  # pragma: no cover
+        """Extended resource limits including memory and I/O accounting."""
+
         _fields_ = [
             ("BasicLimitInformation", JOBOBJECT_BASIC_LIMIT_INFORMATION),
             ("IoInfo", IO_COUNTERS),
