@@ -76,7 +76,7 @@ def test_create_mints_handle_with_id_generation_and_status():
     assert handle.generation == 1
     assert handle.provider_name == "fake"
     # Handle snapshots status at creation; live status comes from inspect().
-    assert handle.status == SandboxStatus.CREATED
+    assert handle.initial_status == SandboxStatus.CREATED
     assert handle.spec.task_id == "t-1"
 
 
@@ -119,3 +119,24 @@ def test_destroy_unknown_handle_is_idempotent():
         spec=_spec(),
     )
     provider.destroy(orphan)  # no raise
+
+
+def test_upload_workspace_is_noop_in_p1():
+    # The frozen Protocol carries upload_workspace so #2023 container/K8s
+    # backends (which must push a snapshot into the sandbox) have a seam.
+    # LegacyPosixProvider (P3) is a no-op: the local worktree is already in
+    # place. P1 just pins the method exists and does not raise.
+    provider = FakeSandboxProvider()
+    handle = provider.create(_spec())
+    provider.upload_workspace(handle, snapshot=None)  # must not raise
+
+
+def test_collect_changes_returns_placeholder_in_p1():
+    # collect_changes is load-bearing: P4 RemoteMachineProvider's agent edits
+    # live on the remote machine and the orchestrator cannot read them with
+    # local git, so the diff must come back through the provider. P1 pins the
+    # seam; the ChangeSet schema is fixed in P3/P4 (Any+TODO for now).
+    provider = FakeSandboxProvider()
+    handle = provider.create(_spec())
+    changes = provider.collect_changes(handle)
+    assert changes is None  # P1 placeholder; P3/P4 return a ChangeSet

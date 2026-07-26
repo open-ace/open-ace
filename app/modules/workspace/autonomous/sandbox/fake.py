@@ -68,7 +68,7 @@ class FakeSandboxProvider:
             generation=1,
             provider_name="fake",
             spec=spec,
-            status=SandboxStatus.CREATED,
+            initial_status=SandboxStatus.CREATED,
         )
 
     def exec(
@@ -76,7 +76,7 @@ class FakeSandboxProvider:
         handle: SandboxHandle,
         command: list[str],
         env: dict[str, str] | None,
-        policy: Any | None,
+        exec_policy: Any | None,
     ) -> ExecHandle:
         command_id = uuid.uuid4().hex
         self._execs[command_id] = {
@@ -84,6 +84,12 @@ class FakeSandboxProvider:
             "command": list(command),
         }
         return ExecHandle(sandbox_id=handle.sandbox_id, command_id=command_id)
+
+    def upload_workspace(self, handle: SandboxHandle, snapshot: Any | None) -> None:
+        # Phase 1 placeholder. LegacyPosixProvider (P3) is a no-op (the local
+        # worktree is already in place); container/K8s backends (#2023) upload
+        # the snapshot. P1 just freezes the seam.
+        return None
 
     def stream(self, exec_handle: ExecHandle) -> Iterator[SandboxEvent]:
         meta = self._execs[exec_handle.command_id]
@@ -128,6 +134,12 @@ class FakeSandboxProvider:
         # Phase 1: the contract method exists; Phase 3 fills it from the real
         # command stream (test_exec_emits_command_execution_evidence).
         return []
+
+    def collect_changes(self, handle: SandboxHandle) -> Any:
+        # Phase 1 placeholder (ChangeSet schema fixed in P3/P4). Legacy
+        # delegates to the git-workspace service (#2041-2043); non-local
+        # backends own collection. P1 just freezes the seam.
+        return None
 
     def destroy(self, handle: SandboxHandle) -> None:
         # Idempotent: destroy of an already-destroyed or unknown handle is a

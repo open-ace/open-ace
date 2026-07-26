@@ -101,15 +101,16 @@ class SandboxHandle:
     ``sandbox_id`` is provider-minted and stable across the task; ``generation``
     is bumped on restart/reconciliation so a stale handle (e.g. one held across
     a provider restart) cannot operate on a new sandbox with the same id. The
-    ``status`` field is the creation-time snapshot only — use
-    :meth:`SandboxProvider.inspect` for the live status.
+    ``initial_status`` field is the creation-time snapshot only — use
+    :meth:`SandboxProvider.inspect` for the live status (a frozen handle cannot
+    track transitions).
     """
 
     sandbox_id: str
     generation: int
     provider_name: str
     spec: SandboxSpec
-    status: SandboxStatus = SandboxStatus.CREATED
+    initial_status: SandboxStatus = SandboxStatus.CREATED
 
 
 @dataclass(frozen=True)

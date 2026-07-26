@@ -52,7 +52,7 @@ def test_sandbox_event_is_frozen():
 def test_exec_returns_exec_handle_bound_to_sandbox():
     provider = FakeSandboxProvider()
     handle = provider.create(_spec())
-    eh = provider.exec(handle, command=["echo", "hi"], env={}, policy=None)
+    eh = provider.exec(handle, command=["echo", "hi"], env={}, exec_policy=None)
     assert isinstance(eh, ExecHandle)
     assert eh.sandbox_id == handle.sandbox_id
     assert eh.command_id  # provider-minted, non-empty
@@ -61,7 +61,7 @@ def test_exec_returns_exec_handle_bound_to_sandbox():
 def test_stream_emits_normalized_lifecycle_sequence():
     provider = FakeSandboxProvider()
     handle = provider.create(_spec())
-    eh = provider.exec(handle, command=["echo", "hi"], env={}, policy=None)
+    eh = provider.exec(handle, command=["echo", "hi"], env={}, exec_policy=None)
     events = list(provider.stream(eh))
     kinds = [e.kind for e in events]
     # The canonical happy-path sequence every provider must emit.
@@ -83,7 +83,7 @@ def test_stream_emits_normalized_lifecycle_sequence():
 def test_stream_stdout_chunk_carries_command_output():
     provider = FakeSandboxProvider()
     handle = provider.create(_spec())
-    eh = provider.exec(handle, command=["pytest", "-q"], env={}, policy=None)
+    eh = provider.exec(handle, command=["pytest", "-q"], env={}, exec_policy=None)
     events = list(provider.stream(eh))
     chunk = next(e for e in events if e.kind == SandboxEventKind.STDOUT_CHUNK)
     assert isinstance(chunk.data, str)
@@ -92,7 +92,7 @@ def test_stream_stdout_chunk_carries_command_output():
 def test_pause_resume_transitions_status():
     provider = FakeSandboxProvider()
     handle = provider.create(_spec())
-    eh = provider.exec(handle, command=["sleep", "1"], env={}, policy=None)
+    eh = provider.exec(handle, command=["sleep", "1"], env={}, exec_policy=None)
     provider.pause(eh)
     assert provider.inspect(handle) == SandboxStatus.PAUSED
     provider.resume(eh)
@@ -102,7 +102,7 @@ def test_pause_resume_transitions_status():
 def test_stop_transitions_to_stopped():
     provider = FakeSandboxProvider()
     handle = provider.create(_spec())
-    eh = provider.exec(handle, command=["echo", "hi"], env={}, policy=None)
+    eh = provider.exec(handle, command=["echo", "hi"], env={}, exec_policy=None)
     provider.stop(eh)
     assert provider.inspect(handle) == SandboxStatus.STOPPED
 
@@ -112,7 +112,7 @@ def test_collect_execution_evidence_is_a_list():
     # real command stream (test_exec_emits_command_execution_evidence).
     provider = FakeSandboxProvider()
     handle = provider.create(_spec())
-    eh = provider.exec(handle, command=["echo", "hi"], env={}, policy=None)
+    eh = provider.exec(handle, command=["echo", "hi"], env={}, exec_policy=None)
     list(provider.stream(eh))
     evidence = provider.collect_execution_evidence(handle)
     assert isinstance(evidence, list)
