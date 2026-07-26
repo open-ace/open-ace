@@ -306,7 +306,8 @@ CREATE TABLE autonomous_workflows (
  transition_temp_path text,
  transition_error text,
  transition_started_at text,
- transition_updated_at text
+ transition_updated_at text,
+ expected_head_sha text
 );
 
 CREATE TABLE command_execution_evidence (

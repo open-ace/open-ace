@@ -190,11 +190,30 @@ class TestEnsureWorktreeSelfHeal:
         o._create_milestone.assert_called_once()
 
     def test_recreates_missing_worktree_and_branch_from_origin(self, monkeypatch):
-        # Both worktree and branch are gone — must create fresh.
-        wf = _make_workflow()
+        # Both worktree and branch are gone — recreate from the authoritative
+        # head (Issue #2042: never silently from origin/main). With a
+        # base_commit_sha present, recovery rebuilds from that verified base.
+        wf = _make_workflow(base_commit_sha="base-sha-verified")
         canonical = os.path.realpath(wf["worktree_path"])
 
         o = _make_orchestrator(wf)
+        # Mock EvidenceService so verify_commit_available → CONFIRMED for the base.
+        from app.modules.workspace.autonomous.evidence import Evidence, Verdict
+
+        confirmed = Evidence(
+            source="local_object_db",
+            subject="commit_availability",
+            verdict=Verdict.CONFIRMED,
+            observed_at=__import__("datetime").datetime(2026, 7, 26),
+            verified_at=__import__("datetime").datetime(2026, 7, 26),
+            verification_method="test",
+            commit_shas=("base-sha-verified",),
+            reason="test",
+        )
+        o.__dict__["_evidence_instance"] = MagicMock(
+            verify_commit_available=MagicMock(return_value=confirmed),
+            resolve_verified_pr_head=MagicMock(return_value=confirmed),
+        )
         fake_gh = MagicMock()
         fake_gh.path_exists_as_user.return_value = False
         not_found = MagicMock(returncode=1)
@@ -202,7 +221,7 @@ class TestEnsureWorktreeSelfHeal:
             MagicMock(),  # fetch origin main
             not_found,  # local branch missing
             not_found,  # remote branch missing
-            # worktree add -b <branch> <path> origin/main
+            # worktree add -b <branch> <path> <base-sha-verified>
             MagicMock(),
         ]
         monkeypatch.setattr(
@@ -220,7 +239,7 @@ class TestEnsureWorktreeSelfHeal:
             "-b",
             wf["branch_name"],
             canonical,
-            "origin/main",
+            "base-sha-verified",
         ]
 
     def test_noop_for_new_branch_strategy(self, monkeypatch):

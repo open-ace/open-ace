@@ -48,6 +48,7 @@ class AutonomousWorkflow:
     batch_order: int | None = None
     batch_total: int | None = None
     base_commit_sha: str | None = None  # Locked SHA for batch workflows (Issue #1552)
+    expected_head_sha: str | None = None  # Last trusted workflow head (Issue #2042)
     auto_merge: bool = True  # Auto merge PR and proceed to next workflow in batch
     definition_snapshot: dict | None = None
     current_phase: str = (
@@ -125,6 +126,7 @@ class AutonomousWorkflow:
             "batch_order": self.batch_order,
             "batch_total": self.batch_total,
             "base_commit_sha": self.base_commit_sha,
+            "expected_head_sha": self.expected_head_sha,
             "auto_merge": self.auto_merge,
             "definition_snapshot": self.definition_snapshot,
             "current_phase": self.current_phase,
@@ -182,6 +184,7 @@ class AutonomousWorkflow:
             batch_order=data.get("batch_order"),
             batch_total=data.get("batch_total"),
             base_commit_sha=data.get("base_commit_sha"),
+            expected_head_sha=data.get("expected_head_sha"),
             auto_merge=bool(data.get("auto_merge", True)),
             definition_snapshot=data.get("definition_snapshot"),
             current_phase=data.get("current_phase", "preparation"),
