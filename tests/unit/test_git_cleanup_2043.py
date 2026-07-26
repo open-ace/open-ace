@@ -92,8 +92,12 @@ def test_remote_branch_delete_failure_is_not_silently_cleaned():
 
 
 def _set_workflow(orch, wf):
-    """Stub self.workflow to return the given dict."""
-    type(orch).workflow = property(lambda self: wf)
+    """Stub self.workflow to return the given dict.
+
+    Uses repo.get_workflow (the property's source) rather than overwriting the
+    class-level property, which would leak into later tests in the same process.
+    """
+    orch.repo.get_workflow.return_value = wf
 
 
 def test_cleanup_completion_persists_completed_status():
