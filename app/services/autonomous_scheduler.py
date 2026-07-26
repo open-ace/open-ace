@@ -634,8 +634,9 @@ class AutonomousScheduler:
         self._reclaim_paused_slots(repo)
         # Retry Git cleanup for delivered-but-uncleaned workflows (#2043). Runs
         # each tick so transient cleanup failures converge without waiting for a
-        # restart; honors per-workflow backoff via cleanup_next_retry_at.
-        _retry_pending_git_cleanups()
+        # restart; honors per-workflow backoff via cleanup_next_retry_at. Reuses
+        # the scheduler's own repo so test mocks of _get_repo stay effective.
+        _retry_pending_git_cleanups(repo)
 
         try:
             workflows = repo.get_active_workflows()
@@ -882,7 +883,7 @@ def _reconcile_pending_transitions():
         logger.error("Worktree transition reconcile sweep failed: %s", e, exc_info=True)
 
 
-def _retry_pending_git_cleanups():
+def _retry_pending_git_cleanups(repo=None):
     """Re-attempt post-merge Git cleanup for delivered workflows (#2043).
 
     Walks every ``status='completed'`` workflow with ``cleanup_status='pending'``
@@ -891,13 +892,18 @@ def _retry_pending_git_cleanups():
     tick. This is shared by the startup sweep and the periodic scheduler tick so
     both converge leaked worktrees/branches without a separate worker. Failures
     are isolated per workflow.
+
+    ``repo`` lets the periodic tick reuse the scheduler's own (mock-friendly)
+    repository; the startup sweep omits it and constructs one.
     """
     try:
         from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
-        from app.repositories.autonomous_repo import AutonomousWorkflowRepository
-        from app.repositories.database import Database
 
-        repo = AutonomousWorkflowRepository(Database())
+        if repo is None:
+            from app.repositories.autonomous_repo import AutonomousWorkflowRepository
+            from app.repositories.database import Database
+
+            repo = AutonomousWorkflowRepository(Database())
         pending = repo.get_workflows_pending_cleanup()
         if not pending:
             return
