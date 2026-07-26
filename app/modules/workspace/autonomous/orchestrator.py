@@ -4296,6 +4296,17 @@ class AutonomousOrchestrator:
                     "cleanup_next_retry_at": "",
                 }
             )
+            # Record a cleaned_up milestone when a retry converges, so the audit
+            # trail shows the eventual success (not just the prior cleanup_pending
+            # failure). The immediate-success path in _do_merge records its own
+            # cleaned_up milestone; this covers the retry-recovered case.
+            if attempts > 1:
+                self._create_milestone(
+                    phase="merge",
+                    milestone_type="cleaned_up",
+                    status="completed",
+                    title=f"Git cleanup recovered after {attempts} attempt(s)",
+                )
             return "completed", ""
         # Transient/partial failure — schedule a backoff retry unless exhausted.
         error = wf.get("error_message") or "Git cleanup failed (worktree or branch)"

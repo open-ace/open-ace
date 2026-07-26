@@ -54,11 +54,14 @@ def upgrade() -> None:
     for col_name, col_type in NEW_COLUMNS:
         if col_name in existing_columns:
             continue
-        nullable = col_name != "cleanup_attempts"
-        default = 0 if col_name == "cleanup_attempts" else None
+        # All cleanup_* columns are nullable: NULL = legacy row (no cleanup
+        # tracking), consistent with cleanup_status. The sweep treats NULL
+        # attempts as 0 via int(... or 0). Avoiding NOT NULL here means an
+        # in-place upgrade of a populated table succeeds (no server default
+        # needed); a NOT NULL add would fail on existing rows.
         op.add_column(
             "autonomous_workflows",
-            sa.Column(col_name, col_type, nullable=nullable, default=default),
+            sa.Column(col_name, col_type, nullable=True),
         )
 
 

@@ -35,7 +35,9 @@ def test_delete_branch_returns_structured_result_on_success():
     gh = GitHubOps.__new__(GitHubOps)
     gh._run_git = MagicMock(
         side_effect=[
+            MagicMock(returncode=0, stdout="", stderr=""),  # show-ref (exists)
             MagicMock(returncode=0, stderr=""),  # git branch -D
+            MagicMock(returncode=0, stdout="abc123\theads/x", stderr=""),  # ls-remote (exists)
             MagicMock(returncode=0, stderr=""),  # git push origin --delete
         ]
     )
@@ -44,14 +46,21 @@ def test_delete_branch_returns_structured_result_on_success():
 
 
 def test_delete_branch_distinguishes_absent_from_failed():
-    """Already-gone branch → 'absent' (success-equivalent), not 'failed'."""
+    """Already-gone branch → 'absent' (success-equivalent), not 'failed'.
+
+    Existence is determined by the show-ref/ls-remote precheck returncode/stdout,
+    not stderr text — so an absent branch reports absent even though the delete
+    command itself returns non-zero.
+    """
     from app.modules.workspace.autonomous.github_ops import GitHubOps
 
     gh = GitHubOps.__new__(GitHubOps)
     gh._run_git = MagicMock(
         side_effect=[
-            MagicMock(returncode=1, stderr="error: branch 'auto-dev/x' not found."),
-            MagicMock(returncode=1, stderr="remote ref does not exist"),
+            MagicMock(returncode=1, stdout="", stderr=""),  # show-ref (not found)
+            MagicMock(returncode=1, stderr="error: not found"),  # branch -D (no-op)
+            MagicMock(returncode=0, stdout="", stderr=""),  # ls-remote (empty → absent)
+            MagicMock(returncode=1, stderr="remote ref absent"),  # push --delete (no-op)
         ]
     )
     result = gh.delete_branch("auto-dev/x")
@@ -61,14 +70,16 @@ def test_delete_branch_distinguishes_absent_from_failed():
 
 
 def test_remote_branch_delete_failure_is_not_silently_cleaned():
-    """Remote delete rejected → 'failed' with stderr captured for retry."""
+    """Remote exists but delete rejected → 'failed' with stderr captured for retry."""
     from app.modules.workspace.autonomous.github_ops import GitHubOps
 
     gh = GitHubOps.__new__(GitHubOps)
     gh._run_git = MagicMock(
         side_effect=[
-            MagicMock(returncode=0, stderr=""),  # local ok
-            MagicMock(returncode=1, stderr="! [remote rejected] ..."),  # remote fail
+            MagicMock(returncode=0, stdout="", stderr=""),  # show-ref (exists)
+            MagicMock(returncode=0, stderr=""),  # branch -D ok
+            MagicMock(returncode=0, stdout="abc123\theads/x", stderr=""),  # ls-remote (exists)
+            MagicMock(returncode=1, stderr="! [remote rejected] ..."),  # push fail
         ]
     )
     result = gh.delete_branch("auto-dev/x")

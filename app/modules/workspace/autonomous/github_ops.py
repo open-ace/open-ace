@@ -822,12 +822,24 @@ class GitHubOps:
         ``absent`` is success-equivalent (the resource was already gone).
         ``failed`` means a real error warranting retry; ``errors`` carries the
         truncated stderr for diagnostics.
+
+        Existence is checked via returncode-based probes (``show-ref`` locally,
+        ``ls-remote`` remotely) rather than parsing stderr text, which varies
+        across git versions and server implementations (GitHub.com / GitLab /
+        GHES). A non-zero delete that follows a confirmed-existing resource is a
+        real failure; a delete of an already-absent resource is reported absent.
         """
+        # Local existence check: show-ref returncode is stable across git versions.
+        local_exists = (
+            self._run_git(
+                ["show-ref", "--verify", "--quiet", f"refs/heads/{name}"], check=False
+            ).returncode
+            == 0
+        )
         local_res = self._run_git(["branch", "-D", name], check=False)
-        local_stderr = (local_res.stderr or "").lower()
         if local_res.returncode == 0:
             local = "deleted"
-        elif "not found" in local_stderr:
+        elif not local_exists:
             local = "absent"
         else:
             local = "failed"
@@ -835,11 +847,14 @@ class GitHubOps:
         if local == "failed":
             result["errors"].append((local_res.stderr or "").strip()[:500])
         if remote:
+            # Remote existence check: ls-remote returncode is stable; an empty
+            # stdout means the ref does not exist on the remote.
+            ls_res = self._run_git(["ls-remote", "origin", name], check=False)
+            remote_exists = ls_res.returncode == 0 and bool((ls_res.stdout or "").strip())
             remote_res = self._run_git(["push", "origin", "--delete", name], check=False)
-            remote_stderr = (remote_res.stderr or "").lower()
             if remote_res.returncode == 0:
                 result["remote"] = "deleted"
-            elif "not found" in remote_stderr or "does not exist" in remote_stderr:
+            elif not remote_exists:
                 result["remote"] = "absent"
             else:
                 result["remote"] = "failed"

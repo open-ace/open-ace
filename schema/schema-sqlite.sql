@@ -309,7 +309,7 @@ CREATE TABLE autonomous_workflows (
  transition_updated_at text,
  expected_head_sha text,
  cleanup_status text,
- cleanup_attempts integer NOT NULL,
+ cleanup_attempts integer,
  cleanup_error text,
  cleanup_updated_at text,
  cleanup_next_retry_at text
