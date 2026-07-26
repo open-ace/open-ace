@@ -49,6 +49,11 @@ class AutonomousWorkflow:
     batch_total: int | None = None
     base_commit_sha: str | None = None  # Locked SHA for batch workflows (Issue #1552)
     expected_head_sha: str | None = None  # Last trusted workflow head (Issue #2042)
+    cleanup_status: str | None = None  # not_started|pending|completed|failed (Issue #2043)
+    cleanup_attempts: int | None = 0  # Git cleanup retry counter (Issue #2043)
+    cleanup_error: str | None = None  # Last cleanup error message (Issue #2043)
+    cleanup_updated_at: str | None = None  # ISO timestamp of last cleanup attempt
+    cleanup_next_retry_at: str | None = None  # ISO timestamp; backoff-gated
     auto_merge: bool = True  # Auto merge PR and proceed to next workflow in batch
     definition_snapshot: dict | None = None
     current_phase: str = (
@@ -127,6 +132,11 @@ class AutonomousWorkflow:
             "batch_total": self.batch_total,
             "base_commit_sha": self.base_commit_sha,
             "expected_head_sha": self.expected_head_sha,
+            "cleanup_status": self.cleanup_status,
+            "cleanup_attempts": self.cleanup_attempts,
+            "cleanup_error": self.cleanup_error,
+            "cleanup_updated_at": self.cleanup_updated_at,
+            "cleanup_next_retry_at": self.cleanup_next_retry_at,
             "auto_merge": self.auto_merge,
             "definition_snapshot": self.definition_snapshot,
             "current_phase": self.current_phase,
@@ -185,6 +195,11 @@ class AutonomousWorkflow:
             batch_total=data.get("batch_total"),
             base_commit_sha=data.get("base_commit_sha"),
             expected_head_sha=data.get("expected_head_sha"),
+            cleanup_status=data.get("cleanup_status"),
+            cleanup_attempts=data.get("cleanup_attempts"),
+            cleanup_error=data.get("cleanup_error"),
+            cleanup_updated_at=data.get("cleanup_updated_at"),
+            cleanup_next_retry_at=data.get("cleanup_next_retry_at"),
             auto_merge=bool(data.get("auto_merge", True)),
             definition_snapshot=data.get("definition_snapshot"),
             current_phase=data.get("current_phase", "preparation"),

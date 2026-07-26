@@ -805,11 +805,46 @@ class GitHubOps:
         """Discard local CI-repair state and reset to a trusted immutable ref."""
         self._run_git(["reset", "--hard", ref])
 
-    def delete_branch(self, name: str, remote: bool = True) -> None:
-        """Delete a branch locally and optionally remotely."""
-        self._run_git(["branch", "-D", name], check=False)
+    def delete_branch(self, name: str, remote: bool = True) -> dict:
+        """Delete a branch locally and optionally remotely.
+
+        Returns a structured result so callers can distinguish a real failure
+        from an already-absent branch (#2043). Previously both commands used
+        ``check=False`` and returned ``None``, silently swallowing failures —
+        the caller could not tell whether deletion succeeded.
+
+        Result shape::
+
+            {"local": "deleted"|"absent"|"failed",
+             "remote": "deleted"|"absent"|"failed"|"skipped",
+             "errors": [str, ...]}
+
+        ``absent`` is success-equivalent (the resource was already gone).
+        ``failed`` means a real error warranting retry; ``errors`` carries the
+        truncated stderr for diagnostics.
+        """
+        local_res = self._run_git(["branch", "-D", name], check=False)
+        local_stderr = (local_res.stderr or "").lower()
+        if local_res.returncode == 0:
+            local = "deleted"
+        elif "not found" in local_stderr:
+            local = "absent"
+        else:
+            local = "failed"
+        result: dict = {"local": local, "remote": "skipped", "errors": []}
+        if local == "failed":
+            result["errors"].append((local_res.stderr or "").strip()[:500])
         if remote:
-            self._run_git(["push", "origin", "--delete", name], check=False)
+            remote_res = self._run_git(["push", "origin", "--delete", name], check=False)
+            remote_stderr = (remote_res.stderr or "").lower()
+            if remote_res.returncode == 0:
+                result["remote"] = "deleted"
+            elif "not found" in remote_stderr or "does not exist" in remote_stderr:
+                result["remote"] = "absent"
+            else:
+                result["remote"] = "failed"
+                result["errors"].append((remote_res.stderr or "").strip()[:500])
+        return result
 
     # ── Worktree Operations ─────────────────────────────────────────
 

@@ -458,7 +458,12 @@ CREATE TABLE autonomous_workflows (
     transition_error text,
     transition_started_at text,
     transition_updated_at text,
-    expected_head_sha text
+    expected_head_sha text,
+    cleanup_status text,
+    cleanup_attempts integer NOT NULL,
+    cleanup_error text,
+    cleanup_updated_at text,
+    cleanup_next_retry_at text
 );
 
 CREATE SEQUENCE autonomous_workflows_id_seq

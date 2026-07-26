@@ -99,6 +99,12 @@ class AutonomousWorkflowRepository:
         "transition_error",
         "transition_started_at",
         "transition_updated_at",
+        # Post-merge Git cleanup tracking (#2043).
+        "cleanup_status",
+        "cleanup_attempts",
+        "cleanup_error",
+        "cleanup_updated_at",
+        "cleanup_next_retry_at",
     }
     ALLOWED_MILESTONE_FIELDS = {
         "phase",
@@ -486,6 +492,22 @@ class AutonomousWorkflowRepository:
             WHERE status IN ('pending', 'preparing', 'planning', 'developing',
                              'pr_review', 'reporting', 'waiting', 'merging')
             ORDER BY created_at ASC
+            """
+        )
+
+    def get_workflows_pending_cleanup(self) -> list:
+        """Get delivered workflows whose Git cleanup is still pending (#2043).
+
+        Returns ``status='completed'`` rows with ``cleanup_status='pending'`` so
+        the startup sweep and scheduler retry pass can re-attempt worktree/branch
+        removal. Ordered by ``cleanup_updated_at`` so the oldest failures retry
+        first. Legacy rows (NULL cleanup_status) are excluded.
+        """
+        return self.db.fetch_all(
+            """
+            SELECT * FROM autonomous_workflows
+            WHERE status = 'completed' AND cleanup_status = 'pending'
+            ORDER BY cleanup_updated_at ASC NULLS LAST, created_at ASC
             """
         )
 
