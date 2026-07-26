@@ -4137,6 +4137,140 @@ class AutonomousOrchestrator:
         self.repo.update_workflow(self._workflow_id, updates)
         self._emit("workflow_updated", updates)
 
+    def _cleanup_worktree_and_branch(
+        self,
+        reason: str = "failed",
+        *,
+        remove_worktree: bool = True,
+        remove_branch: bool = False,
+    ) -> bool:
+        """Remove the workflow's worktree dir and/or git branch.
+
+        Extracted from ``_do_merge``'s post-merge cleanup (Issue #1831 finding
+        #1) so the same path serves both completed and terminally-failed
+        workflows. Previously a terminally-failed workflow left its worktree dir
+        on disk indefinitely — a slow leak across retries.
+
+        #1112 timing dimension / ``keep_for_debug`` default: by default this
+        removes ONLY the worktree dir (cheap, and ``_ensure_worktree`` recreates
+        it on the next cycle if the workflow is retried/resumed) and KEEPS the
+        git branch. Deleting a branch whose PR is still open would orphan the PR,
+        so branch deletion is reserved for the post-merge success path
+        (``remove_branch=True``), where the PR is already merged.
+
+        Dirty-worktree guard (review P1-b): on the terminal-FAILURE path
+        (``reason="failed"``) a dirty worktree (uncommitted edits or untracked
+        files) is retained rather than force-removed — the branch only holds
+        committed content, so force-removing would discard working-tree state
+        that ``_ensure_worktree`` cannot recreate on retry. The worktree and
+        branch are kept on disk and the reason is appended to ``error_message``;
+        this method returns ``False`` to signal nothing was reclaimed. The
+        completed/merged path (``reason="completed"``) is expected clean and is
+        reclaimed directly. Full reclamation of a retained dirty worktree is
+        handled later by the #2043 reconciler or an operator, not here.
+
+        Best-effort: failures are logged, never raised, so cleanup can't mask the
+        failure that triggered it. ``worktree_path``/``branch_name`` are cleared
+        in the DB only after the corresponding removal succeeds. Returns whether
+        the removal completed without raising.
+        """
+        wf = self.workflow
+        branch_name = wf.get("branch_name", "")
+        worktree_path = wf.get("worktree_path", "")
+        project_path = wf.get("project_path", "")
+        if not worktree_path and not branch_name:
+            return True
+        system_account = None
+        user_id = wf.get("user_id")
+        if user_id:
+            try:
+                user = UserRepository().get_user_by_id(user_id)
+                if user:
+                    system_account = user.get("system_account")
+            except Exception as e:
+                logger.warning("Could not resolve system_account for cleanup: %s", e)
+        try:
+            if remove_worktree and worktree_path:
+                # P1-b dirty guard — terminal-FAILURE path only (reason="failed").
+                # A completed/merged workflow has committed its working state, so
+                # its worktree is expected clean and is reclaimed directly. Only a
+                # failure-path worktree is protected from force-removal: it may
+                # hold uncommitted agent edits, failed-test fixes, conflict/
+                # diagnostic state, or untracked artifacts the branch cannot
+                # preserve and ``_ensure_worktree`` cannot recreate on retry.
+                # Reclamation of a retained dirty worktree is left to the #2043
+                # reconciler / an operator; this method only guarantees it does
+                # not destroy state.
+                if reason == "failed":
+                    wt_gh = GitHubOps(worktree_path, system_account=system_account)
+                    if wt_gh.has_uncommitted_changes():
+                        logger.warning(
+                            "Keeping dirty worktree %s (workflow %s) for debug "
+                            "after terminal failure — force-remove would lose "
+                            "uncommitted/untracked state; branch=%s also retained",
+                            worktree_path,
+                            self._workflow_id[:8],
+                            branch_name or "(none)",
+                        )
+                        existing_err = wf.get("error_message") or ""
+                        marker = f"[worktree kept at {worktree_path}"
+                        if marker in existing_err:
+                            # Already noted by a prior pass (e.g. a repeated
+                            # advance on a still-failed workflow) — don't
+                            # duplicate the retention note (review P2).
+                            return False
+                        note = f"{marker}: uncommitted changes preserved for debug]"
+                        self._update_workflow(
+                            {"error_message": (existing_err + " " + note).strip()}
+                            if existing_err
+                            else {"error_message": note}
+                        )
+                        # Intentional retention: nothing was removed. Leave
+                        # worktree_path/branch_name set so the retained state is
+                        # visible to operators and a future #2043 reconciler.
+                        return False
+                # Must use the main repo's gh — a worktree can't remove itself.
+                main_gh = GitHubOps(project_path, system_account=system_account)
+                main_gh.remove_worktree(worktree_path)
+                self._update_workflow({"worktree_path": ""})
+            if remove_branch and branch_name:
+                gh = GitHubOps(project_path, system_account=system_account)
+                gh.delete_branch(branch_name)
+                self._update_workflow({"branch_name": ""})
+        except GitHubOpsError as e:
+            logger.warning("Cleanup (%s) failed: %s", reason, e)
+            return False
+        except Exception as e:
+            logger.warning("Cleanup (%s) raised: %s", reason, e)
+            return False
+        return True
+
+    def _mark_failed(self, error_message: str, *, phase: str | None = None) -> None:
+        """Record a terminal workflow failure (status + error event) only.
+
+        Sets ``status=failed`` and emits the error event. Worktree reclamation
+        is NOT performed here: ``advance``'s post-phase convergence point (which
+        runs after this AND after inline ``status=failed`` returns) is the
+        SINGLE place terminal-failure worktree cleanup happens. Doing cleanup in
+        both ``_mark_failed`` and the convergence point doubled the dirty-
+        worktree retention note and re-ran the git-status check on every pass
+        (review P2), so this method now records state only and lets the
+        convergence point own the cleanup.
+
+        #1112 timing dimension: the transient-retry path in ``advance`` returns
+        before reaching here, so transient (retryable) failures keep their
+        worktree for the next cycle; only terminal failures reach the
+        convergence cleanup. The branch is kept (``keep_for_debug``).
+        """
+        self._update_workflow(
+            {
+                "status": "failed",
+                "error_message": error_message,
+                "transient_retry_count": 0,
+            }
+        )
+        self._emit("error", {"phase": phase or "unknown", "error": error_message})
+
     def _accumulate_tokens(self, _result: AgentTaskResult):
         """Refresh workflow totals from the sessions linked to milestones."""
         self.repo.refresh_workflow_usage_from_sessions(self._workflow_id)
@@ -5586,15 +5720,28 @@ class AutonomousOrchestrator:
                     transient_count - 1,
                 )
             # Non-transient error, or transient retries exhausted → fail.
+            # _mark_failed records the terminal failure and reclaims the
+            # worktree for THIS path (advance's exception handler). The
+            # transient path above returned already, so this only runs for
+            # terminal failures — the worktree survives retries, not terminal
+            # failures (#1112).
             logger.error("Orchestrator error in %s: %s", phase, e, exc_info=True)
-            self._update_workflow(
-                {
-                    "status": "failed",
-                    "error_message": str(e),
-                    "transient_retry_count": 0,
-                }
+            self._mark_failed(str(e), phase=phase)
+        # Convergence point for terminal-failure worktree reclamation (Issue
+        # #1831 finding #1). After the phase runs, if the workflow is now
+        # terminally failed — whether via _mark_failed just above (an unhandled
+        # exception) OR via a phase that recorded status=failed inline and
+        # returned normally (which bypasses _mark_failed) — reclaim the worktree
+        # dir. Many phase-internal failure paths set status=failed and return;
+        # without this check each would leak the worktree. Idempotent: on the
+        # exception path _mark_failed already cleared worktree_path, so the
+        # ``worktree_path`` guard makes this a no-op there and it only acts on
+        # the inline-failure paths. Best-effort + branch kept (#1112).
+        wf = self.workflow
+        if wf and wf.get("status") == "failed" and wf.get("worktree_path"):
+            self._cleanup_worktree_and_branch(
+                reason="failed", remove_worktree=True, remove_branch=False
             )
-            self._emit("error", {"phase": phase, "error": str(e)})
 
     # ── Phase: Preparation ────────────────────────────────────────
 
@@ -9097,38 +9244,18 @@ class AutonomousOrchestrator:
         # restores worktree_path in its finally block (so the restored value
         # may differ from the caller's stale snapshot); using the stale snapshot
         # would retry the removal and fail, skipping branch deletion (#1107).
-        wf = self.workflow
-        branch_name = wf.get("branch_name", "")
-        worktree_path = wf.get("worktree_path", "")
-        project_path = wf.get("project_path", "")
-        # Get system_account for multi-user permission isolation (Issue #1395)
-        system_account = None
-        user_id = wf.get("user_id")
-        if user_id:
-            user_repo = UserRepository()
-            user = user_repo.get_user_by_id(user_id)
-            if user:
-                system_account = user.get("system_account")
-        try:
-            if worktree_path:
-                # Must use main repo's gh to remove worktree
-                # (can't remove a worktree from within itself)
-                main_gh = GitHubOps(project_path, system_account=system_account)
-                main_gh.remove_worktree(worktree_path)
-                self._update_workflow({"worktree_path": ""})
-                # Reinitialize gh to point at main repo for branch deletion
-                self._gh = GitHubOps(project_path, system_account=system_account)
-                gh = self._gh
-            if branch_name:
-                gh.delete_branch(branch_name)
+        # _cleanup_worktree_and_branch re-reads self.workflow itself, so it sees
+        # the restored value. The branch IS removed here — the PR is merged.
+        cleanup_ok = self._cleanup_worktree_and_branch(
+            reason="completed", remove_worktree=True, remove_branch=True
+        )
+        if cleanup_ok:
             self._create_milestone(
                 phase="merge",
                 milestone_type="cleaned_up",
                 status="completed",
                 title="Branch/worktree cleaned up",
             )
-        except GitHubOpsError as e:
-            logger.warning("Cleanup failed: %s", e)
 
         # Mark workflow completed
         self._update_workflow(

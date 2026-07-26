@@ -1790,6 +1790,31 @@ CREATE SEQUENCE web_user_auth_sessions_id_seq
     CACHE 1;
 
 ALTER SEQUENCE web_user_auth_sessions_id_seq OWNED BY web_user_auth_sessions.id;
+CREATE TABLE webhook_deliveries (
+    id integer NOT NULL,
+    alert_id character varying(64) NOT NULL,
+    user_id integer NOT NULL,
+    webhook_url_hash character varying(64),
+    status character varying(16) NOT NULL,
+    attempts integer DEFAULT 0 NOT NULL,
+    max_attempts integer DEFAULT 3 NOT NULL,
+    next_retry_at timestamp without time zone,
+    last_error_type character varying(64),
+    last_error_at timestamp without time zone,
+    created_at timestamp without time zone NOT NULL,
+    updated_at timestamp without time zone NOT NULL,
+    CONSTRAINT ck_webhook_deliveries_status CHECK (((status)::text = ANY ((ARRAY['pending'::character varying, 'in_flight'::character varying, 'delivered'::character varying, 'dead'::character varying])::text[])))
+);
+
+CREATE SEQUENCE webhook_deliveries_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE webhook_deliveries_id_seq OWNED BY webhook_deliveries.id;
 CREATE TABLE workflow_events (
     id integer NOT NULL,
     workflow_id character varying(36) NOT NULL,
@@ -1979,6 +2004,8 @@ ALTER TABLE ONLY user_tool_accounts ALTER COLUMN id SET DEFAULT nextval('user_to
 ALTER TABLE ONLY users ALTER COLUMN id SET DEFAULT nextval('users_id_seq'::regclass);
 
 ALTER TABLE ONLY web_user_auth_sessions ALTER COLUMN id SET DEFAULT nextval('web_user_auth_sessions_id_seq'::regclass);
+
+ALTER TABLE ONLY webhook_deliveries ALTER COLUMN id SET DEFAULT nextval('webhook_deliveries_id_seq'::regclass);
 
 ALTER TABLE ONLY workflow_events ALTER COLUMN id SET DEFAULT nextval('workflow_events_id_seq'::regclass);
 
@@ -2331,6 +2358,9 @@ ALTER TABLE ONLY web_user_auth_sessions
 
 ALTER TABLE ONLY web_user_auth_sessions
     ADD CONSTRAINT web_user_auth_sessions_session_token_key UNIQUE (session_token);
+
+ALTER TABLE ONLY webhook_deliveries
+    ADD CONSTRAINT webhook_deliveries_pkey PRIMARY KEY (id);
 
 ALTER TABLE ONLY workflow_events
     ADD CONSTRAINT workflow_events_pkey PRIMARY KEY (id);
@@ -3091,39 +3121,53 @@ CREATE INDEX idx_users_username ON users USING btree (username) WHERE ((deleted_
 --
 --
 
+CREATE INDEX idx_webhook_deliveries_alert ON webhook_deliveries USING btree (alert_id);
+
+CREATE INDEX idx_webhook_deliveries_status_retry ON webhook_deliveries USING btree (status, next_retry_at);
+
+
+--
+--
+
+CREATE INDEX idx_webhook_deliveries_user ON webhook_deliveries USING btree (user_id);
+
 CREATE INDEX idx_workflows_batch_order ON autonomous_workflows USING btree (batch_id, batch_order);
+
+
+--
+--
 
 CREATE INDEX idx_workflows_parent ON autonomous_workflows USING btree (parent_workflow_id);
 
-
---
---
-
 CREATE INDEX idx_workflows_status_created ON autonomous_workflows USING btree (status, created_at);
+
+
+--
+--
 
 CREATE INDEX idx_workflows_user_status ON autonomous_workflows USING btree (user_id, status);
 
-
---
---
-
 CREATE UNIQUE INDEX ix_anomaly_status_type_hash ON anomaly_status USING btree (anomaly_type, affected_users_hash);
+
+
+--
+--
 
 CREATE UNIQUE INDEX policy_decisions_decision_id_key ON policy_decisions USING btree (decision_id);
 
-
---
---
-
 CREATE UNIQUE INDEX policy_rules_rule_key_version_key ON policy_rules USING btree (rule_key, version);
+
+
+--
+--
 
 CREATE UNIQUE INDEX uq_projects_path ON projects USING btree (tenant_id, path) WHERE (is_active IS TRUE);
 
-
---
---
-
 CREATE UNIQUE INDEX uq_user_projects_user_project ON user_projects USING btree (user_id, project_id);
+
+
+--
+--
 
 ALTER TABLE ONLY alerts_history
     ADD CONSTRAINT alerts_history_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE;

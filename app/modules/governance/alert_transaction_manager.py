@@ -193,7 +193,18 @@ class AlertTransactionManager:
         Returns:
             Tuple of (success, alert_id). alert_id is None on failure.
         """
-        # Check for recent alerts (deduplication)
+        # Check for recent alerts (deduplication).
+        #
+        # NOTE (Issue #1831 webhook-fan-out analysis): a sustained quota breach
+        # (e.g. back-to-back HTTP 429s from the LLM proxy) does NOT fan out one
+        # webhook per request. ``llm_proxy_handler.has_recent_quota_alert`` gates
+        # the *call* to this function upstream, and even if it is reached this
+        # inner ``_has_recent_alert`` short-circuits repeat alerts for the same
+        # user/quota_type. So webhook delivery load here is bounded by the
+        # dedup window, not by the request rate. The webhook delivery-state
+        # retry/reaper machinery in ``alert_notifier`` therefore exists to make
+        # each (deduplication-bounded) delivery resilient, not to throttle an
+        # unbounded fan-out.
         if self._has_recent_alert(alert_data.user_id, alert_data.quota_type):
             logger.debug(
                 f"Skipping duplicate alert for user {alert_data.user_id}, "
