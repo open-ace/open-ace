@@ -19,7 +19,7 @@ from app.modules.policy.evaluator import TARGET_MODEL_SELECTION, TARGET_TOOL_ACT
 from app.modules.workspace.api_key_proxy import APIKeyProxyService
 from app.modules.workspace.remote_agent_manager import get_remote_agent_manager
 from app.modules.workspace.run_timeline import get_run_recorder
-from app.modules.workspace.session_manager import SessionManager
+from app.modules.workspace.session_manager import SessionManager, is_autonomous_workflow_session
 from app.repositories.message_repo import MessageRepository
 from app.repositories.user_repo import UserRepository
 from app.utils.tool_names import normalize_tool_name
@@ -59,6 +59,13 @@ class RemoteSessionManager:
         self._user_repo = UserRepository()
         # Cache user names to avoid repeated lookups
         self._user_name_cache: dict[int, str] = {}
+        # Cache of session_id -> is_autonomous_workflow_session. The inputs to
+        # is_autonomous_workflow_session (session_type + context.workflow_id)
+        # are set at session creation and immutable for the session lifetime, so
+        # the flag is computed once per session instead of on every stdout line
+        # (the accumulate path runs per streaming JSON chunk). Guarded by
+        # _buffer_lock since multiple SSE reader threads can touch it.
+        self._autonomous_cache: dict[str, bool] = {}
         # Persisted run/event timeline recorder. No-op when the feature is
         # disabled (run_timeline.enabled=false); see app/modules/workspace/run_timeline.
         self._run_recorder = get_run_recorder()
@@ -74,6 +81,35 @@ class RemoteSessionManager:
             recorder = get_run_recorder()
             self._run_recorder = recorder
         return recorder
+
+    def _is_autonomous_session(self, session_id: str) -> bool:
+        """Return whether ``session_id`` is an autonomous workflow session.
+
+        Autonomous sessions persist structured tool/thinking evidence in the
+        transcript (``content_blocks``) so the runner can verify real command
+        and test execution. Ordinary interactive remote sessions do not:
+        tool-only turns must not produce empty assistant bubbles or inflate
+        ``message_count``. This guards the shared ``process_session_output``
+        path so the autonomous evidence policy is additive rather than a
+        silent change to interactive session semantics.
+
+        The flag depends only on ``session_type`` and ``context.workflow_id``,
+        both set at session creation and immutable for the session lifetime, so
+        the result is memoized in ``_autonomous_cache`` to avoid a DB round-trip
+        on every streaming JSON line (the accumulate path is per-line).
+        """
+        with self._buffer_lock:
+            cached = self._autonomous_cache.get(session_id)
+        if cached is not None:
+            return cached
+        try:
+            session = self._session_manager.get_session(session_id)
+        except Exception:
+            return False
+        result = bool(session) and is_autonomous_workflow_session(session)
+        with self._buffer_lock:
+            self._autonomous_cache[session_id] = result
+        return result
 
     def _get_policy_evaluator(self):
         """Return the policy evaluator, lazily restoring it for lightweight test doubles."""
@@ -1049,7 +1085,16 @@ class RemoteSessionManager:
                 if block_type in ("text", "tool_use", "thinking", "tool_result"):
                     structured_blocks.append(block)
 
-            if text_parts or structured_blocks:
+            # Ordinary interactive sessions persist a turn only when it
+            # produced visible text; a tool/thinking-only turn writes no row
+            # and does not inflate message_count. Accompanying blocks are kept
+            # as context when there is text (pre-#1939 behaviour). Autonomous
+            # workflow sessions also keep block-only turns as transcript
+            # evidence so the runner can verify real command/test execution
+            # (#1939 evidence policy, scoped to autonomous sessions per #2047).
+            is_autonomous = self._is_autonomous_session(session_id)
+            has_text = bool(text_parts)
+            if has_text or (is_autonomous and structured_blocks):
                 combined = "".join(text_parts)
                 with self._buffer_lock:
                     buf = self._assistant_text_buffer.get(session_id, "")
@@ -1082,7 +1127,9 @@ class RemoteSessionManager:
                                 text_parts.append(text)
                         if block_type in ("text", "tool_use", "thinking", "tool_result"):
                             structured_blocks.append(block)
-                    if text_parts or structured_blocks:
+                    is_autonomous = self._is_autonomous_session(session_id)
+                    has_text = bool(text_parts)
+                    if has_text or (is_autonomous and structured_blocks):
                         with self._buffer_lock:
                             buf = self._assistant_text_buffer.get(session_id, "")
                             self._assistant_text_buffer[session_id] = buf + "".join(text_parts)
@@ -1092,22 +1139,24 @@ class RemoteSessionManager:
 
         elif msg_type == "user":
             # Claude stream-json reports command results as user-message
-            # ``tool_result`` blocks. Keep them with the current turn so the
-            # autonomous runner can verify real test execution on remote
-            # workspaces instead of relying on the model's prose summary.
-            message = parsed.get("message", {})
-            content = message.get("content", []) if isinstance(message, dict) else []
-            if isinstance(content, list):
-                result_blocks = [
-                    block
-                    for block in content
-                    if isinstance(block, dict) and block.get("type") == "tool_result"
-                ]
-                if result_blocks:
-                    with self._buffer_lock:
-                        blocks_buf = self._content_blocks_buffer.get(session_id, [])
-                        blocks_buf.extend(result_blocks)
-                        self._content_blocks_buffer[session_id] = blocks_buf
+            # ``tool_result`` blocks. Only autonomous workflow sessions fold
+            # them into the current turn's content_blocks so the runner can
+            # verify real test execution; ordinary interactive sessions ignore
+            # them (per #2047, this evidence policy is autonomous-additive).
+            if self._is_autonomous_session(session_id):
+                message = parsed.get("message", {})
+                content = message.get("content", []) if isinstance(message, dict) else []
+                if isinstance(content, list):
+                    result_blocks = [
+                        block
+                        for block in content
+                        if isinstance(block, dict) and block.get("type") == "tool_result"
+                    ]
+                    if result_blocks:
+                        with self._buffer_lock:
+                            blocks_buf = self._content_blocks_buffer.get(session_id, [])
+                            blocks_buf.extend(result_blocks)
+                            self._content_blocks_buffer[session_id] = blocks_buf
 
         elif msg_type == "system":
             # System messages (e.g., init) are stored directly, not accumulated
@@ -1212,7 +1261,12 @@ class RemoteSessionManager:
             text = self._assistant_text_buffer.pop(session_id, "")
             blocks = self._content_blocks_buffer.pop(session_id, [])
 
-        if text.strip() or blocks:
+        # Ordinary interactive sessions only persist turns that produced
+        # visible assistant text; tool/thinking-only turns are dropped (no
+        # empty bubble, no message_count inflation). Autonomous workflow
+        # sessions also persist block-only turns as structured evidence.
+        # Short-circuit the autonomous lookup for the common text-turn case.
+        if text.strip() or (blocks and self._is_autonomous_session(session_id)):
             metadata = {}
             if blocks:
                 metadata["content_blocks"] = blocks
