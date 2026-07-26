@@ -63,6 +63,25 @@ def task_runtime_dirs(task_id: str, root: str = DEFAULT_TASK_ROOT) -> dict[str, 
     return dirs
 
 
+def ensure_task_runtime_dirs(task_id: str, root: str = DEFAULT_TASK_ROOT) -> dict[str, str] | None:
+    """Create the per-task runtime tree, returning the dirs or None.
+
+    Used on the same-user launch path (dev/local) where the root launcher is
+    not invoked and the Python runner is authoritative for the agent's
+    HOME/TMP. On the cross-user path the root-owned launcher creates the tree
+    under /run, which the service user cannot write to; this helper returns
+    None there so the env builder falls back to the legacy shared HOME rather
+    than pointing the agent at a non-existent directory.
+    """
+    dirs = task_runtime_dirs(task_id, root)
+    try:
+        for var in ("root", *_RUNTIME_VARS):
+            Path(dirs[var]).mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return None
+    return dirs
+
+
 @dataclass(frozen=True)
 class AgentTaskPolicy:
     """Per-task isolation + resource policy parsed from agent-launcher.conf.

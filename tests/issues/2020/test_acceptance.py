@@ -52,11 +52,11 @@ def _patch_env_deps(monkeypatch):
     monkeypatch.setattr("app.utils.config.get_config_value", fake)
 
 
-def _build_env(monkeypatch, task_id):
+def _build_env(monkeypatch, task_id, root):
     from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner
 
     _patch_env_deps(monkeypatch)
-    monkeypatch.setenv("OPENACE_AGENT_TASK_ROOT", "/run/openace-agent-tasks")
+    monkeypatch.setenv("OPENACE_AGENT_TASK_ROOT", str(root))
     return AutonomousAgentRunner._build_agent_env(
         _FakeAdapter(), "claude-code", None, f"sess-{task_id}", "m", task_id=task_id
     )
@@ -65,13 +65,13 @@ def _build_env(monkeypatch, task_id):
 # ── 1. distinct HOME/TMP/XDG per task ──────────────────────────────────────
 
 
-def test_tasks_use_distinct_home_tmp_and_xdg_dirs(monkeypatch):
-    a = _build_env(monkeypatch, "task-a")
-    b = _build_env(monkeypatch, "task-b")
+def test_tasks_use_distinct_home_tmp_and_xdg_dirs(monkeypatch, tmp_path):
+    a = _build_env(monkeypatch, "task-a", tmp_path)
+    b = _build_env(monkeypatch, "task-b", tmp_path)
     for key in ("HOME", "TMPDIR", "XDG_CACHE_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME"):
         assert a[key] != b[key], f"{key} shared between tasks"
-    assert "/run/openace-agent-tasks/task-a/" in a["HOME"]
-    assert "/run/openace-agent-tasks/task-b/" in b["HOME"]
+    assert "task-a" in a["HOME"]
+    assert "task-b" in b["HOME"]
 
 
 # ── 2. cleanup one task does not kill another ──────────────────────────────

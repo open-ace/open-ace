@@ -29,7 +29,10 @@ from typing import Any, cast
 
 from app.modules.workspace.autonomous.artifact_text import pick_best_artifact_text
 from app.modules.workspace.autonomous.models import AgentTaskResult
-from app.modules.workspace.autonomous.task_isolation import DEFAULT_TASK_ROOT, task_runtime_dirs
+from app.modules.workspace.autonomous.task_isolation import (
+    DEFAULT_TASK_ROOT,
+    ensure_task_runtime_dirs,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1259,13 +1262,18 @@ class AutonomousAgentRunner:
         # (legacy callers) the shared defaults above stand.
         if task_id:
             task_root = os.environ.get("OPENACE_AGENT_TASK_ROOT", DEFAULT_TASK_ROOT)
-            task_dirs = task_runtime_dirs(task_id, task_root)
-            env["HOME"] = task_dirs["home"]
-            env["TMPDIR"] = task_dirs["tmp"]
-            env["XDG_CACHE_HOME"] = task_dirs["cache"]
-            env["XDG_CONFIG_HOME"] = task_dirs["config"]
-            env["XDG_DATA_HOME"] = task_dirs["data"]
-            env["OPENACE_GIT_CACHE_ROOT"] = str(Path(task_dirs["cache"]) / "pre-commit")
+            # Create the tree when the root is writable (same-user/dev path,
+            # where the launcher is not invoked). On the cross-user path the
+            # root launcher creates it under root-owned /run; this returns None
+            # there and we leave HOME untouched so the launcher sets it.
+            task_dirs = ensure_task_runtime_dirs(task_id, task_root)
+            if task_dirs is not None:
+                env["HOME"] = task_dirs["home"]
+                env["TMPDIR"] = task_dirs["tmp"]
+                env["XDG_CACHE_HOME"] = task_dirs["cache"]
+                env["XDG_CONFIG_HOME"] = task_dirs["config"]
+                env["XDG_DATA_HOME"] = task_dirs["data"]
+                env["OPENACE_GIT_CACHE_ROOT"] = str(Path(task_dirs["cache"]) / "pre-commit")
 
         # Issue #2019: scrub every raw credential (provider/GitHub/SSH/cloud +
         # dynamic custom envKeys) BEFORE injecting the proxy token, and fail

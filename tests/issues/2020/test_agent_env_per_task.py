@@ -63,29 +63,38 @@ def _build(monkeypatch, task_id, *, task_root=None):
     )
 
 
-def test_build_agent_env_sets_per_task_home_tmp_xdg(monkeypatch):
-    env = _build(monkeypatch, "abc-123", task_root="/run/openace-agent-tasks")
+def test_build_agent_env_sets_per_task_home_tmp_xdg(monkeypatch, tmp_path):
+    env = _build(monkeypatch, "abc-123", task_root=str(tmp_path))
 
-    base = "/run/openace-agent-tasks/abc-123"
-    assert env["HOME"] == f"{base}/home"
-    assert env["TMPDIR"] == f"{base}/tmp"
-    assert env["XDG_CACHE_HOME"] == f"{base}/cache"
-    assert env["XDG_CONFIG_HOME"] == f"{base}/config"
-    assert env["XDG_DATA_HOME"] == f"{base}/data"
+    base = tmp_path / "abc-123"
+    assert env["HOME"] == str(base / "home")
+    assert env["TMPDIR"] == str(base / "tmp")
+    assert env["XDG_CACHE_HOME"] == str(base / "cache")
+    assert env["XDG_CONFIG_HOME"] == str(base / "config")
+    assert env["XDG_DATA_HOME"] == str(base / "data")
 
 
-def test_build_agent_env_relocates_git_cache_root_to_task_cache(monkeypatch):
+def test_build_agent_env_relocates_git_cache_root_to_task_cache(monkeypatch, tmp_path):
     # Issue decision (2026-07-26): OPENACE_GIT_CACHE_ROOT is per-task.
-    env = _build(monkeypatch, "abc-123", task_root="/run/openace-agent-tasks")
-    assert env["OPENACE_GIT_CACHE_ROOT"] == "/run/openace-agent-tasks/abc-123/cache/pre-commit"
+    env = _build(monkeypatch, "abc-123", task_root=str(tmp_path))
+    assert env["OPENACE_GIT_CACHE_ROOT"] == str(tmp_path / "abc-123" / "cache" / "pre-commit")
 
 
-def test_build_agent_env_two_tasks_get_disjoint_homes(monkeypatch):
-    a = _build(monkeypatch, "task-a", task_root="/run/openace-agent-tasks")
-    b = _build(monkeypatch, "task-b", task_root="/run/openace-agent-tasks")
+def test_build_agent_env_two_tasks_get_disjoint_homes(monkeypatch, tmp_path):
+    a = _build(monkeypatch, "task-a", task_root=str(tmp_path))
+    b = _build(monkeypatch, "task-b", task_root=str(tmp_path))
     assert a["HOME"] != b["HOME"]
     assert a["TMPDIR"] != b["TMPDIR"]
     assert a["XDG_CACHE_HOME"] != b["XDG_CACHE_HOME"]
+
+
+def test_build_agent_env_skips_per_task_home_when_root_unwritable(monkeypatch):
+    """Cross-user path: the launcher (root) creates /run, not the service
+    user. _build_agent_env must NOT point HOME at a non-existent /run tree —
+    it leaves HOME untouched so the launcher's env -i sets it instead."""
+    env = _build(monkeypatch, "abc-123", task_root="/run/openace-agent-tasks")
+    assert "HOME" not in env or "/run/openace-agent-tasks" not in env.get("HOME", "")
+    assert "TMPDIR" not in env or "/run/openace-agent-tasks" not in env.get("TMPDIR", "")
 
 
 def test_build_agent_env_task_root_is_configurable(monkeypatch, tmp_path):
