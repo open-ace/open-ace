@@ -446,7 +446,6 @@ CREATE TABLE autonomous_workflows (
     dev_retries_on_test_fail integer DEFAULT 0,
     system_account text DEFAULT ''::text,
     base_commit_sha character varying(40),
-    expected_head_sha text,
     preferred_worktree_path text DEFAULT ''::text,
     ci_repair_context text DEFAULT ''::text,
     ci_repair_attempts integer DEFAULT 0,
@@ -458,7 +457,8 @@ CREATE TABLE autonomous_workflows (
     transition_temp_path text,
     transition_error text,
     transition_started_at text,
-    transition_updated_at text
+    transition_updated_at text,
+    expected_head_sha text
 );
 
 CREATE SEQUENCE autonomous_workflows_id_seq

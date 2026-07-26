@@ -295,7 +295,6 @@ CREATE TABLE autonomous_workflows (
  dev_retries_on_test_fail integer DEFAULT 0,
  system_account text DEFAULT '',
  base_commit_sha TEXT,
- expected_head_sha TEXT,
  preferred_worktree_path text DEFAULT '',
  ci_repair_context text DEFAULT '',
  ci_repair_attempts integer DEFAULT 0,
@@ -307,7 +306,8 @@ CREATE TABLE autonomous_workflows (
  transition_temp_path text,
  transition_error text,
  transition_started_at text,
- transition_updated_at text
+ transition_updated_at text,
+ expected_head_sha TEXT
 );
 
 CREATE TABLE compliance_reports (

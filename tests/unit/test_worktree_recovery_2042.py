@@ -15,7 +15,7 @@ to skip ``__init__``, ``MagicMock`` for GitHubOps, method-level stubs.
 """
 
 import json
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -187,29 +187,135 @@ def test_recovery_milestone_records_verified_evidence():
     assert meta["evidence"] == evidence_meta
 
 
-def test_local_branch_ahead_does_not_override_verified_remote_head():
+def _make_evidence(verdict, head_sha):
+    """Build a real Evidence object for the CONFIRMED/INDETERMINATE cases."""
+    import datetime
+
+    now = datetime.datetime(2026, 7, 26)
+    return Evidence(
+        source="github_api",
+        subject="pr_head",
+        verdict=verdict,
+        observed_at=now,
+        verified_at=now,
+        verification_method="test",
+        commit_shas=(head_sha,) if head_sha else (),
+        reason="test",
+    )
+
+
+def test_ensure_worktree_1999_guard_fails_closed_on_divergence():
     """A surviving local branch diverging from the verified head fails closed.
 
-    Decision-tree integration: when a PR's verified head is confirmed but the
-    surviving local branch HEAD differs, recovery must NOT attach and continue.
+    Real _ensure_worktree integration: branch survives → attach → #1999 guard
+    reads the attached HEAD and compares to the verified PR head. A mismatch
+    (unpushed local commits) must raise, not silently continue.
     """
     orch = _make_orch()
-    _set_evidence(orch, _mock_gh_with_recovery("verified-head-abc"))
-    # Simulate _ensure_worktree's divergence guard in isolation: the guard calls
-    # GitHubOps(canonical).get_current_commit() and compares to the verified head.
-    # We assert the guard logic by checking _fail_recovery_closed is reachable.
-    local_head = "stale-local-def"  # diverged from verified-head-abc
-    # The guard condition: head_sha confirmed AND local != head_sha → fail closed.
-    assert local_head != "verified-head-abc"
-    # Verify _fail_recovery_closed records the divergence as a failed milestone.
-    orch._fail_recovery_closed(
-        wf={"current_phase": "merge"},
-        canonical="/tmp/wt",
-        decision="verified_pr_head",
-        evidence_meta={"evidence": {"verdict": "confirmed"}},
-        local_sha=local_head,
-        expected_sha="verified-head-abc",
+    # verified PR head is CONFIRMED.
+    _set_evidence(
+        orch,
+        MagicMock(
+            resolve_verified_pr_head=MagicMock(
+                return_value=_make_evidence(Verdict.CONFIRMED, "verified-head-abc")
+            ),
+            verify_commit_available=MagicMock(
+                return_value=_make_evidence(Verdict.CONFIRMED, "verified-head-abc")
+            ),
+        ),
     )
-    meta = json.loads(orch._create_milestone.call_args.kwargs["metadata"])
-    assert meta["local_sha"] == "stale-local-def"
+    wf = {
+        "workflow_id": "wf-2042",
+        "branch_name": "auto-dev/x",
+        "github_pr_number": 42,
+        "worktree_path": "/private/tmp/repo/.worktrees/wf-2042",
+        "project_path": "/private/tmp/repo",
+        "branch_strategy": "worktree",
+        "current_phase": "merge",
+        "user_id": None,
+    }
+    main_gh = MagicMock()
+    main_gh.path_exists_as_user.return_value = False  # worktree missing
+    found = MagicMock(returncode=0)  # branch survives locally
+    main_gh._run_git.side_effect = [
+        MagicMock(),  # fetch origin main
+        found,  # local branch exists
+        found,  # remote branch exists
+        MagicMock(),  # worktree add <canonical> <branch>
+    ]
+    # GitHubOps(canonical) for the #1999 guard returns a divergent local head.
+    wt_gh = MagicMock()
+    wt_gh.get_current_commit.return_value = "stale-local-unpushed"
+
+    def fake_gh_ctor(path, **kw):
+        return wt_gh if path.endswith("wf-2042") else main_gh
+
+    with (
+        patch("app.modules.workspace.autonomous.orchestrator.GitHubOps", fake_gh_ctor),
+        patch("os.path.realpath", side_effect=lambda p: p),
+    ):
+        with pytest.raises(RuntimeError, match="diverges from verified head"):
+            orch._ensure_worktree(wf)
+    # Fail-closed milestone was recorded with the divergence detail.
+    ms_kwargs = orch._create_milestone.call_args.kwargs
+    assert ms_kwargs["milestone_type"] == "recovery_evidence_missing"
+    meta = json.loads(ms_kwargs["metadata"])
+    assert meta["local_sha"] == "stale-local-unpushed"
     assert meta["expected_sha"] == "verified-head-abc"
+
+
+def test_ensure_worktree_never_uses_origin_main_for_missing_branch():
+    """Branch + worktree both gone → rebuild from base_commit_sha, NOT origin/main.
+
+    Real _ensure_worktree integration: asserts the `worktree add -b` command's
+    last arg is the verified head_sha, never `origin/main`.
+    """
+    orch = _make_orch()
+    _set_evidence(
+        orch,
+        MagicMock(
+            resolve_verified_pr_head=MagicMock(
+                return_value=_make_evidence(Verdict.CONFIRMED, "base-sha-verified")
+            ),
+            verify_commit_available=MagicMock(
+                return_value=_make_evidence(Verdict.CONFIRMED, "base-sha-verified")
+            ),
+        ),
+    )
+    wf = {
+        "workflow_id": "wf-2042",
+        "branch_name": "auto-dev/x",
+        "base_commit_sha": "base-sha-verified",
+        "worktree_path": "/private/tmp/repo/.worktrees/wf-2042",
+        "project_path": "/private/tmp/repo",
+        "branch_strategy": "worktree",
+        "current_phase": "preparation",
+        "user_id": None,
+    }
+    main_gh = MagicMock()
+    main_gh.path_exists_as_user.return_value = False  # worktree missing
+    not_found = MagicMock(returncode=1)  # branch gone locally + remotely
+    main_gh._run_git.side_effect = [
+        MagicMock(),  # fetch origin main
+        not_found,  # local branch missing
+        not_found,  # remote branch missing
+        MagicMock(),  # worktree add -b <branch> <path> <head>
+    ]
+
+    with (
+        patch("app.modules.workspace.autonomous.orchestrator.GitHubOps", lambda _p, **_kw: main_gh),
+        patch("os.path.realpath", side_effect=lambda p: p),
+    ):
+        result = orch._ensure_worktree(wf)
+
+    assert result.endswith("wf-2042")
+    # The worktree add -b command must use the verified head, never origin/main.
+    add_calls = [
+        c.args[0]
+        for c in main_gh._run_git.call_args_list
+        if c.args and c.args[0] and c.args[0][0:2] == ["worktree", "add"]
+    ]
+    assert add_calls, "expected a worktree add call"
+    create_call = [c for c in add_calls if "-b" in c][0]
+    assert create_call[-1] == "base-sha-verified"
+    assert "origin/main" not in create_call
