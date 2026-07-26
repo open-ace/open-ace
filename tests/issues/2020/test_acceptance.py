@@ -131,9 +131,12 @@ def test_memory_and_pid_limit_return_structured_error(tmp_path):
     assert policy.memory_max_bytes == 2147483648
     assert policy.pids_max == 512
 
-    # A task killed by the kernel over its cgroup/rlimit (exit 137) surfaces a
-    # structured, machine-readable error code — not an opaque non-zero exit.
-    code, _msg = R._classify_isolated_exit_code(137, "")
+    # A task killed by the kernel over its cgroup/rlimit surfaces a structured,
+    # machine-readable error code — not an opaque non-zero exit. Python encodes
+    # a SIGKILL death as returncode -9; with a policy configured it maps to the
+    # resource-limit code (a timeout/stop, which the orchestrator initiates,
+    # must NOT map here — it gets task_wall_clock_timeout instead).
+    code, _msg = R._classify_isolated_exit_code(-9, "", resource_policy_configured=True)
     assert code == "task_resource_limit_exceeded"
 
 

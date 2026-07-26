@@ -746,30 +746,62 @@ class AutonomousAgentRunner:
     TASK_WALL_CLOCK_TIMEOUT_ERROR_CODE = "task_wall_clock_timeout"
 
     @staticmethod
+    def _resource_policy_configured() -> bool:
+        """Whether agent-launcher.conf sets a non-zero memory/pids/cpu limit.
+
+        Used to gate signal-kill classification: ``task_resource_limit_exceeded``
+        should mean a configured limit was actually hit, not an unrelated kill.
+        """
+        try:
+            from app.modules.workspace.autonomous.task_isolation import read_agent_task_policy
+
+            conf = os.environ.get("OPENACE_LAUNCHER_CONF", "/etc/openace/agent-launcher.conf")
+            policy = read_agent_task_policy(conf)
+        except Exception:
+            return False
+        return bool(policy.memory_max_bytes or policy.pids_max or policy.cpu_max)
+
+    @staticmethod
     def _classify_isolated_exit_code(
-        return_code: int | None, stderr: str = ""
+        return_code: int | None,
+        stderr: str = "",
+        *,
+        orchestrator_initiated: bool = False,
+        resource_policy_configured: bool = False,
     ) -> tuple[str | None, str | None]:
         """Map an isolated-launcher child exit to a structured error code.
 
-        Returns ``(error_code, message)`` where both may be ``None`` for a clean
-        or generic non-isolation failure. Recognized cases:
+        Returns ``(error_code, message)`` where both may be ``None`` for a
+        clean or generic non-isolation failure. Recognized cases:
 
-        * exit 66 + ``OPENACE_CGROUP_REQUIRED`` → resource policy unavailable
-          (cgroup forced on but unwritable).
-        * exit 68 + ``OPENACE_REPO_INTEGRITY_VIOLATION`` → .git tamper.
-        * exit >= 128 (killed by signal, e.g. cgroup OOM / SIGXCPU / prlimit)
-          → resource-limit exceeded (best-effort; the launcher cannot always
-          distinguish OOM from an external SIGKILL).
+        * ``OPENACE_CGROUP_REQUIRED`` stderr sentinel → resource policy
+          unavailable (cgroup forced on but unwritable). Matched by sentinel
+          only — exit 66 is overloaded in the launcher for unrelated
+          pre-flight failures (validator/flock/base64/reject_conf).
+        * exit 68 / ``OPENACE_REPO_INTEGRITY_VIOLATION`` → .git tamper.
+        * a resource-limit breach: only when the orchestrator did NOT
+          initiate the kill, a resource policy is configured, and the kernel
+          killed the process with an exhaustion signal (SIGKILL/SIGXCPU).
+          Python ``subprocess.Popen.returncode`` encodes signal deaths as
+          negative values (-signum); SIGTERM(-15)/SIGINT(-2) are the
+          orchestrator's own stop/timeout signals and are never a resource
+          breach, so timeouts/stops are never misreported here.
         """
         lowered = (stderr or "").lower()
-        if return_code == 66 or "openace_cgroup_required" in lowered:
+        if "openace_cgroup_required" in lowered:
             return (
                 "task_resource_policy_unavailable",
                 "Task resource policy could not be enforced (cgroup unavailable)",
             )
         if return_code == 68 or "openace_repo_integrity_violation" in lowered:
             return ("repo_integrity_violation", None)
-        if return_code is not None and return_code >= 128:
+        if (
+            not orchestrator_initiated
+            and resource_policy_configured
+            and return_code is not None
+            and return_code < 0
+            and -return_code in (signal.SIGKILL, signal.SIGXCPU)
+        ):
             return (
                 "task_resource_limit_exceeded",
                 "Agent process killed by signal (possible resource-limit breach)",
@@ -2251,8 +2283,14 @@ class AutonomousAgentRunner:
         # Issue #2020: classify isolated-launcher exits (repo integrity,
         # resource-policy unavailable, signal-killed) into a structured code.
         if not session.error_code:
+            # orchestrator_initiated: a timeout (`not completed`) or an
+            # explicit stop (`session._stopped`) means WE killed it — never a
+            # resource breach, so the wall-clock/stop code below is preserved.
             cls_code, cls_msg = self._classify_isolated_exit_code(
-                process.returncode, session.last_stderr
+                process.returncode,
+                session.last_stderr,
+                orchestrator_initiated=(not completed) or session._stopped.is_set(),
+                resource_policy_configured=self._resource_policy_configured(),
             )
             if cls_code:
                 session.error_code = cls_code
@@ -2944,7 +2982,14 @@ class AutonomousAgentRunner:
         if not success:
             error = stderr_text or f"Command exited with code {proc.returncode}"
             # Issue #2020: structured classification of isolated-launcher exits.
-            cls_code, cls_msg = self._classify_isolated_exit_code(proc.returncode, stderr_text)
+            # Single-shot runs synchronously; its timeout is handled by the
+            # subprocess.run(timeout=...) branch above, so a signal death here
+            # was not orchestrator-initiated.
+            cls_code, cls_msg = self._classify_isolated_exit_code(
+                proc.returncode,
+                stderr_text,
+                resource_policy_configured=self._resource_policy_configured(),
+            )
             if cls_code:
                 error_code = cls_code
                 if cls_code == "repo_integrity_violation":

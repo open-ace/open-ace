@@ -346,9 +346,13 @@ if [ "$isolated" = true ]; then
     task_memory="$(_conf_value agent_task_memory_max_bytes)"
     task_pids="$(_conf_value agent_task_pids_max)"
     task_cpu="$(_conf_value agent_task_cpu_max)"
-    case "$(_conf_value agent_task_cgroup_enabled)" in
-        on|ON|true|TRUE|TRUE|yes|Yes|1) task_cg_required=true ;;
-        *)                               task_cg_required=false ;;
+    # Normalize to lowercase before matching so the case list can't miss a
+    # variant (review #2067: the hand-enumerated list had a duplicate TRUE and
+    # no mixed-case True).
+    task_cg_enabled_lc="$(printf '%s' "$(_conf_value agent_task_cgroup_enabled)" | tr '[:upper:]' '[:lower:]')"
+    case "$task_cg_enabled_lc" in
+        on|true|yes|1) task_cg_required=true ;;
+        *)             task_cg_required=false ;;
     esac
 
     # Fail-closed (#2020): if cgroup enforcement is forced on but the task
@@ -369,7 +373,7 @@ if [ "$isolated" = true ]; then
         if [ -n "$task_pids" ] && [ "$task_pids" != "0" ]; then
             echo "$task_pids" > "$task_cgroup/pids.max" 2>/dev/null || true
         fi
-        if [ -n "$task_cpu" ]; then
+        if [ -n "$task_cpu" ] && [ "$task_cpu" != "0" ]; then
             echo "$task_cpu" > "$task_cgroup/cpu.max" 2>/dev/null || true
         fi
     fi
@@ -559,7 +563,7 @@ if [ "$isolated" = true ]; then
     agent_child_pid=$!
     if [ -n "$task_cgroup" ]; then
         echo "$agent_child_pid" > "$task_cgroup/cgroup.procs" 2>/dev/null || true
-    elif command -v prlimit >/dev/null 2>&1; then
+    elif [ -n "$task_id" ] && command -v prlimit >/dev/null 2>&1; then
         # Issue #2020 portable fallback: where no task cgroup exists (stock
         # container with read-only /sys/fs/cgroup), apply POSIX rlimits to the
         # child process tree. RLIMIT_AS bounds virtual address space (a coarse
