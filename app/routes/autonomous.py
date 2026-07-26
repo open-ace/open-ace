@@ -101,9 +101,10 @@ def _shared_checkout_rejection(branch_strategy: str) -> str | None:
     """
     if branch_strategy not in ("current", "new-branch"):
         return None
-    from app.services.webui_manager import WebUIManager
+    # Use the global singleton (reads config.json once, not per request).
+    from app.services.webui_manager import get_webui_manager
 
-    multi_user = WebUIManager().config.multi_user_mode
+    multi_user = get_webui_manager().config.multi_user_mode
     allow_shared = os.environ.get("OPENACE_ALLOW_SHARED_CHECKOUT", "").lower() in (
         "1",
         "true",

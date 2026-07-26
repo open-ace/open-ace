@@ -411,12 +411,21 @@ class GitHubOps:
         """
         self._verify_trusted_git_context()
         kwargs = self._build_subprocess_kwargs()
-        # gh has no `-c <key>=<val>` flag, so trust only the canonical repo via
-        # GIT_CONFIG_COUNT env (per-command, never written to a config file).
-        # This replaces the old global ``safe.directory *``. _build_subprocess_kwargs
-        # only sets ``env`` when an AI token is configured, so fall back to a
-        # copy of os.environ to ensure the vars reach gh (and the git it shells
-        # out to) on the no-token path too.
+        # gh has no `-c <key>=<val>` flag, so on the same-user path we trust the
+        # canonical repo via GIT_CONFIG_COUNT env (per-command, never written to
+        # a config file). This replaces the old global ``safe.directory *``.
+        # _build_subprocess_kwargs only sets ``env`` when an AI token is
+        # configured, so fall back to a copy of os.environ to ensure the vars
+        # reach gh (and the git it shells out to) on the no-token path too.
+        #
+        # Under ``sudo -u`` this env is stripped by sudo's default env_reset,
+        # but that is intentional and safe: the sudo path drops cwd (gh has no
+        # ``-C``) and targets the repo explicitly via ``-R owner/repo``, so gh
+        # has no local repo cwd that would trigger a dubious-ownership check.
+        # Any git operation gh needs (e.g. resolving the remote) is routed
+        # through _resolve_owner_repo -> _run_git, which carries the per-command
+        # ``-c safe.directory=`` inline and does reach the sudo child. Issue
+        # #2021.
         env = kwargs.get("env") or dict(os.environ)
         env["GIT_CONFIG_COUNT"] = "1"
         env["GIT_CONFIG_KEY_0"] = "safe.directory"
@@ -498,12 +507,28 @@ class GitHubOps:
                 f"--git-dir={self._trusted_git_dir}",
                 f"--work-tree={self._trusted_work_tree or os.path.realpath(self.repo_path)}",
             ]
-        # Trust only the canonical repo via per-command ``-c`` (never the
-        # global ``safe.directory *`` that used to be written via
-        # _ensure_safe_directory). Mirrors the work-tree used by --work-tree=
-        # above so trusted and non-trusted paths share one trust scope.
-        safe_dir = self._trusted_work_tree or os.path.realpath(self.repo_path)
-        safe_cfg = f"safe.directory={safe_dir}"
+        # Trust the canonical repo via per-command ``-c`` (never the global
+        # ``safe.directory *`` that used to be written via
+        # _ensure_safe_directory). git's dubious-ownership check covers every
+        # path it touches — the work tree, the git dir, and the (shared)
+        # common dir — so we emit one ``-c safe.directory=<path>`` per trusted
+        # path rather than a single entry. De-duplicated and absolute; the
+        # work tree, git dir, and common dir are often distinct (e.g. a linked
+        # worktree's git dir lives under <repo>/.git/worktrees/<name>, while
+        # the common dir is <repo>/.git), and in cross-user/isolated
+        # deployments they can be owned by different accounts. Issue #2021.
+        safe_paths: list[str] = []
+        for p in (
+            self._trusted_work_tree or os.path.realpath(self.repo_path),
+            self._trusted_git_dir,
+            self._trusted_common_dir,
+        ):
+            rp = os.path.realpath(p) if p else ""
+            if rp and rp not in safe_paths:
+                safe_paths.append(rp)
+        safe_cfgs: list[str] = []
+        for p in safe_paths:
+            safe_cfgs += ["-c", f"safe.directory={p}"]
         if self._needs_sudo():
             # git supports `-C <path>` (unlike gh), so we use it to set the
             # working directory under a sudo wrapper where cwd would trigger a
@@ -520,8 +545,7 @@ class GitHubOps:
                     "core.hooksPath=/dev/null",
                     "-c",
                     "core.fsmonitor=false",
-                    "-c",
-                    safe_cfg,
+                    *safe_cfgs,
                 ]
                 + ([] if trusted_args else ["-C", self.repo_path])
                 + args
@@ -535,8 +559,7 @@ class GitHubOps:
                 "core.hooksPath=/dev/null",
                 "-c",
                 "core.fsmonitor=false",
-                "-c",
-                safe_cfg,
+                *safe_cfgs,
             ] + args
         last_error: GitHubOpsError | None = None
         for attempt in range(GIT_NETWORK_RETRY_COUNT):

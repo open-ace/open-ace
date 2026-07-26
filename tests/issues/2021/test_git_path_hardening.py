@@ -141,6 +141,43 @@ def test_run_gh_injects_git_config_count_env(mock_run):
     assert "*" not in env.get("GIT_CONFIG_VALUE_0", "*")
 
 
+@patch("app.modules.workspace.autonomous.github_ops.subprocess.run")
+def test_run_git_trusts_work_tree_git_dir_and_common_dir(mock_run, tmp_path):
+    """git's dubious-ownership check covers the work tree, git dir, and common
+    dir — which in cross-user/isolated deployments can be owned by different
+    accounts. The per-command ``-c`` must trust all three (de-duplicated), not
+    just the work tree, or git still rejects the common dir. Issue #2021
+    review: a single safe.directory=<worktree> is insufficient."""
+    mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+    # Build a real linked-worktree layout so _verify_trusted_git_context's
+    # os.stat identity probes succeed.
+    repo = tmp_path / "repo"
+    (repo / ".git" / "worktrees" / "wf").mkdir(parents=True)
+    gh = GitHubOps(str(repo))
+    git_dir = str(repo / ".git" / "worktrees" / "wf")
+    common_dir = str(repo / ".git")
+    gh.bind_trusted_git_context(
+        git_dir=git_dir,
+        git_identity=gh.get_path_identity(git_dir),
+        common_dir=common_dir,
+        common_identity=gh.get_path_identity(common_dir),
+    )
+
+    gh._run_git(["status", "--porcelain"])
+
+    cmd = mock_run.call_args.args[0]
+    safe_cfgs = [a for a in cmd if isinstance(a, str) and a.startswith("safe.directory=")]
+    trusted = {a[len("safe.directory=") :] for a in safe_cfgs}
+    # All three trusted paths are present (work tree == repo_path here).
+    assert os.path.realpath(str(repo)) in trusted
+    assert os.path.realpath(git_dir) in trusted
+    assert os.path.realpath(common_dir) in trusted
+    # No wildcard.
+    assert all("*" not in v for v in trusted)
+    # De-duplicated: identical paths collapse to one entry.
+    assert len(safe_cfgs) == len(trusted)
+
+
 # ── 4. worktree porcelain -z parses spaces and newlines ───────────────────
 
 
@@ -229,10 +266,15 @@ def test_branch_and_worktree_names_have_collision_resistant_identity():
 
 
 def _multi_user_manager(enabled: bool):
-    """Patch WebUIManager so config.multi_user_mode reflects ``enabled``."""
+    """Patch get_webui_manager so config.multi_user_mode reflects ``enabled``.
+
+    The singleton accessor is the production read path; patching it (not the
+    WebUIManager class) keeps the test aligned with how the route actually
+    resolves the flag and avoids a per-test config.json read.
+    """
     inst = MagicMock()
     inst.config.multi_user_mode = enabled
-    return patch("app.services.webui_manager.WebUIManager", return_value=inst)
+    return patch("app.services.webui_manager.get_webui_manager", return_value=inst)
 
 
 def test_multi_user_mode_rejects_shared_checkout_without_explicit_override():
