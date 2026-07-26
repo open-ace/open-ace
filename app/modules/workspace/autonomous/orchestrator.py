@@ -37,6 +37,7 @@ from app.modules.workspace.autonomous.evidence import Verdict
 from app.modules.workspace.autonomous.evidence_service import EvidenceService
 from app.modules.workspace.autonomous.github_ops import _FAILURE_LINE_RE, GitHubOps, GitHubOpsError
 from app.modules.workspace.autonomous.models import AgentTaskResult
+from app.modules.workspace.autonomous.phase_contract import PhaseResult, WorkflowContext
 from app.modules.workspace.autonomous.progress_report_i18n import (
     build_progress_payload,
     render_progress_report,
@@ -3665,6 +3666,117 @@ class AutonomousOrchestrator:
         )
         return ms
 
+    # ── Phase A (#2044): unified phase/status commit entrypoint ──────────────
+    #
+    # The single authoritative path for phase/status transition. Phase handlers
+    # migrated onto the PhaseResult contract return a structured outcome instead
+    # of calling _update_workflow / _create_milestone inline; this method
+    # validates and applies it. Crucially, a failed/paused/retrying phase can
+    # no longer write the NEXT phase's state — only outcome="completed" advances
+    # current_phase, which prevents the partial-commit hazard #2044 targets.
+    #
+    # Legacy _do_* methods that still return None keep their inline commits
+    # (see _dispatch_phase / advance). This method is additive and does not
+    # change existing behaviour until a phase opts in.
+
+    def _commit_phase_result(self, result: PhaseResult) -> None:
+        """Validate and persist a ``PhaseResult`` atomically-ish.
+
+        Order matters: workflow patch + phase/status first, then milestones,
+        then usage. Each DB call is individual (no transaction across repos),
+        but routing every transition through here makes phase/status mutation a
+        single auditable path — the property Phase A requires.
+        """
+        patch: dict[str, object] = dict(result.workflow_patch)
+
+        if result.outcome == "completed":
+            # Only a successful phase may advance current_phase. An unknown
+            # next_phase is rejected rather than silently stored, so a buggy
+            # handler cannot strand the workflow in a non-canonical phase.
+            if result.next_phase is None:
+                raise ValueError("PhaseResult(completed) requires next_phase")
+            if result.next_phase not in PHASE_ORDER and result.next_phase != "completed":
+                raise ValueError(
+                    f"PhaseResult(completed) next_phase={result.next_phase!r} "
+                    f"is not in PHASE_ORDER={PHASE_ORDER}"
+                )
+            # The "completed" pseudo-phase is a terminal workflow status, not a
+            # real phase. A handler signals it by next_phase="completed" (the
+            # sentinel mirrors how _do_merge writes status="completed" +
+            # completed_at + emits phase_change{"phase":"completed"}).
+            #
+            # completed_at is written here, symmetric with paused_at on the
+            # pause branch, so a migrated merge handler cannot silently drop
+            # the completion timestamp (review feedback on #2065).
+            #
+            # phase_change events are NOT emitted by this entrypoint: the legacy
+            # _do_* methods emit them inline with phase-specific payloads (e.g.
+            # {"phase":"merge","auto_merge":True}), which the entrypoint cannot
+            # reconstruct. A migrated handler must emit its own phase_change.
+            if result.next_phase == "completed":
+                patch["current_phase"] = "merge"
+                patch["status"] = "completed"
+                patch["completed_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+            else:
+                patch["current_phase"] = result.next_phase
+                patch["status"] = result.next_status or PHASE_STATUS_MAP.get(
+                    result.next_phase, "planning"
+                )
+        elif result.outcome == "wait":
+            # Wait parks the workflow without advancing the phase.
+            patch["status"] = result.next_status or "waiting"
+        elif result.outcome == "retry":
+            # Retry leaves phase/status untouched; only the patch (if any)
+            # applies — e.g. a transient_retry_count bump.
+            pass
+        elif result.outcome == "pause":
+            patch["status"] = "paused"
+            patch["paused_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        elif result.outcome == "failed":
+            patch["status"] = "failed"
+            if isinstance(result.structured_error, dict) and result.structured_error.get("message"):
+                patch["error_message"] = str(result.structured_error["message"])
+        else:  # pragma: no cover - defensive, outcome is a Literal
+            raise ValueError(f"Unknown PhaseResult outcome: {result.outcome!r}")
+
+        if patch:
+            self._update_workflow(patch)
+
+        # Milestones are committed after the workflow patch so an observer
+        # reading the timeline sees the phase advance first. _create_milestone
+        # is idempotent, so replaying a partially-applied result is safe.
+        for ms_kwargs in result.milestone_events:
+            self._create_milestone(**ms_kwargs)
+
+        if result.usage_delta is not None:
+            # Refresh workflow totals from linked sessions. The delta value is
+            # currently unused — _accumulate_tokens ignores its argument and
+            # recomputes from sessions — so passing it is a no-op today.
+            #
+            # TODO(#2044 Phase B): when an evidence service (#2046) produces a
+            # real structured delta, either teach _accumulate_tokens to apply
+            # it (fixing its unused _result param / the object-vs-AgentTaskResult
+            # type smell) or route usage updates through a dedicated method.
+            # review feedback on #2065.
+            self._accumulate_tokens(result.usage_delta)  # type: ignore[arg-type]
+
+    def _build_workflow_context(self, wf: dict) -> WorkflowContext:
+        """Assemble the read-only snapshot a phase handler receives.
+
+        Phases migrated onto the contract take this instead of the raw ``wf``
+        dict, so they cannot accidentally read mutable workflow fields that a
+        user may edit mid-run (model, permission_mode). The cancellation event
+        is the orchestrator's own shutdown signal — phases observe it instead
+        of the scheduler aborting them externally.
+        """
+        return WorkflowContext(
+            workflow=wf,
+            definition_snapshot=wf.get("definition_snapshot"),
+            repository_context=None,  # wired in Phase B via #2041/#2042 services
+            session_bindings=self._session_usage_offsets,
+            cancellation=self._shutdown_requested,
+        )
+
     def _poll_ci_status(self, gh: GitHubOps, pr_number: int) -> list:
         """Poll CI checks until all are non-pending or timeout is reached.
 
@@ -5704,6 +5816,22 @@ class AutonomousOrchestrator:
                     e,
                 )
 
+    def _dispatch_phase(self, phase: str, wf: dict, handler) -> PhaseResult | None:
+        """Run a phase handler and return its structured result, if any.
+
+        Phase A (#2044) adapter: every phase now flows through this single
+        dispatch point. A legacy ``_do_*`` returns ``None`` and commits inline
+        (unchanged behaviour). A migrated handler returns a ``PhaseResult``,
+        which ``advance`` forwards to ``_commit_phase_result`` so phase/status
+        transition stays on one auditable path.
+
+        ``phase`` is threaded for logging only; the handler already knows which
+        phase it is. Keeping the dispatch explicit (rather than a registry) lets
+        each phase migrate independently without touching the others.
+        """
+        logger.debug("Dispatching phase=%s for workflow %s", phase, self._workflow_id[:8])
+        return handler(wf)
+
     def advance(self):
         """Advance the workflow one step. Called by the scheduler."""
         wf = self.workflow
@@ -5739,19 +5867,28 @@ class AutonomousOrchestrator:
                 # branch_name in wf rather than the pre-heal snapshot.
                 wf = self.workflow
             if phase == "preparation":
-                self._do_preparation(wf)
+                result = self._dispatch_phase("preparation", wf, self._do_preparation)
             elif phase == "planning":
-                self._do_planning(wf)
+                result = self._dispatch_phase("planning", wf, self._do_planning)
             elif phase == "development":
-                self._do_development(wf)
+                result = self._dispatch_phase("development", wf, self._do_development)
             elif phase == "pr_review":
-                self._do_pr_review(wf)
+                result = self._dispatch_phase("pr_review", wf, self._do_pr_review)
             elif phase == "report":
-                self._do_report(wf)
+                result = self._dispatch_phase("report", wf, self._do_report)
             elif phase == "wait":
-                self._do_wait(wf)
+                result = self._dispatch_phase("wait", wf, self._do_wait)
             elif phase == "merge":
-                self._do_merge(wf)
+                result = self._dispatch_phase("merge", wf, self._do_merge)
+            else:
+                result = None
+            # Phase A (#2044): a phase migrated onto the PhaseResult contract
+            # returns a structured outcome, which is committed through the
+            # single authoritative entrypoint. Legacy _do_* methods return None
+            # and have already committed inline — leave them be. Either way the
+            # transient-retry reset below applies only on a clean return.
+            if isinstance(result, PhaseResult):
+                self._commit_phase_result(result)
             # Success — reset the transient retry counter so the next network
             # blip starts fresh.
             if wf.get("transient_retry_count", 0):
