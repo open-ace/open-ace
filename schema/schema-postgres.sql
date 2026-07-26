@@ -469,6 +469,44 @@ CREATE SEQUENCE autonomous_workflows_id_seq
     CACHE 1;
 
 ALTER SEQUENCE autonomous_workflows_id_seq OWNED BY autonomous_workflows.id;
+CREATE TABLE command_execution_evidence (
+    id integer NOT NULL,
+    command_id text NOT NULL,
+    workflow_id text DEFAULT ''::text NOT NULL,
+    session_id text DEFAULT ''::text NOT NULL,
+    milestone_id text DEFAULT ''::text NOT NULL,
+    sandbox_id text,
+    sandbox_generation integer,
+    tool_name text DEFAULT ''::text NOT NULL,
+    argv text,
+    shell_command text,
+    cwd text DEFAULT ''::text NOT NULL,
+    execution_profile text DEFAULT ''::text NOT NULL,
+    started_at timestamp without time zone,
+    completed_at timestamp without time zone,
+    exit_code integer,
+    signal integer,
+    timed_out boolean DEFAULT false,
+    cancelled boolean DEFAULT false,
+    terminal_reason text DEFAULT ''::text NOT NULL,
+    stdout_digest text,
+    stderr_digest text,
+    stdout_artifact text,
+    stderr_artifact text,
+    output_excerpt text DEFAULT ''::text NOT NULL,
+    tenant_id integer DEFAULT 1 NOT NULL,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE SEQUENCE command_execution_evidence_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE command_execution_evidence_id_seq OWNED BY command_execution_evidence.id;
 CREATE TABLE compliance_reports (
     id integer NOT NULL,
     report_id text NOT NULL,
@@ -1843,6 +1881,8 @@ ALTER TABLE ONLY audit_logs ALTER COLUMN id SET DEFAULT nextval('audit_logs_id_s
 
 ALTER TABLE ONLY autonomous_workflows ALTER COLUMN id SET DEFAULT nextval('autonomous_workflows_id_seq'::regclass);
 
+ALTER TABLE ONLY command_execution_evidence ALTER COLUMN id SET DEFAULT nextval('command_execution_evidence_id_seq'::regclass);
+
 ALTER TABLE ONLY compliance_reports ALTER COLUMN id SET DEFAULT nextval('compliance_reports_id_seq'::regclass);
 
 ALTER TABLE ONLY consistency_violations ALTER COLUMN id SET DEFAULT nextval('consistency_violations_id_seq'::regclass);
@@ -2014,6 +2054,9 @@ ALTER TABLE ONLY autonomous_workflows
 
 ALTER TABLE ONLY autonomous_workflows
     ADD CONSTRAINT autonomous_workflows_workflow_id_key UNIQUE (workflow_id);
+
+ALTER TABLE ONLY command_execution_evidence
+    ADD CONSTRAINT command_execution_evidence_pkey PRIMARY KEY (id);
 
 ALTER TABLE ONLY compliance_reports
     ADD CONSTRAINT compliance_reports_pkey PRIMARY KEY (id);
@@ -2215,6 +2258,9 @@ ALTER TABLE ONLY tenants
 
 ALTER TABLE ONLY tool_account_mapping_rules
     ADD CONSTRAINT tool_account_mapping_rules_pkey PRIMARY KEY (id);
+
+ALTER TABLE ONLY command_execution_evidence
+    ADD CONSTRAINT uq_command_evidence_session_command UNIQUE (session_id, command_id);
 
 ALTER TABLE ONLY daily_messages
     ADD CONSTRAINT uq_daily_messages_date_tool_msg_host UNIQUE (date, tool_name, message_id, host_name);
@@ -2431,6 +2477,14 @@ CREATE INDEX idx_audit_tenant_id ON audit_logs USING btree (tenant_id);
 CREATE INDEX idx_audit_timestamp ON audit_logs USING btree ("timestamp");
 
 CREATE INDEX idx_audit_user_id ON audit_logs USING btree (user_id);
+
+
+--
+--
+
+CREATE INDEX idx_command_evidence_session_command ON command_execution_evidence USING btree (session_id, command_id);
+
+CREATE INDEX idx_command_evidence_workflow_milestone ON command_execution_evidence USING btree (workflow_id, milestone_id);
 
 
 --
