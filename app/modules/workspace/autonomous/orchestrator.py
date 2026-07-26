@@ -8013,7 +8013,10 @@ class AutonomousOrchestrator:
         if dirty_before is True:
             try:
                 gh.git_add_all()
-                gh.git_commit("auto: stage pre-existing worktree changes before review fix")
+                gh.git_commit(
+                    "auto: stage pre-existing worktree changes before review fix",
+                    no_verify=True,
+                )
                 logger.warning(
                     "Workflow %s: worktree was dirty before review fix; "
                     "committed pre-existing changes before running fix agent",
