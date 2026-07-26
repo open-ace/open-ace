@@ -822,10 +822,68 @@ def _cleanup_orphan_processes():
         logger.error("Orphan process cleanup failed: %s", e, exc_info=True)
 
 
+def _reconcile_pending_transitions():
+    """Recover interrupted merge-conflict worktree transitions (#2050).
+
+    Walks every workflow with a non-NULL ``worktree_transition_state`` (left
+    behind by a SIGKILL / restart mid-transition) and runs the same idempotent
+    ``_reconcile_worktree_transition`` entry point that ``advance()`` uses, so
+    startup, advance, and manual resume share one reconciler. Each workflow is
+    isolated: a failure fails that workflow closed (recovery_failed) without
+    blocking the others.
+    """
+    logger.info("Reconciling interrupted worktree transitions...")
+
+    try:
+        from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+        from app.repositories.autonomous_repo import AutonomousWorkflowRepository
+        from app.repositories.database import Database
+
+        repo = AutonomousWorkflowRepository(Database())
+        pending = repo.get_workflows_with_active_transition()
+        if not pending:
+            logger.info("No interrupted worktree transitions found")
+            return
+
+        for wf in pending:
+            wf_id = wf.get("workflow_id")
+            if not isinstance(wf_id, str) or not wf_id:
+                continue
+            try:
+                orchestrator = AutonomousOrchestrator(wf_id)
+                orchestrator._reconcile_worktree_transition(wf)
+            except Exception as e:  # noqa: BLE001
+                # The reconciler itself should fail closed internally; this catch
+                # is a last resort so one bad workflow does not block the rest.
+                logger.error(
+                    "Reconcile raised for workflow %s: %s",
+                    (wf_id or "")[:8],
+                    e,
+                    exc_info=True,
+                )
+                try:
+                    repo.update_workflow(
+                        wf_id,
+                        {
+                            "worktree_transition_state": "recovery_failed",
+                            "transition_error": f"reconcile raised: {e}",
+                            "status": "failed",
+                        },
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.error("Could not persist recovery_failed for %s", (wf_id or "")[:8])
+
+        logger.info("Reconciled %d interrupted worktree transition(s)", len(pending))
+    except Exception as e:  # noqa: BLE001
+        logger.error("Worktree transition reconcile sweep failed: %s", e, exc_info=True)
+
+
 def init_autonomous_scheduler():
     """Initialize and start the autonomous scheduler."""
     # Clean up orphaned processes from previous server run
     _cleanup_orphan_processes()
+    # Recover any worktree transitions interrupted by a prior SIGKILL/restart
+    _reconcile_pending_transitions()
 
     scheduler = AutonomousScheduler.instance()
     scheduler.start()

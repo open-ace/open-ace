@@ -56,6 +56,15 @@ class UpstreamQuotaPaused(WorkflowPaused):
     """Control-flow signal used after persisting a hard-quota pause."""
 
 
+class _ReconcileFailed(Exception):
+    """Internal signal that worktree transition reconcile must fail closed.
+
+    Raised from the reconcile helper body when git registry/disk state is
+    ambiguous or ownership cannot be proven. The caller catches it and writes
+    ``recovery_failed`` + a usable message (#2050).
+    """
+
+
 # Completion keywords to detect in issue comments
 COMPLETION_KEYWORDS = [
     "开发完成",
@@ -1284,6 +1293,14 @@ class AutonomousOrchestrator:
         """
         wf = self.workflow
         if not self._gh and wf:
+            # Reconcile an interrupted transition before binding, so we never
+            # bind GitHubOps to the main repo (HEAD=main) while a worktree
+            # transition is mid-flight (#2050). recovery_failed also short-
+            # circuits: nothing should run against git in that state.
+            ts = wf.get("worktree_transition_state")
+            if ts and ts != "recovery_failed":
+                self._reconcile_worktree_transition(wf)
+                wf = self.workflow
             worktree_path = wf.get("worktree_path", "")
             project_path = wf.get("project_path", "")
             # Resolve system_account for multi-user permission isolation (Issue #1395)
@@ -1779,6 +1796,15 @@ class AutonomousOrchestrator:
         # which fails and turns a retried merge into a hard failure. Only a
         # non-empty path whose dir is gone represents external loss (#814).
         if strategy != "worktree" or not project_path or not worktree_path:
+            # Hard guard (#2050): a transition still in progress (anything other
+            # than recovery_failed) must NOT fall back to project_path — that
+            # would run a phase against the main checkout (HEAD=main). The
+            # caller is required to reconcile first.
+            ts = wf.get("worktree_transition_state")
+            if ts and ts != "recovery_failed":
+                raise RuntimeError(
+                    "worktree transition in progress " f"(state={ts!r}); reconcile before execution"
+                )
             return worktree_path or project_path
 
         canonical = os.path.realpath(worktree_path)
@@ -5194,6 +5220,16 @@ class AutonomousOrchestrator:
         logger.info("Advancing workflow %s phase=%s", self._workflow_id[:8], phase)
 
         try:
+            # Reconcile an interrupted merge-conflict worktree transition BEFORE
+            # _ensure_worktree / _get_gh, so a SIGKILLed transition never lets a
+            # later phase fall back to the main checkout (#2050). Order is fixed:
+            # reconcile -> ensure_worktree -> bind GitHubOps -> phase execute.
+            if wf.get("worktree_transition_state"):
+                self._reconcile_worktree_transition(wf)
+                wf = self.workflow  # reconcile may have changed worktree_path
+                if wf.get("status") == "failed":
+                    # Reconcile failed closed; do not run a phase.
+                    return
             # Self-heal the worktree before any downstream phase runs. A
             # retried/resumed workflow may find its worktree dir gone (cleaned
             # up after a prior failure), which previously launched the agent
@@ -8868,12 +8904,30 @@ class AutonomousOrchestrator:
         )
         original_removed = False
         temp_created = False
+        # The path to restore at the end. Prefer the live worktree_path, fall
+        # back to preferred_worktree_path (it is what _ensure_worktree recreates
+        # from if worktree_path is empty). Captured up front so the journal can
+        # restore even if the process is SIGKILLed mid-transition (#2050).
+        original_path_for_journal = worktree_path or wf.get("preferred_worktree_path") or ""
         try:
             if worktree_path:
+                # Persist the removal intent BEFORE the git side effect so a
+                # SIGKILL anywhere in this block leaves the journal able to
+                # reconcile (#2050). transition_original_path records the path
+                # to restore; transition_temp_path records the temp to tear down.
+                self._set_transition_state(
+                    "removing_original",
+                    original_path=original_path_for_journal,
+                    temp_path=temp_wt_path,
+                )
                 # Fail closed on removal failure: only clear the DB once git has
                 # actually freed the branch, and never assume removal succeeded.
                 self._remove_worktree_idempotent(main_gh, worktree_path)
-                self._update_workflow({"worktree_path": ""})
+                # One atomic write: clear worktree_path AND advance state so the
+                # empty path is never observable without its transition context.
+                self._update_workflow(
+                    {"worktree_path": "", "worktree_transition_state": "original_removed"}
+                )
                 # The caller's gh still points at the now-deleted worktree dir
                 # as its cwd. Rebind it (and cached self._gh) to the main repo
                 # so later cleanup doesn't run subprocess with a gone cwd (#1107).
@@ -8887,6 +8941,10 @@ class AutonomousOrchestrator:
             main_gh.add_worktree(temp_wt_path, branch_name)
             logger.info("Created temporary merge worktree at %s", temp_wt_path)
             temp_created = True
+            # Advance the journal: a successful add_worktree is the proof the
+            # temp is attached. If the process dies here, reconcile re-queries
+            # the registry to observe the temp and tear it down (#2050).
+            self._set_transition_state("temp_attached")
 
             # All subsequent git ops run inside the temp worktree.
             wt_gh = GitHubOps(temp_wt_path, system_account=system_account)
@@ -9209,6 +9267,10 @@ class AutonomousOrchestrator:
             # restore would error. A restore failure fails CLOSED — never let a
             # later phase run on the main checkout.
             if original_removed:
+                # Mark the restore intent before doing git work, so a SIGKILL
+                # during restore converges on the `restoring` state and the
+                # reconcile resumes idempotently (#2050).
+                self._set_transition_state("restoring")
                 try:
                     # If remove_worktree succeeded earlier, the dir is gone
                     # and we recreate it. If it failed, the dir is still
@@ -9217,7 +9279,9 @@ class AutonomousOrchestrator:
                     if not main_gh.path_exists_as_user(git_file, file_only=True):
                         main_gh.add_worktree(worktree_path, branch_name)
                     self._verify_worktree_restored(main_gh, worktree_path, branch_name)
-                    self._update_workflow({"worktree_path": worktree_path})
+                    # Converge in a single write: restore worktree_path AND clear
+                    # the journal together so they can never disagree (#2050).
+                    self._clear_transition_journal(worktree_path=worktree_path)
                     self._gh = GitHubOps(worktree_path, system_account=system_account)
                     logger.info("Restored workflow worktree at %s", worktree_path)
                 except Exception as e:
@@ -9227,15 +9291,323 @@ class AutonomousOrchestrator:
                         e,
                         exc_info=True,
                     )
-                    self._update_workflow(
-                        {
-                            "status": "failed",
-                            "error_message": (
-                                f"worktree restore failed after merge resolution: {e}"
-                            ),
-                        }
+                    # Fail CLOSED and keep the journal + metadata for diagnosis.
+                    self._fail_transition_closed(
+                        f"worktree restore failed after merge resolution: {e}",
+                        error_message=(f"worktree restore failed after merge resolution: {e}"),
                     )
                     raise
+
+    # ── Worktree transition journal (Issue #2050) ───────────────────
+    # These helpers persist a minimal crash-recovery journal so a SIGKILL at
+    # any git/DB boundary can be reconciled from the persisted intent + the
+    # observed git registry/disk state. They never touch branch refs (that is
+    # #2042's head-authority job).
+
+    def _set_transition_state(
+        self,
+        state: str,
+        *,
+        original_path: str | None = None,
+        temp_path: str | None = None,
+        error: str | None = None,
+    ) -> None:
+        """Advance the persisted worktree transition journal (#2050).
+
+        Writes ``worktree_transition_state`` and refreshes
+        ``transition_updated_at``. ``transition_started_at`` is stamped once
+        when the journal begins (state moves out of NULL). Path fields are only
+        overwritten when provided, so a mid-transition update does not clobber
+        the original/temp paths captured at the start.
+        """
+        wf = self.workflow
+        updates: dict = {"worktree_transition_state": state}
+        now = datetime.now(timezone.utc).isoformat()
+        updates["transition_updated_at"] = now
+        if not wf.get("transition_started_at"):
+            updates["transition_started_at"] = now
+        if original_path is not None:
+            updates["transition_original_path"] = original_path
+        if temp_path is not None:
+            updates["transition_temp_path"] = temp_path
+        updates["transition_error"] = error
+        self._update_workflow(updates)
+
+    def _clear_transition_journal(self, *, worktree_path: str | None = None) -> None:
+        """Converge the journal to the stable state (#2050).
+
+        Clears every journal field and optionally restores ``worktree_path`` in
+        the SAME write, so the cleared path and the cleared state can never be
+        observed separately.
+        """
+        updates: dict = {
+            "worktree_transition_state": None,
+            "transition_original_path": None,
+            "transition_temp_path": None,
+            "transition_error": None,
+            "transition_started_at": None,
+            "transition_updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        if worktree_path is not None:
+            updates["worktree_path"] = worktree_path
+        self._update_workflow(updates)
+
+    def _fail_transition_closed(self, reason: str, *, error_message: str | None = None) -> None:
+        """Mark the transition unrecoverable and fail the workflow closed (#2050).
+
+        Keeps the journal + paths for diagnosis; no later phase runs. The status
+        mirrors the in-process restore-failure precedent (status=failed).
+        """
+        updates: dict = {
+            "worktree_transition_state": "recovery_failed",
+            "transition_error": reason,
+            "transition_updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        if error_message:
+            updates["error_message"] = error_message
+        updates["status"] = "failed"
+        self._update_workflow(updates)
+
+    @staticmethod
+    def _is_registered_on_branch(entries: list[dict], path: str, branch: str) -> bool:
+        """True if ``path`` is a registered worktree on ``branch``."""
+        for w in entries:
+            if w.get("path") == path:
+                actual = w.get("branch")
+                return actual in (branch, f"refs/heads/{branch}")
+        return False
+
+    def _verify_worktree_registered(self, gh: GitHubOps, path: str, branch: str) -> None:
+        """Confirm ``path`` is registered in ``git worktree list`` on ``branch``.
+
+        Distinct from ``_verify_worktree_restored`` only in naming; both check
+        the registry, but this one is used to confirm the temp was actually
+        attached before advancing the journal (#2050).
+        """
+        entries = gh.list_worktrees()
+        if not self._is_registered_on_branch(entries, path, branch):
+            raise RuntimeError(
+                f"worktree {path} not registered on branch {branch!r} " f"(registry: {entries!r})"
+            )
+
+    def _path_within_worktrees_root(self, path: str, project_path: str) -> bool:
+        """True if ``path`` lives under ``<project_path>/.worktrees`` (#2050).
+
+        Used by reconcile to refuse operating on foreign / out-of-root paths
+        (fail closed instead of touching worktrees we cannot prove we own).
+        """
+        if not path or not project_path:
+            return False
+        try:
+            root = os.path.normpath(os.path.join(project_path, ".worktrees"))
+            return os.path.commonpath([root, os.path.normpath(path)]) == root
+        except ValueError:
+            # commonpath raises on different drives (Windows) / absolute mismatches.
+            return False
+
+    def _reconcile_worktree_transition(self, wf: dict) -> None:
+        """Recover an interrupted merge-conflict worktree transition (#2050).
+
+        Single idempotent entry point. Combines the persisted transition intent
+        (``worktree_transition_state`` + path fields) with the OBSERVED git
+        registry / disk state to either restore the original worktree to a
+        stable state, or fail the workflow closed. Never resets/deletes/recreates
+        branch refs — that is #2042's head-authority job.
+
+        Goal is to discard any half-finished temp worktree and get back to the
+        stable original worktree so the next round can re-run merge/conflict from
+        a known-good state. A SIGKILL cannot prove the temp's edits/commits/push
+        were complete or trustworthy.
+        """
+        state = (wf.get("worktree_transition_state") or "").strip()
+        if not state:
+            return  # stable, nothing to reconcile
+        if state == "recovery_failed":
+            # Already failed closed; do not start an agent or touch git.
+            logger.warning(
+                "Workflow %s is in recovery_failed; skipping reconcile",
+                self._workflow_id[:8],
+            )
+            return
+
+        project_path = wf.get("project_path", "") or ""
+        branch_name = wf.get("branch_name", "") or ""
+        original_path = (
+            wf.get("transition_original_path")
+            or wf.get("preferred_worktree_path")
+            or wf.get("worktree_path")
+            or ""
+        )
+        temp_path = wf.get("transition_temp_path") or ""
+
+        # Fail closed if we cannot confirm the original path or its root. We
+        # must know what to restore before touching git.
+        if not original_path:
+            self._fail_transition_closed(
+                "cannot reconcile: transition_original_path is empty "
+                "and no preferred/worktree path is available"
+            )
+            return
+        if not branch_name:
+            self._fail_transition_closed(
+                "cannot reconcile: branch_name is empty, cannot verify worktree"
+            )
+            return
+        # Refuse foreign roots: only operate inside the project's .worktrees dir.
+        if not self._path_within_worktrees_root(original_path, project_path):
+            self._fail_transition_closed(
+                f"cannot reconcile: original_path {original_path!r} is outside "
+                f"the project worktrees root"
+            )
+            return
+        if temp_path and not self._path_within_worktrees_root(temp_path, project_path):
+            self._fail_transition_closed(
+                f"cannot reconcile: temp_path {temp_path!r} is outside "
+                f"the project worktrees root"
+            )
+            return
+
+        system_account = None
+        user_id = wf.get("user_id")
+        if user_id:
+            try:
+                from app.repositories.user_repo import UserRepository
+
+                user = UserRepository().get_user_by_id(user_id)
+                if user:
+                    system_account = user.get("system_account")
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Could not resolve system_account for reconcile: %s", e)
+        main_gh = GitHubOps(project_path, system_account=system_account)
+
+        try:
+            entries = main_gh.list_worktrees()
+        except Exception as e:  # noqa: BLE001
+            # Cannot safely judge ownership without the registry → fail closed.
+            self._fail_transition_closed(f"git worktree list failed: {e}")
+            return
+
+        def _registered(path: str) -> bool:
+            return any(w.get("path") == path for w in entries)
+
+        def _on_branch(path: str) -> bool:
+            return self._is_registered_on_branch(entries, path, branch_name)
+
+        try:
+            if state == "removing_original":
+                if _registered(original_path):
+                    if _on_branch(original_path):
+                        # Original never actually removed — nothing to undo.
+                        self._clear_transition_journal(worktree_path=original_path)
+                        logger.info(
+                            "Reconcile %s: original still registered; cleared journal",
+                            state,
+                        )
+                        return
+                    # Registered but wrong branch → ambiguous, fail closed.
+                    self._fail_transition_closed(
+                        f"original worktree {original_path!r} registered on "
+                        f"unexpected branch (expected {branch_name!r})"
+                    )
+                    return
+                # Original gone → removal happened. Clean any temp, then restore.
+                self._reconcile_cleanup_temp_and_restore(
+                    main_gh, entries, temp_path, original_path, branch_name, system_account
+                )
+                return
+
+            if state in ("original_removed", "temp_attached"):
+                # Either way: tear down any temp, then restore the original.
+                self._reconcile_cleanup_temp_and_restore(
+                    main_gh, entries, temp_path, original_path, branch_name, system_account
+                )
+                return
+
+            if state == "restoring":
+                if _on_branch(original_path):
+                    # Restore already completed before the SIGKILL; converge.
+                    self._clear_transition_journal(worktree_path=original_path)
+                    self._gh = GitHubOps(original_path, system_account=system_account)
+                    logger.info("Reconcile restoring: original already restored; converged")
+                    return
+                # Otherwise resume the idempotent restore (also cleans temp).
+                self._reconcile_cleanup_temp_and_restore(
+                    main_gh, entries, temp_path, original_path, branch_name, system_account
+                )
+                return
+
+            # Unknown state → fail closed rather than guess.
+            self._fail_transition_closed(f"cannot reconcile: unknown transition state {state!r}")
+        except _ReconcileFailed as e:
+            self._fail_transition_closed(str(e))
+        except Exception as e:  # noqa: BLE001
+            logger.error("Reconcile failed for %s: %s", self._workflow_id[:8], e, exc_info=True)
+            self._fail_transition_closed(f"reconcile raised: {e}")
+
+    def _reconcile_cleanup_temp_and_restore(
+        self,
+        main_gh: GitHubOps,
+        entries: list[dict],
+        temp_path: str,
+        original_path: str,
+        branch_name: str,
+        system_account,
+    ) -> None:
+        """Shared reconcile body: remove temp (if any), restore original (#2050).
+
+        Validates ownership before each git mutation. Raises ``_ReconcileFailed``
+        on ambiguity so the caller fails closed with a usable message.
+        """
+        # 1. Tear down a lingering temp worktree. It holds untrusted half-done
+        #    agent work and (if registered) blocks the branch.
+        if temp_path:
+            temp_entry = next((w for w in entries if w.get("path") == temp_path), None)
+            if temp_entry is not None:
+                actual_branch = temp_entry.get("branch")
+                if actual_branch not in (branch_name, f"refs/heads/{branch_name}"):
+                    # A temp registered on the wrong branch is not ours to remove.
+                    raise _ReconcileFailed(
+                        f"temp worktree {temp_path!r} registered on unexpected "
+                        f"branch {actual_branch!r} (expected {branch_name!r})"
+                    )
+                self._remove_worktree_idempotent(main_gh, temp_path)
+                logger.info("Reconcile removed temp worktree %s", temp_path)
+                # Refresh the registry view before checking the original.
+                entries = main_gh.list_worktrees()
+
+        # 2. Restore the original. If it is already registered on the right
+        #    branch, the restore already happened — just verify. Otherwise
+        #    re-attach the existing branch to its path. We do NOT create or
+        #    reset the branch here (#2042 owns head authority): add_worktree on
+        #    a missing branch would error, which we fail closed on.
+        original_entry = next((w for w in entries if w.get("path") == original_path), None)
+        if original_entry is not None:
+            actual_branch = original_entry.get("branch")
+            if actual_branch not in (branch_name, f"refs/heads/{branch_name}"):
+                raise _ReconcileFailed(
+                    f"original worktree {original_path!r} registered on unexpected "
+                    f"branch {actual_branch!r} (expected {branch_name!r})"
+                )
+        else:
+            # Not registered → re-attach. add_worktree on the existing branch.
+            git_file = os.path.join(original_path, ".git")
+            if not main_gh.path_exists_as_user(git_file, file_only=True):
+                try:
+                    main_gh.add_worktree(original_path, branch_name)
+                except GitHubOpsError as e:
+                    # Most commonly: branch ref missing/divergent. That is #2042's
+                    # decision, not ours — fail closed rather than recreate it.
+                    raise _ReconcileFailed(
+                        f"cannot re-attach original worktree {original_path!r} "
+                        f"to branch {branch_name!r} (branch missing or "
+                        f"divergent — needs #2042 head authority): {e}"
+                    )
+        # Verify registration + branch on the canonical gh view.
+        self._verify_worktree_restored(main_gh, original_path, branch_name)
+        # Converge DB path + journal in one write, rebind cached gh.
+        self._clear_transition_journal(worktree_path=original_path)
+        self._gh = GitHubOps(original_path, system_account=system_account)
+        logger.info("Reconcile restored original worktree at %s", original_path)
 
     def _remove_worktree_idempotent(self, gh: GitHubOps, path: str) -> None:
         """Remove a worktree, treating "already absent" as success (Issue #2041).
