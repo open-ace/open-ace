@@ -32,6 +32,8 @@ from app.modules.workspace.autonomous.artifact_text import (
     sanitize_artifact_text,
 )
 from app.modules.workspace.autonomous.event_emitter import AutonomousEventEmitter
+from app.modules.workspace.autonomous.evidence import Verdict
+from app.modules.workspace.autonomous.evidence_service import EvidenceService
 from app.modules.workspace.autonomous.github_ops import _FAILURE_LINE_RE, GitHubOps, GitHubOpsError
 from app.modules.workspace.autonomous.models import AgentTaskResult
 from app.modules.workspace.autonomous.progress_report_i18n import (
@@ -1273,6 +1275,20 @@ class AutonomousOrchestrator:
         self._gh: GitHubOps | None = None
 
     @property
+    def _evidence(self) -> EvidenceService:
+        """Lazily attach the verify-before-act evidence service (issue #2045).
+
+        Some unit tests construct the orchestrator via ``__new__`` (bypassing
+        ``__init__``) and stub individual methods; this property keeps those
+        tests working without each needing to set ``self._evidence`` explicitly.
+        """
+        cached = self.__dict__.get("_evidence_instance")
+        if cached is None:
+            cached = EvidenceService()
+            self.__dict__["_evidence_instance"] = cached
+        return cached
+
+    @property
     def workflow(self) -> dict | None:
         return self.repo.get_workflow(self._workflow_id)
 
@@ -1497,13 +1513,13 @@ class AutonomousOrchestrator:
         a "no" is a definitive commit-graph answer we act on, a git error is
         an indeterminate probe that must fail closed (see
         ``_main_drift_is_benign_pull``).
+
+        Issue #2045 Phase A: delegates to :class:`EvidenceService`, which returns
+        a tri-state :class:`Evidence`. The bool|None return is preserved for
+        existing callers (True=CONFIRMED, False=REJECTED, None=INDETERMINATE).
         """
-        rc = gh._run_git(["merge-base", "--is-ancestor", a, b], check=False).returncode
-        if rc == 0:
-            return True
-        if rc == 1:
-            return False
-        return None
+        evidence = self._evidence.verify_branch_contains(gh, head=b, base=a)
+        return evidence.verdict.to_bool_or_none()
 
     def _main_drift_is_benign_pull(
         self,
@@ -3633,7 +3649,15 @@ class AutonomousOrchestrator:
         Returns True if the PR head has main as an ancestor (nothing to merge),
         False if the branch is behind main, or None when the probe is
         indeterminate and the caller must fail closed.
+
+        Issue #2045 Phase A: the pr-head existence check (``_ensure_pr_head_local``)
+        and the ancestry probe (``_ancestor_check``) each delegate to
+        :class:`EvidenceService`; this method composes them as before so the
+        bool|None contract and the test-visible call structure are preserved.
         """
+        # Ensure pr_head_sha is local first; an unverifiable head is indeterminate.
+        # ``_ensure_pr_head_local`` already applies the workflow branch_name
+        # fallback, so reuse it to keep the historical fetch-ref behavior.
         if not self._ensure_pr_head_local(gh, pr_head_sha, branch_name):
             return None
         gh._run_git(["fetch", "origin", "main"])
@@ -3651,19 +3675,12 @@ class AutonomousOrchestrator:
         ``git merge-base`` then fails with "no commit" and fails the workflow.
         Fetch the branch first so the merge-base probe has both objects.
         Returns False if the object still cannot be resolved after fetching.
+
+        Issue #2045 Phase A: delegates to :class:`EvidenceService`.
         """
-        if (
-            pr_head_sha
-            and gh._run_git(["cat-file", "-e", pr_head_sha], check=False).returncode == 0
-        ):
-            return True
         ref = branch_name or self.workflow.get("branch_name", "")
-        if ref:
-            gh._run_git(["fetch", "origin", ref])
-        return bool(
-            pr_head_sha
-            and gh._run_git(["cat-file", "-e", pr_head_sha], check=False).returncode == 0
-        )
+        evidence = self._evidence.verify_commit_available(gh, pr_head_sha, ref)
+        return evidence.verdict is Verdict.CONFIRMED
 
     def _start_ci_repair_round(self, wf: dict, pr_number: int, failed_checks: list[dict]) -> None:
         """Repair merge-phase CI failures in-place on the existing PR branch."""
