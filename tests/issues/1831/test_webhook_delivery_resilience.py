@@ -211,6 +211,14 @@ class TestClaimDue:
 
 class TestReaper:
     def test_reaper_redelivers_and_marks_delivered(self, notifier):
+        notifier.set_notification_preferences(
+            NotificationPreference(
+                user_id=1,
+                push_enabled=True,
+                webhook_url="https://x.example/hook",
+                alert_types=["quota"],
+            )
+        )
         alert = _insert_alert_direct(notifier, 1, "rep-1")
         did = notifier._delivery_enqueue(alert, 1)
         # Force the row due immediately.
@@ -255,6 +263,14 @@ class TestReaper:
         assert _all_delivery_rows(notifier)[0]["status"] == "dead"
 
     def test_reaper_schedules_retry_when_under_max(self, notifier):
+        notifier.set_notification_preferences(
+            NotificationPreference(
+                user_id=1,
+                push_enabled=True,
+                webhook_url="https://x.example/hook",
+                alert_types=["quota"],
+            )
+        )
         alert = _insert_alert_direct(notifier, 1, "rep-3")
         did = notifier._delivery_enqueue(alert, 1)
         conn = notifier._get_connection()
@@ -427,8 +443,10 @@ class TestDeliveryIdentity:
 
         assert _all_delivery_rows(notifier)[0]["status"] == "delivered"
 
-    def test_null_hash_legacy_row_still_retries(self, notifier):
-        """A legacy row with a null hash (pre-guard) is not blocked — it retries."""
+    def test_null_hash_row_is_dead_not_retried(self, notifier):
+        """P2: a row with no recorded receiver hash can't be verified against the
+        original receiver — dead-letter rather than guess by sending to whatever
+        is configured now (which may be a different team/tenant)."""
         url = "https://open.feishu.cn/open-apis/bot/v2/hook/TOKEN-A"
         notifier.set_notification_preferences(
             NotificationPreference(
@@ -451,12 +469,14 @@ class TestDeliveryIdentity:
         conn.commit()
         conn.close()
 
-        with patch.object(
-            notifier, "_deliver_to_prefs", return_value=DeliveryResult(delivered=True)
-        ):
+        with patch.object(notifier, "_deliver_to_prefs") as mock_deliver:
             notifier.process_due_deliveries()
+            # No POST — the row can't be verified, so it is dead-lettered.
+            mock_deliver.assert_not_called()
 
-        assert _all_delivery_rows(notifier)[0]["status"] == "delivered"
+        row = _all_delivery_rows(notifier)[0]
+        assert row["status"] == "dead"
+        assert row["last_error_type"] == "unverifiable_receiver"
 
     def test_immediate_retry_does_not_send_to_changed_webhook(self, notifier):
         """P1-2: if the receiver changes during the worker's inter-attempt
@@ -619,11 +639,10 @@ class TestDeliveryIdentity:
 
         assert delivered == [url_x]
 
-    def test_transient_initial_preferences_failure_does_not_create_unprotected_null_hash_row(
-        self, notifier
-    ):
-        """P1: when the worker can't read preferences, it fails closed — no POST
-        and no NULL-hash delivery row (which the reaper's guard would skip)."""
+    def test_initial_prefs_failure_is_retried_or_persisted_not_dropped(self, notifier):
+        """P1-1: a transient prefs read failure is not silently dropped. The
+        worker retries the read in-worker; if it still fails it persists a dead
+        delivery row (auditable, no identity to verify) rather than vanishing."""
         url_x = "https://open.feishu.cn/open-apis/bot/v2/hook/TOKEN-X"
         notifier.set_notification_preferences(
             NotificationPreference(
@@ -643,9 +662,98 @@ class TestDeliveryIdentity:
             patch.object(
                 notifier, "get_notification_preferences", side_effect=Exception("DB blip")
             ),
+            patch("app.modules.governance.alert_notifier.time.sleep"),  # skip retry backoff
             patch("app.modules.governance.alert_notifier.threading.Thread", _SyncThread),
         ):
             notifier._dispatch_webhook_async(alert, 1)
 
-        # Fail closed: no delivery row created (no unprotected NULL-hash row).
-        assert _all_delivery_rows(notifier) == []
+        # Not dropped: a dead row is persisted for audit (no identity to verify).
+        rows = _all_delivery_rows(notifier)
+        assert len(rows) == 1
+        assert rows[0]["status"] == "dead"
+        assert rows[0]["last_error_type"] == "receiver_unresolved"
+
+    def test_prefs_failure_after_retriable_post_persists_pending_delivery(self, notifier):
+        """P1-1 path B: after a retriable POST failure, a subsequent prefs read
+        failure persists a pending row pinned to the original receiver (handed
+        to the reaper) instead of dropping the notification."""
+        url_x = "https://open.feishu.cn/open-apis/bot/v2/hook/TOKEN-X"
+        notifier.set_notification_preferences(
+            NotificationPreference(
+                user_id=1, push_enabled=True, webhook_url=url_x, alert_types=["quota"]
+            )
+        )
+        alert = _insert_alert_direct(notifier, 1, "p12-post-then-prefs")
+
+        # First prefs read succeeds (pins identity X) and the POST fails
+        # retriable; the second prefs read (immediate retry) raises a
+        # control-plane error.
+        real_prefs = notifier.get_notification_preferences
+        call = {"n": 0}
+
+        def flaky_prefs(uid):
+            call["n"] += 1
+            if call["n"] >= 2:
+                raise Exception("prefs DB blip")
+            return real_prefs(uid)
+
+        class _SyncThread:
+            def __init__(self, **kwargs):
+                self._target = kwargs.get("target")
+
+            def start(self):
+                self._target()
+
+        with (
+            patch.object(notifier, "get_notification_preferences", side_effect=flaky_prefs),
+            patch.object(
+                notifier,
+                "_deliver_to_prefs",
+                return_value=DeliveryResult(retriable=True, error_type="timeout"),
+            ),
+            patch("app.modules.governance.alert_notifier.time.sleep"),
+            patch("app.modules.governance.alert_notifier.threading.Thread", _SyncThread),
+        ):
+            notifier._dispatch_webhook_async(alert, 1)
+
+        row = _all_delivery_rows(notifier)[0]
+        assert row["status"] == "pending"  # handed to reaper, not dropped
+        assert row["webhook_url_hash"] == _hash_webhook_url(url_x)  # pinned to X
+        assert row["last_error_type"] == "prefs_unreadable"
+
+    def test_reaper_prefs_failure_at_attempt_budget_does_not_strand_pending_row(self, notifier):
+        """P1-2: a control-plane prefs read failure does not consume a delivery
+        attempt — the row stays claimable instead of stranding at attempts == max."""
+        url_x = "https://open.feishu.cn/open-apis/bot/v2/hook/TOKEN-X"
+        notifier.set_notification_preferences(
+            NotificationPreference(
+                user_id=1, push_enabled=True, webhook_url=url_x, alert_types=["quota"]
+            )
+        )
+        _insert_alert_direct(notifier, 1, "p12-strand")
+        # Row one short of the budget: a consuming failure would strand it.
+        conn = notifier._get_connection()
+        cursor = conn.cursor()
+        now = datetime.utcnow().isoformat()
+        cursor.execute(
+            "INSERT INTO webhook_deliveries "
+            "(alert_id, user_id, webhook_url_hash, status, attempts, max_attempts, "
+            " next_retry_at, created_at, updated_at) "
+            "VALUES ('p12-strand', 1, ?, 'pending', 2, 3, NULL, ?, ?)",
+            (_hash_webhook_url(url_x), now, now),
+        )
+        conn.commit()
+        conn.close()
+
+        with patch.object(
+            notifier, "get_notification_preferences", side_effect=Exception("prefs DB blip")
+        ):
+            notifier.process_due_deliveries()
+
+        row = _all_delivery_rows(notifier)[0]
+        assert row["status"] == "pending"  # not stranded/dead
+        assert row["attempts"] == 2  # unchanged — control-plane failure didn't consume
+        assert row["last_error_type"] == "prefs_unreadable"
+        assert (
+            row["next_retry_at"] is not None
+        )  # backoff scheduled — claimable later (attempts 2 < max 3)

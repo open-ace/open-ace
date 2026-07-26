@@ -83,6 +83,11 @@ _WEBHOOK_DELIVERY_REAPER_ENABLED = (
     os.environ.get("OPENACE_WEBHOOK_REAPER_ENABLED", "true").lower() == "true"
 )
 _WEBHOOK_DELIVERY_REAPER_BATCH = int(os.environ.get("OPENACE_WEBHOOK_REAPER_BATCH", "50"))
+# In-worker retries on a transient notification-preferences READ failure before
+# the first POST (control-plane blip, not a receiver failure). The dispatch
+# worker is best-effort, but a prefs read error must not silently drop the
+# notification — retry the read a couple times first (review P1-1).
+_WEBHOOK_PREFS_READ_RETRIES = int(os.environ.get("OPENACE_WEBHOOK_PREFS_READ_RETRIES", "2"))
 _FEISHU_WEBHOOK_HOST_SNIPPETS = ("feishu.cn", "larksuite.com", "larkoffice.com")
 _DINGTALK_WEBHOOK_HOST_SNIPPETS = ("dingtalk.com",)
 _DINGTALK_SECRET_QUERY_KEYS = ("openace_dingtalk_secret", "dingtalk_secret")
@@ -1121,19 +1126,29 @@ class AlertNotifier:
         try:
             prefs = self.get_notification_preferences(row["user_id"])
         except Exception:
-            # Identity-sensitive: keep the row pending for the next reaper cycle
-            # (fail closed) rather than POST without verifying the receiver.
+            # Control-plane read failure: re-queue WITHOUT consuming a delivery
+            # attempt (attempt stays at the row's current count) so the row
+            # doesn't strand at attempts == max_attempts (review P1-2).
             self._delivery_set_outcome(
                 delivery_id,
                 DeliveryResult(retriable=True, error_type="prefs_unreadable"),
-                attempt=attempt,
+                attempt=(row["attempts"] or 0),
                 final=False,
             )
             return
         snapshot_hash = _hash_webhook_url(prefs.webhook_url) if prefs else None
-        # A non-null enqueued hash pins the receiver; a config change dead-letters.
-        # A null enqueued hash (legacy row, pre-P1) is allowed to proceed.
-        if enqueued_hash and snapshot_hash and snapshot_hash != enqueued_hash:
+        if not enqueued_hash:
+            # No recorded receiver identity — can't verify against the original
+            # receiver, so dead-letter rather than guess by sending to whatever
+            # is configured now (review P2).
+            self._delivery_set_outcome(
+                delivery_id,
+                DeliveryResult(retriable=False, error_type="unverifiable_receiver"),
+                attempt=attempt,
+                final=True,
+            )
+            return
+        if snapshot_hash and snapshot_hash != enqueued_hash:
             logger.info(
                 "Dead-lettering delivery %s (alert %s): webhook URL changed "
                 "since enqueue — preserving delivery identity, not forwarding "
@@ -1508,31 +1523,61 @@ class AlertNotifier:
                 acquired = True
                 # Receiver identity is established on the first SUCCESSFUL prefs
                 # read. A config change mid-retry must not redirect this alert to
-                # a new webhook (cross-team/tenant leak). Each attempt reads prefs
-                # ONCE and uses that same snapshot for BOTH the identity check and
-                # the POST — there is no second read between check and send, which
-                # closes the check-then-refetch TOCTOU (review P1). The enqueue
-                # row is pinned to this hash so the reaper's guard stays
-                # consistent.
+                # a new webhook (cross-team/tenant leak). Each iteration reads
+                # prefs ONCE and uses that same snapshot for BOTH the identity
+                # check and the POST — there is no second read between check and
+                # send, which closes the check-then-refetch TOCTOU (review P1).
+                # ``post_failures`` counts only POST failures (delivery attempts
+                # consumed); a control-plane prefs-read failure does NOT consume
+                # one, so a row handed to the reaper can't strand at
+                # attempts == max_attempts (review P1-1 / P1-2).
                 expected_hash: str | None = None
-                attempt = 0
+                post_failures = 0
+                prefs_read_retries = 0
                 while True:
-                    attempt += 1
                     try:
                         prefs = self.get_notification_preferences(user_id)
                     except Exception:
-                        # Identity-sensitive: can't establish/verify the receiver
-                        # — fail closed. Don't POST, and don't enqueue a NULL-hash
-                        # row that the reaper's guard would skip (review P1).
+                        # Control-plane transient (prefs DB blip), NOT a receiver
+                        # failure. Don't drop the notification (review P1-1).
+                        if expected_hash is not None:
+                            # Identity already pinned — hand to reaper (it retries
+                            # once prefs recover, without consuming an attempt).
+                            did = self._delivery_enqueue(
+                                alert, user_id, webhook_url_hash=expected_hash
+                            )
+                            self._delivery_set_outcome(
+                                did,
+                                DeliveryResult(retriable=True, error_type="prefs_unreadable"),
+                                attempt=post_failures,
+                                final=False,
+                            )
+                            return
+                        # No identity yet — retry the read in-worker a couple
+                        # times; if it still fails, persist a dead row for audit
+                        # (no identity to verify, so we won't guess a receiver —
+                        # review P2).
+                        prefs_read_retries += 1
+                        if prefs_read_retries <= _WEBHOOK_PREFS_READ_RETRIES:
+                            time.sleep(_WEBHOOK_DELIVERY_SHORT_BACKOFF_SEC)
+                            continue
                         logger.warning(
-                            "Skipping webhook dispatch for alert %s: preferences "
-                            "unreadable (fail closed)",
+                            "Webhook dispatch for alert %s: preferences unreadable "
+                            "after %d retries; dead-lettering (no receiver identity)",
                             alert.alert_id,
+                            prefs_read_retries,
+                        )
+                        did = self._delivery_enqueue(alert, user_id, webhook_url_hash=None)
+                        self._delivery_set_outcome(
+                            did,
+                            DeliveryResult(retriable=False, error_type="receiver_unresolved"),
+                            attempt=0,
+                            final=True,
                         )
                         return
                     snapshot_hash = _hash_webhook_url(prefs.webhook_url) if prefs else None
                     if expected_hash is None:
-                        # First successful attempt establishes the identity.
+                        # First successful read establishes the identity.
                         expected_hash = snapshot_hash
                     elif snapshot_hash != expected_hash:
                         # Receiver changed since the first attempt — dead-letter
@@ -1541,7 +1586,7 @@ class AlertNotifier:
                         self._delivery_set_outcome(
                             did,
                             DeliveryResult(retriable=False, error_type="config_changed"),
-                            attempt=attempt,
+                            attempt=post_failures,
                             final=True,
                         )
                         return
@@ -1555,23 +1600,23 @@ class AlertNotifier:
                         # Non-retriable failure (4xx / unresolved target) →
                         # dead-letter for audit, never silently dropped.
                         did = self._delivery_enqueue(alert, user_id, webhook_url_hash=expected_hash)
-                        self._delivery_set_outcome(did, result, attempt=attempt, final=True)
+                        self._delivery_set_outcome(did, result, attempt=post_failures, final=True)
                         return
-                    # Retriable failure: one bounded immediate short-backoff
-                    # retry inside the worker, then hand long backoff to the
-                    # reaper so a failing receiver can't hold a slot for long.
-                    if attempt <= _WEBHOOK_DELIVERY_WORKER_RETRIES:
+                    # Retriable POST failure: bounded immediate retry in-worker,
+                    # then hand long backoff to the reaper so a failing receiver
+                    # can't hold a slot for long.
+                    post_failures += 1
+                    if post_failures <= _WEBHOOK_DELIVERY_WORKER_RETRIES:
                         time.sleep(_WEBHOOK_DELIVERY_SHORT_BACKOFF_SEC)
                         continue
                     did = self._delivery_enqueue(alert, user_id, webhook_url_hash=expected_hash)
                     # F3 guard: the reaper only claims rows with attempts <
-                    # max_attempts. If this attempt has already reached the
-                    # budget, dead-letter now instead of stranding the row in
-                    # 'pending' forever (misconfiguration-safe).
-                    if attempt >= _WEBHOOK_DELIVERY_MAX_ATTEMPTS:
-                        self._delivery_set_outcome(did, result, attempt=attempt, final=True)
+                    # max_attempts. If this reached the budget, dead-letter now
+                    # instead of stranding the row in 'pending' (misconfiguration-safe).
+                    if post_failures >= _WEBHOOK_DELIVERY_MAX_ATTEMPTS:
+                        self._delivery_set_outcome(did, result, attempt=post_failures, final=True)
                     else:
-                        self._delivery_set_outcome(did, result, attempt=attempt, final=False)
+                        self._delivery_set_outcome(did, result, attempt=post_failures, final=False)
                     return
             except Exception as e:  # pragma: no cover - defensive
                 logger.error(
