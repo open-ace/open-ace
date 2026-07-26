@@ -88,6 +88,22 @@ def test_commit_available_rejected_when_absent_after_fetch():
     assert ev.reason
 
 
+def test_commit_available_empty_sha_is_indeterminate_not_rejected():
+    """Empty sha is a caller error → INDETERMINATE, not a definitive REJECTED.
+
+    A missing sha means there is no object to probe; surfacing it as
+    INDETERMINATE (rather than REJECTED) lets ``resolve_verified_pr_head``
+    classify it as "cannot verify" instead of "definitively absent", and never
+    touches git.
+    """
+    gh = MagicMock()
+    svc = EvidenceService()
+    ev = svc.verify_commit_available(gh, "", "feat")
+    assert ev.verdict is Verdict.INDETERMINATE
+    assert "empty sha" in ev.reason
+    gh._run_git.assert_not_called()
+
+
 # ── verify_branch_contains (ancestry) ──────────────────────────────────────
 
 

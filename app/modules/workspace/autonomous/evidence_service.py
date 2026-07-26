@@ -47,9 +47,23 @@ class EvidenceService:
         chance to succeed after a worktree teardown (the prior
         ``_ensure_pr_head_local`` behavior). REJECTED means the object truly
         cannot be resolved after fetching; callers must treat that as a
-        definitive "no" rather than retrying.
+        definitive "no" rather than retrying. An empty ``sha`` is a caller error
+        (no object to probe), returned as INDETERMINATE rather than REJECTED so
+        the composite ``resolve_verified_pr_head`` surfaces it as "cannot verify"
+        instead of "definitively absent".
         """
         observed_at = self._now()
+        if not sha:
+            return Evidence(
+                source="local_object_db",
+                subject="commit_availability",
+                verdict=Verdict.INDETERMINATE,
+                observed_at=observed_at,
+                verified_at=self._now(),
+                verification_method="cat-file -e",
+                commit_shas=(),
+                reason="empty sha: no object to probe",
+            )
         method = "cat-file -e"
         if sha and gh._run_git(["cat-file", "-e", sha], check=False).returncode == 0:
             return Evidence(
