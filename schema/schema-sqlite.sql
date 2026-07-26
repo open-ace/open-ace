@@ -307,7 +307,7 @@ CREATE TABLE autonomous_workflows (
  transition_error text,
  transition_started_at text,
  transition_updated_at text,
- expected_head_sha TEXT
+ expected_head_sha text
 );
 
 CREATE TABLE compliance_reports (
