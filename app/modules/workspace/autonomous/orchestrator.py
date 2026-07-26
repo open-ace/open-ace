@@ -4197,13 +4197,22 @@ class AutonomousOrchestrator:
         return True
 
     def _mark_failed(self, error_message: str, *, phase: str | None = None) -> None:
-        """Convergence point for terminal workflow failures (Issue #1831 #1).
+        """Record a terminal workflow failure and reclaim the worktree (Issue #1831 #1).
 
-        The single place a workflow is recorded as terminally failed: sets
-        ``status=failed``, emits the error, and reclaims the worktree dir. Because
-        every phase runs inside ``advance``'s try block and terminal failures
-        converge here, worktree cleanup is guaranteed for any failure that
-        reaches this point — closing the leak.
+        Sets ``status=failed``, emits the error, and reclaims the worktree dir.
+        This is the handler for the EXCEPTION path in ``advance``: when a phase
+        raises an unhandled error, ``advance``'s ``except`` block calls this.
+
+        Scope note (Issue #1831 finding #1): this is NOT the only place a
+        workflow is recorded as terminally failed — many phase methods set
+        ``status=failed`` inline and ``return`` normally, bypassing this method.
+        Those inline paths do not reclaim the worktree themselves; ``advance``
+        has a post-phase convergence check that reclaims the worktree whenever
+        the workflow ends up terminally failed, closing the leak for both the
+        exception path (here) and the inline-failure paths (there). The cleanup
+        below is therefore redundant-but-harmless when reached via ``advance``
+        (the post-check no-ops on an already-cleared worktree) and keeps this
+        method self-contained when called directly.
 
         #1112 timing dimension: the transient-retry path in ``advance`` returns
         before reaching here, so transient (retryable) failures keep their
@@ -5672,12 +5681,28 @@ class AutonomousOrchestrator:
                     transient_count - 1,
                 )
             # Non-transient error, or transient retries exhausted → fail.
-            # Converge on _mark_failed so a terminal failure always reclaims the
-            # worktree dir (Issue #1831 finding #1). The transient path above
-            # returned already, so this only runs for terminal failures — the
-            # worktree survives retries, not terminal failures (#1112).
+            # _mark_failed records the terminal failure and reclaims the
+            # worktree for THIS path (advance's exception handler). The
+            # transient path above returned already, so this only runs for
+            # terminal failures — the worktree survives retries, not terminal
+            # failures (#1112).
             logger.error("Orchestrator error in %s: %s", phase, e, exc_info=True)
             self._mark_failed(str(e), phase=phase)
+        # Convergence point for terminal-failure worktree reclamation (Issue
+        # #1831 finding #1). After the phase runs, if the workflow is now
+        # terminally failed — whether via _mark_failed just above (an unhandled
+        # exception) OR via a phase that recorded status=failed inline and
+        # returned normally (which bypasses _mark_failed) — reclaim the worktree
+        # dir. Many phase-internal failure paths set status=failed and return;
+        # without this check each would leak the worktree. Idempotent: on the
+        # exception path _mark_failed already cleared worktree_path, so the
+        # ``worktree_path`` guard makes this a no-op there and it only acts on
+        # the inline-failure paths. Best-effort + branch kept (#1112).
+        wf = self.workflow
+        if wf and wf.get("status") == "failed" and wf.get("worktree_path"):
+            self._cleanup_worktree_and_branch(
+                reason="failed", remove_worktree=True, remove_branch=False
+            )
 
     # ── Phase: Preparation ────────────────────────────────────────
 

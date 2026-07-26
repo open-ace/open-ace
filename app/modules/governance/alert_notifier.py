@@ -64,6 +64,14 @@ _WEBHOOK_DELIVERY_MAX_ATTEMPTS = int(os.environ.get("OPENACE_WEBHOOK_MAX_ATTEMPT
 # failing receiver can't hold a delivery slot for long). Long-backoff retries
 # are advanced by the AlertCompensationWorker reaper (process_due_deliveries).
 _WEBHOOK_DELIVERY_WORKER_RETRIES = int(os.environ.get("OPENACE_WEBHOOK_WORKER_RETRIES", "1"))
+# Issue #1831 F3: cap the worker's immediate retries below max_attempts so the
+# budget can't exceed the total delivery budget. The worker also dead-letters
+# defensively when an attempt reaches max_attempts (see ``_worker``), so this
+# cap is belt-and-suspenders — the dead-letter guard is what prevents a row
+# from being stranded in 'pending' (the reaper only claims attempts <
+# max_attempts).
+if _WEBHOOK_DELIVERY_WORKER_RETRIES >= _WEBHOOK_DELIVERY_MAX_ATTEMPTS:
+    _WEBHOOK_DELIVERY_WORKER_RETRIES = max(0, _WEBHOOK_DELIVERY_MAX_ATTEMPTS - 1)
 _WEBHOOK_DELIVERY_SHORT_BACKOFF_SEC = float(
     os.environ.get("OPENACE_WEBHOOK_SHORT_BACKOFF_SEC", "2")
 )
@@ -261,10 +269,12 @@ def _classify_delivery_error(exc: Exception) -> tuple[bool, str | None]:
     """
     if isinstance(exc, requests.exceptions.Timeout):
         return True, "timeout"
-    if isinstance(exc, requests.exceptions.ConnectionError):
-        return True, "connection"
+    # SSLError subclasses ConnectionError, so it must be checked first —
+    # otherwise every SSL failure is mislabeled "connection" (Issue #1831 F4).
     if isinstance(exc, requests.exceptions.SSLError):
         return True, "ssl"
+    if isinstance(exc, requests.exceptions.ConnectionError):
+        return True, "connection"
     if isinstance(exc, requests.exceptions.HTTPError):
         status = getattr(getattr(exc, "response", None), "status_code", None)
         if status is not None and 500 <= status < 600:
@@ -1449,7 +1459,14 @@ class AlertNotifier:
                         time.sleep(_WEBHOOK_DELIVERY_SHORT_BACKOFF_SEC)
                         continue
                     did = self._delivery_enqueue(alert, user_id)
-                    self._delivery_set_outcome(did, result, attempt=attempt, final=False)
+                    # F3 guard: the reaper only claims rows with attempts <
+                    # max_attempts. If this attempt has already reached the
+                    # budget, dead-letter now instead of stranding the row in
+                    # 'pending' forever (misconfiguration-safe).
+                    if attempt >= _WEBHOOK_DELIVERY_MAX_ATTEMPTS:
+                        self._delivery_set_outcome(did, result, attempt=attempt, final=True)
+                    else:
+                        self._delivery_set_outcome(did, result, attempt=attempt, final=False)
                     return
             except Exception as e:  # pragma: no cover - defensive
                 logger.error(
