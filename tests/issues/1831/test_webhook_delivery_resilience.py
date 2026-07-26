@@ -457,3 +457,72 @@ class TestDeliveryIdentity:
             notifier.process_due_deliveries()
 
         assert _all_delivery_rows(notifier)[0]["status"] == "delivered"
+
+    def test_immediate_retry_does_not_send_to_changed_webhook(self, notifier):
+        """P1-2: if the receiver changes during the worker's inter-attempt
+        backoff, the second attempt dead-letters pinned to the ORIGINAL hash
+        instead of POSTing to the new endpoint."""
+        url_x = "https://open.feishu.cn/open-apis/bot/v2/hook/TOKEN-X"
+        url_y = "https://open.feishu.cn/open-apis/bot/v2/hook/TOKEN-Y"
+        notifier.set_notification_preferences(
+            NotificationPreference(
+                user_id=1, push_enabled=True, webhook_url=url_x, alert_types=["quota"]
+            )
+        )
+        alert = _insert_alert_direct(notifier, 1, "p12-retry")
+
+        sent_urls: list[str] = []
+
+        def fake_send(_alert, user_id):
+            sent_urls.append(notifier.get_notification_preferences(user_id).webhook_url)
+            return DeliveryResult(retriable=True, error_type="timeout")
+
+        def switch_receiver(_secs):
+            notifier.set_notification_preferences(
+                NotificationPreference(
+                    user_id=1, push_enabled=True, webhook_url=url_y, alert_types=["quota"]
+                )
+            )
+
+        class _SyncThread:
+            def __init__(self, **kwargs):
+                self._target = kwargs.get("target")
+
+            def start(self):
+                self._target()
+
+        with (
+            patch.object(notifier, "_send_webhook_notification", side_effect=fake_send),
+            patch("app.modules.governance.alert_notifier.time.sleep", side_effect=switch_receiver),
+            patch("app.modules.governance.alert_notifier.threading.Thread", _SyncThread),
+        ):
+            notifier._dispatch_webhook_async(alert, 1)
+
+        # Only attempt 1 POSTed (to X); attempt 2 saw the receiver change and
+        # dead-lettered without POSTing to Y.
+        assert sent_urls == [url_x]
+        row = _all_delivery_rows(notifier)[0]
+        assert row["status"] == "dead"
+        assert row["last_error_type"] == "config_changed"
+        assert row["webhook_url_hash"] == _hash_webhook_url(url_x)
+
+    def test_enqueue_uses_pinned_hash_not_current_preferences(self, notifier):
+        """P1-2: when the worker pins the hash, _delivery_enqueue stores THAT
+        hash (the receiver that actually failed), not one recomputed from the
+        current prefs (which may have changed by enqueue time)."""
+        url_x = "https://open.feishu.cn/open-apis/bot/v2/hook/TOKEN-X"
+        url_y = "https://open.feishu.cn/open-apis/bot/v2/hook/TOKEN-Y"
+        # Current prefs point at Y, but the caller pins the ORIGINAL receiver X.
+        notifier.set_notification_preferences(
+            NotificationPreference(
+                user_id=1, push_enabled=True, webhook_url=url_y, alert_types=["quota"]
+            )
+        )
+        alert = _insert_alert_direct(notifier, 1, "p12-enqueue")
+
+        pinned = _hash_webhook_url(url_x)
+        notifier._delivery_enqueue(alert, 1, webhook_url_hash=pinned)
+
+        row = _all_delivery_rows(notifier)[0]
+        assert row["webhook_url_hash"] == pinned
+        assert row["webhook_url_hash"] != _hash_webhook_url(url_y)

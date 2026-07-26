@@ -245,6 +245,14 @@ def _hash_webhook_url(webhook_url: str | None) -> str | None:
     return hashlib.sha256(webhook_url.strip().encode("utf-8")).hexdigest()
 
 
+# Sentinel for ``AlertNotifier._delivery_enqueue``: when the caller does not
+# pass ``webhook_url_hash``, recompute it from the user's current prefs (legacy
+# default). The dispatch worker instead pins the hash captured at the first
+# attempt so the row records the receiver that actually failed, not whatever is
+# configured at enqueue time (review P1-2).
+_RECOMPUTE_RECEIVER_HASH: Any = object()
+
+
 @dataclass
 class DeliveryResult:
     """Structured outcome of a single webhook delivery attempt (Issue #1831).
@@ -806,21 +814,27 @@ class AlertNotifier:
     # important side effect; the row only tracks retry state.
     # ------------------------------------------------------------------
 
-    def _delivery_enqueue(self, alert: Alert, user_id: int) -> int | None:
+    def _delivery_enqueue(
+        self, alert: Alert, user_id: int, *, webhook_url_hash: Any = _RECOMPUTE_RECEIVER_HASH
+    ) -> int | None:
         """Persist a new ``in_flight`` delivery row; return its id or ``None``.
 
-        ``None`` means "untracked delivery" — the caller still POSTs, just
-        without retry state. The webhook URL hash is computed from the user's
-        stored prefs so deliveries can be correlated to a receiver without
-        persisting the plaintext (token-bearing) URL.
+        ``webhook_url_hash`` pins the row to a specific receiver so the reaper
+        can detect a later config change. By default (``_RECOMPUTE_RECEIVER_HASH``)
+        it is recomputed from the user's CURRENT prefs (legacy callers); the
+        dispatch worker passes the hash captured at the FIRST attempt so the row
+        records the receiver that actually failed, not whatever happens to be
+        configured at enqueue time (review P1-2). ``None`` means "untracked
+        delivery" — the caller still POSTs, just without retry state. Only the
+        hash is stored, never the plaintext (token-bearing) URL.
         """
-        webhook_url_hash: str | None = None
-        try:
-            prefs = self.get_notification_preferences(user_id)
-            webhook_url_hash = _hash_webhook_url(prefs.webhook_url)
-        except Exception:
-            # Don't let hash computation block enqueue; leave it null.
-            webhook_url_hash = None
+        if webhook_url_hash is _RECOMPUTE_RECEIVER_HASH:
+            try:
+                prefs = self.get_notification_preferences(user_id)
+                webhook_url_hash = _hash_webhook_url(prefs.webhook_url)
+            except Exception:
+                # Don't let hash computation block enqueue; leave it null.
+                webhook_url_hash = None
         now = _utcnow_naive().isoformat()
         try:
             conn = self._get_connection()
@@ -1437,6 +1451,21 @@ class AlertNotifier:
         logger.info(f"Created alert: [{severity}] {title}")
         return alert
 
+    def _receiver_hash_changed(self, user_id: int, expected_hash: str) -> bool:
+        """Return whether the user's current webhook URL hash differs from expected.
+
+        Used by the dispatch worker to refuse forwarding a historical alert to
+        a receiver that changed mid-retry (review P1-2). Conservative on read
+        failure: returns ``False`` so a transient prefs-DB blip doesn't strand
+        the delivery.
+        """
+        try:
+            prefs = self.get_notification_preferences(user_id)
+            current = _hash_webhook_url(prefs.webhook_url) if prefs else None
+        except Exception:
+            return False
+        return current is not None and current != expected_hash
+
     def _dispatch_webhook_async(self, alert: Alert, user_id: int) -> None:
         """Deliver ``_send_webhook_notification`` on a background daemon thread.
 
@@ -1476,9 +1505,34 @@ class AlertNotifier:
             try:
                 _webhook_delivery_semaphore.acquire()
                 acquired = True
+                # P1-2: capture the receiver identity ONCE, before any attempt.
+                # A config change mid-retry must not redirect this alert to a
+                # new webhook (cross-team/tenant leak). Every attempt verifies
+                # the current receiver still matches; the enqueue row is pinned
+                # to this captured hash so the reaper's guard stays consistent.
+                try:
+                    initial_prefs = self.get_notification_preferences(user_id)
+                    expected_hash = (
+                        _hash_webhook_url(initial_prefs.webhook_url) if initial_prefs else None
+                    )
+                except Exception:
+                    expected_hash = None
                 attempt = 0
                 while True:
                     attempt += 1
+                    if expected_hash is not None and self._receiver_hash_changed(
+                        user_id, expected_hash
+                    ):
+                        # Receiver changed since the first attempt — dead-letter
+                        # pinned to the ORIGINAL hash; do not POST to the new one.
+                        did = self._delivery_enqueue(alert, user_id, webhook_url_hash=expected_hash)
+                        self._delivery_set_outcome(
+                            did,
+                            DeliveryResult(retriable=False, error_type="config_changed"),
+                            attempt=attempt,
+                            final=True,
+                        )
+                        return
                     result = self._send_webhook_notification(alert, user_id)
                     if result.delivered or result.skipped:
                         # Resolved (success or prefs-gated no-op) — no retry
@@ -1487,7 +1541,7 @@ class AlertNotifier:
                     if not result.retriable:
                         # Non-retriable failure (4xx / unresolved target) →
                         # dead-letter for audit, never silently dropped.
-                        did = self._delivery_enqueue(alert, user_id)
+                        did = self._delivery_enqueue(alert, user_id, webhook_url_hash=expected_hash)
                         self._delivery_set_outcome(did, result, attempt=attempt, final=True)
                         return
                     # Retriable failure: one bounded immediate short-backoff
@@ -1496,7 +1550,7 @@ class AlertNotifier:
                     if attempt <= _WEBHOOK_DELIVERY_WORKER_RETRIES:
                         time.sleep(_WEBHOOK_DELIVERY_SHORT_BACKOFF_SEC)
                         continue
-                    did = self._delivery_enqueue(alert, user_id)
+                    did = self._delivery_enqueue(alert, user_id, webhook_url_hash=expected_hash)
                     # F3 guard: the reaper only claims rows with attempts <
                     # max_attempts. If this attempt has already reached the
                     # budget, dead-letter now instead of stranding the row in

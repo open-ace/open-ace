@@ -116,24 +116,23 @@ class TestCleanupWorktreeAndBranch:
 
 class TestMarkFailed:
     @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
-    def test_sets_failed_and_reclaims_worktree(self, mock_gh_cls):
+    def test_mark_failed_records_state_only_no_cleanup(self, mock_gh_cls):
+        """P2: _mark_failed records status/error only; worktree cleanup is owned
+        by advance's convergence point (single cleanup site, no double-retain)."""
         wf = _make_workflow()
         orch = _bare_orchestrator(wf)
         instance = mock_gh_cls.return_value
-        instance.has_uncommitted_changes.return_value = False  # clean worktree
 
         orch._mark_failed("kaboom", phase="development")
 
         updates = _update_calls(orch)
-        # First update records the terminal failure.
         assert updates[0] == {
             "status": "failed",
             "error_message": "kaboom",
             "transient_retry_count": 0,
         }
-        # Worktree reclaimed...
-        instance.remove_worktree.assert_called_once_with("/tmp/test-wt")
-        # ...but branch kept (keep_for_debug).
+        # _mark_failed no longer cleans up — the convergence point owns it (P2).
+        instance.remove_worktree.assert_not_called()
         instance.delete_branch.assert_not_called()
 
     @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
@@ -248,3 +247,84 @@ class TestDirtyWorktreeGuard:
         instance.remove_worktree.assert_called_once_with("/tmp/test-wt")
         updates = _update_calls(orch)
         assert {"worktree_path": ""} in updates
+
+    @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
+    def test_dirty_retention_note_is_idempotent(self, mock_gh_cls):
+        """P2: a cleanup pass on a worktree already marked 'kept' does not
+        duplicate the retention note (repeated advance convergence on a
+        still-failed dirty workflow, or the former _mark_failed + convergence
+        double-cleanup)."""
+        wf = _make_workflow(
+            error_message="boom [worktree kept at /tmp/test-wt: uncommitted changes preserved for debug]"
+        )
+        orch = _bare_orchestrator(wf)
+        mock_gh_cls.return_value.has_uncommitted_changes.return_value = True  # dirty
+
+        ok = orch._cleanup_worktree_and_branch("failed")
+
+        assert ok is False
+        # No error_message update — the note is already present (idempotent).
+        assert not any("error_message" in u for u in _update_calls(orch))
+
+
+class TestRetryRestoresWorktreePath:
+    """P1-1: retry rebinds worktree_path from preferred_worktree_path so
+    _ensure_worktree recreates the dir on the retry pass instead of falling back
+    to the main checkout (review P1-1; see also #2011/#1981)."""
+
+    def _run_retry(self, workflow):
+        from flask import Flask
+
+        from app.routes.autonomous import retry_workflow
+
+        fake_user = {"id": 1, "role": "admin", "tenant_id": 1}
+        with (
+            patch("app.routes.autonomous._get_repo") as mock_get_repo,
+            patch("app.services.autonomous_scheduler.AutonomousScheduler"),
+            patch("app.routes.autonomous._emit_event_safe"),
+            patch("app.auth.decorators._extract_session_token", return_value="t"),
+            patch("app.auth.decorators._load_user_from_token", return_value=fake_user),
+            patch("app.auth.decorators.enforce_password_change_requirement", return_value=None),
+        ):
+            mock_repo = MagicMock()
+            mock_repo.get_workflow.return_value = workflow
+            mock_get_repo.return_value = mock_repo
+            app = Flask(__name__)
+            with app.test_request_context():
+                retry_workflow(workflow["workflow_id"])
+            return mock_repo
+
+    def test_retry_restores_worktree_path_from_preferred(self):
+        """After terminal-failure cleanup clears worktree_path, retry rebinds it
+        from preferred_worktree_path so _ensure_worktree recreates the dir."""
+        mock_repo = self._run_retry(
+            {
+                "workflow_id": "wf-p11",
+                "status": "failed",
+                "user_id": 1,
+                "current_phase": "development",
+                "retry_count": 0,
+                "branch_strategy": "worktree",
+                "worktree_path": "",  # cleared by cleanup
+                "preferred_worktree_path": "/tmp/proj/.worktrees/wf-p11",
+            }
+        )
+        update_arg = mock_repo.update_workflow.call_args[0][1]
+        assert update_arg["worktree_path"] == "/tmp/proj/.worktrees/wf-p11"
+
+    def test_retry_skips_restore_for_non_worktree_strategy(self):
+        """A non-worktree (new-branch) workflow has no worktree to recreate."""
+        mock_repo = self._run_retry(
+            {
+                "workflow_id": "wf-p11-nb",
+                "status": "failed",
+                "user_id": 1,
+                "current_phase": "development",
+                "retry_count": 0,
+                "branch_strategy": "new-branch",
+                "worktree_path": "",
+                "preferred_worktree_path": "/tmp/proj/.worktrees/wf-p11-nb",
+            }
+        )
+        update_arg = mock_repo.update_workflow.call_args[0][1]
+        assert "worktree_path" not in update_arg

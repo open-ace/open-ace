@@ -4213,10 +4213,13 @@ class AutonomousOrchestrator:
                             branch_name or "(none)",
                         )
                         existing_err = wf.get("error_message") or ""
-                        note = (
-                            f"[worktree kept at {worktree_path}: uncommitted "
-                            "changes preserved for debug]"
-                        )
+                        marker = f"[worktree kept at {worktree_path}"
+                        if marker in existing_err:
+                            # Already noted by a prior pass (e.g. a repeated
+                            # advance on a still-failed workflow) — don't
+                            # duplicate the retention note (review P2).
+                            return False
+                        note = f"{marker}: uncommitted changes preserved for debug]"
                         self._update_workflow(
                             {"error_message": (existing_err + " " + note).strip()}
                             if existing_err
@@ -4243,34 +4246,21 @@ class AutonomousOrchestrator:
         return True
 
     def _mark_failed(self, error_message: str, *, phase: str | None = None) -> None:
-        """Record a terminal workflow failure and reclaim the worktree (Issue #1831 #1).
+        """Record a terminal workflow failure (status + error event) only.
 
-        Sets ``status=failed``, emits the error, and reclaims the worktree dir.
-        This is the handler for the EXCEPTION path in ``advance``: when a phase
-        raises an unhandled error, ``advance``'s ``except`` block calls this.
-
-        Scope note (Issue #1831 finding #1): this is NOT the only place a
-        workflow is recorded as terminally failed — many phase methods set
-        ``status=failed`` inline and ``return`` normally, bypassing this method.
-        Those inline paths do not reclaim the worktree themselves; ``advance``
-        has a post-phase convergence check that reclaims the worktree whenever
-        the workflow ends up terminally failed, closing the leak for both the
-        exception path (here) and the inline-failure paths (there). The cleanup
-        below is therefore redundant-but-harmless when reached via ``advance``
-        (the post-check no-ops on an already-cleared worktree) and keeps this
-        method self-contained when called directly.
+        Sets ``status=failed`` and emits the error event. Worktree reclamation
+        is NOT performed here: ``advance``'s post-phase convergence point (which
+        runs after this AND after inline ``status=failed`` returns) is the
+        SINGLE place terminal-failure worktree cleanup happens. Doing cleanup in
+        both ``_mark_failed`` and the convergence point doubled the dirty-
+        worktree retention note and re-ran the git-status check on every pass
+        (review P2), so this method now records state only and lets the
+        convergence point own the cleanup.
 
         #1112 timing dimension: the transient-retry path in ``advance`` returns
         before reaching here, so transient (retryable) failures keep their
-        worktree for the next cycle; only terminal failures reclaim it. The
-        branch is kept (``keep_for_debug``) — ``_ensure_worktree`` recreates a
-        removed worktree on retry, but a deleted branch is gone for good.
-
-        Dirty-worktree exception (review P1-b): ``_cleanup_worktree_and_branch``
-        retains — never force-removes — a worktree that still holds uncommitted
-        or untracked changes, recording the reason in ``error_message``. So a
-        terminal failure with a dirty worktree keeps the working-tree state for
-        debug; only clean worktrees are actually reclaimed here.
+        worktree for the next cycle; only terminal failures reach the
+        convergence cleanup. The branch is kept (``keep_for_debug``).
         """
         self._update_workflow(
             {
@@ -4280,9 +4270,6 @@ class AutonomousOrchestrator:
             }
         )
         self._emit("error", {"phase": phase or "unknown", "error": error_message})
-        self._cleanup_worktree_and_branch(
-            reason="failed", remove_worktree=True, remove_branch=False
-        )
 
     def _accumulate_tokens(self, _result: AgentTaskResult):
         """Refresh workflow totals from the sessions linked to milestones."""
