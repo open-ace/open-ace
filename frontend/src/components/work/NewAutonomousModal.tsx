@@ -10,6 +10,7 @@ import { RemoteMachineSelector } from './RemoteMachineSelector';
 import { DirectoryBrowserModal } from './DirectoryBrowserModal';
 import { LocalDirectoryBrowserModal } from './LocalDirectoryBrowserModal';
 import { useCreateWorkflow, useAvailableTools, useAvailableModels } from '@/hooks/useAutonomous';
+import { workspaceApi } from '@/api/workspace';
 import type { AutonomousWorkflow, CreateWorkflowRequest } from '@/api/autonomous';
 
 interface NewAutonomousModalProps {
@@ -93,6 +94,10 @@ export const NewAutonomousModal: React.FC<NewAutonomousModalProps> = ({
   const [title, setTitle] = useState('');
   const [autoMerge, setAutoMerge] = useState(true); // Auto merge for batch workflows
   const [errorMessage, setErrorMessage] = useState('');
+  // Multi-user/unattended deployments require an isolated worktree; a shared
+  // main checkout (current/new-branch) would let concurrent agents race on the
+  // same index/HEAD. When this flag is set we hide those strategies. Issue #2021.
+  const [isMultiUser, setIsMultiUser] = useState(false);
 
   // Data
   const { data: toolsData } = useAvailableTools();
@@ -106,6 +111,27 @@ export const NewAutonomousModal: React.FC<NewAutonomousModalProps> = ({
     modelsEnabled
   );
   const createWorkflow = useCreateWorkflow();
+
+  // Fetch multi-user mode once on mount. getConfig() already fails closed to
+  // multi_user_mode=false on error, so a backend hiccup degrades to showing
+  // all strategies rather than hiding them.
+  useEffect(() => {
+    let cancelled = false;
+    workspaceApi.getConfig().then((cfg) => {
+      if (!cancelled) setIsMultiUser(!!cfg.multi_user_mode);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // If the deployment switches to multi-user while a non-worktree strategy is
+  // selected, snap it back to the only allowed value.
+  useEffect(() => {
+    if (isMultiUser && branchStrategy !== 'worktree') {
+      setBranchStrategy('worktree');
+    }
+  }, [isMultiUser, branchStrategy]);
 
   // Agent tool dropdown order. OpenClaw is intentionally hidden from the
   // autonomous workflow dialog (not a supported autonomous tool), and the
@@ -587,10 +613,20 @@ export const NewAutonomousModal: React.FC<NewAutonomousModalProps> = ({
                 setBranchStrategy(e.target.value as 'new-branch' | 'worktree' | 'current')
               }
             >
-              <option value="new-branch">{t('autoNewBranch', language)}</option>
               <option value="worktree">{t('autoWorktree', language)}</option>
-              <option value="current">{t('autoCurrentBranch', language)}</option>
+              {!isMultiUser && (
+                <>
+                  <option value="new-branch">{t('autoNewBranch', language)}</option>
+                  <option value="current">{t('autoCurrentBranch', language)}</option>
+                </>
+              )}
             </select>
+            {isMultiUser && (
+              <small className="text-muted d-block mt-1">
+                {t('autoWorktreeOnlyMultiUser', language) ||
+                  'Multi-user mode requires an isolated worktree.'}
+              </small>
+            )}
           </div>
           <div className="col-md-6">
             <label className="form-label fw-semibold">{t('autoBranchName', language)}</label>

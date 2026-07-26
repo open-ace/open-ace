@@ -89,6 +89,33 @@ def _is_recoverable_system_pause_reason(error_message: str) -> bool:
     )
 
 
+def _shared_checkout_rejection(branch_strategy: str) -> str | None:
+    """Return an error message if ``branch_strategy`` is rejected, else None.
+
+    Multi-user/unattended deployments require an isolated worktree because a
+    shared main checkout (``current``/``new-branch``) lets concurrent agents
+    race on the same index/HEAD. A shared checkout is allowed only with an
+    explicit operator override (``OPENACE_ALLOW_SHARED_CHECKOUT=1``). The
+    decision is factored out so it can be unit-tested without the Flask/DB
+    harness. Issue #2021.
+    """
+    if branch_strategy not in ("current", "new-branch"):
+        return None
+    from app.services.webui_manager import WebUIManager
+
+    multi_user = WebUIManager().config.multi_user_mode
+    allow_shared = os.environ.get("OPENACE_ALLOW_SHARED_CHECKOUT", "").lower() in (
+        "1",
+        "true",
+    )
+    if multi_user and not allow_shared:
+        return (
+            "Multi-user/unattended mode requires branch_strategy='worktree'; "
+            "a shared main checkout needs OPENACE_ALLOW_SHARED_CHECKOUT=1."
+        )
+    return None
+
+
 autonomous_bp = Blueprint("autonomous", __name__)
 
 
@@ -698,6 +725,14 @@ def create_workflow():
     branch_strategy = data.get("branch_strategy", "new-branch")
     user_branch_name = data.get("branch_name", "")  # User's original input (if any)
 
+    # Multi-user/unattended mode requires an isolated worktree: a shared main
+    # checkout (current/new-branch) lets concurrent agents race on the same
+    # index/HEAD. Allow it only with an explicit operator override
+    # (OPENACE_ALLOW_SHARED_CHECKOUT=1). Issue #2021.
+    reject_msg = _shared_checkout_rejection(branch_strategy)
+    if reject_msg:
+        return jsonify({"error": reject_msg}), 400
+
     base_workflow_data = {
         "user_id": user_id,
         "title": data.get("title", ""),
@@ -773,7 +808,7 @@ def create_workflow():
                 # Pre-generate workflow_id, branch_name and worktree_path (Issue #1573)
                 # This ensures scheduler can perform conflict checks before preparation phase.
                 workflow_id = str(uuid.uuid4())
-                branch_name = f"auto-dev/{workflow_id[:8]}"
+                branch_name = f"auto-dev/{workflow_id[:12]}"
                 # Use .worktrees directory for worktree strategy, with full workflow_id for uniqueness
                 worktree_path = (
                     os.path.join(project_path, ".worktrees", workflow_id) if project_path else ""
@@ -856,7 +891,7 @@ def create_workflow():
 
         if branch_strategy == "worktree":
             # Force pre-generated branch_name for worktree strategy
-            branch_name = f"auto-dev/{workflow_id[:8]}"
+            branch_name = f"auto-dev/{workflow_id[:12]}"
             worktree_path = (
                 os.path.join(project_path, ".worktrees", workflow_id) if project_path else ""
             )
@@ -879,7 +914,7 @@ def create_workflow():
                 # showing a misleading auto-generated branch name up front.
                 base_workflow_data["branch_name"] = ""
             else:
-                branch_name = f"auto-dev/{workflow_id[:8]}"
+                branch_name = f"auto-dev/{workflow_id[:12]}"
                 base_workflow_data["branch_name"] = branch_name
 
         workflow = repo.create_workflow(base_workflow_data)

@@ -1884,7 +1884,7 @@ class AutonomousOrchestrator:
             return canonical
 
         # Worktree missing — recreate from the main repo.
-        branch_name = wf.get("branch_name") or f"auto-dev/{self._workflow_id[:8]}"
+        branch_name = wf.get("branch_name") or f"auto-dev/{self._workflow_id[:12]}"
         try:
             main_gh._run_git(["fetch", "origin", "main"])
             # Does the branch still exist locally or on origin?
@@ -5526,7 +5526,7 @@ class AutonomousOrchestrator:
         # Use pre-generated branch_name if available (Issue #1573)
         branch_name = wf.get("branch_name", "")
         if not branch_name:
-            branch_name = f"auto-dev/{self._workflow_id[:8]}"
+            branch_name = f"auto-dev/{self._workflow_id[:12]}"
 
         if strategy == "new-branch" or strategy == "worktree":
             try:

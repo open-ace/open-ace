@@ -6,6 +6,7 @@ test_github_ops.py never exercised — the gap that let PR #1422's invalid
 gh operation under a sudo wrapper and causing empty-requirements plans.
 """
 
+import os
 from unittest.mock import MagicMock, patch
 
 from app.modules.workspace.autonomous.github_ops import GitHubOps, GitHubOpsError
@@ -306,24 +307,28 @@ class TestGhApiSudo:
         # REST path uses the plain owner/repo (no host prefix).
         assert "repos/owner/repo/issues/10/comments" in gh_cmd
 
-    """_ensure_safe_directory must not crash on duplicate timeout kwarg."""
 
-    def setup_method(self):
-        # The class-level cache persists across tests; reset it so each test
-        # actually exercises the subprocess path.
-        GitHubOps._safe_directory_configured.clear()
+@patch("app.modules.workspace.autonomous.github_ops.subprocess.run")
+def test_run_git_injects_per_command_safe_directory(mock_run):
+    """_run_git trusts only the canonical repo via ``-c safe.directory=<path>``.
 
-    @patch("app.modules.workspace.autonomous.github_ops.subprocess.run")
-    def test_no_duplicate_timeout(self, mock_run):
-        # Regression guard: previously this raised
-        # "got multiple values for keyword argument 'timeout'" (a hard
-        # TypeError swallowed as a warning), so safe.directory was never set.
-        mock_run.return_value = _completed(stdout="")
-        gh = GitHubOps("/tmp/repo")
+    Regression guard for the removal of the global ``safe.directory *``: every
+    git command must carry the absolute repo path inline, never the wildcard,
+    and no ``git config --global`` subprocess may run. Issue #2021.
+    """
+    mock_run.return_value = _completed(stdout="")
+    gh = GitHubOps("/tmp/repo")
 
-        gh._ensure_safe_directory()
+    gh._run_git(["status", "--porcelain"])
 
-        # subprocess.run ran and completed without raising; the call was made
-        # with exactly one timeout value.
-        assert mock_run.call_count == 1
-        assert mock_run.call_args.kwargs.get("timeout") == 5
+    assert mock_run.call_count == 1
+    cmd = mock_run.call_args.args[0]
+    safe_cfgs = [a for a in cmd if isinstance(a, str) and a.startswith("safe.directory=")]
+    assert len(safe_cfgs) == 1
+    # Absolute path, never the wildcard.
+    assert safe_cfgs[0] == f"safe.directory={os.path.realpath('/tmp/repo')}"
+    assert "*" not in safe_cfgs[0]
+    # No git-config subprocess was spawned (only the git command).
+    assert all(
+        "config" not in str(c) or "safe.directory" in str(c) for c in mock_run.call_args_list
+    )

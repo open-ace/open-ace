@@ -396,8 +396,9 @@ class TestGitHubOpsWorktree:
     @patch("app.modules.workspace.autonomous.github_ops.subprocess.run")
     def test_create_worktree(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0, stdout="")
-        result = self.gh.create_worktree("/tmp/test-repo-wt", "feature/wt")
-        assert result["worktree_path"] == "/tmp/test-repo-wt"
+        wt = "/tmp/test-repo/.worktrees/test-repo-wt"
+        result = self.gh.create_worktree(wt, "feature/wt")
+        assert result["worktree_path"] == wt
         assert result["branch"] == "feature/wt"
         # Default base is HEAD
         cmd = mock_run.call_args[0][0]
@@ -406,8 +407,9 @@ class TestGitHubOpsWorktree:
     @patch("app.modules.workspace.autonomous.github_ops.subprocess.run")
     def test_create_worktree_with_base(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0, stdout="")
-        result = self.gh.create_worktree("/tmp/test-repo-wt", "feature/wt", base="origin/main")
-        assert result["worktree_path"] == "/tmp/test-repo-wt"
+        wt = "/tmp/test-repo/.worktrees/test-repo-wt"
+        result = self.gh.create_worktree(wt, "feature/wt", base="origin/main")
+        assert result["worktree_path"] == wt
         assert result["branch"] == "feature/wt"
         # Should use the provided base ref instead of HEAD
         cmd = mock_run.call_args[0][0]
@@ -416,14 +418,20 @@ class TestGitHubOpsWorktree:
     @patch("app.modules.workspace.autonomous.github_ops.subprocess.run")
     def test_remove_worktree(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0, stdout="")
-        result = self.gh.remove_worktree("/tmp/test-repo-wt")
-        assert result["removed"] == "/tmp/test-repo-wt"
+        wt = "/tmp/test-repo/.worktrees/test-repo-wt"
+        result = self.gh.remove_worktree(wt)
+        assert result["removed"] == wt
 
     @patch("app.modules.workspace.autonomous.github_ops.subprocess.run")
     def test_list_worktrees(self, mock_run):
+        # --porcelain -z output: each worktree record is NUL-terminated; fields
+        # within a record are LF-separated.
         mock_run.return_value = MagicMock(
             returncode=0,
-            stdout="worktree /tmp/main\nbranch refs/heads/main\nworktree /tmp/feature\nbranch refs/heads/feature\n",
+            stdout=(
+                "worktree /tmp/main\nbranch refs/heads/main\0"
+                "worktree /tmp/feature\nbranch refs/heads/feature\0"
+            ),
         )
         worktrees = self.gh.list_worktrees()
         assert len(worktrees) == 2
