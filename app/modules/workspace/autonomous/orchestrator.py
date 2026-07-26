@@ -5100,7 +5100,7 @@ class AutonomousOrchestrator:
                         "skip_retries": skip_retries,
                         "dev_retries_on_test_fail": dev_retries,
                         "status": "paused",
-                        "paused_at": datetime.now(timezone.utc),
+                        "paused_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
                     }
                 )
                 logger.info(
@@ -8001,16 +8001,65 @@ class AutonomousOrchestrator:
             )
 
         # A review-fix call can only attribute and auto-stage changes safely
-        # when it starts from a clean tree. Never let an unrelated test/manual
-        # edit hitchhike on a successful recovery or a no-op agent response.
+        # when it starts from a clean tree. If the worktree is dirty (e.g. a
+        # previous dev/CI-repair round left formatting edits uncommitted), commit
+        # those pre-existing changes first so the fix agent starts from a clean
+        # tree. Refusing to proceed creates a dead-end: retrying hits the same
+        # dirty worktree (#1828/#1830).
+        #
+        # Scope safety: capture commit_before BEFORE staging so the pre-existing
+        # diff is also validated by _validate_autonomous_change_scope below
+        # (called with commit_before_staging..commit_after_staging). Without
+        # this, unrelated/unreviewed content in the dirty tree would be pushed
+        # to the PR branch without scope validation.
+        commit_before_staging = ""
         try:
             dirty_before = gh.has_uncommitted_changes()
         except Exception as exc:
             return fail_fix(f"Unable to verify clean worktree before PR review fix: {exc}")
         if dirty_before is True:
-            return fail_fix(
-                "PR review fix refused: worktree already had uncommitted changes before agent run"
-            )
+            try:
+                commit_before_staging = gh.get_current_commit()
+                gh.git_add_all()
+                gh.git_commit(
+                    "auto: stage pre-existing worktree changes before review fix",
+                    no_verify=True,
+                )
+                staged_sha = gh.get_current_commit()
+                # Validate the pre-existing changes against the autonomous
+                # scope guard. If they touch files outside the allowed scope
+                # (e.g. unrelated test/manual edits), refuse — do NOT push
+                # out-of-scope content to the PR branch.
+                pre_scope_error = self._validate_autonomous_change_scope(
+                    gh, wf, commit_before_staging, staged_sha
+                )
+                if pre_scope_error:
+                    try:
+                        gh.reset_hard_to(commit_before_staging)
+                    except Exception as reset_exc:
+                        pre_scope_error += (
+                            "; failed to discard the rejected pre-existing commit: " f"{reset_exc}"
+                        )
+                    return fail_fix(
+                        f"Pre-existing worktree changes failed scope validation: {pre_scope_error}"
+                    )
+                logger.warning(
+                    "Workflow %s: worktree was dirty before review fix; "
+                    "committed and scope-validated pre-existing changes before "
+                    "running fix agent",
+                    self._workflow_id[:8],
+                )
+            except Exception as exc:
+                # On any failure during staging, reset to the pre-staging
+                # commit so we don't leave the tree in a half-staged state.
+                if commit_before_staging:
+                    try:
+                        gh.reset_hard_to(commit_before_staging)
+                    except Exception:
+                        pass
+                return fail_fix(
+                    f"Worktree was dirty and auto-staging pre-existing changes failed: {exc}"
+                )
 
         commit_before = ""
         try:

@@ -54,6 +54,11 @@ class TestPauseResumeRetryState:
         assert persisted["dev_retries_on_test_fail"] == 0
         assert persisted["status"] == "paused"
         assert "paused_at" in persisted
+        # paused_at must be a string, not a raw datetime — _emit() does
+        # json.dumps(updates) and datetime is not JSON-serializable,
+        # which would make the pause-state persistence fail silently
+        # (#1828/#1830 pause deadlock).
+        assert isinstance(persisted["paused_at"], str)
 
     def test_resume_retrieves_retry_counts_from_db(self, mock_orchestrator):
         """Resume should retrieve persisted retry counts from database."""
