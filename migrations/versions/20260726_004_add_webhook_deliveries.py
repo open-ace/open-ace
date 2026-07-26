@@ -1,8 +1,8 @@
 """Add webhook delivery-state tracking table
 
-Revision ID: 20260725_001_add_webhook_deliveries
+Revision ID: 20260726_004_add_webhook_deliveries
 Revises: 20260726_003_add_expected_head_sha
-Create Date: 2026-07-25
+Create Date: 2026-07-26
 
 Issue: #1831
 Adds a durable delivery-state table for outbound webhook notifications so
@@ -15,7 +15,7 @@ persisted here.
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "20260725_001_add_webhook_deliveries"
+revision: str = "20260726_004_add_webhook_deliveries"
 down_revision: str | None = "20260726_003_add_expected_head_sha"
 branch_labels: str | None = None
 depends_on: str | None = None

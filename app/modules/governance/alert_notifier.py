@@ -1312,7 +1312,7 @@ class AlertNotifier:
         )
 
         # Webhook delivery-state table (Issue #1831). Mirrors the Alembic
-        # migration ``20260725_001_add_webhook_deliveries``: durable record of
+        # migration ``20260726_004_add_webhook_deliveries``: durable record of
         # outbound webhook attempts so transient receiver failures (5xx /
         # timeout / reset) are retried with backoff by the reaper instead of
         # being silently dropped. Only the URL *hash* is stored.
