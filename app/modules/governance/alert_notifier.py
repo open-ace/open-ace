@@ -680,28 +680,33 @@ class AlertNotifier:
         return hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
 
     def _send_webhook_notification(self, alert: Alert, user_id: int) -> DeliveryResult:
-        """Deliver one webhook notification attempt if user preferences allow.
+        """Legacy entry point: read prefs and deliver using that snapshot.
 
-        Returns a :class:`DeliveryResult` so the caller (the dispatch worker or
-        the delivery reaper) can persist delivery state and apply retry /
-        dead-letter policy (Issue #1831). This runs on a background worker
-        thread (see :meth:`create_alert`) so a slow/hanging receiver never
-        blocks the user-facing request that triggered the alert.
+        Identity-sensitive callers (the dispatch worker and the delivery reaper)
+        read ``get_notification_preferences`` ONCE themselves and call
+        :meth:`_deliver_to_prefs` directly so the receiver-identity check and
+        the POST share a single snapshot (closes the check-then-refetch TOCTOU,
+        review P1). This wrapper is retained for callers that don't need the
+        snapshot and for tests that patch ``_send_webhook_notification``.
         """
-        # Bound ``prefs`` before the try so the handler below can safely read it
-        # even when ``get_notification_preferences`` itself raises (e.g. a DB
-        # error). Otherwise referencing ``prefs`` there would raise
-        # UnboundLocalError and mask the real exception.
-        prefs: NotificationPreference | None = None
-        try:
-            prefs = self.get_notification_preferences(user_id)
+        prefs = self.get_notification_preferences(user_id)
+        return self._deliver_to_prefs(alert, prefs)
 
+    def _deliver_to_prefs(self, alert: Alert, prefs: NotificationPreference) -> DeliveryResult:
+        """Apply preference gates and POST using the GIVEN prefs snapshot.
+
+        Single-snapshot delivery: the caller has already read
+        ``get_notification_preferences`` and (for identity-sensitive paths)
+        verified the receiver hash against this same object, so the POST uses
+        exactly the receiver that was checked — no second prefs read (review P1).
+        """
+        try:
             if not prefs.push_enabled:
-                logger.debug("Webhook notifications disabled for user %s", user_id)
+                logger.debug("Webhook notifications disabled for user %s", prefs.user_id)
                 return DeliveryResult(skipped=True)
 
             if not prefs.webhook_url:
-                logger.debug("No webhook URL configured for user %s", user_id)
+                logger.debug("No webhook URL configured for user %s", prefs.user_id)
                 return DeliveryResult(skipped=True)
 
             if not self._matches_notification_preferences(alert, prefs, "webhook"):
@@ -712,8 +717,7 @@ class AlertNotifier:
             # Log exception TYPE + redacted host only. ``requests`` ConnectionError
             # / HTTPError embed the full request URL, which for Feishu/Lark
             # contains the bot token in the path — never interpolate the raw
-            # exception. ``prefs`` is pre-bound to None above so this is safe
-            # even when get_notification_preferences itself raised.
+            # exception.
             webhook_url = prefs.webhook_url if prefs and prefs.webhook_url else None
             redacted_host = _redact_webhook_credentials(webhook_url) if webhook_url else None
             host = (urlparse(redacted_host).hostname if redacted_host else None) or "unknown"
@@ -722,7 +726,7 @@ class AlertNotifier:
                 "Failed to deliver webhook notification for alert %s to user %s "
                 "(host=%s, retriable=%s, error=%s)",
                 alert.alert_id,
-                user_id,
+                prefs.user_id,
                 host,
                 retriable,
                 error_type or type(e).__name__,
@@ -1105,36 +1109,48 @@ class AlertNotifier:
                 final=True,
             )
             return
-        # Delivery-identity guard (review P1-a): a ``webhook_deliveries`` row
-        # carries the hash of the webhook URL configured at enqueue time. If the
-        # user has since repointed notifications at a different endpoint, do NOT
-        # forward a historical alert to the new receiver — that would break
-        # delivery identity and could leak alert content across teams/tenants
-        # (e.g. a webhook moved from team A's bot to team B's). Dead-letter the
-        # row; only a hash match (or a legacy null hash) proceeds to the POST.
+        # Delivery-identity guard (review P1-a / P1): a ``webhook_deliveries``
+        # row carries the hash of the webhook URL configured at enqueue time.
+        # Read prefs ONCE here and use that SAME snapshot for both the identity
+        # check and the POST — there is no second prefs read between check and
+        # send, which closes the reaper-side check-then-refetch TOCTOU (review
+        # P1). If the user has repointed notifications at a different endpoint,
+        # dead-letter the row instead of forwarding a historical alert to the
+        # new receiver (cross-team/tenant leak).
         enqueued_hash = row["webhook_url_hash"]
-        if enqueued_hash:
-            current_prefs = self.get_notification_preferences(row["user_id"])
-            current_url = current_prefs.webhook_url if current_prefs else None
-            current_hash = _hash_webhook_url(current_url)
-            if current_hash and current_hash != enqueued_hash:
-                logger.info(
-                    "Dead-lettering delivery %s (alert %s): webhook URL changed "
-                    "since enqueue — preserving delivery identity, not forwarding "
-                    "to the new receiver",
-                    delivery_id,
-                    alert.alert_id,
-                )
-                self._delivery_set_outcome(
-                    delivery_id,
-                    DeliveryResult(retriable=False, error_type="config_changed"),
-                    attempt=attempt,
-                    final=True,
-                )
-                return
-        result = self._send_webhook_notification(alert, row["user_id"])
-        # _send_webhook_notification applies the prefs gate (disabled / no URL /
-        # type filtered → skipped) and never raises.
+        try:
+            prefs = self.get_notification_preferences(row["user_id"])
+        except Exception:
+            # Identity-sensitive: keep the row pending for the next reaper cycle
+            # (fail closed) rather than POST without verifying the receiver.
+            self._delivery_set_outcome(
+                delivery_id,
+                DeliveryResult(retriable=True, error_type="prefs_unreadable"),
+                attempt=attempt,
+                final=False,
+            )
+            return
+        snapshot_hash = _hash_webhook_url(prefs.webhook_url) if prefs else None
+        # A non-null enqueued hash pins the receiver; a config change dead-letters.
+        # A null enqueued hash (legacy row, pre-P1) is allowed to proceed.
+        if enqueued_hash and snapshot_hash and snapshot_hash != enqueued_hash:
+            logger.info(
+                "Dead-lettering delivery %s (alert %s): webhook URL changed "
+                "since enqueue — preserving delivery identity, not forwarding "
+                "to the new receiver",
+                delivery_id,
+                alert.alert_id,
+            )
+            self._delivery_set_outcome(
+                delivery_id,
+                DeliveryResult(retriable=False, error_type="config_changed"),
+                attempt=attempt,
+                final=True,
+            )
+            return
+        # POST using the SAME snapshot that was just identity-checked. The prefs
+        # gate (disabled / no URL / type filtered → skipped) is applied inside.
+        result = self._deliver_to_prefs(alert, prefs)
         if result.delivered or result.skipped or not result.retriable or attempt >= max_attempts:
             self._delivery_set_outcome(delivery_id, result, attempt=attempt, final=True)
         else:
@@ -1451,21 +1467,6 @@ class AlertNotifier:
         logger.info(f"Created alert: [{severity}] {title}")
         return alert
 
-    def _receiver_hash_changed(self, user_id: int, expected_hash: str) -> bool:
-        """Return whether the user's current webhook URL hash differs from expected.
-
-        Used by the dispatch worker to refuse forwarding a historical alert to
-        a receiver that changed mid-retry (review P1-2). Conservative on read
-        failure: returns ``False`` so a transient prefs-DB blip doesn't strand
-        the delivery.
-        """
-        try:
-            prefs = self.get_notification_preferences(user_id)
-            current = _hash_webhook_url(prefs.webhook_url) if prefs else None
-        except Exception:
-            return False
-        return current is not None and current != expected_hash
-
     def _dispatch_webhook_async(self, alert: Alert, user_id: int) -> None:
         """Deliver ``_send_webhook_notification`` on a background daemon thread.
 
@@ -1505,24 +1506,35 @@ class AlertNotifier:
             try:
                 _webhook_delivery_semaphore.acquire()
                 acquired = True
-                # P1-2: capture the receiver identity ONCE, before any attempt.
-                # A config change mid-retry must not redirect this alert to a
-                # new webhook (cross-team/tenant leak). Every attempt verifies
-                # the current receiver still matches; the enqueue row is pinned
-                # to this captured hash so the reaper's guard stays consistent.
-                try:
-                    initial_prefs = self.get_notification_preferences(user_id)
-                    expected_hash = (
-                        _hash_webhook_url(initial_prefs.webhook_url) if initial_prefs else None
-                    )
-                except Exception:
-                    expected_hash = None
+                # Receiver identity is established on the first SUCCESSFUL prefs
+                # read. A config change mid-retry must not redirect this alert to
+                # a new webhook (cross-team/tenant leak). Each attempt reads prefs
+                # ONCE and uses that same snapshot for BOTH the identity check and
+                # the POST — there is no second read between check and send, which
+                # closes the check-then-refetch TOCTOU (review P1). The enqueue
+                # row is pinned to this hash so the reaper's guard stays
+                # consistent.
+                expected_hash: str | None = None
                 attempt = 0
                 while True:
                     attempt += 1
-                    if expected_hash is not None and self._receiver_hash_changed(
-                        user_id, expected_hash
-                    ):
+                    try:
+                        prefs = self.get_notification_preferences(user_id)
+                    except Exception:
+                        # Identity-sensitive: can't establish/verify the receiver
+                        # — fail closed. Don't POST, and don't enqueue a NULL-hash
+                        # row that the reaper's guard would skip (review P1).
+                        logger.warning(
+                            "Skipping webhook dispatch for alert %s: preferences "
+                            "unreadable (fail closed)",
+                            alert.alert_id,
+                        )
+                        return
+                    snapshot_hash = _hash_webhook_url(prefs.webhook_url) if prefs else None
+                    if expected_hash is None:
+                        # First successful attempt establishes the identity.
+                        expected_hash = snapshot_hash
+                    elif snapshot_hash != expected_hash:
                         # Receiver changed since the first attempt — dead-letter
                         # pinned to the ORIGINAL hash; do not POST to the new one.
                         did = self._delivery_enqueue(alert, user_id, webhook_url_hash=expected_hash)
@@ -1533,7 +1545,8 @@ class AlertNotifier:
                             final=True,
                         )
                         return
-                    result = self._send_webhook_notification(alert, user_id)
+                    # POST using the SAME snapshot that was just identity-checked.
+                    result = self._deliver_to_prefs(alert, prefs)
                     if result.delivered or result.skipped:
                         # Resolved (success or prefs-gated no-op) — no retry
                         # tracking needed. Return without a DB write.

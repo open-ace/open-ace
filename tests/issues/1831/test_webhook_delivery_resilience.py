@@ -224,7 +224,7 @@ class TestReaper:
         conn.close()
 
         with patch.object(
-            notifier, "_send_webhook_notification", return_value=DeliveryResult(delivered=True)
+            notifier, "_deliver_to_prefs", return_value=DeliveryResult(delivered=True)
         ):
             attempted = notifier.process_due_deliveries()
 
@@ -246,7 +246,7 @@ class TestReaper:
 
         with patch.object(
             notifier,
-            "_send_webhook_notification",
+            "_deliver_to_prefs",
             return_value=DeliveryResult(retriable=True, error_type="timeout"),
         ):
             notifier.process_due_deliveries()
@@ -268,7 +268,7 @@ class TestReaper:
 
         with patch.object(
             notifier,
-            "_send_webhook_notification",
+            "_deliver_to_prefs",
             return_value=DeliveryResult(retriable=True, error_type="connection"),
         ):
             notifier.process_due_deliveries()
@@ -299,7 +299,7 @@ class TestReaper:
         conn.commit()
         conn.close()
 
-        with patch.object(notifier, "_send_webhook_notification") as mock_send:
+        with patch.object(notifier, "_deliver_to_prefs") as mock_send:
             attempted = notifier.process_due_deliveries()
             mock_send.assert_not_called()  # no POST for a missing alert
 
@@ -398,7 +398,7 @@ class TestDeliveryIdentity:
         )
         self._force_due(notifier, did)
 
-        with patch.object(notifier, "_send_webhook_notification") as mock_send:
+        with patch.object(notifier, "_deliver_to_prefs") as mock_send:
             attempted = notifier.process_due_deliveries()
             # No POST — the historical alert is NOT forwarded to the new receiver.
             mock_send.assert_not_called()
@@ -421,7 +421,7 @@ class TestDeliveryIdentity:
         self._force_due(notifier, did)
 
         with patch.object(
-            notifier, "_send_webhook_notification", return_value=DeliveryResult(delivered=True)
+            notifier, "_deliver_to_prefs", return_value=DeliveryResult(delivered=True)
         ):
             notifier.process_due_deliveries()
 
@@ -452,7 +452,7 @@ class TestDeliveryIdentity:
         conn.close()
 
         with patch.object(
-            notifier, "_send_webhook_notification", return_value=DeliveryResult(delivered=True)
+            notifier, "_deliver_to_prefs", return_value=DeliveryResult(delivered=True)
         ):
             notifier.process_due_deliveries()
 
@@ -473,8 +473,8 @@ class TestDeliveryIdentity:
 
         sent_urls: list[str] = []
 
-        def fake_send(_alert, user_id):
-            sent_urls.append(notifier.get_notification_preferences(user_id).webhook_url)
+        def fake_send(_alert, prefs):
+            sent_urls.append(prefs.webhook_url)
             return DeliveryResult(retriable=True, error_type="timeout")
 
         def switch_receiver(_secs):
@@ -492,7 +492,7 @@ class TestDeliveryIdentity:
                 self._target()
 
         with (
-            patch.object(notifier, "_send_webhook_notification", side_effect=fake_send),
+            patch.object(notifier, "_deliver_to_prefs", side_effect=fake_send),
             patch("app.modules.governance.alert_notifier.time.sleep", side_effect=switch_receiver),
             patch("app.modules.governance.alert_notifier.threading.Thread", _SyncThread),
         ):
@@ -526,3 +526,126 @@ class TestDeliveryIdentity:
         row = _all_delivery_rows(notifier)[0]
         assert row["webhook_url_hash"] == pinned
         assert row["webhook_url_hash"] != _hash_webhook_url(url_y)
+
+    def test_worker_posts_using_same_preferences_snapshot_that_passed_hash_check(self, notifier):
+        """P1: the worker reads prefs ONCE per attempt and POSTs with that same
+        snapshot — there is no second prefs read between the identity check and
+        the POST (closes the check-then-refetch TOCTOU)."""
+        url_x = "https://open.feishu.cn/open-apis/bot/v2/hook/TOKEN-X"
+        url_y = "https://open.feishu.cn/open-apis/bot/v2/hook/TOKEN-Y"
+        notifier.set_notification_preferences(
+            NotificationPreference(
+                user_id=1, push_enabled=True, webhook_url=url_x, alert_types=["quota"]
+            )
+        )
+        alert = _insert_alert_direct(notifier, 1, "p12-snap-w")
+
+        delivered: list[str] = []
+
+        def fake_deliver(_alert, prefs):
+            delivered.append(prefs.webhook_url)
+            return DeliveryResult(delivered=True)
+
+        # If the worker refetched prefs after the identity check, a later read
+        # would observe Y. The snapshot-based worker must POST with the X it
+        # actually checked.
+        real_get = notifier.get_notification_preferences
+        seq = [url_x, url_y, url_y]
+
+        def mutating_get(uid):
+            prefs = real_get(uid)
+            if seq:
+                prefs.webhook_url = seq.pop(0)
+            return prefs
+
+        class _SyncThread:
+            def __init__(self, **kwargs):
+                self._target = kwargs.get("target")
+
+            def start(self):
+                self._target()
+
+        with (
+            patch.object(notifier, "get_notification_preferences", side_effect=mutating_get),
+            patch.object(notifier, "_deliver_to_prefs", side_effect=fake_deliver),
+            patch("app.modules.governance.alert_notifier.threading.Thread", _SyncThread),
+        ):
+            notifier._dispatch_webhook_async(alert, 1)
+
+        # Posted with the snapshot that was identity-checked (X), not a refetched Y.
+        assert delivered == [url_x]
+
+    def test_reaper_posts_using_same_preferences_snapshot_that_passed_hash_check(self, notifier):
+        """P1: the reaper reads prefs ONCE and POSTs with that same snapshot —
+        no second read between the hash check and the POST."""
+        url_x = "https://open.feishu.cn/open-apis/bot/v2/hook/TOKEN-X"
+        url_y = "https://open.feishu.cn/open-apis/bot/v2/hook/TOKEN-Y"
+        notifier.set_notification_preferences(
+            NotificationPreference(
+                user_id=1, push_enabled=True, webhook_url=url_x, alert_types=["quota"]
+            )
+        )
+        alert = _insert_alert_direct(notifier, 1, "p12-snap-r")
+        did = notifier._delivery_enqueue(alert, 1)
+        conn = notifier._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE webhook_deliveries SET status='pending', next_retry_at=NULL WHERE id=?",
+            (did,),
+        )
+        conn.commit()
+        conn.close()
+
+        delivered: list[str] = []
+
+        def fake_deliver(_alert, prefs):
+            delivered.append(prefs.webhook_url)
+            return DeliveryResult(delivered=True)
+
+        real_get = notifier.get_notification_preferences
+        seq = [url_x, url_y, url_y]
+
+        def mutating_get(uid):
+            prefs = real_get(uid)
+            if seq:
+                prefs.webhook_url = seq.pop(0)
+            return prefs
+
+        with (
+            patch.object(notifier, "get_notification_preferences", side_effect=mutating_get),
+            patch.object(notifier, "_deliver_to_prefs", side_effect=fake_deliver),
+        ):
+            notifier.process_due_deliveries()
+
+        assert delivered == [url_x]
+
+    def test_transient_initial_preferences_failure_does_not_create_unprotected_null_hash_row(
+        self, notifier
+    ):
+        """P1: when the worker can't read preferences, it fails closed — no POST
+        and no NULL-hash delivery row (which the reaper's guard would skip)."""
+        url_x = "https://open.feishu.cn/open-apis/bot/v2/hook/TOKEN-X"
+        notifier.set_notification_preferences(
+            NotificationPreference(
+                user_id=1, push_enabled=True, webhook_url=url_x, alert_types=["quota"]
+            )
+        )
+        alert = _insert_alert_direct(notifier, 1, "p12-prefs-fail")
+
+        class _SyncThread:
+            def __init__(self, **kwargs):
+                self._target = kwargs.get("target")
+
+            def start(self):
+                self._target()
+
+        with (
+            patch.object(
+                notifier, "get_notification_preferences", side_effect=Exception("DB blip")
+            ),
+            patch("app.modules.governance.alert_notifier.threading.Thread", _SyncThread),
+        ):
+            notifier._dispatch_webhook_async(alert, 1)
+
+        # Fail closed: no delivery row created (no unprotected NULL-hash row).
+        assert _all_delivery_rows(notifier) == []
