@@ -33,8 +33,22 @@ if [ "${1:-}" = "--isolated" ]; then
     shift
 fi
 
+# Issue #2020: optional per-attempt task id. When present the launcher keys
+# HOME/TMP/XDG, the ACL/signature registries, the cleanup lock and (where
+# available) a task cgroup off the attempt instead of the shared Agent UID,
+# so concurrent attempts on one UID no longer serialize or cross-kill.
+task_id=""
+if [ "$isolated" = true ] && [ "${1:-}" = "--task-id" ]; then
+    if [ "$#" -lt 2 ]; then
+        echo "Usage: $0 [--isolated] [--task-id <id>] <user> <dir> <cmd> [args...]" >&2
+        exit 64
+    fi
+    task_id="$2"
+    shift 2
+fi
+
 if [ "$#" -lt 3 ]; then
-    echo "Usage: $0 [--isolated] <user> <dir> <cmd> [args...]" >&2
+    echo "Usage: $0 [--isolated] [--task-id <id>] <user> <dir> <cmd> [args...]" >&2
     exit 64
 fi
 
@@ -83,6 +97,18 @@ log_audit() {
 # files; Git metadata is read-only so it cannot install hooks, rewrite remotes,
 # or create refs that a later privileged push would trust.
 if [ "$isolated" = true ]; then
+    # task_id becomes a path component under the per-task runtime root and a
+    # suffix on registry/lock filenames, so it must match the same safe charset
+    # the Python side enforces (task_isolation.sanitize_task_id). Reject early,
+    # before any filesystem or audit work.
+    if [ -n "$task_id" ]; then
+        case "$task_id" in
+            "" | *[!A-Za-z0-9._-]*)
+                echo "openace-run-as: --task-id must be alphanumeric, '.', '_', '-' only" >&2
+                exit 64
+                ;;
+        esac
+    fi
     if [[ "$project_dir" != /* || "$project_dir" == *$'\n'* ]]; then
         echo "openace-run-as: isolated project path must be absolute and single-line" >&2
         exit 64
@@ -118,8 +144,10 @@ if [ "$isolated" = true ]; then
         esac
     fi
     log_audit "result=accept"
-    if ! command -v flock >/dev/null 2>&1 || ! command -v pkill >/dev/null 2>&1; then
-        echo "openace-run-as: flock and pkill are required for isolated execution" >&2
+    # Issue #2020: pkill is no longer used (UID-wide kill removed in favor of
+    # task-scoped cgroup/pgid kill); only flock remains required here.
+    if ! command -v flock >/dev/null 2>&1; then
+        echo "openace-run-as: flock is required for isolated execution" >&2
         exit 66
     fi
     normalize_group_class_signature() {
@@ -249,11 +277,102 @@ if [ "$isolated" = true ]; then
                 ;;
         esac
     done
-    acl_registry="/run/openace-agent-acl-${target_uid}"
-    signature_registry="/run/openace-agent-git-signature-${target_uid}"
+    # Issue #2020: key the lock + registries off the attempt (task_id) when
+    # present, so concurrent attempts on the same UID neither serialize on a
+    # UID-level flock nor overwrite each other's ACL/signature registry. The
+    # uid-* fallback preserves legacy single-attempt semantics for callers
+    # that do not pass --task-id.
+    if [ -n "$task_id" ]; then
+        isolation_key="task-${task_id}"
+    else
+        isolation_key="uid-${target_uid}"
+    fi
+    acl_registry="/run/openace-agent-acl-${isolation_key}"
+    signature_registry="/run/openace-agent-git-signature-${isolation_key}"
     signature_tmp="${signature_registry}.next"
-    exec 9>"/run/lock/openace-agent-${target_uid}.lock"
+    exec 9>"/run/lock/openace-agent-${isolation_key}.lock"
     flock -x 9
+
+    # Per-attempt HOME/TMP/XDG runtime tree (#2020). Ephemeral parent under
+    # /run; each leaf chowned to the agent and locked 0700 so sibling attempts
+    # cannot traverse. Wiped first so a retried task_id starts clean.
+    task_base=""
+    task_home="" ; task_tmp="" ; task_cache="" ; task_config="" ; task_data=""
+    if [ -n "$task_id" ]; then
+        task_root="${OPENACE_AGENT_TASK_ROOT:-/run/openace-agent-tasks}"
+        task_base="${task_root}/${task_id}"
+        task_home="${task_base}/home"
+        task_tmp="${task_base}/tmp"
+        task_cache="${task_base}/cache"
+        task_config="${task_base}/config"
+        task_data="${task_base}/data"
+        rm -rf -- "$task_base" 2>/dev/null || true
+        mkdir -p "$task_home" "$task_tmp" "$task_cache" "$task_config" "$task_data"
+        chmod 700 "$task_base" "$task_home" "$task_tmp" "$task_cache" "$task_config" "$task_data"
+        chown -R "$target_user":"$(id -g "$target_user")" "$task_base" 2>/dev/null || true
+    fi
+
+    # Optional task cgroup (v2 unified) for task-scoped kill (#2020) and, under
+    # #2020-B / Layer 3, resource limits. Created only where the host exposes a
+    # writable cgroup v2 hierarchy (bare metal or a delegated container). In a
+    # stock python:3.11-slim container /sys/fs/cgroup is read-only and mkdir
+    # fails, so task_cgroup stays empty and kill falls back to the child pgid.
+    task_cgroup=""
+    if [ -n "$task_id" ]; then
+        cgroup_root="${OPENACE_AGENT_CGROUP_ROOT:-/sys/fs/cgroup/openace-agent}"
+        if [ -w /sys/fs/cgroup/cgroup.kill ]; then
+            if [ -d "$cgroup_root/$task_id" ]; then
+                echo 1 > "$cgroup_root/$task_id/cgroup.kill" 2>/dev/null || true
+                rmdir "$cgroup_root/$task_id" 2>/dev/null || true
+            fi
+            if mkdir -p "$cgroup_root/$task_id" 2>/dev/null \
+               && [ -w "$cgroup_root/$task_id/cgroup.procs" ]; then
+                task_cgroup="$cgroup_root/$task_id"
+            fi
+        fi
+    fi
+    agent_child_pid=""
+
+    # Issue #2020: per-task resource limits read from agent-launcher.conf. The
+    # same keys the scheduler/runner parse (task_isolation.read_agent_task_policy)
+    # are consumed here so the launcher and control plane agree on the policy.
+    _conf_value() {
+        local key="$1"
+        [ -f "$_OPENACE_LAUNCHER_CONF" ] || return 0
+        sed -n "s/^[[:space:]]*${key}[[:space:]]*=[[:space:]]*//p" \
+            "$_OPENACE_LAUNCHER_CONF" 2>/dev/null \
+            | head -1 | sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//"
+    }
+    task_memory="$(_conf_value agent_task_memory_max_bytes)"
+    task_pids="$(_conf_value agent_task_pids_max)"
+    task_cpu="$(_conf_value agent_task_cpu_max)"
+    case "$(_conf_value agent_task_cgroup_enabled)" in
+        on|ON|true|TRUE|TRUE|yes|Yes|1) task_cg_required=true ;;
+        *)                               task_cg_required=false ;;
+    esac
+
+    # Fail-closed (#2020): if cgroup enforcement is forced on but the task
+    # cgroup could not be created (read-only cgroupfs / no v2 hierarchy, e.g.
+    # a stock container), refuse to launch rather than run the agent without
+    # the configured resource boundary.
+    if [ "$task_cg_required" = true ] && [ -z "$task_cgroup" ] && [ -n "$task_id" ]; then
+        echo "OPENACE_CGROUP_REQUIRED: cgroup enforcement forced (agent_task_cgroup_enabled=on) but task cgroup unavailable" >&2
+        log_audit "result=reject_cgroup_required_unavailable"
+        exit 66
+    fi
+
+    # Apply cgroup v2 limits where the task cgroup exists.
+    if [ -n "$task_cgroup" ]; then
+        if [ -n "$task_memory" ] && [ "$task_memory" != "0" ]; then
+            echo "$task_memory" > "$task_cgroup/memory.max" 2>/dev/null || true
+        fi
+        if [ -n "$task_pids" ] && [ "$task_pids" != "0" ]; then
+            echo "$task_pids" > "$task_cgroup/pids.max" 2>/dev/null || true
+        fi
+        if [ -n "$task_cpu" ]; then
+            echo "$task_cpu" > "$task_cgroup/cpu.max" 2>/dev/null || true
+        fi
+    fi
 
     revoke_agent_access() {
         local protected_path="$1"
@@ -274,9 +393,17 @@ if [ "$isolated" = true ]; then
     }
 
     cleanup_isolated() {
-        # The account is dedicated to autonomous work and wrappers using it
-        # are serialized by fd 9, so this cannot kill an unrelated session.
-        pkill -KILL -u "$target_uid" 2>/dev/null || true
+        # Issue #2020: kill exactly THIS attempt's processes. Never pkill by
+        # UID — that would reap other concurrent attempts sharing the Agent
+        # account. Prefer the task cgroup (kills every descendant regardless of
+        # session); fall back to the child's own process group (each attempt is
+        # launched via setsid, so its pid is its pgid).
+        if [ -n "$task_cgroup" ] && [ -w "$task_cgroup/cgroup.kill" ]; then
+            echo 1 > "$task_cgroup/cgroup.kill" 2>/dev/null || true
+        fi
+        if [ -n "${agent_child_pid:-}" ] && kill -0 "${agent_child_pid}" 2>/dev/null; then
+            kill -KILL -- "-${agent_child_pid}" 2>/dev/null || true
+        fi
         if [ -f "$acl_registry" ]; then
             while IFS= read -r protected_path; do
                 revoke_agent_access "$protected_path"
@@ -400,14 +527,53 @@ cd "$project_dir" || {
 # Drop privileges and run the CLI. Absolute path is used because sudo's
 # secure_path may not include /usr/sbin on all distros.
 if [ "$isolated" = true ]; then
-    target_home="$(getent passwd "$target_user" | cut -d: -f6)"
+    # Issue #2020: choose HOME/TMP per attempt. With --task-id the agent gets a
+    # private HOME/TMP/XDG tree (and is enrolled in its task cgroup); without it
+    # the legacy shared account home + /tmp are used for backward compatibility.
+    if [ -n "$task_home" ]; then
+        agent_home="$task_home"
+        agent_tmp="$task_tmp"
+    else
+        agent_home="$(getent passwd "$target_user" | cut -d: -f6)"
+        agent_tmp="/tmp"
+    fi
+    env_args=(
+        "HOME=$agent_home" "USER=$target_user" "LOGNAME=$target_user"
+        "LANG=${LANG:-C.UTF-8}" "LC_ALL=${LC_ALL:-}" "TMPDIR=$agent_tmp"
+    )
+    if [ -n "$task_cache" ]; then
+        env_args+=("XDG_CACHE_HOME=$task_cache" "XDG_CONFIG_HOME=$task_config" "XDG_DATA_HOME=$task_data")
+    fi
+    env_args+=(
+        "GIT_CONFIG_COUNT=1" "GIT_CONFIG_KEY_0=safe.directory"
+        "GIT_CONFIG_VALUE_0=$project_dir"
+    )
     set +e
-    /usr/sbin/runuser -u "$target_user" -- /usr/bin/env -i \
-        "HOME=$target_home" "USER=$target_user" "LOGNAME=$target_user" \
-        "LANG=${LANG:-C.UTF-8}" "LC_ALL=${LC_ALL:-}" "TMPDIR=/tmp" \
-        "GIT_CONFIG_COUNT=1" "GIT_CONFIG_KEY_0=safe.directory" \
-        "GIT_CONFIG_VALUE_0=$project_dir" "$@" <&0 9>&- &
+    # setsid makes the child its own session/process-group leader (pgid == pid)
+    # so cleanup can target exactly this attempt via ``kill -- -<pid>`` even when
+    # a task cgroup is unavailable.
+    setsid /usr/sbin/runuser -u "$target_user" -- /usr/bin/env -i \
+        "${env_args[@]}" "$@" <&0 9>&- &
     agent_child_pid=$!
+    if [ -n "$task_cgroup" ]; then
+        echo "$agent_child_pid" > "$task_cgroup/cgroup.procs" 2>/dev/null || true
+    elif command -v prlimit >/dev/null 2>&1; then
+        # Issue #2020 portable fallback: where no task cgroup exists (stock
+        # container with read-only /sys/fs/cgroup), apply POSIX rlimits to the
+        # child process tree. RLIMIT_AS bounds virtual address space (a coarse
+        # memory ceiling) and RLIMIT_NPROC bounds processes per real UID. CPU
+        # is enforced only via cgroup (cpu.max) since RLIMIT_CPU is in seconds.
+        prlimit_args=()
+        if [ -n "$task_memory" ] && [ "$task_memory" != "0" ]; then
+            prlimit_args+=("--as=${task_memory}")
+        fi
+        if [ -n "$task_pids" ] && [ "$task_pids" != "0" ]; then
+            prlimit_args+=("--nproc=${task_pids}")
+        fi
+        if [ "${#prlimit_args[@]}" -gt 0 ]; then
+            prlimit --pid="$agent_child_pid" "${prlimit_args[@]}" 2>/dev/null || true
+        fi
+    fi
     wait "$agent_child_pid"
     child_status=$?
     set -e
@@ -418,6 +584,12 @@ if [ "$isolated" = true ]; then
         exit 68
     fi
     rm -f "$signature_registry"
+    # Reap the task cgroup now that the child has exited and cleanup killed
+    # any stragglers. The runtime tree under /run is ephemeral; orphan dirs
+    # from killed attempts are reconciled by the scheduler on restart (#2020).
+    if [ -n "$task_cgroup" ] && [ -d "$task_cgroup" ]; then
+        rmdir "$task_cgroup" 2>/dev/null || true
+    fi
     exit "$child_status"
 fi
 

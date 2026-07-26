@@ -29,6 +29,7 @@ from typing import Any, cast
 
 from app.modules.workspace.autonomous.artifact_text import pick_best_artifact_text
 from app.modules.workspace.autonomous.models import AgentTaskResult
+from app.modules.workspace.autonomous.task_isolation import DEFAULT_TASK_ROOT, task_runtime_dirs
 
 logger = logging.getLogger(__name__)
 
@@ -1031,6 +1032,7 @@ class AutonomousAgentRunner:
         project_path: str,
         system_account: str | None,
         env: dict[str, str] | None = None,
+        task_id: str | None = None,
     ) -> tuple[list[str], str | None]:
         """Wrap an agent CLI command for cross-user launch (Issue #1395).
 
@@ -1079,13 +1081,21 @@ class AutonomousAgentRunner:
                 if env and env.get(key):
                     guard_env.append(f"{key}={env[key]}")
             guarded_cmd = ["/usr/bin/env", *guard_env, *cmd] if guard_env else cmd
+            # Issue #2020: pass a sanitized per-attempt task_id so the launcher
+            # can key HOME/TMP/XDG/flock/cgroup off the attempt rather than the
+            # shared Agent UID. Omitted for legacy callers without a task_id.
+            launcher_opts: list[str] = ["--isolated"]
+            if task_id:
+                from app.modules.workspace.autonomous.task_isolation import sanitize_task_id
+
+                launcher_opts += ["--task-id", sanitize_task_id(task_id)]
             wrapped = [
                 "sudo",
                 "-n",
                 "-u",
                 "root",
                 _OPENACE_RUN_AS,
-                "--isolated",
+                *launcher_opts,
                 system_account,
                 project_path,
                 *guarded_cmd,
@@ -1160,6 +1170,7 @@ class AutonomousAgentRunner:
         session_id: str,
         model: str,
         runtime_python_command: list[str] | None = None,
+        task_id: str | None = None,
     ) -> dict[str, str]:
         """Build subprocess env with LLM proxy auth for a local agent.
 
@@ -1201,6 +1212,24 @@ class AutonomousAgentRunner:
         env["GH_CONFIG_DIR"] = "/var/empty/openace-autonomous-gh"
         env["GIT_TERMINAL_PROMPT"] = "0"
         env["PATH"] = guard_bin + os.pathsep + env.get("PATH", "")
+
+        # Issue #2020 Phase A: per-attempt HOME/TMP/XDG runtime tree keyed by
+        # task_id, so concurrent attempts on the same Agent UID never share
+        # HOME/TMP/cache. The cross-user launcher re-derives the same paths
+        # from ``--task-id`` (its env -i overrides these); on the same-user
+        # path these env vars are authoritative. OPENACE_GIT_CACHE_ROOT
+        # (pre-commit baseline cache) is relocated to the per-task cache dir
+        # for full isolation (decision: 2026-07-26). When task_id is absent
+        # (legacy callers) the shared defaults above stand.
+        if task_id:
+            task_root = os.environ.get("OPENACE_AGENT_TASK_ROOT", DEFAULT_TASK_ROOT)
+            task_dirs = task_runtime_dirs(task_id, task_root)
+            env["HOME"] = task_dirs["home"]
+            env["TMPDIR"] = task_dirs["tmp"]
+            env["XDG_CACHE_HOME"] = task_dirs["cache"]
+            env["XDG_CONFIG_HOME"] = task_dirs["config"]
+            env["XDG_DATA_HOME"] = task_dirs["data"]
+            env["OPENACE_GIT_CACHE_ROOT"] = str(Path(task_dirs["cache"]) / "pre-commit")
 
         # Issue #2019: scrub every raw credential (provider/GitHub/SSH/cloud +
         # dynamic custom envKeys) BEFORE injecting the proxy token, and fail
@@ -2009,10 +2038,18 @@ class AutonomousAgentRunner:
         # Open ACE (short-lived proxy token, never the raw API key).
         env = (
             self._build_agent_env(
-                adapter, cli_tool, user_id, session_id, model, runtime_python_command
+                adapter,
+                cli_tool,
+                user_id,
+                session_id,
+                model,
+                runtime_python_command,
+                task_id=session_id,
             )
             if runtime_python_command
-            else self._build_agent_env(adapter, cli_tool, user_id, session_id, model)
+            else self._build_agent_env(
+                adapter, cli_tool, user_id, session_id, model, task_id=session_id
+            )
         )
 
         # Build command
@@ -2055,9 +2092,9 @@ class AutonomousAgentRunner:
         # system_account (claude-code/qwen-code infer project root from cwd
         # and have no --cwd flag). Same-user runs verbatim with cwd=project.
         cmd, cwd = (
-            self._wrap_agent_cmd(cmd, project_path, system_account, env)
+            self._wrap_agent_cmd(cmd, project_path, system_account, env, task_id=session_id)
             if self._is_cross_user(system_account)
-            else self._wrap_agent_cmd(cmd, project_path, system_account)
+            else self._wrap_agent_cmd(cmd, project_path, system_account, task_id=session_id)
         )
 
         logger.info("Launching local agent: %s", " ".join(cmd))
@@ -2324,10 +2361,18 @@ class AutonomousAgentRunner:
 
         env = (
             self._build_agent_env(
-                adapter, cli_tool, user_id, session_id, model, runtime_python_command
+                adapter,
+                cli_tool,
+                user_id,
+                session_id,
+                model,
+                runtime_python_command,
+                task_id=session_id,
             )
             if runtime_python_command
-            else self._build_agent_env(adapter, cli_tool, user_id, session_id, model)
+            else self._build_agent_env(
+                adapter, cli_tool, user_id, session_id, model, task_id=session_id
+            )
         )
         # Resolve the ZCode session mode. The --mode CLI flag is ignored by
         # app-server (verified: sessions always start in "build" mode regardless
@@ -2348,9 +2393,9 @@ class AutonomousAgentRunner:
         )
         # Cross-user launch via run-as wrapper (zcode needs cwd=project too).
         cmd, cwd = (
-            self._wrap_agent_cmd(cmd, project_path, system_account, env)
+            self._wrap_agent_cmd(cmd, project_path, system_account, env, task_id=session_id)
             if self._is_cross_user(system_account)
-            else self._wrap_agent_cmd(cmd, project_path, system_account)
+            else self._wrap_agent_cmd(cmd, project_path, system_account, task_id=session_id)
         )
 
         logger.info("Launching ZCode app-server (mode=%s): %s", zcode_mode, " ".join(cmd))
@@ -2753,18 +2798,26 @@ class AutonomousAgentRunner:
         cmd = [executable] + (args[1:] if len(args) > 1 and args[0] == exe_name else args)
         env = (
             self._build_agent_env(
-                adapter, cli_tool, user_id, session_id, model, runtime_python_command
+                adapter,
+                cli_tool,
+                user_id,
+                session_id,
+                model,
+                runtime_python_command,
+                task_id=session_id,
             )
             if runtime_python_command
-            else self._build_agent_env(adapter, cli_tool, user_id, session_id, model)
+            else self._build_agent_env(
+                adapter, cli_tool, user_id, session_id, model, task_id=session_id
+            )
         )
 
         # Cross-user launch via run-as wrapper (single-shot CLIs also need
         # cwd=project; openclaw documents it relies on the caller's cwd).
         cmd, cwd = (
-            self._wrap_agent_cmd(cmd, project_path, system_account, env)
+            self._wrap_agent_cmd(cmd, project_path, system_account, env, task_id=session_id)
             if self._is_cross_user(system_account)
-            else self._wrap_agent_cmd(cmd, project_path, system_account)
+            else self._wrap_agent_cmd(cmd, project_path, system_account, task_id=session_id)
         )
 
         logger.info("Launching single-shot agent (%s): %s", cli_tool, " ".join(cmd))
