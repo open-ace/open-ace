@@ -22,7 +22,7 @@ import logging
 import queue as queue_module
 import threading
 from collections.abc import Callable
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from app.modules.workspace.autonomous.command_evidence.types import (
@@ -178,7 +178,7 @@ class CommandEvidenceRecorder:
             argv=argv,
             cwd=cwd,
             execution_profile=execution_profile,
-            started_at=started_at or datetime.utcnow(),
+            started_at=started_at or datetime.now(timezone.utc),
             tenant_id=tenant_id,
         )
 
@@ -219,7 +219,7 @@ class CommandEvidenceRecorder:
             timed_out=timed_out,
             cancelled=cancelled,
             terminal_reason=terminal_reason.value,
-            completed_at=completed_at or datetime.utcnow(),
+            completed_at=completed_at or datetime.now(timezone.utc),
             output_excerpt=excerpt,
             stdout_digest=compute_output_digest(excerpt),
         )
@@ -304,7 +304,7 @@ class CommandEvidenceRecorder:
 
     def _mark_missing_result(self, command_id: str, session_id: str) -> None:
         """Flag an unpaired command's evidence row as ``missing_result``."""
-        if self.is_noop or self._repo is None:
+        if self.is_noop:
             return
         evidence = CommandExecutionEvidence(
             command_id=command_id,
@@ -330,8 +330,12 @@ class _NoopEvidenceRecorder(CommandEvidenceRecorder):
     is_noop = True
 
     def __init__(self) -> None:  # noqa: D401 - simple no-op construction
-        # Bypass repo/writer construction entirely.
-        pass
+        # Bypass repo/writer construction entirely. ``is_noop`` short-circuits
+        # every record_* / emit path before ``self.repo`` is touched; keep the
+        # attributes defined so attribute access never raises if a caller
+        # forgets the noop guard.
+        self._repo = None
+        self._writer = _SyncEvidenceWriter()
 
     def flush(self, timeout: float | None = None) -> bool:
         return True
@@ -440,9 +444,9 @@ def compare_verdicts(
         ).value
         for row in evidence_rows
     ]
-    structured_passed = all(v == "passed" for v in verdicts) and any(
-        v == "passed" for v in verdicts
-    )
+    # verdicts is non-empty here (the empty case returns above). A run passes
+    # structurally only when every recorded command passed.
+    structured_passed = all(v == "passed" for v in verdicts)
     divergence = structured_passed != heuristic_passed
     return {
         "heuristic_verdict": "passed" if heuristic_passed else "not_passed",

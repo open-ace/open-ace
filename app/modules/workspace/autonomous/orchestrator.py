@@ -3957,6 +3957,8 @@ class AutonomousOrchestrator:
             )
 
             recorder = get_command_evidence_recorder()
+            if recorder.is_noop:
+                return
             recorder.flush(timeout=1.0)
             repo = recorder.repo
             session_id = test_result.session_id or test_result.tracking_session_id or ""

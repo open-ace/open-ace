@@ -111,9 +111,14 @@ def test_output_digest_stable_and_none_for_empty():
     assert compute_output_digest("x") == compute_output_digest("x")
 
 
-def test_bound_excerpt_truncates():
+def test_bound_excerpt_truncates_head_and_tail():
     long = "x" * 5000
-    assert len(bound_excerpt(long)) == 4096
+    excerpt = bound_excerpt(long)
+    # Head + tail each kept (plus the truncation marker), and the tail is
+    # preserved so a verdict/traceback at the end survives.
+    assert excerpt.startswith("x" * 100)
+    assert excerpt.endswith("x" * 100)
+    assert "[truncated]" in excerpt
     assert bound_excerpt("short") == "short"
 
 

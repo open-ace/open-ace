@@ -156,3 +156,105 @@ def test_shadow_comparison_reads_persisted_rows(repo, recorder):
     result = compare_verdicts(heuristic_passed=True, evidence_rows=rows)
     assert result["divergence"] is True
     assert result["structured_verdict"] == "failed"
+
+
+# ---------------------------------------------------------------------------
+# Orchestrator-level shadow wiring
+# ---------------------------------------------------------------------------
+
+
+def _make_orchestrator_with_recorder(tmp_db, evidence_rows_by_session):
+    """Build a minimal orchestrator whose shadow path uses a real recorder.
+
+    ``evidence_rows_by_session`` pre-seeds the store so ``query_by_session``
+    returns the rows the test wants without driving a full agent run. Also
+    injects the recorder as the process-wide singleton so the orchestrator's
+    lazy ``get_command_evidence_recorder()`` resolves to it. Caller must reset
+    ``rec_mod._recorder_singleton = None`` after the test.
+    """
+    from unittest.mock import MagicMock
+
+    import app.modules.workspace.autonomous.command_evidence.recorder as rec_mod
+    from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+    db_repo = CommandExecutionEvidenceRepository(db=tmp_db)
+    for rows in evidence_rows_by_session.values():
+        for row in rows:
+            db_repo.upsert(row)
+
+    recorder = CommandEvidenceRecorder(repo=db_repo)
+    rec_mod._recorder_singleton = recorder
+
+    orch = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
+    orch._workflow_id = "wf-shadow"
+    orch.repo = MagicMock()
+    return orch
+
+
+def test_orchestrator_shadow_creates_divergence_event(tmp_db):
+    """Divergence (heuristic pass ≠ evidence failed) persists a workflow event."""
+    import app.modules.workspace.autonomous.command_evidence.recorder as rec_mod
+    from app.modules.workspace.autonomous.models import AgentTaskResult
+
+    rows = [
+        CommandExecutionEvidence(
+            command_id="c1", session_id="sess-shadow", exit_code=1, terminal_reason="completed"
+        ),
+    ]
+    orch = _make_orchestrator_with_recorder(tmp_db, {"sess-shadow": rows})
+    try:
+        result = AgentTaskResult(session_id="sess-shadow")
+        orch._shadow_compare_evidence(
+            test_result=result, milestone_id="ms-shadow", heuristic_passed=True
+        )
+        # create_event must have been called with the divergence event type.
+        calls = orch.repo.create_event.call_args_list
+        assert any(
+            c.args[0].get("event_type") == "evidence_shadow_divergence" for c in calls
+        ), calls
+        # The persisted event_data records both verdicts.
+        event_payload = calls[-1].args[0]
+        assert event_payload["workflow_id"] == "wf-shadow"
+        assert "heuristic_verdict" in event_payload["event_data"]
+    finally:
+        rec_mod._recorder_singleton = None
+
+
+def test_orchestrator_shadow_creates_no_event_on_agreement(tmp_db):
+    """When heuristic and structured verdicts agree, no event is written."""
+    import app.modules.workspace.autonomous.command_evidence.recorder as rec_mod
+    from app.modules.workspace.autonomous.models import AgentTaskResult
+
+    rows = [
+        CommandExecutionEvidence(
+            command_id="c1", session_id="sess-agree", exit_code=0, terminal_reason="completed"
+        ),
+    ]
+    orch = _make_orchestrator_with_recorder(tmp_db, {"sess-agree": rows})
+    try:
+        result = AgentTaskResult(session_id="sess-agree")
+        orch._shadow_compare_evidence(
+            test_result=result, milestone_id="ms-agree", heuristic_passed=True
+        )
+        orch.repo.create_event.assert_not_called()
+    finally:
+        rec_mod._recorder_singleton = None
+
+
+def test_orchestrator_shadow_pass_without_evidence_creates_divergence(tmp_db):
+    """Agent prose pass with no evidence rows → divergence event (#1967 core)."""
+    import app.modules.workspace.autonomous.command_evidence.recorder as rec_mod
+    from app.modules.workspace.autonomous.models import AgentTaskResult
+
+    orch = _make_orchestrator_with_recorder(tmp_db, {})
+    try:
+        result = AgentTaskResult(session_id="sess-none")
+        orch._shadow_compare_evidence(
+            test_result=result, milestone_id="ms-none", heuristic_passed=True
+        )
+        calls = orch.repo.create_event.call_args_list
+        assert any(
+            c.args[0].get("event_type") == "evidence_shadow_divergence" for c in calls
+        ), calls
+    finally:
+        rec_mod._recorder_singleton = None

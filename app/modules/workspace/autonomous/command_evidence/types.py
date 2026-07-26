@@ -120,7 +120,10 @@ def compute_output_digest(output_excerpt: str) -> str | None:
     """Return a sha256 digest of the output excerpt, or None if empty.
 
     Phase A stores only a bounded excerpt + digest; full stdout/stderr artifacts
-    are referenced by path and produced by #2022's SandboxProvider.
+    are referenced by path and produced by #2022's SandboxProvider. Note this
+    digests the **truncated excerpt** (see :func:`bound_excerpt`), not the full
+    output — two outputs sharing the same head+tail excerpt collide. Treat it
+    as an excerpt fingerprint, not a full-output hash.
     """
     if not output_excerpt:
         return None
@@ -228,12 +231,21 @@ def _parse_dt(value: Any) -> datetime | None:
 # Bounded excerpt kept alongside the digest so the test gate / UI can show
 # context without the full output artifact (#2022 owns full artifact storage).
 OUTPUT_EXCERPT_MAX = 4096
+# Head/tail split so the excerpt keeps both the collection/header (head) and
+# the verdict/traceback (tail) — test summaries and failures live at the end.
+_EXCERPT_HALF = OUTPUT_EXCERPT_MAX // 2
 
 
 def bound_excerpt(text: str | None) -> str:
-    """Truncate output text to the persisted excerpt size."""
+    """Truncate output text to the persisted excerpt size (head + tail).
+
+    Test runs put framework banners and the collected-test list at the top but
+    the pass/fail summary and failure tracebacks at the bottom. A head-only
+    truncation loses the verdict on long runs, so keep the first and last
+    ``_EXCERPT_HALF`` characters joined by an ellipsis marker.
+    """
     if not text:
         return ""
     if len(text) <= OUTPUT_EXCERPT_MAX:
         return text
-    return text[:OUTPUT_EXCERPT_MAX]
+    return text[:_EXCERPT_HALF] + "\n...[truncated]...\n" + text[-_EXCERPT_HALF:]

@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from app.modules.workspace.autonomous.command_evidence.types import CommandExecutionEvidence
@@ -41,7 +41,7 @@ class CommandExecutionEvidenceRepository:
         ``cwd`` ...) are preserved unless the caller supplies new values.
         """
         argv_json = json.dumps(evidence.argv) if evidence.argv else None
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         if is_postgresql():
             return self._upsert_postgres(evidence, argv_json, now)
