@@ -296,6 +296,51 @@ def test_autonomous_thinking_only_turn_persists_evidence(manager, sqlite_sm):
     assert any(b.get("type") == "thinking" for b in blocks)
 
 
+def test_autonomous_message_list_branch_persists_evidence(manager, sqlite_sm):
+    """Autonomous gating also covers the OpenAI ``message`` assistant-list shape.
+
+    The ``assistant``-type and ``message``/assistant-list branches carry
+    duplicated autonomous guards; this locks the list-shape branch so a future
+    refactor cannot silently drop its evidence policy.
+    """
+    _create_autonomous_session(sqlite_sm)
+    manager.process_session_output(
+        "sess-autonomous",
+        json.dumps(
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "tool_use", "id": "tu1", "name": "bash", "input": {}}],
+            }
+        ),
+    )
+    manager.process_session_output("sess-autonomous", _result())
+
+    msgs = _messages(sqlite_sm, "sess-autonomous")
+    assert len(msgs) == 1
+    assert msgs[0].content == ""
+    blocks = msgs[0].metadata.get("content_blocks", [])
+    assert any(b.get("type") == "tool_use" for b in blocks)
+
+
+def test_interactive_message_list_tool_only_writes_no_row(manager, sqlite_sm):
+    """Interactive sessions skip tool-only turns in the message-list branch too."""
+    _create_interactive_session(sqlite_sm)
+    manager.process_session_output(
+        "sess-interactive",
+        json.dumps(
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "tool_use", "id": "tu1", "name": "bash", "input": {}}],
+            }
+        ),
+    )
+    manager.process_session_output("sess-interactive", _result())
+
+    assert _messages(sqlite_sm, "sess-interactive") == []
+
+
 # ---------------------------------------------------------------------------
 # Idempotency / replay contract
 # ---------------------------------------------------------------------------

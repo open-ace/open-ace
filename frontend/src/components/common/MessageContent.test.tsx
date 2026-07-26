@@ -14,9 +14,7 @@ import type { ContentBlock, SessionMessage } from '@/api/sessions';
 
 const identity = (text: string) => text;
 const renderBlock = (block: ContentBlock) =>
-  render(
-    <ContentBlockRenderer block={block} searchText="" highlightText={identity} />
-  );
+  render(<ContentBlockRenderer block={block} searchText="" highlightText={identity} />);
 
 describe('ContentBlockRenderer', () => {
   it('renders a text block', () => {
@@ -55,14 +53,15 @@ describe('ContentBlockRenderer', () => {
 });
 
 describe('MessageContent', () => {
-  const baseMsg = (overrides: Partial<SessionMessage>): SessionMessage => ({
-    id: 1,
-    session_id: 's1',
-    role: 'assistant',
-    content: '',
-    metadata: {},
-    ...overrides,
-  } as SessionMessage);
+  const baseMsg = (overrides: Partial<SessionMessage>): SessionMessage =>
+    ({
+      id: 1,
+      session_id: 's1',
+      role: 'assistant',
+      content: '',
+      metadata: {},
+      ...overrides,
+    }) as SessionMessage;
 
   it('renders structured content_blocks when present', () => {
     render(

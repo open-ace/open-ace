@@ -59,6 +59,13 @@ class RemoteSessionManager:
         self._user_repo = UserRepository()
         # Cache user names to avoid repeated lookups
         self._user_name_cache: dict[int, str] = {}
+        # Cache of session_id -> is_autonomous_workflow_session. The inputs to
+        # is_autonomous_workflow_session (session_type + context.workflow_id)
+        # are set at session creation and immutable for the session lifetime, so
+        # the flag is computed once per session instead of on every stdout line
+        # (the accumulate path runs per streaming JSON chunk). Guarded by
+        # _buffer_lock since multiple SSE reader threads can touch it.
+        self._autonomous_cache: dict[str, bool] = {}
         # Persisted run/event timeline recorder. No-op when the feature is
         # disabled (run_timeline.enabled=false); see app/modules/workspace/run_timeline.
         self._run_recorder = get_run_recorder()
@@ -85,14 +92,24 @@ class RemoteSessionManager:
         ``message_count``. This guards the shared ``process_session_output``
         path so the autonomous evidence policy is additive rather than a
         silent change to interactive session semantics.
+
+        The flag depends only on ``session_type`` and ``context.workflow_id``,
+        both set at session creation and immutable for the session lifetime, so
+        the result is memoized in ``_autonomous_cache`` to avoid a DB round-trip
+        on every streaming JSON line (the accumulate path is per-line).
         """
+        with self._buffer_lock:
+            cached = self._autonomous_cache.get(session_id)
+        if cached is not None:
+            return cached
         try:
             session = self._session_manager.get_session(session_id)
         except Exception:
             return False
-        if session is None:
-            return False
-        return is_autonomous_workflow_session(session)
+        result = bool(session) and is_autonomous_workflow_session(session)
+        with self._buffer_lock:
+            self._autonomous_cache[session_id] = result
+        return result
 
     def _get_policy_evaluator(self):
         """Return the policy evaluator, lazily restoring it for lightweight test doubles."""
@@ -1082,10 +1099,9 @@ class RemoteSessionManager:
                 with self._buffer_lock:
                     buf = self._assistant_text_buffer.get(session_id, "")
                     self._assistant_text_buffer[session_id] = buf + combined
-                    if has_text or is_autonomous:
-                        blocks_buf = self._content_blocks_buffer.get(session_id, [])
-                        blocks_buf.extend(structured_blocks)
-                        self._content_blocks_buffer[session_id] = blocks_buf
+                    blocks_buf = self._content_blocks_buffer.get(session_id, [])
+                    blocks_buf.extend(structured_blocks)
+                    self._content_blocks_buffer[session_id] = blocks_buf
 
         elif msg_type == "message":
             role = parsed.get("role")
@@ -1117,10 +1133,9 @@ class RemoteSessionManager:
                         with self._buffer_lock:
                             buf = self._assistant_text_buffer.get(session_id, "")
                             self._assistant_text_buffer[session_id] = buf + "".join(text_parts)
-                            if has_text or is_autonomous:
-                                blocks_buf = self._content_blocks_buffer.get(session_id, [])
-                                blocks_buf.extend(structured_blocks)
-                                self._content_blocks_buffer[session_id] = blocks_buf
+                            blocks_buf = self._content_blocks_buffer.get(session_id, [])
+                            blocks_buf.extend(structured_blocks)
+                            self._content_blocks_buffer[session_id] = blocks_buf
 
         elif msg_type == "user":
             # Claude stream-json reports command results as user-message
@@ -1250,8 +1265,8 @@ class RemoteSessionManager:
         # visible assistant text; tool/thinking-only turns are dropped (no
         # empty bubble, no message_count inflation). Autonomous workflow
         # sessions also persist block-only turns as structured evidence.
-        keep_blocks = self._is_autonomous_session(session_id)
-        if text.strip() or (keep_blocks and blocks):
+        # Short-circuit the autonomous lookup for the common text-turn case.
+        if text.strip() or (blocks and self._is_autonomous_session(session_id)):
             metadata = {}
             if blocks:
                 metadata["content_blocks"] = blocks
