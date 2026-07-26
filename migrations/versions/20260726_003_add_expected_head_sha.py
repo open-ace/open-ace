@@ -1,7 +1,7 @@
 """Add expected_head_sha to autonomous_workflows
 
-Revision ID: 20260726_002_add_expected_head_sha
-Revises: 20260726_001_add_worktree_transition_journal
+Revision ID: 20260726_003_add_expected_head_sha
+Revises: 20260726_002_add_command_execution_evidence
 Create Date: 2026-07-26
 
 Issue: #2042
@@ -24,8 +24,8 @@ from alembic import op
 
 log = logging.getLogger(__name__)
 
-revision: str = "20260726_002_add_expected_head_sha"
-down_revision: str | None = "20260726_001_add_worktree_transition_journal"
+revision: str = "20260726_003_add_expected_head_sha"
+down_revision: str | None = "20260726_002_add_command_execution_evidence"
 branch_labels: str | None = None
 depends_on: str | None = None
 
