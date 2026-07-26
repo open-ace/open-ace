@@ -2226,11 +2226,12 @@ def test_review_fix_commits_dirty_worktree_instead_of_refusing():
     # Fix agent must actually have been invoked (proves we proceeded past guard)
     orch._run_agent_with_context_recovery.assert_called_once()
     # Must NOT have failed with the old "worktree already had uncommitted
-    # changes" refusal message
+    # changes" refusal message. repo.update_workflow(workflow_id, updates) →
+    # args[1] is the updates dict (args[0] is the workflow_id string).
     failed_updates = [
-        call.args[0]
+        call.args[1]
         for call in orch.repo.update_workflow.call_args_list
-        if call.args[0].get("status") == "failed"
+        if len(call.args) > 1 and call.args[1].get("status") == "failed"
     ]
     for update in failed_updates:
         assert "worktree already had uncommitted changes" not in update.get("error_message", "")

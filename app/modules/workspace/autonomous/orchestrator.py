@@ -1886,7 +1886,8 @@ class AutonomousOrchestrator:
                             expected_branch,
                         )
                         main_gh.remove_worktree(canonical)
-                        # Recreate with correct branch
+                        # Recreate with correct branch. Issue #2042: restore to
+                        # the authoritative head, not origin/main.
                         branch_check = main_gh._run_git(
                             ["show-ref", "--verify", "--quiet", f"refs/heads/{expected_branch}"],
                             check=False,
@@ -1903,8 +1904,18 @@ class AutonomousOrchestrator:
                         if branch_check.returncode == 0 or remote_check.returncode == 0:
                             main_gh._run_git(["worktree", "add", canonical, expected_branch])
                         else:
+                            # Branch gone — fail closed without a verified head
+                            # instead of silently rebuilding from origin/main.
+                            head_sha, decision, head_meta = self._resolve_recovery_head(main_gh, wf)
+                            if not head_sha:
+                                self._fail_recovery_closed(
+                                    wf, canonical, decision, head_meta, "", ""
+                                )
+                                raise RuntimeError(
+                                    f"Worktree branch-mismatch recovery fail-closed: {decision}"
+                                )
                             main_gh._run_git(
-                                ["worktree", "add", "-b", expected_branch, canonical, "origin/main"]
+                                ["worktree", "add", "-b", expected_branch, canonical, head_sha]
                             )
                         self._create_milestone(
                             phase=wf.get("current_phase", "preparation"),
@@ -1925,8 +1936,12 @@ class AutonomousOrchestrator:
                     logger.warning("Branch verification failed: %s", e)
             return canonical
 
-        # Worktree missing — recreate from the main repo.
+        # Worktree missing — recreate at the authoritative trusted commit.
+        # Issue #2042: never silently rebuild from the moving origin/main tip;
+        # restore to the verified PR head, recorded expected_head_sha, or (last
+        # resort) base_commit_sha. Divergence or missing evidence fails closed.
         branch_name = wf.get("branch_name") or f"auto-dev/{self._workflow_id[:12]}"
+        recovery_meta: dict = {}
         try:
             main_gh._run_git(["fetch", "origin", "main"])
             # Does the branch still exist locally or on origin?
@@ -1938,14 +1953,41 @@ class AutonomousOrchestrator:
                 ["show-ref", "--verify", "--quiet", f"refs/remotes/origin/{branch_name}"],
                 check=False,
             )
-            if branch_check.returncode == 0 or remote_check.returncode == 0:
+            branch_survives = branch_check.returncode == 0 or remote_check.returncode == 0
+            # Resolve the authoritative recovery head regardless of whether the
+            # branch survives, so we can also validate a surviving branch below.
+            head_sha, decision, head_meta = self._resolve_recovery_head(main_gh, wf)
+            recovery_meta = head_meta
+            if branch_survives:
                 # Branch survives (local or remote) — attach a worktree to it
                 # without recreating the branch. For a remote-only branch, git
                 # auto-creates a local tracking branch in this step.
                 main_gh._run_git(["worktree", "add", canonical, branch_name])
+                # Issue #1999 guard: a surviving local branch may have drifted
+                # ahead of the verified head (unpushed commits). If we have a
+                # confirmed expected_head_sha and the attached HEAD does not
+                # match, fail closed rather than continuing on a stale branch.
+                if head_sha and decision in ("verified_pr_head", "expected_head"):
+                    wt_gh = GitHubOps(canonical)
+                    try:
+                        local_head = wt_gh.get_current_commit()
+                    except Exception:
+                        local_head = ""
+                    if local_head and local_head != head_sha:
+                        self._fail_recovery_closed(
+                            wf, canonical, decision, head_meta, local_head, head_sha
+                        )
+                        raise RuntimeError(
+                            f"Worktree recovery fail-closed: local branch {local_head[:8]} "
+                            f"diverges from verified head {head_sha[:8]} ({decision})"
+                        )
             else:
-                # Neither worktree nor branch — start fresh from origin/main.
-                main_gh._run_git(["worktree", "add", "-b", branch_name, canonical, "origin/main"])
+                # Neither worktree nor branch — recreate from the authoritative
+                # head, never from origin/main. No verified head → fail closed.
+                if not head_sha:
+                    self._fail_recovery_closed(wf, canonical, decision, head_meta, "", "")
+                    raise RuntimeError(f"Worktree recovery fail-closed: {decision}")
+                main_gh._run_git(["worktree", "add", "-b", branch_name, canonical, head_sha])
         except GitHubOpsError as e:
             logger.error("Failed to recreate worktree at %s: %s", canonical, e)
             raise
@@ -1956,11 +1998,60 @@ class AutonomousOrchestrator:
             milestone_type="worktree_restored",
             status="completed",
             title=f"Worktree restored at {os.path.basename(canonical)}",
+            metadata=json.dumps(
+                {
+                    "decision": decision,
+                    "head_sha": head_sha,
+                    "evidence": recovery_meta,
+                },
+                ensure_ascii=False,
+            ),
         )
-        logger.info("Restored worktree at %s on branch %s", canonical, branch_name)
+        logger.info(
+            "Restored worktree at %s on branch %s (decision=%s)", canonical, branch_name, decision
+        )
         # Reset cached gh so it picks up the restored worktree path.
         self._gh = None
         return canonical
+
+    def _fail_recovery_closed(
+        self,
+        wf: dict,
+        canonical: str,
+        decision: str,
+        evidence_meta: dict,
+        local_sha: str,
+        expected_sha: str,
+    ) -> None:
+        """Record a fail-closed recovery outcome and mark the workflow failed.
+
+        Issue #2042: divergence or missing evidence must pause the workflow
+        rather than guess a recovery commit. Writes a ``recovery_evidence_missing``
+        milestone with the full evidence trail so the failure is auditable.
+        """
+        logger.error(
+            "Workflow %s: worktree recovery fail-closed (decision=%s, " "local=%s, expected=%s)",
+            self._workflow_id,
+            decision,
+            (local_sha or "<none>")[:8],
+            (expected_sha or "<none>")[:8],
+        )
+        self._update_workflow({"status": "failed"})
+        self._create_milestone(
+            phase=wf.get("current_phase", "preparation"),
+            milestone_type="recovery_evidence_missing",
+            status="failed",
+            title="Worktree recovery failed: no verified head",
+            metadata=json.dumps(
+                {
+                    "decision": decision,
+                    "local_sha": local_sha,
+                    "expected_sha": expected_sha,
+                    "evidence": evidence_meta,
+                },
+                ensure_ascii=False,
+            ),
+        )
 
     def _emit(self, event_type: str, data: dict):
         """Emit a timeline event."""
@@ -2864,6 +2955,11 @@ class AutonomousOrchestrator:
             ),
         )
 
+        # Record the trusted head only after a successful commit+push (the
+        # static helper has no `self`; this is the caller that owns state).
+        if sha_changed and not push_error:
+            self._record_trusted_head(gh, pushed=True, sha=commit_sha)
+
         try:
             diff_stats = gh.get_commit_diff_stats(commit_sha) if commit_sha else {}
         except Exception:
@@ -3681,6 +3777,116 @@ class AutonomousOrchestrator:
         ref = branch_name or self.workflow.get("branch_name", "")
         evidence = self._evidence.verify_commit_available(gh, pr_head_sha, ref)
         return evidence.verdict is Verdict.CONFIRMED
+
+    def _record_trusted_head(
+        self, gh: GitHubOps, *, pushed: bool = False, sha: str | None = None
+    ) -> str | None:
+        """Persist the current HEAD as the workflow's last trusted commit.
+
+        Called after every orchestrator-owned commit (and, when ``pushed=True``,
+        after GitHub has accepted the push). Stores ``expected_head_sha`` so a
+        later worktree recovery restores to this exact commit instead of falling
+        back to ``origin/main`` (Issue #2042). Returns the recorded SHA, or None
+        if HEAD could not be read (logged, never raises).
+
+        ``sha`` lets a caller pass an already-read commit SHA instead of
+        re-reading HEAD — avoids a redundant git call and keeps test
+        ``side_effect`` sequences aligned when the caller already read the SHA.
+        """
+        if sha is None:
+            try:
+                sha = gh.get_current_commit()
+            except Exception as e:
+                logger.warning(
+                    "Workflow %s: cannot read HEAD to record trusted head: %s",
+                    self._workflow_id,
+                    e,
+                )
+                return None
+        if sha:
+            self._update_workflow({"expected_head_sha": sha})
+            logger.info(
+                "Workflow %s: recorded trusted head %s (pushed=%s)",
+                self._workflow_id,
+                sha[:8],
+                pushed,
+            )
+        return sha
+
+    def _resolve_recovery_head(self, main_gh: GitHubOps, wf: dict) -> tuple[str | None, str, dict]:
+        """Determine the authoritative commit to restore a missing worktree to.
+
+        Four-state decision tree (Issue #2042 §3), fail-closed:
+
+        1. Existing PR → ``resolve_verified_pr_head`` (external authority).
+        2. No PR, has ``expected_head_sha`` → verify the object is local.
+        3. No PR, no expected head, has ``base_commit_sha`` → verify local.
+        4. None of the above, or any unverifiable/divergent signal → pause.
+
+        Returns ``(head_sha_or_None, decision, evidence_metadata)``. A None head
+        means indeterminate: the caller must fail closed, never guess. The
+        ``evidence_metadata`` dict carries the :class:`Evidence` audit trail.
+        """
+        branch_name = wf.get("branch_name", "")
+        pr_number = wf.get("github_pr_number")
+
+        # 1. Existing PR — verified GitHub PR head is the external authority.
+        if pr_number:
+            ev = self._evidence.resolve_verified_pr_head(main_gh, int(pr_number), branch_name)
+            if ev.verdict is Verdict.CONFIRMED:
+                return ev.commit_shas[0], "verified_pr_head", ev.to_dict()
+            return (
+                None,
+                "indeterminate_pause",
+                {
+                    "decision": "indeterminate_pause",
+                    "reason": f"PR head not verifiable: {ev.reason}",
+                    "evidence": ev.to_dict(),
+                },
+            )
+
+        # 2. No PR, but a trusted head was recorded.
+        expected = wf.get("expected_head_sha")
+        if expected:
+            ev = self._evidence.verify_commit_available(main_gh, expected, branch_name)
+            if ev.verdict is Verdict.CONFIRMED:
+                return expected, "expected_head", ev.to_dict()
+            return (
+                None,
+                "indeterminate_pause",
+                {
+                    "decision": "indeterminate_pause",
+                    "reason": f"expected_head_sha unavailable: {ev.reason}",
+                    "evidence": ev.to_dict(),
+                },
+            )
+
+        # 3. No trusted head yet — fall back to the immutable base.
+        base = wf.get("base_commit_sha")
+        if base:
+            ev = self._evidence.verify_commit_available(main_gh, base, branch_name)
+            if ev.verdict is Verdict.CONFIRMED:
+                return base, "base_commit", ev.to_dict()
+            return (
+                None,
+                "indeterminate_pause",
+                {
+                    "decision": "indeterminate_pause",
+                    "reason": f"base_commit_sha unavailable: {ev.reason}",
+                    "evidence": ev.to_dict(),
+                },
+            )
+
+        # 4. No evidence at all — must not guess.
+        return (
+            None,
+            "indeterminate_pause",
+            {
+                "decision": "indeterminate_pause",
+                "reason": "no PR, no expected_head_sha, no base_commit_sha",
+                "evidence": {},
+            },
+        )
 
     def _start_ci_repair_round(self, wf: dict, pr_number: int, failed_checks: list[dict]) -> None:
         """Repair merge-phase CI failures in-place on the existing PR branch."""
@@ -6474,6 +6680,7 @@ class AutonomousOrchestrator:
                         no_verify=True,
                     )
                     commit_sha = gh.get_current_commit()
+                    self._record_trusted_head(gh, sha=commit_sha)
                     sha_changed = True
                     try:
                         diff_stats = (
@@ -8079,6 +8286,7 @@ class AutonomousOrchestrator:
                     no_verify=True,
                 )
                 staged_sha = gh.get_current_commit()
+                self._record_trusted_head(gh, sha=staged_sha)
                 # Validate the pre-existing changes against the autonomous
                 # scope guard. If they touch files outside the allowed scope
                 # (e.g. unrelated test/manual edits), refuse — do NOT push
@@ -8180,6 +8388,7 @@ class AutonomousOrchestrator:
                         no_verify=True,
                     )
                     commit_sha = gh.get_current_commit()
+                    self._record_trusted_head(gh, sha=commit_sha)
                     if not commit_sha or commit_sha == commit_before:
                         raise RuntimeError("review-fix commit did not advance branch HEAD")
                     sha_changed = True
@@ -9229,6 +9438,7 @@ class AutonomousOrchestrator:
                         f"Conflict resolution scope rejected before push: {scope_error}"
                     )
                 wt_gh.git_push(branch=branch_name, force_with_lease=True)
+                self._record_trusted_head(wt_gh, pushed=True, sha=resolved_head)
             except Exception as exc:
                 if conflict_ms_id:
                     self.repo.update_milestone(

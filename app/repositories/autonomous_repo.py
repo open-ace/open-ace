@@ -50,6 +50,7 @@ class AutonomousWorkflowRepository:
         "batch_order",
         "batch_total",
         "base_commit_sha",
+        "expected_head_sha",
         "auto_merge",
         "definition_snapshot",
         "current_phase",
