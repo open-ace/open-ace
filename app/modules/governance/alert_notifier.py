@@ -1091,6 +1091,33 @@ class AlertNotifier:
                 final=True,
             )
             return
+        # Delivery-identity guard (review P1-a): a ``webhook_deliveries`` row
+        # carries the hash of the webhook URL configured at enqueue time. If the
+        # user has since repointed notifications at a different endpoint, do NOT
+        # forward a historical alert to the new receiver — that would break
+        # delivery identity and could leak alert content across teams/tenants
+        # (e.g. a webhook moved from team A's bot to team B's). Dead-letter the
+        # row; only a hash match (or a legacy null hash) proceeds to the POST.
+        enqueued_hash = row["webhook_url_hash"]
+        if enqueued_hash:
+            current_prefs = self.get_notification_preferences(row["user_id"])
+            current_url = current_prefs.webhook_url if current_prefs else None
+            current_hash = _hash_webhook_url(current_url)
+            if current_hash and current_hash != enqueued_hash:
+                logger.info(
+                    "Dead-lettering delivery %s (alert %s): webhook URL changed "
+                    "since enqueue — preserving delivery identity, not forwarding "
+                    "to the new receiver",
+                    delivery_id,
+                    alert.alert_id,
+                )
+                self._delivery_set_outcome(
+                    delivery_id,
+                    DeliveryResult(retriable=False, error_type="config_changed"),
+                    attempt=attempt,
+                    final=True,
+                )
+                return
         result = self._send_webhook_notification(alert, row["user_id"])
         # _send_webhook_notification applies the prefs gate (disabled / no URL /
         # type filtered → skipped) and never raises.
@@ -1431,6 +1458,17 @@ class AlertNotifier:
         Persisting first would add a DB round-trip before the POST, deferring the
         (time-sensitive, mocked-in-tests) preference read and letting a daemon
         thread deliver one test's alert during another test's window.
+
+        At-most-best-effort first attempt: because the delivery-state row is
+        written only AFTER a failed POST, a process crash between the failed POST
+        and the ``_delivery_enqueue`` commit loses that first-attempt failure —
+        the reaper has nothing to recover. This is an intentional trade-off: the
+        success path stays DB-free, and the common case (POST resolves) never
+        writes a row. Durable retry with reaper recovery begins only once a row
+        exists. A crash-safe first attempt would require persisting an
+        ``in_flight`` row before the POST plus a receiver-side idempotency key to
+        tolerate the resulting possible duplicate, which is out of scope here
+        (review P2).
         """
 
         def _worker():

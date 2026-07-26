@@ -58,6 +58,7 @@ class TestCleanupWorktreeAndBranch:
         wf = _make_workflow()
         orch = _bare_orchestrator(wf)
         instance = mock_gh_cls.return_value
+        instance.has_uncommitted_changes.return_value = False  # clean worktree
 
         ok = orch._cleanup_worktree_and_branch("failed")
 
@@ -74,6 +75,7 @@ class TestCleanupWorktreeAndBranch:
         wf = _make_workflow()
         orch = _bare_orchestrator(wf)
         instance = mock_gh_cls.return_value
+        instance.has_uncommitted_changes.return_value = False  # clean worktree
 
         ok = orch._cleanup_worktree_and_branch(
             "completed", remove_worktree=True, remove_branch=True
@@ -91,6 +93,7 @@ class TestCleanupWorktreeAndBranch:
         wf = _make_workflow()
         orch = _bare_orchestrator(wf)
         instance = mock_gh_cls.return_value
+        instance.has_uncommitted_changes.return_value = False  # clean → reaches remove
         instance.remove_worktree.side_effect = GitHubOpsError("boom")
 
         # Must not raise; cleanup is best-effort.
@@ -117,6 +120,7 @@ class TestMarkFailed:
         wf = _make_workflow()
         orch = _bare_orchestrator(wf)
         instance = mock_gh_cls.return_value
+        instance.has_uncommitted_changes.return_value = False  # clean worktree
 
         orch._mark_failed("kaboom", phase="development")
 
@@ -136,6 +140,7 @@ class TestMarkFailed:
     def test_mark_failed_emits_error(self, mock_gh_cls):
         wf = _make_workflow()
         orch = _bare_orchestrator(wf)
+        mock_gh_cls.return_value.has_uncommitted_changes.return_value = False
 
         orch._mark_failed("kaboom", phase="development")
 
@@ -190,3 +195,56 @@ class TestAdvanceTimingDimension:
         orch, mock_mark_failed = self._advance_with_phase_error(wf, exc)
 
         mock_mark_failed.assert_called_once()
+
+
+class TestDirtyWorktreeGuard:
+    """Review P1-b: a dirty worktree is retained for debug, never force-removed.
+
+    ``git worktree remove --force`` discards uncommitted/untracked state that the
+    branch (committed content only) cannot preserve and ``_ensure_worktree``
+    cannot recreate on retry. Cleanup detects dirtiness and keeps the worktree +
+    branch, recording why; only a clean worktree (committed state preserved) is
+    reclaimed. Full reclamation of a retained worktree is left to the #2043
+    reconciler / an operator.
+    """
+
+    @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
+    def test_terminal_failure_does_not_force_remove_dirty_worktree(self, mock_gh_cls):
+        wf = _make_workflow()
+        orch = _bare_orchestrator(wf)
+        instance = mock_gh_cls.return_value
+        instance.has_uncommitted_changes.return_value = True  # dirty
+
+        ok = orch._cleanup_worktree_and_branch("failed")
+
+        assert ok is False  # nothing removed — intentional retention
+        instance.remove_worktree.assert_not_called()
+        instance.delete_branch.assert_not_called()
+        updates = _update_calls(orch)
+        # worktree_path is NOT cleared (worktree retained on disk for debug).
+        assert not any(u.get("worktree_path") == "" for u in updates)
+        # The reason is appended to error_message, naming the retained path.
+        err_updates = [u["error_message"] for u in updates if "error_message" in u]
+        assert err_updates
+        assert "/tmp/test-wt" in err_updates[-1]
+        assert "uncommitted" in err_updates[-1]
+
+    @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
+    def test_pre_pr_push_failure_can_cleanup_after_commit_is_preserved(self, mock_gh_cls):
+        """A clean worktree (state already committed) is safe to reclaim.
+
+        Models the original #1831 scenario — a pre-PR push hard-fail AFTER the
+        agent committed: nothing uncommitted would be lost, so the worktree dir
+        can be reclaimed (the branch still keeps the committed work).
+        """
+        wf = _make_workflow(current_phase="push")
+        orch = _bare_orchestrator(wf)
+        instance = mock_gh_cls.return_value
+        instance.has_uncommitted_changes.return_value = False  # clean (committed)
+
+        ok = orch._cleanup_worktree_and_branch("failed")
+
+        assert ok is True
+        instance.remove_worktree.assert_called_once_with("/tmp/test-wt")
+        updates = _update_calls(orch)
+        assert {"worktree_path": ""} in updates

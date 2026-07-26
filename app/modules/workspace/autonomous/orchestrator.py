@@ -4158,6 +4158,17 @@ class AutonomousOrchestrator:
         so branch deletion is reserved for the post-merge success path
         (``remove_branch=True``), where the PR is already merged.
 
+        Dirty-worktree guard (review P1-b): on the terminal-FAILURE path
+        (``reason="failed"``) a dirty worktree (uncommitted edits or untracked
+        files) is retained rather than force-removed — the branch only holds
+        committed content, so force-removing would discard working-tree state
+        that ``_ensure_worktree`` cannot recreate on retry. The worktree and
+        branch are kept on disk and the reason is appended to ``error_message``;
+        this method returns ``False`` to signal nothing was reclaimed. The
+        completed/merged path (``reason="completed"``) is expected clean and is
+        reclaimed directly. Full reclamation of a retained dirty worktree is
+        handled later by the #2043 reconciler or an operator, not here.
+
         Best-effort: failures are logged, never raised, so cleanup can't mask the
         failure that triggered it. ``worktree_path``/``branch_name`` are cleared
         in the DB only after the corresponding removal succeeds. Returns whether
@@ -4180,6 +4191,41 @@ class AutonomousOrchestrator:
                 logger.warning("Could not resolve system_account for cleanup: %s", e)
         try:
             if remove_worktree and worktree_path:
+                # P1-b dirty guard — terminal-FAILURE path only (reason="failed").
+                # A completed/merged workflow has committed its working state, so
+                # its worktree is expected clean and is reclaimed directly. Only a
+                # failure-path worktree is protected from force-removal: it may
+                # hold uncommitted agent edits, failed-test fixes, conflict/
+                # diagnostic state, or untracked artifacts the branch cannot
+                # preserve and ``_ensure_worktree`` cannot recreate on retry.
+                # Reclamation of a retained dirty worktree is left to the #2043
+                # reconciler / an operator; this method only guarantees it does
+                # not destroy state.
+                if reason == "failed":
+                    wt_gh = GitHubOps(worktree_path, system_account=system_account)
+                    if wt_gh.has_uncommitted_changes():
+                        logger.warning(
+                            "Keeping dirty worktree %s (workflow %s) for debug "
+                            "after terminal failure — force-remove would lose "
+                            "uncommitted/untracked state; branch=%s also retained",
+                            worktree_path,
+                            self._workflow_id[:8],
+                            branch_name or "(none)",
+                        )
+                        existing_err = wf.get("error_message") or ""
+                        note = (
+                            f"[worktree kept at {worktree_path}: uncommitted "
+                            "changes preserved for debug]"
+                        )
+                        self._update_workflow(
+                            {"error_message": (existing_err + " " + note).strip()}
+                            if existing_err
+                            else {"error_message": note}
+                        )
+                        # Intentional retention: nothing was removed. Leave
+                        # worktree_path/branch_name set so the retained state is
+                        # visible to operators and a future #2043 reconciler.
+                        return False
                 # Must use the main repo's gh — a worktree can't remove itself.
                 main_gh = GitHubOps(project_path, system_account=system_account)
                 main_gh.remove_worktree(worktree_path)
@@ -4219,6 +4265,12 @@ class AutonomousOrchestrator:
         worktree for the next cycle; only terminal failures reclaim it. The
         branch is kept (``keep_for_debug``) — ``_ensure_worktree`` recreates a
         removed worktree on retry, but a deleted branch is gone for good.
+
+        Dirty-worktree exception (review P1-b): ``_cleanup_worktree_and_branch``
+        retains — never force-removes — a worktree that still holds uncommitted
+        or untracked changes, recording the reason in ``error_message``. So a
+        terminal failure with a dirty worktree keeps the working-tree state for
+        debug; only clean worktrees are actually reclaimed here.
         """
         self._update_workflow(
             {

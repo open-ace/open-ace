@@ -350,3 +350,110 @@ class TestCleanupAndCascade:
 
         assert notifier.delete_alert("del-1") is True
         assert _all_delivery_rows(notifier) == []
+
+
+# ---------------------------------------------------------------------------
+# Delivery identity (review P1-a)
+# ---------------------------------------------------------------------------
+
+
+class TestDeliveryIdentity:
+    """A delivery must never be retried to a later-configured webhook.
+
+    ``webhook_deliveries`` pins each row to the hash of the URL configured at
+    enqueue time; if the user later repoints notifications at a different
+    endpoint, retrying the historical alert there would break delivery identity
+    and could leak alert content across teams/tenants. The row is dead-lettered
+    (``config_changed``) instead of POSTing.
+    """
+
+    def _force_due(self, notifier, delivery_id):
+        conn = notifier._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE webhook_deliveries SET status='pending', next_retry_at=NULL WHERE id=?",
+            (delivery_id,),
+        )
+        conn.commit()
+        conn.close()
+
+    def test_pending_delivery_is_not_sent_to_changed_webhook_url(self, notifier):
+        old_url = "https://open.feishu.cn/open-apis/bot/v2/hook/TOKEN-A"
+        new_url = "https://open.feishu.cn/open-apis/bot/v2/hook/TOKEN-B"
+        notifier.set_notification_preferences(
+            NotificationPreference(
+                user_id=1, push_enabled=True, webhook_url=old_url, alert_types=["quota"]
+            )
+        )
+        alert = _insert_alert_direct(notifier, 1, "p1a-changed")
+        did = notifier._delivery_enqueue(alert, 1)
+        # Row pinned to the OLD receiver's hash at enqueue time.
+        assert _all_delivery_rows(notifier)[0]["webhook_url_hash"] == _hash_webhook_url(old_url)
+
+        # Repoint notifications at a different webhook (e.g. another team/tenant).
+        notifier.set_notification_preferences(
+            NotificationPreference(
+                user_id=1, push_enabled=True, webhook_url=new_url, alert_types=["quota"]
+            )
+        )
+        self._force_due(notifier, did)
+
+        with patch.object(notifier, "_send_webhook_notification") as mock_send:
+            attempted = notifier.process_due_deliveries()
+            # No POST — the historical alert is NOT forwarded to the new receiver.
+            mock_send.assert_not_called()
+
+        assert attempted == 1
+        row = _all_delivery_rows(notifier)[0]
+        assert row["status"] == "dead"
+        assert row["last_error_type"] == "config_changed"
+
+    def test_pending_delivery_proceeds_when_webhook_unchanged(self, notifier):
+        """Guard must not misfire when the URL is unchanged — retry proceeds."""
+        url = "https://open.feishu.cn/open-apis/bot/v2/hook/TOKEN-A"
+        notifier.set_notification_preferences(
+            NotificationPreference(
+                user_id=1, push_enabled=True, webhook_url=url, alert_types=["quota"]
+            )
+        )
+        alert = _insert_alert_direct(notifier, 1, "p1a-same")
+        did = notifier._delivery_enqueue(alert, 1)
+        self._force_due(notifier, did)
+
+        with patch.object(
+            notifier, "_send_webhook_notification", return_value=DeliveryResult(delivered=True)
+        ):
+            notifier.process_due_deliveries()
+
+        assert _all_delivery_rows(notifier)[0]["status"] == "delivered"
+
+    def test_null_hash_legacy_row_still_retries(self, notifier):
+        """A legacy row with a null hash (pre-guard) is not blocked — it retries."""
+        url = "https://open.feishu.cn/open-apis/bot/v2/hook/TOKEN-A"
+        notifier.set_notification_preferences(
+            NotificationPreference(
+                user_id=1, push_enabled=True, webhook_url=url, alert_types=["quota"]
+            )
+        )
+        _insert_alert_direct(notifier, 1, "p1a-legacy")
+        # Insert a row directly with a NULL hash (as produced by old code paths
+        # or an enqueue where no URL was configured).
+        conn = notifier._get_connection()
+        cursor = conn.cursor()
+        now = datetime.utcnow().isoformat()
+        cursor.execute(
+            "INSERT INTO webhook_deliveries "
+            "(alert_id, user_id, webhook_url_hash, status, attempts, max_attempts, "
+            " next_retry_at, created_at, updated_at) "
+            "VALUES ('p1a-legacy', 1, NULL, 'pending', 0, 3, NULL, ?, ?)",
+            (now, now),
+        )
+        conn.commit()
+        conn.close()
+
+        with patch.object(
+            notifier, "_send_webhook_notification", return_value=DeliveryResult(delivered=True)
+        ):
+            notifier.process_due_deliveries()
+
+        assert _all_delivery_rows(notifier)[0]["status"] == "delivered"
