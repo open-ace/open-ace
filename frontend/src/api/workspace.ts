@@ -160,7 +160,9 @@ export const workspaceApi = {
    * Refresh an expiring or expired WebUI token
    * Called automatically when token is about to expire
    */
-  async refreshWebUIToken(token: string): Promise<{ success: boolean; token?: string; error?: string }> {
+  async refreshWebUIToken(
+    token: string
+  ): Promise<{ success: boolean; token?: string; error?: string }> {
     try {
       const response = await apiClient.post<{ success: boolean; token?: string; error?: string }>(
         '/api/workspace/refresh-webui-token',
