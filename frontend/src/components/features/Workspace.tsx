@@ -224,8 +224,11 @@ export const Workspace: React.FC = () => {
         const now = Math.floor(Date.now() / 1000);
         const remaining = 1800 - (now - timestamp); // 30 min TTL
 
-        if (remaining < 300) { // Less than 5 minutes remaining
-          console.log(`[Workspace] Token expiring (${remaining}s), refreshing before new session...`);
+        if (remaining < 300) {
+          // Less than 5 minutes remaining
+          console.log(
+            `[Workspace] Token expiring (${remaining}s), refreshing before new session...`
+          );
           const result = await workspaceApi.getUserWebUIUrl();
           if (result.success) {
             setUserWebUI(result);
