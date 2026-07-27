@@ -1011,6 +1011,57 @@ class GitHubOps:
             "mergeable_state": str(data.get("mergeable_state") or "").strip().lower(),
         }
 
+    def get_branch_protection(self, branch: str = "main") -> dict:
+        """Return the branch-protection rules for ``branch`` (issue #2045 Phase B).
+
+        Used by the merge-readiness classifier to distinguish required from
+        optional CI checks. Only ``required_status_checks`` is unpacked — that
+        is the only field the classifier consumes, so the rest of the protection
+        payload (required_reviews, enforce_admins, restrictions, ...) is ignored.
+
+        A 404 (branch has no protection rules) returns an empty required-contexts
+        list rather than raising: "no required checks" is a valid classification
+        — every failing check is optional — not a probe failure.
+
+        Any other non-zero exit (403 permission, 5xx, network) raises
+        :class:`GitHubOpsError` so the classifier fails closed to
+        ``indeterminate`` instead of guessing required/optional semantics it
+        cannot observe. This is the Phase B guard for #1989-class incidents
+        where an un-verifiable signal must never silently drive an irreversible
+        merge/repair decision.
+        """
+        repo = self.get_repo_name()
+        result = self._run_gh(
+            self._gh_api_args([f"repos/{repo}/branches/{branch}/protection"]),
+            repo_scoped=False,
+            check=False,
+        )
+        if result.returncode != 0:
+            stderr = (result.stderr or "").strip().lower()
+            # gh api surfaces HTTP 404 for an unprotected branch; that is a
+            # valid "no required checks" answer, not a probe failure.
+            if "404" in stderr or "not found" in stderr or "not protected" in stderr:
+                return {"required_status_checks": {"contexts": []}}
+            raise GitHubOpsError(
+                f"get_branch_protection({branch}) failed (exit {result.returncode}): "
+                f"{(result.stderr or '').strip()}"
+            )
+        data = json.loads((result.stdout or "").strip() or "{}")
+        rsc = data.get("required_status_checks") or {}
+        # GitHub returns the legacy string ``contexts`` array and/or the newer
+        # ``checks`` array of {context, integration_id, ...} objects. Merge both
+        # into a flat, de-duplicated required-check-name list.
+        contexts: list[str] = []
+        for ctx in rsc.get("contexts", []) or []:
+            name = ctx.get("context") if isinstance(ctx, dict) else ctx
+            if name and name not in contexts:
+                contexts.append(name)
+        for chk in rsc.get("checks", []) or []:
+            name = chk.get("context") if isinstance(chk, dict) else chk
+            if name and name not in contexts:
+                contexts.append(name)
+        return {"required_status_checks": {"contexts": contexts}}
+
     def find_existing_pr(self, head_branch: str) -> dict | None:
         """Find an existing open PR for a head branch (scoped to base=main).
 

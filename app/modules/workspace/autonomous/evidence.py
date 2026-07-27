@@ -69,6 +69,14 @@ class Evidence:
         commit_shas: SHAs the evidence binds to; the order is method-specific
             (e.g. for ancestry: ``(head, base)``).
         reason: Human-readable explanation of the verdict.
+        classification: Optional method-specific sub-result. Empty for Phase A
+            probes (``verify_*``); Phase B ``classify_merge_readiness`` sets it
+            to one of the 7 merge-readiness labels (``mergeable``,
+            ``pending_required_checks``, ``failing_required_checks``,
+            ``failing_optional_checks``, ``conflict_confirmed``,
+            ``policy_blocked``, ``indeterminate``). ``verdict`` stays tri-state
+            so the fail-closed discipline is uniform; ``classification`` carries
+            the finer action the caller should take.
     """
 
     source: str
@@ -79,6 +87,7 @@ class Evidence:
     verification_method: str
     commit_shas: tuple[str, ...] = ()
     reason: str = ""
+    classification: str = ""
 
     def to_dict(self) -> dict:
         """Serialize to a JSON-friendly dict for milestone/event metadata."""
