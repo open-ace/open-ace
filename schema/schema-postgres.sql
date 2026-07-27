@@ -1615,6 +1615,37 @@ CREATE SEQUENCE tenants_id_seq
     CACHE 1;
 
 ALTER SEQUENCE tenants_id_seq OWNED BY tenants.id;
+CREATE TABLE test_execution_evidence (
+    id integer NOT NULL,
+    command_id text NOT NULL,
+    command_execution_id integer,
+    framework text DEFAULT ''::text NOT NULL,
+    collected integer,
+    passed integer,
+    failed integer,
+    skipped integer,
+    errors integer,
+    selectors text,
+    coverage_scope text,
+    parser text DEFAULT ''::text NOT NULL,
+    parser_confidence text DEFAULT ''::text NOT NULL,
+    verdict text DEFAULT ''::text NOT NULL,
+    session_id text DEFAULT ''::text NOT NULL,
+    workflow_id text DEFAULT ''::text NOT NULL,
+    milestone_id text DEFAULT ''::text NOT NULL,
+    tenant_id integer DEFAULT 1 NOT NULL,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE SEQUENCE test_execution_evidence_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE test_execution_evidence_id_seq OWNED BY test_execution_evidence.id;
 CREATE TABLE tool_account_mapping_rules (
     id integer NOT NULL,
     user_id integer NOT NULL,
@@ -2003,6 +2034,8 @@ ALTER TABLE ONLY tenant_usage ALTER COLUMN id SET DEFAULT nextval('tenant_usage_
 
 ALTER TABLE ONLY tenants ALTER COLUMN id SET DEFAULT nextval('tenants_id_seq'::regclass);
 
+ALTER TABLE ONLY test_execution_evidence ALTER COLUMN id SET DEFAULT nextval('test_execution_evidence_id_seq'::regclass);
+
 ALTER TABLE ONLY tool_account_mapping_rules ALTER COLUMN id SET DEFAULT nextval('tool_account_mapping_rules_id_seq'::regclass);
 
 ALTER TABLE ONLY user_daily_stats ALTER COLUMN id SET DEFAULT nextval('user_daily_stats_id_seq'::regclass);
@@ -2296,6 +2329,9 @@ ALTER TABLE ONLY tenants
 ALTER TABLE ONLY tenants
     ADD CONSTRAINT tenants_slug_key UNIQUE (slug);
 
+ALTER TABLE ONLY test_execution_evidence
+    ADD CONSTRAINT test_execution_evidence_pkey PRIMARY KEY (id);
+
 ALTER TABLE ONLY tool_account_mapping_rules
     ADD CONSTRAINT tool_account_mapping_rules_pkey PRIMARY KEY (id);
 
@@ -2328,6 +2364,9 @@ ALTER TABLE ONLY smtp_settings
 
 ALTER TABLE ONLY tenant_usage
     ADD CONSTRAINT uq_tenant_usage_tenant_date_new UNIQUE (tenant_id, date);
+
+ALTER TABLE ONLY test_execution_evidence
+    ADD CONSTRAINT uq_test_evidence_session_command UNIQUE (session_id, command_id);
 
 ALTER TABLE ONLY usage_summary
     ADD CONSTRAINT uq_usage_summary_tool_host UNIQUE (tool_name, host_name);
@@ -3039,6 +3078,14 @@ CREATE INDEX idx_tenants_slug ON tenants USING btree (slug);
 
 CREATE INDEX idx_tenants_status ON tenants USING btree (status);
 
+CREATE INDEX idx_test_evidence_session_command ON test_execution_evidence USING btree (session_id, command_id);
+
+
+--
+--
+
+CREATE INDEX idx_test_evidence_workflow_milestone ON test_execution_evidence USING btree (workflow_id, milestone_id);
+
 CREATE INDEX idx_tool_accounts_tool_account ON user_tool_accounts USING btree (tool_account);
 
 
@@ -3198,6 +3245,9 @@ ALTER TABLE ONLY autonomous_workflows
 
 ALTER TABLE ONLY consistency_violations
     ADD CONSTRAINT consistency_violations_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE;
+
+ALTER TABLE ONLY test_execution_evidence
+    ADD CONSTRAINT fk_test_evidence_command_execution FOREIGN KEY (command_execution_id) REFERENCES command_execution_evidence(id);
 
 ALTER TABLE ONLY user_daily_stats
     ADD CONSTRAINT fk_user_daily_stats_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
