@@ -36,7 +36,7 @@ from app.modules.workspace.autonomous.command_evidence.types import (
     CommandExecutionEvidence,
     derive_terminal_reason,
 )
-from app.modules.workspace.autonomous.sandbox.provider import require_capabilities
+from app.modules.workspace.autonomous.sandbox.provider import validate_spec_capabilities
 from app.modules.workspace.autonomous.sandbox.types import (
     ExecHandle,
     SandboxCapability,
@@ -164,7 +164,7 @@ class LegacyPosixProvider:
         return _LEGACY_CAPS
 
     def create(self, spec: SandboxSpec) -> SandboxHandle:
-        require_capabilities(_LEGACY_CAPS, spec.required_capabilities)
+        validate_spec_capabilities(_LEGACY_CAPS, spec)
         sandbox_id = uuid.uuid4().hex
         self._status[sandbox_id] = SandboxStatus.CREATED
         return SandboxHandle(

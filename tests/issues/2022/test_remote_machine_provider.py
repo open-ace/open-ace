@@ -26,14 +26,9 @@ from app.modules.workspace.autonomous.sandbox.types import (
     SandboxStatus,
 )
 
-_REMOTE_CAPS = frozenset(
-    {
-        SandboxCapability.PRIVATE_HOME_TMP_XDG,
-        SandboxCapability.FILESYSTEM_ACL,
-        SandboxCapability.CPU_MEM_PIDS_TIME_QUOTA,
-        SandboxCapability.CREDENTIAL_TOKEN_BINDING,
-    }
-)
+# Remote provides NO verifiable isolation (#2078 P1#1) — the remote-agent
+# executor (dict(os.environ) + plain Popen) has no per-task HOME/ACL/cgroup.
+_REMOTE_CAPS = frozenset()
 
 
 class FakeRemoteSessionManager:
@@ -100,18 +95,27 @@ def _turn(**overrides: Any) -> RemoteTurnSpec:
 # ── capabilities + create ──
 
 
-def test_remote_declares_four_capabilities():
+def test_remote_declares_no_isolation_capabilities():
+    # #2078 P1#1: remote-agent provides no verifiable isolation, so Remote
+    # declares an empty capability set (not the Legacy four).
     rsm = FakeRemoteSessionManager()
     provider = RemoteMachineProvider(rsm)
-    assert provider.capabilities() == _REMOTE_CAPS
-    assert SandboxCapability.NAMESPACE_ISOLATION not in provider.capabilities()
+    assert provider.capabilities() == frozenset()
 
 
-def test_remote_create_rejects_namespace_requirement():
+def test_remote_create_rejects_isolation_requirement():
+    # A spec requiring any isolation cap must fail closed on Remote (it can't
+    # enforce HOME/ACL/quota/credential-binding).
     provider = RemoteMachineProvider(FakeRemoteSessionManager())
-    spec = _spec(required_capabilities=frozenset({SandboxCapability.NAMESPACE_ISOLATION}))
-    with pytest.raises(CapabilityUnsupported):
-        provider.create(spec)
+    for cap in (
+        SandboxCapability.PRIVATE_HOME_TMP_XDG,
+        SandboxCapability.FILESYSTEM_ACL,
+        SandboxCapability.CPU_MEM_PIDS_TIME_QUOTA,
+        SandboxCapability.CREDENTIAL_TOKEN_BINDING,
+        SandboxCapability.NAMESPACE_ISOLATION,
+    ):
+        with pytest.raises(CapabilityUnsupported):
+            provider.create(_spec(required_capabilities=frozenset({cap})))
 
 
 def test_remote_create_requires_machine_id_and_user_id():
@@ -204,6 +208,41 @@ def test_remote_stream_emits_lifecycle_until_turn_complete():
     assert completed.exit_code == 0
     # Polled at least once for the turn-complete signal.
     assert len(rsm.status_calls) >= 1
+
+
+def test_remote_stream_emits_timeout_when_poll_budget_exhausts():
+    # #2078 P1#3: a poll that never observes completion must emit
+    # COMMAND_TIMED_OUT, not COMMAND_COMPLETED(0). poll_timeout=0 makes the loop
+    # exit immediately; a fake that never reports is_complete stays incomplete.
+    rsm = FakeRemoteSessionManager(complete_after=999)
+    provider = RemoteMachineProvider(rsm, poll_interval=0, poll_timeout=0)
+    handle = provider.create(_spec())
+    eh = provider.exec(handle, command=[], env=None, exec_policy=_turn())
+    events = list(provider.stream(eh))
+    kinds = [e.kind for e in events]
+    assert SandboxEventKind.COMMAND_TIMED_OUT in kinds
+    assert SandboxEventKind.COMMAND_COMPLETED not in kinds
+    assert provider.inspect(handle) == SandboxStatus.ERROR
+    # collect_execution_evidence reports timeout, not completed.
+    rows = provider.collect_execution_evidence(handle)
+    assert rows[0].terminal_reason == "timeout"
+
+
+def test_remote_stream_emits_sandbox_error_when_status_unavailable():
+    # If the manager has no get_session_status (or it raises), the stream cannot
+    # observe a terminal state — emit SANDBOX_ERROR, not a fake success.
+    class _NoStatusManager(FakeRemoteSessionManager):
+        def get_session_status(self, session_id):  # type: ignore[override]
+            raise RuntimeError("status backend down")
+
+    provider = RemoteMachineProvider(_NoStatusManager(), poll_interval=0, poll_timeout=0.5)
+    handle = provider.create(_spec())
+    eh = provider.exec(handle, command=[], env=None, exec_policy=_turn())
+    events = list(provider.stream(eh))
+    kinds = [e.kind for e in events]
+    assert SandboxEventKind.SANDBOX_ERROR in kinds
+    assert SandboxEventKind.COMMAND_COMPLETED not in kinds
+    assert provider.inspect(handle) == SandboxStatus.ERROR
 
 
 # ── stop / destroy / pause ──

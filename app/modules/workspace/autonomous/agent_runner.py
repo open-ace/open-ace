@@ -2231,6 +2231,14 @@ class AutonomousAgentRunner:
             exec_handle = self._sandbox_provider.exec(
                 sandbox_handle, command=cmd, env=env, exec_policy=None
             )
+            # NOTE (#2023): get_process/build_launch_argv are Legacy-only escape
+            # hatches (NOT on the SandboxProvider Protocol) — the CLI stream-json
+            # protocol layer (_read_stdout/_send_sdk_init) drives a local Popen's
+            # stdin/stdout directly. A gVisor/container provider has no local
+            # Popen, so reusing this path requires abstracting the IO into a
+            # provider-returned transport handle (the "replaceable local seam").
+            # Deferred to #2023's first step (when gVisor needs to reuse
+            # stream-json); P4 deliberately stops at spawn/signal decoupling.
             process = self._sandbox_provider.get_process(exec_handle)
         except (OSError, subprocess.SubprocessError) as e:
             self._sandbox_provider.destroy(sandbox_handle)
@@ -4123,7 +4131,11 @@ class AutonomousAgentRunner:
         """Suspend a running local session using SIGSTOP.
 
         The process is frozen in place and can be resumed with
-        :meth:`resume_session` using SIGCONT.
+        :meth:`resume_session` using SIGCONT. Legacy-effective only: a remote
+        tracker has ``process=None`` and returns False here (a remote CLI
+        session has no SIGSTOP analogue — pause is unsupported, not silently
+        claimed). The provider branch is reached only for local sessions with a
+        live process; ``RemoteMachineProvider.pause`` is a documented no-op.
         """
         session = self._local_sessions.get(session_id)
         if not session or not session.process or session.process.returncode is not None:

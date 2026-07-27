@@ -31,9 +31,13 @@ from typing import TYPE_CHECKING, Any
 
 from app.modules.workspace.autonomous.command_evidence.types import (
     CommandExecutionEvidence,
+    TerminalReason,
     derive_terminal_reason,
 )
-from app.modules.workspace.autonomous.sandbox.provider import SandboxError, require_capabilities
+from app.modules.workspace.autonomous.sandbox.provider import (
+    SandboxError,
+    validate_spec_capabilities,
+)
 from app.modules.workspace.autonomous.sandbox.types import (
     ExecHandle,
     SandboxCapability,
@@ -47,19 +51,18 @@ from app.modules.workspace.autonomous.sandbox.types import (
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from app.modules.workspace.remote_session_manager import RemoteSessionManager
 
-# Remote provides an isolated agent environment equivalent to Legacy (private
-# HOME on the remote machine, ACL'd workspace, proxy-token credential binding,
-# resource limits enforced by the remote deployment). Same capability set as
-# Legacy so a spec portable local↔remote does not fail-closed on the remote
-# path. gVisor/K8s (#2023) adds NAMESPACE_ISOLATION / NETWORK_EGRESS_POLICY.
-_REMOTE_CAPS = frozenset(
-    {
-        SandboxCapability.PRIVATE_HOME_TMP_XDG,
-        SandboxCapability.FILESYSTEM_ACL,
-        SandboxCapability.CPU_MEM_PIDS_TIME_QUOTA,
-        SandboxCapability.CREDENTIAL_TOKEN_BINDING,
-    }
-)
+# Remote provides NO verifiable isolation today (#2078 review P1#1): the
+# remote-agent executor (remote-agent/executor.py::_build_env) launches the CLI
+# from ``dict(os.environ)`` with a plain Popen — no per-task HOME/TMP/XDG, no
+# openace-run-as ACL, no cgroup quota, and the proxy-token injection does not
+# scrub the rest of the inherited env (so CREDENTIAL_TOKEN_BINDING is not
+# honestly held either). Declaring these would let a spec require them and have
+# Remote silently accept without enforcing — a fail-closed violation. Remote
+# therefore declares an empty set: a spec requiring ANY isolation cap fails
+# closed here (current autonomous remote specs require none, so this is honest
+# and non-breaking). When a remote deployment gains verifiable isolation it
+# should be reported via a machine capability handshake, not a static constant.
+_REMOTE_CAPS: frozenset[SandboxCapability] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -98,6 +101,10 @@ class RemoteMachineProvider:
         # instead of a hardcoded 0. Prod remote does not call stream() today
         # (the runner has its own poll loop); this fills when stream runs.
         self._last_exit_code: dict[str, int] = {}
+        # sandbox_id -> the terminal event kind stream() reached (COMMAND_COMPLETED
+        # / COMMAND_TIMED_OUT / SANDBOX_ERROR), so collect_execution_evidence maps
+        # to an honest terminal_reason instead of assuming completed (#2078 P1#3).
+        self._last_terminal_kind: dict[str, SandboxEventKind] = {}
         self._poll_interval = poll_interval
         self._poll_timeout = poll_timeout
 
@@ -105,7 +112,7 @@ class RemoteMachineProvider:
         return _REMOTE_CAPS
 
     def create(self, spec: SandboxSpec) -> SandboxHandle:
-        require_capabilities(_REMOTE_CAPS, spec.required_capabilities)
+        validate_spec_capabilities(_REMOTE_CAPS, spec)
         if not spec.machine_id:
             raise SandboxError("RemoteMachineProvider requires spec.machine_id")
         if spec.user_id is None:
@@ -189,20 +196,37 @@ class RemoteMachineProvider:
             command_id=remote_session_id,
         )
         # Poll get_session_status until the remote manager observes the turn
-        # complete (an output entry with is_complete=True) or the poll budget
-        # runs out. Message normalization stays with the runner.
+        # complete (an output entry with is_complete=True), the poll budget runs
+        # out (COMMAND_TIMED_OUT), or status polling itself fails
+        # (SANDBOX_ERROR). Never disguise a non-completion as COMMAND_COMPLETED
+        # (#2078 review P1#3). Message normalization stays with the runner.
         deadline = time.monotonic() + max(self._poll_timeout, 0.0)
         exit_code = 0
+        terminal_kind = SandboxEventKind.COMMAND_TIMED_OUT  # if the loop exhausts
         getter = getattr(self._rsm, "get_session_status", None)
-        while time.monotonic() < deadline:
-            remote_state = getter(remote_session_id) if callable(getter) else None
-            if remote_state is not None and self._turn_complete(remote_state):
-                exit_code = int(remote_state.get("exit_code") or 0)
-                self._last_exit_code[sandbox_id] = exit_code
-                break
-            time.sleep(self._poll_interval)
+        if not callable(getter):
+            terminal_kind = SandboxEventKind.SANDBOX_ERROR
+        else:
+            while time.monotonic() < deadline:
+                try:
+                    remote_state = getter(remote_session_id)
+                except Exception:
+                    terminal_kind = SandboxEventKind.SANDBOX_ERROR
+                    remote_state = None
+                    break
+                if remote_state is not None and self._turn_complete(remote_state):
+                    exit_code = int(remote_state.get("exit_code") or 0)
+                    self._last_exit_code[sandbox_id] = exit_code
+                    terminal_kind = SandboxEventKind.COMMAND_COMPLETED
+                    break
+                time.sleep(self._poll_interval)
+        if terminal_kind != SandboxEventKind.COMMAND_COMPLETED:
+            # Non-completion is an error state; collect_execution_evidence reads
+            # _last_terminal_kind for the honest terminal_reason.
+            self._status[sandbox_id] = SandboxStatus.ERROR
+        self._last_terminal_kind[sandbox_id] = terminal_kind
         yield SandboxEvent(
-            kind=SandboxEventKind.COMMAND_COMPLETED,
+            kind=terminal_kind,
             sandbox_id=sandbox_id,
             command_id=remote_session_id,
             exit_code=exit_code,
@@ -239,14 +263,16 @@ class RemoteMachineProvider:
 
     def collect_execution_evidence(self, handle: SandboxHandle) -> list[Any]:
         # Fills the #2046-A sandbox attribution (sandbox_id/generation). The
-        # exit_code is the last one stream()'s poll observed (stored in
-        # _last_exit_code); before stream runs it defaults to 0. Prod remote
-        # does not call this today (the runner drives its own poll loop and
-        # stamps sandbox attribution via the recorder), so this is the contract
+        # exit_code is the last stream() observed; terminal_reason reflects the
+        # terminal event kind stream() reached (completed / timeout / sandbox
+        # error) — never assuming completed on a non-completion (#2078 P1#3).
+        # Prod remote does not call this today (the runner drives its own poll
+        # loop and stamps attribution via the recorder); this is the contract
         # path #2023 gVisor inherits.
         remote_session_id = self._remote_sid.get(handle.sandbox_id, handle.sandbox_id)
         exit_code = self._last_exit_code.get(handle.sandbox_id, 0)
-        terminal = derive_terminal_reason(exit_code=exit_code, has_result=True)
+        terminal_kind = self._last_terminal_kind.get(handle.sandbox_id)
+        terminal_reason = self._terminal_reason(terminal_kind, exit_code)
         return [
             CommandExecutionEvidence(
                 command_id=remote_session_id,
@@ -254,7 +280,7 @@ class RemoteMachineProvider:
                 sandbox_generation=handle.generation,
                 cwd=handle.spec.project_path,
                 exit_code=exit_code,
-                terminal_reason=terminal.value,
+                terminal_reason=terminal_reason,
             )
         ]
 
@@ -289,3 +315,12 @@ class RemoteMachineProvider:
             and entry.get("stream") in ("stdout", "stderr", "system")
             for entry in output
         )
+
+    @staticmethod
+    def _terminal_reason(kind: SandboxEventKind | None, exit_code: int) -> str:
+        """Map stream()'s terminal event kind to a #2046-A terminal_reason."""
+        if kind == SandboxEventKind.COMMAND_TIMED_OUT:
+            return TerminalReason.TIMEOUT.value
+        if kind == SandboxEventKind.SANDBOX_ERROR:
+            return "sandbox_error"
+        return derive_terminal_reason(exit_code=exit_code, has_result=True).value

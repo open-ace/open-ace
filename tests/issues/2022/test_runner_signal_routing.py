@@ -57,6 +57,24 @@ def test_pause_resume_route_through_sandbox_provider():
     assert not session._paused.is_set()
 
 
+def test_pause_resume_return_false_for_process_less_remote_tracker():
+    # #2078 P2: a real remote tracker has process=None (no local Popen). The
+    # process guard precedes the provider branch, so pause/resume return False
+    # — honestly reflecting that remote can't SIGSTOP a CLI session. The
+    # provider-routed pause/resume is therefore Legacy-effective; remote pause
+    # is unsupported (not silently claimed).
+    provider = FakeSandboxProvider()
+    runner = AutonomousAgentRunner(sandbox_provider=provider)
+    handle = provider.create(SandboxSpec(task_id="t", project_path="/tmp", cli_tool="c"))
+    eh = provider.exec(handle, command=["x"], env=None, exec_policy=None)
+    session = _LocalSession(session_id="s1", process=None)  # remote-shape tracker
+    session.sandbox_provider = provider
+    session.exec_handle = eh
+    runner._local_sessions["s1"] = session
+    assert runner.pause_session("s1") is False
+    assert runner.resume_session("s1") is False
+
+
 def test_select_sandbox_provider_returns_legacy_for_local():
     legacy = FakeSandboxProvider()
     runner = AutonomousAgentRunner(sandbox_provider=legacy)

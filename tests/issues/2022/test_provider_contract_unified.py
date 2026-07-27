@@ -58,6 +58,7 @@ class _FakeRemoteSessionManager:
 class _LegacyHarness:
     name = "legacy_posix"
     provider_name = "legacy_posix"
+    expected_caps = _LEGACY_CAPS
 
     def __init__(self) -> None:
         self.provider = LegacyPosixProvider()
@@ -81,6 +82,10 @@ class _LegacyHarness:
 class _RemoteHarness:
     name = "remote_machine"
     provider_name = "remote_machine"
+    # Remote provides NO verifiable isolation today (#2078 P1#1): the remote-agent
+    # executor runs from dict(os.environ) + plain Popen. Declaring any cap would
+    # be a fail-closed lie.
+    expected_caps = frozenset()
 
     def __init__(self) -> None:
         self.provider = RemoteMachineProvider(_FakeRemoteSessionManager(), poll_interval=0)
@@ -116,14 +121,27 @@ def harness(request):
 # ── shared contract assertions ──
 
 
-def test_capabilities_declare_four(harness):
-    assert harness.provider.capabilities() == _LEGACY_CAPS
+def test_capabilities_match_expected(harness):
+    # Each provider declares only what it actually enforces (#2078 P1#1):
+    # Legacy the four POSIX caps; Remote none (remote-agent has no isolation).
+    assert harness.provider.capabilities() == harness.expected_caps
     assert SandboxCapability.NAMESPACE_ISOLATION not in harness.provider.capabilities()
     assert SandboxCapability.NETWORK_EGRESS_POLICY not in harness.provider.capabilities()
 
 
 def test_create_rejects_namespace_requirement(harness):
     spec = harness.spec(required_capabilities=frozenset({SandboxCapability.NAMESPACE_ISOLATION}))
+    with pytest.raises(CapabilityUnsupported):
+        harness.provider.create(spec)
+
+
+def test_explicit_network_egress_fails_closed(harness):
+    # #2078 P1#1: setting network_egress on the spec implies
+    # NETWORK_EGRESS_POLICY — neither Legacy nor Remote provides it, so create
+    # must fail closed rather than silently ignore the policy field.
+    from app.modules.workspace.autonomous.sandbox.types import NetworkEgressPolicy
+
+    spec = harness.spec(network_egress=NetworkEgressPolicy(mode="deny_all"))
     with pytest.raises(CapabilityUnsupported):
         harness.provider.create(spec)
 
