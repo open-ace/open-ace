@@ -420,3 +420,44 @@ def test_collect_excerpt_failure_keeps_check_with_empty_excerpt():
     assert len(actionable) == 1
     assert actionable[0]["failure_excerpt"] == ""
     assert ev.classification == "actionable_required_failures"
+
+
+# ── Phase B incident contract tests (#2045: 事故场景迁移为 contract tests) ───
+
+
+def test_stale_dirty_requires_ancestry_verification():
+    """mergeable_state=dirty must be ancestry-probed, never trusted as conflict.
+
+    A GitHub ``dirty`` cache right after a sync push is not a real conflict.
+    classify_merge_readiness probes ancestry before classifying; an
+    inconclusive probe (merge-base rc=128) fails closed to indeterminate
+    rather than launching the conflict resolver (#1991/#1999 stale-dirty guard).
+    """
+    gh = _gh_for_classify(
+        mergeable=False,
+        mergeable_state="dirty",
+        checks=[],
+        required=[],
+        ancestry_rc=128,
+    )
+    ev = ReadinessService().classify_merge_readiness(gh, 42, "feat", "head-sha")
+    assert ev.classification == "indeterminate"
+    assert ev.classification != "conflict_confirmed"
+
+
+def test_incident_1989_pending_required_not_classified_as_conflict():
+    """Pending required checks must not be misclassified as conflict (#1989).
+
+    ``gh pr merge`` returns a generic 'repository rule violations' error for
+    both pending required checks and real conflicts. classify_merge_readiness
+    distinguishes them: pending required → ``pending_required_checks`` (defer),
+    never ``conflict_confirmed`` (which would launch the resolver).
+    """
+    gh = _gh_for_classify(
+        mergeable_state="clean",
+        checks=[{"name": "ci-lint", "bucket": "pending"}],
+        required=["ci-lint"],
+    )
+    ev = ReadinessService().classify_merge_readiness(gh, 42, "feat", "head-sha")
+    assert ev.classification == "pending_required_checks"
+    assert ev.classification != "conflict_confirmed"
