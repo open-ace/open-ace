@@ -4464,6 +4464,33 @@ class AutonomousOrchestrator:
         """Refresh workflow totals from the sessions linked to milestones."""
         self.repo.refresh_workflow_usage_from_sessions(self._workflow_id)
 
+    def _persist_sandbox_attribution(self, result: AgentTaskResult) -> None:
+        """Write the task's sandbox identity + final state to the workflow row.
+
+        #2022 P5: records which SandboxProvider ran the task (provider/id/
+        generation/state) so the workflow carries sandbox attribution for audit,
+        the (deferred) UI, and P6 reconciliation. Best-effort: never raises to
+        the caller (runs on the result path).
+        """
+        provider = getattr(result, "sandbox_provider", "") or ""
+        sandbox_id = getattr(result, "sandbox_id", None)
+        if not provider and not sandbox_id:
+            return  # no sandbox ran (e.g. CLI not found before create)
+        try:
+            self.repo.update_workflow(
+                self._workflow_id,
+                {
+                    "sandbox_provider": provider,
+                    "sandbox_id": sandbox_id,
+                    "sandbox_generation": getattr(result, "sandbox_generation", None),
+                    "sandbox_state": getattr(result, "sandbox_state", "") or None,
+                },
+            )
+        except Exception as e:  # pragma: no cover - best-effort attribution
+            logger.warning(
+                "Failed to persist sandbox attribution for %s: %s", self._workflow_id[:8], e
+            )
+
     def _shadow_compare_evidence(
         self,
         *,
@@ -7512,6 +7539,10 @@ class AutonomousOrchestrator:
             sandbox_id=getattr(test_result, "sandbox_id", None),
             sandbox_generation=getattr(test_result, "sandbox_generation", None),
         )
+        # #2022 P5: persist sandbox identity + final state onto the workflow row
+        # (provider/id/generation/state) so the workflow records which sandbox ran
+        # each task and reconciliation (#2022 P6) can probe/clean orphans.
+        self._persist_sandbox_attribution(test_result)
 
         if self._abort_on_repo_integrity_violation(test_result, test_ms.get("milestone_id", "")):
             return

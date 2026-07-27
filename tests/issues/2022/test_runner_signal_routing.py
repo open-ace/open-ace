@@ -12,6 +12,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner, _LocalSession
+from app.modules.workspace.autonomous.models import AgentTaskResult
 from app.modules.workspace.autonomous.sandbox.fake import FakeSandboxProvider
 from app.modules.workspace.autonomous.sandbox.types import SandboxSpec, SandboxStatus
 
@@ -79,6 +80,27 @@ def test_select_sandbox_provider_returns_legacy_for_local():
     legacy = FakeSandboxProvider()
     runner = AutonomousAgentRunner(sandbox_provider=legacy)
     assert runner._select_sandbox_provider("local") is legacy
+
+
+def test_stamp_sandbox_attribution_fills_provider_and_state():
+    # #2022 P5: every return path stamps provider/id/generation/state so the
+    # orchestrator can persist sandbox identity + every evidence path carries it.
+    provider = FakeSandboxProvider()
+    handle = provider.create(SandboxSpec(task_id="t", project_path="/tmp", cli_tool="c"))
+    result = AgentTaskResult(session_id="s")
+    AutonomousAgentRunner._stamp_sandbox_attribution(result, handle, provider)
+    assert result.sandbox_id == handle.sandbox_id
+    assert result.sandbox_generation == handle.generation
+    assert result.sandbox_provider == "fake"
+    assert result.sandbox_state == SandboxStatus.CREATED.value
+
+
+def test_stamp_sandbox_attribution_noop_without_handle():
+    # Spawn-failed-before-create paths pass sandbox_handle=None → no attribution.
+    result = AgentTaskResult(session_id="s")
+    AutonomousAgentRunner._stamp_sandbox_attribution(result, None, FakeSandboxProvider())
+    assert result.sandbox_id is None
+    assert result.sandbox_provider == ""
 
 
 def test_select_sandbox_provider_returns_remote_for_remote():
