@@ -321,7 +321,7 @@ export const Workspace: React.FC = () => {
           if (result.success && result.token) {
             console.log('[Workspace] Token refreshed successfully');
             setUserWebUI((prev) =>
-              prev ? { ...prev, token: result.token! } : prev
+              (prev ? { ...prev, token: result.token! } : prev)
             );
           } else {
             console.error('[Workspace] Token refresh failed:', result.error);
@@ -582,7 +582,7 @@ export const Workspace: React.FC = () => {
             if (result.success && result.token) {
               console.log('[Workspace] Token refreshed, notifying iframe');
               // Update local state
-              setUserWebUI((prev) => (prev ? { ...prev, token: result.token! } : prev));
+              setUserWebUI((prev) => ((prev ? { ...prev, token: result.token! } : prev)));
               // Notify all iframes about new token
               iframeRefs.current.forEach((iframe) => {
                 if (iframe.contentWindow) {
