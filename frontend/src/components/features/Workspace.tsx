@@ -116,7 +116,6 @@ export const Workspace: React.FC = () => {
   // Refresh lock to prevent concurrent token refresh
   const refreshingRef = useRef(false);
 
-
   // Workspace tabs state from store (Issue #65)
   const storedTabs = useWorkspaceTabs();
   const storedActiveTabId = useWorkspaceActiveTabId();
@@ -592,24 +591,27 @@ export const Workspace: React.FC = () => {
         }
         refreshingRef.current = true;
         // Re-fetch userWebUI URL to get fresh token
-        workspaceApi.getUserWebUIUrl().then((result) => {
-          if (result.success && result.token) {
-            console.log('[Workspace] Token refreshed, notifying iframe');
-            // Update local state
-            setUserWebUI(result);
-            // Notify all iframes about new token
-            iframeRefs.current.forEach((iframe) => {
-              if (iframe.contentWindow) {
-                iframe.contentWindow.postMessage(
-                  { type: 'openace-token-refreshed', token: result.token },
-                  '*'
-                );
-              }
-            });
-          }
-        }).finally(() => {
-          refreshingRef.current = false;
-        });
+        workspaceApi
+          .getUserWebUIUrl()
+          .then((result) => {
+            if (result.success && result.token) {
+              console.log('[Workspace] Token refreshed, notifying iframe');
+              // Update local state
+              setUserWebUI(result);
+              // Notify all iframes about new token
+              iframeRefs.current.forEach((iframe) => {
+                if (iframe.contentWindow) {
+                  iframe.contentWindow.postMessage(
+                    { type: 'openace-token-refreshed', token: result.token },
+                    '*'
+                  );
+                }
+              });
+            }
+          })
+          .finally(() => {
+            refreshingRef.current = false;
+          });
       }
     };
 
