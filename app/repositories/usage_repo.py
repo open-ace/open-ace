@@ -652,13 +652,17 @@ class UsageRepository:
 
         Note:
             Issue #1852: Added tenant_id parameter for tenant filtering.
+            Issue #2089: Changed from user_id IN (...) to direct tenant_id filtering
+                         to handle NULL user_id records correctly.
         """
         conditions = ["date >= ?", "date <= ?"]
         params: list[Any] = [start_date, end_date]
         normalized_tenant_id = self._normalize_tenant_id(tenant_id)
 
         if normalized_tenant_id is not None:
-            conditions.append(self._tenant_user_condition("user_id"))
+            # Issue #2089: Use tenant_id directly instead of user_id IN (...)
+            # to correctly filter records where user_id is NULL.
+            conditions.append("tenant_id = ?")
             params.append(normalized_tenant_id)
 
         if host_name:
