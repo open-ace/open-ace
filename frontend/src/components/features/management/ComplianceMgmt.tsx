@@ -610,6 +610,7 @@ export const ComplianceMgmt: React.FC = () => {
                           <Button
                             variant="outline-primary"
                             size="sm"
+                            title={t('downloadJson', language)}
                             onClick={() =>
                               handleDownloadSavedReport(
                                 report.report_id,
@@ -623,6 +624,7 @@ export const ComplianceMgmt: React.FC = () => {
                           <Button
                             variant="outline-secondary"
                             size="sm"
+                            title={t('downloadCsv', language)}
                             onClick={() =>
                               handleDownloadSavedReport(report.report_id, report.report_type, 'csv')
                             }
@@ -632,6 +634,7 @@ export const ComplianceMgmt: React.FC = () => {
                           <Button
                             variant="outline-warning"
                             size="sm"
+                            title={t('downloadHtml', language)}
                             onClick={() =>
                               handleDownloadSavedReport(
                                 report.report_id,
@@ -645,6 +648,7 @@ export const ComplianceMgmt: React.FC = () => {
                           <Button
                             variant="outline-success"
                             size="sm"
+                            title={t('downloadExcel', language)}
                             onClick={() =>
                               handleDownloadSavedReport(
                                 report.report_id,
