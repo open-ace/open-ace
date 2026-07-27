@@ -783,11 +783,11 @@ class DailyStatsRepository:
             if is_postgresql():
                 # Issue #2010: Use advisory lock to prevent concurrent refresh
                 # Lock key: hash of 'daily_stats_refresh' (arbitrary but consistent)
-                lock_acquired = self.db.fetch_one(
-                    "SELECT pg_try_advisory_lock(2024) as acquired"
-                )
+                lock_acquired = self.db.fetch_one("SELECT pg_try_advisory_lock(2024) as acquired")
                 if not lock_acquired or not lock_acquired.get("acquired"):
-                    logger.warning("Could not acquire advisory lock for refresh_stats, proceeding anyway")
+                    logger.warning(
+                        "Could not acquire advisory lock for refresh_stats, proceeding anyway"
+                    )
 
                 try:
                     # Issue #2010: Use INSERT ... ON CONFLICT DO UPDATE for atomic operation
@@ -1014,11 +1014,11 @@ class DailyStatsRepository:
             if is_postgresql():
                 # Issue #2010: Use advisory lock to prevent concurrent refresh
                 # Lock key: different from daily_stats to allow parallel hourly/daily refresh
-                lock_acquired = self.db.fetch_one(
-                    "SELECT pg_try_advisory_lock(2025) as acquired"
-                )
+                lock_acquired = self.db.fetch_one("SELECT pg_try_advisory_lock(2025) as acquired")
                 if not lock_acquired or not lock_acquired.get("acquired"):
-                    logger.warning("Could not acquire advisory lock for refresh_hourly_stats, proceeding anyway")
+                    logger.warning(
+                        "Could not acquire advisory lock for refresh_hourly_stats, proceeding anyway"
+                    )
 
                 try:
                     # Issue #2010: Use INSERT ... ON CONFLICT DO UPDATE for atomic operation
