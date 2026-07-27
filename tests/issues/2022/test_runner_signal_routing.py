@@ -83,16 +83,20 @@ def test_select_sandbox_provider_returns_legacy_for_local():
 
 
 def test_stamp_sandbox_attribution_fills_provider_and_state():
-    # #2022 P5: every return path stamps provider/id/generation/state so the
-    # orchestrator can persist sandbox identity + every evidence path carries it.
+    # #2022 P6: state is TASK-terminal (success→destroyed, failure→error), NOT
+    # provider.inspect() — a remote session left alive on success must not read
+    # 'running' (the startup reconciler would mis-flag it as a crash orphan).
     provider = FakeSandboxProvider()
     handle = provider.create(SandboxSpec(task_id="t", project_path="/tmp", cli_tool="c"))
-    result = AgentTaskResult(session_id="s")
-    AutonomousAgentRunner._stamp_sandbox_attribution(result, handle, provider)
-    assert result.sandbox_id == handle.sandbox_id
-    assert result.sandbox_generation == handle.generation
-    assert result.sandbox_provider == "fake"
-    assert result.sandbox_state == SandboxStatus.CREATED.value
+    ok = AgentTaskResult(session_id="s", success=True)
+    AutonomousAgentRunner._stamp_sandbox_attribution(ok, handle, provider)
+    assert ok.sandbox_id == handle.sandbox_id
+    assert ok.sandbox_generation == handle.generation
+    assert ok.sandbox_provider == "fake"
+    assert ok.sandbox_state == "destroyed"
+    failed = AgentTaskResult(session_id="s", success=False)
+    AutonomousAgentRunner._stamp_sandbox_attribution(failed, handle, provider)
+    assert failed.sandbox_state == "error"
 
 
 def test_stamp_sandbox_attribution_noop_without_handle():

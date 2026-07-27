@@ -817,10 +817,16 @@ class AutonomousAgentRunner:
         result.sandbox_id = sandbox_handle.sandbox_id
         result.sandbox_generation = sandbox_handle.generation
         result.sandbox_provider = sandbox_handle.provider_name
-        try:
-            result.sandbox_state = provider.inspect(sandbox_handle).value
-        except Exception:  # pragma: no cover - best-effort
-            result.sandbox_state = ""
+        # #2022 P6: stamp the TASK-terminal state, not provider.inspect(). A
+        # remote CLI session is deliberately left alive on success (reusable
+        # sidebar), so inspect() returns 'running' — which the startup
+        # reconciler would mis-flag as an orphan and destroy. The workflow row's
+        # sandbox_state must mean "is THIS task's sandbox still occupying
+        # resources": success → destroyed (task done; local literally, remote
+        # task-done even if the session is reused), failure → error. A 'running'
+        # row therefore only exists from a mid-task write — and at startup, any
+        # 'running'/'paused' row is a genuine crash orphan.
+        result.sandbox_state = "destroyed" if result.success else "error"
         return result
 
     @staticmethod
