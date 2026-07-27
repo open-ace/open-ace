@@ -184,6 +184,15 @@ class LegacyPosixProvider:
         # credentials). Spawn with an empty env instead; callers must pass a
         # scrubbed env (#2019 / _build_agent_env output) for the agent to work.
         spawn_env: dict[str, str] | None = env if env is not None else {}
+        # cwd mirrors _wrap_agent_cmd's (cmd, cwd) return: same-user agents
+        # (claude-code/qwen-code) infer project root from cwd (no --cwd flag),
+        # so the spawn must chdir into project_path; cross-user launches leave
+        # cwd=None because the run-as launcher chdir's as root before dropping
+        # to system_account. Omitting cwd (the P3a default) would run the
+        # same-user agent in the orchestrator's cwd — wrong project.
+        cwd: str | None = (
+            None if _is_cross_user(handle.spec.system_account) else handle.spec.project_path
+        )
         # start_new_session=True puts the child in its own process group/session
         # (pgid == child pid), which is what later lets pause/resume/stop reach
         # the whole tree via os.killpg(os.getpgid(pid), sig). This invariant
@@ -193,6 +202,7 @@ class LegacyPosixProvider:
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            cwd=cwd,
             env=spawn_env,
             start_new_session=True,
         )
@@ -200,6 +210,20 @@ class LegacyPosixProvider:
         self._procs[command_id] = proc
         self._sandbox_of[command_id] = handle.sandbox_id
         return ExecHandle(sandbox_id=handle.sandbox_id, command_id=command_id)
+
+    def get_process(self, exec_handle: ExecHandle) -> subprocess.Popen[Any]:
+        """Return the raw ``Popen`` for an execution (#2022 P3b).
+
+        The CLI stream-json protocol (``_read_stdout``/``_read_stderr``/
+        ``_send_sdk_init``/``_send_message``) drives the stdin/stdout handshake
+        directly and needs the raw process; the provider's normalized
+        ``stream()`` events are too high-level to carry it. This is a
+        Legacy-specific escape hatch — it is deliberately NOT on the
+        ``SandboxProvider`` Protocol: ``RemoteMachineProvider`` (P4) has no
+        local ``Popen`` and the remote agent speaks a different transport, so
+        exposing a local process would not make sense cross-backend.
+        """
+        return self._procs[exec_handle.command_id]
 
     def build_launch_argv(
         self,
@@ -366,12 +390,16 @@ class LegacyPosixProvider:
             pass
 
     def _reap_sandbox(self, sandbox_id: str) -> None:
-        # SIGTERM→SIGKILL any live proc whose command belongs to this sandbox.
-        # _sandbox_of tracks command_id -> sandbox_id at exec time.
-        for command_id, proc in list(self._procs.items()):
-            if self._sandbox_of.get(command_id) != sandbox_id:
-                continue
-            if proc.poll() is None and proc.pid is not None:
+        # SIGTERM→SIGKILL any live proc whose command belongs to this sandbox,
+        # then DROP its bookkeeping so a long-lived shared provider does not
+        # leak entries across sessions. _sandbox_of tracks command_id ->
+        # sandbox_id at exec time; _status is left for destroy() to mark
+        # DESTROYED (inspect() returns DESTROYED for unknown ids too, so the
+        # dropped _procs/_sandbox_of entries do not break idempotent inspect).
+        owned = [cid for cid, sid in self._sandbox_of.items() if sid == sandbox_id]
+        for command_id in owned:
+            proc = self._procs.get(command_id)
+            if proc is not None and proc.poll() is None and proc.pid is not None:
                 try:
                     os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
                     proc.wait(timeout=5)
@@ -380,3 +408,5 @@ class LegacyPosixProvider:
                         os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
                     except (ProcessLookupError, OSError):
                         pass
+            self._procs.pop(command_id, None)
+            self._sandbox_of.pop(command_id, None)

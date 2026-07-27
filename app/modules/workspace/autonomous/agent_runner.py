@@ -25,14 +25,19 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from app.modules.workspace.autonomous.artifact_text import pick_best_artifact_text
 from app.modules.workspace.autonomous.models import AgentTaskResult
+from app.modules.workspace.autonomous.sandbox.legacy_posix import LegacyPosixProvider
+from app.modules.workspace.autonomous.sandbox.types import SandboxSpec
 from app.modules.workspace.autonomous.task_isolation import (
     DEFAULT_TASK_ROOT,
     ensure_task_runtime_dirs,
 )
+
+if TYPE_CHECKING:  # pragma: no cover - annotations only (PEP 563)
+    from app.modules.workspace.autonomous.sandbox.types import ExecHandle, SandboxHandle
 
 logger = logging.getLogger(__name__)
 
@@ -237,6 +242,12 @@ class _LocalSession:
     # Local subprocess sessions do not use it, but keeping it on the tracker
     # avoids a second tracker type and closes the create-vs-stop race.
     _remote_lifecycle_lock: threading.Lock = field(default_factory=threading.Lock)
+    # #2022 P3b: the SandboxProvider handle/exec_handle for the local spawn.
+    # process (above) is the raw Popen the provider exposed; these let the
+    # session release the provider sandbox at teardown. None on remote/legacy
+    # tracker paths that don't go through the provider.
+    sandbox_handle: SandboxHandle | None = None
+    exec_handle: ExecHandle | None = None
 
 
 # Top-level keys that indicate a JSON object is a leaked tool-call blob
@@ -711,6 +722,7 @@ class AutonomousAgentRunner:
         activity_callback=None,
         on_pid_registered=None,
         on_pid_cleared=None,
+        sandbox_provider=None,
     ):
         """
         Args:
@@ -724,6 +736,9 @@ class AutonomousAgentRunner:
                 when a local subprocess is created, for PID persistence.
             on_pid_cleared: Optional callback ``(session_id)`` called when a
                 local subprocess exits, for PID cleanup.
+            sandbox_provider: #2022 P3b — the SandboxProvider that owns local
+                spawn/ACL-wrap. Defaults to LegacyPosixProvider; injectable for
+                tests. P4 will branch on workspace_type for RemoteMachineProvider.
         """
         self.session_manager = session_manager
         self.remote_session_manager = remote_session_manager
@@ -734,6 +749,11 @@ class AutonomousAgentRunner:
         self._on_pid_registered = on_pid_registered
         self._on_pid_cleared = on_pid_cleared
         self._local_sessions: dict[str, _LocalSession] = {}
+        # #2022 P3b: local spawns route through the SandboxProvider so the
+        # orchestrator no longer touches sudo/_wrap_agent_cmd/Popen directly
+        # for spawn. The CLI protocol layer (reader threads, stdin handshake)
+        # still drives the raw Popen the provider exposes via get_process().
+        self._sandbox_provider = sandbox_provider or LegacyPosixProvider()
 
     @staticmethod
     def _uses_sidebar_session_source(cli_tool: str, workspace_type: str) -> bool:
@@ -2164,28 +2184,47 @@ class AutonomousAgentRunner:
                 )
             cmd = [executable] + (adapter_args[1:] if len(adapter_args) > 1 else [])
 
-        # Cross-user launch: the run-as wrapper chdir's as root then drops to
-        # system_account (claude-code/qwen-code infer project root from cwd
-        # and have no --cwd flag). Same-user runs verbatim with cwd=project.
-        cmd, cwd = (
-            self._wrap_agent_cmd(cmd, project_path, system_account, env, task_id=session_id)
-            if self._is_cross_user(system_account)
-            else self._wrap_agent_cmd(cmd, project_path, system_account, task_id=session_id)
+        # #2022 P3b: spawn through the SandboxProvider. The orchestrator no
+        # longer touches sudo/_wrap_agent_cmd/Popen directly for spawn; the
+        # provider owns the ACL wrap (build_launch_argv) + spawn + cwd. The CLI
+        # stream-json protocol (reader threads, stdin handshake below) still
+        # drives the raw Popen the provider exposes via get_process().
+        if self._is_cross_user(system_account):
+            # Env finalization moved here from _wrap_agent_cmd's cross-user
+            # branch. The launcher forwards guard_env verbatim (runuser ...
+            # /usr/bin/env -i <env_args> "$@" — env_args sets only HOME/TMPDIR/
+            # XDG/GIT_CONFIG, NOT OPENACE_GIT_CACHE_ROOT) and does NOT re-derive
+            # it, so the agent user's pre-commit cache path must be set here;
+            # the guard-bin safety check fails closed before spawn. _build_agent_env
+            # set it to the service user's path (it has no system_account), so
+            # this overwrite is load-bearing for cross-user.
+            env["OPENACE_GIT_CACHE_ROOT"] = str(
+                self._resolve_home_dir(system_account) / ".cache" / "pre-commit"
+            )
+            self._validate_cross_user_guard_bin(env)
+        sandbox_handle = self._sandbox_provider.create(
+            SandboxSpec(
+                task_id=session_id,
+                project_path=project_path,
+                cli_tool=cli_tool,
+                system_account=system_account,
+            )
+        )
+        # Preserve the old log: the wrapped launch argv (sudo/openace-run-as for
+        # cross-user, verbatim for same-user). build_launch_argv is pure, so
+        # calling it for display is harmless; exec re-derives it internally.
+        logger.info(
+            "Launching local agent: %s",
+            " ".join(self._sandbox_provider.build_launch_argv(sandbox_handle, cmd, env)),
         )
 
-        logger.info("Launching local agent: %s", " ".join(cmd))
-
         try:
-            process = subprocess.Popen(
-                cmd,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                cwd=cwd,
-                env=env,
-                start_new_session=True,
+            exec_handle = self._sandbox_provider.exec(
+                sandbox_handle, command=cmd, env=env, exec_policy=None
             )
+            process = self._sandbox_provider.get_process(exec_handle)
         except (OSError, subprocess.SubprocessError) as e:
+            self._sandbox_provider.destroy(sandbox_handle)
             return AgentTaskResult(
                 session_id=(
                     ""
@@ -2210,6 +2249,8 @@ class AutonomousAgentRunner:
             started_at_epoch=time.time(),
             milestone_id=milestone_id,
             system_account=system_account,
+            sandbox_handle=sandbox_handle,
+            exec_handle=exec_handle,
         )
         # For a resumed session the real CLI session_id is known up front; pin
         # it so sidebar detection reuses the existing record instead of guessing.
@@ -2268,6 +2309,15 @@ class AutonomousAgentRunner:
                     os.killpg(os.getpgid(process.pid), signal.SIGKILL)
                 except (ProcessLookupError, OSError):
                     pass
+
+        # #2022 P3b: release the provider sandbox (reap any stragglers the
+        # process-group signal missed + clear its _procs so a shared provider
+        # instance does not leak across sessions). The reap above already killed
+        # the proc; destroy is idempotent on an already-dead sandbox.
+        try:
+            self._sandbox_provider.destroy(sandbox_handle)
+        except Exception as e:
+            logger.warning("sandbox destroy failed for %s: %s", session_id[:8], e)
 
         self._local_sessions.pop(session_id, None)
 
