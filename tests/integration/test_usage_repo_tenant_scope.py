@@ -129,3 +129,153 @@ def test_get_request_stats_by_user_filters_by_tenant(tmp_db):
 
     assert [row["user"] for row in tenant_one_stats] == ["alice"]
     assert [row["user"] for row in tenant_two_stats] == ["bob"]
+
+
+def test_get_request_stats_by_user_null_user_id_fallback(tmp_db):
+    """Issue #2077: Verify NULL user_id fallback via sender_name matching.
+
+    When user_id is NULL (e.g., from save_messages_batch), the query should
+    fall back to matching sender_name against the tenant's users' system_account.
+    """
+    repo = UsageRepository(db=tmp_db)
+
+    # Create users with system_account matching sender_name pattern
+    # sender_name format: {system_account}-{hostname}-{tool}
+    _ensure_tenant(tmp_db, 1)
+    _ensure_tenant(tmp_db, 2)
+
+    cursor = tmp_db.execute(
+        """
+        INSERT INTO users (username, email, password_hash, role, tenant_id, system_account)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        ("alice", "alice@example.com", "hashed_pw", "user", 1, "alice-host"),
+    )
+    alice_id = cursor.lastrowid
+
+    tmp_db.execute(
+        """
+        INSERT INTO users (username, email, password_hash, role, tenant_id, system_account)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        ("bob", "bob@example.com", "hashed_pw", "user", 2, "bob-server"),
+    )
+
+    # Insert messages with NULL user_id (simulating save_messages_batch behavior)
+    # Alice's message - belongs to tenant 1
+    tmp_db.execute(
+        """
+        INSERT INTO daily_messages
+        (date, tool_name, host_name, message_id, role, tokens_used, sender_name, user_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
+        """,
+        ("2026-07-17", "codex", "host", "req-null-1", "assistant", 100, "alice-host-codex"),
+    )
+
+    # Bob's message - belongs to tenant 2
+    tmp_db.execute(
+        """
+        INSERT INTO daily_messages
+        (date, tool_name, host_name, message_id, role, tokens_used, sender_name, user_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
+        """,
+        ("2026-07-17", "codex", "server", "req-null-2", "assistant", 200, "bob-server-codex"),
+    )
+
+    # Insert a message with non-NULL user_id for comparison
+    tmp_db.execute(
+        """
+        INSERT INTO daily_messages
+        (date, tool_name, host_name, message_id, role, tokens_used, sender_name, user_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "2026-07-17",
+            "codex",
+            "host",
+            "req-with-id",
+            "assistant",
+            50,
+            "alice-host-codex",
+            alice_id,
+        ),
+    )
+
+    # Query for tenant 1 - should see both Alice's messages
+    tenant_one_stats = repo.get_request_stats_by_user(date="2026-07-17", tenant_id=1)
+    assert len(tenant_one_stats) == 1
+    assert tenant_one_stats[0]["user"] == "alice"
+    # Should count both messages: one with NULL user_id + one with valid user_id
+    assert tenant_one_stats[0]["requests"] == 2
+
+    # Query for tenant 2 - should see Bob's message
+    tenant_two_stats = repo.get_request_stats_by_user(date="2026-07-17", tenant_id=2)
+    assert len(tenant_two_stats) == 1
+    assert tenant_two_stats[0]["user"] == "bob"
+    assert tenant_two_stats[0]["requests"] == 1
+
+    # Query for admin (no tenant filter) - should see all
+    admin_stats = repo.get_request_stats_by_user(date="2026-07-17")
+    users = {row["user"] for row in admin_stats}
+    assert "alice" in users
+    assert "bob" in users
+
+
+def test_get_request_stats_by_user_null_user_id_cross_tenant_isolation(tmp_db):
+    """Issue #2077: Verify cross-tenant isolation for NULL user_id fallback.
+
+    A message with NULL user_id should only appear for the tenant whose
+    user's system_account matches the sender_name prefix.
+    """
+    repo = UsageRepository(db=tmp_db)
+
+    _ensure_tenant(tmp_db, 1)
+    _ensure_tenant(tmp_db, 2)
+
+    # User in tenant 1
+    tmp_db.execute(
+        """
+        INSERT INTO users (username, email, password_hash, role, tenant_id, system_account)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        ("alice", "alice@example.com", "hashed_pw", "user", 1, "alice-host"),
+    )
+
+    # User in tenant 2 with different system_account
+    tmp_db.execute(
+        """
+        INSERT INTO users (username, email, password_hash, role, tenant_id, system_account)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        ("bob", "bob@example.com", "hashed_pw", "user", 2, "bob-server"),
+    )
+
+    # Message with NULL user_id belonging to tenant 1's user
+    tmp_db.execute(
+        """
+        INSERT INTO daily_messages
+        (date, tool_name, host_name, message_id, role, tokens_used, sender_name, user_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
+        """,
+        ("2026-07-17", "codex", "host", "req-1", "assistant", 100, "alice-host-codex"),
+    )
+
+    # Message with NULL user_id belonging to tenant 2's user
+    tmp_db.execute(
+        """
+        INSERT INTO daily_messages
+        (date, tool_name, host_name, message_id, role, tokens_used, sender_name, user_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
+        """,
+        ("2026-07-17", "codex", "server", "req-2", "assistant", 200, "bob-server-codex"),
+    )
+
+    # Tenant 1 should only see alice's message
+    tenant_one_stats = repo.get_request_stats_by_user(date="2026-07-17", tenant_id=1)
+    assert len(tenant_one_stats) == 1
+    assert tenant_one_stats[0]["user"] == "alice"
+
+    # Tenant 2 should only see bob's message
+    tenant_two_stats = repo.get_request_stats_by_user(date="2026-07-17", tenant_id=2)
+    assert len(tenant_two_stats) == 1
+    assert tenant_two_stats[0]["user"] == "bob"
