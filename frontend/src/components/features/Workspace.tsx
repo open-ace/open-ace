@@ -312,15 +312,15 @@ export const Workspace: React.FC = () => {
       const age = now - timestamp;
       const remaining = TOKEN_TTL_SECONDS - age;
 
-      // Refresh when remaining time < threshold
-      if (remaining < REFRESH_THRESHOLD_SECONDS && remaining > -300) {
-        // Allow refresh up to 5 minutes after expiry
-        console.log(`[Workspace] Token expiring in ${remaining}s, refreshing...`);
+      // Refresh when remaining time < threshold or already expired
+      if (remaining < REFRESH_THRESHOLD_SECONDS) {
+        console.log(`[Workspace] Token expiring/expired (remaining: ${remaining}s), refreshing...`);
         try {
-          const result = await workspaceApi.refreshWebUIToken(userWebUI.token);
+          // Re-fetch userWebUI URL to get fresh token
+          const result = await workspaceApi.getUserWebUIUrl();
           if (result.success && result.token) {
             console.log('[Workspace] Token refreshed successfully');
-            setUserWebUI((prev) => (prev ? { ...prev, token: result.token! } : prev));
+            setUserWebUI(result);
           } else {
             console.error('[Workspace] Token refresh failed:', result.error);
           }
@@ -574,25 +574,23 @@ export const Workspace: React.FC = () => {
       // When iframe gets 401 error, it sends this message to request token refresh
       if (event.data?.type === 'qwen-code-token-expired') {
         console.log('[Workspace] Received token-expired from iframe, refreshing token...');
-        // Refresh token
-        if (userWebUI?.token) {
-          workspaceApi.refreshWebUIToken(userWebUI.token).then((result) => {
-            if (result.success && result.token) {
-              console.log('[Workspace] Token refreshed, notifying iframe');
-              // Update local state
-              setUserWebUI((prev) => (prev ? { ...prev, token: result.token! } : prev));
-              // Notify all iframes about new token
-              iframeRefs.current.forEach((iframe) => {
-                if (iframe.contentWindow) {
-                  iframe.contentWindow.postMessage(
-                    { type: 'openace-token-refreshed', token: result.token },
-                    '*'
-                  );
-                }
-              });
-            }
-          });
-        }
+        // Re-fetch userWebUI URL to get fresh token
+        workspaceApi.getUserWebUIUrl().then((result) => {
+          if (result.success && result.token) {
+            console.log('[Workspace] Token refreshed, notifying iframe');
+            // Update local state
+            setUserWebUI(result);
+            // Notify all iframes about new token
+            iframeRefs.current.forEach((iframe) => {
+              if (iframe.contentWindow) {
+                iframe.contentWindow.postMessage(
+                  { type: 'openace-token-refreshed', token: result.token },
+                  '*'
+                );
+              }
+            });
+          }
+        });
       }
     };
 
@@ -604,7 +602,6 @@ export const Workspace: React.FC = () => {
     workspaceFullscreen,
     exitWorkspaceFullscreen,
     clearTabNotification,
-    userWebUI?.token,
   ]);
 
   // Check quota
