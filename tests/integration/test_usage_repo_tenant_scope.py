@@ -279,3 +279,90 @@ def test_get_request_stats_by_user_null_user_id_cross_tenant_isolation(tmp_db):
     tenant_two_stats = repo.get_request_stats_by_user(date="2026-07-17", tenant_id=2)
     assert len(tenant_two_stats) == 1
     assert tenant_two_stats[0]["user"] == "bob"
+
+
+def test_get_daily_by_tool_filters_by_tenant(tmp_db):
+    """Issue #2089: Verify get_daily_by_tool filters correctly by tenant_id.
+
+    This test ensures that tenant filtering uses tenant_id directly instead of
+    user_id IN (...), which fails when user_id is NULL.
+    """
+    repo = UsageRepository(db=tmp_db)
+
+    # Create daily_stats entries for two different tenants
+    # Tenant 1 stats
+    tmp_db.execute(
+        """
+        INSERT INTO daily_stats
+        (date, tool_name, host_name, sender_name, user_id, tenant_id, total_tokens,
+         total_input_tokens, total_output_tokens, message_count)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        ("2026-07-17", "codex", "host1", "sender1", None, 1, 100, 10, 90, 5),
+    )
+
+    # Tenant 2 stats
+    tmp_db.execute(
+        """
+        INSERT INTO daily_stats
+        (date, tool_name, host_name, sender_name, user_id, tenant_id, total_tokens,
+         total_input_tokens, total_output_tokens, message_count)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        ("2026-07-17", "qwen", "host2", "sender2", None, 2, 200, 20, 180, 10),
+    )
+
+    # Query for tenant 1 - should only see tenant 1's data
+    tenant_one_trend = repo.get_daily_by_tool("2026-07-17", "2026-07-17", tenant_id=1)
+    assert len(tenant_one_trend) == 1
+    assert tenant_one_trend[0]["tool"] == "codex"
+    assert tenant_one_trend[0]["tokens"] == 100
+
+    # Query for tenant 2 - should only see tenant 2's data
+    tenant_two_trend = repo.get_daily_by_tool("2026-07-17", "2026-07-17", tenant_id=2)
+    assert len(tenant_two_trend) == 1
+    assert tenant_two_trend[0]["tool"] == "qwen"
+    assert tenant_two_trend[0]["tokens"] == 200
+
+    # Query for admin (no tenant filter) - should see all
+    admin_trend = repo.get_daily_by_tool("2026-07-17", "2026-07-17")
+    assert len(admin_trend) == 2
+
+
+def test_get_daily_by_tool_null_user_id_tenant_filter(tmp_db):
+    """Issue #2089: Verify tenant filtering works for NULL user_id records.
+
+    The fix changes from user_id IN (...) to tenant_id = ? to correctly
+    handle records where user_id is NULL.
+    """
+    repo = UsageRepository(db=tmp_db)
+
+    # Insert records with NULL user_id for both tenants
+    tmp_db.execute(
+        """
+        INSERT INTO daily_stats
+        (date, tool_name, host_name, sender_name, user_id, tenant_id, total_tokens,
+         total_input_tokens, total_output_tokens, message_count)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        ("2026-07-17", "codex", "host", "sender-null", None, 1, 150, 15, 135, 7),
+    )
+
+    tmp_db.execute(
+        """
+        INSERT INTO daily_stats
+        (date, tool_name, host_name, sender_name, user_id, tenant_id, total_tokens,
+         total_input_tokens, total_output_tokens, message_count)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        ("2026-07-17", "qwen", "host", "sender-null-2", None, 2, 250, 25, 225, 12),
+    )
+
+    # Verify tenant filtering works correctly with NULL user_id
+    tenant_one_trend = repo.get_daily_by_tool("2026-07-17", "2026-07-17", tenant_id=1)
+    assert len(tenant_one_trend) == 1
+    assert tenant_one_trend[0]["tokens"] == 150
+
+    tenant_two_trend = repo.get_daily_by_tool("2026-07-17", "2026-07-17", tenant_id=2)
+    assert len(tenant_two_trend) == 1
+    assert tenant_two_trend[0]["tokens"] == 250
