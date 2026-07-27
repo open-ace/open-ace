@@ -2247,6 +2247,7 @@ def get_user_webui_url():
             500,
         )
 
+
 @workspace_bp.route("/instances", methods=["GET"])
 def list_webui_instances():
     """List all active webui instances (admin only)."""
