@@ -32,7 +32,11 @@ import threading
 import uuid
 from typing import Any
 
-from app.modules.workspace.autonomous.sandbox.provider import require_capabilities
+from app.modules.workspace.autonomous.command_evidence.types import (
+    CommandExecutionEvidence,
+    derive_terminal_reason,
+)
+from app.modules.workspace.autonomous.sandbox.provider import validate_spec_capabilities
 from app.modules.workspace.autonomous.sandbox.types import (
     ExecHandle,
     SandboxCapability,
@@ -152,12 +156,15 @@ class LegacyPosixProvider:
         # command_id -> owning sandbox_id, so destroy can reap every proc that
         # belongs to a sandbox without iterating opaque command ids.
         self._sandbox_of: dict[str, str] = {}
+        # command_id -> the raw agent command argv (pre-wrap), so evidence
+        # reports the agent's intent, not the sudo/openace-run-as scaffold.
+        self._command_argv: dict[str, list[str]] = {}
 
     def capabilities(self) -> frozenset[SandboxCapability]:
         return _LEGACY_CAPS
 
     def create(self, spec: SandboxSpec) -> SandboxHandle:
-        require_capabilities(_LEGACY_CAPS, spec.required_capabilities)
+        validate_spec_capabilities(_LEGACY_CAPS, spec)
         sandbox_id = uuid.uuid4().hex
         self._status[sandbox_id] = SandboxStatus.CREATED
         return SandboxHandle(
@@ -209,6 +216,7 @@ class LegacyPosixProvider:
         command_id = uuid.uuid4().hex
         self._procs[command_id] = proc
         self._sandbox_of[command_id] = handle.sandbox_id
+        self._command_argv[command_id] = list(command)
         return ExecHandle(sandbox_id=handle.sandbox_id, command_id=command_id)
 
     def get_process(self, exec_handle: ExecHandle) -> subprocess.Popen[Any]:
@@ -366,8 +374,39 @@ class LegacyPosixProvider:
         return None
 
     def collect_execution_evidence(self, handle: SandboxHandle) -> list[Any]:
-        # P3a placeholder; filled from the real command stream in P3b.
-        return []
+        """Return the sandbox's process-level :class:`CommandExecutionEvidence`.
+
+        Fills the #2046-A schema fields the runner-side recorder cannot derive
+        — ``sandbox_id`` / ``sandbox_generation`` (from the handle) and the
+        process ``exit_code`` / ``signal`` / ``terminal_reason`` (from the
+        spawned proc) — plus the raw agent ``argv`` and ``cwd``. This is the
+        process-level row; per-tool_use evidence (argv/output excerpts from the
+        agent stream) stays with the runner's recorder, which stamps the
+        sandbox_id/generation from the handle. Call before ``destroy`` (the
+        proc tracking is cleared on destroy).
+        """
+        rows: list[CommandExecutionEvidence] = []
+        for command_id, sandbox_id in self._sandbox_of.items():
+            if sandbox_id != handle.sandbox_id:
+                continue
+            proc = self._procs.get(command_id)
+            returncode = proc.returncode if proc is not None else None
+            # Python encodes signal deaths as negative return codes.
+            sig = -returncode if (returncode is not None and returncode < 0) else None
+            terminal = derive_terminal_reason(exit_code=returncode, signal=sig, has_result=True)
+            rows.append(
+                CommandExecutionEvidence(
+                    command_id=command_id,
+                    sandbox_id=handle.sandbox_id,
+                    sandbox_generation=handle.generation,
+                    argv=list(self._command_argv.get(command_id, [])),
+                    cwd=handle.spec.project_path,
+                    exit_code=returncode,
+                    signal=sig,
+                    terminal_reason=terminal.value,
+                )
+            )
+        return rows
 
     def destroy(self, handle: SandboxHandle) -> None:
         # Reap any live process belonging to this sandbox, then mark destroyed.

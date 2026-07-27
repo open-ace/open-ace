@@ -7509,6 +7509,8 @@ class AutonomousOrchestrator:
             workflow_id=self._workflow_id,
             milestone_id=test_ms.get("milestone_id", ""),
             event_log=test_result.event_log or [],
+            sandbox_id=getattr(test_result, "sandbox_id", None),
+            sandbox_generation=getattr(test_result, "sandbox_generation", None),
         )
 
         if self._abort_on_repo_integrity_violation(test_result, test_ms.get("milestone_id", "")):

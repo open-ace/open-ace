@@ -13,10 +13,13 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any, Protocol
 
+# SandboxCapability is needed at runtime (implied_required_capabilities), not
+# just for annotations. types.py is a leaf module, so this is cycle-free.
+from app.modules.workspace.autonomous.sandbox.types import SandboxCapability
+
 if TYPE_CHECKING:  # pragma: no cover - annotations only (PEP 563)
     from app.modules.workspace.autonomous.sandbox.types import (
         ExecHandle,
-        SandboxCapability,
         SandboxEvent,
         SandboxHandle,
         SandboxSpec,
@@ -55,6 +58,36 @@ def require_capabilities(
     missing = frozenset(required) - frozenset(available)
     if missing:
         raise CapabilityUnsupported(missing)
+
+
+def implied_required_capabilities(spec: SandboxSpec) -> frozenset[SandboxCapability]:
+    """Capabilities a spec's explicit policy fields imply (#2078 review P1#1).
+
+    Without this, a caller can set ``network_egress`` / ``runtime`` / ``volumes``
+    on the spec but forget to add the matching ``required_capabilities`` entry —
+    and a provider that cannot honor the policy would silently ignore it. By
+    deriving the implied requirement from the fields themselves, ``create``
+    fail-closes instead: ``network_egress`` demands ``NETWORK_EGRESS_POLICY``;
+    ``runtime``/``volumes`` (container image + mounts) demand
+    ``NAMESPACE_ISOLATION``.
+    """
+    implied: set[SandboxCapability] = set()
+    if spec.network_egress is not None:
+        implied.add(SandboxCapability.NETWORK_EGRESS_POLICY)
+    if spec.runtime is not None or spec.volumes:
+        implied.add(SandboxCapability.NAMESPACE_ISOLATION)
+    return frozenset(implied)
+
+
+def validate_spec_capabilities(available: frozenset[SandboxCapability], spec: SandboxSpec) -> None:
+    """Fail-closed gate combining explicit + field-implied requirements.
+
+    Single entry point for every provider's ``create``: merges the spec's
+    ``required_capabilities`` with the caps its policy fields imply, then
+    :func:`require_capabilities` against what the provider declares.
+    """
+    required = frozenset(spec.required_capabilities) | implied_required_capabilities(spec)
+    require_capabilities(available, required)
 
 
 def is_current_generation(

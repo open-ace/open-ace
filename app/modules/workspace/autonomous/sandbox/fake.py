@@ -17,7 +17,7 @@ import uuid
 from collections.abc import Iterator
 from typing import Any
 
-from app.modules.workspace.autonomous.sandbox.provider import require_capabilities
+from app.modules.workspace.autonomous.sandbox.provider import validate_spec_capabilities
 from app.modules.workspace.autonomous.sandbox.types import (
     ExecHandle,
     SandboxCapability,
@@ -60,7 +60,7 @@ class FakeSandboxProvider:
         return self._capabilities
 
     def create(self, spec: SandboxSpec) -> SandboxHandle:
-        require_capabilities(self._capabilities, spec.required_capabilities)
+        validate_spec_capabilities(self._capabilities, spec)
         sandbox_id = uuid.uuid4().hex
         self._status[sandbox_id] = SandboxStatus.CREATED
         return SandboxHandle(

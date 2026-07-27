@@ -30,6 +30,11 @@ from typing import TYPE_CHECKING, Any, cast
 from app.modules.workspace.autonomous.artifact_text import pick_best_artifact_text
 from app.modules.workspace.autonomous.models import AgentTaskResult
 from app.modules.workspace.autonomous.sandbox.legacy_posix import LegacyPosixProvider
+from app.modules.workspace.autonomous.sandbox.provider import SandboxError
+from app.modules.workspace.autonomous.sandbox.remote_machine import (
+    RemoteMachineProvider,
+    RemoteTurnSpec,
+)
 from app.modules.workspace.autonomous.sandbox.types import SandboxSpec
 from app.modules.workspace.autonomous.task_isolation import (
     DEFAULT_TASK_ROOT,
@@ -248,6 +253,10 @@ class _LocalSession:
     # tracker paths that don't go through the provider.
     sandbox_handle: SandboxHandle | None = None
     exec_handle: ExecHandle | None = None
+    # #2022 P4 ③: the provider that owns this sandbox, so stop/pause/resume can
+    # route through it (gVisor has no local Popen — signals MUST reach the
+    # sandbox via the provider). None on legacy tracker paths.
+    sandbox_provider: Any = None
 
 
 # Top-level keys that indicate a JSON object is a leaked tool-call blob
@@ -2222,6 +2231,14 @@ class AutonomousAgentRunner:
             exec_handle = self._sandbox_provider.exec(
                 sandbox_handle, command=cmd, env=env, exec_policy=None
             )
+            # NOTE (#2023): get_process/build_launch_argv are Legacy-only escape
+            # hatches (NOT on the SandboxProvider Protocol) — the CLI stream-json
+            # protocol layer (_read_stdout/_send_sdk_init) drives a local Popen's
+            # stdin/stdout directly. A gVisor/container provider has no local
+            # Popen, so reusing this path requires abstracting the IO into a
+            # provider-returned transport handle (the "replaceable local seam").
+            # Deferred to #2023's first step (when gVisor needs to reuse
+            # stream-json); P4 deliberately stops at spawn/signal decoupling.
             process = self._sandbox_provider.get_process(exec_handle)
         except (OSError, subprocess.SubprocessError) as e:
             self._sandbox_provider.destroy(sandbox_handle)
@@ -2251,6 +2268,7 @@ class AutonomousAgentRunner:
             system_account=system_account,
             sandbox_handle=sandbox_handle,
             exec_handle=exec_handle,
+            sandbox_provider=self._sandbox_provider,
         )
         # For a resumed session the real CLI session_id is known up front; pin
         # it so sidebar detection reuses the existing record instead of guessing.
@@ -2416,7 +2434,7 @@ class AutonomousAgentRunner:
                 or AutonomousAgentRunner.TASK_WALL_CLOCK_TIMEOUT_ERROR_CODE,
             )
 
-        return _build_agent_task_result(
+        result = _build_agent_task_result(
             session_id=session_id,
             tracking_session_id=session_id,
             source_session_id=resolved_session_id,
@@ -2431,6 +2449,10 @@ class AutonomousAgentRunner:
             error=session.error,
             error_code=session.error_code,
         )
+        # #2022: attribute the result (and thus its evidence) to the sandbox.
+        result.sandbox_id = sandbox_handle.sandbox_id
+        result.sandbox_generation = sandbox_handle.generation
+        return result
 
     def _create_workflow_session(
         self,
@@ -3200,6 +3222,19 @@ class AutonomousAgentRunner:
 
         return events, tool_calls
 
+    def _select_sandbox_provider(self, workspace_type: str) -> Any:
+        """Pick the SandboxProvider for a task (#2022 P4 ③).
+
+        Centralizes backend selection so adding gVisor (#2023) is one branch
+        here, not a new dispatch fork in ``run_agent_task``. Local → the
+        injected LegacyPosixProvider; remote → a RemoteMachineProvider wrapping
+        ``remote_session_manager``. The runner no longer decides isolation
+        mechanics inline — it asks the provider.
+        """
+        if workspace_type == "remote" and self.remote_session_manager is not None:
+            return RemoteMachineProvider(self.remote_session_manager)
+        return self._sandbox_provider
+
     def _run_remote(
         self,
         session_id: str,
@@ -3236,6 +3271,14 @@ class AutonomousAgentRunner:
                 error="User ID is required for remote autonomous execution",
             )
 
+        # #2022 P4: route autonomous remote execution through RemoteMachineProvider
+        # so the orchestrator speaks the same create/exec/stop/destroy contract as
+        # the local path. The provider wraps RemoteSessionManager (create_remote_
+        # session / send_message / stop_session); it does NOT change the manager
+        # or remote.py (autonomous-only scope).
+        provider = self._select_sandbox_provider("remote")
+        sandbox_handle: SandboxHandle | None = None
+        exec_handle: ExecHandle | None = None
         remote_session_id = session_id
         try:
             # Register a tracker so orchestrator can signal cancellation
@@ -3245,83 +3288,85 @@ class AutonomousAgentRunner:
             )
             self._local_sessions[session_id] = tracker
 
-            # Create remote session
-            result = self.remote_session_manager.create_remote_session(
-                user_id=user_id,
-                machine_id=remote_machine_id,
-                project_path=project_path,
-                cli_tool=cli_tool,
-                model=model,
-                permission_mode=permission_mode,
-                allowed_tools=allowed_tools,
+            sandbox_handle = provider.create(
+                SandboxSpec(
+                    task_id=session_id,
+                    project_path=project_path,
+                    cli_tool=cli_tool,
+                    machine_id=remote_machine_id,
+                    user_id=user_id,
+                )
             )
+            try:
+                with tracker._remote_lifecycle_lock:
+                    if tracker._stopped.is_set():
+                        # Shutdown arrived before dispatch — do not create/send.
+                        return self._build_remote_cancelled_result(session_id, session_id)
+                    # exec = create_remote_session + send_message(prompt). It
+                    # raises SandboxError on either failure (fail-closed),
+                    # replacing the old success-False / sent-False branches.
+                    # cancel_check restores the create↔send _stopped window the
+                    # old code had (#2078 review 🟡A): a shutdown landing during
+                    # create_remote_session is caught BEFORE send dispatches the
+                    # prompt.
+                    exec_handle = provider.exec(
+                        sandbox_handle,
+                        command=[],
+                        env=None,
+                        exec_policy=RemoteTurnSpec(
+                            prompt=prompt,
+                            model=model,
+                            permission_mode=permission_mode,
+                            allowed_tools=tuple(allowed_tools) if allowed_tools else None,
+                        ),
+                        cancel_check=lambda: tracker._stopped.is_set(),
+                    )
+                    remote_session_id = exec_handle.command_id
+                    tracker.persisted_session_id = remote_session_id
+                    tracker.sandbox_handle = sandbox_handle
+                    tracker.exec_handle = exec_handle
+                    tracker.sandbox_provider = provider
+                    if tracker._stopped.is_set():
+                        # Shutdown won while exec was in flight — stop the real
+                        # session before the poll loop observes it.
+                        provider.stop(exec_handle)
+                        return self._build_remote_cancelled_result(remote_session_id, session_id)
 
-            # The concrete RemoteSessionManager returns the session payload
-            # directly (without a success=True envelope). Keep compatibility
-            # with older/test adapters that explicitly return success=False.
-            if not result or result.get("success") is False or not result.get("session_id"):
+                    # Map the hidden stable workflow line to the real remote row so
+                    # milestone details resolve the transcript without replacing
+                    # the main/review/test tracking identity.
+                    tracking_row = self.session_manager.get_session(session_id)
+                    context = dict(getattr(tracking_row, "context", {}) or {})
+                    if isinstance(tracking_row, dict):
+                        context = dict(tracking_row.get("context", {}) or {})
+                    context.update(
+                        {
+                            "workflow_id": context.get("workflow_id", ""),
+                            "cli_session_id": remote_session_id,
+                        }
+                    )
+                    self.session_manager.update_session_fields(
+                        session_id,
+                        {
+                            "context": context,
+                            "status": "active",
+                            "cli_session_id": remote_session_id,
+                        },
+                    )
+            except SandboxError as e:
+                # provider.exec failed closed (create/send). No remote session
+                # leak: exec already stopped a partially-created session.
                 return AgentTaskResult(
                     session_id=session_id,
                     tracking_session_id=session_id,
                     success=False,
-                    error=(result or {}).get("error", "Failed to create remote session"),
+                    error=str(e),
                 )
 
-            remote_session_id = result["session_id"]
-            with tracker._remote_lifecycle_lock:
-                tracker.persisted_session_id = remote_session_id
-                if tracker._stopped.is_set():
-                    # Shutdown won while create_remote_session was in flight.
-                    # Stop the newly discovered real session before any prompt
-                    # can be dispatched.
-                    self.remote_session_manager.stop_session(remote_session_id)
-                    return self._build_remote_cancelled_result(remote_session_id, session_id)
-
-                # Map the hidden stable workflow line to the real remote row so
-                # milestone details resolve the transcript without replacing
-                # the main/review/test tracking identity.
-                tracking_row = self.session_manager.get_session(session_id)
-                context = dict(getattr(tracking_row, "context", {}) or {})
-                if isinstance(tracking_row, dict):
-                    context = dict(tracking_row.get("context", {}) or {})
-                context.update(
-                    {
-                        "workflow_id": context.get("workflow_id", ""),
-                        "cli_session_id": remote_session_id,
-                    }
-                )
-                self.session_manager.update_session_fields(
-                    session_id,
-                    {
-                        "context": context,
-                        "status": "active",
-                        "cli_session_id": remote_session_id,
-                    },
-                )
-
-                if tracker._stopped.is_set():
-                    self.remote_session_manager.stop_session(remote_session_id)
-                    return self._build_remote_cancelled_result(remote_session_id, session_id)
-
-                # The real manager names this argument ``content``. Treat an
-                # explicit False as a dispatch failure while retaining support
-                # for legacy adapters that returned None on success.
-                sent = self.remote_session_manager.send_message(
-                    session_id=remote_session_id,
-                    content=prompt,
-                    user_id=user_id,
-                )
-                if sent is False:
-                    self.remote_session_manager.stop_session(remote_session_id)
-                    return AgentTaskResult(
-                        session_id=remote_session_id,
-                        tracking_session_id=session_id,
-                        source_session_id=remote_session_id,
-                        success=False,
-                        error="Failed to send prompt to remote session",
-                    )
-
-            # Poll until session completes
+            # Poll until session completes. This stays runner-side: it needs the
+            # local session_manager for messages/tokens + _remote_turn_complete,
+            # which are CLI-protocol concerns (the provider's stream() is the
+            # contract equivalent for lifecycle events only).
             import time
 
             start_time = time.time()
@@ -3349,7 +3394,7 @@ class AutonomousAgentRunner:
 
                         remote_events, remote_tool_calls = self._normalize_remote_messages(messages)
 
-                        return _build_agent_task_result(
+                        result = _build_agent_task_result(
                             session_id=remote_session_id,
                             tracking_session_id=session_id,
                             source_session_id=remote_session_id,
@@ -3374,26 +3419,34 @@ class AutonomousAgentRunner:
                                 else None
                             ),
                         )
+                        if sandbox_handle is not None:
+                            result.sandbox_id = sandbox_handle.sandbox_id
+                            result.sandbox_generation = sandbox_handle.generation
+                        return result
                 time.sleep(5)
 
             timeout_result = self._build_remote_cancelled_result(remote_session_id, session_id)
-            try:
-                self.remote_session_manager.stop_session(remote_session_id)
-            except Exception:
-                logger.warning(
-                    "Failed to stop timed-out remote session %s",
-                    remote_session_id[:8],
-                    exc_info=True,
-                )
+            if exec_handle is not None:
+                try:
+                    provider.stop(exec_handle)
+                except Exception:
+                    logger.warning(
+                        "Failed to stop timed-out remote session %s",
+                        remote_session_id[:8],
+                        exc_info=True,
+                    )
+            if sandbox_handle is not None:
+                timeout_result.sandbox_id = sandbox_handle.sandbox_id
+                timeout_result.sandbox_generation = sandbox_handle.generation
             timeout_result.error = f"Remote agent task timed out after {timeout}s"
             return timeout_result
 
         except Exception as e:
             # Once a real remote id exists, never drop its local tracker while
             # leaving the remote task running after a mapping/polling failure.
-            if remote_session_id != session_id:
+            if exec_handle is not None and remote_session_id != session_id:
                 try:
-                    self.remote_session_manager.stop_session(remote_session_id)
+                    provider.stop(exec_handle)
                 except Exception:
                     logger.warning(
                         "Failed to stop remote session after runner error %s",
@@ -3408,6 +3461,13 @@ class AutonomousAgentRunner:
                 error=f"Remote execution error: {e}",
             )
         finally:
+            # #2078 review 🟢: do NOT destroy/stop unconditionally. A successful
+            # remote turn leaves its reusable sidebar session deliberately
+            # active (see the success-path comment above); the failure paths
+            # (timeout / exception / cancel) already call provider.stop
+            # explicitly. The provider is per-call (factory mints a fresh one),
+            # so not destroying here leaks no cross-session state. Only the
+            # local tracker is popped.
             # Clean up the remote session tracker
             self._local_sessions.pop(session_id, None)
 
@@ -3989,6 +4049,21 @@ class AutonomousAgentRunner:
         session = self._local_sessions.get(session_id)
         if not session:
             return
+        # #2022 P4 ③: route stop through the SandboxProvider when the session has
+        # one. gVisor (#2023) has no local Popen — cancellation/timeout MUST
+        # reach the sandbox via provider.stop. Legacy (raw-proc killpg) and
+        # Remote (remote_session_manager.stop_session) both set sandbox_provider
+        # on the tracker, so this covers both; the branches below are the
+        # raw-proc / no-provider fallbacks for legacy tracker paths.
+        if session.sandbox_provider is not None and session.exec_handle is not None:
+            session._stopped.set()
+            with session._remote_lifecycle_lock:
+                try:
+                    session.sandbox_provider.stop(session.exec_handle)
+                except Exception as exc:
+                    logger.warning("sandbox stop failed for %s: %s", session_id[:8], exc)
+            session.completed.set()
+            return
         if session.process is None:
             # Remote autonomous calls use a process-less local tracker so the
             # synchronous poll loop can observe cancellation. Stop the actual
@@ -4056,13 +4131,28 @@ class AutonomousAgentRunner:
         """Suspend a running local session using SIGSTOP.
 
         The process is frozen in place and can be resumed with
-        :meth:`resume_session` using SIGCONT.
+        :meth:`resume_session` using SIGCONT. Legacy-effective only: a remote
+        tracker has ``process=None`` and returns False here (a remote CLI
+        session has no SIGSTOP analogue — pause is unsupported, not silently
+        claimed). The provider branch is reached only for local sessions with a
+        live process; ``RemoteMachineProvider.pause`` is a documented no-op.
         """
         session = self._local_sessions.get(session_id)
         if not session or not session.process or session.process.returncode is not None:
             return False
         if session._paused.is_set():
             return True
+        # #2022 P4 ③: route through the SandboxProvider when present (gVisor
+        # paves container pause); equivalent to the raw SIGSTOP below for Legacy.
+        if session.sandbox_provider is not None and session.exec_handle is not None:
+            try:
+                session.sandbox_provider.pause(session.exec_handle)
+                session._paused.set()
+                logger.info("Paused session %s via sandbox provider", session_id[:8])
+                return True
+            except Exception as e:
+                logger.error("Failed to pause session %s: %s", session_id[:8], e)
+                return False
         try:
             pgid = os.getpgid(session.process.pid)
             os.killpg(pgid, signal.SIGSTOP)
@@ -4080,6 +4170,15 @@ class AutonomousAgentRunner:
             return False
         if not session._paused.is_set():
             return True
+        if session.sandbox_provider is not None and session.exec_handle is not None:
+            try:
+                session.sandbox_provider.resume(session.exec_handle)
+                session._paused.clear()
+                logger.info("Resumed session %s via sandbox provider", session_id[:8])
+                return True
+            except Exception as e:
+                logger.error("Failed to resume session %s: %s", session_id[:8], e)
+                return False
         try:
             pgid = os.getpgid(session.process.pid)
             os.killpg(pgid, signal.SIGCONT)

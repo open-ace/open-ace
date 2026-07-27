@@ -163,6 +163,8 @@ class CommandEvidenceRecorder:
         execution_profile: str = "",
         started_at: datetime | None = None,
         tenant_id: int = 1,
+        sandbox_id: str | None = None,
+        sandbox_generation: int | None = None,
     ) -> None:
         """Record (or seed) the evidence row for a command invocation."""
         if self.is_noop or not command_id or not session_id:
@@ -173,6 +175,8 @@ class CommandEvidenceRecorder:
             workflow_id=workflow_id,
             session_id=session_id,
             milestone_id=milestone_id,
+            sandbox_id=sandbox_id,
+            sandbox_generation=sandbox_generation,
             tool_name=tool_name,
             shell_command=shell_command,
             argv=argv,
@@ -198,6 +202,8 @@ class CommandEvidenceRecorder:
         cancelled: bool = False,
         output_excerpt: str | None = None,
         completed_at: datetime | None = None,
+        sandbox_id: str | None = None,
+        sandbox_generation: int | None = None,
     ) -> None:
         """Upsert the terminal state for a command's evidence row."""
         if self.is_noop or not command_id or not session_id:
@@ -214,6 +220,8 @@ class CommandEvidenceRecorder:
         evidence = CommandExecutionEvidence(
             command_id=command_id,
             session_id=session_id,
+            sandbox_id=sandbox_id,
+            sandbox_generation=sandbox_generation,
             exit_code=exit_code,
             signal=signal,
             timed_out=timed_out,
@@ -236,6 +244,8 @@ class CommandEvidenceRecorder:
         workflow_id: str = "",
         milestone_id: str = "",
         event_log: list[dict[str, Any]],
+        sandbox_id: str | None = None,
+        sandbox_generation: int | None = None,
     ) -> None:
         """Walk an agent task's ``event_log`` and persist command evidence.
 
@@ -278,6 +288,8 @@ class CommandEvidenceRecorder:
                         milestone_id=milestone_id,
                         tool_name=event.get("tool_name") or "",
                         shell_command=shell_command if isinstance(shell_command, str) else None,
+                        sandbox_id=sandbox_id,
+                        sandbox_generation=sandbox_generation,
                     )
                 elif etype == "tool_result":
                     if not command_id:
@@ -290,6 +302,8 @@ class CommandEvidenceRecorder:
                         session_id=session_id,
                         exit_code=event.get("exit_code"),
                         output_excerpt=event.get("text"),
+                        sandbox_id=sandbox_id,
+                        sandbox_generation=sandbox_generation,
                     )
             except Exception as e:  # pragma: no cover - never raise to caller
                 logger.debug("command_evidence: event emit failed: %s", e)
@@ -393,12 +407,17 @@ def emit_command_evidence(
     workflow_id: str = "",
     milestone_id: str = "",
     event_log: list[dict[str, Any]],
+    sandbox_id: str | None = None,
+    sandbox_generation: int | None = None,
 ) -> None:
     """Dual-write command evidence from an agent task's event log.
 
     Convenience entry point for the orchestrator: persists a
     ``CommandExecutionEvidence`` row per command alongside the existing
     in-memory heuristics (Phase A shadow). Best-effort, never raises.
+    ``sandbox_id`` / ``sandbox_generation`` (#2022) attribute every row to the
+    SandboxProvider sandbox that ran the task — the fields #2046-A deferred to
+    the provider.
     """
     try:
         get_command_evidence_recorder().emit_from_event_log(
@@ -406,6 +425,8 @@ def emit_command_evidence(
             workflow_id=workflow_id,
             milestone_id=milestone_id,
             event_log=event_log,
+            sandbox_id=sandbox_id,
+            sandbox_generation=sandbox_generation,
         )
     except Exception as e:  # pragma: no cover - never raise to caller
         logger.debug("command_evidence: emit failed: %s", e)
