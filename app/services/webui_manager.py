@@ -468,6 +468,98 @@ class WebUIManager:
         ]
         return f"{payload}:{signature}"
 
+    def refresh_token(self, old_token: str) -> tuple[bool, str | None, str | None]:
+        """
+        Refresh an expired or expiring token with a new one.
+
+        This method allows refreshing a token even if it has expired,
+        as long as the signature is valid. This enables seamless token
+        renewal without requiring user re-authentication.
+
+        Supports both v2 format (with TTL) and v1 format (legacy).
+
+        Args:
+            old_token: The token to refresh (can be expired).
+
+        Returns:
+            Tuple of (success, new_token, error_message).
+            On success: (True, new_token, None)
+            On failure: (False, None, error_message)
+        """
+        if not old_token:
+            return False, None, "Empty token"
+
+        # v2 format
+        if old_token.startswith("v2:"):
+            return self._refresh_token_v2(old_token)
+
+        # v1 format (legacy) - refresh to v2
+        return self._refresh_token_v1(old_token)
+
+    def _refresh_token_v2(self, old_token: str) -> tuple[bool, str | None, str | None]:
+        """Refresh a v2 format token.
+
+        Validates signature (ignoring TTL), then generates a fresh token.
+
+        v2 format: v2:{user_id}:{port}:{timestamp}:{random}:{signature}
+        """
+        try:
+            parts = old_token.split(":")
+            if len(parts) != 6:
+                return False, None, "Invalid v2 token format"
+
+            _, user_id_str, port_str, timestamp_str, random_part, signature = parts
+            user_id: int = int(user_id_str)
+            port: int = int(port_str)
+            timestamp: int = int(timestamp_str)
+
+            # Verify signature (even if expired)
+            payload = f"v2:{user_id}:{port}:{timestamp}:{random_part}"
+            expected_signature = hashlib.sha256(
+                f"{payload}:{self.config.token_secret}".encode()
+            ).hexdigest()[:16]
+
+            if not hmac.compare_digest(signature, expected_signature):
+                return False, None, "Invalid signature"
+
+            # Generate new token with fresh timestamp
+            new_token = self.generate_token(user_id, port)
+            logger.info(f"Refreshed token for user {user_id}, port {port}")
+            return True, new_token, None
+
+        except (ValueError, TypeError) as e:
+            return False, None, f"Token parse error: {e}"
+
+    def _refresh_token_v1(self, old_token: str) -> tuple[bool, str | None, str | None]:
+        """Refresh a v1 format token to v2 format.
+
+        v1 format: {user_id}:{port}:{random}:{signature}
+        """
+        try:
+            parts = old_token.split(":")
+            if len(parts) != 4:
+                return False, None, "Invalid v1 token format"
+
+            user_id_str, port_str, random_part, signature = parts
+            user_id: int = int(user_id_str)
+            port: int = int(port_str)
+
+            # Verify signature
+            expected_signature = hashlib.sha256(
+                f"{user_id}:{port}:{random_part}:{self.config.token_secret}".encode()
+            ).hexdigest()[:16]
+
+            if not hmac.compare_digest(signature, expected_signature):
+                return False, None, "Invalid signature"
+
+            # Generate new v2 token
+            new_token = self.generate_token(user_id, port)
+            logger.info(f"Refreshed v1 token to v2 for user {user_id}, port {port}")
+            return True, new_token, None
+
+        except (ValueError, TypeError) as e:
+            return False, None, f"Token parse error: {e}"
+
     def validate_token(self, token: str) -> tuple[bool, int | None, str | None]:
         """
         Validate an authentication token.

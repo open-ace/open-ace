@@ -113,6 +113,8 @@ export const Workspace: React.FC = () => {
 
   // Refs for iframe elements (to send focus messages)
   const iframeRefs = useRef<Map<string, HTMLIFrameElement>>(new Map());
+  // Refresh lock to prevent concurrent token refresh
+  const refreshingRef = useRef(false);
 
   // Workspace tabs state from store (Issue #65)
   const storedTabs = useWorkspaceTabs();
@@ -201,6 +203,44 @@ export const Workspace: React.FC = () => {
   const workspaceFullscreen = useWorkspaceFullscreen();
   const { toggleWorkspaceFullscreen, exitWorkspaceFullscreen } = useAppStore();
 
+  // Ensure fresh token before creating new session
+  const ensureFreshToken = useCallback(async () => {
+    if (!userWebUI?.success || !userWebUI?.token) {
+      // No token, fetch a new one
+      const result = await workspaceApi.getUserWebUIUrl();
+      if (result.success) {
+        setUserWebUI(result);
+        return result.token;
+      }
+      return null;
+    }
+
+    // Check if token is about to expire or already expired
+    const token = userWebUI.token;
+    if (token.startsWith('v2:')) {
+      const parts = token.split(':');
+      if (parts.length === 6) {
+        const timestamp = parseInt(parts[3], 10);
+        const now = Math.floor(Date.now() / 1000);
+        const remaining = 1800 - (now - timestamp); // 30 min TTL
+
+        // Refresh if expiring within 5 minutes OR already expired (remaining <= 0)
+        if (remaining <= 300) {
+          console.log(
+            `[Workspace] Token expiring/expired (${remaining}s), refreshing before new session...`
+          );
+          const result = await workspaceApi.getUserWebUIUrl();
+          if (result.success) {
+            setUserWebUI(result);
+            return result.token;
+          }
+        }
+      }
+    }
+
+    return token;
+  }, [userWebUI]);
+
   // Load workspace config and user webui URL
   useEffect(() => {
     const loadConfig = async () => {
@@ -284,6 +324,67 @@ export const Workspace: React.FC = () => {
     const interval = setInterval(sendHeartbeat, ACTIVITY_HEARTBEAT_INTERVAL);
     return () => clearInterval(interval);
   }, [config?.multi_user_mode, userWebUI?.success]);
+
+  // Token refresh: Automatically refresh token before it expires
+  // v2 token format: v2:user_id:port:timestamp:random:signature
+  // Token TTL is 30 minutes (1800 seconds), refresh when < 5 minutes remaining
+  useEffect(() => {
+    if (!userWebUI?.success || !userWebUI?.token) return;
+
+    // Parse token timestamp (v2 format only)
+    const parseTokenTimestamp = (token: string): number | null => {
+      if (!token.startsWith('v2:')) return null;
+      const parts = token.split(':');
+      if (parts.length !== 6) return null;
+      const timestamp = parseInt(parts[3], 10);
+      return isNaN(timestamp) ? null : timestamp;
+    };
+
+    const TOKEN_TTL_SECONDS = 1800; // 30 minutes
+    const REFRESH_THRESHOLD_SECONDS = 300; // 5 minutes
+    const CHECK_INTERVAL_MS = 60 * 1000; // Check every minute
+
+    const checkAndRefreshToken = async () => {
+      const timestamp = parseTokenTimestamp(userWebUI.token);
+      if (!timestamp) return; // Not v2 format or invalid
+
+      const now = Math.floor(Date.now() / 1000);
+      const age = now - timestamp;
+      const remaining = TOKEN_TTL_SECONDS - age;
+
+      // Refresh when remaining time < threshold or already expired
+      if (remaining < REFRESH_THRESHOLD_SECONDS) {
+        // Prevent concurrent refresh
+        if (refreshingRef.current) {
+          console.log('[Workspace] Refresh already in progress, skipping');
+          return;
+        }
+        refreshingRef.current = true;
+        console.log(`[Workspace] Token expiring/expired (remaining: ${remaining}s), refreshing...`);
+        try {
+          // Re-fetch userWebUI URL to get fresh token
+          const result = await workspaceApi.getUserWebUIUrl();
+          if (result.success && result.token) {
+            console.log('[Workspace] Token refreshed successfully');
+            setUserWebUI(result);
+          } else {
+            console.error('[Workspace] Token refresh failed:', result.error);
+          }
+        } catch (err) {
+          console.error('[Workspace] Token refresh error:', err);
+        } finally {
+          refreshingRef.current = false;
+        }
+      }
+    };
+
+    // Initial check
+    checkAndRefreshToken();
+
+    // Periodic check
+    const interval = setInterval(checkAndRefreshToken, CHECK_INTERVAL_MS);
+    return () => clearInterval(interval);
+  }, [userWebUI?.success, userWebUI?.token]);
 
   // Theme sync: Send postMessage to all iframes when theme changes (Issue #104)
   useEffect(() => {
@@ -515,6 +616,40 @@ export const Workspace: React.FC = () => {
           workspaceType: workspaceType ?? 'local',
           machineId: machineId ?? undefined,
         });
+      }
+
+      // Listen for token expired from qwen-code-webui iframe
+      // When iframe gets 401 error, it sends this message to request token refresh
+      if (event.data?.type === 'qwen-code-token-expired') {
+        console.log('[Workspace] Received token-expired from iframe, refreshing token...');
+        // Prevent concurrent refresh
+        if (refreshingRef.current) {
+          console.log('[Workspace] Refresh already in progress, skipping');
+          return;
+        }
+        refreshingRef.current = true;
+        // Re-fetch userWebUI URL to get fresh token
+        workspaceApi
+          .getUserWebUIUrl()
+          .then((result) => {
+            if (result.success && result.token) {
+              console.log('[Workspace] Token refreshed, notifying iframe');
+              // Update local state
+              setUserWebUI(result);
+              // Notify all iframes about new token
+              iframeRefs.current.forEach((iframe) => {
+                if (iframe.contentWindow) {
+                  iframe.contentWindow.postMessage(
+                    { type: 'openace-token-refreshed', token: result.token },
+                    '*'
+                  );
+                }
+              });
+            }
+          })
+          .finally(() => {
+            refreshingRef.current = false;
+          });
       }
     };
 
@@ -752,6 +887,37 @@ export const Workspace: React.FC = () => {
     },
     [config, userWebUI, language, theme, remoteProjects]
   );
+
+  // Update tabs URL when token changes (after refresh)
+  useEffect(() => {
+    if (!tabsInitialized || tabs.length === 0 || !userWebUI?.success || !userWebUI?.token) return;
+
+    // Only update if token has changed
+    setTabs((prevTabs) =>
+      prevTabs.map((tab) => {
+        // Skip terminal tabs
+        if (tab.tabType === 'terminal') return tab;
+        // Update token for all other tabs
+        if (tab.token !== userWebUI.token) {
+          const newUrl = getEffectiveUrl(
+            tab.sessionId,
+            tab.encodedProjectName,
+            tab.toolName,
+            tab.settings,
+            tab.workspaceType
+              ? {
+                  workspaceType: tab.workspaceType,
+                  machineId: tab.machineId,
+                  machineName: tab.machineName,
+                }
+              : undefined
+          );
+          return { ...tab, token: userWebUI.token, url: newUrl };
+        }
+        return tab;
+      })
+    );
+  }, [userWebUI?.token, tabsInitialized, getEffectiveUrl]);
 
   // Initialize tabs when config is loaded (Issue #65: Restore from store if available)
   useEffect(() => {
@@ -2527,17 +2693,19 @@ export const Workspace: React.FC = () => {
       <NewSessionModal
         show={showNewSessionModal}
         onClose={() => setShowNewSessionModal(false)}
-        onCreateLocal={() => {
+        onCreateLocal={async () => {
           setShowNewSessionModal(false);
+          await ensureFreshToken();
           createNewTab(undefined, { workspaceType: 'local' });
         }}
-        onCreateRemote={(params: {
+        onCreateRemote={async (params: {
           machineId: string;
           machineName: string;
           sessionId: string;
           projectPath: string;
         }) => {
           setShowNewSessionModal(false);
+          await ensureFreshToken();
           createNewTab(undefined, {
             workspaceType: 'remote',
             machineId: params.machineId,
