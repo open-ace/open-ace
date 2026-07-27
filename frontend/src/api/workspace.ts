@@ -150,5 +150,9 @@ export const workspaceApi = {
       return response;
     } catch {
       return {
+        success: false,
+        projects: [],
+      };
+    }
   },
 };
