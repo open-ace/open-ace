@@ -113,6 +113,9 @@ export const Workspace: React.FC = () => {
 
   // Refs for iframe elements (to send focus messages)
   const iframeRefs = useRef<Map<string, HTMLIFrameElement>>(new Map());
+  // Refresh lock to prevent concurrent token refresh
+  const refreshingRef = useRef(false);
+
 
   // Workspace tabs state from store (Issue #65)
   const storedTabs = useWorkspaceTabs();
@@ -314,6 +317,12 @@ export const Workspace: React.FC = () => {
 
       // Refresh when remaining time < threshold or already expired
       if (remaining < REFRESH_THRESHOLD_SECONDS) {
+        // Prevent concurrent refresh
+        if (refreshingRef.current) {
+          console.log('[Workspace] Refresh already in progress, skipping');
+          return;
+        }
+        refreshingRef.current = true;
         console.log(`[Workspace] Token expiring/expired (remaining: ${remaining}s), refreshing...`);
         try {
           // Re-fetch userWebUI URL to get fresh token
@@ -326,6 +335,8 @@ export const Workspace: React.FC = () => {
           }
         } catch (err) {
           console.error('[Workspace] Token refresh error:', err);
+        } finally {
+          refreshingRef.current = false;
         }
       }
     };
@@ -574,6 +585,12 @@ export const Workspace: React.FC = () => {
       // When iframe gets 401 error, it sends this message to request token refresh
       if (event.data?.type === 'qwen-code-token-expired') {
         console.log('[Workspace] Received token-expired from iframe, refreshing token...');
+        // Prevent concurrent refresh
+        if (refreshingRef.current) {
+          console.log('[Workspace] Refresh already in progress, skipping');
+          return;
+        }
+        refreshingRef.current = true;
         // Re-fetch userWebUI URL to get fresh token
         workspaceApi.getUserWebUIUrl().then((result) => {
           if (result.success && result.token) {
@@ -590,6 +607,8 @@ export const Workspace: React.FC = () => {
               }
             });
           }
+        }).finally(() => {
+          refreshingRef.current = false;
         });
       }
     };
