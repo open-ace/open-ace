@@ -430,6 +430,8 @@ export const RemoteMachineManagement: React.FC = () => {
                         variant="outline-primary"
                         size="sm"
                         onClick={() => handleViewDetails(machine)}
+                        title={t('viewDetails', language)}
+                        aria-label={t('viewDetails', language)}
                       >
                         <i className="bi bi-eye" />
                       </Button>
@@ -439,6 +441,8 @@ export const RemoteMachineManagement: React.FC = () => {
                             variant="outline-success"
                             size="sm"
                             onClick={() => handleOpenRotate(machine)}
+                            title={t('rotateToken', language)}
+                            aria-label={t('rotateToken', language)}
                           >
                             <i className="bi bi-key" />
                           </Button>
@@ -446,6 +450,8 @@ export const RemoteMachineManagement: React.FC = () => {
                             variant="outline-warning"
                             size="sm"
                             onClick={() => handleOpenRevoke(machine)}
+                            title={t('revokeToken', language)}
+                            aria-label={t('revokeToken', language)}
                           >
                             <i className="bi bi-shield-lock" />
                           </Button>
@@ -453,6 +459,8 @@ export const RemoteMachineManagement: React.FC = () => {
                             variant="outline-danger"
                             size="sm"
                             onClick={() => handleOpenDeregister(machine)}
+                            title={t('deregister', language)}
+                            aria-label={t('deregister', language)}
                           >
                             <i className="bi bi-x-lg" />
                           </Button>
