@@ -9217,8 +9217,28 @@ class AutonomousOrchestrator:
         branch_name = wf.get("branch_name", "")
 
         if pr_number:
+            # Phase B (#2045): verify the PR head through the evidence contract
+            # before any probe consumes it. Fail closed — an unverifiable head
+            # defers to the next scheduler cycle rather than driving scope/sync/
+            # merge probes on a raw API SHA.
+            head_ev = self._evidence.resolve_verified_pr_head(gh, pr_number, branch_name)
+            if head_ev.verdict is not Verdict.CONFIRMED:
+                logger.info(
+                    "PR #%s: head not verified (verdict=%s), deferring merge",
+                    pr_number,
+                    head_ev.verdict.value,
+                )
+                self._create_milestone(
+                    phase="merge",
+                    milestone_type="pr_head_unverified",
+                    status="in_progress",
+                    title=f"PR #{pr_number} head not verifiable; deferring merge",
+                    error_message=head_ev.reason,
+                    metadata=json.dumps({"evidence": head_ev.to_dict()}, ensure_ascii=False),
+                )
+                return
+            pr_head_sha = head_ev.commit_shas[0]
             try:
-                pr_head_sha = gh.get_pr_head_sha(pr_number)
                 scope_error = self._validate_pre_merge_change_scope(gh, wf, pr_head_sha)
             except Exception as exc:
                 scope_error = f"Pre-merge change scope could not be verified: {exc}"
