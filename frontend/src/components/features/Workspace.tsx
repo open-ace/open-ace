@@ -203,6 +203,41 @@ export const Workspace: React.FC = () => {
   const workspaceFullscreen = useWorkspaceFullscreen();
   const { toggleWorkspaceFullscreen, exitWorkspaceFullscreen } = useAppStore();
 
+  // Ensure fresh token before creating new session
+  const ensureFreshToken = useCallback(async () => {
+    if (!userWebUI?.success || !userWebUI?.token) {
+      // No token, fetch a new one
+      const result = await workspaceApi.getUserWebUIUrl();
+      if (result.success) {
+        setUserWebUI(result);
+        return result.token;
+      }
+      return null;
+    }
+
+    // Check if token is about to expire (within 5 minutes)
+    const token = userWebUI.token;
+    if (token.startsWith('v2:')) {
+      const parts = token.split(':');
+      if (parts.length === 6) {
+        const timestamp = parseInt(parts[3], 10);
+        const now = Math.floor(Date.now() / 1000);
+        const remaining = 1800 - (now - timestamp); // 30 min TTL
+
+        if (remaining < 300) { // Less than 5 minutes remaining
+          console.log(`[Workspace] Token expiring (${remaining}s), refreshing before new session...`);
+          const result = await workspaceApi.getUserWebUIUrl();
+          if (result.success) {
+            setUserWebUI(result);
+            return result.token;
+          }
+        }
+      }
+    }
+
+    return token;
+  }, [userWebUI]);
+
   // Load workspace config and user webui URL
   useEffect(() => {
     const loadConfig = async () => {
@@ -2655,17 +2690,19 @@ export const Workspace: React.FC = () => {
       <NewSessionModal
         show={showNewSessionModal}
         onClose={() => setShowNewSessionModal(false)}
-        onCreateLocal={() => {
+        onCreateLocal={async () => {
           setShowNewSessionModal(false);
+          await ensureFreshToken();
           createNewTab(undefined, { workspaceType: 'local' });
         }}
-        onCreateRemote={(params: {
+        onCreateRemote={async (params: {
           machineId: string;
           machineName: string;
           sessionId: string;
           projectPath: string;
         }) => {
           setShowNewSessionModal(false);
+          await ensureFreshToken();
           createNewTab(undefined, {
             workspaceType: 'remote',
             machineId: params.machineId,
