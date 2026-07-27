@@ -198,6 +198,22 @@ class SandboxProvider(Protocol):
         """Tear down the sandbox. Idempotent: repeated calls do not raise."""
         ...
 
+    def destroy_attribution(self, sandbox_id: str, remote_session_id: str | None) -> None:
+        """Tear down a sandbox identified only by persisted attribution (#2022 P6).
+
+        Used by the startup/periodic reconciler after a crash/restart, when the
+        per-call provider instance (and its ``sandbox_id`` -> handle map) is gone
+        and only the strings persisted to the workflow row remain. ``destroy()``
+        cannot be used here — it keys off a live handle this provider no longer
+        holds. Idempotent + best-effort: never raises (the reconciler sweeps many
+        rows and must not abort on one failure).
+
+        Legacy/local: no-op (the process died with the server; the reconciler's
+        DB-reset is the real cleanup). Remote: ``stop_session(remote_session_id)``
+        when set. Container/gVisor (#2023) kills its sandbox by id here.
+        """
+        ...
+
     def inspect(self, handle: SandboxHandle) -> SandboxStatus:
         """Return the live status of the sandbox."""
         ...

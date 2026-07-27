@@ -113,3 +113,55 @@ def test_select_sandbox_provider_returns_remote_for_remote():
     # RemoteMachineProvider wraps the remote_session_manager (gVisor would add
     # a third branch here).
     assert provider.__class__.__name__ == "RemoteMachineProvider"
+
+
+def _spec() -> SandboxSpec:
+    return SandboxSpec(task_id="t", project_path="/tmp", cli_tool="c")
+
+
+def test_notify_sandbox_created_invokes_callback_with_attribution():
+    # #2022 P6: right after exec the runner fires on_sandbox_created so the
+    # orchestrator can persist a mid-run 'running' row (crash orphan bait for
+    # the reconciler). Callback gets (session_id, sandbox_id, provider_name,
+    # remote_session_id_or_None).
+    captured: list = []
+    provider = FakeSandboxProvider()
+    runner = AutonomousAgentRunner(
+        sandbox_provider=provider,
+        on_sandbox_created=lambda *a: captured.append(a),
+    )
+    handle = provider.create(_spec())
+    runner._notify_sandbox_created("s1", handle, "remote-42")
+    assert captured == [("s1", handle.sandbox_id, "fake", "remote-42")]
+
+
+def test_notify_sandbox_created_none_remote_id_for_local():
+    # Local path passes remote_session_id=None (no external session id).
+    captured: list = []
+    provider = FakeSandboxProvider()
+    runner = AutonomousAgentRunner(
+        sandbox_provider=provider,
+        on_sandbox_created=lambda *a: captured.append(a),
+    )
+    handle = provider.create(_spec())
+    runner._notify_sandbox_created("s1", handle, None)
+    assert captured == [("s1", handle.sandbox_id, "fake", None)]
+
+
+def test_notify_sandbox_created_noop_without_callback():
+    # No callback registered -> no-op, no raise.
+    provider = FakeSandboxProvider()
+    runner = AutonomousAgentRunner(sandbox_provider=provider)
+    handle = provider.create(_spec())
+    runner._notify_sandbox_created("s1", handle, None)
+
+
+def test_notify_sandbox_created_swallows_callback_errors():
+    # Best-effort: a failing callback must not propagate to the runner path.
+    def _boom(*a):
+        raise RuntimeError("callback failed")
+
+    provider = FakeSandboxProvider()
+    runner = AutonomousAgentRunner(sandbox_provider=provider, on_sandbox_created=_boom)
+    handle = provider.create(_spec())
+    runner._notify_sandbox_created("s1", handle, None)  # no raise

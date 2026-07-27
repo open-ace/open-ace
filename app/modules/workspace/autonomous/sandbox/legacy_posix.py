@@ -414,6 +414,15 @@ class LegacyPosixProvider:
         self._reap_sandbox(handle.sandbox_id)
         self._status[handle.sandbox_id] = SandboxStatus.DESTROYED
 
+    def destroy_attribution(self, sandbox_id: str, remote_session_id: str | None) -> None:
+        # Reconcile-path destroy (#2022 P6): the local proc died with the
+        # server, so there is nothing to stop — the reconciler's DB-reset
+        # (state -> destroyed, generation bump) is the real cleanup. Kept on the
+        # contract (not a local-only skip in the reconciler) so the sweep treats
+        # every provider uniformly and gVisor (#2023) overrides it with a real
+        # kill-by-id. Idempotent no-op.
+        return None
+
     def inspect(self, handle: SandboxHandle) -> SandboxStatus:
         return self._status.get(handle.sandbox_id, SandboxStatus.DESTROYED)
 

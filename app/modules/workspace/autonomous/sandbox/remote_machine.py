@@ -294,6 +294,19 @@ class RemoteMachineProvider:
                 pass
         self._status[handle.sandbox_id] = SandboxStatus.DESTROYED
 
+    def destroy_attribution(self, sandbox_id: str, remote_session_id: str | None) -> None:
+        # Reconcile-path destroy (#2022 P6): the per-call provider instance (and
+        # its _remote_sid map) is gone after a restart, so destroy(handle) cannot
+        # resolve the session. Stop directly by the persisted id. Best-effort +
+        # idempotent: a failing/repeated stop must not raise (the sweep walks many
+        # rows). local/gVisor rows pass remote_session_id=None -> no-op.
+        if not remote_session_id:
+            return
+        try:
+            self._rsm.stop_session(remote_session_id)
+        except Exception:  # pragma: no cover - best-effort
+            pass
+
     def inspect(self, handle: SandboxHandle) -> SandboxStatus:
         return self._status.get(handle.sandbox_id, SandboxStatus.DESTROYED)
 

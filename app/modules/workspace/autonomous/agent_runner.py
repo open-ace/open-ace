@@ -732,6 +732,7 @@ class AutonomousAgentRunner:
         on_pid_registered=None,
         on_pid_cleared=None,
         sandbox_provider=None,
+        on_sandbox_created=None,
     ):
         """
         Args:
@@ -748,6 +749,12 @@ class AutonomousAgentRunner:
             sandbox_provider: #2022 P3b — the SandboxProvider that owns local
                 spawn/ACL-wrap. Defaults to LegacyPosixProvider; injectable for
                 tests. P4 will branch on workspace_type for RemoteMachineProvider.
+            on_sandbox_created: Optional callback
+                ``(session_id, sandbox_id, provider_name, remote_session_id_or_None)``
+                called right after the provider execs (#2022 P6), so the
+                orchestrator can persist a mid-run ``sandbox_state='running'``
+                row + attribution. A crash between exec and task completion then
+                leaves a row the startup reconciler can destroy by id.
         """
         self.session_manager = session_manager
         self.remote_session_manager = remote_session_manager
@@ -757,6 +764,7 @@ class AutonomousAgentRunner:
         self._activity_callback = activity_callback
         self._on_pid_registered = on_pid_registered
         self._on_pid_cleared = on_pid_cleared
+        self._on_sandbox_created = on_sandbox_created
         self._local_sessions: dict[str, _LocalSession] = {}
         # #2022 P3b: local spawns route through the SandboxProvider so the
         # orchestrator no longer touches sudo/_wrap_agent_cmd/Popen directly
@@ -828,6 +836,33 @@ class AutonomousAgentRunner:
         # 'running'/'paused' row is a genuine crash orphan.
         result.sandbox_state = "destroyed" if result.success else "error"
         return result
+
+    def _notify_sandbox_created(
+        self,
+        session_id: str,
+        sandbox_handle: Any,
+        remote_session_id: str | None,
+    ) -> None:
+        """Fire ``on_sandbox_created`` so the orchestrator persists mid-run state (#2022 P6).
+
+        Called right after ``provider.exec()`` returns (local + remote), so a
+        crash between exec and task completion leaves a ``sandbox_state='running'``
+        workflow row the startup/periodic reconciler can destroy by id. The
+        remote path passes the manager's session id; local/gVisor pass ``None``.
+        Best-effort: a callback failure is logged, never propagated to the run
+        path (mirrors ``on_pid_registered``).
+        """
+        if self._on_sandbox_created is None or sandbox_handle is None:
+            return
+        try:
+            self._on_sandbox_created(
+                session_id,
+                sandbox_handle.sandbox_id,
+                sandbox_handle.provider_name,
+                remote_session_id,
+            )
+        except Exception as e:
+            logger.warning("on_sandbox_created callback failed: %s", e)
 
     @staticmethod
     def _classify_isolated_exit_code(
@@ -2282,6 +2317,10 @@ class AutonomousAgentRunner:
             # Deferred to #2023's first step (when gVisor needs to reuse
             # stream-json); P4 deliberately stops at spawn/signal decoupling.
             process = self._sandbox_provider.get_process(exec_handle)
+            # #2022 P6: persist a mid-run 'running' row so a crash between exec
+            # and task completion leaves an orphan the reconciler can destroy.
+            # Local has no external session id → None.
+            self._notify_sandbox_created(session_id, sandbox_handle, None)
         except (OSError, subprocess.SubprocessError) as e:
             self._sandbox_provider.destroy(sandbox_handle)
             return self._stamp_sandbox_attribution(
@@ -3373,6 +3412,9 @@ class AutonomousAgentRunner:
                         cancel_check=lambda: tracker._stopped.is_set(),
                     )
                     remote_session_id = exec_handle.command_id
+                    # #2022 P6: persist mid-run 'running' + remote_session_id so
+                    # a crash leaves an orphan the reconciler can destroy by id.
+                    self._notify_sandbox_created(session_id, sandbox_handle, remote_session_id)
                     tracker.persisted_session_id = remote_session_id
                     tracker.sandbox_handle = sandbox_handle
                     tracker.exec_handle = exec_handle
