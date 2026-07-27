@@ -3871,6 +3871,12 @@ export const translations: Record<Language, Translations> = {
     aiGithubTestSavedToken: '保存済みトークンをテスト',
     aiGithubEnterTokenFirst: 'テストする前に新しいトークンを入力してください',
 
+    generateToken: 'トークン生成',
+    registrationToken: '登録トークン',
+    deregister: '登録解除',
+    deregisterMachine: 'マシン登録解除',
+    deregisterConfirm: 'このマシンを登録解除しますか？関連するすべてのデータが削除されます。',
+
     // Quota Management
     quotaUsage: 'クォータ使用量',
     noQuotaData: 'クォータデータがありません',
@@ -5425,6 +5431,12 @@ export const translations: Record<Language, Translations> = {
     aiGithubAccountConfigured: 'AI GitHub 계정 구성됨',
     aiGithubTestSavedToken: '저장된 토큰 테스트',
     aiGithubEnterTokenFirst: '테스트 전 새 토큰을 입력하세요',
+
+    generateToken: '토큰 생성',
+    registrationToken: '등록 토큰',
+    deregister: '등록 해제',
+    deregisterMachine: '머신 등록 해제',
+    deregisterConfirm: '이 머신을 등록 해제하시겠습니까? 모든 관련 데이터가 삭제됩니다.',
 
     // Quota Management
     quotaUsage: '할당량 사용',
