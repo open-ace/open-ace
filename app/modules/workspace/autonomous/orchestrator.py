@@ -13,7 +13,6 @@ import logging
 import os
 import pwd
 import re
-import shlex
 import shutil
 import subprocess
 import sys
@@ -32,6 +31,14 @@ from app.modules.workspace.autonomous.artifact_text import (
     sanitize_artifact_text,
 )
 from app.modules.workspace.autonomous.command_evidence.recorder import emit_command_evidence
+from app.modules.workspace.autonomous.command_evidence.scope import (  # noqa: E402,F401; Re-imported for the legacy heuristic (_has_passing_test_tool_result) and; any in-module callers; the structured verdict (test_verdict) imports them; directly from scope to avoid a circular import (#2046 Phase B).
+    _TEST_OUTPUT_FILTER_RE,
+    _normalize_test_command,
+    _pytest_scope_covers,
+    _pytest_test_scope,
+    _PytestScope,
+)
+from app.modules.workspace.autonomous.command_evidence.types import ExecutionVerdict
 from app.modules.workspace.autonomous.event_emitter import AutonomousEventEmitter
 from app.modules.workspace.autonomous.evidence import Verdict
 from app.modules.workspace.autonomous.evidence_service import EvidenceService
@@ -310,192 +317,6 @@ def _has_test_tool_call(tool_calls: list, framework_type: str) -> bool:
     return False
 
 
-_TEST_OUTPUT_FILTER_RE = re.compile(
-    r"(?:\s+2>\&1)?\s*\|\s*(?:head|tail)(?:\s+-[^\s]+|\s+\d+)*\s*$",
-    re.IGNORECASE,
-)
-
-
-def _normalize_test_command(command: str) -> str:
-    """Return a stable identity for a test command across output-only filters.
-
-    Autonomous agents commonly run ``pytest ... | head -100`` while exploring
-    a failure and rerun the same target as ``pytest ... | tail -20`` after the
-    fix.  Those filters change only which output is displayed, not the tests
-    executed.  Treating the two strings as distinct left the truncated first
-    run permanently inconclusive even when the later rerun passed.
-
-    Strip only trailing ``head``/``tail`` pipelines (and their adjacent stderr
-    merge).  Execution-affecting shell operators such as ``&&``/``||`` and
-    pytest selectors/options remain part of the identity.
-    """
-    normalized = " ".join(str(command or "").split())
-    while True:
-        stripped = _TEST_OUTPUT_FILTER_RE.sub("", normalized).strip()
-        if stripped == normalized:
-            break
-        normalized = stripped
-    return re.sub(r"\s+2>\&1\s*$", "", normalized).strip()
-
-
-_PytestScope = tuple[str, frozenset[str]]
-
-
-def _pytest_test_scope(command: str) -> _PytestScope | None:
-    """Return the pytest execution context and selectors when safely comparable.
-
-    ``None`` means the command is too complex for safe scope comparison.  An
-    empty selector set means a full-suite invocation.  This lets a later
-    passing superset rerun clear earlier failures for the same files while
-    ensuring a targeted pass or a different Python environment can never clear
-    a failed full-suite command.
-    """
-    normalized = _normalize_test_command(command)
-    if any(operator in normalized for operator in ("&&", "||", ";", "|")):
-        return None
-    try:
-        tokens = shlex.split(normalized)
-    except ValueError:
-        return None
-
-    pytest_index = -1
-    for index, token in enumerate(tokens):
-        if os.path.basename(token) in {"pytest", "py.test"}:
-            pytest_index = index
-            break
-    if pytest_index < 0:
-        return None
-
-    # Only compare scopes when the invocation prefix has ordinary pytest
-    # semantics.  Environment assignments and wrappers can change collection
-    # even when the visible selectors are identical.
-    prefix = tokens[:pytest_index]
-    if prefix:
-        python_name = os.path.basename(prefix[0])
-        if (
-            len(prefix) != 2
-            or prefix[1] != "-m"
-            or re.fullmatch(r"python(?:\d+(?:\.\d+)*)?", python_name) is None
-        ):
-            return None
-        execution_context = f"{prefix[0]} -m {tokens[pytest_index]}"
-    else:
-        execution_context = tokens[pytest_index]
-
-    scope_narrowing_options = {
-        "-k",
-        "-m",
-        "--ignore",
-        "--ignore-glob",
-        "--deselect",
-        "--lf",
-        "--last-failed",
-        "--ff",
-        "--failed-first",
-        "--nf",
-        "--new-first",
-        "--sw",
-        "--stepwise",
-        "--stepwise-skip",
-    }
-    safe_flags = {
-        "-q",
-        "--quiet",
-        "-v",
-        "-vv",
-        "--verbose",
-        "-s",
-        "-x",
-        "--exitfirst",
-        "--disable-warnings",
-        "--strict-config",
-        "--strict-markers",
-        "--continue-on-collection-errors",
-        "--full-trace",
-        "--showlocals",
-        "-l",
-        "--no-header",
-        "--no-summary",
-    }
-    safe_value_options = {
-        "--tb",
-        "--color",
-        "--capture",
-        "--durations",
-        "--durations-min",
-        "--junitxml",
-        "--junit-prefix",
-        "--basetemp",
-        "--verbosity",
-        "--maxfail",
-    }
-
-    selectors: set[str] = set()
-    args = tokens[pytest_index + 1 :]
-    index = 0
-    selectors_only = False
-    while index < len(args):
-        token = args[index]
-        if token == "--":
-            selectors_only = True
-            index += 1
-            continue
-        if not selectors_only and token.startswith("-"):
-            option_name = token.split("=", 1)[0]
-            if option_name in scope_narrowing_options:
-                return None
-            if token in safe_flags:
-                index += 1
-                continue
-            if option_name in safe_value_options:
-                if "=" not in token:
-                    index += 1
-                    if index >= len(args):
-                        return None
-                index += 1
-                continue
-            # Plugin and future pytest options are unknown here.  Exact-command
-            # retries remain supported, but cross-command scope coverage is not.
-            return None
-        selectors.add(token.rstrip("/") or ".")
-        index += 1
-
-    return execution_context, frozenset(selectors)
-
-
-def _pytest_scope_covers(
-    passing_scope: _PytestScope | None,
-    earlier_scope: _PytestScope | None,
-) -> bool:
-    """Whether a passing pytest command covers an earlier command's scope."""
-    if passing_scope is None or earlier_scope is None:
-        return False
-    passing_context, passing_selectors = passing_scope
-    earlier_context, earlier_selectors = earlier_scope
-    if passing_context != earlier_context:
-        return False
-    if not passing_selectors:
-        return True
-    if not earlier_selectors:
-        return False
-
-    def _selector_covers(passing: str, earlier: str) -> bool:
-        if passing == earlier:
-            return True
-        if passing in {".", "./"}:
-            return True
-        passing_path = passing.split("::", 1)[0].rstrip("/")
-        earlier_path = earlier.split("::", 1)[0].rstrip("/")
-        if "::" not in passing and passing_path == earlier_path:
-            return True
-        return "::" not in passing and earlier_path.startswith(f"{passing_path}/")
-
-    return all(
-        any(_selector_covers(passing, earlier) for passing in passing_selectors)
-        for earlier in earlier_selectors
-    )
-
-
 def _has_passing_test_tool_result(event_log: list, framework_type: str) -> bool:
     """Require conclusive success for every distinct test command in this run.
 
@@ -503,6 +324,12 @@ def _has_passing_test_tool_result(event_log: list, framework_type: str) -> bool:
     reruns the same normalized command or a safely comparable pytest superset.
     Every new invocation resets its command to pending, so stale success from
     before a code change cannot satisfy an interrupted rerun.
+
+    #2046 Phase B — NON-AUTHORITATIVE FALLBACK: the gate now drives
+    PASSED/FAILED from ``compute_run_verdict`` over ``TestExecutionEvidence``.
+    This heuristic is retained only as the INCONCLUSIVE/NOT_RUN fallback (when
+    ``structured_verdict`` deferred). Do not extend it as a source of truth;
+    new frameworks belong in ``test_evidence.parse_test_evidence``.
     """
     _CommandInfo = tuple[str, _PytestScope | None]
     _Invocation = tuple[_CommandInfo, int]
@@ -4498,36 +4325,55 @@ class AutonomousOrchestrator:
         test_result: AgentTaskResult,
         milestone_id: str,
         heuristic_passed: bool,
+        structured_verdict: ExecutionVerdict | None = None,
     ) -> None:
         """Compare the heuristic test verdict against structured evidence (#2046).
 
-        Phase A shadow comparison: persists a ``workflow_events`` row + warning
-        when the structured verdict (derived purely from
-        ``CommandExecutionEvidence`` rows) disagrees with the heuristic
-        verdict. Does NOT influence the gate — the heuristic stays
-        authoritative until #2022 lands (Phase B).
+        Two divergence layers are recorded as ``evidence_shadow_divergence``
+        workflow events:
+
+        - Command-level (Phase A): ``compare_verdicts`` over
+          ``CommandExecutionEvidence`` rows — whether every recorded command
+          passed. Catches missing evidence (a heuristic pass with no commands).
+        - Run-level (Phase B): the structured ``ExecutionVerdict`` (from
+          ``compute_run_verdict`` over ``TestExecutionEvidence``) vs the
+          heuristic. This verdict now drives the gate; divergence here is the
+          signal for whether the heuristic fallback (#2046 §4) can be retired.
         """
         try:
+            import json
+
             from app.modules.workspace.autonomous.command_evidence.recorder import (
                 compare_verdicts,
                 get_command_evidence_recorder,
             )
 
             recorder = get_command_evidence_recorder()
-            if recorder.is_noop:
-                return
-            recorder.flush(timeout=1.0)
-            repo = recorder.repo
-            session_id = test_result.session_id or test_result.tracking_session_id or ""
-            if not session_id:
-                return
-            evidence_rows = repo.query_by_session(session_id)
+            evidence_rows = []
+            if not recorder.is_noop:
+                recorder.flush(timeout=1.0)
+                session_id = test_result.session_id or test_result.tracking_session_id or ""
+                if session_id:
+                    evidence_rows = recorder.repo.query_by_session(session_id)
             comparison = compare_verdicts(
                 heuristic_passed=heuristic_passed, evidence_rows=evidence_rows
             )
-            if not comparison.get("divergence"):
+
+            structured_value = (
+                structured_verdict.value
+                if structured_verdict is not None
+                else comparison.get("structured_verdict")
+            )
+            # Run-level divergence: structured PASSED/FAILED disagrees with the
+            # heuristic. NOT_RUN/INCONCLUSIVE means the structured layer deferred
+            # — only a divergence if the heuristic nonetheless claimed a pass.
+            structured_pass = structured_value == ExecutionVerdict.PASSED.value
+            run_level_divergence = (
+                structured_verdict is not None and structured_pass != heuristic_passed
+            )
+
+            if not comparison.get("divergence") and not run_level_divergence:
                 return
-            import json
 
             self.repo.create_event(
                 {
@@ -4537,23 +4383,140 @@ class AutonomousOrchestrator:
                     "event_data": json.dumps(
                         {
                             "heuristic_verdict": comparison.get("heuristic_verdict"),
-                            "structured_verdict": comparison.get("structured_verdict"),
+                            "structured_command_verdict": comparison.get("structured_verdict"),
+                            "structured_run_verdict": structured_value,
                             "reason": comparison.get("reason"),
                             "command_verdicts": comparison.get("command_verdicts", []),
                             "evidence_count": len(evidence_rows),
-                        }
+                        },
+                        ensure_ascii=False,
                     ),
                 }
             )
             logger.warning(
-                "evidence shadow divergence for %s: heuristic=%s structured=%s (%s)",
+                "evidence shadow divergence for %s: heuristic=%s structured_run=%s (%s)",
                 self._workflow_id,
                 comparison.get("heuristic_verdict"),
-                comparison.get("structured_verdict"),
+                structured_value,
                 comparison.get("reason", ""),
             )
         except Exception as e:
             logger.debug("evidence shadow comparison failed: %s", e)
+
+    def _compute_structured_test_verdict(
+        self,
+        test_result: AgentTaskResult,
+        framework_type: str,
+        test_ms: dict,
+    ) -> tuple[ExecutionVerdict, list, str]:
+        """Parse command evidence into TestExecutionEvidence and compute the run verdict.
+
+        #2046 Phase B authoritative path: reads the ``CommandExecutionEvidence``
+        rows dual-written in Phase A, parses each test command's output into a
+        ``TestExecutionEvidence`` row (persisted), and aggregates them via
+        ``compute_run_verdict``. Returns ``(verdict, evidences, reason)``.
+
+        Best-effort: any failure returns ``NOT_RUN`` with a reason so the gate
+        falls back to the legacy heuristic — the structured layer never raises
+        into the gate path.
+        """
+        try:
+            from app.modules.workspace.autonomous.command_evidence.recorder import (
+                get_command_evidence_recorder,
+            )
+            from app.modules.workspace.autonomous.command_evidence.test_evidence import (
+                parse_test_evidence,
+            )
+            from app.modules.workspace.autonomous.command_evidence.test_verdict import (
+                compute_run_verdict,
+            )
+            from app.repositories.command_evidence_repo import CommandExecutionEvidenceRepository
+            from app.repositories.test_evidence_repo import TestExecutionEvidenceRepository
+
+            recorder = get_command_evidence_recorder()
+            if not recorder.is_noop:
+                recorder.flush(timeout=1.0)
+
+            session_id = test_result.session_id or test_result.tracking_session_id or ""
+            if not session_id:
+                return ExecutionVerdict.NOT_RUN, [], "no session id on test result"
+
+            command_evidences = CommandExecutionEvidenceRepository().query_by_session(session_id)
+            if not command_evidences:
+                return ExecutionVerdict.NOT_RUN, [], "no command execution evidence"
+
+            # Only parse commands that look like test invocations; an ``echo``
+            # or ``ls`` must not be fed to the generic parser as if it were a
+            # test run (#2046 — agent prose / non-test commands cannot judge).
+            test_command_evidences = [
+                ce
+                for ce in command_evidences
+                if _has_test_tool_call(
+                    [
+                        {
+                            "tool": {
+                                "name": ce.tool_name or "",
+                                "input": {"command": ce.shell_command or ""},
+                            }
+                        }
+                    ],
+                    framework_type,
+                )
+            ]
+            if not test_command_evidences:
+                return ExecutionVerdict.NOT_RUN, [], "no test command evidence"
+
+            test_repo = TestExecutionEvidenceRepository()
+            test_evidences: list = []
+            for command_evidence in test_command_evidences:
+                parsed = parse_test_evidence(command_evidence, framework_hint=framework_type)
+                test_repo.upsert(parsed)
+                test_evidences.append(parsed)
+
+            verdict = compute_run_verdict(test_evidences, framework_type)
+            return verdict, test_evidences, f"parsed {len(test_evidences)} test command(s)"
+        except Exception as e:
+            logger.debug("structured test verdict computation failed: %s", e)
+            return ExecutionVerdict.NOT_RUN, [], f"compute failed: {e}"
+
+    def _emit_structured_test_fallback(
+        self,
+        verdict: ExecutionVerdict,
+        reason: str,
+        milestone_id: str,
+    ) -> None:
+        """Record that the structured verdict deferred to the heuristic.
+
+        Emitted whenever ``compute_run_verdict`` returns NOT_RUN/INCONCLUSIVE
+        and the gate falls back to ``_has_passing_test_tool_result`` (#2046 §4
+        降级). Tracked so parser coverage gaps are visible and the fallback can
+        be retired once shadow data proves the structured layer is sufficient.
+        """
+        try:
+            import json
+
+            self.repo.create_event(
+                {
+                    "workflow_id": self._workflow_id,
+                    "milestone_id": milestone_id,
+                    "event_type": "structured_test_fallback",
+                    "event_data": json.dumps(
+                        {
+                            "structured_verdict": verdict.value,
+                            "reason": reason,
+                        },
+                        ensure_ascii=False,
+                    ),
+                }
+            )
+            logger.info(
+                "structured test verdict deferred to heuristic for %s: verdict=%s (%s)",
+                self._workflow_id,
+                verdict.value,
+                reason,
+            )
+        except Exception as e:
+            logger.debug("structured fallback event emit failed: %s", e)
 
     def _on_pid_registered(self, session_id: str, pid: int):
         """Persist agent subprocess PID to database for reliable cancel/pause."""
@@ -7823,22 +7786,47 @@ class AutonomousOrchestrator:
         has_text_pass_evidence = has_test_result and bool(
             re.search(r"\b[1-9]\d*\s+passed\b", test_response_text, re.IGNORECASE)
         )
-        tests_actually_run = has_passing_tool_result or (
-            has_test_tool_call and has_text_pass_evidence
+        # #2046 Phase B: structured evidence is authoritative for PASSED/FAILED;
+        # the legacy heuristic stays as the INCONCLUSIVE/NOT_RUN fallback
+        # (#2046 §4 降级). Agent prose / TEST_STATUS can no longer promote a
+        # run to PASSED on its own (#1967 invariant).
+        structured_verdict, _structured_evidences, structured_reason = (
+            self._compute_structured_test_verdict(test_result, framework_type, test_ms)
         )
+        structured_authoritative = structured_verdict in (
+            ExecutionVerdict.PASSED,
+            ExecutionVerdict.FAILED,
+        )
+        if structured_verdict == ExecutionVerdict.PASSED:
+            tests_actually_run = True
+        elif structured_verdict == ExecutionVerdict.FAILED:
+            tests_actually_run = False
+        else:  # NOT_RUN / INCONCLUSIVE — fall back to the legacy heuristic.
+            tests_actually_run = has_passing_tool_result or (
+                has_test_tool_call and has_text_pass_evidence
+            )
+            self._emit_structured_test_fallback(
+                structured_verdict, structured_reason, test_ms.get("milestone_id", "")
+            )
+        # test_result_inconclusive only applies when the structured layer could
+        # not judge authoritatively; a structured FAILED is a real failure,
+        # not an inconclusive run.
         test_result_inconclusive = (
-            test_result.success
+            not structured_authoritative
+            and test_result.success
             and (has_test_tool_call or has_test_result or test_status_tag in ("passed", "failed"))
             and not tests_actually_run
         )
 
-        # #2046 Phase A shadow comparison: compare the heuristic verdict against
-        # structured CommandExecutionEvidence. Records divergence but does NOT
-        # influence the verdict (Phase B migrates the gate to evidence).
+        # #2046 shadow comparison: record divergence between the structured
+        # test verdict and the heuristic. Phase A compared at command level;
+        # Phase B compares the run-level verdict that now drives the gate.
         self._shadow_compare_evidence(
             test_result=test_result,
             milestone_id=test_ms.get("milestone_id", ""),
-            heuristic_passed=tests_actually_run,
+            heuristic_passed=has_passing_tool_result
+            or (has_test_tool_call and has_text_pass_evidence),
+            structured_verdict=structured_verdict,
         )
 
         # Issue #1547: Validate test report format
@@ -7846,7 +7834,10 @@ class AutonomousOrchestrator:
         format_valid, format_reason = self._validate_test_report_format(test_response_text)
         has_non_standard_format = not format_valid and tests_actually_run
 
-        tests_actually_skipped = (
+        # A structured PASSED/FAILED means tests really ran (and passed or
+        # failed) — that is never a "skipped" outcome. Skip detection only
+        # applies when the structured layer deferred to the heuristic.
+        tests_actually_skipped = not structured_authoritative and (
             test_status_tag == "skipped"
             or has_skip_tag
             or (test_result.success and has_skip_keyword and not tests_actually_run)

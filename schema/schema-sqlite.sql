@@ -1025,6 +1025,28 @@ CREATE TABLE tenants (
     CONSTRAINT chk_tenants_status CHECK (status IN ('active', 'suspended', 'trial', 'inactive'))
 );
 
+CREATE TABLE test_execution_evidence (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ command_id text NOT NULL,
+ command_execution_id integer,
+ framework text DEFAULT '' NOT NULL,
+ collected integer,
+ passed integer,
+ failed integer,
+ skipped integer,
+ errors integer,
+ selectors text,
+ coverage_scope text,
+ parser text DEFAULT '' NOT NULL,
+ parser_confidence text DEFAULT '' NOT NULL,
+ verdict text DEFAULT '' NOT NULL,
+ session_id text DEFAULT '' NOT NULL,
+ workflow_id text DEFAULT '' NOT NULL,
+ milestone_id text DEFAULT '' NOT NULL,
+ tenant_id integer DEFAULT 1 NOT NULL,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE tool_account_mapping_rules (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  user_id integer NOT NULL,
@@ -1292,6 +1314,8 @@ CREATE UNIQUE INDEX uq_quota_usage_user_date_period_new ON quota_usage (user_id,
 CREATE UNIQUE INDEX uq_remote_runtime_outputs_session_index ON remote_runtime_outputs (session_id, event_index);
 
 CREATE UNIQUE INDEX uq_tenant_usage_tenant_date_new ON tenant_usage (tenant_id, date);
+
+CREATE UNIQUE INDEX uq_test_evidence_session_command ON test_execution_evidence (session_id, command_id);
 
 CREATE UNIQUE INDEX uq_usage_summary_tool_host ON usage_summary (tool_name, host_name);
 
@@ -1628,6 +1652,10 @@ CREATE INDEX idx_tenants_deleted ON tenants (deleted_at);
 CREATE INDEX idx_tenants_slug ON tenants (slug);
 
 CREATE INDEX idx_tenants_status ON tenants (status);
+
+CREATE INDEX idx_test_evidence_session_command ON test_execution_evidence (session_id, command_id);
+
+CREATE INDEX idx_test_evidence_workflow_milestone ON test_execution_evidence (workflow_id, milestone_id);
 
 CREATE INDEX idx_tool_accounts_tool_account ON user_tool_accounts (tool_account);
 
