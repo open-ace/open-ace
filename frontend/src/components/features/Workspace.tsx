@@ -320,8 +320,7 @@ export const Workspace: React.FC = () => {
           const result = await workspaceApi.refreshWebUIToken(userWebUI.token);
           if (result.success && result.token) {
             console.log('[Workspace] Token refreshed successfully');
-            setUserWebUI((prev) => (prev ? { ...prev, token: result.token! } : prev))
-            );
+            setUserWebUI((prev) => (prev ? { ...prev, token: result.token! } : prev));
           } else {
             console.error('[Workspace] Token refresh failed:', result.error);
           }
