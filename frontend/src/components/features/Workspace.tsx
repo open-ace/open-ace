@@ -226,7 +226,9 @@ export const Workspace: React.FC = () => {
 
         // Refresh if expiring within 5 minutes OR already expired (remaining <= 0)
         if (remaining <= 300) {
-          console.log(`[Workspace] Token expiring/expired (${remaining}s), refreshing before new session...`);
+          console.log(
+            `[Workspace] Token expiring/expired (${remaining}s), refreshing before new session...`
+          );
           const result = await workspaceApi.getUserWebUIUrl();
           if (result.success) {
             setUserWebUI(result);
