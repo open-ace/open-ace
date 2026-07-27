@@ -253,3 +253,56 @@ def test_remote_collect_execution_evidence_fills_sandbox_attribution():
     assert row.sandbox_id == handle.sandbox_id
     assert row.sandbox_generation == handle.generation
     assert row.command_id == "rsess-1"
+
+
+# ── #2078 review fixes ──
+
+
+def test_remote_exec_cancel_check_intercepts_before_send():
+    # 🟡A: cancel_check restores the create↔send cancellation window. If the
+    # runner signals cancellation (create succeeded, send pending), exec must
+    # stop the just-created session and raise BEFORE send_message dispatches the
+    # prompt — the old "intercept before dispatch" guarantee.
+    rsm = FakeRemoteSessionManager()
+    provider = RemoteMachineProvider(rsm)
+    handle = provider.create(_spec())
+    with pytest.raises(SandboxError):
+        provider.exec(
+            handle,
+            command=[],
+            env=None,
+            exec_policy=_turn(),
+            cancel_check=lambda: True,
+        )
+    # The created session was stopped; the prompt was NOT dispatched.
+    assert rsm.stop_calls == ["rsess-1"]
+    assert rsm.send_calls == []
+    assert provider.inspect(handle) == SandboxStatus.STOPPED
+
+
+def test_remote_exec_cancel_check_false_dispatches_normally():
+    # cancel_check returning False (not cancelled) is a no-op — send proceeds.
+    rsm = FakeRemoteSessionManager()
+    provider = RemoteMachineProvider(rsm)
+    handle = provider.create(_spec())
+    eh = provider.exec(
+        handle, command=[], env=None, exec_policy=_turn(), cancel_check=lambda: False
+    )
+    assert eh.command_id == "rsess-1"
+    assert rsm.send_calls and rsm.send_calls[0]["content"] == "do the thing"
+
+
+def test_remote_collect_execution_evidence_uses_streamed_exit_code():
+    # 🟡B: collect_execution_evidence reads the exit_code stream() polled, not a
+    # hardcoded 0.
+    rsm = FakeRemoteSessionManager()
+    provider = RemoteMachineProvider(rsm, poll_interval=0)
+    handle = provider.create(_spec())
+    eh = provider.exec(handle, command=[], env=None, exec_policy=_turn())
+    rsm.get_session_status = lambda sid: {  # type: ignore[assignment]
+        "output": [{"is_complete": True, "stream": "stdout"}],
+        "exit_code": 2,
+    }
+    list(provider.stream(eh))
+    rows = provider.collect_execution_evidence(handle)
+    assert rows[0].exit_code == 2

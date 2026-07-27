@@ -3297,6 +3297,10 @@ class AutonomousAgentRunner:
                     # exec = create_remote_session + send_message(prompt). It
                     # raises SandboxError on either failure (fail-closed),
                     # replacing the old success-False / sent-False branches.
+                    # cancel_check restores the create↔send _stopped window the
+                    # old code had (#2078 review 🟡A): a shutdown landing during
+                    # create_remote_session is caught BEFORE send dispatches the
+                    # prompt.
                     exec_handle = provider.exec(
                         sandbox_handle,
                         command=[],
@@ -3307,6 +3311,7 @@ class AutonomousAgentRunner:
                             permission_mode=permission_mode,
                             allowed_tools=tuple(allowed_tools) if allowed_tools else None,
                         ),
+                        cancel_check=lambda: tracker._stopped.is_set(),
                     )
                     remote_session_id = exec_handle.command_id
                     tracker.persisted_session_id = remote_session_id
@@ -3448,16 +3453,13 @@ class AutonomousAgentRunner:
                 error=f"Remote execution error: {e}",
             )
         finally:
-            # Release the provider sandbox (idempotent stop + mark destroyed).
-            if sandbox_handle is not None:
-                try:
-                    provider.destroy(sandbox_handle)
-                except Exception:
-                    logger.warning(
-                        "Failed to destroy remote sandbox for %s",
-                        session_id[:8],
-                        exc_info=True,
-                    )
+            # #2078 review 🟢: do NOT destroy/stop unconditionally. A successful
+            # remote turn leaves its reusable sidebar session deliberately
+            # active (see the success-path comment above); the failure paths
+            # (timeout / exception / cancel) already call provider.stop
+            # explicitly. The provider is per-call (factory mints a fresh one),
+            # so not destroying here leaks no cross-session state. Only the
+            # local tracker is popped.
             # Clean up the remote session tracker
             self._local_sessions.pop(session_id, None)
 

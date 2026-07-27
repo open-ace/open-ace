@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import time
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -93,6 +93,11 @@ class RemoteMachineProvider:
         # sandbox_id -> remote_session_id (the manager's row id). command_id on
         # the ExecHandle IS the remote_session_id so stop/destroy map directly.
         self._remote_sid: dict[str, str] = {}
+        # sandbox_id -> last exit_code observed by stream()'s poll, so
+        # collect_execution_evidence reports the real outcome (#2078 review 🟡B)
+        # instead of a hardcoded 0. Prod remote does not call stream() today
+        # (the runner has its own poll loop); this fills when stream runs.
+        self._last_exit_code: dict[str, int] = {}
         self._poll_interval = poll_interval
         self._poll_timeout = poll_timeout
 
@@ -121,6 +126,7 @@ class RemoteMachineProvider:
         command: list[str],
         env: dict[str, str] | None,
         exec_policy: Any | None,
+        cancel_check: Callable[[], bool] | None = None,
     ) -> ExecHandle:
         if not isinstance(exec_policy, RemoteTurnSpec):
             raise SandboxError("remote exec requires a RemoteTurnSpec as exec_policy")
@@ -146,6 +152,18 @@ class RemoteMachineProvider:
         remote_session_id = result["session_id"]
         self._remote_sid[handle.sandbox_id] = remote_session_id
         self._status[handle.sandbox_id] = SandboxStatus.RUNNING
+        # #2078 review 🟡A: restore the create↔send cancellation window the old
+        # _run_remote had two _stopped checks for. exec merges create+send; the
+        # runner passes its _stopped event as cancel_check so a shutdown landing
+        # during create_remote_session is caught BEFORE send — no prompt reaches
+        # a cancelled task (the old "intercept before dispatch" guarantee).
+        if cancel_check is not None and cancel_check():
+            try:
+                self._rsm.stop_session(remote_session_id)
+            except Exception:  # pragma: no cover - best-effort cleanup
+                pass
+            self._status[handle.sandbox_id] = SandboxStatus.STOPPED
+            raise SandboxError("cancelled before prompt dispatch")
         sent = self._rsm.send_message(
             session_id=remote_session_id,
             content=exec_policy.prompt,
@@ -180,6 +198,7 @@ class RemoteMachineProvider:
             remote_state = getter(remote_session_id) if callable(getter) else None
             if remote_state is not None and self._turn_complete(remote_state):
                 exit_code = int(remote_state.get("exit_code") or 0)
+                self._last_exit_code[sandbox_id] = exit_code
                 break
             time.sleep(self._poll_interval)
         yield SandboxEvent(
@@ -219,18 +238,22 @@ class RemoteMachineProvider:
         return None
 
     def collect_execution_evidence(self, handle: SandboxHandle) -> list[Any]:
-        # Fills the #2046-A sandbox attribution (sandbox_id/generation). Remote
-        # exit_code/signal are best-effort from the last observed status; the
-        # authoritative per-tool evidence stays with the runner's recorder.
+        # Fills the #2046-A sandbox attribution (sandbox_id/generation). The
+        # exit_code is the last one stream()'s poll observed (stored in
+        # _last_exit_code); before stream runs it defaults to 0. Prod remote
+        # does not call this today (the runner drives its own poll loop and
+        # stamps sandbox attribution via the recorder), so this is the contract
+        # path #2023 gVisor inherits.
         remote_session_id = self._remote_sid.get(handle.sandbox_id, handle.sandbox_id)
-        terminal = derive_terminal_reason(exit_code=0, has_result=True)
+        exit_code = self._last_exit_code.get(handle.sandbox_id, 0)
+        terminal = derive_terminal_reason(exit_code=exit_code, has_result=True)
         return [
             CommandExecutionEvidence(
                 command_id=remote_session_id,
                 sandbox_id=handle.sandbox_id,
                 sandbox_generation=handle.generation,
                 cwd=handle.spec.project_path,
-                exit_code=0,
+                exit_code=exit_code,
                 terminal_reason=terminal.value,
             )
         ]
