@@ -774,21 +774,54 @@ class AutonomousAgentRunner:
     # them so the orchestrator sees a structured reason, not an opaque exit.
     TASK_WALL_CLOCK_TIMEOUT_ERROR_CODE = "task_wall_clock_timeout"
 
-    @staticmethod
-    def _resource_policy_configured() -> bool:
-        """Whether agent-launcher.conf sets a non-zero memory/pids/cpu limit.
+    def _load_task_policy(self) -> Any:
+        """Load the #2020 AgentTaskPolicy from agent-launcher.conf, or None.
 
-        Used to gate signal-kill classification: ``task_resource_limit_exceeded``
-        should mean a configured limit was actually hit, not an unrelated kill.
+        Passed into ``SandboxSpec.policy`` so #2020 HOME/TMP/quota is *expressed
+        via the spec* (the #2022 acceptance), not only enforced ad hoc by
+        _build_agent_env + openace-run-as. Legacy does not yet consume
+        spec.policy (the existing isolation path stands), but the spec now
+        carries it for contract completeness and future providers. None if the
+        conf is missing/unreadable.
         """
         try:
             from app.modules.workspace.autonomous.task_isolation import read_agent_task_policy
 
             conf = os.environ.get("OPENACE_LAUNCHER_CONF", "/etc/openace/agent-launcher.conf")
-            policy = read_agent_task_policy(conf)
+            return read_agent_task_policy(conf)
         except Exception:
-            return False
-        return bool(policy.memory_max_bytes or policy.pids_max or policy.cpu_max)
+            return None
+
+    def _resource_policy_configured(self) -> bool:
+        """Whether agent-launcher.conf sets a non-zero memory/pids/cpu limit.
+
+        Used to gate signal-kill classification: ``task_resource_limit_exceeded``
+        should mean a configured limit was actually hit, not an unrelated kill.
+        """
+        policy = self._load_task_policy()
+        return bool(policy and (policy.memory_max_bytes or policy.pids_max or policy.cpu_max))
+
+    @staticmethod
+    def _stamp_sandbox_attribution(
+        result: AgentTaskResult, sandbox_handle: Any, provider: Any
+    ) -> AgentTaskResult:
+        """Stamp sandbox identity + final state onto a result (#2022 P5).
+
+        Called at every _run_local/_run_remote return path where a sandbox was
+        created, so the orchestrator can persist sandbox_provider/id/generation/
+        state onto the workflow row and every evidence path carries attribution.
+        No-op when sandbox_handle is None (spawn failed before create).
+        """
+        if sandbox_handle is None:
+            return result
+        result.sandbox_id = sandbox_handle.sandbox_id
+        result.sandbox_generation = sandbox_handle.generation
+        result.sandbox_provider = sandbox_handle.provider_name
+        try:
+            result.sandbox_state = provider.inspect(sandbox_handle).value
+        except Exception:  # pragma: no cover - best-effort
+            result.sandbox_state = ""
+        return result
 
     @staticmethod
     def _classify_isolated_exit_code(
@@ -2217,6 +2250,9 @@ class AutonomousAgentRunner:
                 project_path=project_path,
                 cli_tool=cli_tool,
                 system_account=system_account,
+                # #2022 P5: express #2020 HOME/TMP/quota via the spec (not just
+                # enforce ad hoc); Legacy doesn't consume it yet, future providers do.
+                policy=self._load_task_policy(),
             )
         )
         # Preserve the old log: the wrapped launch argv (sudo/openace-run-as for
@@ -2242,15 +2278,19 @@ class AutonomousAgentRunner:
             process = self._sandbox_provider.get_process(exec_handle)
         except (OSError, subprocess.SubprocessError) as e:
             self._sandbox_provider.destroy(sandbox_handle)
-            return AgentTaskResult(
-                session_id=(
-                    ""
-                    if self._uses_sidebar_session_source(cli_tool, workspace_type)
-                    else session_id
+            return self._stamp_sandbox_attribution(
+                AgentTaskResult(
+                    session_id=(
+                        ""
+                        if self._uses_sidebar_session_source(cli_tool, workspace_type)
+                        else session_id
+                    ),
+                    tracking_session_id=session_id,
+                    success=False,
+                    error=f"Failed to start process: {e}",
                 ),
-                tracking_session_id=session_id,
-                success=False,
-                error=f"Failed to start process: {e}",
+                sandbox_handle,
+                self._sandbox_provider,
             )
 
         session = _LocalSession(
@@ -2417,21 +2457,25 @@ class AutonomousAgentRunner:
                 and self._uses_sidebar_session_source(cli_tool, workspace_type)
             ):
                 self._replay_usage_from_jsonl(session, resolved_session_id)
-            return _build_agent_task_result(
-                session_id=session_id,
-                tracking_session_id=session_id,
-                source_session_id=resolved_session_id,
-                event_log=session.event_log,
-                fallback_text=session.assistant_text,
-                total_tokens=session.total_tokens,
-                total_input_tokens=session.total_input_tokens,
-                total_output_tokens=session.total_output_tokens,
-                request_count=session.request_count,
-                tool_calls=session.tool_calls,
-                success=False,
-                error=f"Agent task timed out after {timeout}s",
-                error_code=session.error_code
-                or AutonomousAgentRunner.TASK_WALL_CLOCK_TIMEOUT_ERROR_CODE,
+            return self._stamp_sandbox_attribution(
+                _build_agent_task_result(
+                    session_id=session_id,
+                    tracking_session_id=session_id,
+                    source_session_id=resolved_session_id,
+                    event_log=session.event_log,
+                    fallback_text=session.assistant_text,
+                    total_tokens=session.total_tokens,
+                    total_input_tokens=session.total_input_tokens,
+                    total_output_tokens=session.total_output_tokens,
+                    request_count=session.request_count,
+                    tool_calls=session.tool_calls,
+                    success=False,
+                    error=f"Agent task timed out after {timeout}s",
+                    error_code=session.error_code
+                    or AutonomousAgentRunner.TASK_WALL_CLOCK_TIMEOUT_ERROR_CODE,
+                ),
+                sandbox_handle,
+                self._sandbox_provider,
             )
 
         result = _build_agent_task_result(
@@ -2449,10 +2493,9 @@ class AutonomousAgentRunner:
             error=session.error,
             error_code=session.error_code,
         )
-        # #2022: attribute the result (and thus its evidence) to the sandbox.
-        result.sandbox_id = sandbox_handle.sandbox_id
-        result.sandbox_generation = sandbox_handle.generation
-        return result
+        # #2022 P5: attribute the result (provider/id/generation/state) so the
+        # orchestrator can persist sandbox identity + every evidence path carries it.
+        return self._stamp_sandbox_attribution(result, sandbox_handle, self._sandbox_provider)
 
     def _create_workflow_session(
         self,
@@ -3295,6 +3338,8 @@ class AutonomousAgentRunner:
                     cli_tool=cli_tool,
                     machine_id=remote_machine_id,
                     user_id=user_id,
+                    # #2022 P5: express #2020 HOME/TMP/quota via the spec.
+                    policy=self._load_task_policy(),
                 )
             )
             try:
@@ -3419,10 +3464,7 @@ class AutonomousAgentRunner:
                                 else None
                             ),
                         )
-                        if sandbox_handle is not None:
-                            result.sandbox_id = sandbox_handle.sandbox_id
-                            result.sandbox_generation = sandbox_handle.generation
-                        return result
+                        return self._stamp_sandbox_attribution(result, sandbox_handle, provider)
                 time.sleep(5)
 
             timeout_result = self._build_remote_cancelled_result(remote_session_id, session_id)
@@ -3435,11 +3477,8 @@ class AutonomousAgentRunner:
                         remote_session_id[:8],
                         exc_info=True,
                     )
-            if sandbox_handle is not None:
-                timeout_result.sandbox_id = sandbox_handle.sandbox_id
-                timeout_result.sandbox_generation = sandbox_handle.generation
             timeout_result.error = f"Remote agent task timed out after {timeout}s"
-            return timeout_result
+            return self._stamp_sandbox_attribution(timeout_result, sandbox_handle, provider)
 
         except Exception as e:
             # Once a real remote id exists, never drop its local tracker while

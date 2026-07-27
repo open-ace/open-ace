@@ -434,3 +434,8 @@ class AgentTaskResult:
     # rows carry sandbox_id/generation. None when no sandbox was created.
     sandbox_id: str | None = None
     sandbox_generation: int | None = None
+    # #2022 P5: which provider ran the task (legacy_posix / remote_machine / …)
+    # + final sandbox_state, so the orchestrator can persist sandbox identity +
+    # lifecycle state onto the workflow row. Empty/None when no sandbox ran.
+    sandbox_provider: str = ""
+    sandbox_state: str = ""
