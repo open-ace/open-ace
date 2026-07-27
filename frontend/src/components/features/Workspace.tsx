@@ -285,6 +285,61 @@ export const Workspace: React.FC = () => {
     return () => clearInterval(interval);
   }, [config?.multi_user_mode, userWebUI?.success]);
 
+  // Token refresh: Automatically refresh token before it expires
+  // v2 token format: v2:user_id:port:timestamp:random:signature
+  // Token TTL is 30 minutes (1800 seconds), refresh when < 5 minutes remaining
+  useEffect(() => {
+    if (!userWebUI?.success || !userWebUI?.token) return;
+
+    // Parse token timestamp (v2 format only)
+    const parseTokenTimestamp = (token: string): number | null => {
+      if (!token.startsWith('v2:')) return null;
+      const parts = token.split(':');
+      if (parts.length !== 6) return null;
+      const timestamp = parseInt(parts[3], 10);
+      return isNaN(timestamp) ? null : timestamp;
+    };
+
+    const TOKEN_TTL_SECONDS = 1800; // 30 minutes
+    const REFRESH_THRESHOLD_SECONDS = 300; // 5 minutes
+    const CHECK_INTERVAL_MS = 60 * 1000; // Check every minute
+
+    const checkAndRefreshToken = async () => {
+      const timestamp = parseTokenTimestamp(userWebUI.token);
+      if (!timestamp) return; // Not v2 format or invalid
+
+      const now = Math.floor(Date.now() / 1000);
+      const age = now - timestamp;
+      const remaining = TOKEN_TTL_SECONDS - age;
+
+      // Refresh when remaining time < threshold
+      if (remaining < REFRESH_THRESHOLD_SECONDS && remaining > -300) {
+        // Allow refresh up to 5 minutes after expiry
+        console.log(`[Workspace] Token expiring in ${remaining}s, refreshing...`);
+        try {
+          const result = await workspaceApi.refreshWebUIToken(userWebUI.token);
+          if (result.success && result.token) {
+            console.log('[Workspace] Token refreshed successfully');
+            setUserWebUI((prev) =>
+              prev ? { ...prev, token: result.token! } : prev
+            );
+          } else {
+            console.error('[Workspace] Token refresh failed:', result.error);
+          }
+        } catch (err) {
+          console.error('[Workspace] Token refresh error:', err);
+        }
+      }
+    };
+
+    // Initial check
+    checkAndRefreshToken();
+
+    // Periodic check
+    const interval = setInterval(checkAndRefreshToken, CHECK_INTERVAL_MS);
+    return () => clearInterval(interval);
+  }, [userWebUI?.success, userWebUI?.token]);
+
   // Theme sync: Send postMessage to all iframes when theme changes (Issue #104)
   useEffect(() => {
     if (!tabsInitialized || tabs.length === 0) return;
@@ -752,6 +807,37 @@ export const Workspace: React.FC = () => {
     },
     [config, userWebUI, language, theme, remoteProjects]
   );
+
+  // Update tabs URL when token changes (after refresh)
+  useEffect(() => {
+    if (!tabsInitialized || tabs.length === 0 || !userWebUI?.success || !userWebUI?.token) return;
+
+    // Only update if token has changed
+    setTabs((prevTabs) =>
+      prevTabs.map((tab) => {
+        // Skip terminal tabs
+        if (tab.tabType === 'terminal') return tab;
+        // Update token for all other tabs
+        if (tab.token !== userWebUI.token) {
+          const newUrl = getEffectiveUrl(
+            tab.sessionId,
+            tab.encodedProjectName,
+            tab.toolName,
+            tab.settings,
+            tab.workspaceType
+              ? {
+                  workspaceType: tab.workspaceType,
+                  machineId: tab.machineId,
+                  machineName: tab.machineName,
+                }
+              : undefined
+          );
+          return { ...tab, token: userWebUI.token, url: newUrl };
+        }
+        return tab;
+      })
+    );
+  }, [userWebUI?.token, tabsInitialized, getEffectiveUrl]);
 
   // Initialize tabs when config is loaded (Issue #65: Restore from store if available)
   useEffect(() => {

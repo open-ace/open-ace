@@ -2248,6 +2248,64 @@ def get_user_webui_url():
         )
 
 
+@workspace_bp.route("/refresh-webui-token", methods=["POST"])
+def refresh_webui_token():
+    """Refresh an expiring or expired WebUI token.
+
+    This endpoint allows refreshing a token before or after it expires,
+    as long as the signature is valid. This enables seamless session
+    continuation without requiring user re-authentication.
+
+    Request body:
+        {"token": "v2:user_id:port:timestamp:random:signature"}
+
+    Returns:
+        JSON with new token on success.
+    """
+    from app.services.webui_manager import get_webui_manager
+
+    # Check if user is logged in
+    if not hasattr(g, "user") or not g.user:
+        return jsonify({"error": "Not authenticated"}), 401
+
+    user_id = g.user.get("id")
+
+    # Get token from request
+    data = request.get_json(silent=True) or {}
+    old_token = data.get("token", "")
+
+    if not old_token:
+        return jsonify({"error": "Token required"}), 400
+
+    try:
+        manager = get_webui_manager()
+        success, new_token, error_msg = manager.refresh_token(old_token)
+
+        if not success:
+            logger.warning(f"Token refresh failed for user {user_id}: {error_msg}")
+            return jsonify({"success": False, "error": error_msg}), 400
+
+        logger.info(f"Token refreshed successfully for user {user_id}")
+        return jsonify(
+            {
+                "success": True,
+                "token": new_token,
+            }
+        )
+
+    except Exception as e:
+        logger.error(f"Error refreshing token for user {user_id}: {e}")
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "Internal server error",
+                }
+            ),
+            500,
+        )
+
+
 @workspace_bp.route("/instances", methods=["GET"])
 def list_webui_instances():
     """List all active webui instances (admin only)."""
