@@ -571,6 +571,31 @@ export const Workspace: React.FC = () => {
           machineId: machineId ?? undefined,
         });
       }
+
+      // Listen for token expired from qwen-code-webui iframe
+      // When iframe gets 401 error, it sends this message to request token refresh
+      if (event.data?.type === 'qwen-code-token-expired') {
+        console.log('[Workspace] Received token-expired from iframe, refreshing token...');
+        // Refresh token
+        if (userWebUI?.token) {
+          workspaceApi.refreshWebUIToken(userWebUI.token).then((result) => {
+            if (result.success && result.token) {
+              console.log('[Workspace] Token refreshed, notifying iframe');
+              // Update local state
+              setUserWebUI((prev) => (prev ? { ...prev, token: result.token! } : prev));
+              // Notify all iframes about new token
+              iframeRefs.current.forEach((iframe) => {
+                if (iframe.contentWindow) {
+                  iframe.contentWindow.postMessage(
+                    { type: 'openace-token-refreshed', token: result.token },
+                    '*'
+                  );
+                }
+              });
+            }
+          });
+        }
+      }
     };
 
     window.addEventListener('message', handleIframeMessage);
@@ -581,6 +606,7 @@ export const Workspace: React.FC = () => {
     workspaceFullscreen,
     exitWorkspaceFullscreen,
     clearTabNotification,
+    userWebUI?.token,
   ]);
 
   // Check quota
