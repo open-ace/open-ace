@@ -215,7 +215,7 @@ export const Workspace: React.FC = () => {
       return null;
     }
 
-    // Check if token is about to expire (within 5 minutes)
+    // Check if token is about to expire or already expired
     const token = userWebUI.token;
     if (token.startsWith('v2:')) {
       const parts = token.split(':');
@@ -224,11 +224,9 @@ export const Workspace: React.FC = () => {
         const now = Math.floor(Date.now() / 1000);
         const remaining = 1800 - (now - timestamp); // 30 min TTL
 
-        if (remaining < 300) {
-          // Less than 5 minutes remaining
-          console.log(
-            `[Workspace] Token expiring (${remaining}s), refreshing before new session...`
-          );
+        // Refresh if expiring within 5 minutes OR already expired (remaining <= 0)
+        if (remaining <= 300) {
+          console.log(`[Workspace] Token expiring/expired (${remaining}s), refreshing before new session...`);
           const result = await workspaceApi.getUserWebUIUrl();
           if (result.success) {
             setUserWebUI(result);
