@@ -254,6 +254,9 @@ class DataFetchScheduler:
         # Safety net: aggregate user_daily_stats periodically
         self._aggregate_user_stats()
 
+        # Refresh daily_stats table (aggregate from daily_messages)
+        self._refresh_daily_stats()
+
         # Refresh usage_summary table
         self._refresh_usage_summary()
 
@@ -293,6 +296,17 @@ class DataFetchScheduler:
             aggregate_user_stats_background()
         except Exception as e:
             logger.warning(f"Scheduled user stats aggregation failed: {e}")
+
+    def _refresh_daily_stats(self):
+        """Refresh daily_stats table by aggregating from daily_messages."""
+        from app.repositories.daily_stats_repo import DailyStatsRepository
+
+        try:
+            daily_stats_repo = DailyStatsRepository()
+            daily_stats_repo.refresh_stats()
+            logger.info("Daily stats refreshed")
+        except Exception as e:
+            logger.warning(f"Daily stats refresh failed: {e}")
 
     def _refresh_usage_summary(self):
         """Refresh usage_summary table after new data is fetched."""

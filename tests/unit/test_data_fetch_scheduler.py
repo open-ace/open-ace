@@ -279,6 +279,22 @@ class TestDataFetchSchedulerRunFetch:
         s = DataFetchScheduler()
         s._refresh_usage_summary()  # Should not raise
 
+    @patch("app.repositories.daily_stats_repo.DailyStatsRepository")
+    def test_refresh_daily_stats_success(self, mock_repo_cls):
+        mock_repo = MagicMock()
+        mock_repo.refresh_stats.return_value = True
+        mock_repo_cls.return_value = mock_repo
+
+        s = DataFetchScheduler()
+        s._refresh_daily_stats()
+        mock_repo.refresh_stats.assert_called_once()
+
+    @patch("app.repositories.daily_stats_repo.DailyStatsRepository")
+    def test_refresh_daily_stats_error(self, mock_repo_cls):
+        mock_repo_cls.side_effect = Exception("Stats refresh error")
+        s = DataFetchScheduler()
+        s._refresh_daily_stats()  # Should not raise
+
 
 class TestDataFetchSchedulerCheckQuotas:
     """Test _check_quotas method."""
