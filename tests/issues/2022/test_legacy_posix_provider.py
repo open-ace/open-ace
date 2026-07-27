@@ -13,6 +13,7 @@ untouched in P3a — zero production behavior change.
 from __future__ import annotations
 
 import signal
+import tempfile
 
 from app.modules.workspace.autonomous.sandbox.legacy_posix import LegacyPosixProvider
 from app.modules.workspace.autonomous.sandbox.provider import CapabilityUnsupported
@@ -32,9 +33,18 @@ _LEGACY_CAPS = frozenset(
     }
 )
 
+# P3b made exec chdir into project_path (same-user), so specs that drive a
+# REAL Popen need an existing directory. Mock-Popen tests still pass "/repo"
+# explicitly (no real chdir happens).
+_REAL_PROJECT_PATH = tempfile.gettempdir()
+
 
 def _spec(**overrides) -> SandboxSpec:
-    base = {"task_id": "t-1", "project_path": "/repo", "cli_tool": "claude-code"}
+    base = {
+        "task_id": "t-1",
+        "project_path": _REAL_PROJECT_PATH,
+        "cli_tool": "claude-code",
+    }
     base.update(overrides)
     return SandboxSpec(**base)
 
@@ -215,7 +225,7 @@ def test_build_launch_argv_cross_user_wraps_with_run_as():
     assert "--isolated" in argv
     assert "--task-id" in argv
     assert "openace-agent" in argv
-    assert "/repo" in argv  # project_path
+    assert _REAL_PROJECT_PATH in argv  # project_path
     assert "/usr/bin/env" in argv
     assert "OPENACE_PROXY_TOKEN=tok" in argv
     assert "claude" in argv and "--print" in argv
@@ -285,6 +295,139 @@ def test_exec_env_none_does_not_inherit_credentials():
         mock_popen.return_value = MagicMock()
         provider.exec(handle, command=["/bin/echo", "hi"], env=None, exec_policy=None)
     assert mock_popen.call_args.kwargs["env"] == {}
+
+
+# ── #2022 P3b: cwd + get_process (spawn-cut prerequisites) ──
+
+
+def test_exec_passes_project_path_cwd_for_same_user():
+    # Same-user agents (claude-code/qwen-code) infer project root from cwd —
+    # there is no --cwd flag — so the provider must spawn with cwd=project_path,
+    # matching the inline ``Popen(..., cwd=project_path)`` it replaces. P3a
+    # omitted cwd; this closes the gap (otherwise the agent runs in the
+    # orchestrator's cwd).
+    provider = LegacyPosixProvider()
+    handle = provider.create(_spec(project_path="/repo"))  # no system_account → same-user
+    with patch(
+        "app.modules.workspace.autonomous.sandbox.legacy_posix.subprocess.Popen"
+    ) as mock_popen:
+        mock_popen.return_value = MagicMock()
+        provider.exec(handle, command=["claude", "--print"], env={"PATH": "/x"}, exec_policy=None)
+    assert mock_popen.call_args.kwargs.get("cwd") == "/repo"
+
+
+def test_exec_cwd_none_for_cross_user():
+    # Cross-user: the run-as launcher chdir's as root before dropping to
+    # system_account, so Popen cwd must be None (mirrors _wrap_agent_cmd's
+    # ``(wrapped, None)`` return). A set cwd would chdir the service user.
+    provider = LegacyPosixProvider()
+    handle = provider.create(_spec(project_path="/repo", system_account="openace-agent"))
+    with patch(
+        "app.modules.workspace.autonomous.sandbox.legacy_posix.subprocess.Popen"
+    ) as mock_popen:
+        mock_popen.return_value = MagicMock()
+        provider.exec(handle, command=["claude", "--print"], env={"PATH": "/x"}, exec_policy=None)
+    assert mock_popen.call_args.kwargs.get("cwd") is None
+
+
+def test_exec_start_new_session_preserved():
+    # The process-group invariant (pgid == child pid) that pause/resume/stop
+    # rely on must survive the spawn cut.
+    provider = LegacyPosixProvider()
+    handle = provider.create(_spec())
+    with patch(
+        "app.modules.workspace.autonomous.sandbox.legacy_posix.subprocess.Popen"
+    ) as mock_popen:
+        mock_popen.return_value = MagicMock()
+        provider.exec(handle, command=["claude"], env={"PATH": "/x"}, exec_policy=None)
+    assert mock_popen.call_args.kwargs.get("start_new_session") is True
+
+
+def test_get_process_returns_spawned_popen():
+    # The CLI protocol layer (_read_stdout/_read_stderr/_send_sdk_init) needs
+    # the raw Popen to drive the stream-json handshake over stdin/stdout. The
+    # provider exposes it via this Legacy-specific escape hatch (not on the
+    # Protocol — RemoteMachineProvider has no local Popen).
+    provider = LegacyPosixProvider()
+    handle = provider.create(_spec())
+    eh = provider.exec(handle, command=["/bin/echo", "hi"], env=None, exec_policy=None)
+    proc = provider.get_process(eh)
+    assert proc is provider._procs[eh.command_id]  # noqa: SLF001 - white-box
+    assert proc.stdout is not None  # real Popen pipe, not the mock
+
+
+def test_get_process_after_destroy_inspects_destroyed():
+    provider = LegacyPosixProvider()
+    handle = provider.create(_spec())
+    provider.exec(handle, command=["/bin/sleep", "30"], env=None, exec_policy=None)
+    provider.destroy(handle)
+    assert provider.inspect(handle) == SandboxStatus.DESTROYED
+
+
+# ── #2022 P3b: golden spawn equivalence vs the old inline path ──
+#
+# Locks the invariant the _run_local cut relies on: provider.exec must spawn
+# byte-identical (argv, cwd, env, start_new_session) to the old _wrap_agent_cmd
+# + inline Popen, for both same-user and cross-user. If these break, C2's cut
+# would silently change execution behavior.
+
+from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner  # noqa: E402
+
+
+def test_exec_spawn_argv_matches_wrap_agent_cmd_same_user():
+    cmd = ["claude", "--print", "--model", "sonnet"]
+    expected_argv, expected_cwd = AutonomousAgentRunner._wrap_agent_cmd(
+        list(cmd), _REAL_PROJECT_PATH, None, task_id="t-1"
+    )
+    provider = LegacyPosixProvider()
+    handle = provider.create(_spec(task_id="t-1", project_path=_REAL_PROJECT_PATH))
+    with patch(
+        "app.modules.workspace.autonomous.sandbox.legacy_posix.subprocess.Popen"
+    ) as mock_popen:
+        mock_popen.return_value = MagicMock()
+        provider.exec(handle, command=list(cmd), env={"PATH": "/x"}, exec_policy=None)
+    call = mock_popen.call_args
+    assert call.args[0] == expected_argv
+    assert call.kwargs.get("cwd") == expected_cwd == _REAL_PROJECT_PATH
+    assert call.kwargs.get("start_new_session") is True
+
+
+def test_exec_spawn_argv_matches_wrap_agent_cmd_cross_user():
+    # Cross-user: build_launch_argv must produce the same wrapped argv as
+    # _wrap_agent_cmd, GIVEN the same finalized env. P3b moves the cross-user
+    # env finalization (OPENACE_GIT_CACHE_ROOT overwrite + guard validation)
+    # out of _wrap_agent_cmd into _run_local's env-prep, so this test feeds
+    # both paths an already-finalized env (cacheroot pre-set; guard validation
+    # mocked out of _wrap_agent_cmd) and asserts the spawn shape matches.
+    cmd = ["claude", "--print"]
+    account = "openace-agent"
+    finalized_env = {
+        "PATH": "/guard/bin:/usr/bin",
+        "OPENACE_PROXY_TOKEN": "tok",
+        "OPENACE_REAL_GIT": "/usr/bin/git",
+        "OPENACE_GIT_CACHE_ROOT": str(
+            AutonomousAgentRunner._resolve_home_dir(account) / ".cache" / "pre-commit"
+        ),
+    }
+    with patch.object(AutonomousAgentRunner, "_validate_cross_user_guard_bin"):
+        expected_argv, expected_cwd = AutonomousAgentRunner._wrap_agent_cmd(
+            list(cmd), _REAL_PROJECT_PATH, account, dict(finalized_env), task_id="t-1"
+        )
+
+    provider = LegacyPosixProvider()
+    handle = provider.create(
+        _spec(task_id="t-1", project_path=_REAL_PROJECT_PATH, system_account=account)
+    )
+    with patch(
+        "app.modules.workspace.autonomous.sandbox.legacy_posix.subprocess.Popen"
+    ) as mock_popen:
+        mock_popen.return_value = MagicMock()
+        provider.exec(handle, command=list(cmd), env=dict(finalized_env), exec_policy=None)
+    call = mock_popen.call_args
+    assert call.args[0] == expected_argv
+    assert call.kwargs.get("cwd") is expected_cwd is None
+    assert call.kwargs.get("env") == finalized_env
+    assert call.kwargs.get("start_new_session") is True
 
 
 # keep the signal import referenced
