@@ -221,5 +221,71 @@ def test_build_launch_argv_cross_user_wraps_with_run_as():
     assert "claude" in argv and "--print" in argv
 
 
+# ── regression: concurrent stream + exec contract (#2068 review) ──
+
+from unittest.mock import MagicMock, patch  # noqa: E402
+
+import pytest  # noqa: E402
+
+
+@pytest.mark.timeout(15)
+def test_legacy_stream_does_not_deadlock_on_large_concurrent_output():
+    # Regression for the sequential stdout→stderr deadlock: when the child
+    # fills its 64KB stderr pipe while the parent is still reading stdout, a
+    # sequential read hangs forever (Python subprocess docs warn about this).
+    # Two background writers (>64KB each) force that condition; the concurrent
+    # stream must drain both and complete.
+    provider = LegacyPosixProvider()
+    handle = provider.create(_spec())
+    eh = provider.exec(
+        handle,
+        command=[
+            "/bin/sh",
+            "-c",
+            "(yes x | head -c 100000) & (yes y | head -c 100000 >&2) & wait",
+        ],
+        env={"PATH": "/usr/bin:/bin"},
+        exec_policy=None,
+    )
+    events = list(provider.stream(eh))
+    stdout_total = sum(len(e.data) for e in events if e.kind == SandboxEventKind.STDOUT_CHUNK)
+    stderr_total = sum(len(e.data) for e in events if e.kind == SandboxEventKind.STDERR_CHUNK)
+    assert stdout_total >= 100000
+    assert stderr_total >= 100000
+    completed = next(e for e in events if e.kind == SandboxEventKind.COMMAND_COMPLETED)
+    assert completed.exit_code == 0
+
+
+def test_exec_internally_wraps_cross_user_command():
+    # P1 boundary: the provider owns the sudo/openace-run-as ACL wrap, so exec
+    # must apply build_launch_argv itself — a cross-user spec gets the wrap
+    # automatically and P3b cannot silently skip it by calling exec raw.
+    provider = LegacyPosixProvider()
+    handle = provider.create(_spec(system_account="openace-agent"))
+    with patch(
+        "app.modules.workspace.autonomous.sandbox.legacy_posix.subprocess.Popen"
+    ) as mock_popen:
+        mock_popen.return_value = MagicMock()
+        provider.exec(handle, command=["claude", "--print"], env={"PATH": "/x"}, exec_policy=None)
+    spawned_argv = mock_popen.call_args.args[0]
+    assert spawned_argv[:4] == ["sudo", "-n", "-u", "root"]
+    assert "--isolated" in spawned_argv
+    assert "claude" in spawned_argv
+
+
+def test_exec_env_none_does_not_inherit_credentials():
+    # env=None must NOT pass None to Popen (which inherits the orchestrator's
+    # full env, leaking credentials). It spawns with an empty env instead;
+    # callers must pass a scrubbed env (#2019) for the agent to function.
+    provider = LegacyPosixProvider()
+    handle = provider.create(_spec())
+    with patch(
+        "app.modules.workspace.autonomous.sandbox.legacy_posix.subprocess.Popen"
+    ) as mock_popen:
+        mock_popen.return_value = MagicMock()
+        provider.exec(handle, command=["/bin/echo", "hi"], env=None, exec_policy=None)
+    assert mock_popen.call_args.kwargs["env"] == {}
+
+
 # keep the signal import referenced
 _ = signal

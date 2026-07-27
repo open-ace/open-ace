@@ -25,8 +25,10 @@ from __future__ import annotations
 
 import os
 import pwd
+import queue
 import signal
 import subprocess
+import threading
 import uuid
 from typing import Any
 
@@ -173,16 +175,25 @@ class LegacyPosixProvider:
         env: dict[str, str] | None,
         exec_policy: Any | None,
     ) -> ExecHandle:
+        # The provider OWNS the sudo/openace-run-as ACL wrap (P1 boundary), so
+        # exec applies build_launch_argv internally — a cross-user spec gets the
+        # isolation wrap automatically, P3b cannot silently skip it by calling
+        # exec with a raw command.
+        argv = self.build_launch_argv(handle, command, env)
+        # env=None must NOT inherit the orchestrator's environment (it carries
+        # credentials). Spawn with an empty env instead; callers must pass a
+        # scrubbed env (#2019 / _build_agent_env output) for the agent to work.
+        spawn_env: dict[str, str] | None = env if env is not None else {}
         # start_new_session=True puts the child in its own process group/session
         # (pgid == child pid), which is what later lets pause/resume/stop reach
         # the whole tree via os.killpg(os.getpgid(pid), sig). This invariant
         # mirrors agent_runner._run_local.
         proc = subprocess.Popen(
-            command,
+            argv,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            env=env,
+            env=spawn_env,
             start_new_session=True,
         )
         command_id = uuid.uuid4().hex
@@ -203,8 +214,9 @@ class LegacyPosixProvider:
         <project_path> /usr/bin/env K=V ... <command>`` — the launcher chdir's
         as root then drops to ``system_account`` via runuser, and only the
         allowlisted env keys are forwarded so a private cross-user HOME cannot
-        leak the service user's secrets. P3a builds the argv structurally; P3b
-        uses it in the real exec path.
+        leak the service user's secrets. ``exec`` applies this internally so
+        the wrap is automatic (the P1 boundary puts ACL wrap on the provider,
+        not the caller).
         """
         system_account = handle.spec.system_account
         if not _is_cross_user(system_account):
@@ -237,22 +249,49 @@ class LegacyPosixProvider:
             sandbox_id=sandbox_id,
             command_id=command_id,
         )
-        if proc.stdout is not None:
-            for raw in proc.stdout:
-                yield SandboxEvent(
-                    kind=SandboxEventKind.STDOUT_CHUNK,
-                    sandbox_id=sandbox_id,
-                    command_id=command_id,
-                    data=raw.decode("utf-8", errors="replace"),
-                )
-        if proc.stderr is not None:
-            for raw in proc.stderr:
-                yield SandboxEvent(
-                    kind=SandboxEventKind.STDERR_CHUNK,
-                    sandbox_id=sandbox_id,
-                    command_id=command_id,
-                    data=raw.decode("utf-8", errors="replace"),
-                )
+        # Read stdout + stderr CONCURRENTLY. A sequential read (stdout to EOF,
+        # then stderr) deadlocks once the child fills its 64KB stderr OS pipe
+        # while the parent is still blocked reading stdout — Python's
+        # subprocess docs warn about this, and a real agent's verbose stderr
+        # (>64KB) would hang the stream. ``communicate()`` would avoid it but
+        # is one-shot and cannot yield chunks, so two daemon threads pump each
+        # fd into a queue the generator drains (mirrors agent_runner's
+        # ``_stdout_thread`` / ``_stderr_thread``).
+        chunk_queue: queue.Queue[Any] = queue.Queue()
+        sentinel = object()
+
+        def _pump(stream: Any, kind: SandboxEventKind) -> None:
+            try:
+                if stream is None:
+                    return
+                for raw in stream:
+                    chunk_queue.put((kind, raw))
+            finally:
+                chunk_queue.put(sentinel)
+
+        stdout_thread = threading.Thread(
+            target=_pump, args=(proc.stdout, SandboxEventKind.STDOUT_CHUNK), daemon=True
+        )
+        stderr_thread = threading.Thread(
+            target=_pump, args=(proc.stderr, SandboxEventKind.STDERR_CHUNK), daemon=True
+        )
+        stdout_thread.start()
+        stderr_thread.start()
+        sentinels_seen = 0
+        while sentinels_seen < 2:
+            item = chunk_queue.get()
+            if item is sentinel:
+                sentinels_seen += 1
+                continue
+            kind, raw = item
+            yield SandboxEvent(
+                kind=kind,
+                sandbox_id=sandbox_id,
+                command_id=command_id,
+                data=raw.decode("utf-8", errors="replace"),
+            )
+        stdout_thread.join(timeout=5)
+        stderr_thread.join(timeout=5)
         proc.wait()
         exit_code = proc.returncode
         yield SandboxEvent(
