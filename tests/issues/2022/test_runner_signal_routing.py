@@ -83,16 +83,20 @@ def test_select_sandbox_provider_returns_legacy_for_local():
 
 
 def test_stamp_sandbox_attribution_fills_provider_and_state():
-    # #2022 P5: every return path stamps provider/id/generation/state so the
-    # orchestrator can persist sandbox identity + every evidence path carries it.
+    # #2022 P6: state is TASK-terminal (success→destroyed, failure→error), NOT
+    # provider.inspect() — a remote session left alive on success must not read
+    # 'running' (the startup reconciler would mis-flag it as a crash orphan).
     provider = FakeSandboxProvider()
     handle = provider.create(SandboxSpec(task_id="t", project_path="/tmp", cli_tool="c"))
-    result = AgentTaskResult(session_id="s")
-    AutonomousAgentRunner._stamp_sandbox_attribution(result, handle, provider)
-    assert result.sandbox_id == handle.sandbox_id
-    assert result.sandbox_generation == handle.generation
-    assert result.sandbox_provider == "fake"
-    assert result.sandbox_state == SandboxStatus.CREATED.value
+    ok = AgentTaskResult(session_id="s", success=True)
+    AutonomousAgentRunner._stamp_sandbox_attribution(ok, handle, provider)
+    assert ok.sandbox_id == handle.sandbox_id
+    assert ok.sandbox_generation == handle.generation
+    assert ok.sandbox_provider == "fake"
+    assert ok.sandbox_state == "destroyed"
+    failed = AgentTaskResult(session_id="s", success=False)
+    AutonomousAgentRunner._stamp_sandbox_attribution(failed, handle, provider)
+    assert failed.sandbox_state == "error"
 
 
 def test_stamp_sandbox_attribution_noop_without_handle():
@@ -109,3 +113,55 @@ def test_select_sandbox_provider_returns_remote_for_remote():
     # RemoteMachineProvider wraps the remote_session_manager (gVisor would add
     # a third branch here).
     assert provider.__class__.__name__ == "RemoteMachineProvider"
+
+
+def _spec() -> SandboxSpec:
+    return SandboxSpec(task_id="t", project_path="/tmp", cli_tool="c")
+
+
+def test_notify_sandbox_created_invokes_callback_with_attribution():
+    # #2022 P6: right after exec the runner fires on_sandbox_created so the
+    # orchestrator can persist a mid-run 'running' row (crash orphan bait for
+    # the reconciler). Callback gets (session_id, sandbox_id, provider_name,
+    # remote_session_id_or_None).
+    captured: list = []
+    provider = FakeSandboxProvider()
+    runner = AutonomousAgentRunner(
+        sandbox_provider=provider,
+        on_sandbox_created=lambda *a: captured.append(a),
+    )
+    handle = provider.create(_spec())
+    runner._notify_sandbox_created("s1", handle, "remote-42")
+    assert captured == [("s1", handle.sandbox_id, "fake", "remote-42")]
+
+
+def test_notify_sandbox_created_none_remote_id_for_local():
+    # Local path passes remote_session_id=None (no external session id).
+    captured: list = []
+    provider = FakeSandboxProvider()
+    runner = AutonomousAgentRunner(
+        sandbox_provider=provider,
+        on_sandbox_created=lambda *a: captured.append(a),
+    )
+    handle = provider.create(_spec())
+    runner._notify_sandbox_created("s1", handle, None)
+    assert captured == [("s1", handle.sandbox_id, "fake", None)]
+
+
+def test_notify_sandbox_created_noop_without_callback():
+    # No callback registered -> no-op, no raise.
+    provider = FakeSandboxProvider()
+    runner = AutonomousAgentRunner(sandbox_provider=provider)
+    handle = provider.create(_spec())
+    runner._notify_sandbox_created("s1", handle, None)
+
+
+def test_notify_sandbox_created_swallows_callback_errors():
+    # Best-effort: a failing callback must not propagate to the runner path.
+    def _boom(*a):
+        raise RuntimeError("callback failed")
+
+    provider = FakeSandboxProvider()
+    runner = AutonomousAgentRunner(sandbox_provider=provider, on_sandbox_created=_boom)
+    handle = provider.create(_spec())
+    runner._notify_sandbox_created("s1", handle, None)  # no raise

@@ -55,6 +55,8 @@ class FakeSandboxProvider:
         # command_id -> the command argv + owning sandbox_id, so stream() can
         # replay a deterministic lifecycle without a real process.
         self._execs: dict[str, dict[str, Any]] = {}
+        # P6.2: record reconcile-time destroy_attribution calls for assertions.
+        self.destroy_attribution_calls: list[tuple[str, str | None]] = []
 
     def capabilities(self) -> frozenset[SandboxCapability]:
         return self._capabilities
@@ -145,6 +147,10 @@ class FakeSandboxProvider:
         # Idempotent: destroy of an already-destroyed or unknown handle is a
         # no-op. Reconciliation (Phase 2) relies on this for orphan sandboxes.
         self._status[handle.sandbox_id] = SandboxStatus.DESTROYED
+
+    def destroy_attribution(self, sandbox_id: str, remote_session_id: str | None) -> None:
+        # P6.2: record the reconcile-path destroy-by-attribution for assertions.
+        self.destroy_attribution_calls.append((sandbox_id, remote_session_id))
 
     def inspect(self, handle: SandboxHandle) -> SandboxStatus:
         return self._status.get(handle.sandbox_id, SandboxStatus.DESTROYED)

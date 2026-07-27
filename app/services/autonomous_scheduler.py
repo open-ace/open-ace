@@ -17,10 +17,11 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+    from app.modules.workspace.remote_session_manager import RemoteSessionManager
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,15 @@ MAX_CONCURRENT_WORKFLOWS = 3
 # agent-launcher.conf the launcher reads. The constant above is the default
 # when the conf is absent or the key is missing/invalid.
 _AGENT_LAUNCHER_CONF = os.environ.get("OPENACE_LAUNCHER_CONF", "/etc/openace/agent-launcher.conf")
+
+# #2022 P6: periodic TTL reaper. A 'running' sandbox row the scheduler is not
+# actively driving (not in _in_progress_ids) and has not been touched for longer
+# than this TTL is treated as a live-process orphan and destroyed. 7200s is well
+# past any agent step's wall-clock budget, so a legitimately in-flight task (held
+# in _in_progress_ids, or freshly updated) is never reaped. The reaper cadence is
+# how often the sweep runs inside _run_loop.
+_SANDBOX_TTL_SECONDS = int(os.environ.get("OPENACE_SANDBOX_TTL_SECONDS", "7200"))
+_SANDBOX_REAP_INTERVAL_SECONDS = float(os.environ.get("OPENACE_SANDBOX_REAP_INTERVAL", "300"))
 
 
 def get_max_concurrent_workflows() -> int:
@@ -113,6 +123,12 @@ class AutonomousScheduler:
         self._in_progress_lock = threading.Lock()
         self._running_orchestrators: dict[str, AutonomousOrchestrator] = {}
         self._orchestrator_lock = threading.Lock()
+        # #2022 P6: RemoteSessionManager shared with the periodic reaper so a
+        # remote orphan is destroyed by its persisted session id. Set by
+        # init_autonomous_scheduler; read via getattr-default in the reaper so
+        # construction paths that don't set it (tests, direct AutonomousScheduler())
+        # degrade gracefully (local-only sweep).
+        self.remote_session_manager: RemoteSessionManager | None = None
 
     @classmethod
     def instance(cls) -> AutonomousScheduler:
@@ -345,14 +361,84 @@ class AutonomousScheduler:
 
     def _run_loop(self):
         """Main loop: poll for active workflows and advance them."""
+        # Seed so the first reap is delayed one interval — init_autonomous_scheduler
+        # already ran the startup reconcile, so reaping on the very first poll
+        # cycle would only repeat that no-op.
+        last_reap_monotonic = time.monotonic()
         while not self._stop_event.is_set():
             try:
                 self._process_workflows()
+                # #2022 P6: periodically reap stuck 'running' sandbox rows the
+                # scheduler is not driving. Bounded by _SANDBOX_REAP_INTERVAL
+                # so the hot 10s poll loop does not hit the DB each cycle.
+                now_monotonic = time.monotonic()
+                if now_monotonic - last_reap_monotonic >= _SANDBOX_REAP_INTERVAL_SECONDS:
+                    last_reap_monotonic = now_monotonic
+                    try:
+                        self._reap_stale_running_sandboxes()
+                    except Exception as e:  # noqa: BLE001
+                        logger.error("Sandbox TTL reap failed: %s", e, exc_info=True)
             except Exception as e:
                 logger.error("Scheduler error: %s", e, exc_info=True)
 
             # Wait 10 seconds between checks (or stop signal)
             self._stop_event.wait(10)
+
+    def _reap_stale_running_sandboxes(self, repo=None, *, now_epoch=None) -> None:
+        """Reap stuck 'running' sandbox rows the scheduler isn't driving (#2022 P6).
+
+        Catches live-process orphans the startup reconcile misses: a workflow
+        whose ``sandbox_state`` still claims ``running`` but which the scheduler
+        is not actively advancing (not in ``_in_progress_ids``) and has not been
+        touched for longer than ``_SANDBOX_TTL_SECONDS``. The double guard
+        (not-driven + stale) avoids reaping a long task in flight.
+
+        Paused workflows are left alone — their sandbox is intentionally retained
+        for a later resume (a paused workflow is not in ``_in_progress_ids`` by
+        design, so the not-driven guard alone would mis-reap it; the status check
+        excludes it). Remote orphans are stopped by their persisted session id;
+        local rows are DB-reset only (the proc died).
+
+        Accepts injected ``repo`` / ``now_epoch`` for hermetic testing.
+        """
+        if repo is None:
+            from app.repositories.autonomous_repo import AutonomousWorkflowRepository
+            from app.repositories.database import Database
+
+            repo = AutonomousWorkflowRepository(Database())
+        if now_epoch is None:
+            now_epoch = time.time()
+        remote_session_manager = getattr(self, "remote_session_manager", None)
+
+        with self._in_progress_lock:
+            driven = set(self._in_progress_ids)
+
+        ttl = _SANDBOX_TTL_SECONDS
+        workflows = repo.get_workflows_with_active_sandbox()
+        for wf in workflows:
+            if wf.get("sandbox_state") != "running":
+                continue  # only 'running' occupies resources right now
+            if wf.get("status") == "paused":
+                continue  # intentional; keep the sandbox for resume
+            if wf.get("workflow_id") in driven:
+                continue  # scheduler is actively advancing it
+            updated = _parse_epoch(wf.get("updated_at"))
+            if updated is None or now_epoch - updated < ttl:
+                continue  # fresh (or no timestamp) — not stale yet
+            _destroy_orphan_sandbox(wf, remote_session_manager)
+            repo.update_workflow(
+                wf["workflow_id"],
+                {
+                    "sandbox_state": "destroyed",
+                    "sandbox_id": None,
+                    "sandbox_remote_session_id": None,
+                    "sandbox_last_error": (f"reaped by TTL sweep: running sandbox stale > {ttl}s"),
+                },
+            )
+            logger.info(
+                "Reaped stale running sandbox for workflow %s",
+                wf.get("workflow_id", "")[:8],
+            )
 
     def _advance_single(self, workflow_id: str) -> str:
         """Advance a single workflow. Returns workflow_id for tracking."""
@@ -958,20 +1044,82 @@ def _retry_pending_git_cleanups(repo=None):
         logger.error("Git cleanup retry sweep failed: %s", e, exc_info=True)
 
 
-def _reconcile_orphan_sandboxes(repo=None):
-    """Reset orphan sandbox state at startup (#2022 P2).
+def _parse_epoch(value: Any) -> float | None:
+    """Coerce a workflow-row timestamp to epoch seconds (cross-DB tolerant).
+
+    Postgres returns ``datetime``; SQLite may return a string or epoch. Returns
+    ``None`` when the value is missing or unparseable so the caller can treat
+    "no timestamp" as "not stale" (don't reap what we can't age).
+    """
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, datetime):
+        return value.timestamp()
+    try:
+        return datetime.fromisoformat(str(value)).timestamp()
+    except Exception:
+        try:
+            return float(value)
+        except Exception:
+            return None
+
+
+def _destroy_orphan_sandbox(wf: dict, remote_session_manager: Any) -> None:
+    """Best-effort real destroy of one orphan sandbox by persisted attribution (#2022 P6).
+
+    Rebuilds the provider from the workflow row's ``sandbox_provider`` name and
+    calls ``destroy_attribution`` with the persisted ids. The per-call provider
+    instance that ran the task (and held its ``sandbox_id`` -> handle map) is
+    gone after a restart, so ``destroy(handle)`` cannot resolve the session —
+    only the persisted strings remain. Local/gVisor rows without an external id
+    no-op (the proc died with the server); ``destroy_attribution`` swallows its
+    own failures so a bad row never aborts the sweep.
+
+    Scope firewall: this acts ONLY on the autonomous workflow row's own
+    persisted ``sandbox_remote_session_id`` — it never enumerates or stops
+    ordinary (non-autonomous) remote sessions.
+    """
+    provider_name = wf.get("sandbox_provider") or ""
+    raw_sid = wf.get("sandbox_remote_session_id")
+    remote_sid = raw_sid if isinstance(raw_sid, str) else ""
+    raw_sandbox = wf.get("sandbox_id")
+    sandbox_id = raw_sandbox if isinstance(raw_sandbox, str) else ""
+    # Only remote_machine has an external resource still alive after a restart;
+    # legacy/gVisor rows without an id have nothing to stop.
+    if provider_name != "remote_machine" or not remote_sid:
+        return
+    try:
+        from app.modules.workspace.autonomous.sandbox.registry import provider_for
+
+        provider = provider_for(provider_name, remote_session_manager)
+        provider.destroy_attribution(sandbox_id, remote_sid)
+    except Exception as e:  # noqa: BLE001
+        logger.warning(
+            "Failed to destroy orphan sandbox %s for workflow %s: %s",
+            sandbox_id,
+            wf.get("workflow_id", "")[:8],
+            e,
+            exc_info=True,
+        )
+
+
+def _reconcile_orphan_sandboxes(repo=None, remote_session_manager=None):
+    """Reset orphan sandbox state at startup (#2022 P2 state reset, P6 real destroy).
 
     Walks workflows whose ``sandbox_state`` claims an active sandbox
     (created/running/paused) but whose owning process is gone — the server
     crashed/restarted mid-task before the sandbox was destroyed. At startup
     nothing is running, so every active-sandbox-state row is an orphan.
 
-    For each: reset ``sandbox_state`` to ``destroyed``, bump
-    ``sandbox_generation`` (so a handle minted before the restart is stale and
-    a future provider rejects it), clear ``sandbox_id``, and record the
-    reconcile reason. This is STATE reconciliation only — there is no real
-    ``provider.destroy()`` until P3 (LegacyPosixProvider), which will add
-    actual per-task resource teardown to this sweep.
+    #2022 P6: real resource teardown now. A ``remote_machine`` orphan carries the
+    persisted ``sandbox_remote_session_id`` (the manager row id written mid-run
+    via ``on_sandbox_created``); the sweep rebuilds a provider via the registry
+    and stops that session by id. Local/gVisor rows have no external id — the
+    proc died with the server, so ``destroy_attribution`` is a no-op and the
+    DB-reset is the real cleanup. Then reset state/generation/sandbox_id/
+    remote_session_id so a second sweep is a no-op.
     """
     logger.info("Reconciling orphan sandbox state...")
 
@@ -988,6 +1136,7 @@ def _reconcile_orphan_sandboxes(repo=None):
             return
 
         for wf in workflows:
+            _destroy_orphan_sandbox(wf, remote_session_manager)
             current_gen = int(wf.get("sandbox_generation") or 0)
             repo.update_workflow(
                 wf["workflow_id"],
@@ -995,10 +1144,8 @@ def _reconcile_orphan_sandboxes(repo=None):
                     "sandbox_state": "destroyed",
                     "sandbox_generation": current_gen + 1,
                     "sandbox_id": None,
-                    "sandbox_last_error": (
-                        "reconciled at startup: orphan sandbox "
-                        "(state reset; provider destroy lands in P3)"
-                    ),
+                    "sandbox_remote_session_id": None,
+                    "sandbox_last_error": ("reconciled at startup: orphan sandbox destroyed"),
                 },
             )
             logger.info(
@@ -1019,8 +1166,14 @@ def init_autonomous_scheduler():
     _reconcile_pending_transitions()
     # Retry Git cleanup for workflows delivered but not yet cleaned up (#2043)
     _retry_pending_git_cleanups()
-    # Reset orphan sandbox state from a prior crash/restart (#2022 P2)
-    _reconcile_orphan_sandboxes()
+    # Reset orphan sandbox state from a prior crash/restart (#2022 P2/P6).
+    # RemoteSessionManager is shared with the periodic reaper so a remote orphan
+    # is actually stopped by its persisted session id, not just DB-reset.
+    from app.modules.workspace.remote_session_manager import RemoteSessionManager
+
+    remote_session_manager = RemoteSessionManager()
+    _reconcile_orphan_sandboxes(remote_session_manager=remote_session_manager)
 
     scheduler = AutonomousScheduler.instance()
+    scheduler.remote_session_manager = remote_session_manager
     scheduler.start()

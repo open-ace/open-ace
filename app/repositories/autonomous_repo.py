@@ -112,6 +112,7 @@ class AutonomousWorkflowRepository:
         "sandbox_state",
         "sandbox_policy_digest",
         "sandbox_last_error",
+        "sandbox_remote_session_id",  # #2022 P6: remote-agent session id for orphan destroy
     }
     ALLOWED_MILESTONE_FIELDS = {
         "phase",

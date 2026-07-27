@@ -1284,6 +1284,7 @@ class AutonomousOrchestrator:
             activity_callback=self._on_agent_activity,
             on_pid_registered=self._on_pid_registered,
             on_pid_cleared=self._on_pid_cleared,
+            on_sandbox_created=self._on_sandbox_created,
         )
         self._gh: GitHubOps | None = None
 
@@ -4572,6 +4573,41 @@ class AutonomousOrchestrator:
             )
         except Exception as e:
             logger.warning("Failed to persist agent PID: %s", e)
+
+    def _on_sandbox_created(
+        self,
+        session_id: str,
+        sandbox_id: str,
+        provider_name: str,
+        remote_session_id: str | None,
+    ) -> None:
+        """Persist mid-run sandbox identity so a crash leaves a reconcilable row (#2022 P6).
+
+        Sandbox-lifecycle mirror of ``_on_pid_registered``: write
+        ``sandbox_state='running'`` + sandbox_id/provider between exec and task
+        completion. A crash here leaves an orphan the startup/periodic reconciler
+        destroys by ``sandbox_remote_session_id`` (remote) or DB-resets (local).
+        The remote id is written only when present so a local row never carries a
+        stale/NULL remote id. Best-effort: never raises to the run path.
+        """
+        try:
+            updates: dict[str, object] = {
+                "sandbox_state": "running",
+                "sandbox_id": sandbox_id,
+                "sandbox_provider": provider_name,
+            }
+            if remote_session_id is not None:
+                updates["sandbox_remote_session_id"] = remote_session_id
+            self.repo.update_workflow(self._workflow_id, updates)
+            logger.info(
+                "Registered sandbox %s (provider=%s) for workflow %s%s",
+                sandbox_id[:8],
+                provider_name,
+                self._workflow_id[:8],
+                f" remote_session={remote_session_id[:8]}" if remote_session_id else "",
+            )
+        except Exception as e:
+            logger.warning("Failed to persist mid-run sandbox state: %s", e)
 
     def _on_pid_cleared(self, session_id: str):
         """Clear agent subprocess PID from database after process exits."""
