@@ -3869,8 +3869,7 @@ export const translations: Record<Language, Translations> = {
     registrationToken: '登録トークン',
     deregister: '登録解除',
     deregisterMachine: 'マシン登録解除',
-    deregisterConfirm:
-      'このマシンを登録解除しますか？関連するすべてのデータが削除されます。',
+    deregisterConfirm: 'このマシンを登録解除しますか？関連するすべてのデータが削除されます。',
 
     // Quota Management
     quotaUsage: 'クォータ使用量',
@@ -5429,8 +5428,7 @@ export const translations: Record<Language, Translations> = {
     registrationToken: '등록 토큰',
     deregister: '등록 해제',
     deregisterMachine: '머신 등록 해제',
-    deregisterConfirm:
-      '이 머신을 등록 해제하시겠습니까? 모든 관련 데이터가 삭제됩니다.',
+    deregisterConfirm: '이 머신을 등록 해제하시겠습니까? 모든 관련 데이터가 삭제됩니다.',
 
     // Quota Management
     quotaUsage: '할당량 사용',
