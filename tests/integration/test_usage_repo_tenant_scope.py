@@ -189,7 +189,16 @@ def test_get_request_stats_by_user_null_user_id_fallback(tmp_db):
         (date, tool_name, host_name, message_id, role, tokens_used, sender_name, user_id)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        ("2026-07-17", "codex", "host", "req-with-id", "assistant", 50, "alice-host-codex", alice_id),
+        (
+            "2026-07-17",
+            "codex",
+            "host",
+            "req-with-id",
+            "assistant",
+            50,
+            "alice-host-codex",
+            alice_id,
+        ),
     )
 
     # Query for tenant 1 - should see both Alice's messages
