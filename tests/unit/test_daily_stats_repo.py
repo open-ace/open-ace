@@ -396,14 +396,23 @@ class TestDailyStatsRepository:
 
     @patch("app.repositories.daily_stats_repo.is_postgresql", return_value=True)
     def test_refresh_stats_postgresql(self, mock_pg):
+        # Mock advisory lock acquisition
+        self.db.fetch_one.return_value = {"acquired": True}
         self.db.execute.return_value = MagicMock()
         result = self.repo.refresh_stats(date="2024-01-15")
         assert result is True
-        # PostgreSQL: DELETE + INSERT (2 execute calls)
+        # Issue #2010: PostgreSQL now uses advisory lock + INSERT ON CONFLICT + unlock
+        # Calls: 1 fetch_one (lock) + 2 execute (insert + unlock)
+        assert self.db.fetch_one.call_count == 1
         assert self.db.execute.call_count == 2
-        insert_call = self.db.execute.call_args_list[1]
+        # Find the INSERT call (should be first execute call)
+        insert_call = self.db.execute.call_args_list[0]
         assert "INSERT INTO daily_stats" in insert_call[0][0]
+        assert "ON CONFLICT" in insert_call[0][0]
         assert "OR REPLACE" not in insert_call[0][0]
+        # Verify advisory lock was released
+        unlock_call = self.db.execute.call_args_list[1]
+        assert "pg_advisory_unlock" in unlock_call[0][0]
 
     def test_refresh_stats_exception(self):
         self.db.execute.side_effect = Exception("DB error")
@@ -484,14 +493,23 @@ class TestDailyStatsRepository:
 
     @patch("app.repositories.daily_stats_repo.is_postgresql", return_value=True)
     def test_refresh_hourly_stats_postgresql(self, mock_pg):
+        # Mock advisory lock acquisition
+        self.db.fetch_one.return_value = {"acquired": True}
         self.db.execute.return_value = MagicMock()
         result = self.repo.refresh_hourly_stats()
         assert result is True
-        # PostgreSQL: DELETE + INSERT (2 calls)
+        # Issue #2010: PostgreSQL now uses advisory lock + INSERT ON CONFLICT + unlock
+        # Calls: 1 fetch_one (lock) + 2 execute (insert + unlock)
+        assert self.db.fetch_one.call_count == 1
         assert self.db.execute.call_count == 2
-        insert_call = self.db.execute.call_args_list[1]
+        # Find the INSERT call (should be first execute call)
+        insert_call = self.db.execute.call_args_list[0]
         assert "INSERT INTO hourly_stats" in insert_call[0][0]
+        assert "ON CONFLICT" in insert_call[0][0]
         assert "EXTRACT" in insert_call[0][0]
+        # Verify advisory lock was released
+        unlock_call = self.db.execute.call_args_list[1]
+        assert "pg_advisory_unlock" in unlock_call[0][0]
 
     def test_refresh_hourly_stats_exception(self):
         self.db.execute.side_effect = Exception("DB error")
