@@ -122,8 +122,8 @@ def test_legacy_destroy_reaps_process():
     provider = LegacyPosixProvider()
     handle = provider.create(_spec())
     eh = provider.exec(handle, command=["/bin/sleep", "30"], env=None, exec_policy=None)
+    proc = provider._procs[eh.command_id]  # noqa: SLF001 - capture before destroy clears it
     provider.destroy(handle)
-    proc = provider._procs[eh.command_id]  # noqa: SLF001
     assert proc.poll() is not None
     assert provider.inspect(handle) == SandboxStatus.DESTROYED
 
@@ -361,6 +361,24 @@ def test_get_process_after_destroy_inspects_destroyed():
     handle = provider.create(_spec())
     provider.exec(handle, command=["/bin/sleep", "30"], env=None, exec_policy=None)
     provider.destroy(handle)
+    assert provider.inspect(handle) == SandboxStatus.DESTROYED
+
+
+def test_destroy_clears_proc_tracking_entries():
+    # destroy must release the provider's per-sandbox bookkeeping (_procs /
+    # _sandbox_of) so a long-lived shared provider does not leak entries across
+    # sessions. Today the per-orchestrator lifetime bounds it, but P4/P5 may
+    # lift the provider to a shared singleton (remote connection pool reuse) —
+    # then a monotonic leak would surface. (Review #2074 🟢#1.)
+    provider = LegacyPosixProvider()
+    handle = provider.create(_spec())
+    eh = provider.exec(handle, command=["/bin/echo", "hi"], env=None, exec_policy=None)
+    assert eh.command_id in provider._procs  # noqa: SLF001 - white-box
+    assert eh.command_id in provider._sandbox_of  # noqa: SLF001
+    provider.destroy(handle)
+    assert eh.command_id not in provider._procs  # noqa: SLF001
+    assert eh.command_id not in provider._sandbox_of  # noqa: SLF001
+    # _status stays DESTROYED for idempotent inspect (unknown id → DESTROYED).
     assert provider.inspect(handle) == SandboxStatus.DESTROYED
 
 

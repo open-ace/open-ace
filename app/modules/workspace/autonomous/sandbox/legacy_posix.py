@@ -390,12 +390,16 @@ class LegacyPosixProvider:
             pass
 
     def _reap_sandbox(self, sandbox_id: str) -> None:
-        # SIGTERM→SIGKILL any live proc whose command belongs to this sandbox.
-        # _sandbox_of tracks command_id -> sandbox_id at exec time.
-        for command_id, proc in list(self._procs.items()):
-            if self._sandbox_of.get(command_id) != sandbox_id:
-                continue
-            if proc.poll() is None and proc.pid is not None:
+        # SIGTERM→SIGKILL any live proc whose command belongs to this sandbox,
+        # then DROP its bookkeeping so a long-lived shared provider does not
+        # leak entries across sessions. _sandbox_of tracks command_id ->
+        # sandbox_id at exec time; _status is left for destroy() to mark
+        # DESTROYED (inspect() returns DESTROYED for unknown ids too, so the
+        # dropped _procs/_sandbox_of entries do not break idempotent inspect).
+        owned = [cid for cid, sid in self._sandbox_of.items() if sid == sandbox_id]
+        for command_id in owned:
+            proc = self._procs.get(command_id)
+            if proc is not None and proc.poll() is None and proc.pid is not None:
                 try:
                     os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
                     proc.wait(timeout=5)
@@ -404,3 +408,5 @@ class LegacyPosixProvider:
                         os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
                     except (ProcessLookupError, OSError):
                         pass
+            self._procs.pop(command_id, None)
+            self._sandbox_of.pop(command_id, None)
