@@ -429,3 +429,8 @@ class AgentTaskResult:
     error_code: str | None = None
     # Ordered event log preserving actual message interleaving
     event_log: list = field(default_factory=list)
+    # #2022 SandboxProvider attribution for evidence (#2046-A schema). Filled by
+    # the runner from the provider handle so persisted CommandExecutionEvidence
+    # rows carry sandbox_id/generation. None when no sandbox was created.
+    sandbox_id: str | None = None
+    sandbox_generation: int | None = None

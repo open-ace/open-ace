@@ -57,6 +57,53 @@ class SandboxCapability(str, Enum):
     NETWORK_EGRESS_POLICY = "network_egress_policy"
 
 
+# ── gVisor/container-facing isolation dimensions (#2022 P4 ①) ──
+#
+# A gVisor/OpenSandbox backend (#2023) needs to express network egress,
+# runtime/image and volumes THROUGH THE SPEC, not by extending the contract
+# (which would re-leak backend detail into the seam — exactly what #2022
+# prevents). HOME/TMP/cgroup/quota stay on #2020's AgentTaskPolicy via
+# ``SandboxSpec.policy``; these value objects model only the dimensions
+# AgentTaskPolicy does not. Legacy/Remote providers leave them None/empty.
+
+
+@dataclass(frozen=True)
+class NetworkEgressPolicy:
+    """Outbound network policy a sandbox requires (#2023 gVisor headline).
+
+    ``mode``: ``deny_all`` (default, safest) | ``allow_explicit`` (only the
+    listed CIDRs/hosts) | ``unrestricted`` (escape hatch, fail-closed providers
+    refuse to satisfy this without an explicit capability).
+    """
+
+    mode: str = "deny_all"
+    allow_cidrs: tuple[str, ...] = ()
+    allow_hosts: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class RuntimeSpec:
+    """Container runtime/image a sandbox should use (#2023).
+
+    ``runtime`` e.g. ``runsc`` (gVisor) / ``runc`` / ``""`` (Legacy: N/A).
+    ``toolchain`` is an optional named toolchain profile the backend resolves.
+    """
+
+    image: str = ""
+    runtime: str = ""
+    toolchain: str = ""
+
+
+@dataclass(frozen=True)
+class VolumeSpec:
+    """One mount a sandbox should expose (#2023)."""
+
+    name: str
+    mount_path: str
+    kind: str = "ephemeral"  # ephemeral | persistent
+    read_only: bool = False
+
+
 @dataclass(frozen=True)
 class SandboxSpec:
     """Immutable description of the sandbox a task needs.
@@ -64,9 +111,13 @@ class SandboxSpec:
     Carries identity (``task_id`` / ``cli_tool`` / ``system_account``) plus the
     isolation intent. The HOME/TMP/quota knobs are NOT redefined here — they
     ride on the #2020 :class:`AgentTaskPolicy` via ``policy`` — so there is one
-    source of truth for the per-task isolation tree. ``required_capabilities``
-    is the fail-closed gate: a provider that cannot meet a required capability
-    must reject the spec at creation.
+    source of truth for the per-task isolation tree. The gVisor-facing
+    dimensions (``network_egress`` / ``runtime`` / ``volumes``) model what
+    AgentTaskPolicy does not, so a #2023 backend expresses intent through the
+    spec rather than by growing the contract. ``machine_id`` / ``user_id``
+    carry remote identity (Phase 4). ``required_capabilities`` is the
+    fail-closed gate: a provider that cannot meet a required capability must
+    reject the spec at creation.
     """
 
     task_id: str
@@ -75,6 +126,18 @@ class SandboxSpec:
     system_account: str | None = None
     policy: AgentTaskPolicy | None = None
     required_capabilities: frozenset[SandboxCapability] = field(default_factory=frozenset)
+    # Remote identity (Phase 4 RemoteMachineProvider). None for local/gVisor.
+    machine_id: str | None = None
+    user_id: int | None = None
+    # gVisor/container dimensions (#2023). None/empty for Legacy/Remote, which
+    # ignore them.
+    network_egress: NetworkEgressPolicy | None = None
+    runtime: RuntimeSpec | None = None
+    volumes: tuple[VolumeSpec, ...] = ()
+    # Lightweight profile slots whose semantics are decided by #2047 (transcript)
+    # and #2046 (evidence); empty string = provider default.
+    transcript_profile: str = ""
+    evidence_profile: str = ""
 
 
 class SandboxStatus(str, Enum):

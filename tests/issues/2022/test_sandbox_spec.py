@@ -88,3 +88,85 @@ def test_sandbox_spec_reuses_agent_task_policy_from_issue_2020():
     assert spec.policy.memory_max_bytes == 536870912
     assert spec.policy.pids_max == 256
     assert spec.policy.max_concurrent_workflows == 2
+
+
+# ── #2022 P4 ①: gVisor-facing isolation dimensions on the spec ──
+#
+# The minimal P1 spec carried only identity + #2020 policy. A gVisor/container
+# backend (#2023) needs to express network egress, runtime/image and volumes
+# THROUGH THE SPEC — otherwise it would extend the contract itself, which is
+# exactly the backend-detail-leak #2022 exists to prevent. AgentTaskPolicy
+# already owns HOME/TMP/cgroup/quota, so these new dimensions do not duplicate it.
+
+from app.modules.workspace.autonomous.sandbox.types import (  # noqa: E402
+    NetworkEgressPolicy,
+    RuntimeSpec,
+    VolumeSpec,
+)
+
+
+def test_network_egress_policy_is_frozen_value_object():
+    egress = NetworkEgressPolicy(
+        mode="allow_explicit",
+        allow_cidrs=("10.0.0.0/8",),
+        allow_hosts=("github.com",),
+    )
+    assert egress.mode == "allow_explicit"
+    assert egress.allow_cidrs == ("10.0.0.0/8",)
+    assert egress.allow_hosts == ("github.com",)
+    try:
+        egress.mode = "unrestricted"  # type: ignore[misc]
+    except FrozenInstanceError:
+        return
+    raise AssertionError("NetworkEgressPolicy must be frozen")
+
+
+def test_runtime_and_volume_specs_are_frozen_value_objects():
+    runtime = RuntimeSpec(image="openace/agent:1", runtime="runsc")
+    assert runtime.image == "openace/agent:1"
+    assert runtime.runtime == "runsc"
+    vol = VolumeSpec(name="repo", mount_path="/workspace", kind="ephemeral")
+    assert vol.mount_path == "/workspace"
+    assert vol.kind == "ephemeral"
+    try:
+        runtime.runtime = "runc"  # type: ignore[misc]
+    except FrozenInstanceError:
+        return
+    raise AssertionError("RuntimeSpec must be frozen")
+
+
+def test_sandbox_spec_carries_gvisor_isolation_dimensions():
+    egress = NetworkEgressPolicy(mode="deny_all")
+    runtime = RuntimeSpec(image="openace/agent:1", runtime="runsc")
+    volumes = (VolumeSpec(name="repo", mount_path="/workspace", kind="ephemeral"),)
+    spec = SandboxSpec(
+        task_id="t-1",
+        project_path="/repo",
+        cli_tool="claude-code",
+        machine_id="machine-7",
+        user_id=42,
+        network_egress=egress,
+        runtime=runtime,
+        volumes=volumes,
+        required_capabilities=frozenset(
+            {SandboxCapability.NAMESPACE_ISOLATION, SandboxCapability.NETWORK_EGRESS_POLICY}
+        ),
+    )
+    assert spec.machine_id == "machine-7"
+    assert spec.user_id == 42
+    assert spec.network_egress is egress
+    assert spec.runtime is runtime
+    assert spec.volumes == volumes
+
+
+def test_sandbox_spec_gvisor_fields_default_none_for_legacy():
+    # Legacy/Remote providers ignore the gVisor dimensions; they default to
+    # None/empty so existing two-arg construction stays backward-compatible.
+    spec = SandboxSpec(task_id="t-1", project_path="/repo", cli_tool="claude-code")
+    assert spec.machine_id is None
+    assert spec.user_id is None
+    assert spec.network_egress is None
+    assert spec.runtime is None
+    assert spec.volumes == ()
+    assert spec.transcript_profile == ""
+    assert spec.evidence_profile == ""

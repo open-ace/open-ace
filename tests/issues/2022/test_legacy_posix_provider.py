@@ -364,6 +364,42 @@ def test_get_process_after_destroy_inspects_destroyed():
     assert provider.inspect(handle) == SandboxStatus.DESTROYED
 
 
+# ── #2022 P4 ②: collect_execution_evidence fills the #2046-A schema's ──
+# ── sandbox-deferred fields (sandbox_id / generation / signal) ─────────
+
+
+def test_legacy_collect_execution_evidence_fills_sandbox_fields():
+    # The #2046-A schema explicitly defers sandbox_id / sandbox_generation /
+    # signal to "#2022's normalized provider events". collect_execution_evidence
+    # is that provider event: it returns the process-level evidence row with
+    # the provider-ownable fields filled (sandbox_id/generation from the handle,
+    # exit_code/signal/argv/cwd from the spawn) — the contract a gVisor backend
+    # inherits. Per-tool_use evidence stays with the runner's recorder.
+    provider = LegacyPosixProvider()
+    handle = provider.create(_spec())
+    eh = provider.exec(handle, command=["/bin/sh", "-c", "exit 3"], env=None, exec_policy=None)
+    list(provider.stream(eh))  # drive the proc to completion
+    rows = provider.collect_execution_evidence(handle)
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.sandbox_id == handle.sandbox_id
+    assert row.sandbox_generation == handle.generation
+    assert row.exit_code == 3
+    assert row.signal is None
+    assert row.argv == ["/bin/sh", "-c", "exit 3"]
+    assert row.terminal_reason == "completed"
+
+
+def test_legacy_collect_execution_evidence_records_signal_death():
+    provider = LegacyPosixProvider()
+    handle = provider.create(_spec())
+    eh = provider.exec(handle, command=["/bin/sh", "-c", "kill -9 $$"], env=None, exec_policy=None)
+    list(provider.stream(eh))
+    rows = provider.collect_execution_evidence(handle)
+    assert rows[0].signal == 9  # SIGKILL; Python encodes signal deaths as -rc
+    assert rows[0].exit_code is not None and rows[0].exit_code < 0
+
+
 def test_destroy_clears_proc_tracking_entries():
     # destroy must release the provider's per-sandbox bookkeeping (_procs /
     # _sandbox_of) so a long-lived shared provider does not leak entries across
