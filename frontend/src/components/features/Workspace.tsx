@@ -67,11 +67,39 @@ const ACTIVITY_HEARTBEAT_INTERVAL = 2 * 60 * 1000;
 
 // WebUI Token TTL (should match backend OPENACE_WEBUI_TOKEN_TTL_SECONDS)
 // Default: 24 hours (86400 seconds)
+// IMPORTANT: If you change backend OPENACE_WEBUI_TOKEN_TTL_SECONDS, update this value accordingly.
 const TOKEN_TTL_SECONDS = 86400;
 
-// Token refresh threshold - refresh when remaining time <= this value
-// Set to 1 hour to ensure token is always fresh during normal use
-const TOKEN_REFRESH_THRESHOLD_SECONDS = 3600;
+// Token refresh threshold ratio (5% of TTL)
+// Refresh when remaining time <= TTL * TOKEN_REFRESH_THRESHOLD_RATIO
+// For 24h TTL: threshold = 86400 * 0.05 = 4320 seconds (1.2 hours)
+// For 30min TTL: threshold = 1800 * 0.05 = 90 seconds
+const TOKEN_REFRESH_THRESHOLD_RATIO = 0.05;
+
+/**
+ * Parse v2 token and return remaining time in seconds.
+ * Returns null if token is not v2 format or invalid.
+ *
+ * v2 format: v2:user_id:port:timestamp:random:signature
+ */
+const getTokenRemainingTime = (token: string): number | null => {
+  if (!token.startsWith('v2:')) return null;
+  const parts = token.split(':');
+  if (parts.length !== 6) return null;
+  const timestamp = parseInt(parts[3], 10);
+  if (isNaN(timestamp)) return null;
+  const now = Math.floor(Date.now() / 1000);
+  return TOKEN_TTL_SECONDS - (now - timestamp);
+};
+
+/**
+ * Check if token needs refresh based on remaining time.
+ * Uses relative threshold (5% of TTL) for better scalability.
+ */
+const needsTokenRefresh = (remainingSeconds: number): boolean => {
+  const threshold = Math.floor(TOKEN_TTL_SECONDS * TOKEN_REFRESH_THRESHOLD_RATIO);
+  return remainingSeconds <= threshold;
+};
 
 export const Workspace: React.FC = () => {
   const language = useLanguage();
@@ -224,26 +252,17 @@ export const Workspace: React.FC = () => {
     }
 
     // Check if token is about to expire or already expired
-    const token = userWebUI.token;
-    if (token.startsWith('v2:')) {
-      const parts = token.split(':');
-      if (parts.length === 6) {
-        const timestamp = parseInt(parts[3], 10);
-        const now = Math.floor(Date.now() / 1000);
-        const remaining = TOKEN_TTL_SECONDS - (now - timestamp);
+    const remaining = getTokenRemainingTime(userWebUI.token);
 
-        // Refresh if expiring within threshold OR already expired (remaining <= 0)
-        // Use <= to ensure we refresh in time, matching the auto-refresh logic
-        if (remaining <= TOKEN_REFRESH_THRESHOLD_SECONDS) {
-          console.log(
-            `[Workspace] Token expiring/expired (${remaining}s), refreshing before new session...`
-          );
-          const result = await workspaceApi.getUserWebUIUrl();
-          if (result.success) {
-            setUserWebUI(result);
-            return result.token;
-          }
-        }
+    // Refresh if expiring within threshold OR already expired (remaining <= 0)
+    if (remaining !== null && needsTokenRefresh(remaining)) {
+      console.log(
+        `[Workspace] Token expiring/expired (${remaining}s), refreshing before new session...`
+      );
+      const result = await workspaceApi.getUserWebUIUrl();
+      if (result.success) {
+        setUserWebUI(result);
+        return result.token;
       }
     }
 
@@ -336,32 +355,18 @@ export const Workspace: React.FC = () => {
 
   // Token refresh: Automatically refresh token before it expires
   // v2 token format: v2:user_id:port:timestamp:random:signature
-  // Token TTL is configurable (default 24 hours), refresh when remaining time <= threshold
+  // Token TTL is configurable (default 24 hours), refresh when remaining time <= threshold ratio (5%)
   useEffect(() => {
     if (!userWebUI?.success || !userWebUI?.token) return;
-
-    // Parse token timestamp (v2 format only)
-    const parseTokenTimestamp = (token: string): number | null => {
-      if (!token.startsWith('v2:')) return null;
-      const parts = token.split(':');
-      if (parts.length !== 6) return null;
-      const timestamp = parseInt(parts[3], 10);
-      return isNaN(timestamp) ? null : timestamp;
-    };
 
     const CHECK_INTERVAL_MS = 60 * 1000; // Check every 60 seconds
 
     const checkAndRefreshToken = async () => {
-      const timestamp = parseTokenTimestamp(userWebUI.token);
-      if (!timestamp) return; // Not v2 format or invalid
-
-      const now = Math.floor(Date.now() / 1000);
-      const age = now - timestamp;
-      const remaining = TOKEN_TTL_SECONDS - age;
+      const remaining = getTokenRemainingTime(userWebUI.token);
+      if (remaining === null) return; // Not v2 format or invalid
 
       // Refresh when remaining time <= threshold or already expired
-      // Use <= to match ensureFreshToken logic and ensure we refresh in time
-      if (remaining <= TOKEN_REFRESH_THRESHOLD_SECONDS) {
+      if (needsTokenRefresh(remaining)) {
         // Prevent concurrent refresh
         if (refreshingRef.current) {
           console.log('[Workspace] Refresh already in progress, skipping');
@@ -403,18 +408,10 @@ export const Workspace: React.FC = () => {
       // Only check when page becomes visible
       if (document.visibilityState !== 'visible') return;
 
-      const token = userWebUI.token;
-      if (!token.startsWith('v2:')) return;
-
-      const parts = token.split(':');
-      if (parts.length !== 6) return;
-
-      const timestamp = parseInt(parts[3], 10);
-      const now = Math.floor(Date.now() / 1000);
-      const remaining = TOKEN_TTL_SECONDS - (now - timestamp);
+      const remaining = getTokenRemainingTime(userWebUI.token);
 
       // Refresh if token is about to expire or already expired
-      if (remaining <= TOKEN_REFRESH_THRESHOLD_SECONDS) {
+      if (remaining !== null && needsTokenRefresh(remaining)) {
         // Prevent concurrent refresh
         if (refreshingRef.current) {
           console.log('[Workspace] Refresh already in progress on visibility change, skipping');
@@ -1765,33 +1762,23 @@ export const Workspace: React.FC = () => {
       // Check and refresh token if needed before switching tabs
       // This ensures the new tab has a valid token for any API requests
       if (userWebUI?.success && userWebUI?.token) {
-        const token = userWebUI.token;
-        if (token.startsWith('v2:')) {
-          const parts = token.split(':');
-          if (parts.length === 6) {
-            const timestamp = parseInt(parts[3], 10);
-            const now = Math.floor(Date.now() / 1000);
-            const remaining = TOKEN_TTL_SECONDS - (now - timestamp);
-
-            // If token is about to expire, refresh it
-            if (remaining <= TOKEN_REFRESH_THRESHOLD_SECONDS && !refreshingRef.current) {
-              console.log(
-                `[Workspace] Token expiring on tab switch (${remaining}s), refreshing...`
-              );
-              refreshingRef.current = true;
-              workspaceApi
-                .getUserWebUIUrl()
-                .then((result) => {
-                  if (result.success && result.token) {
-                    console.log('[Workspace] Token refreshed on tab switch');
-                    setUserWebUI(result);
-                  }
-                })
-                .finally(() => {
-                  refreshingRef.current = false;
-                });
-            }
-          }
+        const remaining = getTokenRemainingTime(userWebUI.token);
+        if (remaining !== null && needsTokenRefresh(remaining) && !refreshingRef.current) {
+          console.log(
+            `[Workspace] Token expiring on tab switch (${remaining}s), refreshing...`
+          );
+          refreshingRef.current = true;
+          workspaceApi
+            .getUserWebUIUrl()
+            .then((result) => {
+              if (result.success && result.token) {
+                console.log('[Workspace] Token refreshed on tab switch');
+                setUserWebUI(result);
+              }
+            })
+            .finally(() => {
+              refreshingRef.current = false;
+            });
         }
       }
 
