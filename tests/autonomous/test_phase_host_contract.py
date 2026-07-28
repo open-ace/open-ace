@@ -79,6 +79,29 @@ def _phase_status_write_violations(tree: ast.AST):
                                 yield (node.lineno, k.value)
 
 
+def test_git_workspace_service_class_exists_and_has_lifecycle_methods():
+    from app.modules.workspace.autonomous.git_workspace import GitWorkspaceService
+
+    expected = [
+        "fail_recovery_closed",
+        "ensure_worktree",
+        "get_preferred_worktree_path",
+        "record_trusted_head",
+        "resolve_recovery_head",
+        "cleanup_worktree_and_branch",
+        "sync_worktree_to_pr_remote_head",
+        "resolve_merge_conflicts",
+        "clear_transition_journal",
+        "verify_worktree_registered",
+        "path_within_worktrees_root",
+        "reconcile_worktree_transition",
+        "remove_worktree_idempotent",
+        "verify_worktree_restored",
+    ]
+    for method in expected:
+        assert hasattr(GitWorkspaceService, method), f"GitWorkspaceService missing {method}"
+
+
 def test_phases_dir_does_not_directly_write_phase_status_fields():
     """#2044 Phase B invariant: phases/*.py must not write current_phase/status/
     completed_at/paused_at directly — those flow only through PhaseResult."""
