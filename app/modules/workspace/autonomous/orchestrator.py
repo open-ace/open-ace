@@ -52,6 +52,7 @@ from app.modules.workspace.autonomous.command_evidence.types import ExecutionVer
 # ``noqa: F401`` keeps the unused-in-orchestrator names exported even though
 # the migrated phase bodies no longer reference them here.
 from app.modules.workspace.autonomous.constants import (  # noqa: F401
+    _REVIEW_APPROVAL_PHRASES,
     _TRANSIENT_ORCHESTRATOR_KEYWORDS,
     AUTONOMOUS_CONTEXT,
     AUTONOMOUS_DEV_ALLOWED_TOOLS,
