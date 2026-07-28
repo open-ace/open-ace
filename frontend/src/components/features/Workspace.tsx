@@ -224,8 +224,9 @@ export const Workspace: React.FC = () => {
         const now = Math.floor(Date.now() / 1000);
         const remaining = 1800 - (now - timestamp); // 30 min TTL
 
-        // Refresh if expiring within 5 minutes OR already expired (remaining <= 0)
-        if (remaining <= 300) {
+        // Refresh if expiring within 10 minutes OR already expired (remaining <= 0)
+        // Use <= to ensure we refresh in time, matching the auto-refresh logic
+        if (remaining <= 600) {
           console.log(
             `[Workspace] Token expiring/expired (${remaining}s), refreshing before new session...`
           );
@@ -341,8 +342,8 @@ export const Workspace: React.FC = () => {
     };
 
     const TOKEN_TTL_SECONDS = 1800; // 30 minutes
-    const REFRESH_THRESHOLD_SECONDS = 300; // 5 minutes
-    const CHECK_INTERVAL_MS = 60 * 1000; // Check every minute
+    const REFRESH_THRESHOLD_SECONDS = 600; // 10 minutes - increased for better safety margin
+    const CHECK_INTERVAL_MS = 30 * 1000; // Check every 30 seconds (more frequent)
 
     const checkAndRefreshToken = async () => {
       const timestamp = parseTokenTimestamp(userWebUI.token);
@@ -352,8 +353,9 @@ export const Workspace: React.FC = () => {
       const age = now - timestamp;
       const remaining = TOKEN_TTL_SECONDS - age;
 
-      // Refresh when remaining time < threshold or already expired
-      if (remaining < REFRESH_THRESHOLD_SECONDS) {
+      // Refresh when remaining time <= threshold or already expired
+      // Use <= to match ensureFreshToken logic and ensure we refresh in time
+      if (remaining <= REFRESH_THRESHOLD_SECONDS) {
         // Prevent concurrent refresh
         if (refreshingRef.current) {
           console.log('[Workspace] Refresh already in progress, skipping');
@@ -384,6 +386,54 @@ export const Workspace: React.FC = () => {
     // Periodic check
     const interval = setInterval(checkAndRefreshToken, CHECK_INTERVAL_MS);
     return () => clearInterval(interval);
+  }, [userWebUI?.success, userWebUI?.token]);
+
+  // Visibility change: Check and refresh token when user switches back to the tab
+  // This ensures token is fresh after user has been away from the tab
+  useEffect(() => {
+    if (!userWebUI?.success || !userWebUI?.token) return;
+
+    const handleVisibilityChange = async () => {
+      // Only check when page becomes visible
+      if (document.visibilityState !== 'visible') return;
+
+      const token = userWebUI.token;
+      if (!token.startsWith('v2:')) return;
+
+      const parts = token.split(':');
+      if (parts.length !== 6) return;
+
+      const timestamp = parseInt(parts[3], 10);
+      const now = Math.floor(Date.now() / 1000);
+      const remaining = 1800 - (now - timestamp);
+
+      // Refresh if token is about to expire (< 10 minutes) or already expired
+      if (remaining <= 600) {
+        // Prevent concurrent refresh
+        if (refreshingRef.current) {
+          console.log('[Workspace] Refresh already in progress on visibility change, skipping');
+          return;
+        }
+        refreshingRef.current = true;
+        console.log(
+          `[Workspace] Token expiring/expired on visibility change (${remaining}s), refreshing...`
+        );
+        try {
+          const result = await workspaceApi.getUserWebUIUrl();
+          if (result.success && result.token) {
+            console.log('[Workspace] Token refreshed on visibility change');
+            setUserWebUI(result);
+          }
+        } catch (err) {
+          console.error('[Workspace] Token refresh error on visibility change:', err);
+        } finally {
+          refreshingRef.current = false;
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, [userWebUI?.success, userWebUI?.token]);
 
   // Theme sync: Send postMessage to all iframes when theme changes (Issue #104)
@@ -1706,6 +1756,39 @@ export const Workspace: React.FC = () => {
         clearTabNotification(previousTabId);
       }
 
+      // Check and refresh token if needed before switching tabs
+      // This ensures the new tab has a valid token for any API requests
+      if (userWebUI?.success && userWebUI?.token) {
+        const token = userWebUI.token;
+        if (token.startsWith('v2:')) {
+          const parts = token.split(':');
+          if (parts.length === 6) {
+            const timestamp = parseInt(parts[3], 10);
+            const now = Math.floor(Date.now() / 1000);
+            const remaining = 1800 - (now - timestamp);
+
+            // If token is about to expire (< 10 minutes), refresh it
+            if (remaining <= 600 && !refreshingRef.current) {
+              console.log(
+                `[Workspace] Token expiring on tab switch (${remaining}s), refreshing...`
+              );
+              refreshingRef.current = true;
+              workspaceApi
+                .getUserWebUIUrl()
+                .then((result) => {
+                  if (result.success && result.token) {
+                    console.log('[Workspace] Token refreshed on tab switch');
+                    setUserWebUI(result);
+                  }
+                })
+                .finally(() => {
+                  refreshingRef.current = false;
+                });
+            }
+          }
+        }
+      }
+
       // Send focus message to the new active iframe
       // Use setTimeout to ensure the iframe is visible before sending message
       setTimeout(() => {
@@ -1717,7 +1800,7 @@ export const Workspace: React.FC = () => {
         }
       }, 100);
     },
-    [activeTabId, setStoredActiveTabId, clearTabNotification]
+    [activeTabId, setStoredActiveTabId, clearTabNotification, userWebUI]
   );
 
   // Rename a tab

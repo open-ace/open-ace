@@ -167,6 +167,12 @@ describe('ApiClient', () => {
       vi.mocked(fetch).mockResolvedValueOnce({
         ok: false,
         status: 400,
+        headers: {
+          get: (name: string) => {
+            if (name === 'content-type') return 'application/json';
+            return null;
+          },
+        },
         json: () =>
           Promise.resolve({
             message: 'Validation error',
@@ -194,6 +200,7 @@ describe('ApiClient', () => {
           details: unknown;
         };
         expect(apiError.status).toBe(400);
+        // After fix: error message comes from response, not friendly message
         expect(apiError.message).toBe('Validation error');
         expect(apiError.code).toBe('VALIDATION_ERROR');
         expect(apiError.details).toEqual({ field: 'name' });

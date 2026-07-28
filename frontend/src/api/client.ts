@@ -151,11 +151,22 @@ class ApiClient {
             status: response.status,
           };
 
+          // Try to parse error response
           try {
-            const errorData = await response.json();
-            error.message = errorData.error ?? errorData.message ?? error.message;
-            error.code = errorData.code;
-            error.details = errorData.details;
+            // Check Content-Type to determine how to parse response
+            const contentType = response.headers.get('content-type');
+            if (contentType?.includes('application/json')) {
+              const errorData = await response.json();
+              error.message = errorData.error ?? errorData.message ?? error.message;
+              error.code = errorData.code;
+              error.details = errorData.details;
+            } else {
+              // Handle non-JSON responses (e.g., plain text "Unauthorized")
+              const errorText = await response.text();
+              if (errorText) {
+                error.message = errorText;
+              }
+            }
           } catch {
             // Ignore JSON parse errors
           }

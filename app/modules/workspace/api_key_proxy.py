@@ -15,7 +15,7 @@ import sqlite3
 import threading
 from base64 import b64decode, b64encode
 from copy import deepcopy
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, cast
 
 from app.modules.workspace.api_key_router import APIKeyRouter
@@ -572,7 +572,7 @@ class APIKeyProxyService:
         """
         # Issue #1894: SSRF protection - validate base_url before storing
         resolved_ips: str = ""
-        resolved_at: str | None = None
+        resolved_at: datetime | None = None
         if base_url:
             from app.utils.llm_proxy_url_validator import (
                 resolve_and_store_ips,
@@ -594,7 +594,7 @@ class APIKeyProxyService:
             # Resolve and store IPs for DNS rebinding protection
             resolved_ips, _ = resolve_and_store_ips(base_url)
             if resolved_ips:
-                resolved_at = "CURRENT_TIMESTAMP"
+                resolved_at = datetime.now(timezone.utc)  # Use UTC timestamp
                 logger.info(
                     "Resolved IPs for base_url: %s -> %s",
                     base_url[:50] + "..." if len(base_url) > 50 else base_url,
@@ -911,7 +911,7 @@ class APIKeyProxyService:
         """
         # Issue #1894: SSRF protection - validate base_url before updating
         resolved_ips: str | None = None
-        resolved_at: str | None = None
+        resolved_at: datetime | None = None
         if base_url is not None:
             from app.utils.llm_proxy_url_validator import (
                 resolve_and_store_ips,
@@ -935,7 +935,7 @@ class APIKeyProxyService:
             if base_url:
                 resolved_ips, _ = resolve_and_store_ips(base_url)
                 if resolved_ips:
-                    resolved_at = "CURRENT_TIMESTAMP"
+                    resolved_at = datetime.now(timezone.utc)  # Use UTC timestamp
                     logger.info(
                         "Resolved IPs for updated base_url: %s -> %s",
                         base_url[:50] + "..." if len(base_url) > 50 else base_url,
