@@ -713,9 +713,7 @@ class TenantRepository:
             if key in settings_dict:
                 fields.append(f"{key} = {p}")
                 value = settings_dict[key]
-                if cast_type is bool:
-                    value = adapt_boolean_value(value)
-                elif cast_type is int and isinstance(value, bool):
+                if cast_type is bool or cast_type is int and isinstance(value, bool):
                     value = adapt_boolean_value(value)
                 values.append(value)
 
