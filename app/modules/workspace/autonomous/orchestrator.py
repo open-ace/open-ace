@@ -5525,7 +5525,10 @@ class AutonomousOrchestrator:
                 # committed via _commit_phase_result).
                 handler = self._do_report
             elif phase == "wait":
-                handler = _legacy(self._do_wait)
+                # Phase B #2044 T7: migrated onto the (ctx, deps) contract —
+                # no longer wrapped by _legacy (it returns a PhaseResult and is
+                # committed via _commit_phase_result).
+                handler = self._do_wait
             elif phase == "merge":
                 handler = _legacy(self._do_merge)
             else:
@@ -8753,7 +8756,7 @@ class AutonomousOrchestrator:
 
     # ── Phase: Wait ─────────────────────────────────────────────────
 
-    def _do_wait(self, wf: dict):
+    def _do_wait(self, ctx: WorkflowContext, deps: PhaseDeps) -> PhaseResult:
         """Poll for new requirements or completion signal.
 
         If user_feedback is stored on the workflow (from cancel-with-feedback),
@@ -8767,7 +8770,21 @@ class AutonomousOrchestrator:
         workflows on the assumption that this phase only touches DB/API state.
         Any git or agent work must happen in a later phase, after the workflow
         has left ``waiting``.
+
+        Phase B #2044 T7: migrated onto the PhaseResult contract. Same
+        decisions as the legacy inline-commit method, only the recording
+        mechanism changes: phase/status transitions travel on the returned
+        ``PhaseResult`` (``completed`` advances ``current_phase``; ``wait``
+        parks the workflow), the ``requirement_received`` milestone travels in
+        ``milestone_events``, and the phase_change event is emitted through
+        ``deps.host`` so the commit entrypoint stays the sole phase/status
+        authority. The four forbidden fields (current_phase/status/completed_at/
+        paused_at) are no longer written inline by this handler.
+
+        Until T10-T12 extract phases into phases/*.py, gh/repo stay on self;
+        deps here carries the host (emit_phase_change) for this thin phase.
         """
+        wf = ctx.workflow
         # Check for stored user feedback (from cancel-with-feedback)
         user_feedback = wf.get("user_feedback", "")
         if user_feedback and user_feedback.strip():
@@ -8789,19 +8806,21 @@ class AutonomousOrchestrator:
                     break
 
             new_dev_round = wf.get("dev_round", 1) + 1
-            self._update_workflow(
-                {
-                    "current_phase": cancelled_phase,
-                    "status": PHASE_STATUS_MAP.get(cancelled_phase, "developing"),
-                    "dev_round": new_dev_round,
-                    "current_round": 0,
-                }
+            # Emit the phase_change event through the host (the commit entrypoint
+            # does NOT emit phase_change — Phase A contract — so the handler emits
+            # its own). Payload is identical to the legacy inline _emit call.
+            deps.host.emit_phase_change(
+                {"phase": cancelled_phase, "dev_round": new_dev_round, "resumed": True}
             )
-            self._emit(
-                "phase_change",
-                {"phase": cancelled_phase, "dev_round": new_dev_round, "resumed": True},
+            # Resume from the cancelled phase — advance via PhaseResult rather
+            # than an inline current_phase/status write. Same decision the legacy
+            # method made; dev_round/current_round are non-forbidden workflow
+            # fields and travel in workflow_patch.
+            return PhaseResult.completed(
+                next_phase=cancelled_phase,
+                next_status=PHASE_STATUS_MAP.get(cancelled_phase, "developing"),
+                workflow_patch={"dev_round": new_dev_round, "current_round": 0},
             )
-            return
 
         # Auto merge check for batch workflows
         auto_merge = wf.get("auto_merge", True)
@@ -8812,24 +8831,18 @@ class AutonomousOrchestrator:
                 "Auto merge enabled for workflow %s, proceeding to merge phase",
                 self._workflow_id[:8],
             )
-            self._update_workflow(
-                {
-                    "current_phase": "merge",
-                    "status": "merging",
-                }
+            deps.host.emit_phase_change({"phase": "merge", "auto_merge": True})
+            return PhaseResult.completed(
+                next_phase="merge",
+                next_status="merging",
             )
-            self._emit(
-                "phase_change",
-                {"phase": "merge", "auto_merge": True},
-            )
-            return
 
         # Original behavior: poll GitHub issue comments
         issue_number = wf.get("github_issue_number")
         gh = self._get_gh()
 
         if not issue_number:
-            return  # No issue to check
+            return PhaseResult.wait()  # No issue to check
 
         # Get the time when wait phase started (set by _do_report)
         # This ensures only user comments AFTER the report are considered
@@ -8849,10 +8862,10 @@ class AutonomousOrchestrator:
                 issue_number, since=wait_start if wait_start else None
             )
         except GitHubOpsError:
-            return
+            return PhaseResult.wait()
 
         if not comments:
-            return  # No new comments
+            return PhaseResult.wait()  # No new comments
 
         # Filter out bot's own comments (comments authored by the automation)
         user_comments = [c for c in comments if not _is_bot_comment(c)]
@@ -8862,18 +8875,15 @@ class AutonomousOrchestrator:
             body = comment.get("body", "")
             for pattern in _COMPLETION_PATTERNS:
                 if pattern.search(body):
-                    self._update_workflow(
-                        {
-                            "current_phase": "merge",
-                            "status": "merging",
-                        }
+                    deps.host.emit_phase_change({"phase": "merge"})
+                    return PhaseResult.completed(
+                        next_phase="merge",
+                        next_status="merging",
                     )
-                    self._emit("phase_change", {"phase": "merge"})
-                    return
 
         # No user comments left after filtering
         if not user_comments:
-            return
+            return PhaseResult.wait()
 
         # New requirements detected
         new_req_comment = user_comments[-1]  # Latest user comment
@@ -8881,26 +8891,32 @@ class AutonomousOrchestrator:
         # Use correct field name from gh CLI (camelCase)
         comment_time = new_req_comment.get("createdAt", "")
 
-        self._create_milestone(
-            phase="wait",
-            milestone_type="requirement_received",
-            status="completed",
-            title="New requirements detected",
-            result_summary=new_requirements[:200],
-            metadata=json.dumps({"last_comment_time": comment_time}),
-        )
-
-        # Start new dev round
-        self._update_workflow(
+        milestone_events = [
             {
-                "current_phase": "planning",
-                "status": "planning",
-                "current_round": 0,
-                "dev_round": wf.get("dev_round", 1) + 1,
-                "requirements_text": new_requirements,
+                "phase": "wait",
+                "milestone_type": "requirement_received",
+                "status": "completed",
+                "title": "New requirements detected",
+                "result_summary": new_requirements[:200],
+                "metadata": json.dumps({"last_comment_time": comment_time}),
             }
+        ]
+
+        new_dev_round = wf.get("dev_round", 1) + 1
+        deps.host.emit_phase_change({"phase": "planning", "dev_round": new_dev_round})
+        # Start a new dev round — advance via PhaseResult. current_phase/status
+        # come from next_phase/next_status; dev_round/current_round/
+        # requirements_text are non-forbidden workflow fields in workflow_patch.
+        return PhaseResult.completed(
+            next_phase="planning",
+            next_status="planning",
+            workflow_patch={
+                "current_round": 0,
+                "dev_round": new_dev_round,
+                "requirements_text": new_requirements,
+            },
+            milestone_events=milestone_events,
         )
-        self._emit("phase_change", {"phase": "planning", "dev_round": wf.get("dev_round", 1) + 1})
 
     # ── Phase: Merge ────────────────────────────────────────────────
 

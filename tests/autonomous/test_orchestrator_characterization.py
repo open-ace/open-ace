@@ -710,3 +710,176 @@ def test_report_phase_returns_phase_result_not_inline_commit(monkeypatch):
     # does NOT) — assert the wait payload actually fires.
     assert captured_phase_changes, "_do_report did not emit phase_change"
     assert {"phase": "wait"} in captured_phase_changes
+
+
+def test_wait_phase_returns_phase_result_not_inline_commit(monkeypatch):
+    """#2044 Phase B T7: migrated _do_wait returns a PhaseResult; no inline
+    phase/status write; emits phase_change via deps.host. Mirrors the T6 test
+    for _do_report. Exercises the "new requirements detected → planning" path,
+    which is the only _do_wait branch that fires both a milestone and a
+    phase/status transition, so the template assertion covers every recording
+    mechanism the migration changes.
+    """
+    wf = _active_workflow(
+        phase="wait",
+        status="waiting",
+        dev_round=1,
+        github_issue_number=42,
+        github_pr_number=None,  # auto_merge path is exercised separately
+        branch_name="auto-dev/wf-test",
+    )
+    orch = _make_orchestrator(wf)
+
+    # Stub _do_wait's external collaborators so it reaches its terminal
+    # PhaseResult without making real gh/repo calls. These stubs do NOT change
+    # the handler's decisions — they only satisfy its reads.
+    gh = MagicMock()
+    # A user comment carrying a new requirement (no completion keyword): the
+    # handler should advance to "planning" for a new dev round.
+    gh.list_issue_comments.return_value = [
+        {"body": "please also add tests", "createdAt": "2026-07-28T00:00:00Z", "author": "user"}
+    ]
+    monkeypatch.setattr(orch, "_get_gh", lambda: gh)
+    orch.repo.list_milestones.return_value = []
+
+    inline_phase_status_writes: list[dict] = []
+    orig_update = orch._update_workflow
+
+    def spy(patch):
+        if any(k in patch for k in ("current_phase", "status", "completed_at", "paused_at")):
+            inline_phase_status_writes.append(dict(patch))
+        return orig_update(patch)
+
+    monkeypatch.setattr(orch, "_update_workflow", spy)
+    monkeypatch.setattr(orch, "_create_milestone", lambda **kw: kw)
+
+    # _do_wait emits its phase_change through deps.host.emit_phase_change (not
+    # the legacy _emit). Wrap the real host with a recorder so this template
+    # test proves the migrated handler actually fires the event, while
+    # delegating the other PhaseHost methods to the orchestrator.
+    import dataclasses
+
+    captured_phase_changes: list[dict] = []
+    real_host = orch  # orchestrator implements PhaseHost
+
+    class _RecordingHost:
+        workflow_id = orch.workflow_id
+
+        def emit_phase_change(self, payload):
+            captured_phase_changes.append(payload)
+
+        def session_offsets(self):
+            return real_host.session_offsets()
+
+        def cancellation(self):
+            return real_host.cancellation()
+
+        def create_milestone_idempotent(self, **kw):
+            return real_host.create_milestone_idempotent(**kw)
+
+    deps = dataclasses.replace(orch._build_phase_deps(), host=_RecordingHost())
+    ctx = orch._build_workflow_context(orch.workflow)
+    result = orch._do_wait(ctx, deps)
+
+    assert isinstance(result, PhaseResult), f"_do_wait must return PhaseResult, got {type(result)}"
+    assert not inline_phase_status_writes, (
+        f"_do_wait wrote phase/status/completed_at/paused_at inline: "
+        f"{inline_phase_status_writes}"
+    )
+    # New-requirements branch advances to "planning" for dev_round 2 — same
+    # decision as the legacy inline _update_workflow({"current_phase":"planning",
+    # "status":"planning","dev_round":2,"current_round":0,...}).
+    assert result.outcome == "completed"
+    assert result.next_phase == "planning"
+    assert result.next_status == "planning"
+    assert result.workflow_patch.get("dev_round") == 2
+    assert result.workflow_patch.get("current_round") == 0
+    assert "requirements_text" in result.workflow_patch
+    # The requirement_received milestone travels in milestone_events, not via
+    # an inline _create_milestone call.
+    assert any(
+        m.get("milestone_type") == "requirement_received" for m in result.milestone_events
+    ), f"requirement_received milestone missing: {result.milestone_events}"
+    # The migrated handler emits its own phase_change (the commit entrypoint
+    # does NOT) — assert the planning payload actually fires.
+    assert captured_phase_changes, "_do_wait did not emit phase_change"
+    assert {"phase": "planning", "dev_round": 2} in captured_phase_changes
+
+
+@pytest.mark.parametrize(
+    "comments,pr_number,expected",
+    [
+        # No new comments → stay waiting (PhaseResult.wait).
+        ([], None, "wait_outcome"),
+        # auto_merge + PR → skip to merge (PhaseResult.completed merge/merging).
+        ([], 7, "merge_outcome"),
+    ],
+)
+def test_wait_phase_parking_and_auto_merge_paths(monkeypatch, comments, pr_number, expected):
+    """#2044 Phase B T7: the "keep waiting" and "auto_merge → merge" branches
+    of _do_wait also return PhaseResults without inline phase/status writes."""
+    wf = _active_workflow(
+        phase="wait",
+        status="waiting",
+        dev_round=1,
+        github_issue_number=42,
+        github_pr_number=pr_number,
+        branch_name="auto-dev/wf-test",
+    )
+    orch = _make_orchestrator(wf)
+
+    gh = MagicMock()
+    gh.list_issue_comments.return_value = comments
+    monkeypatch.setattr(orch, "_get_gh", lambda: gh)
+    orch.repo.list_milestones.return_value = []
+
+    inline_phase_status_writes: list[dict] = []
+    orig_update = orch._update_workflow
+
+    def spy(patch):
+        if any(k in patch for k in ("current_phase", "status", "completed_at", "paused_at")):
+            inline_phase_status_writes.append(dict(patch))
+        return orig_update(patch)
+
+    monkeypatch.setattr(orch, "_update_workflow", spy)
+    monkeypatch.setattr(orch, "_create_milestone", lambda **kw: kw)
+
+    import dataclasses
+
+    captured_phase_changes: list[dict] = []
+    real_host = orch
+
+    class _RecordingHost:
+        workflow_id = orch.workflow_id
+
+        def emit_phase_change(self, payload):
+            captured_phase_changes.append(payload)
+
+        def session_offsets(self):
+            return real_host.session_offsets()
+
+        def cancellation(self):
+            return real_host.cancellation()
+
+        def create_milestone_idempotent(self, **kw):
+            return real_host.create_milestone_idempotent(**kw)
+
+    deps = dataclasses.replace(orch._build_phase_deps(), host=_RecordingHost())
+    ctx = orch._build_workflow_context(orch.workflow)
+    result = orch._do_wait(ctx, deps)
+
+    assert isinstance(result, PhaseResult)
+    assert not inline_phase_status_writes, (
+        f"_do_wait wrote phase/status inline on {expected}: " f"{inline_phase_status_writes}"
+    )
+    if expected == "wait_outcome":
+        assert result.outcome == "wait"
+        assert result.next_phase is None
+        assert result.next_status == "waiting"
+        # No phase_change emitted when staying parked (legacy returned silently).
+        assert not captured_phase_changes
+    else:  # merge_outcome
+        assert result.outcome == "completed"
+        assert result.next_phase == "merge"
+        assert result.next_status == "merging"
+        assert {"phase": "merge", "auto_merge": True} in captured_phase_changes
