@@ -15,7 +15,7 @@ import sqlite3
 import threading
 from base64 import b64decode, b64encode
 from copy import deepcopy
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, cast
 
 from app.modules.workspace.api_key_router import APIKeyRouter
@@ -594,7 +594,7 @@ class APIKeyProxyService:
             # Resolve and store IPs for DNS rebinding protection
             resolved_ips, _ = resolve_and_store_ips(base_url)
             if resolved_ips:
-                resolved_at = datetime.now()  # Use Python datetime instead of SQL function
+                resolved_at = datetime.now(timezone.utc)  # Use UTC timestamp
                 logger.info(
                     "Resolved IPs for base_url: %s -> %s",
                     base_url[:50] + "..." if len(base_url) > 50 else base_url,
@@ -935,7 +935,7 @@ class APIKeyProxyService:
             if base_url:
                 resolved_ips, _ = resolve_and_store_ips(base_url)
                 if resolved_ips:
-                    resolved_at = datetime.now()  # Use Python datetime instead of SQL function
+                    resolved_at = datetime.now(timezone.utc)  # Use UTC timestamp
                     logger.info(
                         "Resolved IPs for updated base_url: %s -> %s",
                         base_url[:50] + "..." if len(base_url) > 50 else base_url,
