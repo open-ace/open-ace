@@ -343,9 +343,10 @@ def test_env_honors_config_url_without_database_url_env(tmp_path, monkeypatch):
     """
     # Ensure the env-var override path is NOT taken, so the only URL signal is
     # the one pinned on the Config below. Also clear the cached project URL so
-    # a previously-imported cache cannot leak into the assertion.
+    # a previously-imported cache cannot leak into the assertion. setattr (not
+    # a bare assignment) so the cache is restored after the test.
     monkeypatch.delenv("DATABASE_URL", raising=False)
-    shared_db._db_url_cache = None
+    monkeypatch.setattr(shared_db, "_db_url_cache", None)
 
     db_path = tmp_path / "from_config_url.db"
     project_root = Path(__file__).resolve().parents[2]

@@ -16,15 +16,20 @@ invoking this check. The pre-commit hook ``check-migration-heads`` also calls
 this script, but it only sees the current working tree and so cannot detect
 cross-branch forks — it guards the (rarer) single-branch multi-head case.
 
-No database is opened and no ``upgrade()`` is executed here. In addition to
-the single-head assertion, building the revision map surfaces a dangling
-``down_revision`` (one pointing at a revision id no migration defines) as a
-deterministic failure rather than an unhandled traceback. ``get_heads()``
-alone cannot catch a broken/stamped DB row — only a live ``upgrade head``
-can, which is why the schema-sync CI job also runs ``alembic upgrade head``
-end-to-end on a throwaway database. This script deliberately stays
-database-free so it works inside the synthetic pre-merged tree (which has no
-``migrations/env.py`` or ``scripts/``).
+No database is opened and no ``upgrade()`` is executed here, because this
+check runs inside the synthetic pre-merged tree that CI assembles (``alembic.ini``
++ ``migrations/{baseline,version_table}.py`` + ``migrations/versions/``) — that
+tree has no ``migrations/env.py`` or ``scripts/``, so an ``upgrade()`` could not
+run even if we wanted it to. The pre-commit ``check-migration-heads`` hook sees
+the real working tree but stays database-free for parity with the CI job.
+
+In addition to the single-head assertion, building the revision map surfaces a
+dangling ``down_revision`` (one pointing at a revision id no migration defines)
+as a deterministic failure rather than an unhandled traceback. This catches the
+source-graph form of the rename-without-update regression. It does **not** catch
+a phantom that lives only in a stamped DB row (issue #2101's actual failure
+mode) — that requires a live ``alembic upgrade head`` against a throwaway
+database, which is a planned follow-up to this check (tracked on issue #2101).
 
 Usage:
     python3 scripts/check_migration_heads.py
