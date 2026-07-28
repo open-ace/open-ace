@@ -59,7 +59,7 @@ Creates the `open-ace` namespace with standard Kubernetes labels.
 
 **HorizontalPodAutoscaler:** The reference manifest keeps at least 3 replicas and can scale to 10 replicas based on CPU and memory utilization.
 
-**Sticky routing:** The Service uses `sessionAffinity: ClientIP`, and the nginx Ingress uses cookie affinity. Remote session HTTP control state is persisted and can cross pods, but live terminal relay WebSocket bridges still belong to one web process; sticky routing remains the safest default for active terminal sessions.
+**Sticky routing:** The nginx Ingress uses cookie affinity (`openace_route` cookie, max-age 10800) as the primary session stickiness mechanism. The Service's `sessionAffinity: ClientIP` has limited effect with a ClusterIP-type Service because it hashes the ingress controller's source IP, not the end-user IP. Cookie affinity is the effective mechanism for user session persistence. Remote session HTTP control state is persisted and can cross pods, but live terminal relay WebSocket bridges still belong to one web process; sticky routing remains the safest default for active terminal sessions.
 
 **HA Support (Issue #1851):**
 
@@ -190,7 +190,7 @@ Keys: `SECRET_KEY`, `OPENACE_ENCRYPTION_KEY`, `UPLOAD_AUTH_KEY`, `DB_USER`, `DB_
 
 ### PodDisruptionBudget
 
-- `minAvailable: 2` — Keeps at least two web pods available during voluntary disruptions
+The PDB uses `minAvailable: 50%` (percentage-based) to avoid tight coupling with the HPA's `minReplicas: 3` setting. With 3 replicas, 50% ensures at least 2 pods remain available during voluntary disruptions (node drains, cluster upgrades). This percentage-based approach automatically adapts if the HPA floor changes—for example, at 2 replicas, 50% = 1 pod would still be allowed to be disrupted.
 
 ## Configuration
 
@@ -222,6 +222,13 @@ kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/
 ## Monitoring
 
 The `/health` endpoint returns service status and git commit hash.
+
+**Prometheus Integration:** The reference manifest does not include Prometheus annotations because the application does not expose a `/metrics` endpoint. For production monitoring, you have two options:
+
+1. **Add a metrics endpoint** to the application using a library like `prometheus_client` and re-add the Prometheus scrape annotations to the deployment
+2. **Use external monitoring** via the `/health` endpoint or application logs
+
+See your organization's monitoring standards for the recommended approach.
 
 ## Scaling
 

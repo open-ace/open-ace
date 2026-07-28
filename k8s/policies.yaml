@@ -1,4 +1,6 @@
 # Open ACE - PodDisruptionBudget
+# Issue #1821: minAvailable uses percentage to avoid coupling with HPA minReplicas.
+# With 3 replicas, 50% = 2 pods available during voluntary disruptions.
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
@@ -7,7 +9,7 @@ metadata:
   labels:
     app.kubernetes.io/name: open-ace
 spec:
-  minAvailable: 2
+  minAvailable: 50%
   selector:
     matchLabels:
       app.kubernetes.io/name: open-ace
