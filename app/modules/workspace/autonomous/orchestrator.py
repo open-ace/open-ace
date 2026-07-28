@@ -5533,7 +5533,10 @@ class AutonomousOrchestrator:
                 # committed via _commit_phase_result).
                 handler = self._do_preparation
             elif phase == "planning":
-                handler = _legacy(self._do_planning)
+                # Phase B #2044 T9: migrated onto the (ctx, deps) contract —
+                # no longer wrapped by _legacy (it returns a PhaseResult and is
+                # committed via _commit_phase_result).
+                handler = self._do_planning
             elif phase == "development":
                 handler = _legacy(self._do_development)
             elif phase == "pr_review":
@@ -6149,9 +6152,47 @@ class AutonomousOrchestrator:
 
     # ── Phase: Planning ────────────────────────────────────────────
 
-    def _do_planning(self, wf: dict):
-        """Execute one planning + review round."""
-        wf = self.workflow  # Re-read for latest state
+    def _do_planning(self, ctx: WorkflowContext, deps: PhaseDeps) -> PhaseResult:
+        """Execute one planning + review round.
+
+        Phase B #2044 T9: migrated onto the PhaseResult contract. Same
+        decisions as the legacy inline-commit method, only the recording
+        mechanism changes: the phase/status transition (planning → development)
+        travels on the returned ``PhaseResult``; bookkeeping workflow-field
+        writes (current_round, user_feedback) travel in ``workflow_patch``; the
+        plan-finalization phase_change event is emitted through ``deps.host`` so
+        the commit entrypoint stays the sole phase/status authority. The four
+        forbidden fields (current_phase/status/completed_at/paused_at) are no
+        longer written inline by this handler on the success path.
+
+        This phase's milestones are NOT collected into ``milestone_events`` for
+        unified commit, unlike _do_preparation. Each plan/review/refine
+        milestone is created inline as status=in_progress, the agent runs, then
+        ``repo.update_milestone`` flips it to completed/failed with the agent
+        output — and the next round reads prior milestones via
+        ``repo.list_milestones`` to refine. Deferring creation to the end would
+        break that create→run→update→re-read interleaving. So the in-progress
+        anchors stay inline (they are durable work records, not terminal
+        markers); only the terminal phase/status transition uses PhaseResult.
+
+        Failure paths (plan/refine timeout or agent failure) keep their legacy
+        semantics: they were normal control-flow returns (not raises) that wrote
+        status inline and returned None, bypassing advance()'s _mark_failed. The
+        migration preserves that exactly — a timeout returns
+        ``PhaseResult(outcome="wait", next_status="planning_timeout", ...)`` (the
+        wait outcome parks the workflow without advancing the phase; constructed
+        directly because the wait() factory hardcodes next_status="waiting"),
+        and a hard failure returns ``PhaseResult.failed(structured_error=
+        {"message": ...})`` so _commit_phase_result writes status=failed +
+        error_message. Both also keep their inline ``_emit("planning_timeout",
+        ...)`` because it is a domain event (not a phase_change) and PhaseHost
+        only proxies phase_change. The non-phase_change round_end emit on the
+        continue-round branch likewise stays inline.
+
+        Until T10-T12 extract phases into phases/*.py, gh/repo/agent stay on
+        self; deps here carries the host (emit_phase_change) for this phase.
+        """
+        wf = ctx.workflow
         round_num = wf.get("current_round", 0) + 1
         max_rounds = wf.get("max_plan_rounds", 3)
         force_full_rounds = self._must_run_full_review_rounds(wf)
@@ -6258,9 +6299,13 @@ class AutonomousOrchestrator:
             milestone_id=ms.get("milestone_id", ""),
         )
 
+        # Bookkeeping workflow-field writes collected here (non-forbidden fields
+        # only); the phase/status transition is supplied by the PhaseResult.
+        workflow_patch: dict[str, object] = {}
+
         # Clear user feedback after it has been injected into the prompt
         if wf.get("user_feedback", "").strip():
-            self._update_workflow({"user_feedback": ""})
+            workflow_patch["user_feedback"] = ""
 
         self._accumulate_tokens(result)
 
@@ -6280,15 +6325,16 @@ class AutonomousOrchestrator:
 
         if not result.success:
             if "timed out" in (result.error or ""):
-                # Timeout → allow user to extend instead of hard failure
-                self._update_workflow(
-                    {
-                        "status": "planning_timeout",
-                        "error_message": (
-                            f"Planning timed out after {planning_timeout}s. "
-                            "You can extend the timeout and retry."
-                        ),
-                    }
+                # Timeout → allow user to extend instead of hard failure.
+                # ``wait`` parks the workflow without advancing the phase; the
+                # custom planning_timeout status travels on next_status (the
+                # wait outcome writes ``next_status or "waiting"``), and the
+                # error_message travels in workflow_patch (non-forbidden). The
+                # inline planning_timeout event stays — it is a domain event,
+                # not a phase_change, so PhaseHost does not proxy it.
+                error_message = (
+                    f"Planning timed out after {planning_timeout}s. "
+                    "You can extend the timeout and retry."
                 )
                 self._emit(
                     "planning_timeout",
@@ -6298,11 +6344,27 @@ class AutonomousOrchestrator:
                         "partial_plan": (self._artifact_visible_text(result) or plan_text)[:500],
                     },
                 )
-            else:
-                self._update_workflow(
-                    {"status": "failed", "error_message": f"Planning failed: {result.error}"}
+                # The wait() factory hardcodes next_status="waiting", but
+                # planning_timeout is a distinct park status the user can extend
+                # via the planning-timeout API. Construct directly so the custom
+                # status rides on outcome="wait" (which parks the phase) while
+                # next_status overrides the parked status — exactly what the
+                # _commit_phase_result wait branch already supports
+                # (patch["status"] = result.next_status or "waiting").
+                return PhaseResult(
+                    outcome="wait",
+                    next_phase=None,
+                    next_status="planning_timeout",
+                    workflow_patch={**workflow_patch, "error_message": error_message},
                 )
-            return
+            else:
+                # Hard failure: PhaseResult.failed writes status=failed +
+                # error_message (from structured_error.message) in the commit
+                # entrypoint. Same decision as the legacy inline write.
+                return PhaseResult.failed(
+                    structured_error={"message": f"Planning failed: {result.error}"},
+                    workflow_patch=workflow_patch,
+                )
 
         # Post plan as issue comment
         if issue_number:
@@ -6401,7 +6463,7 @@ class AutonomousOrchestrator:
         # max_plan_rounds is the cap for plan review rounds. In the default
         # mode we continue only when the review has substantive feedback; in
         # force-full mode we continue until the cap even after approval.
-        self._update_workflow({"current_round": round_num})
+        workflow_patch["current_round"] = round_num
 
         review_has_feedback = bool(
             review_text
@@ -6498,14 +6560,13 @@ class AutonomousOrchestrator:
                     # block for retry, mirroring the plan-agent failure path.
                     # Otherwise the last review would be dropped quietly (#1200).
                     if "timed out" in (refine_result.error or ""):
-                        self._update_workflow(
-                            {
-                                "status": "planning_timeout",
-                                "error_message": (
-                                    f"Plan refine timed out after {PLANNING_TIMEOUT}s. "
-                                    "You can extend the timeout and retry."
-                                ),
-                            }
+                        # Same mapping as the plan-agent timeout branch above:
+                        # outcome="wait" parks the phase; the wait() factory
+                        # hardcodes "waiting" so construct directly to carry the
+                        # custom planning_timeout park status.
+                        error_message = (
+                            f"Plan refine timed out after {PLANNING_TIMEOUT}s. "
+                            "You can extend the timeout and retry."
                         )
                         self._emit(
                             "planning_timeout",
@@ -6515,14 +6576,19 @@ class AutonomousOrchestrator:
                                 "partial_plan": final_plan[:500],
                             },
                         )
-                    else:
-                        self._update_workflow(
-                            {
-                                "status": "failed",
-                                "error_message": f"Plan refine failed: {refine_result.error}",
-                            }
+                        return PhaseResult(
+                            outcome="wait",
+                            next_phase=None,
+                            next_status="planning_timeout",
+                            workflow_patch={**workflow_patch, "error_message": error_message},
                         )
-                    return
+                    else:
+                        return PhaseResult.failed(
+                            structured_error={
+                                "message": f"Plan refine failed: {refine_result.error}"
+                            },
+                            workflow_patch=workflow_patch,
+                        )
 
             final_plan = self._sanitize_artifact_text(final_plan)
 
@@ -6558,17 +6624,28 @@ class AutonomousOrchestrator:
                 )
                 self._post_github_comment(gh, issue_number, final_comment, context="final-plan")
 
-            # Plan finalized, move to development
-            self._update_workflow(
-                {
-                    "current_phase": "development",
-                    "status": "developing",
-                }
+            # Plan finalized, move to development — advance via PhaseResult
+            # rather than an inline current_phase/status write. Same decision
+            # the legacy method made.
+            #
+            # Emit the phase_change event through the host (the commit
+            # entrypoint does NOT emit phase_change — Phase A contract — so the
+            # handler emits its own). Payload is identical to the legacy inline
+            # _emit call.
+            deps.host.emit_phase_change({"phase": "development"})
+            return PhaseResult.completed(
+                next_phase="development",
+                next_status="developing",
+                workflow_patch=workflow_patch,
             )
-            self._emit("phase_change", {"phase": "development"})
         else:
-            # Continue to next planning round
+            # Continue to next planning round. round_end is a domain event (not
+            # a phase_change) so it stays inline. Phase/status are unchanged —
+            # the workflow stays in planning for the next round, so a ``retry``
+            # outcome carries only the current_round bump (and any user_feedback
+            # clear) without touching the forbidden fields.
             self._emit("round_end", {"round": round_num, "approved": False})
+            return PhaseResult.retry(workflow_patch=workflow_patch)
 
     # ── Phase: Development ────────────────────────────────────────
 

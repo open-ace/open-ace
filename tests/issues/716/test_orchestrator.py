@@ -619,7 +619,10 @@ class TestOrchestratorPlanning:
         orch._runner.run_agent_task.side_effect = [plan_result, review_result]
         orch._gh = mock_gh
 
-        orch._do_planning(wf)
+        ctx = orch._build_workflow_context(wf)
+        result = orch._do_planning(ctx, orch._build_phase_deps())
+        if result is not None:
+            orch._commit_phase_result(result)
 
         # Should call agent twice (plan + review)
         assert orch._runner.run_agent_task.call_count == 2
@@ -648,7 +651,10 @@ class TestOrchestratorPlanning:
         orch._runner.run_agent_task.side_effect = [plan_result, review_result]
         orch._gh = mock_gh
 
-        orch._do_planning(wf)
+        ctx = orch._build_workflow_context(wf)
+        result = orch._do_planning(ctx, orch._build_phase_deps())
+        if result is not None:
+            orch._commit_phase_result(result)
 
         update_calls = mock_repo.update_workflow.call_args_list
         phases = [c[0][1].get("current_phase") for c in update_calls if "current_phase" in c[0][1]]
@@ -678,7 +684,10 @@ class TestOrchestratorPlanning:
         orch._runner.run_agent_task.side_effect = [plan_result, review_result]
         orch._gh = mock_gh
 
-        orch._do_planning(wf)
+        ctx = orch._build_workflow_context(wf)
+        result = orch._do_planning(ctx, orch._build_phase_deps())
+        if result is not None:
+            orch._commit_phase_result(result)
 
         # Should NOT transition to development
         update_calls = mock_repo.update_workflow.call_args_list
@@ -721,7 +730,10 @@ class TestOrchestratorPlanning:
         orch._runner.run_agent_task.side_effect = [plan_result, review_result]
         orch._gh = mock_gh
 
-        orch._do_planning(wf)
+        ctx = orch._build_workflow_context(wf)
+        result = orch._do_planning(ctx, orch._build_phase_deps())
+        if result is not None:
+            orch._commit_phase_result(result)
 
         plan_updates = [
             call[0][1]
@@ -752,7 +764,10 @@ class TestOrchestratorPlanning:
         orch._runner.run_agent_task.side_effect = [plan_result, review_result]
         orch._gh = mock_gh
 
-        orch._do_planning(wf)
+        ctx = orch._build_workflow_context(wf)
+        result = orch._do_planning(ctx, orch._build_phase_deps())
+        if result is not None:
+            orch._commit_phase_result(result)
 
         # Should force transition to development
         update_calls = mock_repo.update_workflow.call_args_list
@@ -773,7 +788,10 @@ class TestOrchestratorPlanning:
         orch._runner.run_agent_task.return_value = plan_result
         orch._gh = mock_gh
 
-        orch._do_planning(wf)
+        ctx = orch._build_workflow_context(wf)
+        result = orch._do_planning(ctx, orch._build_phase_deps())
+        if result is not None:
+            orch._commit_phase_result(result)
 
         # Should set status to failed
         update_calls = mock_repo.update_workflow.call_args_list

@@ -237,7 +237,10 @@ class TestRunAgentWrapper:
         ]
         mock_repo.list_milestones.return_value = []
 
-        orch._do_planning(wf)
+        ctx = orch._build_workflow_context(wf)
+        result = orch._do_planning(ctx, orch._build_phase_deps())
+        if result is not None:
+            orch._commit_phase_result(result)
 
         # Should track the last session_id
         assert orch._current_session_id == "track-review-1"
@@ -840,7 +843,10 @@ class TestBackwardCompatibility:
         ]
         mock_repo.list_milestones.return_value = []
 
-        orch._do_planning(wf)
+        ctx = orch._build_workflow_context(wf)
+        result = orch._do_planning(ctx, orch._build_phase_deps())
+        if result is not None:
+            orch._commit_phase_result(result)
 
         # Planning calls agent twice (plan + review)
         assert orch._runner.run_agent_task.call_count == 2
