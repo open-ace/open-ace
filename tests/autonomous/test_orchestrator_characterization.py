@@ -631,6 +631,39 @@ class TestCommitPhaseResult:
         assert last_updates["current_phase"] == "wait"
         assert last_updates["status"] == "waiting"
 
+    def test_commit_completed_rejects_non_terminal_current_phase_in_patch(self):
+        """#2044 S2 safety net: a handler cannot strand the workflow in a
+        non-canonical current_phase by stuffing it into workflow_patch on a
+        completed result. The top-level next_phase validation rejects unknown
+        next_phase values, but the patch-carried current_phase on the completed
+        branch slipped through (PhaseResult.workflow_patch is the T3-approved
+        escape hatch, so the AST guard does not catch it)."""
+        o = _make_orchestrator(_active_workflow(phase="merge"))
+        bad = PhaseResult.completed(
+            next_phase="completed",
+            workflow_patch={"current_phase": "development"},
+        )
+        with pytest.raises(ValueError, match="not a valid terminal phase"):
+            o._commit_phase_result(bad)
+        # And nothing was persisted — update_workflow never reached.
+        assert not o.repo.update_workflow.called
+
+    def test_commit_completed_allows_merge_and_completed_current_phase(self):
+        """The two legitimate terminal current_phase values still work — guards
+        against over-tightening the whitelist. 'merge' is the default terminal
+        real phase (merge-phase completion); 'completed' is pr_review's
+        literal-terminal legacy path (skips report/merge)."""
+        for legit in ("merge", "completed"):
+            o = _make_orchestrator(_active_workflow(phase="merge"))
+            result = PhaseResult.completed(
+                next_phase="completed", workflow_patch={"current_phase": legit}
+            )
+            o._commit_phase_result(result)  # must NOT raise
+            last_updates = o.repo.update_workflow.call_args_list[-1].args[1]
+            assert last_updates["current_phase"] == legit
+            assert last_updates["status"] == "completed"
+            assert "completed_at" in last_updates
+
     def test_advance_report_commits_wait_through_real_entrypoint(self, monkeypatch):
         """End-to-end: advance() running the report phase routes _do_report's
         PhaseResult through the REAL _commit_phase_result, landing

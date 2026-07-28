@@ -575,6 +575,15 @@ REVIEW_SUGGESTIONS_MIN_LENGTH = 200
 # Phase ordering — used by fork to determine the next phase after the fork point.
 PHASE_ORDER = ["preparation", "planning", "development", "pr_review", "report", "merge"]
 
+# The only legitimate current_phase values a PhaseResult(completed) may carry in
+# workflow_patch when next_phase="completed" (the terminal pseudo-phase). "merge"
+# is the default terminal real phase (a completed workflow's current_phase stays
+# "merge"); "completed" is pr_review's literal-terminal legacy path (it skips
+# report/merge and writes the literal "completed"). Any other patch-carried
+# current_phase would strand the workflow in a non-canonical phase — rejected by
+# _commit_phase_result to mirror the top-level next_phase validation. (#2044 S2)
+_COMPLETED_TERMINAL_PHASES = ("merge", "completed")
+
 # Maps phases to their corresponding workflow status values
 PHASE_STATUS_MAP = {
     "preparation": "preparing",
@@ -3148,6 +3157,19 @@ class AutonomousOrchestrator:
             # "merge" (the merge-phase terminal semantics).
             if result.next_phase == "completed":
                 if "current_phase" in patch:
+                    # Whitelist the patch-carried current_phase to known terminal
+                    # values. Without this a buggy handler could strand the
+                    # workflow in a non-canonical phase (e.g. current_phase=
+                    # "development" + status="completed") by stuffing it into
+                    # workflow_patch — the T3 AST guard cannot see it because
+                    # PhaseResult.workflow_patch is the sanctioned escape hatch.
+                    # Mirror the top-level next_phase rejection. (#2044 S2)
+                    if patch["current_phase"] not in _COMPLETED_TERMINAL_PHASES:
+                        raise ValueError(
+                            f"PhaseResult(completed) workflow_patch.current_phase="
+                            f"{patch['current_phase']!r} is not a valid terminal phase "
+                            f"(allowed: {_COMPLETED_TERMINAL_PHASES})"
+                        )
                     patch.setdefault("status", "completed")
                 else:
                     patch["current_phase"] = "merge"
