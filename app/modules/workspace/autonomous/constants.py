@@ -169,7 +169,7 @@ _REVIEW_APPROVAL_PHRASES = {
     "en": "Code review passed",
     "zh": "代码审查通过",
     "ja": "コードレビュー合格",
-    "ko": "코드 리ビュー 통過",
+    "ko": "코드 리뷰 통과",
 }
 
 
