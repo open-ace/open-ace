@@ -5520,7 +5520,10 @@ class AutonomousOrchestrator:
             elif phase == "pr_review":
                 handler = _legacy(self._do_pr_review)
             elif phase == "report":
-                handler = _legacy(self._do_report)
+                # Phase B #2044 T6: migrated onto the (ctx, deps) contract —
+                # no longer wrapped by _legacy (it returns a PhaseResult and is
+                # committed via _commit_phase_result).
+                handler = self._do_report
             elif phase == "wait":
                 handler = _legacy(self._do_wait)
             elif phase == "merge":
@@ -8616,8 +8619,19 @@ class AutonomousOrchestrator:
 
     # ── Phase: Report ───────────────────────────────────────────────
 
-    def _do_report(self, wf: dict):
-        """Generate progress report and update issue."""
+    def _do_report(self, ctx: WorkflowContext, deps: PhaseDeps) -> PhaseResult:
+        """Generate progress report and update issue.
+
+        Phase B #2044 T6: migrated onto the PhaseResult contract. Builds the
+        report (no business-logic change), then returns a PhaseResult advancing
+        to ``wait`` instead of writing ``current_phase``/``status`` inline. The
+        three milestones it emits (progress_reported / round_completed /
+        wait_started) travel in ``milestone_events`` and are committed by
+        ``_commit_phase_result``; the phase_change event is emitted through
+        ``deps.host`` so the commit entrypoint stays the sole phase/status
+        authority.
+        """
+        wf = ctx.workflow
         dev_round = wf.get("dev_round", 1)
         gh = self._get_gh()
         issue_number = wf.get("github_issue_number")
@@ -8683,46 +8697,56 @@ class AutonomousOrchestrator:
         report_metadata = json.dumps({"report": payload}, ensure_ascii=False)
         report_markdown = render_progress_report(payload, content_language)
 
-        self._create_milestone(
-            phase="report",
-            dev_round=dev_round,
-            milestone_type="progress_reported",
-            status="completed",
-            title=f"Progress report for round {dev_round}",
-            metadata=report_metadata,
-        )
+        milestone_events = [
+            {
+                "phase": "report",
+                "dev_round": dev_round,
+                "milestone_type": "progress_reported",
+                "status": "completed",
+                "title": f"Progress report for round {dev_round}",
+                "metadata": report_metadata,
+            },
+        ]
 
         # Post report to issue
         if issue_number:
             self._post_github_comment(gh, issue_number, report_markdown, context="progress-report")
 
         # Mark round completed
-        self._create_milestone(
-            phase="report",
-            dev_round=dev_round,
-            milestone_type="round_completed",
-            status="completed",
-            title=f"Dev round {dev_round} completed",
+        milestone_events.append(
+            {
+                "phase": "report",
+                "dev_round": dev_round,
+                "milestone_type": "round_completed",
+                "status": "completed",
+                "title": f"Dev round {dev_round} completed",
+            }
         )
 
         # Record wait phase start time for comment filtering
-        self._create_milestone(
-            phase="report",
-            dev_round=dev_round,
-            milestone_type="wait_started",
-            status="completed",
-            title="Wait phase starting",
-            metadata=json.dumps({"wait_started_at": datetime.now(timezone.utc).isoformat()}),
-        )
-
-        # Move to wait phase
-        self._update_workflow(
+        milestone_events.append(
             {
-                "current_phase": "wait",
-                "status": "waiting",
+                "phase": "report",
+                "dev_round": dev_round,
+                "milestone_type": "wait_started",
+                "status": "completed",
+                "title": "Wait phase starting",
+                "metadata": json.dumps({"wait_started_at": datetime.now(timezone.utc).isoformat()}),
             }
         )
-        self._emit("phase_change", {"phase": "wait"})
+
+        # Emit the phase_change event through the host (the commit entrypoint
+        # does NOT emit phase_change — Phase A contract — so the handler emits
+        # its own). Payload is identical to the legacy inline _emit call.
+        deps.host.emit_phase_change({"phase": "wait"})
+
+        # Move to wait phase — advance via PhaseResult rather than an inline
+        # current_phase/status write. Same decision the legacy method made.
+        return PhaseResult.completed(
+            next_phase="wait",
+            next_status="waiting",
+            milestone_events=milestone_events,
+        )
 
     # ── Phase: Wait ─────────────────────────────────────────────────
 

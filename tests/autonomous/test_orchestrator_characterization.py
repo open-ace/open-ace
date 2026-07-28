@@ -555,8 +555,9 @@ class TestCommitPhaseResult:
         o._reconcile_worktree_transition = MagicMock()
         committed: dict = {}
 
-        def fake_report(wf):
-            # A migrated phase: no inline _update_workflow; just return a result.
+        def fake_report(ctx, deps):
+            # A migrated phase: native (ctx, deps) signature, no inline
+            # _update_workflow; just return a result for the commit entrypoint.
             return PhaseResult.completed("wait", workflow_patch={"current_round": 0})
 
         o._do_report = fake_report
@@ -622,3 +623,63 @@ def test_orchestrator_satisfies_phase_host_protocol():
     ]:
         assert callable(getattr(orch, method)), f"orchestrator missing PhaseHost.{method}"
     assert hasattr(orch, "workflow_id")
+
+
+def test_report_phase_returns_phase_result_not_inline_commit(monkeypatch):
+    """#2044 Phase B T6: migrated _do_report returns a PhaseResult; the
+    workflow phase/status transition is applied by _commit_phase_result, not
+    inline. The four forbidden fields (current_phase/status/completed_at/
+    paused_at) must not be written by the handler itself.
+    """
+    wf = _active_workflow(
+        phase="report",
+        status="running",
+        dev_round=1,
+        github_issue_number=42,
+        github_pr_number=7,
+        branch_name="auto-dev/wf-test",
+        content_language="en",
+        total_tokens=0,
+        total_requests=0,
+    )
+    orch = _make_orchestrator(wf)
+
+    # Stub _do_report's external collaborators so it reaches its terminal
+    # PhaseResult without making gh/repo calls. These stubs do NOT change the
+    # handler's decisions — they only satisfy its reads.
+    gh = MagicMock()
+    gh.get_diff_stats.return_value = {}
+    monkeypatch.setattr(orch, "_get_gh", lambda: gh)
+    monkeypatch.setattr(orch, "_clean_agent_text", lambda text: text or "")
+    monkeypatch.setattr(orch, "_derive_review_passed", lambda milestones, lang: True)
+    monkeypatch.setattr(orch, "_post_github_comment", lambda *a, **kw: None)
+    monkeypatch.setattr(orch, "_emit", lambda *a, **kw: None)
+    orch.repo.list_milestones.return_value = []
+
+    inline_phase_status_writes: list[dict] = []
+    orig_update = orch._update_workflow
+
+    def spy(patch):
+        if any(k in patch for k in ("current_phase", "status", "completed_at", "paused_at")):
+            inline_phase_status_writes.append(dict(patch))
+        return orig_update(patch)
+
+    monkeypatch.setattr(orch, "_update_workflow", spy)
+    monkeypatch.setattr(orch, "_create_milestone", lambda **kw: kw)
+
+    ctx = orch._build_workflow_context(orch.workflow)
+    deps = orch._build_phase_deps()
+    result = orch._do_report(ctx, deps)
+
+    assert isinstance(
+        result, PhaseResult
+    ), f"_do_report must return PhaseResult, got {type(result)}"
+    assert not inline_phase_status_writes, (
+        f"_do_report wrote phase/status/completed_at/paused_at inline: "
+        f"{inline_phase_status_writes}"
+    )
+    # Report always advances to "wait" with waiting status — same decision as
+    # the legacy inline _update_workflow({"current_phase":"wait","status":"waiting"}).
+    assert result.outcome == "completed"
+    assert result.next_phase == "wait"
+    assert result.next_status == "waiting"
