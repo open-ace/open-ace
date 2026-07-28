@@ -65,7 +65,10 @@ def _phase_status_write_violations(tree: ast.AST):
         # _update_workflow({...}) with a forbidden literal key
         if isinstance(node, ast.Call):
             fn = node.func
-            is_update = (isinstance(fn, ast.Attribute) and fn.attr == "_update_workflow") or (
+            # Match any attribute call whose attr ends in "update_workflow"
+            # (covers self._update_workflow, deps.repo.update_workflow,
+            # repo.update_workflow) plus the bare _update_workflow local name.
+            is_update = (isinstance(fn, ast.Attribute) and fn.attr.endswith("update_workflow")) or (
                 isinstance(fn, ast.Name) and fn.id == "_update_workflow"
             )
             if is_update and node.args:
