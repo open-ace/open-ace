@@ -65,7 +65,6 @@ from app.repositories.user_repo import UserRepository
 logger = logging.getLogger(__name__)
 
 UPSTREAM_QUOTA_PAUSE_REASON_PREFIX = "Upstream provider quota exhausted:"
-MERGE_POLICY_PAUSE_REASON_PREFIX = "Merge blocked by repository policy:"
 
 
 class WorkflowPaused(RuntimeError):

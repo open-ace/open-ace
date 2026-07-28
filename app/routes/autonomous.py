@@ -79,10 +79,8 @@ def _get_repo() -> AutonomousWorkflowRepository:
 
 def _is_recoverable_system_pause_reason(error_message: str) -> bool:
     """Whether resume should clear a stale system-generated pause reason."""
-    from app.modules.workspace.autonomous.orchestrator import (
-        MERGE_POLICY_PAUSE_REASON_PREFIX,
-        UPSTREAM_QUOTA_PAUSE_REASON_PREFIX,
-    )
+    from app.modules.workspace.autonomous.constants import MERGE_POLICY_PAUSE_REASON_PREFIX
+    from app.modules.workspace.autonomous.orchestrator import UPSTREAM_QUOTA_PAUSE_REASON_PREFIX
 
     return error_message.startswith(
         (UPSTREAM_QUOTA_PAUSE_REASON_PREFIX, MERGE_POLICY_PAUSE_REASON_PREFIX)

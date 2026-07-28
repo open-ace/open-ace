@@ -82,15 +82,10 @@ from __future__ import annotations
 import json
 import logging
 
+from app.modules.workspace.autonomous.constants import MERGE_POLICY_PAUSE_REASON_PREFIX
 from app.modules.workspace.autonomous.evidence import Verdict
 from app.modules.workspace.autonomous.github_ops import GitHubOpsError
 from app.modules.workspace.autonomous.phase_contract import PhaseResult
-
-# Mirrors AutonomousOrchestrator.MERGE_POLICY_PAUSE_REASON_PREFIX. Duplicated
-# here (not imported) to avoid a circular import: the orchestrator imports
-# ``phases`` at module load (for resolve_phase_handler), so phases/merge.py
-# cannot import back from the orchestrator module. Keep in sync.
-MERGE_POLICY_PAUSE_REASON_PREFIX = "Merge blocked by repository policy:"
 
 NAME = "merge"
 
@@ -385,7 +380,11 @@ def handle(ctx, deps) -> PhaseResult:
     # cleanup runs here BEFORE the result is committed, its own writes are
     # already authoritative — do NOT re-write cleanup_* in workflow_patch (that
     # would clobber cleanup's final status with a stale "pending").
-    workflow_patch: dict[str, object] = {}
+    # workflow_patch stays empty: cleanup's own writes are already authoritative
+    # by the time the result commits (see comment above), and re-writing the
+    # cleanup_* fields would clobber cleanup's final status with a stale value.
+    # PhaseResult.completed() defaults workflow_patch to {} so we pass no
+    # cleanup_* fields.
     milestone_events: list[dict] = []
     if cleanup_status == "completed":
         milestone_events.append(
@@ -411,6 +410,5 @@ def handle(ctx, deps) -> PhaseResult:
 
     return PhaseResult.completed(
         next_phase="completed",
-        workflow_patch=workflow_patch,
         milestone_events=milestone_events,
     )

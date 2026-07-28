@@ -23,6 +23,7 @@ def test_phase_host_protocol_has_narrow_surface():
         "branch_contains_main",
         "start_ci_repair_round",
         "perform_git_cleanup",
+        "resolve_merge_conflicts",
     ]:
         assert hasattr(PhaseHost, method), f"PhaseHost missing {method}"
     # annotation-only data member lives in __annotations__, not dir()
