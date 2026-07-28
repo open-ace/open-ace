@@ -175,6 +175,15 @@ def test_advance_treats_manual_pause_as_control_flow():
         "worktree_path": "/tmp/worktree",
     }
     orchestrator._ensure_worktree = MagicMock()
+    # T4 made _dispatch_phase build (ctx, deps) on every advance, which reads
+    # these orchestrator attrs before the phase handler runs. The __new__
+    # construction above skips __init__ (which sets them on the production
+    # path), so set the ones the dispatch path touches.
+    orchestrator._session_usage_offsets = {}
+    orchestrator._shutdown_requested = threading.Event()
+    orchestrator._gh = None
+    orchestrator._runner = MagicMock()
+    orchestrator.emitter = MagicMock()
     dev_handle_spy = MagicMock(side_effect=WorkflowPaused("manual pause"))
     saved = _phases.PHASE_HANDLERS.get("development")
     _phases.PHASE_HANDLERS["development"] = dev_handle_spy
