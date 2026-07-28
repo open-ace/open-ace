@@ -266,7 +266,7 @@ export const Workspace: React.FC = () => {
       }
     }
 
-    return token;
+    return userWebUI.token;
   }, [userWebUI]);
 
   // Load workspace config and user webui URL
@@ -1764,9 +1764,7 @@ export const Workspace: React.FC = () => {
       if (userWebUI?.success && userWebUI?.token) {
         const remaining = getTokenRemainingTime(userWebUI.token);
         if (remaining !== null && needsTokenRefresh(remaining) && !refreshingRef.current) {
-          console.log(
-            `[Workspace] Token expiring on tab switch (${remaining}s), refreshing...`
-          );
+          console.log(`[Workspace] Token expiring on tab switch (${remaining}s), refreshing...`);
           refreshingRef.current = true;
           workspaceApi
             .getUserWebUIUrl()
