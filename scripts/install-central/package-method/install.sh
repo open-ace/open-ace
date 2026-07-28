@@ -1261,6 +1261,42 @@ with open('$config_file', 'w') as f:
     return 0
 }
 
+# Update config.json with SQLite database settings
+update_config_database_sqlite() {
+    local config_file="$1"
+    local db_path="$2"
+
+    if [ ! -f "$config_file" ]; then
+        print_warning "Config file not found: $config_file"
+        return 1
+    fi
+
+    print_info "Updating SQLite database configuration in $config_file..."
+
+    # Use Python to update JSON
+    if command -v python3 &>/dev/null; then
+        python3 -c "
+import json
+with open('$config_file', 'r') as f:
+    config = json.load(f)
+config['database'] = {
+    'type': 'sqlite',
+    'path': '$db_path'
+}
+with open('$config_file', 'w') as f:
+    json.dump(config, f, indent=2)
+" 2>/dev/null && print_success "SQLite database configuration updated" || {
+            print_warning "Failed to update SQLite configuration"
+            return 1
+        }
+    else
+        print_warning "Python3 not available, cannot update SQLite configuration"
+        return 1
+    fi
+
+    return 0
+}
+
 # Update config.json with workspace settings
 update_config_workspace() {
     local config_file="$1"
@@ -3753,11 +3789,13 @@ do_fresh_install() {
         if [ -f "$target_path/config/config.json.sample" ]; then
             cp "$target_path/config/config.json.sample" "$config_dir/config.json"
             print_info "Created config file: $config_dir/config.json"
-            # Update database configuration if PostgreSQL was set up
+            # Update database configuration based on whether PostgreSQL is configured
             if [ -n "$DB_PASSWORD" ] && [ "$DB_INSTALL_METHOD" != "" ]; then
+                # PostgreSQL is configured
                 update_config_database "$config_dir/config.json"
             else
-                print_warning "Please edit the config file with your database settings."
+                # No PostgreSQL configured, use SQLite as default
+                update_config_database_sqlite "$config_dir/config.json" "$config_dir/ace.db"
             fi
             # Update workspace configuration with webui path
             # First ensure symlinks are created (if running as root)
@@ -4010,7 +4048,7 @@ do_fresh_install() {
         cd "$target_path"
         if [ -f "$schema_file" ]; then
             print_info "Executing SQLite schema..."
-            python3 -c "import sqlite3; c=sqlite3.connect('$config_dir/openace.db'); c.executescript(open('$schema_file').read())" && print_success "SQLite schema created" || print_warning "Failed to execute SQLite schema"
+            python3 -c "import sqlite3; c=sqlite3.connect('$config_dir/ace.db'); c.executescript(open('$schema_file').read())" && print_success "SQLite schema created" || print_warning "Failed to execute SQLite schema"
             print_info "Marking database version..."
             python3 -m alembic stamp head && print_success "Database version marked" || print_warning "Failed to stamp version"
         else
@@ -4073,6 +4111,21 @@ do_upgrade() {
         if [ -d "$config_dir" ]; then
             print_info "Backing up config directory..."
             cp -r "$config_dir" "$backup_dir/"
+
+            # Migrate database file from openace.db to ace.db (Issue #2109)
+            if [ -f "$config_dir/openace.db" ] && [ ! -f "$config_dir/ace.db" ]; then
+                print_info "Migrating database file from openace.db to ace.db..."
+                mv "$config_dir/openace.db" "$config_dir/ace.db"
+                print_success "Database file migrated successfully"
+
+                # Update config.json if database type is sqlite
+                local db_type=$(python3 -c "import json; c=json.load(open('$config_dir/config.json')); print(c.get('database', {}).get('type', 'postgresql'))" 2>/dev/null || echo "postgresql")
+                if [ "$db_type" != "postgresql" ]; then
+                    update_config_database_sqlite "$config_dir/config.json" "$config_dir/ace.db"
+                fi
+            elif [ -f "$config_dir/openace.db" ] && [ -f "$config_dir/ace.db" ]; then
+                print_warning "Both openace.db and ace.db exist. Keeping ace.db, please manually remove openace.db if not needed."
+            fi
         fi
 
         # Backup database in target path (if any)
