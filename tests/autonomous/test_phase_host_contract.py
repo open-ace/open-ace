@@ -38,3 +38,56 @@ def test_phase_deps_carries_services_not_orchestrator():
 
 def test_phase_handler_protocol_has_handle_taking_ctx_deps():
     assert hasattr(PhaseHandler, "handle")
+
+
+import ast
+from pathlib import Path
+
+_PHASES_DIR = (
+    Path(__file__).resolve().parents[2] / "app" / "modules" / "workspace" / "autonomous" / "phases"
+)
+_FORBIDDEN_WRITES = {"current_phase", "status", "completed_at", "paused_at"}
+
+
+def _phase_status_write_violations(tree: ast.AST):
+    """Yield (lineno, name) for any direct write of a forbidden field inside
+    phases/ — either a dict-key assignment (patch['status'] = ...) or a literal
+    _update_workflow({'status': ...}) call."""
+    for node in ast.walk(tree):
+        # dict-key writes: Assign(target=Subscript(slice=Constant(value=...)))
+        if isinstance(node, ast.Assign):
+            for tgt in node.targets:
+                key = None
+                if isinstance(tgt, ast.Subscript) and isinstance(tgt.slice, ast.Constant):
+                    key = tgt.slice.value
+                if isinstance(key, str) and key in _FORBIDDEN_WRITES:
+                    yield (node.lineno, key)
+        # _update_workflow({...}) with a forbidden literal key
+        if isinstance(node, ast.Call):
+            fn = node.func
+            is_update = (isinstance(fn, ast.Attribute) and fn.attr == "_update_workflow") or (
+                isinstance(fn, ast.Name) and fn.id == "_update_workflow"
+            )
+            if is_update and node.args:
+                for arg in node.args:
+                    if isinstance(arg, ast.Dict):
+                        for k in arg.keys:
+                            if isinstance(k, ast.Constant) and k.value in _FORBIDDEN_WRITES:
+                                yield (node.lineno, k.value)
+
+
+def test_phases_dir_does_not_directly_write_phase_status_fields():
+    """#2044 Phase B invariant: phases/*.py must not write current_phase/status/
+    completed_at/paused_at directly — those flow only through PhaseResult."""
+    if not _PHASES_DIR.exists():
+        return  # nothing migrated yet; vacuously green until T10+
+    violations = []
+    for src in _PHASES_DIR.glob("*.py"):
+        if src.name == "__init__.py":
+            continue
+        tree = ast.parse(src.read_text(), filename=str(src))
+        for lineno, key in _phase_status_write_violations(tree):
+            violations.append(f"{src.name}:{lineno} writes forbidden field {key!r}")
+    assert not violations, "phase/status writes must go through PhaseResult:\n  " + "\n  ".join(
+        violations
+    )
