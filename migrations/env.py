@@ -41,11 +41,26 @@ target_metadata = None
 
 def get_url():
     """
-    Get the database URL from environment or config.
-    Uses scripts.shared.db._get_db_url which automatically handles
-    sudo environment by adding gssencmode=disable for PostgreSQL
-    to prevent GSSAPI/Kerberos crash (SIGSEGV).
+    Resolve the database URL for the migration run.
+
+    A caller may pin the target database directly on the Alembic ``Config``
+    (e.g. ``cfg.set_main_option("sqlalchemy.url", ...)`` or the
+    ``sqlalchemy.url`` key in ``alembic.ini``). When set, that value wins so
+    tooling and tests can target a throwaway database explicitly — without it,
+    ``alembic upgrade`` would silently hit the operator's configured project
+    database (see issue #2101, where a stale ``alembic_version`` row on the
+    local DB masqueraded as a broken migration graph).
+
+    When no URL is pinned on the ``Config``, fall back to the project's
+    canonical resolver ``scripts.shared.db._get_db_url``, which reads
+    ``DATABASE_URL`` / ``~/.open-ace/config.json`` and adds
+    ``gssencmode=disable`` for PostgreSQL under sudo to prevent the
+    GSSAPI/Kerberos crash (SIGSEGV).
     """
+    configured = config.get_main_option("sqlalchemy.url")
+    if configured:
+        return configured
+
     from scripts.shared.db import _get_db_url
 
     return _get_db_url()
