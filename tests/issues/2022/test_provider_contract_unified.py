@@ -26,6 +26,7 @@ from app.modules.workspace.autonomous.sandbox.types import (
     SandboxSpec,
     SandboxStatus,
 )
+from app.modules.workspace.autonomous.task_isolation import AgentTaskPolicy
 
 _LEGACY_CAPS = frozenset(
     {
@@ -78,6 +79,63 @@ class _LegacyHarness:
     def drive_to_completion(self, eh) -> list:
         return list(self.provider.stream(eh))
 
+    def realism_probes(self) -> dict[SandboxCapability, Any]:
+        """Per-cap enforcement-wiring probes (#2020 Phase B / #2082 defense).
+
+        Each declared cap maps to a probe that fails if the provider does not
+        actually wire it. The Legacy caps are all enforced through the isolated
+        ``openace-run-as`` launcher on the cross-user path, so each probe
+        inspects a distinct facet of ``build_launch_argv`` for a cross-user spec
+        — the launcher entry point is the signal that ACL/cgroup/HOME-TMP/
+        privilege-drop are wired (the cgroup write itself is integration-tested
+        in tests/issues/2020 Phase A). Non-flaky: build_launch_argv is pure, no
+        spawn, no root.
+        """
+
+        def cross_user_argv() -> list[str]:
+            spec = self.spec(
+                system_account="agent_x",
+                policy=AgentTaskPolicy(memory_max_bytes=2048, pids_max=10, cpu_max="100000/100000"),
+            )
+            handle = self.provider.create(spec)
+            return self.provider.build_launch_argv(
+                handle, command=["/bin/true"], env={"HOME": "/tmp"}
+            )
+
+        def probe_private_home_tmp_xdg() -> None:
+            argv = cross_user_argv()
+            assert (
+                "--task-id" in argv
+            ), "PRIVATE_HOME_TMP_XDG: launcher must key per-task HOME/TMP/XDG off --task-id"
+
+        def probe_filesystem_acl() -> None:
+            argv = cross_user_argv()
+            assert argv[:4] == [
+                "sudo",
+                "-n",
+                "-u",
+                "root",
+            ], "FILESYSTEM_ACL: cross-user launch must route through the root launcher"
+
+        def probe_cpu_mem_pids_time_quota() -> None:
+            argv = cross_user_argv()
+            assert (
+                "--isolated" in argv
+            ), "CPU_MEM_PIDS_TIME_QUOTA: resource quota must go through the isolated launcher"
+
+        def probe_credential_token_binding() -> None:
+            argv = cross_user_argv()
+            assert (
+                argv[0] == "sudo"
+            ), "CREDENTIAL_TOKEN_BINDING: credential isolation requires privilege drop"
+
+        return {
+            SandboxCapability.PRIVATE_HOME_TMP_XDG: probe_private_home_tmp_xdg,
+            SandboxCapability.FILESYSTEM_ACL: probe_filesystem_acl,
+            SandboxCapability.CPU_MEM_PIDS_TIME_QUOTA: probe_cpu_mem_pids_time_quota,
+            SandboxCapability.CREDENTIAL_TOKEN_BINDING: probe_credential_token_binding,
+        }
+
 
 class _RemoteHarness:
     name = "remote_machine"
@@ -109,7 +167,22 @@ class _RemoteHarness:
     def drive_to_completion(self, eh) -> list:
         return list(self.provider.stream(eh))
 
+    def realism_probes(self) -> dict[SandboxCapability, Any]:
+        """Remote declares no caps → no probes (the honest-empty assertion in
+        ``test_capabilities_match_expected`` IS the realism check). #2082
+        defense: if a future change makes Remote claim a cap, it must add a
+        probe here or ``test_every_declared_capability_has_a_realism_probe``
+        fails."""
+        return {}
 
+
+# ── #2023 plug-in point ──
+# To conformance-test a new backend (gVisor/OpenSandbox), add a `_GvisorHarness`
+# here with `expected_caps` (the caps it REALLY enforces — e.g.
+# STORAGE_INODE_QUOTA, NAMESPACE_ISOLATION, NETWORK_EGRESS_POLICY) and a matching
+# `realism_probes()` entry per declared cap. Every test below then runs against
+# it automatically. The realism-probe framework (track 3) ensures the new
+# harness cannot claim a cap without a probe backing it (#2082 defense).
 HARNESSES = [_LegacyHarness, _RemoteHarness]
 
 
@@ -194,3 +267,33 @@ def test_collect_execution_evidence_fills_sandbox_attribution(harness):
     for row in rows:
         assert row.sandbox_id == handle.sandbox_id
         assert row.sandbox_generation == handle.generation
+
+
+# ── capability realism (#2020 Phase B track 3 / #2082 defense) ──
+
+
+def test_every_declared_capability_has_a_realism_probe(harness):
+    """A provider must back EVERY declared cap with a probe (#2082 defense).
+
+    The #2082 bug was Remote copy-pasting Legacy's 4 caps it could not enforce.
+    ``test_capabilities_match_expected`` catches the claim-vs-reality mismatch
+    for the providers we know; THIS test is the forward-looking gate: when #2023
+    adds a gVisor harness declaring STORAGE_INODE_QUOTA / NAMESPACE_ISOLATION /
+    NETWORK_EGRESS_POLICY, it MUST add a realism probe per cap or this fails —
+    no provider can declare a cap without a test exercising its wiring.
+    """
+    declared = set(harness.provider.capabilities())
+    probed = set(harness.realism_probes().keys())
+    assert declared == probed, (
+        f"{harness.name}: declared caps {declared} != probed caps {probed}; "
+        "every declared capability needs a realism probe"
+    )
+
+
+def test_realism_probes_pass(harness):
+    """Each declared cap's enforcement wiring is exercised and holds."""
+    for cap, probe in harness.realism_probes().items():
+        try:
+            probe()
+        except AssertionError as e:
+            raise AssertionError(f"{harness.name} realism probe for {cap.value} failed: {e}") from e
