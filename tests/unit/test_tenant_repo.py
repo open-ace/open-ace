@@ -627,3 +627,111 @@ class TestTenantRepository:
         self.db.fetch_one.return_value = None
         result = self.repo.count()
         assert result == 0
+
+
+class TestUpdateTenantSettingsTableBooleanHandling:
+    """Tests for _update_tenant_settings_table boolean value handling.
+
+    Verifies that boolean values are correctly adapted for PostgreSQL vs SQLite.
+    Regression test for issue where PostgreSQL boolean columns received integer values.
+    """
+
+    def setup_method(self):
+        self.db = MagicMock()
+        self.db.is_postgresql = False
+        self.repo = TenantRepository(db=self.db)
+
+    def test_update_tenant_settings_table_sqlite_uses_integer(self):
+        """SQLite should receive 1/0 for boolean columns."""
+        # Mock existing tenant_settings row
+        self.db.fetch_one.return_value = {"id": 1}
+        mock_cursor = MagicMock()
+        self.db.execute.return_value = mock_cursor
+
+        # Call update with boolean settings
+        # Note: field_mapping order is: content_filter_enabled, audit_log_enabled,
+        # audit_log_retention_days, data_retention_days, sso_enabled, sso_provider,
+        # auto_provision_users, block_sensitive_keyword, sensitive_keyword_match_mode
+        settings_dict = {
+            "content_filter_enabled": False,
+            "sso_enabled": True,
+            "auto_provision_users": True,
+        }
+
+        with patch("app.repositories.database.is_postgresql", return_value=False):
+            self.repo._update_tenant_settings_table(1, settings_dict)
+
+        # Verify execute was called
+        assert self.db.execute.called
+        call_args = self.db.execute.call_args
+        query = call_args[0][0]
+        params = call_args[0][1]
+
+        # Verify query structure
+        assert "UPDATE tenant_settings SET" in query
+        assert "sso_enabled = ?" in query
+        assert "auto_provision_users = ?" in query
+        assert "content_filter_enabled = ?" in query
+
+        # SQLite should receive integers (1/0)
+        # Order follows field_mapping: content_filter_enabled, sso_enabled, auto_provision_users
+        assert params[0] == 0  # content_filter_enabled = False
+        assert params[1] == 1  # sso_enabled = True
+        assert params[2] == 1  # auto_provision_users = True
+
+    def test_update_tenant_settings_table_postgresql_uses_boolean(self):
+        """PostgreSQL should receive True/False for boolean columns."""
+        # Mock existing tenant_settings row
+        self.db.fetch_one.return_value = {"id": 1}
+        mock_cursor = MagicMock()
+        self.db.execute.return_value = mock_cursor
+
+        # Call update with boolean settings
+        settings_dict = {
+            "content_filter_enabled": False,
+            "sso_enabled": True,
+            "auto_provision_users": True,
+        }
+
+        with patch("app.repositories.database.is_postgresql", return_value=True):
+            self.repo._update_tenant_settings_table(1, settings_dict)
+
+        # Verify execute was called
+        assert self.db.execute.called
+        call_args = self.db.execute.call_args
+        params = call_args[0][1]
+
+        # PostgreSQL should receive Python booleans (True/False)
+        # Order follows field_mapping: content_filter_enabled, sso_enabled, auto_provision_users
+        assert params[0] is False  # content_filter_enabled = False
+        assert params[1] is True  # sso_enabled = True
+        assert params[2] is True  # auto_provision_users = True
+
+    def test_update_tenant_settings_table_mixed_types(self):
+        """Test with mixed boolean and non-boolean settings."""
+        # Mock existing tenant_settings row
+        self.db.fetch_one.return_value = {"id": 1}
+        mock_cursor = MagicMock()
+        self.db.execute.return_value = mock_cursor
+
+        # Call update with mixed settings
+        # field_mapping order: audit_log_retention_days comes before sso_enabled and sso_provider
+        settings_dict = {
+            "audit_log_retention_days": 30,
+            "sso_enabled": True,
+            "sso_provider": "okta",
+        }
+
+        with patch("app.repositories.database.is_postgresql", return_value=True):
+            self.repo._update_tenant_settings_table(1, settings_dict)
+
+        # Verify execute was called
+        assert self.db.execute.called
+        call_args = self.db.execute.call_args
+        params = call_args[0][1]
+
+        # Verify types
+        # Order follows field_mapping: audit_log_retention_days, sso_enabled, sso_provider
+        assert params[0] == 30  # audit_log_retention_days (int)
+        assert params[1] is True  # sso_enabled (boolean)
+        assert params[2] == "okta"  # sso_provider (str)

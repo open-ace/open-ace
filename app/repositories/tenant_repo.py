@@ -684,7 +684,7 @@ class TenantRepository:
             tenant_id: Tenant ID.
             settings_dict: Settings dictionary to update.
         """
-        from app.repositories.database import get_param_placeholder
+        from app.repositories.database import adapt_boolean_value, get_param_placeholder
 
         p = get_param_placeholder()
 
@@ -714,10 +714,9 @@ class TenantRepository:
                 fields.append(f"{key} = {p}")
                 value = settings_dict[key]
                 if cast_type is bool:
-                    # SQLite uses 1/0 for boolean
-                    value = 1 if value else 0
+                    value = adapt_boolean_value(value)
                 elif cast_type is int and isinstance(value, bool):
-                    value = 1 if value else 0
+                    value = adapt_boolean_value(value)
                 values.append(value)
 
         if not fields:
