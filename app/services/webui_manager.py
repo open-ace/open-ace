@@ -617,7 +617,11 @@ class WebUIManager:
             age_seconds = current_time - timestamp
 
             if age_seconds > WEBUI_TOKEN_TTL_SECONDS:
-                return False, None, f"Token expired (age: {age_seconds}s, TTL: {WEBUI_TOKEN_TTL_SECONDS}s)"
+                return (
+                    False,
+                    None,
+                    f"Token expired (age: {age_seconds}s, TTL: {WEBUI_TOKEN_TTL_SECONDS}s)",
+                )
 
             if age_seconds < 0:
                 return False, None, "Token timestamp is in the future"
