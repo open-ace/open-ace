@@ -3621,7 +3621,7 @@ class AutonomousOrchestrator:
             "branch_name": wf.get("branch_name"),
             "worktree_path": wf.get("worktree_path"),
             "expected_head_sha": wf.get("expected_head_sha"),
-            "base_branch": wf.get("base_branch", "main"),
+            "base_branch": wf.get("original_branch_name") or "main",
         }
 
     def _poll_ci_status(self, gh: GitHubOps, pr_number: int) -> list:

@@ -583,7 +583,4 @@ def test_workflow_context_repository_context_is_wired_from_git_binding(tmp_path)
     orch = _make_orchestrator(wf)
     ctx = orch._build_workflow_context(orch.workflow)
     assert ctx.repository_context is not None
-    repo_ctx = ctx.repository_context
-    assert getattr(repo_ctx, "branch_name", None) == "feature-x" or (
-        isinstance(repo_ctx, dict) and repo_ctx.get("branch_name") == "feature-x"
-    )
+    assert ctx.repository_context["branch_name"] == "feature-x"
