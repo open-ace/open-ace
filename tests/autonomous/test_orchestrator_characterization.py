@@ -113,11 +113,11 @@ class TestAdvanceDispatch:
         ],
     )
     def test_dispatches_to_matching_phase_method(self, phase, method):
-        # Phase B #2044 T10/T11: merge and pr_review migrated to phases/*.py
-        # and are resolved via the PHASE_HANDLERS registry (the registry caches
-        # the function reference at import, so patching the module attribute is
-        # not enough — patch PHASE_HANDLERS directly). Other phases are still
-        # bound methods on the orchestrator.
+        # Phase B #2044 T10/T11/T12: development, merge and pr_review migrated
+        # to phases/*.py and are resolved via the PHASE_HANDLERS registry (the
+        # registry caches the function reference at import, so patching the
+        # module attribute is not enough — patch PHASE_HANDLERS directly). Other
+        # phases are still bound methods on the orchestrator.
         from app.modules.workspace.autonomous import phases as _phases
 
         o = _make_orchestrator(_active_workflow(phase=phase))
@@ -138,12 +138,16 @@ class TestAdvanceDispatch:
             spy = MagicMock(name=name)
             spies[name] = spy
             setattr(o, name, spy)
+        development_handle_spy = MagicMock(name="phases.development.handle")
+        spies["phases.development.handle"] = development_handle_spy
         merge_handle_spy = MagicMock(name="phases.merge.handle")
         spies["phases.merge.handle"] = merge_handle_spy
         pr_review_handle_spy = MagicMock(name="phases.pr_review.handle")
         spies["phases.pr_review.handle"] = pr_review_handle_spy
 
-        saved_handlers = {name: _phases.PHASE_HANDLERS.get(name) for name in ("merge", "pr_review")}
+        registry_names = ("development", "merge", "pr_review")
+        saved_handlers = {name: _phases.PHASE_HANDLERS.get(name) for name in registry_names}
+        _phases.PHASE_HANDLERS["development"] = development_handle_spy
         _phases.PHASE_HANDLERS["merge"] = merge_handle_spy
         _phases.PHASE_HANDLERS["pr_review"] = pr_review_handle_spy
         try:
@@ -155,13 +159,17 @@ class TestAdvanceDispatch:
                 else:
                     _phases.PHASE_HANDLERS[name] = saved
 
-        if phase in ("merge", "pr_review"):
-            spy = merge_handle_spy if phase == "merge" else pr_review_handle_spy
+        if phase in registry_names:
+            spy = {
+                "development": development_handle_spy,
+                "merge": merge_handle_spy,
+                "pr_review": pr_review_handle_spy,
+            }[phase]
             spy.assert_called_once()
         else:
             spies[method].assert_called_once()
         # No other phase handler fired.
-        expected = f"phases.{phase}.handle" if phase in ("merge", "pr_review") else method
+        expected = f"phases.{phase}.handle" if phase in registry_names else method
         for name in (
             "_do_preparation",
             "_do_planning",
@@ -170,6 +178,7 @@ class TestAdvanceDispatch:
             "_do_report",
             "_do_wait",
             "_do_merge",
+            "phases.development.handle",
             "phases.merge.handle",
             "phases.pr_review.handle",
         ):
@@ -178,14 +187,27 @@ class TestAdvanceDispatch:
 
     def test_non_preparation_phase_self_heals_worktree_before_dispatch(self):
         """advance() runs _ensure_worktree before the phase for non-preparation."""
+        # Phase B #2044 T12: development migrated to phases/development.py and
+        # is resolved via the PHASE_HANDLERS registry (the registry caches the
+        # fn ref at import — patch PHASE_HANDLERS directly, not the module attr).
+        from app.modules.workspace.autonomous import phases as _phases
+
         o = _make_orchestrator(_active_workflow(phase="development"))
         order: list[str] = []
         o._ensure_worktree = MagicMock(side_effect=lambda wf: order.append("ensure"))
         o._get_gh = MagicMock()
-        o._do_development = MagicMock(side_effect=lambda wf: order.append("phase"))
         o._reconcile_worktree_transition = MagicMock()
 
-        o.advance()
+        dev_handle_spy = MagicMock(side_effect=lambda ctx, deps: order.append("phase"))
+        saved = _phases.PHASE_HANDLERS.get("development")
+        _phases.PHASE_HANDLERS["development"] = dev_handle_spy
+        try:
+            o.advance()
+        finally:
+            if saved is None:
+                _phases.PHASE_HANDLERS.pop("development", None)
+            else:
+                _phases.PHASE_HANDLERS["development"] = saved
 
         assert order == ["ensure", "phase"]
 

@@ -5435,6 +5435,24 @@ class AutonomousOrchestrator:
     def cancel_milestone_for_shutdown(self, milestone_id: str) -> None:
         return self._cancel_milestone_for_shutdown(milestone_id)
 
+    # --- PhaseHost development-phase helpers (#2044 Phase B T12) ---
+    # Thin public aliases over the orchestrator-private sub-methods so the
+    # migrated development handler (phases/development.py) can call them via
+    # ``deps.host.<name>`` without a concrete orchestrator reference. Same
+    # pattern as the merge/pr_review helpers above. The sub-methods themselves
+    # stay underscore-prefixed (their existing internal callers and the
+    # direct-call/static-source tests under tests/issues/1140,1897,1647,1520,
+    # 1277,1574,1547,1829 + tests/unit/test_autonomous_ci_guardrails.py are
+    # unchanged); these aliases are the PhaseHost surface only.
+    def run_development_agent(self, wf, dev_round, gh) -> None:
+        return self._run_development_agent(wf, dev_round, gh)
+
+    def post_dev_completion_comment(self, wf, dev_round, gh) -> None:
+        return self._post_dev_completion_comment(wf, dev_round, gh)
+
+    def run_test_phase(self, wf, dev_round, gh) -> None:
+        return self._run_test_phase(wf, dev_round, gh)
+
     @property
     def workflow_id(self) -> str:
         # PhaseHost protocol declares ``workflow_id``; the internal field is the
@@ -5502,6 +5520,12 @@ class AutonomousOrchestrator:
                 # committed via _commit_phase_result).
                 handler = self._do_planning
             elif phase == "development":
+                # Phase B #2044 T12: migrated to phases/development.py and
+                # registered in PHASE_HANDLERS; the registry branch above
+                # resolves it. This branch is retained only as a defensive
+                # fallback in case the registry is queried before the import
+                # side-effect registers the handler (it should never fire in
+                # practice).
                 handler = _legacy(self._do_development)
             elif phase == "pr_review":
                 # Phase B #2044 T11: migrated to phases/pr_review.py and
@@ -6633,43 +6657,43 @@ class AutonomousOrchestrator:
     # ── Phase: Development ────────────────────────────────────────
 
     def _do_development(self, wf: dict):
-        """Execute development based on finalized plan.
+        """Test-compat shim (#2044 Phase B T12).
 
-        When ``test_retries > 0``, the dev phase was already completed and
-        only the test step needs to be re-run (e.g. the test agent itself
-        timed out or hit an API error on the previous attempt).
+        The development phase lives in ``phases/development.py`` (registered in
+        ``PHASE_HANDLERS``); advance()'s production path resolves it via the
+        registry, NOT through this method. This thin wrapper exists only so the
+        many ``o._do_development(wf)`` direct callers in tests/ (and any
+        ``patch('AutonomousOrchestrator._do_development')`` sites that influence
+        a direct call rather than advance()) keep working with zero per-test
+        edits. It builds the (ctx, deps) bundle, delegates to
+        ``phases.development.handle``, and commits the returned PhaseResult
+        through the single authoritative entrypoint — same behaviour as
+        advance()'s dispatch. Removed in T14.
+
+        Behaviour note: the development sub-methods (``_run_development_agent``
+        / ``_post_dev_completion_comment`` / ``_run_test_phase``) stay on the
+        orchestrator and continue to commit forbidden fields inline
+        (status=failed on dev/test failure, status=pr_review +
+        current_phase=pr_review on test-phase success) exactly as the legacy
+        ``_do_development`` did. The migrated handler is a thin top-level
+        orchestrator that calls them via host aliases and returns a PhaseResult
+        mirroring the committed transition; the re-write by
+        ``_commit_phase_result`` is idempotent (values match).
         """
-        dev_round = wf.get("dev_round", 1)
-        gh = self._get_gh()
-        test_retries = wf.get("test_retries", 0)
-        skip_retries = wf.get("skip_retries", 0)
+        from app.modules.workspace.autonomous import phases as _phases
 
-        # ── Development phase (skipped on test-only/skip retry) ──
-        if test_retries > 0 or skip_retries > 0:
-            logger.info(
-                "Test/skip retry (test=%d, skip=%d) for dev round %d, skipping development phase",
-                test_retries,
-                skip_retries,
-                dev_round,
-            )
-        else:
-            self._run_development_agent(wf, dev_round, gh)
-            wf = self.workflow or {}
-            if wf.get("status") == "failed":
-                logger.info(
-                    "Development round %d failed, skipping test phase for workflow %s",
-                    dev_round,
-                    self._workflow_id[:8],
-                )
-                return
-            # Post development completion comment — but only if dev succeeded.
-            # _run_development_agent sets status="failed" on failure; without
-            # this guard, a "✅ Completed" comment is posted with a stale
-            # commit that isn't the agent's work (#525).
-            self._post_dev_completion_comment(wf, dev_round, gh)
-
-        # ── Test phase (always runs) ──
-        self._run_test_phase(wf, dev_round, gh)
+        # Legacy ``_do_development`` called ``gh = self._get_gh()`` first (the
+        # lazy initializer populates ``self._gh``); many direct-call tests stub
+        # ``orch._get_gh.return_value`` rather than ``orch._gh``. Resolve the gh
+        # binding through the same lazy path AND assign it to ``self._gh`` so
+        # ``deps.gh`` (which reads ``self._gh`` via _build_phase_deps) sees the
+        # same mock the legacy method did.
+        self._gh = self._get_gh()
+        ctx = self._build_workflow_context(wf)
+        deps = self._build_phase_deps()
+        result = _phases.development.handle(ctx, deps)
+        if result is not None:
+            self._commit_phase_result(result)
 
     def _run_development_agent(self, wf: dict, dev_round: int, gh: GitHubOps):
         """Run the development agent, verify code changes, and return.

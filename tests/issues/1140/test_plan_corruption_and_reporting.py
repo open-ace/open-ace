@@ -210,21 +210,27 @@ def test_looks_like_tool_json_helper():
 
 
 def test_do_development_skips_comment_on_failure():
-    """_do_development must check workflow status after _run_development_agent
+    """The development phase must check workflow status after the dev agent runs
     and skip _post_dev_completion_comment if failed.
 
-    Static assertion: _do_development is deeply coupled to the orchestrator's
-    internal state (_gh, repo, workflow property), making a pure behavioral
-    test impractical without a full integration harness. The source guard
-    catches regressions to the unconditional comment call.
+    Static assertion: the dev sub-methods are deeply coupled to the
+    orchestrator's internal state (_gh, repo, workflow property), making a pure
+    behavioral test impractical without a full integration harness. The source
+    guard catches regressions to the unconditional comment call.
+
+    #2044 Phase B T12: the guard moved from ``_do_development`` into the
+    migrated handler ``phases/development.py::handle`` (the orchestrator method
+    is now a thin shim). The property under test — "skip the completion comment
+    when dev failed" — is now expressed by the handler's status check before
+    calling ``post_dev_completion_comment``.
     """
     import inspect
 
-    from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+    from app.modules.workspace.autonomous.phases import development as development_phase
 
-    source = inspect.getsource(AutonomousOrchestrator._do_development)
+    source = inspect.getsource(development_phase.handle)
     assert 'status") != "failed"' in source or 'status") == "failed"' in source, (
-        "_do_development must guard _post_dev_completion_comment with a "
+        "development.handle must guard post_dev_completion_comment with a "
         "status check to avoid false 'Completed' comments on failure"
     )
 

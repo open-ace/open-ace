@@ -214,6 +214,34 @@ class PhaseHost(Protocol):
         phase (delegates to ``_cancel_milestone_for_shutdown``).
         """
 
+    # ── Development-phase helpers (#2044 Phase B T12) ───────────────────────
+    # The development sub-methods (_run_development_agent /
+    # _post_dev_completion_comment / _run_test_phase) stay on the orchestrator
+    # (each is hundreds of lines with deep orchestrator-state coupling and
+    # several direct-call + static-source tests under tests/issues/). They
+    # commit forbidden fields inline (status=failed on dev/test failure,
+    # status=pr_review + current_phase=pr_review on test-phase success). The
+    # migrated development handler (phases/development.py) is a thin top-level
+    # orchestrator that calls them via these host aliases and reflects the
+    # committed transition on the returned PhaseResult. Same accepted trade-off
+    # as T11's apply_pr_review_fix alias; PhaseHost-width debt documented T14.
+
+    def run_development_agent(self, wf, dev_round, gh) -> None:
+        """Run the dev agent for one round (delegates to
+        ``_run_development_agent``). Commits status=failed inline on failure.
+        """
+
+    def post_dev_completion_comment(self, wf, dev_round, gh) -> None:
+        """Post the development completion comment to the issue (delegates to
+        ``_post_dev_completion_comment``).
+        """
+
+    def run_test_phase(self, wf, dev_round, gh) -> None:
+        """Run the test agent + retry/verdict logic (delegates to
+        ``_run_test_phase``). Commits status=failed / test_retries /
+        current_phase=pr_review inline.
+        """
+
 
 @dataclass
 class PhaseDeps:
