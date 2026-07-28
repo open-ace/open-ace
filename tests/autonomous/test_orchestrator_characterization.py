@@ -573,6 +573,60 @@ class TestCommitPhaseResult:
         assert committed["result"].outcome == "completed"
         assert committed["result"].next_phase == "wait"
 
+    def test_commit_phase_result_accepts_wait_pseudo_phase(self):
+        """#2044 Phase B regression: _do_report returns next_phase='wait' (the
+        orchestrator's wait pseudo-phase, dispatched by advance() but not in
+        PHASE_ORDER). _commit_phase_result must accept it and set
+        current_phase='wait' + status='waiting', not raise. (Caught a production
+        crash where advance() committing the report result raised ValueError.)"""
+        o = _make_orchestrator(_active_workflow(phase="report", status="running"))
+        result = PhaseResult.completed(next_phase="wait", next_status="waiting")
+        o._commit_phase_result(result)  # must NOT raise
+        last_updates = o.repo.update_workflow.call_args_list[-1].args[1]
+        assert last_updates["current_phase"] == "wait"
+        assert last_updates["status"] == "waiting"
+
+    def test_advance_report_commits_wait_through_real_entrypoint(self, monkeypatch):
+        """End-to-end: advance() running the report phase routes _do_report's
+        PhaseResult through the REAL _commit_phase_result, landing
+        current_phase='wait'. (The gate that originally missed the 'wait'
+        rejection bug — the spy in test_advance_routes_phase_result_through_
+        commit_entrypoint set its assertion before the exception fired, so the
+        swallowed ValueError never failed the test.)"""
+        wf = _active_workflow(
+            phase="report",
+            status="running",
+            dev_round=1,
+            github_issue_number=42,
+            github_pr_number=7,
+            branch_name="auto-dev/wf-test",
+            content_language="en",
+            total_tokens=0,
+            total_requests=0,
+        )
+        o = _make_orchestrator(wf)
+        # Drive the REAL _do_report to its terminal return (no business-logic
+        # change — these stubs only satisfy its gh/repo reads).
+        o._ensure_worktree = MagicMock()
+        o._reconcile_worktree_transition = MagicMock()
+        gh = MagicMock()
+        gh.get_diff_stats.return_value = {}
+        monkeypatch.setattr(o, "_get_gh", lambda: gh)
+        monkeypatch.setattr(o, "_clean_agent_text", lambda text: text or "")
+        monkeypatch.setattr(o, "_derive_review_passed", lambda milestones, lang: True)
+        monkeypatch.setattr(o, "_post_github_comment", lambda *a, **kw: None)
+        o.repo.list_milestones.return_value = []
+        # create_milestone returns a JSON-serialisable dict (the emit path
+        # serialises it); idempotency check finds nothing → create path.
+        o._find_existing_milestone = MagicMock(return_value=None)
+        o.repo.create_milestone.return_value = {"milestone_id": "ms-1"}
+
+        o.advance()  # must not raise; the real _commit_phase_result commits "wait"
+
+        last_updates = o.repo.update_workflow.call_args_list[-1].args[1]
+        assert last_updates["current_phase"] == "wait"
+        assert last_updates["status"] == "waiting"
+
 
 def test_workflow_context_repository_context_is_wired_from_git_binding(tmp_path):
     """Phase B #2044: repository_context is populated (not None) so migrated

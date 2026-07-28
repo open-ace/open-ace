@@ -381,36 +381,6 @@ def _make_orchestrator(wf, milestones=None):
     return orch, mock_repo
 
 
-def _commit_phase_result(orch, result):
-    """Commit a phase result, allowing the legacy ``wait`` transition target.
-
-    The migrated ``_do_report`` returns ``PhaseResult.completed(next_phase="wait",
-    ...)`` to mirror the legacy inline ``_update_workflow({"current_phase":
-    "wait", ...})`` write. ``AutonomousOrchestrator._commit_phase_result``
-    currently rejects ``next_phase="wait"`` because ``wait`` is not in
-    ``PHASE_ORDER`` (it is a workflow status, not a canonical phase) — a
-    production gap that is out of scope for this test-only change. This helper
-    delegates to the real ``_commit_phase_result`` and, on that specific
-    rejection, applies the same side effects the legacy inline path produced
-    (workflow patch + the result's milestones), preserving what these tests
-    assert.
-    """
-    try:
-        type(orch)._commit_phase_result(orch, result)
-        return
-    except ValueError as exc:
-        if "is not in PHASE_ORDER" not in str(exc) or result.outcome != "completed":
-            raise
-    patch = dict(result.workflow_patch)
-    if result.next_phase is not None:
-        patch["current_phase"] = result.next_phase
-        patch["status"] = result.next_status or "waiting"
-    if patch:
-        orch._update_workflow(patch)
-    for ms_kwargs in result.milestone_events:
-        orch._create_milestone(**ms_kwargs)
-
-
 class TestDoReportStructuredPayload:
     """_do_report persists a structured payload and renders the comment in-language."""
 
@@ -432,7 +402,7 @@ class TestDoReportStructuredPayload:
         ctx = orch._build_workflow_context(wf)
         result = orch._do_report(ctx, orch._build_phase_deps())
         if result is not None:
-            _commit_phase_result(orch, result)
+            orch._commit_phase_result(result)
 
         report_ms_dict = mock_repo.create_milestone.call_args_list[0][0][0]
         assert report_ms_dict["milestone_type"] == "progress_reported"
@@ -458,7 +428,7 @@ class TestDoReportStructuredPayload:
         ctx = orch._build_workflow_context(wf)
         result = orch._do_report(ctx, orch._build_phase_deps())
         if result is not None:
-            _commit_phase_result(orch, result)
+            orch._commit_phase_result(result)
 
         orch._gh.add_issue_comment.assert_called_once()
         body = orch._gh.add_issue_comment.call_args[0][1]
@@ -472,7 +442,7 @@ class TestDoReportStructuredPayload:
         ctx = orch._build_workflow_context(wf)
         result = orch._do_report(ctx, orch._build_phase_deps())
         if result is not None:
-            _commit_phase_result(orch, result)
+            orch._commit_phase_result(result)
 
         body = orch._gh.add_issue_comment.call_args[0][1]
         assert "Dev Round 1 Summary" in body

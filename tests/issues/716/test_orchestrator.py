@@ -104,40 +104,6 @@ def _make_agent_result(success=True, text="Done", tokens=100, error=None):
     )
 
 
-def _commit_phase_result(orch, result):
-    """Commit a phase result, allowing the legacy ``wait`` transition target.
-
-    The migrated ``_do_report``/``_do_wait`` return
-    ``PhaseResult.completed(next_phase="wait", ...)`` to mirror the legacy
-    inline ``_update_workflow({"current_phase": "wait", ...})`` write.
-    ``AutonomousOrchestrator._commit_phase_result`` currently rejects
-    ``next_phase="wait"`` because ``wait`` is not in ``PHASE_ORDER`` (it is a
-    workflow status, not a canonical phase) — a production gap that is out of
-    scope for this test-only change. This helper delegates to the real
-    ``_commit_phase_result`` and, on that specific rejection, applies the
-    same side effects the legacy inline path produced (workflow patch + the
-    result's milestones), preserving what these tests assert.
-    """
-    try:
-        type(orch)._commit_phase_result(orch, result)
-        return
-    except ValueError as exc:
-        if "is not in PHASE_ORDER" not in str(exc) or result.outcome != "completed":
-            raise
-    # Manually apply the completed-transition side effects the validator
-    # blocked: advance current_phase/status from the result (allowing "wait"),
-    # then create the result's milestones in order — same calls the old inline
-    # ``_do_report``/``_do_wait`` made.
-    patch = dict(result.workflow_patch)
-    if result.next_phase is not None:
-        patch["current_phase"] = result.next_phase
-        patch["status"] = result.next_status or "waiting"
-    if patch:
-        orch._update_workflow(patch)
-    for ms_kwargs in result.milestone_events:
-        orch._create_milestone(**ms_kwargs)
-
-
 class TestOrchestratorInit:
     """Tests for orchestrator initialization."""
 
@@ -820,7 +786,7 @@ class TestOrchestratorWait:
         ctx = orch._build_workflow_context(wf)
         result = orch._do_wait(ctx, orch._build_phase_deps())
         if result is not None:
-            _commit_phase_result(orch, result)
+            orch._commit_phase_result(result)
 
     @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
     def test_wait_detects_completion(self, mock_gh_cls):
@@ -837,7 +803,7 @@ class TestOrchestratorWait:
         ctx = orch._build_workflow_context(wf)
         result = orch._do_wait(ctx, orch._build_phase_deps())
         if result is not None:
-            _commit_phase_result(orch, result)
+            orch._commit_phase_result(result)
 
         # Should transition to merge
         update_calls = mock_repo.update_workflow.call_args_list
@@ -859,7 +825,7 @@ class TestOrchestratorWait:
         ctx = orch._build_workflow_context(wf)
         result = orch._do_wait(ctx, orch._build_phase_deps())
         if result is not None:
-            _commit_phase_result(orch, result)
+            orch._commit_phase_result(result)
 
         # Should transition to planning with new requirements
         update_calls = mock_repo.update_workflow.call_args_list
@@ -881,7 +847,7 @@ class TestOrchestratorWait:
         ctx = orch._build_workflow_context(wf)
         result = orch._do_wait(ctx, orch._build_phase_deps())
         if result is not None:
-            _commit_phase_result(orch, result)
+            orch._commit_phase_result(result)
 
         # No new comments → the wait phase must not transition the workflow
         # (no current_phase advance, no milestones). Under the PhaseResult
@@ -920,7 +886,7 @@ class TestOrchestratorWait:
         ctx = orch._build_workflow_context(wf)
         result = orch._do_wait(ctx, orch._build_phase_deps())
         if result is not None:
-            _commit_phase_result(orch, result)
+            orch._commit_phase_result(result)
 
         # Should NOT transition to merge
         update_calls = mock_repo.update_workflow.call_args_list
@@ -944,7 +910,7 @@ class TestOrchestratorWait:
         ctx = orch._build_workflow_context(wf)
         result = orch._do_wait(ctx, orch._build_phase_deps())
         if result is not None:
-            _commit_phase_result(orch, result)
+            orch._commit_phase_result(result)
 
         # Should transition to merge
         update_calls = mock_repo.update_workflow.call_args_list
@@ -979,7 +945,7 @@ class TestOrchestratorWait:
         ctx = orch._build_workflow_context(wf)
         result = orch._do_wait(ctx, orch._build_phase_deps())
         if result is not None:
-            _commit_phase_result(orch, result)
+            orch._commit_phase_result(result)
 
         # Should NOT merge — comment is before wait_start
         # (list_issue_comments receives since=wait_start, so comment is filtered server-side)
@@ -1002,7 +968,7 @@ class TestOrchestratorWait:
         ctx = orch._build_workflow_context(wf)
         result = orch._do_wait(ctx, orch._build_phase_deps())
         if result is not None:
-            _commit_phase_result(orch, result)
+            orch._commit_phase_result(result)
 
         # Check the requirement_received milestone stores createdAt
         ms_calls = mock_repo.create_milestone.call_args_list
@@ -1028,7 +994,7 @@ class TestOrchestratorWait:
         ctx = orch._build_workflow_context(wf)
         result = orch._do_wait(ctx, orch._build_phase_deps())
         if result is not None:
-            _commit_phase_result(orch, result)
+            orch._commit_phase_result(result)
 
         update_calls = mock_repo.update_workflow.call_args_list
         phases = [c[0][1].get("current_phase") for c in update_calls if "current_phase" in c[0][1]]
@@ -2082,7 +2048,7 @@ class TestOrchestratorReport:
         ctx = orch._build_workflow_context(wf)
         result = orch._do_report(ctx, orch._build_phase_deps())
         if result is not None:
-            _commit_phase_result(orch, result)
+            orch._commit_phase_result(result)
 
         # Three milestones: progress_reported + round_completed + wait_started
         assert mock_repo.create_milestone.call_count == 3
@@ -2117,7 +2083,7 @@ class TestOrchestratorReport:
         ctx = orch._build_workflow_context(wf)
         result = orch._do_report(ctx, orch._build_phase_deps())
         if result is not None:
-            _commit_phase_result(orch, result)
+            orch._commit_phase_result(result)
 
         orch._gh.add_issue_comment.assert_called_once()
         call_args = orch._gh.add_issue_comment.call_args
@@ -2139,7 +2105,7 @@ class TestOrchestratorReport:
         ctx = orch._build_workflow_context(wf)
         result = orch._do_report(ctx, orch._build_phase_deps())
         if result is not None:
-            _commit_phase_result(orch, result)
+            orch._commit_phase_result(result)
 
         # _create_milestone passes dict as positional arg to repo.create_milestone
         report_ms_dict = orch.repo.create_milestone.call_args_list[0][0][0]
@@ -2156,7 +2122,7 @@ class TestOrchestratorReport:
         ctx = orch._build_workflow_context(wf)
         result = orch._do_report(ctx, orch._build_phase_deps())
         if result is not None:
-            _commit_phase_result(orch, result)
+            orch._commit_phase_result(result)
 
         update_calls = mock_repo.update_workflow.call_args_list
         final_update = update_calls[-1]
@@ -2176,7 +2142,7 @@ class TestOrchestratorReport:
         ctx = orch._build_workflow_context(wf)
         result = orch._do_report(ctx, orch._build_phase_deps())
         if result is not None:
-            _commit_phase_result(orch, result)
+            orch._commit_phase_result(result)
 
         orch._gh.add_issue_comment.assert_not_called()
 
@@ -2190,7 +2156,7 @@ class TestOrchestratorReport:
         ctx = orch._build_workflow_context(wf)
         result = orch._do_report(ctx, orch._build_phase_deps())
         if result is not None:
-            _commit_phase_result(orch, result)
+            orch._commit_phase_result(result)
 
         # Should still create milestones and move to wait
         assert mock_repo.create_milestone.call_count == 3

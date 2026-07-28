@@ -3279,7 +3279,16 @@ class AutonomousOrchestrator:
             # handler cannot strand the workflow in a non-canonical phase.
             if result.next_phase is None:
                 raise ValueError("PhaseResult(completed) requires next_phase")
-            if result.next_phase not in PHASE_ORDER and result.next_phase != "completed":
+            # "wait" is a pseudo-phase the orchestrator dispatches (advance() has
+            # ``elif phase == "wait":`` routing to _do_wait) but it is NOT in
+            # PHASE_ORDER because it is not part of the canonical linear sequence
+            # — it is a park state report/wait transitions into. Admit it here
+            # alongside "completed" (the terminal pseudo-phase) so _do_report's
+            # legitimate next_phase="wait" return is not rejected as unknown.
+            if result.next_phase not in PHASE_ORDER and result.next_phase not in (
+                "completed",
+                "wait",
+            ):
                 raise ValueError(
                     f"PhaseResult(completed) next_phase={result.next_phase!r} "
                     f"is not in PHASE_ORDER={PHASE_ORDER}"
@@ -3301,6 +3310,13 @@ class AutonomousOrchestrator:
                 patch["current_phase"] = "merge"
                 patch["status"] = "completed"
                 patch["completed_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+            elif result.next_phase == "wait":
+                # The wait pseudo-phase: park the workflow at current_phase="wait"
+                # so advance() routes the next cycle to _do_wait. The handler
+                # supplies next_status (typically "waiting"); default to it so a
+                # bare next_phase="wait" still lands in a visible park state.
+                patch["current_phase"] = "wait"
+                patch["status"] = result.next_status or "waiting"
             else:
                 patch["current_phase"] = result.next_phase
                 patch["status"] = result.next_status or PHASE_STATUS_MAP.get(
