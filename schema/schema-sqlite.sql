@@ -319,7 +319,8 @@ CREATE TABLE autonomous_workflows (
  sandbox_state text,
  sandbox_policy_digest text,
  sandbox_last_error text,
- sandbox_remote_session_id text
+ sandbox_remote_session_id text,
+ sandbox_effective_policy text
 );
 
 CREATE TABLE command_execution_evidence (

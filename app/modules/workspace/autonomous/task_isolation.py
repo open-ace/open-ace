@@ -99,6 +99,16 @@ class AgentTaskPolicy:
     pids_max: int = 0
     cpu_max: str = ""
     max_concurrent_workflows: int = 3
+    # #2020 Phase B — complete the resource-contract dimension set. memory/pids/cpu
+    # are enforced by the Legacy launcher (cgroup); wall_clock is enforced by the
+    # runner (covered by the CPU_MEM_PIDS_TIME_QUOTA capability). ephemeral_storage
+    # / inode are NOT enforceable on Legacy (no io.max / disk quota) — declaring
+    # them (>0) implies STORAGE_INODE_QUOTA, which Legacy does not declare, so a
+    # spec carrying them fail-closes at create() rather than silently degrading.
+    # A #2023 gVisor/container backend declares STORAGE_INODE_QUOTA and enforces.
+    wall_clock_limit: int = 0
+    ephemeral_storage_limit: int = 0
+    inode_limit: int = 0
 
 
 def _normalize_cgroup_enabled(raw: str) -> str:
@@ -147,6 +157,12 @@ def read_agent_task_policy(conf_path: str, *, concurrency_default: int = 3) -> A
             fields["pids_max"] = _parse_int_or_default(value, 0)
         elif key == "agent_task_cpu_max":
             fields["cpu_max"] = value
+        elif key == "agent_task_wall_clock_limit":
+            fields["wall_clock_limit"] = _parse_int_or_default(value, 0)
+        elif key == "agent_task_ephemeral_storage_limit":
+            fields["ephemeral_storage_limit"] = _parse_int_or_default(value, 0)
+        elif key == "agent_task_inode_limit":
+            fields["inode_limit"] = _parse_int_or_default(value, 0)
         elif key == "agent_max_concurrent_workflows":
             fields["max_concurrent_workflows"] = max(
                 1, _parse_int_or_default(value, concurrency_default)

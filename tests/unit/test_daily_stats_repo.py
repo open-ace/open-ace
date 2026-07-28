@@ -168,6 +168,78 @@ class TestDailyStatsRepository:
         assert "date <= ?" in query
 
     # -------------------------------------------------------------------------
+    # get_host_totals (Issue #2093)
+    # -------------------------------------------------------------------------
+
+    def test_get_host_totals_no_filters(self):
+        """get_host_totals returns host stats sorted by total_tokens DESC."""
+        self.db.fetch_all.return_value = [
+            {
+                "host_name": "host1",
+                "total_tokens": 1000,
+                "total_input_tokens": 600,
+                "total_output_tokens": 400,
+                "message_count": 100,
+            },
+            {
+                "host_name": "host2",
+                "total_tokens": 500,
+                "total_input_tokens": 300,
+                "total_output_tokens": 200,
+                "message_count": 50,
+            },
+        ]
+        result = self.repo.get_host_totals()
+        assert len(result) == 2
+        assert result[0]["host_name"] == "host1"
+        assert result[0]["total_tokens"] == 1000
+        assert result[1]["host_name"] == "host2"
+        self.db.fetch_all.assert_called_once()
+        query = self.db.fetch_all.call_args[0][0]
+        assert "GROUP BY host_name" in query
+        assert "ORDER BY total_tokens DESC" in query
+
+    def test_get_host_totals_with_filters(self):
+        """get_host_totals applies date and host_name filters."""
+        self.db.fetch_all.return_value = []
+        self.repo.get_host_totals(start_date="2024-01-01", end_date="2024-01-31", host_name="host1")
+        call_args = self.db.fetch_all.call_args
+        query = call_args[0][0]
+        assert "date >= ?" in query
+        assert "date <= ?" in query
+        assert "host_name = ?" in query
+        params = call_args[0][1]
+        assert params == ("2024-01-01", "2024-01-31", "host1")
+
+    def test_get_host_totals_handles_none_values(self):
+        """get_host_totals handles None values from DB."""
+        self.db.fetch_all.return_value = [
+            {
+                "host_name": "unknown",
+                "total_tokens": None,
+                "total_input_tokens": None,
+                "total_output_tokens": None,
+                "message_count": None,
+            },
+        ]
+        result = self.repo.get_host_totals()
+        assert len(result) == 1
+        assert result[0]["total_tokens"] == 0
+        assert result[0]["total_input_tokens"] == 0
+        assert result[0]["total_output_tokens"] == 0
+        assert result[0]["message_count"] == 0
+
+    def test_get_host_totals_with_tenant_id(self):
+        """get_host_totals filters by tenant_id when provided."""
+        self.db.fetch_all.return_value = []
+        self.repo.get_host_totals(tenant_id=1)
+        call_args = self.db.fetch_all.call_args
+        query = call_args[0][0]
+        assert "tenant_id = ?" in query
+        params = call_args[0][1]
+        assert params == (1,)
+
+    # -------------------------------------------------------------------------
     # get_user_totals
     # -------------------------------------------------------------------------
 

@@ -810,6 +810,20 @@ class AutonomousAgentRunner:
         return bool(policy and (policy.memory_max_bytes or policy.pids_max or policy.cpu_max))
 
     @staticmethod
+    def _resolve_wall_clock_timeout(explicit_timeout: int, policy: Any) -> int:
+        """Effective wall-clock cap for one attempt (#2020 Phase B).
+
+        ``AgentTaskPolicy.wall_clock_limit`` (>0) takes precedence — it is the
+        contract dimension the spec/UI surfaces and ``CPU_MEM_PIDS_TIME_QUOTA``
+        covers. 0 (unset) falls back to the orchestrator-passed ``explicit_timeout``
+        (itself defaulting to ``AUTONOMOUS_TASK_TIMEOUT`` / 3600). ``policy`` None
+        (no conf) likewise falls back.
+        """
+        if policy is not None and policy.wall_clock_limit > 0:
+            return int(policy.wall_clock_limit)
+        return explicit_timeout
+
+    @staticmethod
     def _stamp_sandbox_attribution(
         result: AgentTaskResult, sandbox_handle: Any, provider: Any
     ) -> AgentTaskResult:
@@ -855,11 +869,29 @@ class AutonomousAgentRunner:
         if self._on_sandbox_created is None or sandbox_handle is None:
             return
         try:
+            # #2020 Phase B: snapshot the actually-effective resource/isolation
+            # policy for this run. Built from the provider's DECLARED capabilities
+            # + the spec's AgentTaskPolicy so the workflow UI shows what was in
+            # effect, independent of the live agent-launcher.conf.
+            from app.modules.workspace.autonomous.sandbox.effective_policy import (
+                build_effective_policy,
+            )
+
+            try:
+                declared_caps = self._sandbox_provider.capabilities()
+            except Exception:
+                declared_caps = frozenset()
+            effective_policy = build_effective_policy(
+                sandbox_handle.provider_name,
+                declared_caps,
+                getattr(sandbox_handle.spec, "policy", None),
+            )
             self._on_sandbox_created(
                 session_id,
                 sandbox_handle.sandbox_id,
                 sandbox_handle.provider_name,
                 remote_session_id,
+                effective_policy,
             )
         except Exception as e:
             logger.warning("on_sandbox_created callback failed: %s", e)
@@ -1937,6 +1969,10 @@ class AutonomousAgentRunner:
         Returns:
             AgentTaskResult with response text, messages, tokens, etc.
         """
+        # #2020 Phase B: honor AgentTaskPolicy.wall_clock_limit (>0) over the
+        # orchestrator-passed timeout. wall_clock is the "TIME" in
+        # CPU_MEM_PIDS_TIME_QUOTA — Legacy enforces it via this deadline.
+        timeout = self._resolve_wall_clock_timeout(timeout, self._load_task_policy())
         session_id = session_id or str(uuid.uuid4())
         uses_sidebar_session = self._uses_sidebar_session_source(cli_tool, workspace_type)
         # App-server tools (ZCode) resolve their real CLI session id only after

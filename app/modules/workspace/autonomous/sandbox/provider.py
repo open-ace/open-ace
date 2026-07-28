@@ -69,13 +69,21 @@ def implied_required_capabilities(spec: SandboxSpec) -> frozenset[SandboxCapabil
     deriving the implied requirement from the fields themselves, ``create``
     fail-closes instead: ``network_egress`` demands ``NETWORK_EGRESS_POLICY``;
     ``runtime``/``volumes`` (container image + mounts) demand
-    ``NAMESPACE_ISOLATION``.
+    ``NAMESPACE_ISOLATION``; ``policy.ephemeral_storage_limit``/``inode_limit``
+    (>0) demand ``STORAGE_INODE_QUOTA`` (#2020 Phase B).
     """
     implied: set[SandboxCapability] = set()
     if spec.network_egress is not None:
         implied.add(SandboxCapability.NETWORK_EGRESS_POLICY)
     if spec.runtime is not None or spec.volumes:
         implied.add(SandboxCapability.NAMESPACE_ISOLATION)
+    # #2020 Phase B: a policy declaring ephemeral_storage / inode limits (>0)
+    # demands STORAGE_INODE_QUOTA. Legacy has no io.max/disk quota and does not
+    # declare it, so such a spec fail-closes at create() — exactly the
+    # test_provider_rejects_required_policy_when_unsupported guarantee.
+    policy = spec.policy
+    if policy is not None and (policy.ephemeral_storage_limit > 0 or policy.inode_limit > 0):
+        implied.add(SandboxCapability.STORAGE_INODE_QUOTA)
     return frozenset(implied)
 
 
