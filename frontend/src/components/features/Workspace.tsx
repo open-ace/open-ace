@@ -1769,7 +1769,9 @@ export const Workspace: React.FC = () => {
 
             // If token is about to expire (< 10 minutes), refresh it
             if (remaining <= 600 && !refreshingRef.current) {
-              console.log(`[Workspace] Token expiring on tab switch (${remaining}s), refreshing...`);
+              console.log(
+                `[Workspace] Token expiring on tab switch (${remaining}s), refreshing...`
+              );
               refreshingRef.current = true;
               workspaceApi
                 .getUserWebUIUrl()
