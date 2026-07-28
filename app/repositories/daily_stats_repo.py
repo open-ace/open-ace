@@ -164,6 +164,74 @@ class DailyStatsRepository:
 
         return sorted(merged.values(), key=lambda x: x.get("total_tokens", 0), reverse=True)
 
+    def get_host_totals(
+        self,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        host_name: str | None = None,
+        tenant_id: int | None = None,
+    ) -> list[dict]:
+        """
+        Get host token totals from pre-aggregated data.
+
+        Issue #2093: Added to populate top_hosts in batch analysis.
+
+        Args:
+            start_date: Optional start date filter.
+            end_date: Optional end date filter.
+            host_name: Optional host name filter.
+            tenant_id: Optional tenant ID filter. If None, returns all data (admin view).
+
+        Returns:
+            List[Dict]: List of host totals.
+        """
+        conditions: list[str] = []
+        params: list[Any] = []
+
+        if start_date:
+            conditions.append("date >= ?")
+            params.append(start_date)
+
+        if end_date:
+            conditions.append("date <= ?")
+            params.append(end_date)
+
+        if host_name:
+            conditions.append("host_name = ?")
+            params.append(host_name)
+
+        if tenant_id is not None:
+            conditions.append("tenant_id = ?")
+            params.append(tenant_id)
+
+        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+
+        query = f"""
+            SELECT
+                host_name,
+                SUM(total_tokens) as total_tokens,
+                SUM(total_input_tokens) as total_input_tokens,
+                SUM(total_output_tokens) as total_output_tokens,
+                SUM(message_count) as message_count
+            FROM daily_stats
+            {where_clause}
+            GROUP BY host_name
+            ORDER BY total_tokens DESC
+        """
+
+        rows = self.db.fetch_all(query, tuple(params))
+
+        return [
+            {
+                "host_name": row["host_name"],
+                "total_tokens": row["total_tokens"] or 0,
+                "total_input_tokens": row["total_input_tokens"] or 0,
+                "total_output_tokens": row["total_output_tokens"] or 0,
+                "message_count": row["message_count"] or 0,
+            }
+            for row in rows
+        ]
+
     def get_tool_totals_with_range(
         self,
         start_date: str | None = None,

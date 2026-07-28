@@ -95,6 +95,9 @@ class AnalysisService:
                 self.daily_stats_repo.get_tool_totals, start_date, end_date, host_name, tenant_id
             ): "tool_stats",
             _executor.submit(
+                self.daily_stats_repo.get_host_totals, start_date, end_date, host_name, tenant_id
+            ): "host_stats",
+            _executor.submit(
                 self.daily_stats_repo.get_daily_totals, start_date, end_date, host_name, tenant_id
             ): "daily_data",
             _executor.submit(
@@ -127,6 +130,7 @@ class AnalysisService:
         aggregates = results.get("aggregates", {})
         user_tokens = results.get("user_tokens", [])
         tool_stats = results.get("tool_stats", [])
+        host_stats = results.get("host_stats", [])
         daily_data = results.get("daily_data", [])
         hourly_data = results.get("hourly_data", [])
         session_summary = results.get("session_summary", {})
@@ -150,6 +154,12 @@ class AnalysisService:
                 merged_tools[tool] = merged_tools.get(tool, 0) + ts.get("total_tokens", 0)
             for tool, count in sorted(merged_tools.items(), key=lambda x: -x[1])[:5]:
                 top_tools.append({"tool": tool, "count": count})
+
+        # Top hosts - Issue #2093: Populate from host_stats
+        top_hosts = []
+        if host_stats:
+            for hs in host_stats[:5]:
+                top_hosts.append({"host": hs.get("host_name", "unknown"), "count": hs.get("total_tokens", 0)})
 
         # Real conversation count + session-scoped sums from a single query
         # (message_repo.get_conversation_stats_summary). The denominator
@@ -194,7 +204,7 @@ class AnalysisService:
             "unique_tools": unique_tools if unique_tools > 0 else 1,
             "unique_hosts": unique_hosts if unique_hosts > 0 else 1,
             "top_tools": top_tools,
-            "top_hosts": [],  # Will be populated from daily_data if needed
+            "top_hosts": top_hosts,  # Issue #2093: Now populated from host_stats
             "total_sessions": total_sessions,
             "avg_tokens_per_session": (
                 session_tokens / total_sessions if total_sessions > 0 else 0
