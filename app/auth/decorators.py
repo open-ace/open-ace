@@ -22,6 +22,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import logging
+import os
 import time
 from functools import wraps
 from typing import TYPE_CHECKING, Literal, cast
@@ -44,8 +45,27 @@ def _get_auth_service() -> AuthService:
 
 # ── URL Token Security (Issue #1896) ─────────────────────────────────────
 
-# WebUI token TTL in seconds (default 30 minutes)
-WEBUI_TOKEN_TTL_SECONDS = 1800
+# WebUI token TTL in seconds (default 24 hours)
+# Can be configured via OPENACE_WEBUI_TOKEN_TTL_SECONDS environment variable
+# Value must be a positive integer, otherwise defaults to 86400 (24 hours)
+_DEFAULT_WEBUI_TOKEN_TTL = 86400
+_env_ttl = os.environ.get("OPENACE_WEBUI_TOKEN_TTL_SECONDS", str(_DEFAULT_WEBUI_TOKEN_TTL))
+try:
+    WEBUI_TOKEN_TTL_SECONDS = int(_env_ttl)
+    if WEBUI_TOKEN_TTL_SECONDS <= 0:
+        logger.warning(
+            "OPENACE_WEBUI_TOKEN_TTL_SECONDS must be positive, got %s. Using default: %s",
+            WEBUI_TOKEN_TTL_SECONDS,
+            _DEFAULT_WEBUI_TOKEN_TTL,
+        )
+        WEBUI_TOKEN_TTL_SECONDS = _DEFAULT_WEBUI_TOKEN_TTL
+except ValueError:
+    logger.warning(
+        "Invalid OPENACE_WEBUI_TOKEN_TTL_SECONDS value: %s. Using default: %s",
+        _env_ttl,
+        _DEFAULT_WEBUI_TOKEN_TTL,
+    )
+    WEBUI_TOKEN_TTL_SECONDS = _DEFAULT_WEBUI_TOKEN_TTL
 
 # URL token allowed path prefixes
 URL_TOKEN_ALLOWED_PATHS = [

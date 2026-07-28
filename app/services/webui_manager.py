@@ -449,7 +449,7 @@ class WebUIManager:
         v2:{user_id}:{port}:{timestamp}:{random}:{signature}
 
         The v2 format is supported by qwen-code-webui PR #210.
-        Tokens expire after TOKEN_TTL_SECONDS (1800s = 30 minutes).
+        Token TTL is configurable via OPENACE_WEBUI_TOKEN_TTL_SECONDS (default 24 hours).
 
         Args:
             user_id: User ID.
@@ -565,7 +565,7 @@ class WebUIManager:
         Validate an authentication token.
 
         Supports both v2 format (with TTL) and v1 format (legacy, no TTL).
-        Issue #1896: v2 tokens have 30-minute TTL by default.
+        Issue #1896: v2 tokens have configurable TTL (default 24 hours).
 
         v2 format: v2:{user_id}:{port}:{timestamp}:{random}:{signature}
         v1 format: {user_id}:{port}:{random}:{signature}
@@ -591,8 +591,7 @@ class WebUIManager:
 
         v2 format: v2:{user_id}:{port}:{timestamp}:{random}:{signature}
         """
-        # TTL in seconds (30 minutes default)
-        TTL_SECONDS = 1800
+        from app.auth.decorators import WEBUI_TOKEN_TTL_SECONDS
 
         try:
             parts = token.split(":")
@@ -617,8 +616,12 @@ class WebUIManager:
             current_time = int(time.time())
             age_seconds = current_time - timestamp
 
-            if age_seconds > TTL_SECONDS:
-                return False, None, f"Token expired (age: {age_seconds}s, TTL: {TTL_SECONDS}s)"
+            if age_seconds > WEBUI_TOKEN_TTL_SECONDS:
+                return (
+                    False,
+                    None,
+                    f"Token expired (age: {age_seconds}s, TTL: {WEBUI_TOKEN_TTL_SECONDS}s)",
+                )
 
             if age_seconds < 0:
                 return False, None, "Token timestamp is in the future"
