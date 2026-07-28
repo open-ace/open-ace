@@ -159,7 +159,9 @@ class AnalysisService:
         top_hosts = []
         if host_stats:
             for hs in host_stats[:5]:
-                top_hosts.append({"host": hs.get("host_name", "unknown"), "count": hs.get("total_tokens", 0)})
+                top_hosts.append(
+                    {"host": hs.get("host_name", "unknown"), "count": hs.get("total_tokens", 0)}
+                )
 
         # Real conversation count + session-scoped sums from a single query
         # (message_repo.get_conversation_stats_summary). The denominator

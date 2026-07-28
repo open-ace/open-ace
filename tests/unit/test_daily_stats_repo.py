@@ -202,9 +202,7 @@ class TestDailyStatsRepository:
     def test_get_host_totals_with_filters(self):
         """get_host_totals applies date and host_name filters."""
         self.db.fetch_all.return_value = []
-        self.repo.get_host_totals(
-            start_date="2024-01-01", end_date="2024-01-31", host_name="host1"
-        )
+        self.repo.get_host_totals(start_date="2024-01-01", end_date="2024-01-31", host_name="host1")
         call_args = self.db.fetch_all.call_args
         query = call_args[0][0]
         assert "date >= ?" in query
