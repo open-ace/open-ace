@@ -192,6 +192,8 @@ class GitWorkspaceService:
                         else:
                             # Branch gone — fail closed without a verified head
                             # instead of silently rebuilding from origin/main.
+                            # Route sibling calls through the orchestrator wrapper (not self.<public>)
+                            # so tests that patch AutonomousOrchestrator._<name> still intercept them.
                             head_sha, decision, head_meta = self._orch._resolve_recovery_head(
                                 main_gh, wf
                             )

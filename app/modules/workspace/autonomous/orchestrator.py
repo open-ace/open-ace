@@ -20,6 +20,13 @@ import threading
 import time
 import uuid
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    # Import only under TYPE_CHECKING to avoid a runtime cycle: the git_workspace
+    # module imports orchestrator at module top, so a runtime import here would
+    # recurse. The string annotation below resolves via this name under mypy.
+    from app.modules.workspace.autonomous.git_workspace import GitWorkspaceService
 
 from app.modules.workspace.autonomous.agent_runner import (
     DEFAULT_TASK_TIMEOUT,
@@ -1118,7 +1125,7 @@ class AutonomousOrchestrator:
         self._gh: GitHubOps | None = None
 
     @property
-    def _git_workspace(self):
+    def _git_workspace(self) -> "GitWorkspaceService":
         """Lazily attach the git-workspace service (#2044 Phase B T5).
 
         Mirrors ``_evidence``: unit tests that build the orchestrator via
