@@ -41,6 +41,12 @@ class PhaseHost(Protocol):
         with the phase-specific payload the old inline ``_do_*`` used.
         """
 
+    def emit_status_change(self, payload: dict) -> None:
+        """Emit a status_change domain event. Distinct from phase_change (the
+        merge handler emits this on the policy-pause branch, mirroring the
+        legacy inline ``_emit("status_change", ...)``).
+        """
+
     def session_offsets(self) -> object:
         """Read the main/review/test session topology (usage offsets)."""
 
@@ -52,6 +58,44 @@ class PhaseHost(Protocol):
         milestone point mid-phase. Terminal milestones also go into
         ``PhaseResult.milestone_events`` for unified commit; this is for the
         correlation/lookup case.
+        """
+
+    # ── Merge-phase helpers (#2044 Phase B T10) ──────────────────────────
+    # These are orchestrator-private methods (each tens-to-hundreds of lines,
+    # with their own transitive ``self._`` calls) that the merge handler needs
+    # but which are NOT yet on a service. They are exposed on the host (not
+    # PhaseDeps) because they read/commit orchestrator bookkeeping fields
+    # (worktree_path, base_commit_sha, ci_repair_*) inline — the same reason
+    # the un-migrated _do_* methods stayed on ``self``. Moving them into a
+    # service is a larger refactor (tracked separately); for now the handler
+    # reaches them through the host so it can live in phases/merge.py without
+    # a concrete orchestrator reference. The orchestrator already satisfies
+    # these as bound methods, so the duck-typed Protocol adds no new code.
+
+    def validate_pre_merge_change_scope(self, gh, wf, pr_head_sha) -> str:
+        """Validate the effective PR delta against an immutable main snapshot."""
+
+    def sync_failed_pr_with_main(self, gh, branch_name, pr_number, pr_head_sha) -> bool:
+        """Synchronize a stale PR with main before merge.
+
+        Returns True when it took over the cycle (caller should defer).
+        """
+
+    def branch_contains_main(self, gh, pr_head_sha, branch_name="") -> bool | None:
+        """Whether the PR branch already contains current main."""
+
+    def start_ci_repair_round(self, wf, pr_number, failed_checks) -> None:
+        """Repair merge-phase CI failures in-place on the existing PR branch."""
+
+    def perform_git_cleanup(self) -> tuple[str, str]:
+        """Post-merge Git cleanup retry entry; returns (cleanup_status, error)."""
+
+    def resolve_merge_conflicts(self, gh, branch_name, pr_number) -> None:
+        """Resolve a real merge conflict on the PR branch (delegates to the
+        GitWorkspaceService). Exposed on the host so tests that stub the
+        orchestrator's ``_resolve_merge_conflicts`` bound method keep working
+        with the migrated handler, and so the handler does not reach into the
+        git_workspace service directly for what is logically a phase action.
         """
 
 

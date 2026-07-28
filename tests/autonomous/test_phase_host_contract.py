@@ -11,9 +11,18 @@ def test_phase_host_protocol_has_narrow_surface():
     only these members of PhaseHost."""
     for method in [
         "emit_phase_change",
+        "emit_status_change",
         "session_offsets",
         "cancellation",
         "create_milestone_idempotent",
+        # Merge-phase helpers (#2044 Phase B T10): orchestrator-private methods
+        # exposed on the host so phases/merge.py can call them without a
+        # concrete orchestrator reference. See phase_host.py docstring.
+        "validate_pre_merge_change_scope",
+        "sync_failed_pr_with_main",
+        "branch_contains_main",
+        "start_ci_repair_round",
+        "perform_git_cleanup",
     ]:
         assert hasattr(PhaseHost, method), f"PhaseHost missing {method}"
     # annotation-only data member lives in __annotations__, not dir()

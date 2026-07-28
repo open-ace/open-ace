@@ -113,6 +113,13 @@ class TestAdvanceDispatch:
         ],
     )
     def test_dispatches_to_matching_phase_method(self, phase, method):
+        # Phase B #2044 T10: merge migrated to phases/merge.py and is resolved
+        # via the PHASE_HANDLERS registry (the registry caches the function
+        # reference at import, so patching phases.merge.handle attribute is not
+        # enough — patch PHASE_HANDLERS directly). Other phases are still
+        # bound methods on the orchestrator.
+        from app.modules.workspace.autonomous import phases as _phases
+
         o = _make_orchestrator(_active_workflow(phase=phase))
         # Stub every phase so no real agent/git side effects run; record calls.
         spies = {}
@@ -131,11 +138,25 @@ class TestAdvanceDispatch:
             spy = MagicMock(name=name)
             spies[name] = spy
             setattr(o, name, spy)
+        merge_handle_spy = MagicMock(name="phases.merge.handle")
+        spies["phases.merge.handle"] = merge_handle_spy
 
-        o.advance()
+        saved = _phases.PHASE_HANDLERS.get("merge")
+        _phases.PHASE_HANDLERS["merge"] = merge_handle_spy
+        try:
+            o.advance()
+        finally:
+            if saved is None:
+                _phases.PHASE_HANDLERS.pop("merge", None)
+            else:
+                _phases.PHASE_HANDLERS["merge"] = saved
 
-        spies[method].assert_called_once()
-        # No other _do_* fired.
+        if phase == "merge":
+            merge_handle_spy.assert_called_once()
+        else:
+            spies[method].assert_called_once()
+        # No other phase handler fired.
+        expected = "phases.merge.handle" if phase == "merge" else method
         for name in (
             "_do_preparation",
             "_do_planning",
@@ -144,8 +165,9 @@ class TestAdvanceDispatch:
             "_do_report",
             "_do_wait",
             "_do_merge",
+            "phases.merge.handle",
         ):
-            if name != method:
+            if name != expected:
                 spies[name].assert_not_called()
 
     def test_non_preparation_phase_self_heals_worktree_before_dispatch(self):

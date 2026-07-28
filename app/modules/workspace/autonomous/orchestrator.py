@@ -5462,6 +5462,11 @@ class AutonomousOrchestrator:
         # phase_change emission is self._emit("phase_change", {...}) (e.g. L6100).
         self._emit("phase_change", payload)
 
+    def emit_status_change(self, payload: dict) -> None:
+        # Domain event distinct from phase_change; the merge handler emits this
+        # on the policy-pause branch (legacy inline ``_emit("status_change", ...)``).
+        self._emit("status_change", payload)
+
     def session_offsets(self):
         return self._session_usage_offsets
 
@@ -5470,6 +5475,30 @@ class AutonomousOrchestrator:
 
     def create_milestone_idempotent(self, **kwargs) -> None:
         self._create_milestone(**kwargs)
+
+    # --- PhaseHost merge-phase helpers (#2044 Phase B T10) ---
+    # Thin public aliases over the orchestrator-private underscore helpers so
+    # the migrated merge handler (phases/merge.py) can call them via
+    # ``deps.host.<name>`` without a concrete orchestrator reference. The
+    # helpers themselves stay underscore-prefixed (their existing internal
+    # callers are unchanged); these aliases are the PhaseHost surface only.
+    def validate_pre_merge_change_scope(self, gh, wf, pr_head_sha):
+        return self._validate_pre_merge_change_scope(gh, wf, pr_head_sha)
+
+    def sync_failed_pr_with_main(self, gh, branch_name, pr_number, pr_head_sha):
+        return self._sync_failed_pr_with_main(gh, branch_name, pr_number, pr_head_sha)
+
+    def branch_contains_main(self, gh, pr_head_sha, branch_name=""):
+        return self._branch_contains_main(gh, pr_head_sha, branch_name)
+
+    def start_ci_repair_round(self, wf, pr_number, failed_checks):
+        return self._start_ci_repair_round(wf, pr_number, failed_checks)
+
+    def perform_git_cleanup(self):
+        return self._perform_git_cleanup()
+
+    def resolve_merge_conflicts(self, gh, branch_name, pr_number):
+        return self._resolve_merge_conflicts(gh, branch_name, pr_number)
 
     @property
     def workflow_id(self) -> str:
@@ -5552,6 +5581,11 @@ class AutonomousOrchestrator:
                 # committed via _commit_phase_result).
                 handler = self._do_wait
             elif phase == "merge":
+                # Phase B #2044 T10: migrated to phases/merge.py and registered
+                # in PHASE_HANDLERS; the registry branch above resolves it. This
+                # branch is retained only as a defensive fallback in case the
+                # registry is queried before the import side-effect registers
+                # the handler (it should never fire in practice).
                 handler = _legacy(self._do_merge)
             else:
                 handler = None
@@ -5564,6 +5598,15 @@ class AutonomousOrchestrator:
             # transient-retry reset below applies only on a clean return.
             if isinstance(result, PhaseResult):
                 self._commit_phase_result(result)
+                # A pause result persists a user-facing pause reason in
+                # error_message (e.g. merge-policy rejection). Skip the
+                # transient-retry reset on a pause — its ``error_message=""
+                # clear would wipe that reason (#2044 Phase B T10). Legacy
+                # merge short-circuited this by raising WorkflowPaused after
+                # the inline status=paused write; the migrated handler returns
+                # PhaseResult.pause instead, so the reset must be gated here.
+                if result.outcome == "pause":
+                    return
             # Success — reset the transient retry counter so the next network
             # blip starts fresh.
             if wf.get("transient_retry_count", 0):
@@ -9085,320 +9128,43 @@ class AutonomousOrchestrator:
     # ── Phase: Merge ────────────────────────────────────────────────
 
     def _do_merge(self, wf: dict):
-        """Merge PR and clean up. Resolves merge conflicts automatically.
+        """Test-compat shim (#2044 Phase B T10).
 
-        Merge is retried across scheduler cycles instead of blocking on CI:
-        if CI is still running we return (staying in 'merging') and the
-        scheduler retries in ~10s. This avoids hogging a workflow thread for
-        the full CI duration (10+ min for Python 3.10) and naturally adapts
-        to variable CI times without --admin bypass or long polls.
+        The merge phase lives in ``phases/merge.py`` (registered in
+        ``PHASE_HANDLERS``); advance()'s production path resolves it via the
+        registry, NOT through this method. This thin wrapper exists only so the
+        many ``o._do_merge(wf)`` direct callers in tests/ (and any
+        ``patch('AutonomousOrchestrator._do_merge')`` sites that influence a
+        direct call rather than advance()) keep working with zero per-test
+        edits. It builds the (ctx, deps) bundle, delegates to
+        ``phases.merge.handle``, and commits the returned PhaseResult through
+        the single authoritative entrypoint — same behaviour as advance()'s
+        dispatch. Removed in T14.
 
-        Note: an automatic CI repair attempt runs synchronously in this phase
-        on the existing PR branch. That intentionally spends one merge worker
-        for the repair task, but avoids bouncing the workflow back through the
-        full development/test/review/report loop.
+        Behaviour note: the legacy ``_do_merge`` raised ``WorkflowPaused`` on
+        the merge-policy-pause branch, and direct-call tests assert that raise.
+        The migrated handler returns ``PhaseResult.pause`` instead (advance()
+        honours it by skipping the transient-retry reset). This shim re-raises
+        ``WorkflowPaused`` after committing a pause result so those direct-call
+        tests see the same exception they did before — production advance()
+        never goes through this shim (it uses the registry), so the re-raise is
+        test-compat only.
         """
-        gh = self._get_gh()
-        pr_number = wf.get("github_pr_number")
-        branch_name = wf.get("branch_name", "")
+        from app.modules.workspace.autonomous import phases as _phases
 
-        if pr_number:
-            # Phase B (#2045): verify the PR head through the evidence contract
-            # before any probe consumes it. Fail closed — an unverifiable head
-            # defers to the next scheduler cycle rather than driving scope/sync/
-            # merge probes on a raw API SHA.
-            head_ev = self._evidence.resolve_verified_pr_head(gh, pr_number, branch_name)
-            if head_ev.verdict is not Verdict.CONFIRMED:
-                logger.info(
-                    "PR #%s: head not verified (verdict=%s), deferring merge",
-                    pr_number,
-                    head_ev.verdict.value,
-                )
-                self._create_milestone(
-                    phase="merge",
-                    milestone_type="pr_head_unverified",
-                    status="in_progress",
-                    title=f"PR #{pr_number} head not verifiable; deferring merge",
-                    error_message=head_ev.reason,
-                    metadata=json.dumps({"evidence": head_ev.to_dict()}, ensure_ascii=False),
-                )
-                return
-            pr_head_sha = head_ev.commit_shas[0]
-            try:
-                scope_error = self._validate_pre_merge_change_scope(gh, wf, pr_head_sha)
-            except Exception as exc:
-                scope_error = f"Pre-merge change scope could not be verified: {exc}"
-            if scope_error:
-                self._update_workflow({"status": "failed", "error_message": scope_error})
-                return
-
-            # Before syncing or repairing, check whether the PR is already
-            # mergeable despite non-required check failures
-            # (mergeable_state=unstable). If so, skip branch sync and CI
-            # repair — attempt merge directly. Syncing/repairing such PRs is
-            # wasteful and can fail (the agent can't fix dependency
-            # vulnerabilities like Security Audit Gate), causing the workflow
-            # to fail unnecessarily (#2034).
-            try:
-                pre_merge_state = gh.get_pr_merge_state(pr_number)
-                pre_mergeable_state = str(pre_merge_state.get("mergeable_state") or "").lower()
-            except Exception as state_err:
-                logger.warning(
-                    "PR #%s: failed to query merge state before merge: %s",
-                    pr_number,
-                    state_err,
-                )
-                pre_mergeable_state = ""
-
-            checks: list[dict] = []
-            if pre_mergeable_state != "unstable":
-                # PR is not mergeable-as-is; sync branch and check CI.
-                # Required-branch-update rules reject an immediate merge with
-                # the same generic "repository rule violations" error used for
-                # pending checks. Synchronize a stale PR explicitly before
-                # querying the new head's CI. This reuses the trusted
-                # clean/conflict merge path and returns without consuming a
-                # CI-repair attempt.
-                if (
-                    branch_name
-                    and pr_head_sha
-                    and self._sync_failed_pr_with_main(gh, branch_name, pr_number, pr_head_sha)
-                ):
-                    return
-
-                try:
-                    checks = gh.get_pr_checks(pr_number)
-                except Exception as e:
-                    raise GitHubOpsError(
-                        f"Unable to query CI checks before merging PR #{pr_number}: {e}"
-                    ) from e
-                failed = [c for c in checks if c.get("bucket") == "fail"]
-                if failed:
-                    self._start_ci_repair_round(wf, pr_number, failed)
-                    return
-            else:
-                logger.info(
-                    "PR #%s: mergeable_state=unstable; skipping branch sync "
-                    "and CI repair, attempting merge directly",
-                    pr_number,
-                )
-            # If CI is still running, defer this merge to the next scheduler
-            # cycle instead of blocking (synchronous poll) or failing. The
-            # scheduler re-enters _do_merge every ~10s.
-            # (checks is empty for unstable PRs — no deferral needed.)
-            pending = [c for c in checks if c.get("bucket") == "pending"]
-            if pending:
-                logger.info(
-                    "PR #%s: %d CI checks pending, deferring merge to next cycle",
-                    pr_number,
-                    len(pending),
-                )
-                return
-
-            try:
-                gh.merge_pr(pr_number, strategy="merge")
-                self._create_milestone(
-                    phase="merge",
-                    milestone_type="merged",
-                    status="completed",
-                    title=f"PR #{pr_number} merged",
-                )
-            except GitHubOpsError as e:
-                err_msg = str(e)
-
-                # Merge readiness can change after the pre-merge check query:
-                # a newly-pushed head may acquire required checks between these
-                # two calls. Refresh both CI and GitHub's merge classification
-                # before deciding whether this is policy lag or a real conflict.
-                try:
-                    refreshed_checks = gh.get_pr_checks(pr_number)
-                except Exception as checks_err:
-                    logger.warning(
-                        "PR #%s: failed to refresh checks after merge rejection: %s",
-                        pr_number,
-                        checks_err,
-                    )
-                    refreshed_checks = checks
-                failed = [c for c in refreshed_checks if c.get("bucket") == "fail"]
-                if failed:
-                    self._start_ci_repair_round(wf, pr_number, failed)
-                    return
-                pending = [c for c in refreshed_checks if c.get("bucket") == "pending"]
-
-                try:
-                    merge_state = gh.get_pr_merge_state(pr_number)
-                except Exception as state_err:
-                    logger.warning(
-                        "PR #%s: failed to refresh merge state after rejection: %s",
-                        pr_number,
-                        state_err,
-                    )
-                    merge_state = {}
-                mergeable = merge_state.get("mergeable")
-                mergeable_state = str(merge_state.get("mergeable_state") or "").lower()
-                lowered_error = err_msg.lower()
-                is_policy_rejection = any(
-                    marker in lowered_error
-                    for marker in (
-                        "base branch policy prohibits",
-                        "repository rule violations",
-                        "required status check",
-                        "review required",
-                        "review is required",
-                        "branch protection",
-                        "protected branch",
-                        "pull request is in draft",
-                    )
-                )
-                is_conflict_rejection = any(
-                    marker in lowered_error
-                    for marker in (
-                        "merge commit cannot be cleanly created",
-                        "merge conflict",
-                        "conflicting files",
-                    )
-                )
-
-                # Pending checks are confirmed transient state. Keep polling
-                # without consuming an AI repair attempt, even when GitHub's
-                # mergeability cache concurrently reports ``dirty``.
-                if pending:
-                    logger.info(
-                        "PR #%s: merge blocked with %d checks pending " "(state=%s), deferring",
-                        pr_number,
-                        len(pending),
-                        mergeable_state or "unknown",
-                    )
-                    return
-
-                is_real_conflict = (
-                    mergeable_state == "dirty"
-                    or is_conflict_rejection
-                    or (mergeable is False and not mergeable_state)
-                )
-                # GitHub's mergeability cache can report a stale "dirty"
-                # immediately after a synchronization push, before the
-                # synthetic merge commit is recomputed. The PR branch already
-                # contains main in that case, so verifying ancestry avoids a
-                # no-op merge that fails with "made no commit". Only the
-                # cache-derived "dirty" path needs the probe; text evidence
-                # and a definitive non-mergeable branch are authoritative.
-                if (
-                    is_real_conflict
-                    and mergeable_state == "dirty"
-                    and not is_conflict_rejection
-                    and mergeable is not False
-                    and pr_head_sha
-                    and self._branch_contains_main(gh, pr_head_sha, branch_name) is True
-                ):
-                    logger.info(
-                        "PR #%s mergeable_state=dirty is stale (branch has main); "
-                        "deferring to policy/check path",
-                        pr_number,
-                    )
-                    is_real_conflict = False
-                if is_real_conflict:
-                    try:
-                        # Authoritative conflict evidence wins over generic
-                        # repository-rule text. GitHub can return both for the
-                        # same rejected merge.
-                        logger.info(
-                            "PR #%s has a real merge conflict (state=%s), resolving",
-                            pr_number,
-                            mergeable_state or "unknown",
-                        )
-                        self._resolve_merge_conflicts(gh, branch_name, pr_number)
-                        # Conflicts resolved + pushed, but NOT merged yet — the push
-                        # triggered a fresh CI run. Return here (staying in 'merging')
-                        # so _do_merge's CI-pending deferral handles the wait on the
-                        # next cycle. Falling through to cleanup would delete the
-                        # branch before the PR is merged (#1112 P1).
-                        return
-                    except Exception as resolve_err:
-                        self._create_milestone(
-                            phase="merge",
-                            milestone_type="merged",
-                            status="failed",
-                            title="PR merge failed",
-                            error_message=f"Merge conflict resolution failed: {resolve_err}",
-                        )
-                        raise
-
-                if is_policy_rejection:
-                    # With no failed/pending checks and no conflict evidence,
-                    # repository policy requires external action (approval,
-                    # marking ready, or a rule change). Persist a manually
-                    # recoverable pause instead of retrying forever.
-                    state_label = mergeable_state or "unknown"
-                    message = (
-                        f"{MERGE_POLICY_PAUSE_REASON_PREFIX} PR #{pr_number} "
-                        f"is not merge-ready (state={state_label}). Satisfy the "
-                        f"repository requirement, then resume the workflow. {err_msg}"
-                    )
-                    self._update_workflow(
-                        {
-                            "status": "paused",
-                            "paused_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
-                            "error_message": message,
-                            "agent_pid": None,
-                        }
-                    )
-                    self._emit(
-                        "status_change",
-                        {
-                            "status": "paused",
-                            "reason": "merge_policy",
-                            "message": message,
-                        },
-                    )
-                    # Stop advance() before its success cleanup can clear the
-                    # persisted pause reason along with an older transient
-                    # retry counter.
-                    raise WorkflowPaused(message)
-
-                # A mergeable/blocked/unknown PR is not by itself evidence of
-                # either a Git conflict or a recognized policy rejection.
-                # Preserve the original permission, API, or infrastructure
-                # error so the workflow fails visibly instead of spinning.
-                raise
-
-        # Persist delivery completion FIRST, independent of cleanup outcome
-        # (#2043). Previously a cleanup failure only logged a warning and the
-        # workflow still went completed — but with no record that resources were
-        # still leaked. Now cleanup_status tracks resource convergence so the
-        # scheduler/startup sweep can retry; the business status is already final.
-        self._update_workflow(
-            {
-                "status": "completed",
-                "completed_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
-                "cleanup_status": "pending",
-                "cleanup_updated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
-            }
-        )
-        self._emit("phase_change", {"phase": "completed"})
-
-        # Best-effort immediate cleanup. _perform_git_cleanup persists the
-        # cleanup_* fields (completed on success, pending/failed on retry).
-        # Re-reads self.workflow so it sees the restored worktree_path value
-        # (#1107: _resolve_merge_conflicts restores it in its finally block).
-        cleanup_status, cleanup_error = self._perform_git_cleanup()
-        if cleanup_status == "completed":
-            self._create_milestone(
-                phase="merge",
-                milestone_type="cleaned_up",
-                status="completed",
-                title="Branch/worktree cleaned up",
-            )
-        else:
-            # cleanup_status is pending or failed — record why without faking
-            # a cleaned_up milestone. The scheduler sweep retries pending ones.
-            self._create_milestone(
-                phase="merge",
-                milestone_type="cleanup_pending",
-                status="failed",
-                title="Git cleanup pending retry",
-                error_message=(cleanup_error or "")[:300],
-            )
+        ctx = self._build_workflow_context(wf)
+        deps = self._build_phase_deps()
+        result = _phases.merge.handle(ctx, deps)
+        if result is not None:
+            self._commit_phase_result(result)
+            if result.outcome == "pause":
+                # Re-raise so direct-call tests observe the legacy
+                # WorkflowPaused (production advance() does NOT go through this
+                # shim — it routes via the registry and the result path).
+                message = ""
+                if isinstance(result.structured_error, dict):
+                    message = str(result.structured_error.get("message") or "")
+                raise WorkflowPaused(message)
 
     def _sync_worktree_to_pr_remote_head(self, wt_gh: "GitHubOps", branch_name: str) -> None:
         return self._git_workspace.sync_worktree_to_pr_remote_head(wt_gh, branch_name)

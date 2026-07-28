@@ -24,3 +24,11 @@ def register_phase_handler(name: str, fn: Callable[..., PhaseResult | None]) -> 
 
 def resolve_phase_handler(name: str) -> Callable[..., PhaseResult | None] | None:
     return PHASE_HANDLERS.get(name)
+
+
+# Register the migrated handlers. Importing the module has the side effect of
+# registration; the import is local so a malformed module surfaces at first use
+# rather than at package import time of unrelated phases.
+from app.modules.workspace.autonomous.phases import merge as _merge  # noqa: E402
+
+register_phase_handler("merge", _merge.handle)
