@@ -155,7 +155,7 @@ class ApiClient {
           try {
             // Check Content-Type to determine how to parse response
             const contentType = response.headers.get('content-type');
-            if (contentType && contentType.includes('application/json')) {
+            if (contentType?.includes('application/json')) {
               const errorData = await response.json();
               error.message = errorData.error ?? errorData.message ?? error.message;
               error.code = errorData.code;
