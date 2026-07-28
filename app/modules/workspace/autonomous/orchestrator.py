@@ -39,13 +39,32 @@ from app.modules.workspace.autonomous.artifact_text import (
 )
 from app.modules.workspace.autonomous.command_evidence.recorder import emit_command_evidence
 from app.modules.workspace.autonomous.command_evidence.scope import (  # noqa: E402,F401; Re-imported for the legacy heuristic (_has_passing_test_tool_result) and; any in-module callers; the structured verdict (test_verdict) imports them; directly from scope to avoid a circular import (#2046 Phase B).
-    _TEST_OUTPUT_FILTER_RE,
     _normalize_test_command,
     _pytest_scope_covers,
     _pytest_test_scope,
     _PytestScope,
 )
 from app.modules.workspace.autonomous.command_evidence.types import ExecutionVerdict
+
+# Re-exported here for backward compatibility: tests and other modules import
+# these symbols from ``orchestrator`` (they lived here before T11 moved them to
+# constants.py to break the circular import with phases/*.py). The
+# ``noqa: F401`` keeps the unused-in-orchestrator names exported even though
+# the migrated phase bodies no longer reference them here.
+from app.modules.workspace.autonomous.constants import (  # noqa: F401
+    _TRANSIENT_ORCHESTRATOR_KEYWORDS,
+    AUTONOMOUS_CONTEXT,
+    AUTONOMOUS_DEV_ALLOWED_TOOLS,
+    MERGE_POLICY_PAUSE_REASON_PREFIX,
+    READ_ONLY_REVIEW_UNSUPPORTED_TOOLS,
+    REVIEW_ALLOWED_TOOLS,
+    _extract_pr_number_from_error,
+    _is_transient_git_error,
+    _merge_milestone_metadata,
+    _parse_metadata,
+    _review_approval_phrase,
+    _zcode_planning_mode,
+)
 from app.modules.workspace.autonomous.event_emitter import AutonomousEventEmitter
 from app.modules.workspace.autonomous.evidence import Verdict
 from app.modules.workspace.autonomous.evidence_service import EvidenceService
@@ -478,15 +497,9 @@ def _has_passing_test_tool_result(event_log: list, framework_type: str) -> bool:
     return True
 
 
-# Prefix added to all prompts to inform the agent it is running autonomously
-AUTONOMOUS_CONTEXT = (
-    "## 重要提示\n"
-    "你正在无人值守的自动化工作流中运行。请遵守以下规则：\n"
-    "1. 不要请求人类确认或等待权限批准，如果操作被阻止请跳过并继续\n"
-    "2. 不要使用需要交互式确认的 gh CLI 命令（如 gh pr create）\n"
-    "3. 直接执行文件修改和验证，不要仅输出方案文本；不要执行 git add/commit/push，编排器负责提交和推送\n"
-    "4. 遇到权限问题时跳过该步骤继续执行其他任务\n\n"
-)
+# Prefix added to all prompts to inform the agent it is running autonomously.
+# Moved to constants.py (shared with phases/*.py to avoid a circular import);
+# re-imported above as AUTONOMOUS_CONTEXT.
 
 # Prefix for planning phase — restricts agent to read-only analysis only.
 # Rule #3 overrides AUTONOMOUS_CONTEXT's "直接执行文件修改" to prevent
@@ -533,79 +546,6 @@ PLANNING_ALLOWED_TOOLS: dict[str, list[str]] = {
     "zcode": [],
 }
 
-# PR review is an independent, read-only gate.  In particular, do not expose
-# Write/Edit/Bash or Agent here: a reviewer that edits the shared worktree can
-# accidentally make its own findings appear resolved without the main session
-# committing or testing those changes.  The main session applies findings in
-# ``_apply_pr_review_fix`` with ``AUTONOMOUS_DEV_ALLOWED_TOOLS`` instead.
-REVIEW_ALLOWED_TOOLS: dict[str, list[str]] = {
-    "claude-code": [
-        "Read",
-        "Glob",
-        "Grep",
-        "WebSearch",
-        "WebFetch",
-        "TaskRead",
-        "TaskGet",
-        "TaskList",
-    ],
-    "qwen-code-cli": [
-        "read_file",
-        "list_files",
-        "search_files",
-        "code_search",
-        "web_search",
-        "web_fetch",
-    ],
-    "codex": [],
-    "openclaw": [],
-    "zcode": [],
-}
-
-# OpenClaw's current single-shot adapter does not accept per-run permission or
-# tool-policy arguments.  Treating an empty allowlist as read-only would be a
-# false security boundary, so autonomous review must fail closed for this tool
-# until the adapter can provide an enforceable per-run sandbox.
-READ_ONLY_REVIEW_UNSUPPORTED_TOOLS = frozenset({"openclaw"})
-
-# Development-phase tools: planning read-only set + Write/Edit/Bash so the agent
-# can implement, run tests, and commit. Bash is allowed wholesale (test / git /
-# build commands vary by language and can't be enumerated). This bounds where
-# commits land (worktree + feature branch); bash itself is NOT sandboxed —
-# cd /, rm -rf, sudo, network egress are all reachable from the worktree cwd,
-# same trust model as any dev agent. plan phases stay read-only via
-# PLANNING_ALLOWED_TOOLS above. See #996.
-AUTONOMOUS_DEV_ALLOWED_TOOLS: dict[str, list[str]] = {
-    "claude-code": [
-        "Read",
-        "Glob",
-        "Grep",
-        "WebSearch",
-        "WebFetch",
-        "Agent",
-        "TaskRead",
-        "TaskGet",
-        "TaskList",
-        "Write",
-        "Edit",
-        "Bash",
-    ],
-    "qwen-code-cli": [
-        "read_file",
-        "list_files",
-        "search_files",
-        "code_search",
-        "web_search",
-        "web_fetch",
-        "write_file",
-        "edit_file",
-        "run_shell_command",
-    ],
-    "codex": [],
-    "openclaw": [],
-    "zcode": [],
-}
-
 # Maximum time (seconds) for a single planning agent call.
 # ZCode+GLM planning involves multiple model round-trips and subagent spawns
 # that can take 10-15 min for complex issues. 600s was too tight — planning
@@ -614,18 +554,8 @@ AUTONOMOUS_DEV_ALLOWED_TOOLS: dict[str, list[str]] = {
 PLANNING_TIMEOUT = 1800
 
 
-def _zcode_planning_mode(wf: dict) -> str:
-    """Return the ZCode --mode for planning-phase calls.
-
-    ZCode planning must stay read-only (plan mode, #761). For all other CLI
-    tools, pass through the workflow's permission_mode unchanged. For ZCode,
-    force "plan" so the agent can't write files or run commands during
-    planning — allowed_tools is [] for both planning and dev (zcode uses its
-    own built-in toolset), so the mode is the only reliable read-only signal.
-    """
-    if wf.get("cli_tool") in ("zcode", "zcode-code"):
-        return "plan"
-    return wf.get("permission_mode", "auto-edit")
+# _zcode_planning_mode moved to constants.py (shared with phases/pr_review.py);
+# re-imported above.
 
 
 # Minimum review text length (chars) to be considered substantive feedback.
@@ -668,53 +598,8 @@ CI_POLL_MAX_WAIT = 300  # maximum seconds to wait (5 minutes)
 # the workflow is marked failed for manual intervention.
 TRANSIENT_RETRY_MAX = 6
 
-# Keywords identifying transient network errors at the orchestrator level
-# (the error_message stored by advance's except block). Mirrors the
-# _TRANSIENT_ERROR_KEYWORDS in github_ops.py but checks the wrapped message.
-_TRANSIENT_ORCHESTRATOR_KEYWORDS = [
-    "libressl",
-    "openssl",
-    "ssl",
-    "tls",
-    "connection reset",
-    "connection refused",
-    "connection timed out",
-    "timed out",
-    "could not resolve host",
-    "network is unreachable",
-    "unable to access",
-    "rpc failed",
-    "early eof",
-    # --force-with-lease rejects the push when the remote auto-dev tip moved
-    # between git's read of the remote-tracking ref and the actual push (a
-    # concurrent push, or a freshly-fetched ref). The worktree is unchanged, so
-    # a Layer-2 retry that re-reads the remote ref succeeds; treating it as
-    # non-transient strands the workflow on a recoverable race.
-    "stale info",
-    "fetch first",
-    "non-fast-forward",
-    "[rejected]",
-]
-
-
-def _is_transient_git_error(e: Exception) -> bool:
-    """Check if an exception is a transient git push error.
-
-    Used by git_push exception handlers to decide whether to propagate
-    the error (triggering Layer-2 orchestrator retry) or handle it locally.
-
-    Args:
-        e: The caught exception.
-
-    Returns:
-        True if the error is transient and should trigger retry.
-    """
-    from app.modules.workspace.autonomous.github_ops import GitHubOpsError
-
-    if not isinstance(e, GitHubOpsError):
-        return False
-    err_str = str(e).lower()
-    return any(kw in err_str for kw in _TRANSIENT_ORCHESTRATOR_KEYWORDS)
+# _TRANSIENT_ORCHESTRATOR_KEYWORDS + _is_transient_git_error moved to
+# constants.py (shared with phases/pr_review.py); re-imported above.
 
 
 # GitHub rejects comment bodies longer than 65536 chars. Agent output (plan /
@@ -784,19 +669,8 @@ def build_language_instruction(content_language: str | None) -> str:
 
 _TLDR_RE = re.compile(r"TL;DR:\s*(.+?)\s*$", re.MULTILINE | re.IGNORECASE)
 
-# Approval marker the PR reviewer is asked to state when there are no major
-# issues, per content_language. Used in BOTH the review prompt and approval
-# detection — the agent writes its review in content_language, so a zh-only
-# marker would miss en/ja/ko approvals. The structured verdict written to
-# metadata.review_verdict removes progress_reported's dependency on this
-# substring entirely. (Plan-review approval "方案通过审查" is still zh-locked
-# and out of scope for the progress_reported i18n work.)
-_REVIEW_APPROVAL_PHRASES = {
-    "en": "Code review passed",
-    "zh": "代码审查通过",
-    "ja": "コードレビュー合格",
-    "ko": "코드 리뷰 통과",
-}
+# _REVIEW_APPROVAL_PHRASES + _review_approval_phrase moved to constants.py
+# (shared with phases/pr_review.py); re-imported above.
 
 _REVIEW_RESULT_LINE_RE = re.compile(r"^REVIEW_RESULT\s*:\s*(\{.*\})$")
 
@@ -869,53 +743,8 @@ def _parse_review_result(review_text: str) -> dict | None:
     return {"verdict": verdict, "blocking_findings": blockers}
 
 
-def _extract_pr_number_from_error(error_text: str) -> int | None:
-    """Extract a PR number from a gh "already exists" error message.
-
-    gh's already-exists message includes the PR URL, e.g.:
-      "a pull request for branch X into branch main already exists:
-       https://github.com/owner/repo/pull/1877"
-    Parsing the /pull/<n> URL gives the PR number directly — this avoids
-    coupling recovery to the exact "already exists" wording, skips the
-    eventually-consistent find_existing_pr API call, and proves the error
-    really is the already-exists case (no URL → not recoverable here).
-    Returns the PR number or None.
-    """
-    if not error_text:
-        return None
-    m = re.search(r"/pull/(\d+)", error_text)
-    return int(m.group(1)) if m else None
-
-
-def _review_approval_phrase(content_language: str | None) -> str:
-    """Approval marker for PR review in the given content language."""
-    return _REVIEW_APPROVAL_PHRASES.get(
-        content_language, _REVIEW_APPROVAL_PHRASES[DEFAULT_CONTENT_LANGUAGE]
-    )
-
-
-def _parse_metadata(raw) -> dict:
-    """Parse a milestone metadata JSON string/dict into a dict (empty on failure)."""
-    if not raw:
-        return {}
-    if isinstance(raw, dict):
-        return dict(raw)
-    try:
-        return json.loads(raw)
-    except (ValueError, TypeError):
-        return {}
-
-
-def _merge_milestone_metadata(milestone, updates: dict) -> str:
-    """Merge ``updates`` into a milestone's metadata, returning the JSON string.
-
-    ``milestone`` may be a milestone dict (read from the repo) or a raw metadata
-    JSON string. Existing keys are preserved; ``updates`` keys overwrite.
-    """
-    raw = milestone.get("metadata") if isinstance(milestone, dict) else milestone
-    merged = _parse_metadata(raw)
-    merged.update(updates)
-    return json.dumps(merged, ensure_ascii=False)
+# _extract_pr_number_from_error / _parse_metadata / _merge_milestone_metadata
+# moved to constants.py (shared with phases/pr_review.py); re-imported above.
 
 
 # Localized "comment truncated" notice appended when a GitHub comment body
@@ -3305,9 +3134,24 @@ class AutonomousOrchestrator:
             # _do_* methods emit them inline with phase-specific payloads (e.g.
             # {"phase":"merge","auto_merge":True}), which the entrypoint cannot
             # reconstruct. A migrated handler must emit its own phase_change.
+            #
+            # The terminal current_phase value is phase-specific: merge completes
+            # with current_phase="merge" (the workflow is already there and the
+            # legacy merge kept it), while pr_review's no-changes/timing-issue
+            # terminal path writes the literal "completed" (it skips report/
+            # merge entirely). A handler signals the literal terminal
+            # current_phase by including it in workflow_patch (the T3 guard
+            # scans phases/*.py for direct _update_workflow({...}) calls and
+            # patch[...] assignments, NOT for PhaseResult(workflow_patch=...)
+            # construction, so this is the sanctioned escape hatch). When the
+            # patch carries current_phase, honour it; otherwise default to
+            # "merge" (the merge-phase terminal semantics).
             if result.next_phase == "completed":
-                patch["current_phase"] = "merge"
-                patch["status"] = "completed"
+                if "current_phase" in patch:
+                    patch.setdefault("status", "completed")
+                else:
+                    patch["current_phase"] = "merge"
+                    patch["status"] = "completed"
                 patch["completed_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
             elif result.next_phase == "wait":
                 # The wait pseudo-phase: park the workflow at current_phase="wait"
@@ -5472,8 +5316,14 @@ class AutonomousOrchestrator:
     def cancellation(self):
         return self._shutdown_requested
 
-    def create_milestone_idempotent(self, **kwargs) -> None:
-        self._create_milestone(**kwargs)
+    def create_milestone_idempotent(self, **kwargs):
+        # Returns the milestone dict — _create_milestone is idempotent (returns
+        # the existing record if found). Phase A declared this ``-> None`` but
+        # the pr_review handler (#2044 Phase B T11) reads the returned
+        # milestone_id for agent-run correlation, so the return value is now
+        # surfaced (the merge handler ignores it, so this is backward-
+        # compatible).
+        return self._create_milestone(**kwargs)
 
     # --- PhaseHost merge-phase helpers (#2044 Phase B T10) ---
     # Thin public aliases over the orchestrator-private underscore helpers so
@@ -5498,6 +5348,70 @@ class AutonomousOrchestrator:
 
     def resolve_merge_conflicts(self, gh, branch_name, pr_number):
         return self._resolve_merge_conflicts(gh, branch_name, pr_number)
+
+    # --- PhaseHost pr_review-phase helpers (#2044 Phase B T11) ---
+    # Thin public aliases over the orchestrator-private underscore helpers so
+    # the migrated pr_review handler (phases/pr_review.py) can call them via
+    # ``deps.host.<name>`` without a concrete orchestrator reference. Same
+    # pattern as the merge helpers above. See phase_host.py docstring.
+    def get_workflow_field(self, field: str):
+        wf = self.workflow or {}
+        return wf.get(field)
+
+    def refresh_workflow_snapshot(self) -> dict:
+        return self.workflow or {}
+
+    def post_github_comment(self, gh, number, body, *, is_pr=False, context="") -> None:
+        return self._post_github_comment(gh, number, body, is_pr=is_pr, context=context)
+
+    def must_run_full_review_rounds(self, wf: dict) -> bool:
+        return self._must_run_full_review_rounds(wf)
+
+    def get_pr_review_diff(self, gh, pr_number, branch_name) -> str:
+        return self._get_pr_review_diff(gh, pr_number, branch_name)
+
+    def smart_truncate_diff(self, diff_text: str) -> str:
+        return self._smart_truncate_diff(diff_text)
+
+    def clean_agent_text(self, text: str) -> str:
+        return self._clean_agent_text(text)
+
+    def poll_ci_status(self, gh, pr_number) -> list:
+        return self._poll_ci_status(gh, pr_number)
+
+    def run_agent_with_context_recovery(self, **kwargs):
+        return self._run_agent_with_context_recovery(**kwargs)
+
+    def accumulate_tokens(self, result) -> None:
+        return self._accumulate_tokens(result)
+
+    def abort_on_repo_integrity_violation(self, result, milestone_id: str) -> bool:
+        return self._abort_on_repo_integrity_violation(result, milestone_id)
+
+    def is_context_overflow(self, result) -> bool:
+        return self._is_context_overflow(result)
+
+    def artifact_text(self, result) -> str:
+        return self._artifact_text(result)
+
+    def artifact_tldr(self, result) -> str:
+        return self._artifact_tldr(result)
+
+    def review_is_approved(self, review_text: str, approval_phrase: str) -> bool:
+        return self._review_is_approved(review_text, approval_phrase)
+
+    def validate_autonomous_change_scope(self, gh, wf, base_sha, head_sha) -> str:
+        return self._validate_autonomous_change_scope(gh, wf, base_sha, head_sha)
+
+    def apply_pr_review_fix(
+        self, wf, gh, review_text, round_num, dev_round, ci_failures, pr_number
+    ) -> bool:
+        return self._apply_pr_review_fix(
+            wf, gh, review_text, round_num, dev_round, ci_failures, pr_number
+        )
+
+    def cancel_milestone_for_shutdown(self, milestone_id: str) -> None:
+        return self._cancel_milestone_for_shutdown(milestone_id)
 
     @property
     def workflow_id(self) -> str:
@@ -5568,6 +5482,11 @@ class AutonomousOrchestrator:
             elif phase == "development":
                 handler = _legacy(self._do_development)
             elif phase == "pr_review":
+                # Phase B #2044 T11: migrated to phases/pr_review.py and
+                # registered in PHASE_HANDLERS; the registry branch above
+                # resolves it. This branch is retained only as a defensive
+                # fallback in case the registry is queried before the import
+                # side-effect registers the handler (it should never fire).
                 handler = _legacy(self._do_pr_review)
             elif phase == "report":
                 # Phase B #2044 T6: migrated onto the (ctx, deps) contract —
@@ -7897,634 +7816,41 @@ class AutonomousOrchestrator:
     # ── Phase: PR Review ────────────────────────────────────────────
 
     def _do_pr_review(self, wf: dict):
-        """Create PR and handle code review rounds."""
-        wf = self.workflow
-        round_num = wf.get("current_round", 0) + 1
-        max_rounds = wf.get("max_pr_review_rounds", 5)
-        force_full_rounds = self._must_run_full_review_rounds(wf)
-        dev_round = wf.get("dev_round", 1)
-        branch_name = wf.get("branch_name", "")
-        gh = self._get_gh()
-        # Language-aware approval marker for PR review (matches what the agent,
-        # writing in content_language, is asked to state).
-        approval_phrase = _review_approval_phrase(wf.get("content_language"))
+        """Test-compat shim (#2044 Phase B T11).
 
-        # Check if branch has any changes vs main
-        # Distinguish "branch behind main (timing issue)" from "no actual changes" (Issue #1552)
-        has_changes = False
-        is_timing_issue = False
-        try:
-            branch_sha = gh._run_git(["rev-parse", branch_name]).stdout.strip()
-            main_sha = gh._run_git(["rev-parse", "main"]).stdout.strip()
+        The pr_review phase lives in ``phases/pr_review.py`` (registered in
+        ``PHASE_HANDLERS``); advance()'s production path resolves it via the
+        registry, NOT through this method. This thin wrapper exists only so the
+        many ``o._do_pr_review(wf)`` direct callers in tests/ (and any
+        ``patch('AutonomousOrchestrator._do_pr_review')`` sites that influence a
+        direct call rather than advance()) keep working with zero per-test
+        edits. It builds the (ctx, deps) bundle, delegates to
+        ``phases.pr_review.handle``, and commits the returned PhaseResult
+        through the single authoritative entrypoint — same behaviour as
+        advance()'s dispatch. Removed in T14.
 
-            # Check if branch is an ancestor of main (behind main)
-            is_ancestor = (
-                gh._run_git(
-                    ["merge-base", "--is-ancestor", branch_sha, main_sha], check=False
-                ).returncode
-                == 0
-            )
+        Behaviour note: the legacy ``_do_pr_review`` raised ``WorkflowPaused``
+        when ``_poll_ci_status`` was interrupted by shutdown (the
+        ``except WorkflowPaused: cancel + raise`` branch). The migrated handler
+        preserves that raise (it re-raises after cancelling the in-progress
+        milestone), so direct-call tests that assert the raise keep working
+        without a shim-level re-raise — the handler's own raise propagates
+        through here unchanged.
+        """
+        from app.modules.workspace.autonomous import phases as _phases
 
-            if is_ancestor:
-                # Branch is behind main → timing issue
-                is_timing_issue = True
-                has_changes = False
-                logger.warning(
-                    "Branch %s is behind main (timing issue). base_commit_sha=%s",
-                    branch_name,
-                    wf.get("base_commit_sha", "none"),
-                )
-            else:
-                # Branch is ahead or parallel → normal diff check
-                diff_stats = gh.get_diff_stats("main", branch_name)
-                has_changes = diff_stats.get("commits", 0) > 0
-                if has_changes:
-                    scope_error = self._validate_autonomous_change_scope(
-                        gh,
-                        wf,
-                        (wf.get("base_commit_sha") or branch_sha),
-                        branch_sha,
-                    )
-                    if scope_error:
-                        self._update_workflow({"status": "failed", "error_message": scope_error})
-                        return
-        except Exception as e:
-            logger.warning("Failed to check branch status: %s", e)
-            pass
-
-        if not has_changes:
-            # No code changes produced — skip PR, post to issue, and mark completed
-            issue_number = wf.get("github_issue_number")
-
-            # Distinguish timing issue from no changes (Issue #1552)
-            if is_timing_issue:
-                no_change_msg = (
-                    f"## ⚠️ Timing Issue Detected\n\n"
-                    f"Branch `{branch_name}` is behind main (created from an older commit that was merged).\n"
-                    f"This indicates a race condition during workflow creation.\n\n"
-                    f"**Recommendation**: This issue should be fixed by locking base commit during batch creation.\n"
-                )
-            else:
-                no_change_msg = (
-                    f"## ℹ️ No Changes Detected\n\n"
-                    f"Agent completed dev round {dev_round} without producing code changes.\n"
-                    f"Skipping PR creation."
-                )
-
-            if issue_number:
-                self._post_github_comment(gh, issue_number, no_change_msg, context="no-changes")
-            self._create_milestone(
-                phase="pr_review",
-                dev_round=dev_round,
-                milestone_type="timing_issue" if is_timing_issue else "no_changes",
-                status="completed",
-                title=(
-                    "Branch behind main (timing issue)"
-                    if is_timing_issue
-                    else "No code changes produced"
-                ),
-                result_summary=(
-                    "Branch behind main: possible timing issue during workflow creation"
-                    if is_timing_issue
-                    else "Agent did not produce any code changes. Skipping PR creation."
-                ),
-            )
-            self._update_workflow(
-                {
-                    "status": "completed",
-                    "current_phase": "completed",
-                    "error_message": "",
-                }
-            )
-            self._emit("phase_change", {"phase": "completed"})
-            return
-
-        issue_number = wf.get("github_issue_number") or self.workflow.get("github_issue_number")
-        # Ensure branch is pushed to remote before PR creation
-        try:
-            # P1 修复（Issue #1611）：检查当前分支是否与预期一致
-            current_branch = gh.get_current_branch()
-            if branch_name and current_branch != branch_name:
-                logger.error(
-                    "Branch mismatch before push: workflow=%s expected=%s actual=%s",
-                    self._workflow_id[:8],
-                    branch_name,
-                    current_branch,
-                )
-                raise RuntimeError(
-                    f"Branch mismatch before push: expected {branch_name}, actual {current_branch}"
-                )
-            gh.git_push(branch=branch_name, force_with_lease=True)
-        except Exception as e:
-            # Distinguish transient vs non-transient errors to enable Layer-2 retry
-            # for network flakiness (Issue #1814).
-            if _is_transient_git_error(e):
-                # Transient: propagate GitHubOpsError to trigger Layer-2 retry
-                logger.warning("Transient push failure for branch %s: %s", branch_name, e)
-                raise
-            else:
-                # Non-transient: wrap as RuntimeError to signal permanent failure
-                logger.error("Failed to push branch %s: %s", branch_name, e, exc_info=True)
-                # 推送失败必须阻止后续 PR 创建，避免 "No commits" 错误 (Issue #1736)
-                raise RuntimeError(f"Branch push failed before PR creation: {e}") from e
-
-        # Create PR on first round (idempotent: skip if a PR already exists for
-        # this workflow). advance() is reentrant — the scheduler may call it
-        # again while a review agent is still running and current_round hasn't
-        # been persisted yet (it's written at the end of the review round). On
-        # re-entry round_num is still 1, so without this guard the workflow
-        # would call gh pr create again and hit "a pull request ... already
-        # exists", failing the whole workflow (#1857). Checking github_pr_number
-        # covers both re-entry and process-restart resume.
-        #
-        # Reads from both the passed-in wf dict AND self.workflow: self.workflow
-        # is a @property that re-queries the repo on every access, so once an
-        # earlier advance() persisted github_pr_number, a later advance()'s
-        # fallback (self.workflow.get) sees the fresh value even though the
-        # caller's wf snapshot is stale. This is what makes the guard reliable
-        # across re-entries (the test suite mocks get_workflow statically, so
-        # this property-refresh path is exercised in production but not in the
-        # PR-creation unit tests — see test_create_pr_already_exists_recovers).
-        existing_pr_number = wf.get("github_pr_number") or self.workflow.get("github_pr_number")
-        if round_num == 1 and not existing_pr_number:
-            try:
-                # Build PR body with issue linkage
-                pr_body = f"Autonomous development for dev round {dev_round}.\n\nRequirements: {wf.get('requirements_text', '')}"
-                if issue_number:
-                    pr_body += f"\n\nCloses #{issue_number}"
-
-                pr_data = gh.create_pr(
-                    title=f"[Auto] Dev round {dev_round}: {wf.get('title', 'Autonomous development')}",
-                    body=pr_body,
-                    head=branch_name,
-                    base="main",
-                )
-                pr_number = pr_data.get("number")
-                pr_url = pr_data.get("url", "")
-                self._create_milestone(
-                    phase="pr_review",
-                    dev_round=dev_round,
-                    milestone_type="pr_created",
-                    status="completed",
-                    title=f"PR #{pr_number} created",
-                    github_pr_number=pr_number,
-                    result_summary=pr_url,
-                )
-                self._update_workflow(
-                    {
-                        "github_pr_number": pr_number,
-                        "github_pr_url": pr_url,
-                    }
-                )
-            except GitHubOpsError as e:
-                # Graceful recovery ONLY for the "already exists" case (race
-                # between the github_pr_number guard above and the API call, or
-                # a re-entrant advance()). Other GitHubOpsError causes (network
-                # / auth / body-too-long) must NOT be masked by reusing an
-                # unrelated leftover open PR on this branch — those still raise.
-                #
-                # Prefer parsing the PR URL out of gh's error text (gh's
-                # already-exists message includes the PR URL, e.g.
-                # "... already exists: https://github.com/o/r/pull/1877").
-                # This avoids coupling to the exact "already exists" wording
-                # AND skips the eventually-consistent find_existing_pr race
-                # AND saves an API call. find_existing_pr is the fallback when
-                # the error text has no parseable URL.
-                pr_number_reused = _extract_pr_number_from_error(str(e))
-                if pr_number_reused:
-                    existing = {"number": pr_number_reused}
-                else:
-                    # Only treat as recoverable if it really is the
-                    # already-exists case (no PR URL to prove it). Other
-                    # errors have no PR URL and fall through to raise below.
-                    if "already exists" not in str(e).lower():
-                        self._create_milestone(
-                            phase="pr_review",
-                            milestone_type="pr_created",
-                            status="failed",
-                            title="PR creation failed",
-                            error_message=str(e),
-                        )
-                        raise
-                    existing = gh.find_existing_pr(branch_name)
-                    if not existing:
-                        # GitHub's PR list API is eventually consistent — the
-                        # PR that "already exists" may not be indexed yet right
-                        # after a concurrent create. One short retry covers it.
-                        time.sleep(2)
-                        existing = gh.find_existing_pr(branch_name)
-                if existing:
-                    pr_number = existing.get("number")
-                    pr_url = existing.get("url", "")
-                    logger.warning(
-                        "PR create for %s returned 'already exists'; reusing PR #%s",
-                        branch_name,
-                        pr_number,
-                    )
-                    self._create_milestone(
-                        phase="pr_review",
-                        dev_round=dev_round,
-                        milestone_type="pr_created",
-                        status="completed",
-                        title=f"PR #{pr_number} already exists (reused)",
-                        github_pr_number=pr_number,
-                        result_summary=pr_url,
-                    )
-                    self._update_workflow(
-                        {
-                            "github_pr_number": pr_number,
-                            "github_pr_url": pr_url,
-                        }
-                    )
-                else:
-                    self._create_milestone(
-                        phase="pr_review",
-                        milestone_type="pr_created",
-                        status="failed",
-                        title="PR creation failed",
-                        error_message=str(e),
-                    )
-                    raise
-
-            # Check CI status after PR creation — poll until finished or timeout
-            if pr_number:
-                try:
-                    ci_checks_post = self._poll_ci_status(gh, pr_number)
-                except WorkflowPaused:
-                    raise
-                except Exception:
-                    ci_checks_post = []
-                ci_fails_post = [c for c in ci_checks_post if c.get("bucket") == "fail"]
-                if ci_fails_post:
-                    ci_summary = "\n".join(
-                        f"- **{c['name']}**: {c.get('state', 'unknown')}" for c in ci_fails_post
-                    )
-                    self._post_github_comment(
-                        gh,
-                        pr_number,
-                        "## ⚠️ CI 检查状态\n\n"
-                        f"以下 CI 检查未通过：\n{ci_summary}\n\n"
-                        "将在后续代码审查轮次中分析这些失败是否由本 PR 引入。",
-                        is_pr=True,
-                        context="ci-fails",
-                    )
-
-        pr_number = wf.get("github_pr_number")
-        if not pr_number:
-            pr_number = self.workflow.get("github_pr_number")
-
-        # Code review
-        review_ms = self._create_milestone(
-            phase="pr_review",
-            dev_round=dev_round,
-            round_number=round_num,
-            milestone_type="pr_reviewed",
-            status="in_progress",
-            title=f"PR review round {round_num}",
-        )
-
-        # Get diff for review
-        diff_text = self._get_pr_review_diff(gh, pr_number, branch_name)
-
-        # Check CI status for the PR — poll until checks finish or timeout
-        ci_checks: list = []
-        ci_failures: list = []
-        if pr_number:
-            try:
-                ci_checks = self._poll_ci_status(gh, pr_number)
-                ci_failures = [c for c in ci_checks if c.get("bucket") == "fail"]
-            except WorkflowPaused:
-                self._cancel_milestone_for_shutdown(review_ms.get("milestone_id", ""))
-                raise
-            except Exception:
-                pass
-
-        review_prompt = (
-            AUTONOMOUS_CONTEXT + f"你是一位资深代码审查专家。请审查以下 PR 的代码变更。\n\n"
-            f"## 代码变更\n{self._smart_truncate_diff(diff_text)}\n\n"
-        )
-
-        # Add Issue reference
-        if issue_number:
-            review_prompt += (
-                f"## 关联 Issue\n"
-                f"本 PR 关联 GitHub Issue #{issue_number}。\n"
-                f"审查时请确保代码变更满足 Issue #{issue_number} 的所有需求。\n\n"
-            )
-
-        # For rounds > 1, the previous round's review is already in this review
-        # session's resumed history (--resume). Ask the reviewer to revisit it
-        # and confirm whether each point was addressed.
-        if round_num > 1:
-            review_prompt += (
-                "## 上一轮审查\n"
-                "请回顾你上一轮的审查意见（在本会话历史中），逐条确认是否已落实："
-                "已落实（说明如何修改）/ 未落实（说明原因）/ 不适用（说明理由）。\n\n"
-            )
-
-        review_prompt += (
-            "请检查：\n"
-            "1. 代码质量和可读性\n"
-            "2. 潜在 bug 和安全问题\n"
-            "3. 测试覆盖率\n"
-            "4. 性能影响\n"
-            "5. 与需求的对齐程度\n"
-            "6. 上一轮审查意见的落实情况(如有)\n\n"
-            "本阶段是只读审查：不要修改文件、不要创建提交，也不要执行任何会改变仓库状态的命令。\n"
-            "只有在所有 Issue 验收标准均已满足、没有 P0/P1 阻塞项或未落实项时才能批准；"
-            "只要仍有阻塞项，即使核心功能已基本完成，也必须要求修改。\n"
-            f"如果没有重大问题，请在审查结论中明确写出批准标记：{approval_phrase}。\n"
-            "必须把下面的机器可读单行 JSON 作为 TL;DR 摘要之前的最后一个非摘要行"
-            "（不要放进代码块）。所有未解决的 P0/P1 都必须逐项放入 blocking_findings；"
-            "只有数组为空时 verdict 才能是 APPROVE：\n"
-            'REVIEW_RESULT: {"verdict":"APPROVE","blocking_findings":[]}\n'
-            'REVIEW_RESULT: {"verdict":"REQUEST_CHANGES",'
-            '"blocking_findings":["finding 1"]}\n\n'
-            "重要：直接输出审查结果，不要添加引导文字(如'我来审查...'、'让我...'等)"
-            "或结尾引导(如'下一步是否...'等)。"
-        )
-
-        review_tool = wf.get("cli_tool", "claude-code")
-        if review_tool in READ_ONLY_REVIEW_UNSUPPORTED_TOOLS:
-            message = (
-                f"PR review cannot run safely with {review_tool}: its single-shot adapter "
-                "does not provide an enforceable per-run read-only sandbox. Configure a "
-                "review-capable CLI and retry the workflow."
-            )
-            self.repo.update_milestone(
-                review_ms.get("milestone_id", ""),
-                {"status": "failed", "error_message": message},
-            )
-            self._update_workflow({"status": "failed", "error_message": message})
-            if pr_number:
-                self._post_github_comment(
-                    gh,
-                    pr_number,
-                    f"## ⛔ PR Review Blocked\n\n{message}",
-                    is_pr=True,
-                    context="code-review",
-                )
-            return
-
-        # Include CI failures in review prompt if any
-        if ci_failures:
-            ci_summary = "\n".join(
-                f"- **{c['name']}**: {c.get('state', 'unknown')}" for c in ci_failures
-            )
-            review_prompt += (
-                f"\n\n## ⚠️ CI 检查失败\n\n以下 CI 检查未通过：\n{ci_summary}\n\n"
-                "请在审查时分析这些 CI 失败是否由本 PR 的代码变更引入。\n"
-                "如果是预先存在的问题，在审查结论中明确说明。"
-            )
-
-        review_result = self._run_agent_with_context_recovery(
-            wf=wf,
-            workflow_id=self._workflow_id,
-            cli_tool=review_tool,
-            model=wf.get("model", ""),
-            project_path=wf.get("worktree_path") or wf.get("project_path", ""),
-            prompt=review_prompt,
-            workspace_type=wf.get("workspace_type", "local"),
-            remote_machine_id=wf.get("remote_machine_id"),
-            permission_mode=_zcode_planning_mode(wf),
-            allowed_tools=REVIEW_ALLOWED_TOOLS.get(review_tool, []),
-            session_line="review",
-            milestone_id=review_ms.get("milestone_id", ""),
-        )
-
-        self._accumulate_tokens(review_result)
-
-        if self._abort_on_repo_integrity_violation(
-            review_result, review_ms.get("milestone_id", "")
-        ):
-            return
-
-        if not review_result.success or self._is_context_overflow(review_result):
-            message = (
-                "PR review agent failed: "
-                f"{review_result.error or self._artifact_text(review_result) or 'no result'}"
-            )
-            self.repo.update_milestone(
-                review_ms.get("milestone_id", ""),
-                {
-                    "status": "failed",
-                    "review_session_id": review_result.session_id,
-                    "error_message": message,
-                },
-            )
-            self._update_workflow({"status": "failed", "error_message": message})
-            return
-
-        review_text = self._artifact_text(review_result)
-        if not review_text.strip():
-            message = "PR review agent returned no result"
-            self.repo.update_milestone(
-                review_ms.get("milestone_id", ""),
-                {
-                    "status": "failed",
-                    "review_content": "",
-                    "review_session_id": review_result.session_id,
-                    "error_message": message,
-                },
-            )
-            self._update_workflow({"status": "failed", "error_message": message})
-            return
-        # Detect approval using the language-aware marker, then persist a
-        # structured verdict so progress_reported doesn't re-scan review text.
-        # The legacy zh marker is accepted too, for workflows whose content
-        # language predates this field (mirrors _derive_review_passed).
-        review_passed = self._review_is_approved(review_text, approval_phrase)
-        review_metadata = _merge_milestone_metadata(
-            self.repo.get_milestone(review_ms.get("milestone_id", "")),
-            {"review_verdict": {"passed": review_passed, "round": round_num}},
-        )
-        self.repo.update_milestone(
-            review_ms.get("milestone_id", ""),
-            {
-                "status": "completed" if review_result.success else "failed",
-                "review_content": review_text,
-                "review_session_id": review_result.session_id,
-                "tldr": self._artifact_tldr(review_result),
-                "metadata": review_metadata,
-            },
-        )
-
-        # Post review as PR comment
-        if pr_number:
-            self._post_github_comment(
-                gh,
-                pr_number,
-                f"## 🔍 Code Review (Round {round_num})\n\n{review_text}",
-                is_pr=True,
-                context="code-review",
-            )
-
-        # Check if all rounds done
-        self._update_workflow({"current_round": round_num})
-
-        # Every review with findings gets a fix — including the cap round — so
-        # the last review's feedback is never silently dropped. Total reviews are
-        # capped at max_pr_review_rounds (matches the "PR 审查最大轮次" label):
-        # after the cap-round fix we go straight to summary/report instead of
-        # scheduling another review. In the default mode, an approved review can
-        # also end PR review early; with require_full_review_rounds enabled, only
-        # the cap ends the loop. There is never an (N+1)-th review.
-        at_cap = round_num >= max_rounds
-        if not review_passed:
-            fix_succeeded = self._apply_pr_review_fix(
-                wf, gh, review_text, round_num, dev_round, ci_failures, pr_number
-            )
-            if not fix_succeeded:
-                return
-            # Context recovery may have rotated the main session line during
-            # the fix. The cap-round summary runs in this same scheduler call,
-            # so refresh before it resumes main again.
-            wf = self.workflow
-
-        if (review_passed and not force_full_rounds) or at_cap:
-            # All PR review rounds completed — summarize via the main session,
-            # then move to report. The main session resumes with the development
-            # history (incl. fixes) and is given the last review round's feedback
-            # (review runs on the review session, so it must be injected), then
-            # asked whether all review points were addressed and the PR is ready.
-            #
-            # The ENTIRE summary block (create milestone → run agent → fill
-            # review_content → post comment) must run BEFORE the CI check.
-            # Otherwise a CI failure redirects to the CI repair loop and
-            # returns, leaving the milestone with status="in_progress" and
-            # empty review_content — the frontend "PR Review Summary" button
-            # checks review_content?.trim() and stays disabled (#1813).
-            last_pr_review = ""
-            pr_milestones = self.repo.list_milestones(self._workflow_id, phase="pr_review")
-            for ms in reversed(pr_milestones):
-                if ms.get("milestone_type") == "pr_reviewed" and ms.get("review_content"):
-                    last_pr_review = ms["review_content"]
-                    break
-
-            summary_ms = self._create_milestone(
-                phase="pr_review",
-                dev_round=dev_round,
-                round_number=round_num,
-                milestone_type="pr_review_summary",
-                status="in_progress",
-                title="PR Review Summary",
-            )
-
-            summary_prompt = (
-                AUTONOMOUS_CONTEXT + "代码审查已全部完成。请根据最后一轮审查意见，"
-                "并结合本会话历史中开发环节的修复记录，"
-                "输出一份 PR 评审总结，明确：\n"
-                "1. 最后一轮审查意见是否已全部落实\n"
-                "2. 是否还有遗留问题需要处理\n"
-                "3. 当前 PR 是否可以合并\n\n"
-            )
-            if issue_number:
-                summary_prompt += (
-                    f"## 关联 Issue\n"
-                    f"本 PR 关联 GitHub Issue #{issue_number}。\n"
-                    f"总结中请确认修改是否满足 Issue #{issue_number} 的所有需求。\n\n"
-                )
-            summary_prompt += (
-                f"## 最后一轮审查意见\n{self._clean_agent_text(last_pr_review)}\n\n"
-                "如果审查意见已全部落实、无遗留问题，请明确说明'可以合并'。"
-                "直接输出总结，不要添加引导文字。"
-            )
-            summary_result = self._run_agent_with_context_recovery(
-                wf=wf,
-                workflow_id=self._workflow_id,
-                cli_tool=wf.get("cli_tool", "claude-code"),
-                model=wf.get("model", ""),
-                project_path=wf.get("worktree_path") or wf.get("project_path", ""),
-                prompt=summary_prompt,
-                workspace_type=wf.get("workspace_type", "local"),
-                remote_machine_id=wf.get("remote_machine_id"),
-                permission_mode=wf.get("permission_mode", "auto-edit"),
-                allowed_tools=AUTONOMOUS_DEV_ALLOWED_TOOLS.get(
-                    wf.get("cli_tool", "claude-code"), []
-                ),
-                session_line="main",
-                milestone_id=summary_ms.get("milestone_id", ""),
-            )
-            self._accumulate_tokens(summary_result)
-            if self._abort_on_repo_integrity_violation(
-                summary_result, summary_ms.get("milestone_id", "")
-            ):
-                return
-            if not summary_result.success or self._is_context_overflow(summary_result):
-                message = (
-                    "PR review summary agent failed: "
-                    f"{summary_result.error or self._artifact_text(summary_result) or 'no result'}"
-                )
-                self.repo.update_milestone(
-                    summary_ms.get("milestone_id", ""),
-                    {
-                        "status": "failed",
-                        "review_content": "",
-                        "error_message": message,
-                    },
-                )
-                self._update_workflow({"status": "failed", "error_message": message})
-                return
-            summary_text = self._artifact_text(summary_result)
-            if not summary_text.strip():
-                message = "PR review summary agent returned no result"
-                self.repo.update_milestone(
-                    summary_ms.get("milestone_id", ""),
-                    {
-                        "status": "failed",
-                        "review_content": "",
-                        "error_message": message,
-                    },
-                )
-                self._update_workflow({"status": "failed", "error_message": message})
-                return
-            self.repo.update_milestone(
-                summary_ms.get("milestone_id", ""),
-                {
-                    "status": "completed" if summary_result.success else "failed",
-                    "review_content": summary_text,
-                    "result_summary": summary_text[:200],
-                    "tldr": self._artifact_tldr(summary_result),
-                },
-            )
-
-            if pr_number and summary_text:
-                self._post_github_comment(
-                    gh,
-                    pr_number,
-                    f"## ✅ PR Review Summary\n\n{summary_text}",
-                    is_pr=True,
-                    context="review-summary",
-                )
-
-            # Check CI status before proceeding to report phase (Issue #1662)
-            # If CI failed, enter CI repair loop instead of reporting
-            if ci_failures:
-                self._create_milestone(
-                    phase="pr_review",
-                    dev_round=dev_round,
-                    round_number=round_num,
-                    milestone_type="ci_failed_before_report",
-                    status="completed",
-                    title=f"CI failed after review passed: {len(ci_failures)} checks",
-                    result_summary=", ".join(c.get("name", "unknown") for c in ci_failures),
-                )
-                # Reuse merge-phase CI repair loop
-                self._start_ci_repair_round(wf, pr_number, ci_failures)
-                return
-
-            # Move to report
-            self._update_workflow(
-                {
-                    "current_phase": "report",
-                    "status": "reporting",
-                }
-            )
-            self._emit("phase_change", {"phase": "report"})
-        # Under cap, the scheduler re-enters _do_pr_review for the next review
-        # round. In the default mode this path means "not approved and the fix
-        # above already ran"; with force-full enabled it also covers "approved
-        # early, but keep reviewing until the configured cap".
+        # Legacy ``_do_pr_review`` called ``gh = self._get_gh()`` first (the
+        # lazy initializer populates ``self._gh``); many direct-call tests stub
+        # ``orch._get_gh.return_value`` rather than ``orch._gh``. Resolve the gh
+        # binding through the same lazy path AND assign it to ``self._gh`` so
+        # ``deps.gh`` (which reads ``self._gh`` via _build_phase_deps) sees the
+        # same mock the legacy method did.
+        self._gh = self._get_gh()
+        ctx = self._build_workflow_context(wf)
+        deps = self._build_phase_deps()
+        result = _phases.pr_review.handle(ctx, deps)
+        if result is not None:
+            self._commit_phase_result(result)
 
     def _apply_pr_review_fix(
         self,

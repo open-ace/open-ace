@@ -30,5 +30,7 @@ def resolve_phase_handler(name: str) -> Callable[..., PhaseResult | None] | None
 # registration; the import is local so a malformed module surfaces at first use
 # rather than at package import time of unrelated phases.
 from app.modules.workspace.autonomous.phases import merge as _merge  # noqa: E402
+from app.modules.workspace.autonomous.phases import pr_review as _pr_review  # noqa: E402
 
 register_phase_handler("merge", _merge.handle)
+register_phase_handler("pr_review", _pr_review.handle)

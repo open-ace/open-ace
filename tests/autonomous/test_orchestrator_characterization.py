@@ -113,10 +113,10 @@ class TestAdvanceDispatch:
         ],
     )
     def test_dispatches_to_matching_phase_method(self, phase, method):
-        # Phase B #2044 T10: merge migrated to phases/merge.py and is resolved
-        # via the PHASE_HANDLERS registry (the registry caches the function
-        # reference at import, so patching phases.merge.handle attribute is not
-        # enough — patch PHASE_HANDLERS directly). Other phases are still
+        # Phase B #2044 T10/T11: merge and pr_review migrated to phases/*.py
+        # and are resolved via the PHASE_HANDLERS registry (the registry caches
+        # the function reference at import, so patching the module attribute is
+        # not enough — patch PHASE_HANDLERS directly). Other phases are still
         # bound methods on the orchestrator.
         from app.modules.workspace.autonomous import phases as _phases
 
@@ -140,23 +140,28 @@ class TestAdvanceDispatch:
             setattr(o, name, spy)
         merge_handle_spy = MagicMock(name="phases.merge.handle")
         spies["phases.merge.handle"] = merge_handle_spy
+        pr_review_handle_spy = MagicMock(name="phases.pr_review.handle")
+        spies["phases.pr_review.handle"] = pr_review_handle_spy
 
-        saved = _phases.PHASE_HANDLERS.get("merge")
+        saved_handlers = {name: _phases.PHASE_HANDLERS.get(name) for name in ("merge", "pr_review")}
         _phases.PHASE_HANDLERS["merge"] = merge_handle_spy
+        _phases.PHASE_HANDLERS["pr_review"] = pr_review_handle_spy
         try:
             o.advance()
         finally:
-            if saved is None:
-                _phases.PHASE_HANDLERS.pop("merge", None)
-            else:
-                _phases.PHASE_HANDLERS["merge"] = saved
+            for name, saved in saved_handlers.items():
+                if saved is None:
+                    _phases.PHASE_HANDLERS.pop(name, None)
+                else:
+                    _phases.PHASE_HANDLERS[name] = saved
 
-        if phase == "merge":
-            merge_handle_spy.assert_called_once()
+        if phase in ("merge", "pr_review"):
+            spy = merge_handle_spy if phase == "merge" else pr_review_handle_spy
+            spy.assert_called_once()
         else:
             spies[method].assert_called_once()
         # No other phase handler fired.
-        expected = "phases.merge.handle" if phase == "merge" else method
+        expected = f"phases.{phase}.handle" if phase in ("merge", "pr_review") else method
         for name in (
             "_do_preparation",
             "_do_planning",
@@ -166,6 +171,7 @@ class TestAdvanceDispatch:
             "_do_wait",
             "_do_merge",
             "phases.merge.handle",
+            "phases.pr_review.handle",
         ):
             if name != expected:
                 spies[name].assert_not_called()
@@ -347,6 +353,11 @@ class TestRestartReentry:
         assert o.workflow["status"] == "developing"
 
     def test_advance_after_restart_dispatches_from_persisted_phase(self):
+        # Phase B #2044 T11: pr_review migrated to phases/pr_review.py and is
+        # resolved via the PHASE_HANDLERS registry (the registry caches the fn
+        # ref at import — patch PHASE_HANDLERS directly, not the module attr).
+        from app.modules.workspace.autonomous import phases as _phases
+
         persisted = _active_workflow(phase="pr_review")
         o = _make_orchestrator(persisted)
         spies = {
@@ -367,10 +378,22 @@ class TestRestartReentry:
         o._get_gh = MagicMock()
         o._reconcile_worktree_transition = MagicMock()
 
-        o.advance()
+        pr_review_handle_spy = MagicMock(name="phases.pr_review.handle")
+        saved = _phases.PHASE_HANDLERS.get("pr_review")
+        _phases.PHASE_HANDLERS["pr_review"] = pr_review_handle_spy
+        try:
+            o.advance()
+        finally:
+            if saved is None:
+                _phases.PHASE_HANDLERS.pop("pr_review", None)
+            else:
+                _phases.PHASE_HANDLERS["pr_review"] = saved
 
-        spies["_do_pr_review"].assert_called_once()
+        pr_review_handle_spy.assert_called_once()
         spies["_do_development"].assert_not_called()
+        # The legacy _do_pr_review shim is NOT the production path now; ensure
+        # advance() did not fall through to it.
+        spies["_do_pr_review"].assert_not_called()
 
 
 # ── 6. Session / cancellation topology ───────────────────────────────────────

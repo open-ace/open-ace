@@ -98,6 +98,122 @@ class PhaseHost(Protocol):
         git_workspace service directly for what is logically a phase action.
         """
 
+    # ── PR-review-phase helpers (#2044 Phase B T11) ──────────────────────────
+    # Same rationale as the merge helpers above: orchestrator-private methods
+    # (agent runner wrappers, artifact readers, CI polling, scope validation,
+    # the review-fix sub-method, GitHub-comment posting) that the pr_review
+    # handler needs but which are NOT on a service — each reads/commits
+    # orchestrator bookkeeping inline (worktree_path, base_commit_sha,
+    # session_line topology, repo integrity state). Exposed on the host as
+    # thin aliases so phases/pr_review.py lives without a concrete orchestrator
+    # reference. The orchestrator already satisfies these as bound methods.
+
+    def get_workflow_field(self, field: str):
+        """Read one field from the host's live (re-queried) workflow snapshot.
+
+        The handler receives a frozen ``ctx.workflow`` snapshot; the legacy
+        ``_do_pr_review`` re-read ``self.workflow`` (a @property re-querying the
+        repo) to see github_pr_number persisted by an earlier advance() cycle.
+        This delegate gives the handler that fresh read without exposing the
+        whole orchestrator.
+        """
+
+    def refresh_workflow_snapshot(self) -> dict:
+        """Re-read the full live workflow dict after a side effect that may have
+        rotated session bookkeeping (e.g. context-recovery during a review fix).
+        """
+
+    def post_github_comment(self, gh, number, body, *, is_pr=False, context="") -> None:
+        """Post a length-capped comment to a GitHub issue or PR (failure is
+        logged, never aborts the phase). Delegates to the orchestrator's
+        ``_post_github_comment``.
+        """
+
+    def must_run_full_review_rounds(self, wf: dict) -> bool:
+        """Whether the workflow is configured to require all review rounds
+        regardless of an early approval (delegates to
+        ``_must_run_full_review_rounds``).
+        """
+
+    def get_pr_review_diff(self, gh, pr_number, branch_name) -> str:
+        """Fetch the PR diff text for the review prompt (delegates to the
+        ``_get_pr_review_diff`` staticmethod).
+        """
+
+    def smart_truncate_diff(self, diff_text: str) -> str:
+        """Length-cap a diff for prompt inclusion (delegates to
+        ``_smart_truncate_diff``).
+        """
+
+    def clean_agent_text(self, text: str) -> str:
+        """Strip agent intro/closing boilerplate from a text blob (delegates to
+        ``_clean_agent_text``).
+        """
+
+    def poll_ci_status(self, gh, pr_number) -> list:
+        """Poll CI checks for a PR until they finish or timeout (delegates to
+        ``_poll_ci_status``). May raise WorkflowPaused on shutdown — the handler
+        re-raises it so advance() honours the pause.
+        """
+
+    def run_agent_with_context_recovery(self, **kwargs):
+        """Run an agent call with automatic context-recovery on overflow
+        (delegates to ``_run_agent_with_context_recovery``).
+        """
+
+    def accumulate_tokens(self, result) -> None:
+        """Refresh workflow usage totals from an agent result (delegates to
+        ``_accumulate_tokens``).
+        """
+
+    def abort_on_repo_integrity_violation(self, result, milestone_id: str) -> bool:
+        """Check an agent result for a repository-integrity violation and, if
+        found, mark the milestone failed + pause the workflow. Returns True when
+        the caller should abort the phase (delegates to
+        ``_abort_on_repo_integrity_violation``).
+        """
+
+    def is_context_overflow(self, result) -> bool:
+        """Whether an agent result indicates a context-window overflow
+        (delegates to ``_is_context_overflow``).
+        """
+
+    def artifact_text(self, result) -> str:
+        """Extract the primary text artifact from an agent result (delegates to
+        the ``_artifact_text`` classmethod).
+        """
+
+    def artifact_tldr(self, result) -> str:
+        """Extract the TL;DR line from an agent result (delegates to the
+        ``_artifact_tldr`` classmethod).
+        """
+
+    def review_is_approved(self, review_text: str, approval_phrase: str) -> bool:
+        """Decide whether a review text constitutes approval (delegates to
+        ``_review_is_approved``).
+        """
+
+    def validate_autonomous_change_scope(self, gh, wf, base_sha, head_sha) -> str:
+        """Validate the diff between two commits against the autonomous scope
+        guard; returns ``""`` on success or an error message (delegates to
+        ``_validate_autonomous_change_scope``).
+        """
+
+    def apply_pr_review_fix(
+        self, wf, gh, review_text, round_num, dev_round, ci_failures, pr_number
+    ) -> bool:
+        """Apply one round of code-review fixes (the ``pr_updated`` milestone).
+        Returns True on success, False after writing status=failed inline.
+        Delegates to the orchestrator's ``_apply_pr_review_fix`` (a ~300-line
+        sub-method with its own transitive ``self._`` calls — kept on the
+        orchestrator, exposed here as a bound alias).
+        """
+
+    def cancel_milestone_for_shutdown(self, milestone_id: str) -> None:
+        """Mark an in-progress milestone cancelled when shutdown interrupts a
+        phase (delegates to ``_cancel_milestone_for_shutdown``).
+        """
+
 
 @dataclass
 class PhaseDeps:
