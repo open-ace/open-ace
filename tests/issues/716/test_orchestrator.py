@@ -278,7 +278,10 @@ class TestOrchestratorPreparation:
         mock_gh.create_branch.return_value = {"branch": "auto-dev/test-wf"}
         mock_gh_cls.return_value = mock_gh
 
-        orch._do_preparation(wf)
+        ctx = orch._build_workflow_context(wf)
+        result = orch._do_preparation(ctx, orch._build_phase_deps())
+        if result is not None:
+            orch._commit_phase_result(result)
 
         # Should create issue
         mock_gh.create_issue.assert_called_once()
@@ -308,7 +311,10 @@ class TestOrchestratorPreparation:
         orch._gh = mock_gh
 
         with patch("app.modules.workspace.autonomous.orchestrator.GitHubOps", return_value=mock_gh):
-            orch._do_preparation(wf)
+            ctx = orch._build_workflow_context(wf)
+            result = orch._do_preparation(ctx, orch._build_phase_deps())
+            if result is not None:
+                orch._commit_phase_result(result)
 
         mock_gh.get_issue.assert_called_once_with(99)
         # Should update requirements_text from issue body
@@ -355,7 +361,10 @@ class TestOrchestratorPreparation:
         orch._gh = mock_gh
 
         with patch("app.modules.workspace.autonomous.orchestrator.GitHubOps", return_value=mock_gh):
-            orch._do_preparation(wf)
+            ctx = orch._build_workflow_context(wf)
+            result = orch._do_preparation(ctx, orch._build_phase_deps())
+            if result is not None:
+                orch._commit_phase_result(result)
 
         update_calls = mock_repo.update_workflow.call_args_list
         req_updates = [c for c in update_calls if c[0][1].get("requirements_text")]
@@ -389,7 +398,10 @@ class TestOrchestratorPreparation:
         mock_gh.get_current_branch.return_value = "auto-dev/test-wf-"
         mock_gh_cls.return_value = mock_gh
 
-        orch._do_preparation(wf)
+        ctx = orch._build_workflow_context(wf)
+        result = orch._do_preparation(ctx, orch._build_phase_deps())
+        if result is not None:
+            orch._commit_phase_result(result)
 
         mock_gh.create_worktree.assert_called_once()
         # Should set worktree_path
@@ -418,7 +430,10 @@ class TestOrchestratorPreparation:
         mock_gh.get_current_branch.return_value = "auto-dev/test-wf"
         mock_gh_cls.return_value = mock_gh
 
-        orch._do_preparation(wf)
+        ctx = orch._build_workflow_context(wf)
+        result = orch._do_preparation(ctx, orch._build_phase_deps())
+        if result is not None:
+            orch._commit_phase_result(result)
 
         mock_gh.create_worktree.assert_called_once_with(
             path="/tmp/project/.worktrees/test-wf",
@@ -439,16 +454,26 @@ class TestOrchestratorPreparation:
         mock_gh.get_current_branch.return_value = "main"
         mock_gh_cls.return_value = mock_gh
 
-        orch._do_preparation(wf)
+        ctx = orch._build_workflow_context(wf)
+        result = orch._do_preparation(ctx, orch._build_phase_deps())
+        if result is not None:
+            orch._commit_phase_result(result)
 
         # Should NOT create branch or worktree
         mock_gh.create_branch.assert_not_called()
         mock_gh.create_worktree.assert_not_called()
-        mock_repo.update_workflow.assert_any_call(
-            wf["workflow_id"], {"branch_name": mock_gh.get_current_branch.return_value}
-        )
-        # But should still transition to planning
+        # Under the PhaseResult contract, the detected branch_name travels in
+        # the merged workflow_patch applied by _commit_phase_result (alongside
+        # current_round and the planning phase/status). Assert the recorded
+        # patch carries the detected branch rather than an exact-equality call
+        # (the legacy inline method wrote {"branch_name": ...} as a standalone
+        # _update_workflow; the migration coalesces it into one commit).
         update_calls = mock_repo.update_workflow.call_args_list
+        branch_patches = [c for c in update_calls if c[0][1].get("branch_name") == "main"]
+        assert (
+            branch_patches
+        ), f"branch_name=main not recorded in any workflow update: {update_calls}"
+        # But should still transition to planning
         phases = [c[0][1].get("current_phase") for c in update_calls if "current_phase" in c[0][1]]
         assert "planning" in phases
 
@@ -467,7 +492,10 @@ class TestOrchestratorPreparation:
         mock_gh.create_branch.return_value = {"branch": "auto-dev/test-wf"}
         mock_gh_cls.return_value = mock_gh
 
-        orch._do_preparation(wf)
+        ctx = orch._build_workflow_context(wf)
+        result = orch._do_preparation(ctx, orch._build_phase_deps())
+        if result is not None:
+            orch._commit_phase_result(result)
 
         # github_issue_number should be persisted via _update_workflow
         update_calls = mock_repo.update_workflow.call_args_list
@@ -503,7 +531,10 @@ class TestOrchestratorPreparation:
         mock_gh.create_branch.return_value = {"branch": "auto-dev/test-wf"}
         mock_gh_cls.return_value = mock_gh
 
-        orch._do_preparation(wf)
+        ctx = orch._build_workflow_context(wf)
+        result = orch._do_preparation(ctx, orch._build_phase_deps())
+        if result is not None:
+            orch._commit_phase_result(result)
 
         # Should persist issue number from URL
         update_calls = mock_repo.update_workflow.call_args_list
@@ -523,7 +554,10 @@ class TestOrchestratorPreparation:
         mock_gh.create_branch.return_value = {"branch": "auto-dev/test-wf"}
         mock_gh_cls.return_value = mock_gh
 
-        orch._do_preparation(wf)
+        ctx = orch._build_workflow_context(wf)
+        result = orch._do_preparation(ctx, orch._build_phase_deps())
+        if result is not None:
+            orch._commit_phase_result(result)
 
         # Should fetch origin/main before creating branch
         fetch_calls = [c for c in mock_gh._run_git.call_args_list if "fetch" in str(c)]

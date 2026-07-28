@@ -937,3 +937,110 @@ def test_wait_phase_parking_and_auto_merge_paths(monkeypatch, comments, pr_numbe
         assert result.next_phase == "merge"
         assert result.next_status == "merging"
         assert {"phase": "merge", "auto_merge": True} in captured_phase_changes
+
+
+def test_preparation_phase_returns_phase_result_not_inline_commit(monkeypatch):
+    """#2044 Phase B T8: migrated _do_preparation returns a PhaseResult; the
+    workflow phase/status transition (preparation → planning) is applied by
+    _commit_phase_result, not inline. The four forbidden fields (current_phase/
+    status/completed_at/paused_at) must not be written by the handler itself.
+    Mirrors the T6/T7 template tests for _do_report/_do_wait.
+
+    Exercises the normal-workflow new-branch path: requirements_text present,
+    no existing issue_number, no new-project repo. _do_preparation creates the
+    issue, creates the branch, and advances to planning — every recording
+    mechanism the migration changes (workflow_patch for github_issue_number /
+    branch_name / base_commit_sha / current_round, milestone_events for
+    issue_created / branch_created, deps.host for the phase_change).
+    """
+    wf = _active_workflow(
+        phase="preparation",
+        status="preparing",
+        branch_strategy="new-branch",
+        requirements_text="Build the widget",
+        github_issue_number=None,
+        requirements_issue_url="",
+        is_new_project=False,
+    )
+    orch = _make_orchestrator(wf)
+
+    # Stub _do_preparation's external collaborators so it reaches its terminal
+    # PhaseResult without making real gh/repo calls. These stubs do NOT change
+    # the handler's decisions — they only satisfy its reads.
+    gh = MagicMock()
+    gh.create_issue.return_value = {"number": 42, "url": "https://example/42"}
+    # create_branch + the rev-parse / show-ref shelled out via _run_git.
+    gh.create_branch.return_value = {"branch": "auto-dev/wf-test"}
+    gh._run_git.return_value = MagicMock(stdout="deadbeef\n", returncode=1)
+    monkeypatch.setattr(orch, "_get_gh", lambda: gh)
+
+    inline_phase_status_writes: list[dict] = []
+    orig_update = orch._update_workflow
+
+    def spy(patch):
+        if any(k in patch for k in ("current_phase", "status", "completed_at", "paused_at")):
+            inline_phase_status_writes.append(dict(patch))
+        return orig_update(patch)
+
+    monkeypatch.setattr(orch, "_update_workflow", spy)
+    monkeypatch.setattr(orch, "_create_milestone", lambda **kw: kw)
+
+    # _do_preparation emits its phase_change through deps.host.emit_phase_change
+    # (not the legacy _emit). Wrap the real host with a recorder so this
+    # template test proves the migrated handler actually fires the event, while
+    # delegating the other PhaseHost methods to the orchestrator.
+    import dataclasses
+
+    captured_phase_changes: list[dict] = []
+    real_host = orch  # orchestrator implements PhaseHost
+
+    class _RecordingHost:
+        workflow_id = orch.workflow_id
+
+        def emit_phase_change(self, payload):
+            captured_phase_changes.append(payload)
+
+        def session_offsets(self):
+            return real_host.session_offsets()
+
+        def cancellation(self):
+            return real_host.cancellation()
+
+        def create_milestone_idempotent(self, **kw):
+            return real_host.create_milestone_idempotent(**kw)
+
+    deps = dataclasses.replace(orch._build_phase_deps(), host=_RecordingHost())
+    ctx = orch._build_workflow_context(orch.workflow)
+    result = orch._do_preparation(ctx, deps)
+
+    assert isinstance(
+        result, PhaseResult
+    ), f"_do_preparation must return PhaseResult, got {type(result)}"
+    assert not inline_phase_status_writes, (
+        f"_do_preparation wrote phase/status/completed_at/paused_at inline: "
+        f"{inline_phase_status_writes}"
+    )
+    # Preparation always advances to "planning" with planning status — same
+    # decision as the legacy inline _update_workflow({"current_phase":"planning",
+    # "status":"planning","current_round":0}).
+    assert result.outcome == "completed"
+    assert result.next_phase == "planning"
+    assert result.next_status == "planning"
+    # Bookkeeping fields travel in workflow_patch (non-forbidden): the created
+    # issue number, branch_name, base_commit_sha, and current_round.
+    assert result.workflow_patch.get("github_issue_number") == 42
+    assert "branch_name" in result.workflow_patch
+    assert "base_commit_sha" in result.workflow_patch
+    assert result.workflow_patch.get("current_round") == 0
+    # issue_created + branch_created milestones travel in milestone_events, not
+    # via inline _create_milestone calls (those are stubbed out above).
+    assert any(
+        m.get("milestone_type") == "issue_created" for m in result.milestone_events
+    ), f"issue_created milestone missing: {result.milestone_events}"
+    assert any(
+        m.get("milestone_type") == "branch_created" for m in result.milestone_events
+    ), f"branch_created milestone missing: {result.milestone_events}"
+    # The migrated handler emits its own phase_change (the commit entrypoint
+    # does NOT) — assert the planning payload actually fires.
+    assert captured_phase_changes, "_do_preparation did not emit phase_change"
+    assert {"phase": "planning"} in captured_phase_changes

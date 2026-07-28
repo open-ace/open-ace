@@ -5528,7 +5528,10 @@ class AutonomousOrchestrator:
             if migrated is not None:
                 handler = migrated
             elif phase == "preparation":
-                handler = _legacy(self._do_preparation)
+                # Phase B #2044 T8: migrated onto the (ctx, deps) contract —
+                # no longer wrapped by _legacy (it returns a PhaseResult and is
+                # committed via _commit_phase_result).
+                handler = self._do_preparation
             elif phase == "planning":
                 handler = _legacy(self._do_planning)
             elif phase == "development":
@@ -5628,14 +5631,37 @@ class AutonomousOrchestrator:
 
     # ── Phase: Preparation ────────────────────────────────────────
 
-    def _do_preparation(self, wf: dict):
+    def _do_preparation(self, ctx: WorkflowContext, deps: PhaseDeps) -> PhaseResult:
         """Set up project, create/read issue, create branch.
 
         For fork workflows (parent_workflow_id set):
         - Skip repo/issue creation (already exist from parent)
         - Force worktree strategy for parallel execution
         - Jump to the next phase after the fork milestone's phase
+
+        Phase B #2044 T8: migrated onto the PhaseResult contract. Same
+        decisions as the legacy inline-commit method, only the recording
+        mechanism changes: the phase/status transition (preparation → planning,
+        or preparation → fork's next phase) travels on the returned
+        ``PhaseResult``; bookkeeping workflow-field writes (worktree_path,
+        branch_name, github_pr_number, repo_url, requirements_text, etc.) and
+        ``current_round`` travel in ``workflow_patch``; the branch/repo/issue
+        milestones travel in ``milestone_events``; the phase_change event is
+        emitted through ``deps.host`` so the commit entrypoint stays the sole
+        phase/status authority. The four forbidden fields (current_phase/status/
+        completed_at/paused_at) are no longer written inline by this handler.
+
+        Failure paths (GitHubOpsError on repo/issue/branch creation) keep their
+        legacy semantics: they record the failed milestone inline then re-raise
+        so ``advance()``'s exception handler runs ``_mark_failed`` (writing
+        status=failed + error_message + the ``error`` event). Returning
+        PhaseResult.failed here instead would skip that handler and drop the
+        ``error`` event — a behaviour change. Re-raising preserves it exactly.
+
+        Until T10-T12 extract phases into phases/*.py, gh/repo stay on self;
+        deps here carries the host (emit_phase_change) for this thin phase.
         """
+        wf = ctx.workflow
         project_path = wf.get("project_path", "")
         system_account = None
         user_id = wf.get("user_id")
@@ -5644,6 +5670,12 @@ class AutonomousOrchestrator:
             user = user_repo.get_user_by_id(user_id)
             if user:
                 system_account = user.get("system_account")
+
+        # Bookkeeping workflow-field writes collected here (non-forbidden fields
+        # only); the phase/status transition is supplied by the PhaseResult.
+        workflow_patch: dict[str, object] = {}
+        # Milestones accumulated for unified commit by _commit_phase_result.
+        milestone_events: list[dict] = []
 
         # --- Fork workflow fast path ---
         if self._is_fork_workflow(wf):
@@ -5697,7 +5729,7 @@ class AutonomousOrchestrator:
                     gh.add_worktree(path=wt_path, branch=branch_name)
                 else:
                     gh.create_worktree(path=wt_path, branch=branch_name, base=base_ref)
-                self._update_workflow(
+                workflow_patch.update(
                     {
                         "worktree_path": wt_path,
                         "branch_name": branch_name,
@@ -5707,13 +5739,18 @@ class AutonomousOrchestrator:
                 # Worktree now exists; drop the cached gh (bound to the main
                 # repo) so the next _get_gh() rebinds to the worktree path.
                 self._gh = None
-                self._create_milestone(
-                    phase="preparation",
-                    milestone_type="branch_created",
-                    status="completed",
-                    title=f"Fork branch '{branch_name}' created (worktree)",
+                milestone_events.append(
+                    {
+                        "phase": "preparation",
+                        "milestone_type": "branch_created",
+                        "status": "completed",
+                        "title": f"Fork branch '{branch_name}' created (worktree)",
+                    }
                 )
             except GitHubOpsError as e:
+                # Failure path preserves legacy semantics: record the failed
+                # milestone inline then re-raise so advance()'s exception
+                # handler runs _mark_failed. See method docstring.
                 self._create_milestone(
                     phase="preparation",
                     milestone_type="branch_created",
@@ -5726,15 +5763,19 @@ class AutonomousOrchestrator:
             # Jump to the next phase after the fork point's phase
             fork_phase = fork_ms.get("phase", "planning") if fork_ms else "planning"
             next_phase = _next_phase(fork_phase)
-            self._update_workflow(
-                {
-                    "current_phase": next_phase,
-                    "status": PHASE_STATUS_MAP.get(next_phase, "planning"),
-                    "current_round": 0,
-                }
+            workflow_patch["current_round"] = 0
+            # Emit the phase_change event through the host (the commit entrypoint
+            # does NOT emit phase_change — Phase A contract — so the handler emits
+            # its own). Payload is identical to the legacy inline _emit call.
+            deps.host.emit_phase_change({"phase": next_phase, "fork": True})
+            # Advance via PhaseResult rather than an inline current_phase/status
+            # write. Same decision the legacy method made.
+            return PhaseResult.completed(
+                next_phase=next_phase,
+                next_status=PHASE_STATUS_MAP.get(next_phase, "planning"),
+                workflow_patch=workflow_patch,
+                milestone_events=milestone_events,
             )
-            self._emit("phase_change", {"phase": next_phase, "fork": True})
-            return
 
         # --- Normal workflow path ---
 
@@ -5748,17 +5789,22 @@ class AutonomousOrchestrator:
                     description=wf.get("title", ""),
                 )
                 repo_url = repo_data.get("url", "")
-                self._create_milestone(
-                    phase="preparation",
-                    milestone_type="repo_setup",
-                    status="completed",
-                    title="Repository created",
-                    result_summary=f"Created repo: {repo_url}",
+                milestone_events.append(
+                    {
+                        "phase": "preparation",
+                        "milestone_type": "repo_setup",
+                        "status": "completed",
+                        "title": "Repository created",
+                        "result_summary": f"Created repo: {repo_url}",
+                    }
                 )
-                self._update_workflow({"project_repo_url": repo_url})
+                workflow_patch["project_repo_url"] = repo_url
                 project_path = project_path or "."
                 self._gh = GitHubOps(project_path, system_account=system_account)
             except GitHubOpsError as e:
+                # Failure path preserves legacy semantics: record the failed
+                # milestone inline then re-raise so advance()'s exception
+                # handler runs _mark_failed. See method docstring.
                 self._create_milestone(
                     phase="preparation",
                     milestone_type="repo_setup",
@@ -5785,14 +5831,16 @@ class AutonomousOrchestrator:
 
             # Persist parsed issue number to workflow and record milestone
             if issue_number:
-                self._update_workflow({"github_issue_number": issue_number})
-                self._create_milestone(
-                    phase="preparation",
-                    milestone_type="issue_linked",
-                    status="completed",
-                    title=f"Linked to issue #{issue_number}",
-                    github_issue_number=issue_number,
-                    result_summary=issue_url,
+                workflow_patch["github_issue_number"] = issue_number
+                milestone_events.append(
+                    {
+                        "phase": "preparation",
+                        "milestone_type": "issue_linked",
+                        "status": "completed",
+                        "title": f"Linked to issue #{issue_number}",
+                        "github_issue_number": issue_number,
+                        "result_summary": issue_url,
+                    }
                 )
 
         if not issue_number and requirements_text:
@@ -5808,16 +5856,21 @@ class AutonomousOrchestrator:
                 # #N") can resolve it. Mirrors the parsed-issue branch above.
                 # Without this, wf.github_issue_number stays NULL and every
                 # `wf.get("github_issue_number")` gate silently no-ops (#1194).
-                self._update_workflow({"github_issue_number": issue_number})
-                self._create_milestone(
-                    phase="preparation",
-                    milestone_type="issue_created",
-                    status="completed",
-                    title=f"Issue #{issue_number} created",
-                    github_issue_number=issue_number,
-                    result_summary=issue_data.get("url", ""),
+                workflow_patch["github_issue_number"] = issue_number
+                milestone_events.append(
+                    {
+                        "phase": "preparation",
+                        "milestone_type": "issue_created",
+                        "status": "completed",
+                        "title": f"Issue #{issue_number} created",
+                        "github_issue_number": issue_number,
+                        "result_summary": issue_data.get("url", ""),
+                    }
                 )
             except GitHubOpsError as e:
+                # Failure path preserves legacy semantics: record the failed
+                # milestone inline then re-raise so advance()'s exception
+                # handler runs _mark_failed. See method docstring.
                 self._create_milestone(
                     phase="preparation",
                     milestone_type="issue_created",
@@ -5854,16 +5907,21 @@ class AutonomousOrchestrator:
                     requirements_text += "\n\n---\n\n## Issue 评论（补充信息）\n\n" + "\n\n".join(
                         formatted
                     )
-                self._create_milestone(
-                    phase="preparation",
-                    milestone_type="issue_linked",
-                    status="completed",
-                    title=f"Linked to issue #{issue_number}",
-                    github_issue_number=issue_number,
-                    result_summary=issue_data.get("title", ""),
+                milestone_events.append(
+                    {
+                        "phase": "preparation",
+                        "milestone_type": "issue_linked",
+                        "status": "completed",
+                        "title": f"Linked to issue #{issue_number}",
+                        "github_issue_number": issue_number,
+                        "result_summary": issue_data.get("title", ""),
+                    }
                 )
-                self._update_workflow({"requirements_text": requirements_text})
+                workflow_patch["requirements_text"] = requirements_text
             except GitHubOpsError as e:
+                # Failure path preserves legacy semantics: record the failed
+                # milestone inline then re-raise so advance()'s exception
+                # handler runs _mark_failed. See method docstring.
                 self._create_milestone(
                     phase="preparation",
                     milestone_type="issue_linked",
@@ -5967,7 +6025,6 @@ class AutonomousOrchestrator:
                         wt_data = gh.add_worktree(path=worktree_path, branch=branch_name)
                     else:
                         # Use locked base_commit_sha for batch workflows (Issue #1552)
-                        wf = self.workflow
                         base_commit_sha = wf.get("base_commit_sha")
                         base_ref = base_commit_sha if base_commit_sha else "origin/main"
                         # Resolve the symbolic ref before branch creation and
@@ -5977,7 +6034,7 @@ class AutonomousOrchestrator:
                         if not resolved_base:
                             raise GitHubOpsError(f"Unable to resolve branch base {base_ref}")
                         if not base_commit_sha:
-                            self._update_workflow({"base_commit_sha": resolved_base})
+                            workflow_patch["base_commit_sha"] = resolved_base
                         wt_data = gh.create_worktree(
                             path=worktree_path,
                             branch=branch_name,
@@ -6010,8 +6067,11 @@ class AutonomousOrchestrator:
                         except Exception as e:
                             logger.warning("Failed to verify worktree branch: %s", e)
 
-                    # Update workflow with worktree_path and branch_name in single transaction
-                    self._update_workflow(
+                    # Collect worktree_path/branch_name into workflow_patch (the
+                    # legacy method wrote them as a single _update_workflow call;
+                    # they are non-forbidden fields so they travel in the patch
+                    # applied by _commit_phase_result).
+                    workflow_patch.update(
                         {
                             "worktree_path": actual_worktree_path,
                             "preferred_worktree_path": actual_worktree_path,
@@ -6024,25 +6084,28 @@ class AutonomousOrchestrator:
                     self._gh = None
                 else:
                     # Use locked base_commit_sha for batch workflows (Issue #1552)
-                    wf = self.workflow
                     base_commit_sha = wf.get("base_commit_sha")
                     base_ref = base_commit_sha if base_commit_sha else "origin/main"
                     resolved_base = gh._run_git(["rev-parse", base_ref]).stdout.strip()
                     if not resolved_base:
                         raise GitHubOpsError(f"Unable to resolve branch base {base_ref}")
                     gh.create_branch(branch_name, base=resolved_base)
-                    updates = {"branch_name": branch_name}
+                    workflow_patch["branch_name"] = branch_name
                     if not base_commit_sha:
-                        updates["base_commit_sha"] = resolved_base
-                    self._update_workflow(updates)
+                        workflow_patch["base_commit_sha"] = resolved_base
 
-                self._create_milestone(
-                    phase="preparation",
-                    milestone_type="branch_created",
-                    status="completed",
-                    title=f"Branch '{branch_name}' created",
+                milestone_events.append(
+                    {
+                        "phase": "preparation",
+                        "milestone_type": "branch_created",
+                        "status": "completed",
+                        "title": f"Branch '{branch_name}' created",
+                    }
                 )
             except GitHubOpsError as e:
+                # Failure path preserves legacy semantics: record the failed
+                # milestone inline then re-raise so advance()'s exception
+                # handler runs _mark_failed. See method docstring.
                 self._create_milestone(
                     phase="preparation",
                     milestone_type="branch_created",
@@ -6054,9 +6117,11 @@ class AutonomousOrchestrator:
         elif strategy == "current":
             try:
                 current_branch = gh.get_current_branch()
-                self._update_workflow({"branch_name": current_branch})
-                wf["branch_name"] = current_branch
+                workflow_patch["branch_name"] = current_branch
             except GitHubOpsError as e:
+                # Failure path preserves legacy semantics: record the failed
+                # milestone inline then re-raise so advance()'s exception
+                # handler runs _mark_failed. See method docstring.
                 self._create_milestone(
                     phase="preparation",
                     milestone_type="branch_created",
@@ -6066,15 +6131,21 @@ class AutonomousOrchestrator:
                 )
                 raise
 
-        # Transition to planning
-        self._update_workflow(
-            {
-                "current_phase": "planning",
-                "status": "planning",
-                "current_round": 0,
-            }
+        # Transition to planning — advance via PhaseResult rather than an inline
+        # current_phase/status write. current_round is a non-forbidden workflow
+        # field and travels in workflow_patch. Same decision the legacy method
+        # made.
+        workflow_patch["current_round"] = 0
+        # Emit the phase_change event through the host (the commit entrypoint
+        # does NOT emit phase_change — Phase A contract — so the handler emits
+        # its own). Payload is identical to the legacy inline _emit call.
+        deps.host.emit_phase_change({"phase": "planning"})
+        return PhaseResult.completed(
+            next_phase="planning",
+            next_status="planning",
+            workflow_patch=workflow_patch,
+            milestone_events=milestone_events,
         )
-        self._emit("phase_change", {"phase": "planning"})
 
     # ── Phase: Planning ────────────────────────────────────────────
 
