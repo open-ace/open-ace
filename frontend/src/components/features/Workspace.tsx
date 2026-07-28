@@ -65,6 +65,14 @@ const QUOTA_CHECK_INTERVAL = 5 * 60 * 1000;
 // Activity heartbeat interval (2 minutes)
 const ACTIVITY_HEARTBEAT_INTERVAL = 2 * 60 * 1000;
 
+// WebUI Token TTL (should match backend OPENACE_WEBUI_TOKEN_TTL_SECONDS)
+// Default: 24 hours (86400 seconds)
+const TOKEN_TTL_SECONDS = 86400;
+
+// Token refresh threshold - refresh when remaining time <= this value
+// Set to 1 hour to ensure token is always fresh during normal use
+const TOKEN_REFRESH_THRESHOLD_SECONDS = 3600;
+
 export const Workspace: React.FC = () => {
   const language = useLanguage();
   const theme = useTheme();
@@ -222,11 +230,11 @@ export const Workspace: React.FC = () => {
       if (parts.length === 6) {
         const timestamp = parseInt(parts[3], 10);
         const now = Math.floor(Date.now() / 1000);
-        const remaining = 1800 - (now - timestamp); // 30 min TTL
+        const remaining = TOKEN_TTL_SECONDS - (now - timestamp);
 
-        // Refresh if expiring within 10 minutes OR already expired (remaining <= 0)
+        // Refresh if expiring within threshold OR already expired (remaining <= 0)
         // Use <= to ensure we refresh in time, matching the auto-refresh logic
-        if (remaining <= 600) {
+        if (remaining <= TOKEN_REFRESH_THRESHOLD_SECONDS) {
           console.log(
             `[Workspace] Token expiring/expired (${remaining}s), refreshing before new session...`
           );
@@ -328,7 +336,7 @@ export const Workspace: React.FC = () => {
 
   // Token refresh: Automatically refresh token before it expires
   // v2 token format: v2:user_id:port:timestamp:random:signature
-  // Token TTL is 30 minutes (1800 seconds), refresh when < 5 minutes remaining
+  // Token TTL is configurable (default 24 hours), refresh when remaining time <= threshold
   useEffect(() => {
     if (!userWebUI?.success || !userWebUI?.token) return;
 
@@ -341,9 +349,7 @@ export const Workspace: React.FC = () => {
       return isNaN(timestamp) ? null : timestamp;
     };
 
-    const TOKEN_TTL_SECONDS = 1800; // 30 minutes
-    const REFRESH_THRESHOLD_SECONDS = 600; // 10 minutes - increased for better safety margin
-    const CHECK_INTERVAL_MS = 30 * 1000; // Check every 30 seconds (more frequent)
+    const CHECK_INTERVAL_MS = 60 * 1000; // Check every 60 seconds
 
     const checkAndRefreshToken = async () => {
       const timestamp = parseTokenTimestamp(userWebUI.token);
@@ -355,7 +361,7 @@ export const Workspace: React.FC = () => {
 
       // Refresh when remaining time <= threshold or already expired
       // Use <= to match ensureFreshToken logic and ensure we refresh in time
-      if (remaining <= REFRESH_THRESHOLD_SECONDS) {
+      if (remaining <= TOKEN_REFRESH_THRESHOLD_SECONDS) {
         // Prevent concurrent refresh
         if (refreshingRef.current) {
           console.log('[Workspace] Refresh already in progress, skipping');
@@ -405,10 +411,10 @@ export const Workspace: React.FC = () => {
 
       const timestamp = parseInt(parts[3], 10);
       const now = Math.floor(Date.now() / 1000);
-      const remaining = 1800 - (now - timestamp);
+      const remaining = TOKEN_TTL_SECONDS - (now - timestamp);
 
-      // Refresh if token is about to expire (< 10 minutes) or already expired
-      if (remaining <= 600) {
+      // Refresh if token is about to expire or already expired
+      if (remaining <= TOKEN_REFRESH_THRESHOLD_SECONDS) {
         // Prevent concurrent refresh
         if (refreshingRef.current) {
           console.log('[Workspace] Refresh already in progress on visibility change, skipping');
@@ -1765,10 +1771,10 @@ export const Workspace: React.FC = () => {
           if (parts.length === 6) {
             const timestamp = parseInt(parts[3], 10);
             const now = Math.floor(Date.now() / 1000);
-            const remaining = 1800 - (now - timestamp);
+            const remaining = TOKEN_TTL_SECONDS - (now - timestamp);
 
-            // If token is about to expire (< 10 minutes), refresh it
-            if (remaining <= 600 && !refreshingRef.current) {
+            // If token is about to expire, refresh it
+            if (remaining <= TOKEN_REFRESH_THRESHOLD_SECONDS && !refreshingRef.current) {
               console.log(
                 `[Workspace] Token expiring on tab switch (${remaining}s), refreshing...`
               );

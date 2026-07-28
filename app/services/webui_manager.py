@@ -449,7 +449,7 @@ class WebUIManager:
         v2:{user_id}:{port}:{timestamp}:{random}:{signature}
 
         The v2 format is supported by qwen-code-webui PR #210.
-        Tokens expire after TOKEN_TTL_SECONDS (1800s = 30 minutes).
+        Token TTL is configurable via OPENACE_WEBUI_TOKEN_TTL_SECONDS (default 24 hours).
 
         Args:
             user_id: User ID.
