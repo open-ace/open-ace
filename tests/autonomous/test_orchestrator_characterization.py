@@ -584,3 +584,41 @@ def test_workflow_context_repository_context_is_wired_from_git_binding(tmp_path)
     ctx = orch._build_workflow_context(orch.workflow)
     assert ctx.repository_context is not None
     assert ctx.repository_context["branch_name"] == "feature-x"
+
+
+def test_dispatch_phase_passes_ctx_and_deps_to_handler():
+    """Phase B #2044: _dispatch_phase builds WorkflowContext + PhaseDeps and
+    invokes the handler as handler(ctx, deps), not handler(wf)."""
+    orch = _make_orchestrator(_active_workflow(phase="report"))
+    seen = []
+
+    def fake_handler(ctx, deps):
+        seen.append((ctx, deps))
+        return None  # legacy None path
+
+    result = orch._dispatch_phase("report", orch.workflow, fake_handler)
+    assert result is None
+    assert len(seen) == 1
+    ctx, deps = seen[0]
+    from app.modules.workspace.autonomous.phase_host import PhaseDeps
+
+    assert isinstance(deps, PhaseDeps)
+    # ctx.workflow is the wf passed in
+    assert ctx.workflow is orch.workflow or ctx.workflow == orch.workflow
+
+
+def test_orchestrator_satisfies_phase_host_protocol():
+    """Phase B #2044: AutonomousOrchestrator implements the PhaseHost narrow
+    interface (emit_phase_change/session_offsets/cancellation/
+    create_milestone_idempotent + workflow_id)."""
+    from app.modules.workspace.autonomous.phase_host import PhaseHost
+
+    orch = _make_orchestrator(_active_workflow())
+    for method in [
+        "emit_phase_change",
+        "session_offsets",
+        "cancellation",
+        "create_milestone_idempotent",
+    ]:
+        assert callable(getattr(orch, method)), f"orchestrator missing PhaseHost.{method}"
+    assert hasattr(orch, "workflow_id")

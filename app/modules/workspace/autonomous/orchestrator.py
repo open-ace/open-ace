@@ -45,6 +45,8 @@ from app.modules.workspace.autonomous.evidence_service import EvidenceService
 from app.modules.workspace.autonomous.github_ops import _FAILURE_LINE_RE, GitHubOps, GitHubOpsError
 from app.modules.workspace.autonomous.models import AgentTaskResult
 from app.modules.workspace.autonomous.phase_contract import PhaseResult, WorkflowContext
+from app.modules.workspace.autonomous.phase_host import PhaseDeps
+from app.modules.workspace.autonomous.phases import resolve_phase_handler
 from app.modules.workspace.autonomous.progress_report_i18n import (
     build_progress_payload,
     render_progress_report,
@@ -5871,18 +5873,54 @@ class AutonomousOrchestrator:
     def _dispatch_phase(self, phase: str, wf: dict, handler) -> PhaseResult | None:
         """Run a phase handler and return its structured result, if any.
 
-        Phase A (#2044) adapter: every phase now flows through this single
-        dispatch point. A legacy ``_do_*`` returns ``None`` and commits inline
-        (unchanged behaviour). A migrated handler returns a ``PhaseResult``,
-        which ``advance`` forwards to ``_commit_phase_result`` so phase/status
-        transition stays on one auditable path.
-
-        ``phase`` is threaded for logging only; the handler already knows which
-        phase it is. Keeping the dispatch explicit (rather than a registry) lets
-        each phase migrate independently without touching the others.
+        Phase B (#2044): builds ``WorkflowContext`` + ``PhaseDeps`` and invokes
+        the handler as ``handler(ctx, deps)``. Migrated handlers return a
+        ``PhaseResult`` (committed via ``_commit_phase_result``); thin phases are
+        wrapped by ``advance()`` in a legacy adapter and return ``None`` until
+        they migrate (T6-T9).
         """
         logger.debug("Dispatching phase=%s for workflow %s", phase, self._workflow_id[:8])
-        return handler(wf)
+        ctx = self._build_workflow_context(wf)
+        deps = self._build_phase_deps()
+        return handler(ctx, deps)
+
+    def _build_phase_deps(self) -> PhaseDeps:
+        """Assemble the service bundle injected into a phase handler.
+
+        ``git_workspace`` and ``sandbox`` are not yet wired (T5 / T13); they are
+        ``None`` until then and handlers that need them are not migrated yet.
+        """
+        return PhaseDeps(
+            host=self,
+            gh=self._gh,
+            git_workspace=getattr(self, "_git_workspace", None),
+            evidence=self._evidence,
+            sandbox=getattr(self, "_sandbox_provider", None),
+            repo=self.repo,
+            agent_runner=self._runner,
+        )
+
+    # --- PhaseHost implementation (#2044 Phase B) ---
+    def emit_phase_change(self, payload: dict) -> None:
+        # _emit(event_type, data) is the orchestrator's emitter (L1897); real
+        # phase_change emission is self._emit("phase_change", {...}) (e.g. L6100).
+        self._emit("phase_change", payload)
+
+    def session_offsets(self):
+        return self._session_usage_offsets
+
+    def cancellation(self):
+        return self._shutdown_requested
+
+    def create_milestone_idempotent(self, **kwargs) -> None:
+        self._create_milestone(**kwargs)
+
+    @property
+    def workflow_id(self) -> str:
+        # PhaseHost protocol declares ``workflow_id``; the internal field is the
+        # underscore-prefixed ``self._workflow_id``. Expose it read-only so the
+        # narrow interface is satisfied without migrating every internal reader.
+        return self._workflow_id
 
     def advance(self):
         """Advance the workflow one step. Called by the scheduler."""
@@ -5918,22 +5956,39 @@ class AutonomousOrchestrator:
                 # Re-read so downstream phases see the healed worktree_path /
                 # branch_name in wf rather than the pre-heal snapshot.
                 wf = self.workflow
-            if phase == "preparation":
-                result = self._dispatch_phase("preparation", wf, self._do_preparation)
+
+            def _legacy(method):
+                """Adapter: a not-yet-migrated _do_*(self, wf) is invoked with its
+                original (wf) signature; the (ctx, deps) from _dispatch_phase are
+                ignored until it migrates onto the contract (T6-T9).
+                """
+
+                def wrapped(ctx, deps):
+                    return method(ctx.workflow)
+
+                return wrapped
+
+            migrated = resolve_phase_handler(phase)
+            if migrated is not None:
+                handler = migrated
+            elif phase == "preparation":
+                handler = _legacy(self._do_preparation)
             elif phase == "planning":
-                result = self._dispatch_phase("planning", wf, self._do_planning)
+                handler = _legacy(self._do_planning)
             elif phase == "development":
-                result = self._dispatch_phase("development", wf, self._do_development)
+                handler = _legacy(self._do_development)
             elif phase == "pr_review":
-                result = self._dispatch_phase("pr_review", wf, self._do_pr_review)
+                handler = _legacy(self._do_pr_review)
             elif phase == "report":
-                result = self._dispatch_phase("report", wf, self._do_report)
+                handler = _legacy(self._do_report)
             elif phase == "wait":
-                result = self._dispatch_phase("wait", wf, self._do_wait)
+                handler = _legacy(self._do_wait)
             elif phase == "merge":
-                result = self._dispatch_phase("merge", wf, self._do_merge)
+                handler = _legacy(self._do_merge)
             else:
-                result = None
+                handler = None
+
+            result = self._dispatch_phase(phase, wf, handler) if handler is not None else None
             # Phase A (#2044): a phase migrated onto the PhaseResult contract
             # returns a structured outcome, which is committed through the
             # single authoritative entrypoint. Legacy _do_* methods return None
