@@ -55,6 +55,7 @@ class SandboxCapability(str, Enum):
     CREDENTIAL_TOKEN_BINDING = "credential_token_binding"
     NAMESPACE_ISOLATION = "namespace_isolation"
     NETWORK_EGRESS_POLICY = "network_egress_policy"
+    STORAGE_INODE_QUOTA = "storage_inode_quota"
 
 
 # ── gVisor/container-facing isolation dimensions (#2022 P4 ①) ──

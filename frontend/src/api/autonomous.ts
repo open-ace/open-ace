@@ -84,6 +84,13 @@ export interface AutonomousWorkflow {
   fork_milestone_id: string | null;
   user_feedback: string;
   original_branch_name: string;
+  /**
+   * JSON snapshot (#2020 Phase B) of the resource/isolation policy actually in
+   * effect for this workflow's sandbox at creation time — provider, declared
+   * capabilities, effective limits, and which dimensions are enforced. Null until
+   * a sandbox is created. Parsed lazily by the Runtime & Isolation panel.
+   */
+  sandbox_effective_policy?: string | null;
   created_at: string | null;
   updated_at: string | null;
   completed_at: string | null;

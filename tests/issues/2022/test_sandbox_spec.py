@@ -18,9 +18,10 @@ from app.modules.workspace.autonomous.sandbox.types import SandboxCapability, Sa
 from app.modules.workspace.autonomous.task_isolation import AgentTaskPolicy
 
 # The capability taxonomy a spec may require. LegacyPosixProvider (Phase 3)
-# satisfies the first four; namespace/network isolation is reserved for the
-# OpenSandbox/Kubernetes backend (#2023) and MUST make Legacy refuse creation
-# (fail-closed, tested in test_sandbox_provider.py).
+# satisfies the first four; namespace/network/storage-inode isolation is reserved
+# for the OpenSandbox/Kubernetes backend (#2023) and MUST make Legacy refuse
+# creation (fail-closed, tested in test_sandbox_provider.py /
+# tests/issues/2020/test_storage_inode_capability_fail_closed.py).
 _EXPECTED_CAPABILITIES = {
     "private_home_tmp_xdg",
     "filesystem_acl",
@@ -28,6 +29,7 @@ _EXPECTED_CAPABILITIES = {
     "credential_token_binding",
     "namespace_isolation",
     "network_egress_policy",
+    "storage_inode_quota",
 }
 
 

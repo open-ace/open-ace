@@ -8,6 +8,7 @@ import { t } from '@/i18n';
 import { Button, Loading, EmptyState } from '@/components/common';
 import { AutonomousWorkflowList } from '@/components/work/AutonomousWorkflowList';
 import { WorkflowTimeline } from '@/components/work/WorkflowTimeline';
+import { RuntimeIsolationPanel } from '@/components/work/RuntimeIsolationPanel';
 import { NewAutonomousModal } from '@/components/work/NewAutonomousModal';
 import { useWorkflow, useWorkflowEvents } from '@/hooks/useAutonomous';
 import type { AutonomousWorkflow } from '@/api/autonomous';
@@ -211,13 +212,16 @@ export const AutonomousDev: React.FC = () => {
       {/* Right Panel - Timeline */}
       <div className="flex-grow-1 d-flex flex-column overflow-hidden autonomous-dev-right-panel">
         {selectedWorkflow ? (
-          <WorkflowTimeline
-            workflow={selectedWorkflow}
-            onNavigateToWorkflow={(id) => {
-              setSelectedWorkflowId(id);
-              updateUrl(id);
-            }}
-          />
+          <>
+            <RuntimeIsolationPanel workflow={selectedWorkflow} />
+            <WorkflowTimeline
+              workflow={selectedWorkflow}
+              onNavigateToWorkflow={(id) => {
+                setSelectedWorkflowId(id);
+                updateUrl(id);
+              }}
+            />
+          </>
         ) : selectedWorkflowId && workflowLoading ? (
           <div className="d-flex align-items-center justify-content-center h-100">
             <Loading />

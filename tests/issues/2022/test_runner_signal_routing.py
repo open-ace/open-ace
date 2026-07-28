@@ -123,7 +123,7 @@ def test_notify_sandbox_created_invokes_callback_with_attribution():
     # #2022 P6: right after exec the runner fires on_sandbox_created so the
     # orchestrator can persist a mid-run 'running' row (crash orphan bait for
     # the reconciler). Callback gets (session_id, sandbox_id, provider_name,
-    # remote_session_id_or_None).
+    # remote_session_id_or_None, effective_policy_snapshot).
     captured: list = []
     provider = FakeSandboxProvider()
     runner = AutonomousAgentRunner(
@@ -132,7 +132,18 @@ def test_notify_sandbox_created_invokes_callback_with_attribution():
     )
     handle = provider.create(_spec())
     runner._notify_sandbox_created("s1", handle, "remote-42")
-    assert captured == [("s1", handle.sandbox_id, "fake", "remote-42")]
+    # #2020 Phase B: 5th arg is the effective-policy snapshot built from the
+    # provider's declared caps + spec policy.
+    assert len(captured) == 1
+    s_id, sandbox_id, provider_name, remote_id, snap = captured[0]
+    assert (s_id, sandbox_id, provider_name, remote_id) == (
+        "s1",
+        handle.sandbox_id,
+        "fake",
+        "remote-42",
+    )
+    assert snap["provider"] == "fake"
+    assert "enforced" in snap
 
 
 def test_notify_sandbox_created_none_remote_id_for_local():
@@ -145,7 +156,14 @@ def test_notify_sandbox_created_none_remote_id_for_local():
     )
     handle = provider.create(_spec())
     runner._notify_sandbox_created("s1", handle, None)
-    assert captured == [("s1", handle.sandbox_id, "fake", None)]
+    assert len(captured) == 1
+    s_id, sandbox_id, provider_name, remote_id, _snap = captured[0]
+    assert (s_id, sandbox_id, provider_name, remote_id) == (
+        "s1",
+        handle.sandbox_id,
+        "fake",
+        None,
+    )
 
 
 def test_notify_sandbox_created_noop_without_callback():

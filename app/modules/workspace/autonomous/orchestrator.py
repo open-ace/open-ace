@@ -4543,6 +4543,7 @@ class AutonomousOrchestrator:
         sandbox_id: str,
         provider_name: str,
         remote_session_id: str | None,
+        effective_policy: dict | None = None,
     ) -> None:
         """Persist mid-run sandbox identity so a crash leaves a reconcilable row (#2022 P6).
 
@@ -4551,7 +4552,11 @@ class AutonomousOrchestrator:
         completion. A crash here leaves an orphan the startup/periodic reconciler
         destroys by ``sandbox_remote_session_id`` (remote) or DB-resets (local).
         The remote id is written only when present so a local row never carries a
-        stale/NULL remote id. Best-effort: never raises to the run path.
+        stale/NULL remote id. ``effective_policy`` (#2020 Phase B) is the
+        JSON-serializable resource/isolation snapshot built by the runner; when
+        present it is persisted as ``sandbox_effective_policy`` so the workflow
+        detail UI shows what was actually in effect for the run. Best-effort:
+        never raises to the run path.
         """
         try:
             updates: dict[str, object] = {
@@ -4561,6 +4566,10 @@ class AutonomousOrchestrator:
             }
             if remote_session_id is not None:
                 updates["sandbox_remote_session_id"] = remote_session_id
+            if effective_policy is not None:
+                import json
+
+                updates["sandbox_effective_policy"] = json.dumps(effective_policy)
             self.repo.update_workflow(self._workflow_id, updates)
             logger.info(
                 "Registered sandbox %s (provider=%s) for workflow %s%s",
