@@ -572,7 +572,7 @@ class APIKeyProxyService:
         """
         # Issue #1894: SSRF protection - validate base_url before storing
         resolved_ips: str = ""
-        resolved_at: str | None = None
+        resolved_at: datetime | None = None
         if base_url:
             from app.utils.llm_proxy_url_validator import (
                 resolve_and_store_ips,
@@ -911,7 +911,7 @@ class APIKeyProxyService:
         """
         # Issue #1894: SSRF protection - validate base_url before updating
         resolved_ips: str | None = None
-        resolved_at: str | None = None
+        resolved_at: datetime | None = None
         if base_url is not None:
             from app.utils.llm_proxy_url_validator import (
                 resolve_and_store_ips,
