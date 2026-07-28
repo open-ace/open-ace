@@ -792,6 +792,7 @@ class DailyStatsRepository:
                 try:
                     # Issue #2010: Use INSERT ... ON CONFLICT DO UPDATE for atomic operation
                     # This eliminates the race condition window between DELETE and INSERT
+                    # Issue #2094: GROUP BY only by constraint keys, aggregate user_id/tenant_id
                     # sender_name formats:
                     # 1. WebUI: {system_account}-{hostname}-{tool} -> match users.system_account
                     # 2. Feishu: username (real name) -> match users.username
@@ -805,13 +806,13 @@ class DailyStatsRepository:
                             dm.tool_name,
                             dm.host_name,
                             dm.sender_name,
-                            COALESCE(dm.user_id,
+                            MAX(COALESCE(dm.user_id,
                                 (SELECT u.id FROM users u
                                  WHERE dm.sender_name LIKE (u.system_account || '-%%')
                                     OR dm.sender_name = u.username
                                  ORDER BY u.id
-                                 LIMIT 1)) as user_id,
-                            dm.tenant_id,
+                                 LIMIT 1))) as user_id,
+                            MAX(dm.tenant_id) as tenant_id,
                             SUM(dm.tokens_used) as total_tokens,
                             SUM(dm.input_tokens) as total_input_tokens,
                             SUM(dm.output_tokens) as total_output_tokens,
@@ -819,14 +820,7 @@ class DailyStatsRepository:
                             ?
                         FROM daily_messages dm
                         WHERE {date_condition}
-                        GROUP BY dm.date, dm.tool_name, dm.host_name, dm.sender_name,
-                                 COALESCE(dm.user_id,
-                                    (SELECT u.id FROM users u
-                                     WHERE dm.sender_name LIKE (u.system_account || '-%%')
-                                        OR dm.sender_name = u.username
-                                     ORDER BY u.id
-                                     LIMIT 1)),
-                                 dm.tenant_id
+                        GROUP BY dm.date, dm.tool_name, dm.host_name, dm.sender_name
                         ON CONFLICT (date, tool_name, host_name, sender_name) DO UPDATE SET
                             user_id = EXCLUDED.user_id,
                             tenant_id = EXCLUDED.tenant_id,
@@ -845,6 +839,7 @@ class DailyStatsRepository:
             else:
                 # SQLite: use INSERT OR REPLACE with user_id populated
                 # Issue #1852: Include tenant_id for tenant isolation
+                # Issue #2094: GROUP BY only by constraint keys, aggregate user_id/tenant_id
                 self.db.execute(
                     f"""
                     INSERT OR REPLACE INTO daily_stats
@@ -855,12 +850,12 @@ class DailyStatsRepository:
                         dm.tool_name,
                         dm.host_name,
                         dm.sender_name,
-                        COALESCE(dm.user_id,
+                        MAX(COALESCE(dm.user_id,
                             (SELECT u.id FROM users u
                              WHERE dm.sender_name LIKE (u.system_account || '-%%')
                                 OR dm.sender_name = u.username
-                             LIMIT 1)) as user_id,
-                        dm.tenant_id,
+                             LIMIT 1))) as user_id,
+                        MAX(dm.tenant_id) as tenant_id,
                         SUM(dm.tokens_used) as total_tokens,
                         SUM(dm.input_tokens) as total_input_tokens,
                         SUM(dm.output_tokens) as total_output_tokens,
@@ -868,13 +863,7 @@ class DailyStatsRepository:
                         ?
                     FROM daily_messages dm
                     WHERE {date_condition}
-                    GROUP BY dm.date, dm.tool_name, dm.host_name, dm.sender_name,
-                             COALESCE(dm.user_id,
-                                (SELECT u.id FROM users u
-                                 WHERE dm.sender_name LIKE (u.system_account || '-%%')
-                                    OR dm.sender_name = u.username
-                                 LIMIT 1)),
-                             dm.tenant_id
+                    GROUP BY dm.date, dm.tool_name, dm.host_name, dm.sender_name
                     """,
                     (now,) + params,
                 )
