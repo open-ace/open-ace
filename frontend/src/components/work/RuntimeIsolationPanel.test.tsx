@@ -129,6 +129,8 @@ describe('RuntimeIsolationPanel', () => {
     render(<RuntimeIsolationPanel workflow={workflow(remoteSnap)} />);
     expect(screen.getByText('remote_machine')).toBeInTheDocument();
     // No capability chips, and the "no capabilities" notice shows
-    expect(screen.getByText(/No isolation capabilities declared by this backend/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/No isolation capabilities declared by this backend/)
+    ).toBeInTheDocument();
   });
 });

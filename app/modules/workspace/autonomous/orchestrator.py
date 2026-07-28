@@ -4567,8 +4567,6 @@ class AutonomousOrchestrator:
             if remote_session_id is not None:
                 updates["sandbox_remote_session_id"] = remote_session_id
             if effective_policy is not None:
-                import json
-
                 updates["sandbox_effective_policy"] = json.dumps(effective_policy)
             self.repo.update_workflow(self._workflow_id, updates)
             logger.info(

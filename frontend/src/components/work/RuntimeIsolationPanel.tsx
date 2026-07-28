@@ -45,7 +45,7 @@ interface RuntimeIsolationPanelProps {
 
 /** Parse the snapshot JSON; return null on absent/malformed data. */
 export function parseEffectivePolicy(
-  raw: string | null | undefined,
+  raw: string | null | undefined
 ): EffectivePolicySnapshot | null {
   if (!raw) return null;
   try {
@@ -63,7 +63,7 @@ function formatBytes(bytes: number | undefined): string {
   let unit = 0;
   while (value >= 1024 && unit < units.length - 1) {
     value /= 1024;
-        unit++;
+    unit++;
   }
   return `${value % 1 === 0 ? value : value.toFixed(1)} ${units[unit]}`;
 }
@@ -88,7 +88,7 @@ export function RuntimeIsolationPanel({ workflow }: RuntimeIsolationPanelProps) 
   const language = useLanguage();
   const snapshot = useMemo(
     () => parseEffectivePolicy(workflow.sandbox_effective_policy),
-    [workflow.sandbox_effective_policy],
+    [workflow.sandbox_effective_policy]
   );
 
   if (!snapshot) return null;
@@ -108,6 +108,9 @@ export function RuntimeIsolationPanel({ workflow }: RuntimeIsolationPanelProps) 
     },
     {
       labelKey: 'autoPolicyCpu',
+      // cpu_max uses '' as the unset sentinel (build_effective_policy), so an
+      // empty string must render as '—'; nullish coalescing (??) would show ''.
+      // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing
       value: limits.cpu_max || '—',
       enforced: enforced.cpu,
     },
@@ -118,9 +121,7 @@ export function RuntimeIsolationPanel({ workflow }: RuntimeIsolationPanelProps) 
     },
     {
       labelKey: 'autoPolicyStorage',
-      value: limits.ephemeral_storage_limit
-        ? formatBytes(limits.ephemeral_storage_limit)
-        : '—',
+      value: limits.ephemeral_storage_limit ? formatBytes(limits.ephemeral_storage_limit) : '—',
       enforced: enforced.ephemeral_storage,
     },
     {
