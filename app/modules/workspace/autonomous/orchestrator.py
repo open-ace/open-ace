@@ -977,8 +977,13 @@ class AutonomousOrchestrator:
         run time and are not a stable orchestrator-level dependency.
 
         Tests that bypass ``__init__`` (``__new__`` + stubbed runner) get a
-        ``LegacyPosixProvider`` fallback; a test that sets ``_sandbox_provider``
-        on ``__dict__`` takes precedence (standard property override).
+        ``LegacyPosixProvider`` fallback. This is a data-descriptor property,
+        so a test cannot shadow it by stuffing ``self._sandbox_provider =
+        ...`` into ``__dict__`` (assignment would invoke this getter's
+        ``__set__`` and raise ``AttributeError`` — there is no setter). To
+        override in a test, either (a) inject ``runner._sandbox_provider`` and
+        let the getter read it, or (b) ``del type(o)._sandbox_provider`` to
+        remove the property before assigning the instance attribute.
         """
         runner_provider = getattr(self._runner, "_sandbox_provider", None)
         if runner_provider is not None:
@@ -6695,7 +6700,13 @@ class AutonomousOrchestrator:
         edits. It builds the (ctx, deps) bundle, delegates to
         ``phases.development.handle``, and commits the returned PhaseResult
         through the single authoritative entrypoint — same behaviour as
-        advance()'s dispatch. Removed in T14.
+        advance()'s dispatch.
+
+        ACCEPTED DEBT (#2044 T14): kept rather than removed. Migrating the
+        ~60+ direct-caller tests to invoke the registry handler (or advance())
+        is out of scope for #2044 — these are test helpers, production
+        advance() uses the registry. Remove in a follow-up that retires the
+        direct-call test pattern wholesale.
 
         Behaviour note: the development sub-methods (``_run_development_agent``
         / ``_post_dev_completion_comment`` / ``_run_test_phase``) stay on the
@@ -7900,7 +7911,13 @@ class AutonomousOrchestrator:
         edits. It builds the (ctx, deps) bundle, delegates to
         ``phases.pr_review.handle``, and commits the returned PhaseResult
         through the single authoritative entrypoint — same behaviour as
-        advance()'s dispatch. Removed in T14.
+        advance()'s dispatch.
+
+        ACCEPTED DEBT (#2044 T14): kept rather than removed. Migrating the
+        ~60+ direct-caller tests to invoke the registry handler (or advance())
+        is out of scope for #2044 — these are test helpers, production
+        advance() uses the registry. Remove in a follow-up that retires the
+        direct-call test pattern wholesale.
 
         Behaviour note: the legacy ``_do_pr_review`` raised ``WorkflowPaused``
         when ``_poll_ci_status`` was interrupted by shutdown (the
@@ -8537,7 +8554,13 @@ class AutonomousOrchestrator:
         edits. It builds the (ctx, deps) bundle, delegates to
         ``phases.merge.handle``, and commits the returned PhaseResult through
         the single authoritative entrypoint — same behaviour as advance()'s
-        dispatch. Removed in T14.
+        dispatch.
+
+        ACCEPTED DEBT (#2044 T14): kept rather than removed. Migrating the
+        ~60+ direct-caller tests to invoke the registry handler (or advance())
+        is out of scope for #2044 — these are test helpers, production
+        advance() uses the registry. Remove in a follow-up that retires the
+        direct-call test pattern wholesale.
 
         Behaviour note: the legacy ``_do_merge`` raised ``WorkflowPaused`` on
         the merge-policy-pause branch, and direct-call tests assert that raise.

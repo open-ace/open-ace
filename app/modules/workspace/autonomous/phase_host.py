@@ -5,6 +5,18 @@ complex phases (development/pr_review/merge) into ``phases/*.py`` modules. To
 keep those modules independently testable (no ``AutonomousOrchestrator``
 instance), they depend on the narrow interfaces defined here instead of the
 ~10k-line orchestrator concrete class.
+
+ACCEPTED DEBT — PhaseHost width (#2044 T14): ``PhaseHost`` has grown to ~32
+methods (the core emit/session/cancellation/milestone surface PLUS merge-,
+pr_review-, and development-phase helper aliases). Each helper section below
+documents why that alias exists (the underlying orchestrator-private method
+reads/commits bookkeeping fields inline, so it cannot move onto a service
+without a larger refactor). The long-term fix is to extract a phase-helper
+service that owns these — tracked as a follow-up to #2044, NOT done here
+because it would re-couple the handlers to a new wide surface before the
+bookkeeping fields are themselves service-backed. Until then, every addition
+to this Protocol MUST come with a per-method rationale comment so the debt
+surface stays auditable.
 """
 
 from __future__ import annotations
