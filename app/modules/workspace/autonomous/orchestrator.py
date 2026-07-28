@@ -3596,14 +3596,33 @@ class AutonomousOrchestrator:
         user may edit mid-run (model, permission_mode). The cancellation event
         is the orchestrator's own shutdown signal — phases observe it instead
         of the scheduler aborting them externally.
+
+        ``repository_context`` snapshots the persisted git/worktree binding so
+        migrated phases read branch/HEAD via ``ctx.repository_context`` rather
+        than ad hoc (Phase B / #2044).
         """
         return WorkflowContext(
             workflow=wf,
             definition_snapshot=wf.get("definition_snapshot"),
-            repository_context=None,  # wired in Phase B via #2041/#2042 services
+            repository_context=self._build_repository_context(wf),
             session_bindings=self._session_usage_offsets,
             cancellation=self._shutdown_requested,
         )
+
+    def _build_repository_context(self, wf: dict) -> dict:
+        """Snapshot of the git/worktree binding a phase reads via ctx.
+
+        Phase B (#2044): replaces the Phase-A ``repository_context=None`` TODO.
+        Task 5 will move the underlying helpers into GitWorkspaceService and
+        this becomes a thin delegate; for now it snapshots the persisted
+        binding fields.
+        """
+        return {
+            "branch_name": wf.get("branch_name"),
+            "worktree_path": wf.get("worktree_path"),
+            "expected_head_sha": wf.get("expected_head_sha"),
+            "base_branch": wf.get("base_branch", "main"),
+        }
 
     def _poll_ci_status(self, gh: GitHubOps, pr_number: int) -> list:
         """Poll CI checks until all are non-pending or timeout is reached.

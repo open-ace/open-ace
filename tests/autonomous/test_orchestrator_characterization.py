@@ -571,3 +571,19 @@ class TestCommitPhaseResult:
 
         assert committed["result"].outcome == "completed"
         assert committed["result"].next_phase == "wait"
+
+
+def test_workflow_context_repository_context_is_wired_from_git_binding(tmp_path):
+    """Phase B #2044: repository_context is populated (not None) so migrated
+    phases read git binding via ctx, not ad hoc."""
+    wf = _active_workflow(
+        branch_name="feature-x",
+        worktree_path=str(tmp_path),
+    )
+    orch = _make_orchestrator(wf)
+    ctx = orch._build_workflow_context(orch.workflow)
+    assert ctx.repository_context is not None
+    repo_ctx = ctx.repository_context
+    assert getattr(repo_ctx, "branch_name", None) == "feature-x" or (
+        isinstance(repo_ctx, dict) and repo_ctx.get("branch_name") == "feature-x"
+    )
