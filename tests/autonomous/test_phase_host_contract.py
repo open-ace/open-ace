@@ -112,6 +112,61 @@ def test_git_workspace_service_class_exists_and_has_lifecycle_methods():
         assert hasattr(GitWorkspaceService, method), f"GitWorkspaceService missing {method}"
 
 
+def test_build_phase_deps_populates_sandbox_provider():
+    """#2044 Phase B T13: ``deps.sandbox`` must be a SandboxProvider, not None.
+
+    The runner owns per-task provider selection (local Legacy / remote
+    RemoteMachine); the orchestrator exposes its default — the same instance
+    the runner uses for local spawns — so handlers that need to introspect
+    capabilities or build a spec get a live provider. Before T13,
+    ``_build_phase_deps`` read ``getattr(self, "_sandbox_provider", None)`` and
+    the orchestrator had no such attribute, so ``deps.sandbox`` was always None.
+    """
+    from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator as Orch
+    from app.modules.workspace.autonomous.sandbox.legacy_posix import LegacyPosixProvider
+
+    orch = Orch.__new__(Orch)
+    # Minimal stubs: the property reads runner._sandbox_provider; a __new__-built
+    # orchestrator has no runner, so it must fall back to LegacyPosixProvider
+    # (mirrors _git_workspace/_evidence lazy-attach behavior).
+    orch._runner = None
+    provider = orch._sandbox_provider
+    assert isinstance(
+        provider, LegacyPosixProvider
+    ), f"_sandbox_provider property must return a provider, got {type(provider)}"
+    # The full PhaseDeps path must also surface it.
+    orch._gh = None
+    orch._git_workspace_instance = None
+    orch._evidence_instance = None
+    orch.repo = None
+    deps = orch._build_phase_deps()
+    assert isinstance(
+        deps.sandbox, LegacyPosixProvider
+    ), f"_build_phase_deps must surface _sandbox_provider, got {deps.sandbox!r}"
+
+
+def test_build_phase_deps_surfaces_runner_injected_provider():
+    """#2044 T13: when a runner carries an injected SandboxProvider (tests/
+    remote), ``_sandbox_provider`` exposes the SAME instance the runner will
+    use for local spawns — handler-built specs and the spawn path agree.
+    """
+    from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator as Orch
+    from app.modules.workspace.autonomous.sandbox.fake import FakeSandboxProvider
+
+    orch = Orch.__new__(Orch)
+
+    class _RunnerStub:
+        _sandbox_provider = FakeSandboxProvider()
+
+    orch._runner = _RunnerStub()  # type: ignore[assignment]
+    orch._gh = None
+    orch._git_workspace_instance = None
+    orch._evidence_instance = None
+    orch.repo = None
+    deps = orch._build_phase_deps()
+    assert deps.sandbox is _RunnerStub._sandbox_provider
+
+
 def test_phases_dir_does_not_directly_write_phase_status_fields():
     """#2044 Phase B invariant: phases/*.py must not write current_phase/status/
     completed_at/paused_at directly — those flow only through PhaseResult."""

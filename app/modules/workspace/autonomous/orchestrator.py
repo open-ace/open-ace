@@ -962,6 +962,32 @@ class AutonomousOrchestrator:
         self._gh: GitHubOps | None = None
 
     @property
+    def _sandbox_provider(self):
+        """The default SandboxProvider the runner spawns local tasks through (#2044 T13).
+
+        ``AutonomousAgentRunner`` owns the per-task provider selection
+        (``_select_sandbox_provider`` branches on workspace_type: local → the
+        ``LegacyPosixProvider`` injected at construction, remote → a fresh
+        ``RemoteMachineProvider``). Phase handlers that need a provider handle
+        to introspect (capabilities, build a spec, etc.) receive this default
+        via ``PhaseDeps.sandbox``. It is the same instance the runner uses for
+        local spawns, so handler-built specs and the runner's spawn path agree
+        on the declared capabilities. Per-task remote providers are NOT visible
+        here on purpose — they are minted from ``remote_session_manager`` at
+        run time and are not a stable orchestrator-level dependency.
+
+        Tests that bypass ``__init__`` (``__new__`` + stubbed runner) get a
+        ``LegacyPosixProvider`` fallback; a test that sets ``_sandbox_provider``
+        on ``__dict__`` takes precedence (standard property override).
+        """
+        runner_provider = getattr(self._runner, "_sandbox_provider", None)
+        if runner_provider is not None:
+            return runner_provider
+        from app.modules.workspace.autonomous.sandbox.legacy_posix import LegacyPosixProvider
+
+        return LegacyPosixProvider()
+
+    @property
     def _git_workspace(self) -> "GitWorkspaceService":
         """Lazily attach the git-workspace service (#2044 Phase B T5).
 
@@ -5308,15 +5334,16 @@ class AutonomousOrchestrator:
     def _build_phase_deps(self) -> PhaseDeps:
         """Assemble the service bundle injected into a phase handler.
 
-        ``git_workspace`` and ``sandbox`` are not yet wired (T5 / T13); they are
-        ``None`` until then and handlers that need them are not migrated yet.
+        ``git_workspace`` (T5) and ``sandbox`` (T13) are wired via lazy
+        properties so a handler that needs them always gets a live instance;
+        ``gh`` may be ``None`` until the run path constructs ``GitHubOps``.
         """
         return PhaseDeps(
             host=self,
             gh=self._gh,
-            git_workspace=getattr(self, "_git_workspace", None),
+            git_workspace=self._git_workspace,
             evidence=self._evidence,
-            sandbox=getattr(self, "_sandbox_provider", None),
+            sandbox=self._sandbox_provider,
             repo=self.repo,
             agent_runner=self._runner,
         )
