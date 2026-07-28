@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import threading
-
 from app.modules.workspace.autonomous.phase_contract import WorkflowContext
 from app.modules.workspace.autonomous.phase_host import PhaseDeps, PhaseHandler, PhaseHost
 

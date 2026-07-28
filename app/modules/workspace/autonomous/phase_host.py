@@ -19,7 +19,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only, avoids import cycles
     from app.modules.workspace.autonomous.evidence_service import EvidenceService
     from app.modules.workspace.autonomous.git_workspace import GitWorkspaceService
     from app.modules.workspace.autonomous.github_ops import GitHubOps
-    from app.modules.workspace.autonomous.phase_contract import WorkflowContext
+    from app.modules.workspace.autonomous.phase_contract import PhaseResult, WorkflowContext
     from app.modules.workspace.autonomous.sandbox.provider import SandboxProvider
     from app.repositories.autonomous_repo import AutonomousWorkflowRepository
 
@@ -78,5 +78,5 @@ class PhaseHandler(Protocol):
 
     name: str
 
-    def handle(self, ctx: WorkflowContext, deps: PhaseDeps) -> object:
+    def handle(self, ctx: WorkflowContext, deps: PhaseDeps) -> PhaseResult:
         """Execute the phase and return its structured result."""
