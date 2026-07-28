@@ -653,7 +653,6 @@ def test_report_phase_returns_phase_result_not_inline_commit(monkeypatch):
     monkeypatch.setattr(orch, "_clean_agent_text", lambda text: text or "")
     monkeypatch.setattr(orch, "_derive_review_passed", lambda milestones, lang: True)
     monkeypatch.setattr(orch, "_post_github_comment", lambda *a, **kw: None)
-    monkeypatch.setattr(orch, "_emit", lambda *a, **kw: None)
     orch.repo.list_milestones.return_value = []
 
     inline_phase_status_writes: list[dict] = []
@@ -667,8 +666,32 @@ def test_report_phase_returns_phase_result_not_inline_commit(monkeypatch):
     monkeypatch.setattr(orch, "_update_workflow", spy)
     monkeypatch.setattr(orch, "_create_milestone", lambda **kw: kw)
 
+    # _do_report emits its phase_change through deps.host.emit_phase_change
+    # (not the legacy _emit). Wrap the real host with a recorder so this
+    # template test proves the migrated handler actually fires the event,
+    # while delegating the other PhaseHost methods to the orchestrator.
+    import dataclasses
+
+    captured_phase_changes: list[dict] = []
+    real_host = orch  # orchestrator implements PhaseHost
+
+    class _RecordingHost:
+        workflow_id = orch.workflow_id
+
+        def emit_phase_change(self, payload):
+            captured_phase_changes.append(payload)
+
+        def session_offsets(self):
+            return real_host.session_offsets()
+
+        def cancellation(self):
+            return real_host.cancellation()
+
+        def create_milestone_idempotent(self, **kw):
+            return real_host.create_milestone_idempotent(**kw)
+
+    deps = dataclasses.replace(orch._build_phase_deps(), host=_RecordingHost())
     ctx = orch._build_workflow_context(orch.workflow)
-    deps = orch._build_phase_deps()
     result = orch._do_report(ctx, deps)
 
     assert isinstance(
@@ -683,3 +706,7 @@ def test_report_phase_returns_phase_result_not_inline_commit(monkeypatch):
     assert result.outcome == "completed"
     assert result.next_phase == "wait"
     assert result.next_status == "waiting"
+    # The migrated handler emits its own phase_change (the commit entrypoint
+    # does NOT) — assert the wait payload actually fires.
+    assert captured_phase_changes, "_do_report did not emit phase_change"
+    assert {"phase": "wait"} in captured_phase_changes

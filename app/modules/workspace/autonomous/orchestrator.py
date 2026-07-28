@@ -8630,6 +8630,9 @@ class AutonomousOrchestrator:
         ``_commit_phase_result``; the phase_change event is emitted through
         ``deps.host`` so the commit entrypoint stays the sole phase/status
         authority.
+
+        Until T10-T12 extract phases into phases/*.py, gh/repo stay on self;
+        deps here carries the host (emit_phase_change) for this thin phase.
         """
         wf = ctx.workflow
         dev_round = wf.get("dev_round", 1)
