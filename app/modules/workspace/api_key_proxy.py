@@ -594,7 +594,8 @@ class APIKeyProxyService:
             # Resolve and store IPs for DNS rebinding protection
             resolved_ips, _ = resolve_and_store_ips(base_url)
             if resolved_ips:
-                resolved_at = datetime.now(timezone.utc)  # Use UTC timestamp
+                # Use UTC timestamp, remove timezone info for PostgreSQL TIMESTAMP compatibility
+                resolved_at = datetime.now(timezone.utc).replace(tzinfo=None)
                 logger.info(
                     "Resolved IPs for base_url: %s -> %s",
                     base_url[:50] + "..." if len(base_url) > 50 else base_url,
@@ -935,7 +936,8 @@ class APIKeyProxyService:
             if base_url:
                 resolved_ips, _ = resolve_and_store_ips(base_url)
                 if resolved_ips:
-                    resolved_at = datetime.now(timezone.utc)  # Use UTC timestamp
+                    # Use UTC timestamp, remove timezone info for PostgreSQL TIMESTAMP compatibility
+                    resolved_at = datetime.now(timezone.utc).replace(tzinfo=None)
                     logger.info(
                         "Resolved IPs for updated base_url: %s -> %s",
                         base_url[:50] + "..." if len(base_url) > 50 else base_url,
