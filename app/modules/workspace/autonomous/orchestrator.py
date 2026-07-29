@@ -5616,9 +5616,16 @@ class AutonomousOrchestrator:
                 # PhaseResult.pause instead, so the reset must be gated here.
                 if result.outcome == "pause":
                     return
-            # Success — reset the transient retry counter so the next network
-            # blip starts fresh.
-            if wf.get("transient_retry_count", 0):
+            # Success/clean advance — reset the transient retry counter so the
+            # next network blip starts fresh. Skip on ``failed``:
+            # _commit_phase_result just wrote status=failed + error_message,
+            # and this reset's ``error_message=""`` would wipe the failure
+            # reason, leaving an undiagnosable terminal status. ``result is
+            # None`` is the legacy inline-commit path which still resets.
+            # (#2044 Phase B review P2.)
+            if (result is None or result.outcome != "failed") and wf.get(
+                "transient_retry_count", 0
+            ):
                 self._update_workflow({"transient_retry_count": 0, "error_message": ""})
         except WorkflowPaused as e:
             logger.info(
