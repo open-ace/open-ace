@@ -1075,15 +1075,28 @@ def test_preparation_phase_returns_phase_result_not_inline_commit(monkeypatch):
     monkeypatch.setattr(orch, "_get_gh", lambda: gh)
 
     inline_phase_status_writes: list[dict] = []
+    all_workflow_writes: list[dict] = []
     orig_update = orch._update_workflow
 
     def spy(patch):
+        all_workflow_writes.append(dict(patch))
         if any(k in patch for k in ("current_phase", "status", "completed_at", "paused_at")):
             inline_phase_status_writes.append(dict(patch))
         return orig_update(patch)
 
     monkeypatch.setattr(orch, "_update_workflow", spy)
-    monkeypatch.setattr(orch, "_create_milestone", lambda **kw: kw)
+
+    # Record milestones so the immediate-checkpoint of the irreversible
+    # issue_created milestone can be asserted (P1-b: external-resource ids +
+    # their milestones are written immediately, not deferred into the
+    # PhaseResult's milestone_events).
+    created_milestones: list[dict] = []
+
+    def record_milestone(**kw):
+        created_milestones.append(dict(kw))
+        return kw
+
+    monkeypatch.setattr(orch, "_create_milestone", record_milestone)
 
     # _do_preparation emits its phase_change through deps.host.emit_phase_change
     # (not the legacy _emit). Wrap the real host with a recorder so this
@@ -1126,17 +1139,29 @@ def test_preparation_phase_returns_phase_result_not_inline_commit(monkeypatch):
     assert result.outcome == "completed"
     assert result.next_phase == "planning"
     assert result.next_status == "planning"
-    # Bookkeeping fields travel in workflow_patch (non-forbidden): the created
-    # issue number, branch_name, base_commit_sha, and current_round.
-    assert result.workflow_patch.get("github_issue_number") == 42
+    # Bookkeeping fields travel in workflow_patch (non-forbidden):
+    # branch_name, base_commit_sha, current_round. github_issue_number is an
+    # irreversible external-resource id and is immediate-checkpointed via
+    # _update_workflow right after create_issue (P1-b) so a later raise cannot
+    # cause a duplicate issue on reentry — it is NOT in the deferred patch.
+    assert "github_issue_number" not in result.workflow_patch
     assert "branch_name" in result.workflow_patch
     assert "base_commit_sha" in result.workflow_patch
     assert result.workflow_patch.get("current_round") == 0
-    # issue_created + branch_created milestones travel in milestone_events, not
-    # via inline _create_milestone calls (those are stubbed out above).
+    # The immediate-checkpoint of github_issue_number happened via
+    # _update_workflow before the terminal PhaseResult was committed.
     assert any(
+        w.get("github_issue_number") == 42 for w in all_workflow_writes
+    ), f"github_issue_number=42 not immediate-checkpointed: {all_workflow_writes!r}"
+    # branch_created travels in milestone_events (committed by the entrypoint).
+    # issue_created is immediate-checkpointed via _create_milestone (P1-b), so
+    # it appears in created_milestones, not in the deferred milestone_events.
+    assert not any(
         m.get("milestone_type") == "issue_created" for m in result.milestone_events
-    ), f"issue_created milestone missing: {result.milestone_events}"
+    ), f"issue_created must be immediate-checkpointed, not deferred: {result.milestone_events}"
+    assert any(
+        m.get("milestone_type") == "issue_created" for m in created_milestones
+    ), f"issue_created milestone not created inline: {created_milestones!r}"
     assert any(
         m.get("milestone_type") == "branch_created" for m in result.milestone_events
     ), f"branch_created milestone missing: {result.milestone_events}"
