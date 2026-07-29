@@ -5854,45 +5854,49 @@ class AutonomousOrchestrator:
 
         # --- Normal workflow path ---
 
-        # New project: create GitHub repo. The block is gated on the
-        # repo_setup milestone so re-entry is idempotent — is_new_project stays
-        # True across re-entry, but the immediate-checkpointed repo_setup
-        # milestone (written below after create_repo succeeds) tells a later
-        # run the repo was already created. Without this gate a transient
-        # raise after create_repo would re-enter and call create_repo again,
-        # this time with the resolved URL as the name (project_repo_url was
-        # checkpointed) — failing or minting a duplicate. Mirrors the
-        # issue-side github_issue_number gate below. (#2044 Phase B P1-b.)
+        # New project: create GitHub repo. Re-entry is gated on the persisted
+        # RESOLVED repo URL (project_repo_url shape) — NOT the repo_setup
+        # milestone — so a single _update_workflow({"project_repo_url": ...})
+        # write below is BOTH the persisted identity AND the retry guard.
+        # Gating on the milestone instead leaves a between-writes window: the
+        # milestone is written AFTER the URL checkpoint, so a crash (or a DB
+        # write failure) between the two writes persists the resolved URL with
+        # no milestone → re-entry sees no gate → create_repo(name=<URL>) AGAIN
+        # (fails or mints a duplicate). is_new_project stays True across
+        # re-entry, so the gate must be on a durable field. Mirrors the
+        # issue-side github_issue_number gate below. (#2044 Phase B P1-b,
+        # 5th-round review.)
         if wf.get("is_new_project"):
-            if self._find_existing_milestone("preparation", "repo_setup"):
-                # Repo already created on a prior (partially-failed) run — skip
-                # create_repo (idempotent re-entry). The repo_setup milestone
-                # was immediate-checkpointed, so it survives the raise that
-                # ended the prior run; project_repo_url is also persisted.
+            existing_repo = wf.get("project_repo_url", "") or ""
+            # A resolved GitHub repo URL starts with http(s)://; a bare
+            # creation-request name (user input or auto-project-<hex>) does
+            # not. project_repo_url is overloaded (input name OR resolved
+            # URL — routes/autonomous.py accepts it as input), so the URL
+            # shape is the reliable "repo already created" signal.
+            if existing_repo.startswith(("http://", "https://")):
                 logger.info(
-                    "Workflow %s: repo_setup milestone exists; skipping create_repo",
+                    "Workflow %s: project_repo_url already a resolved repo URL "
+                    "(%s); skipping create_repo",
                     self._workflow_id[:8],
+                    existing_repo,
                 )
             else:
                 try:
                     gh = GitHubOps(project_path or ".", system_account=system_account)
                     repo_data = gh.create_repo(
-                        name=wf.get("project_repo_url", f"auto-project-{uuid.uuid4().hex[:8]}"),
+                        name=existing_repo or f"auto-project-{uuid.uuid4().hex[:8]}",
                         private=wf.get("is_private", True),
                         description=wf.get("title", ""),
                     )
                     repo_url = repo_data.get("url", "")
                     project_path = project_path or "."
                     self._gh = GitHubOps(project_path, system_account=system_account)
-                    # The repo URL is an irreversible external-resource id: a
-                    # later raise (e.g. branch creation) must not lose it, or
-                    # re-entry would call create_repo again and mint a NEW
-                    # repo. #2044 allows immediate bookkeeping-field writes
-                    # (only phase/status must travel through PhaseResult), so
-                    # checkpoint the id + its milestone here rather than
-                    # deferring into workflow_patch / milestone_events. The
-                    # completed repo_setup milestone ALSO doubles as the
-                    # re-entry gate above. (#2044 Phase B review P1-b.)
+                    # Single durable checkpoint: this ONE write persists the
+                    # resolved URL (the retry guard above) AND the repo
+                    # identity. The repo_setup milestone below is informational
+                    # (timeline/audit), NOT the re-entry gate, so a crash
+                    # between this write and the milestone still gates
+                    # re-entry correctly. (#2044 Phase B P1-b.)
                     self._update_workflow({"project_repo_url": repo_url})
                     self._create_milestone(
                         phase="preparation",

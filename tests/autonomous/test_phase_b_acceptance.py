@@ -672,6 +672,155 @@ def test_preparation_reentry_skips_create_repo_after_repo_created():
     )
 
 
+# ── 8c. test_preparation_reentry_skips_create_repo_when_milestone_write_crashes_after_url_checkpoint (P1-b) ─
+#
+# #2044 Phase B review (5th round) — the between-writes durability window.
+# 8b gated create_repo on the repo_setup MILESTONE. But that milestone is
+# written AFTER _update_workflow({"project_repo_url": repo_url}), so there's a
+# crash window between the two writes:
+#   1. _update_workflow commits the resolved URL.
+#   2. Process exits (or _create_milestone's DB write fails) BEFORE the
+#      repo_setup milestone commits.
+#   3. Persisted workflow has the resolved URL but NO milestone.
+#   4. Re-entry: _find_existing_milestone("repo_setup") → None → re-enters the
+#      else → create_repo(name=<resolved URL>) AGAIN (fails or duplicates).
+# The fix gates re-entry on the RESOLVED URL shape (http(s)://) instead of the
+# milestone, so _update_workflow is the single durable checkpoint for BOTH the
+# persisted identity AND the retry guard — no two-write window. This test
+# injects a raise from _create_milestone AFTER the URL _update_workflow has
+# committed and asserts re-entry still skips create_repo (call_count stays 1)
+# even though the milestone never committed.
+
+
+def test_preparation_reentry_skips_create_repo_when_milestone_write_crashes_after_url_checkpoint():
+    from app.modules.workspace.autonomous.github_ops import GitHubOpsError
+
+    # New project, no repo URL yet → create_repo runs on the first advance.
+    wf = _active_workflow(
+        phase="preparation",
+        status="preparing",
+        is_new_project=True,
+        branch_strategy="worktree",
+        requirements_text="build the thing",
+        github_issue_number=None,
+        project_repo_url=None,
+    )
+    wf["project_path"] = "/srv/open-ace"
+
+    o = _make_orchestrator(wf)
+    o._reconcile_worktree_transition = MagicMock(name="reconcile")
+    o._emit = MagicMock(name="_emit")
+
+    # In-memory milestone store so _find_existing_milestone reflects what
+    # _create_milestone actually committed (NOT what it raised before). The
+    # between-writes window: the repo_setup milestone is NEVER committed.
+    milestone_store: list[dict] = []
+
+    def list_milestones(wid, phase=None, status=None):
+        out = []
+        for ms in milestone_store:
+            if phase is not None and ms.get("phase") != phase:
+                continue
+            if status is not None and ms.get("status") != status:
+                continue
+            out.append(ms)
+        return out
+
+    o.repo.list_milestones.side_effect = list_milestones
+
+    create_milestone_state = {"calls": 0}
+
+    def create_milestone_side_effect(kw):
+        # Simulate a between-writes crash: the repo_setup milestone's DB write
+        # (or the process) fails on the FIRST advance. The URL
+        # _update_workflow already committed before this call. Use a TRANSIENT
+        # token ("connection reset") so advance()'s exception handler keeps
+        # status="preparing" + bumps transient_retry_count, letting the second
+        # advance re-enter _do_preparation (a non-transient raise would
+        # mark_failed and the second advance no-ops at the status guard — a
+        # false pass). The milestone is NOT appended to the store (the write
+        # never committed).
+        create_milestone_state["calls"] += 1
+        if (
+            kw.get("milestone_type") == "repo_setup"
+            and kw.get("status") == "completed"
+            and create_milestone_state["calls"] == 1
+        ):
+            raise GitHubOpsError("connection reset during milestone write")
+        milestone_store.append(dict(kw))
+        return dict(kw)
+
+    o.repo.create_milestone.side_effect = create_milestone_side_effect
+
+    persisted_updates: list[dict] = []
+    real_update = o._update_workflow
+
+    def recording_update(updates):
+        persisted_updates.append(dict(updates))
+        # project_repo_url checkpoints survive across re-entry — reflect the
+        # write into the workflow dict the next get_workflow() returns.
+        merged = dict(o.repo.get_workflow.return_value)
+        merged.update(updates)
+        o.repo.get_workflow.return_value = merged
+        return real_update(updates)
+
+    o._update_workflow = recording_update  # type: ignore[method-assign]
+
+    # gh.create_repo returns a resolved URL. create_worktree succeeds (we are
+    # only exercising the between-writes milestone crash, not a branch crash).
+    fake_gh = MagicMock(name="gh")
+    fake_gh.create_repo.return_value = {"url": "https://github.com/o/r"}
+    fake_gh.create_issue.return_value = {"number": 4242, "url": "https://x/4242"}
+
+    def run_git(args, **kw):
+        rc = MagicMock(returncode=0, stdout="", stderr="")
+        if "show-ref" in args:
+            rc.returncode = 1
+        elif "rev-parse" in args:
+            rc.stdout = "deadbeef"
+        return rc
+
+    fake_gh._run_git.side_effect = run_git
+    fake_gh.create_worktree.return_value = {"path": "/srv/open-ace/.worktrees/wf-accept"}
+    fake_gh.list_worktrees.return_value = []
+    fake_gh.path_exists_as_user.return_value = False
+
+    with (
+        patch.object(o, "_get_gh", return_value=fake_gh),
+        patch("app.modules.workspace.autonomous.orchestrator.GitHubOps", return_value=fake_gh),
+    ):
+        # First advance: create_repo + URL _update_workflow commits, then
+        # _create_milestone(repo_setup) raises (transient) → status stays
+        # "preparing", transient_retry_count bumped.
+        o.advance()
+        # Second advance: re-entry. The repo_setup milestone NEVER committed,
+        # but project_repo_url holds the resolved URL — the URL gate must skip
+        # create_repo.
+        o.advance()
+
+    # The URL WAS persisted on the first advance (before the milestone crash).
+    persisted_urls = [
+        u.get("project_repo_url") for u in persisted_updates if "project_repo_url" in u
+    ]
+    assert "https://github.com/o/r" in persisted_urls, (
+        "project_repo_url must be immediate-checkpointed after create_repo "
+        f"succeeds; persisted updates were {persisted_updates!r}"
+    )
+
+    # create_repo MUST have run exactly once across both advances. On the
+    # milestone-gate code (96988738) the second advance sees no repo_setup
+    # milestone → re-enters the else → create_repo(name=<resolved URL>) AGAIN
+    # → call_count 2. The URL-shape gate (the fix) keeps it at 1 even though
+    # the milestone is absent.
+    assert fake_gh.create_repo.call_count == 1, (
+        "create_repo must be gated on the resolved project_repo_url shape "
+        "(http(s)://), so a between-writes crash (URL committed, milestone "
+        "not) still gates re-entry. got call_count="
+        f"{fake_gh.create_repo.call_count} (expected 1). "
+        f"create_repo calls: {fake_gh.create_repo.call_args_list!r}"
+    )
+
+
 # ── 9. test_failed_phase_result_preserves_error_message (P2) ────────────────
 #
 # #2044 Phase B review regression: when a workflow re-entered advance() after a
