@@ -7,7 +7,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '@/store';
 import { useAuth } from '@/hooks';
 import { Button } from '@/components/common';
-import { ssoApi, tenantApi, type SSOProvider } from '@/api';
+import { ssoApi, systemApi, type SSOProvider } from '@/api';
 import type { Language } from '@/types';
 import './Login.css';
 
@@ -177,16 +177,15 @@ export const Login: React.FC = () => {
     setShowDefaultCredentials(isDev);
   }, [navigate, isAuthenticated, language]);
 
-  // Fetch SSO configuration for default tenant (tenant_id = 1)
+  // Check if SSO is enabled at system level
   useEffect(() => {
     const fetchSSOConfig = async () => {
       setSsoLoading(true);
       try {
-        // Get default tenant settings
-        const tenant = await tenantApi.getTenant(1);
-        const settings = tenant.settings as Record<string, unknown>;
+        // Check if SSO is enabled at system level
+        const { sso_enabled } = await systemApi.getSSOEnabled();
 
-        if (settings?.sso_enabled) {
+        if (sso_enabled) {
           // Get enabled SSO providers (all tenants)
           const result = await ssoApi.getProviders();
           const enabledProviders = result.registered.filter((p) => p.is_enabled);
