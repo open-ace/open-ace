@@ -7,6 +7,7 @@ import { useLanguage } from '@/store';
 import { t } from '@/i18n';
 import { Button, TextInput, Modal, Badge, useToast, useConfirm } from '@/components/common';
 import { mappingRulesApi, type MappingRule } from '@/api/mappingRules';
+import type { ApiError } from '@/types';
 
 // Match types with display names
 const MATCH_TYPES = [
@@ -73,7 +74,12 @@ export const MappingRulesEditor: React.FC<MappingRulesEditorProps> = ({
       onChange?.();
     } catch (err) {
       console.error('Failed to generate default rules:', err);
-      toast.error(language === 'zh' ? '生成默认规则失败' : 'Failed to generate default rules');
+      const apiError = err as ApiError;
+      if (apiError.status === 401) {
+        toast.error(language === 'zh' ? '请先登录' : 'Please log in first');
+      } else {
+        toast.error(language === 'zh' ? '生成默认规则失败' : 'Failed to generate default rules');
+      }
     } finally {
       setIsGenerating(false);
     }
@@ -110,7 +116,12 @@ export const MappingRulesEditor: React.FC<MappingRulesEditorProps> = ({
       toast.success(language === 'zh' ? '规则添加成功' : 'Rule added successfully');
     } catch (err) {
       console.error('Failed to add rule:', err);
-      toast.error(language === 'zh' ? '规则添加失败' : 'Failed to add rule');
+      const apiError = err as ApiError;
+      if (apiError.status === 401) {
+        toast.error(language === 'zh' ? '请先登录' : 'Please log in first');
+      } else {
+        toast.error(language === 'zh' ? '规则添加失败' : 'Failed to add rule');
+      }
     } finally {
       setIsAdding(false);
     }
