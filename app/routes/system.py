@@ -10,7 +10,6 @@ REST API endpoints for system status and administration:
 
 import logging
 from datetime import datetime, timezone
-from typing import Any
 
 from flask import Blueprint, g, jsonify, request
 
@@ -379,14 +378,17 @@ def update_system_settings():
                 errors.append(f"Failed to update {key}")
 
         if errors:
-            return jsonify(
-                {
-                    "success": False,
-                    "error": "Failed to update some settings",
-                    "details": errors,
-                    "updated": updated_keys,
-                }
-            ), 500
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": "Failed to update some settings",
+                        "details": errors,
+                        "updated": updated_keys,
+                    }
+                ),
+                500,
+            )
 
         return jsonify(
             {
