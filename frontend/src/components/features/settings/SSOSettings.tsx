@@ -494,7 +494,7 @@ export const SSOSettings: React.FC = () => {
               </div>
               <small className="text-muted d-block mt-1">
                 <i className="bi bi-info-circle me-1" />
-                {t('ssoGlobalHint', language)}
+                {t('ssoSystemSettingHint', language)}
               </small>
             </div>
             <div className="col-md-6">
