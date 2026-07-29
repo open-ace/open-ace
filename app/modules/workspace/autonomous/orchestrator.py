@@ -5341,9 +5341,21 @@ class AutonomousOrchestrator:
         """Assemble the service bundle injected into a phase handler.
 
         ``git_workspace`` (T5) and ``sandbox`` (T13) are wired via lazy
-        properties so a handler that needs them always gets a live instance;
-        ``gh`` may be ``None`` until the run path constructs ``GitHubOps``.
+        properties so a handler that needs them always gets a live instance.
+        ``gh`` is bound here too: ``__init__`` leaves ``self._gh = None`` and
+        the scheduler builds a fresh orchestrator each tick, so the registry
+        production path (advance → resolve_phase_handler → _dispatch_phase →
+        here) would otherwise hand a migrated handler (phases/*.handle) a
+        ``None`` gh. The thin test-compat shims (_do_development/_do_pr_review)
+        used to bind their own ``self._gh`` first, masking the gap, but the
+        registry handlers read ``deps.gh`` directly. ``_get_gh`` is the same
+        lazy binder those shims call; it's safe whenever ``self.workflow`` is
+        truthy (it is during advance) and falls back to ``project_path`` when
+        the worktree doesn't exist yet, so it's correct for preparation too
+        (#2044 Phase B review P1-a).
         """
+        if self._gh is None:
+            self._gh = self._get_gh()
         return PhaseDeps(
             host=self,
             gh=self._gh,

@@ -395,3 +395,197 @@ def test_phase_handler_uses_services_instead_of_reimplementing_evidence_or_git_l
                         "subprocess",
                         "requests",
                     ), f"{src.name}: handlers must not import {alias.name} directly"
+
+
+# ── 7. test_fresh_orchestrator_binds_gh_for_registry_handlers (P1-a) ─────────
+#
+# #2044 Phase B review regression: a FRESH orchestrator (real __init__ via
+# _make_orchestrator, NOT __new__) calling advance() WITHOUT replacing the real
+# registry handler must hand that handler a LIVE GitHubOps (deps.gh), not None.
+#
+# Root cause: __init__ sets self._gh = None and the scheduler's _advance_single
+# builds a fresh orchestrator each tick. The production path
+# advance() → resolve_phase_handler → _dispatch_phase → _build_phase_deps used
+# gh=self._gh (None). The 3 test-compat shims (_do_development/_do_pr_review)
+# did their own self._gh = self._get_gh() before reading it, so they masked the
+# bug, but the REGISTRY production path (phases/*.handle) reads deps.gh directly
+# → development crashed at gh.get_current_branch(); pr_review's branch probe
+# swallowed the exception and mislabelled the workflow "No Changes Detected".
+#
+# Fix: _build_phase_deps binds gh lazily via _get_gh() when self._gh is None.
+
+
+def test_fresh_orchestrator_binds_gh_for_registry_handlers():
+    from app.modules.workspace.autonomous import phases as _phases
+    from app.modules.workspace.autonomous.github_ops import GitHubOps
+
+    o = _make_orchestrator(_active_workflow(phase="development"))
+    # Stub ONLY the worktree healers that run before dispatch. Do NOT stub
+    # _get_gh — the bug is exactly that _build_phase_deps never calls it.
+    for name in ("_ensure_worktree", "_reconcile_worktree_transition"):
+        setattr(o, name, MagicMock(name=name))
+
+    # Sentinel live GitHubOps the lazy binder should produce when self.workflow
+    # is truthy (it is during advance). Patching _get_gh isolates the contract
+    # from the real filesystem bind.
+    sentinel_gh = MagicMock(spec=GitHubOps, name="bound_gh")
+    captured: dict = {}
+
+    def capturing_handler(ctx, deps):
+        captured["gh"] = deps.gh
+        return PhaseResult.completed(next_phase="pr_review", next_status="pr_review")
+
+    saved = _phases.PHASE_HANDLERS.get("development")
+    _phases.PHASE_HANDLERS["development"] = capturing_handler
+    try:
+        with patch.object(o, "_get_gh", return_value=sentinel_gh):
+            o.advance()
+    finally:
+        if saved is None:
+            _phases.PHASE_HANDLERS.pop("development", None)
+        else:
+            _phases.PHASE_HANDLERS["development"] = saved
+
+    # The registry handler MUST receive a live GitHubOps, not None. On the
+    # unfixed code deps.gh is None because _build_phase_deps uses self._gh
+    # (set to None by __init__) instead of binding via _get_gh().
+    assert captured.get("gh") is sentinel_gh, (
+        "fresh orchestrator must bind deps.gh before dispatching a registry "
+        f"handler; got {captured.get('gh')!r}"
+    )
+
+
+# ── 8. test_preparation_checkpoints_issue_id_before_branch_raise (P1-b) ──────
+#
+# #2044 Phase B review regression: in _do_preparation, when create_issue
+# succeeds but a later step (branch/worktree creation) raises, the
+# github_issue_number MUST already be persisted so the next scheduler tick does
+# NOT call create_issue again (duplicate issue). Pre-migration these ids were
+# written immediately after each side effect; the PhaseResult migration
+# deferred them into a workflow_patch dict that's only committed at the end —
+# so a raise after issue creation lost the number. The #2044 invariant ALLOWS
+# immediate bookkeeping-field writes (only phase/status must flow through
+# PhaseResult), so external-resource ids are immediate-checkpointed.
+
+
+def test_preparation_checkpoints_issue_id_before_branch_raise():
+    from app.modules.workspace.autonomous.github_ops import GitHubOpsError
+
+    # No github_issue_number yet, requirements_text present → issue gets created.
+    wf = _active_workflow(
+        phase="preparation",
+        status="preparing",
+        is_new_project=False,
+        branch_strategy="worktree",
+        requirements_text="build the thing",
+        github_issue_number=None,
+    )
+    wf["project_path"] = "/srv/open-ace"
+
+    o = _make_orchestrator(wf)
+    # Stub the git/workspace healers and event emission that aren't under test.
+    o._reconcile_worktree_transition = MagicMock(name="reconcile")
+    o._emit = MagicMock(name="_emit")
+    o._create_milestone = MagicMock(name="_create_milestone")
+
+    # gh.create_issue returns a number; the branch-creation path raises.
+    fake_gh = MagicMock(name="gh")
+    fake_gh.create_issue.return_value = {"number": 4242, "url": "https://x/4242"}
+
+    # Drive every _run_git the branch-creation path makes (fetch, worktree
+    # prune, two show-ref probes for surviving branches, rev-parse base) so the
+    # code reaches create_worktree, which raises a transient blip AFTER issue
+    # creation succeeded.
+    def run_git(args, **kw):
+        rc = MagicMock(returncode=0, stdout="", stderr="")
+        if "show-ref" in args:
+            rc.returncode = 1  # branch + remote don't exist → create fresh
+        elif "rev-parse" in args:
+            rc.stdout = "deadbeef"
+        return rc
+
+    fake_gh._run_git.side_effect = run_git
+    fake_gh.list_worktrees.return_value = []
+    fake_gh.path_exists_as_user.return_value = False
+    fake_gh.create_worktree.side_effect = GitHubOpsError("transient branch blip")
+
+    persisted_updates: list[dict] = []
+    real_update = o._update_workflow
+
+    def recording_update(updates):
+        persisted_updates.append(dict(updates))
+        return real_update(updates)
+
+    o._update_workflow = recording_update  # type: ignore[method-assign]
+
+    with (
+        patch.object(o, "_get_gh", return_value=fake_gh),
+        patch("app.modules.workspace.autonomous.orchestrator.GitHubOps", return_value=fake_gh),
+    ):
+        # advance() runs preparation then its exception handler on the raise.
+        with pytest.raises(GitHubOpsError):
+            o.advance()
+
+    # The github_issue_number MUST have been persisted BEFORE the raise. On the
+    # unfixed code the number sat in the deferred workflow_patch dict that was
+    # never committed (the raise skipped _commit_phase_result), so a re-entry
+    # would see github_issue_number=None and call create_issue again.
+    persisted_numbers = [
+        u.get("github_issue_number") for u in persisted_updates if "github_issue_number" in u
+    ]
+    assert 4242 in persisted_numbers, (
+        "github_issue_number must be persisted immediately after create_issue "
+        "succeeds so a later raise cannot cause a duplicate issue on re-entry; "
+        f"persisted updates were {persisted_updates!r}"
+    )
+
+
+# ── 9. test_failed_phase_result_preserves_error_message (P2) ────────────────
+#
+# #2044 Phase B review regression: when a workflow re-entered advance() after a
+# transient retry (transient_retry_count > 0) and the phase then returns
+# PhaseResult.failed, the just-written error_message MUST survive. The post-
+# dispatch transient-reset block unconditionally ran
+# _update_workflow({"error_message": ""}) on a non-pause result, wiping the
+# failure reason and leaving an undiagnosable status=failed. The pause outcome
+# was already gated (returns early); failed is now gated too.
+
+
+def test_failed_phase_result_preserves_error_message():
+    from app.modules.workspace.autonomous import phases as _phases
+
+    wf = _active_workflow(phase="development", transient_retry_count=2)
+    o = _make_orchestrator(wf)
+    # Stub the worktree healers; this test is about the post-dispatch reset.
+    for name in ("_ensure_worktree", "_reconcile_worktree_transition"):
+        setattr(o, name, MagicMock(name=name))
+
+    def failing_handler(ctx, deps):
+        return PhaseResult.failed(structured_error={"message": "boom"})
+
+    saved = _phases.PHASE_HANDLERS.get("development")
+    _phases.PHASE_HANDLERS["development"] = failing_handler
+    try:
+        o.advance()
+    finally:
+        if saved is None:
+            _phases.PHASE_HANDLERS.pop("development", None)
+        else:
+            _phases.PHASE_HANDLERS["development"] = saved
+
+    # The failed PhaseResult committed status=failed + error_message="boom" via
+    # _commit_phase_result. The post-dispatch transient-reset block must NOT
+    # have run _update_workflow({"error_message": ""}) after it — that would
+    # wipe the failure reason and leave an undiagnosable status=failed. The
+    # LAST persisted update_workflow write must therefore still carry "boom".
+    all_updates = [c.args[1] for c in o.repo.update_workflow.call_args_list]
+    failed_writes = [u for u in all_updates if u.get("status") == "failed"]
+    assert failed_writes, f"expected a status=failed write; got {all_updates!r}"
+    assert failed_writes[-1]["error_message"] == "boom"
+    # And no subsequent write cleared it (the bug: transient-reset appended
+    # {"error_message": ""} after the failed write).
+    last = all_updates[-1]
+    assert last.get("error_message") != "", (
+        "transient-retry reset wiped the failed PhaseResult's error_message; "
+        f"final update was {last!r}, all updates {all_updates!r}"
+    )
