@@ -99,7 +99,7 @@ class TestGetIssueFailureHandling:
         orch._gh = mock_gh
 
         with pytest.raises(GitHubOpsError, match="HTTP 422"):
-            orch._do_preparation(wf)
+            orch._do_preparation(orch._build_workflow_context(wf), orch._build_phase_deps())
 
         # Should create failed milestone with correct parameters
         milestone_calls = mock_repo.create_milestone.call_args_list

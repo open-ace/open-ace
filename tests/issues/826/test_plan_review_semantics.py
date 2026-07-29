@@ -270,7 +270,10 @@ class TestPlanningIntegration:
 
         orch._runner.run_agent_task.side_effect = [plan_result, review_result]
 
-        orch._do_planning(wf)
+        ctx = orch._build_workflow_context(wf)
+        result = orch._do_planning(ctx, orch._build_phase_deps())
+        if result is not None:
+            orch._commit_phase_result(result)
 
         # One round of _do_planning = 1 plan + 1 review = 2 agent calls
         assert orch._runner.run_agent_task.call_count == 2
@@ -316,7 +319,10 @@ class TestPlanningIntegration:
 
         orch._runner.run_agent_task.side_effect = [plan_result, review_result]
 
-        orch._do_planning(wf)
+        ctx = orch._build_workflow_context(wf)
+        result = orch._do_planning(ctx, orch._build_phase_deps())
+        if result is not None:
+            orch._commit_phase_result(result)
 
         # 1 plan + 1 review = 2 agent calls, no refinement round
         assert orch._runner.run_agent_task.call_count == 2
@@ -373,7 +379,10 @@ class TestPlanningIntegration:
         )
         orch._runner.run_agent_task.side_effect = [plan_result, review_result, refine_result]
 
-        orch._do_planning(wf)
+        ctx = orch._build_workflow_context(wf)
+        result = orch._do_planning(ctx, orch._build_phase_deps())
+        if result is not None:
+            orch._commit_phase_result(result)
 
         # Blocked: status failed (not developing), no plan_finalized, no dev move.
         status_updates = [

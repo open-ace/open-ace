@@ -160,6 +160,11 @@ def test_manual_pause_interrupts_backoff_before_second_agent_attempt():
 
 
 def test_advance_treats_manual_pause_as_control_flow():
+    # Phase B #2044 T12: development migrated to phases/development.py and is
+    # resolved via the PHASE_HANDLERS registry (the registry caches the fn ref
+    # at import — patch PHASE_HANDLERS directly, not _do_development).
+    from app.modules.workspace.autonomous import phases as _phases
+
     orchestrator = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
     orchestrator._workflow_id = "workflow-1"
     orchestrator.repo = MagicMock()
@@ -170,9 +175,25 @@ def test_advance_treats_manual_pause_as_control_flow():
         "worktree_path": "/tmp/worktree",
     }
     orchestrator._ensure_worktree = MagicMock()
-    orchestrator._do_development = MagicMock(side_effect=WorkflowPaused("manual pause"))
-
-    orchestrator.advance()
+    # T4 made _dispatch_phase build (ctx, deps) on every advance, which reads
+    # these orchestrator attrs before the phase handler runs. The __new__
+    # construction above skips __init__ (which sets them on the production
+    # path), so set the ones the dispatch path touches.
+    orchestrator._session_usage_offsets = {}
+    orchestrator._shutdown_requested = threading.Event()
+    orchestrator._gh = None
+    orchestrator._runner = MagicMock()
+    orchestrator.emitter = MagicMock()
+    dev_handle_spy = MagicMock(side_effect=WorkflowPaused("manual pause"))
+    saved = _phases.PHASE_HANDLERS.get("development")
+    _phases.PHASE_HANDLERS["development"] = dev_handle_spy
+    try:
+        orchestrator.advance()
+    finally:
+        if saved is None:
+            _phases.PHASE_HANDLERS.pop("development", None)
+        else:
+            _phases.PHASE_HANDLERS["development"] = saved
 
     assert not any(
         call.args[1].get("status") == "failed"

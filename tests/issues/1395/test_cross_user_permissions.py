@@ -244,7 +244,10 @@ class TestPreparationWorktreeCleanup:
         wf = _make_workflow()
         orch, _repo = _make_orchestrator(wf)
 
-        orch._do_preparation(wf)
+        ctx = orch._build_workflow_context(wf)
+        result = orch._do_preparation(ctx, orch._build_phase_deps())
+        if result is not None:
+            orch._commit_phase_result(result)
 
         mock_gh.remove_worktree.assert_called_once_with(wt_path)
         # shutil.rmtree must NOT have been invoked on the orchestrator: the
@@ -261,7 +264,10 @@ class TestPreparationWorktreeCleanup:
         wf = _make_workflow()
         orch, _repo = _make_orchestrator(wf)
 
-        orch._do_preparation(wf)
+        ctx = orch._build_workflow_context(wf)
+        result = orch._do_preparation(ctx, orch._build_phase_deps())
+        if result is not None:
+            orch._commit_phase_result(result)
 
         mock_gh.remove_worktree.assert_not_called()
         mock_gh.path_exists_as_user.assert_called()
@@ -276,7 +282,10 @@ class TestPreparationWorktreeCleanup:
         wf = _make_workflow()
         orch, _repo = _make_orchestrator(wf)
 
-        orch._do_preparation(wf)
+        ctx = orch._build_workflow_context(wf)
+        result = orch._do_preparation(ctx, orch._build_phase_deps())
+        if result is not None:
+            orch._commit_phase_result(result)
 
         mock_gh.remove_worktree.assert_not_called()
         mock_gh.create_worktree.assert_called_once()
@@ -297,7 +306,10 @@ class TestPreparationWorktreeCleanup:
         orch, _repo = _make_orchestrator(wf)
 
         # Must not raise — preparation continues to create_worktree.
-        orch._do_preparation(wf)
+        ctx = orch._build_workflow_context(wf)
+        result = orch._do_preparation(ctx, orch._build_phase_deps())
+        if result is not None:
+            orch._commit_phase_result(result)
         mock_gh.create_worktree.assert_called_once()
 
     @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
@@ -318,7 +330,10 @@ class TestPreparationWorktreeCleanup:
         wf = _make_workflow()
         orch, _repo = _make_orchestrator(wf)
 
-        orch._do_preparation(wf)
+        ctx = orch._build_workflow_context(wf)
+        result = orch._do_preparation(ctx, orch._build_phase_deps())
+        if result is not None:
+            orch._commit_phase_result(result)
 
         mock_gh.add_worktree.assert_called_once()
         mock_gh.create_worktree.assert_not_called()
