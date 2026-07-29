@@ -187,8 +187,8 @@ export const Login: React.FC = () => {
         const settings = tenant.settings as Record<string, unknown>;
 
         if (settings?.sso_enabled) {
-          // Get enabled SSO providers
-          const result = await ssoApi.getProviders(1);
+          // Get enabled SSO providers (all tenants)
+          const result = await ssoApi.getProviders();
           const enabledProviders = result.registered.filter((p) => p.is_enabled);
           setSsoProviders(enabledProviders);
         }
