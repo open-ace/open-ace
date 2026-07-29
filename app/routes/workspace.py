@@ -9,6 +9,7 @@ API endpoints for workspace functionality including:
 - Collaboration features
 """
 
+import base64
 import logging
 import os
 from datetime import datetime, timedelta, timezone
@@ -49,6 +50,90 @@ _SESSION_REFRESH_THRESHOLD_MINUTES = 10
 # Issue #1897: Feature flag for prompt ownership enforcement
 # Set ENFORCE_PROMPT_OWNERSHIP=false for gradual rollout (logs only, no rejection)
 _ENFORCE_PROMPT_OWNERSHIP = os.environ.get("ENFORCE_PROMPT_OWNERSHIP", "true").lower() == "true"
+
+
+# Issue #2136: Project path encoding/decoding functions
+# New format: b64:<url-safe-base64-encoded-path>
+# Old format (backward compatible): -home-user-project (replace / with -)
+_B64_PREFIX = "b64:"
+
+
+def encode_project_path(project_path: str) -> str:
+    """Encode a project path to a URL-safe string.
+
+    Args:
+        project_path: The absolute path to encode (e.g., /home/user/demo-project)
+
+    Returns:
+        Encoded string with b64: prefix for new format,
+        or legacy format for backward compatibility.
+
+    Examples:
+        >>> encode_project_path("/home/user/demo-project")
+        'b64:L2hvbWUvdXNlci9kZW1vLXByb2plY3Q'
+        >>> encode_project_path("")  # Empty path
+        ''
+    """
+    if not project_path:
+        return ""
+
+    # Normalize Windows paths: /C:/Users/... -> C:/Users/...
+    normalized_path = project_path
+    if normalized_path.startswith("/") and len(normalized_path) > 2:
+        # Check for Windows path pattern: /X:/...
+        if normalized_path[2] == ":" and normalized_path[1].isalpha():
+            normalized_path = normalized_path[1:]  # Remove leading /
+
+    # URL-safe Base64 encoding (no padding)
+    encoded = base64.urlsafe_b64encode(normalized_path.encode("utf-8")).decode("ascii")
+    # Remove padding for cleaner URLs
+    encoded = encoded.rstrip("=")
+    return f"{_B64_PREFIX}{encoded}"
+
+
+def decode_project_name(encoded_name: str) -> str:
+    """Decode an encoded project name back to the original path.
+
+    Supports both new (b64:) and legacy (-home-user-project) formats.
+
+    Args:
+        encoded_name: The encoded project name
+
+    Returns:
+        The original project path, or empty string if decoding fails
+
+    Examples:
+        >>> decode_project_name("b64:L2hvbWUvdXNlci9kZW1vLXByb2plY3Q")
+        '/home/user/demo-project'
+        >>> decode_project_name("-home-user-demo-project")  # Legacy format
+        '/home/user/demo-project'
+        >>> decode_project_name("")  # Empty
+        ''
+    """
+    if not encoded_name:
+        return ""
+
+    # New format: b64:<base64>
+    if encoded_name.startswith(_B64_PREFIX):
+        try:
+            b64_data = encoded_name[len(_B64_PREFIX) :]
+            # Add back padding if needed
+            padding = 4 - (len(b64_data) % 4)
+            if padding != 4:
+                b64_data += "=" * padding
+            decoded = base64.urlsafe_b64decode(b64_data).decode("utf-8")
+            return decoded
+        except Exception as e:
+            logger.warning(f"Failed to decode project name '{encoded_name}': {e}")
+            return ""
+
+    # Legacy format: -home-user-project (backward compatible)
+    # Convert back: -home-user-demo-project -> /home/user/demo-project
+    if encoded_name.startswith("-"):
+        return "/" + encoded_name[1:].replace("-", "/")
+
+    # Not encoded, return as-is
+    return encoded_name
 
 
 def _check_prompt_ownership(
@@ -1042,11 +1127,8 @@ def get_remote_projects():
         for r in results:
             project_path = r.get("project_path")
             if project_path:
-                # Convert path to encoded project name format
-                # /home/user/demo-project -> -home-user-demo-project
-                encoded_name = (
-                    project_path.replace("/", "-") if project_path.startswith("/") else project_path
-                )
+                # Issue #2136: Use new encoding format (b64:<base64>)
+                encoded_name = encode_project_path(project_path)
 
                 machine_id = r.get("machine_id")
                 machine_name = machine_name_map.get(machine_id) if machine_id else None
@@ -1530,15 +1612,24 @@ def restore_session(session_id):
                     )
 
         # Generate encodedProjectName based on tool
+        # Issue #2136: Use new encoding format (b64:<base64>)
         if normalize_tool_name(tool_name) in ["qwen", "claude"]:
             # project_path may be actual path or encoded name
-            # Need to convert actual path to encoded name if necessary
-            # Format: /home/rhuang/open-ace -> -home-rhuang-open-ace
-            if project_path and project_path.startswith("/"):
-                # Actual path, replace / with - (first / becomes leading -)
-                encoded_project_name = project_path.replace("/", "-")
+            if project_path:
+                if project_path.startswith("/"):
+                    # Actual path, encode using new format
+                    encoded_project_name = encode_project_path(project_path)
+                elif project_path.startswith(_B64_PREFIX):
+                    # Already encoded with new format
+                    encoded_project_name = project_path
+                else:
+                    # Legacy format or empty - try to decode then re-encode
+                    decoded = decode_project_name(project_path)
+                    if decoded:
+                        encoded_project_name = encode_project_path(decoded)
+                    else:
+                        encoded_project_name = project_path
             else:
-                # Already encoded or empty
                 encoded_project_name = project_path
         elif tool_name == "openclaw":
             # project_path is the agent_name (e.g., "main")
