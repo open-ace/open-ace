@@ -69,8 +69,7 @@ export const SSOSettings: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // SSO settings state
-  const [ssoEnabled, setSsoEnabled] = useState(false);
+  // SSO settings state (autoProvision is tenant-level, sso_enabled is system-level)
   const [autoProvision, setAutoProvision] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -172,7 +171,7 @@ export const SSOSettings: React.FC = () => {
       .getTenant(effectiveTenantId)
       .then((tenant) => {
         const settings = tenant.settings as Record<string, unknown>;
-        setSsoEnabled(Boolean(settings?.sso_enabled ?? false));
+        // sso_enabled is now a system-level setting, not tenant-level
         setAutoProvision(Boolean(settings?.auto_provision_users ?? false));
       })
       .catch((err) => {
@@ -217,8 +216,9 @@ export const SSOSettings: React.FC = () => {
 
     setIsSaving(true);
     try {
+      // sso_enabled is now a system-level setting
+      // Only save auto_provision_users at tenant level
       await tenantApi.updateSettings(effectiveTenantId, {
-        sso_enabled: ssoEnabled,
         auto_provision_users: autoProvision,
       });
       success(t('settingsSaved', language));
@@ -460,25 +460,11 @@ export const SSOSettings: React.FC = () => {
       {/* SSO Configuration Form */}
       <Card title={t('ssoConfiguration', language)} className="mb-4">
         <form className="sso-form" onSubmit={handleSaveSettings}>
+          <div className="alert alert-info mb-3" role="alert">
+            <i className="bi bi-info-circle me-2" />
+            {t('ssoSystemSettingHint', language)}
+          </div>
           <div className="row g-3">
-            <div className="col-md-6">
-              <div className="form-check form-switch">
-                <input
-                  className="form-check-input"
-                  type="checkbox"
-                  id="ssoEnabled"
-                  aria-describedby="ssoEnabledDesc"
-                  checked={ssoEnabled}
-                  onChange={(e) => setSsoEnabled(e.target.checked)}
-                />
-                <label className="form-check-label" htmlFor="ssoEnabled">
-                  {t('enableSSO', language)}
-                </label>
-                <span id="ssoEnabledDesc" className="visually-hidden">
-                  {t('ssoEnabledDesc', language)}
-                </span>
-              </div>
-            </div>
             <div className="col-md-6">
               <div className="form-check form-switch">
                 <input
@@ -496,6 +482,10 @@ export const SSOSettings: React.FC = () => {
                   {t('autoProvisionDesc', language)}
                 </span>
               </div>
+              <small className="text-muted d-block mt-1">
+                <i className="bi bi-info-circle me-1" />
+                {t('autoProvisionHint', language)}
+              </small>
             </div>
           </div>
           <div className="mt-3">
