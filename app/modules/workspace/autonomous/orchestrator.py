@@ -5713,6 +5713,19 @@ class AutonomousOrchestrator:
         PhaseResult.failed here instead would skip that handler and drop the
         ``error`` event — a behaviour change. Re-raising preserves it exactly.
 
+        Irreversible external-resource ids (``project_repo_url`` after
+        create_repo, ``github_issue_number`` after create_issue) and their
+        milestones are immediate-checkpointed via ``_update_workflow`` /
+        ``_create_milestone`` right after each creation succeeds, NOT deferred
+        into ``workflow_patch`` / ``milestone_events``. A later raise (e.g.
+        branch/worktree creation) must not lose them, or re-entry would call
+        create_repo/create_issue again — minting a duplicate repo / issue. The
+        #2044 invariant allows immediate bookkeeping-field writes (only
+        phase/status must travel through PhaseResult), so this is the correct
+        split. Branch/worktree ids DO stay deferred — their creation is
+        idempotent on re-entry (the fork fast-path / _ensure_worktree probes for
+        a surviving branch). (#2044 Phase B review P1-b.)
+
         Until T10-T12 extract phases into phases/*.py, gh/repo stay on self;
         deps here carries the host (emit_phase_change) for this thin phase.
         """
@@ -5844,18 +5857,23 @@ class AutonomousOrchestrator:
                     description=wf.get("title", ""),
                 )
                 repo_url = repo_data.get("url", "")
-                milestone_events.append(
-                    {
-                        "phase": "preparation",
-                        "milestone_type": "repo_setup",
-                        "status": "completed",
-                        "title": "Repository created",
-                        "result_summary": f"Created repo: {repo_url}",
-                    }
-                )
-                workflow_patch["project_repo_url"] = repo_url
                 project_path = project_path or "."
                 self._gh = GitHubOps(project_path, system_account=system_account)
+                # The repo URL is an irreversible external-resource id: a later
+                # raise (e.g. branch creation) must not lose it, or re-entry
+                # would call create_repo again and mint a NEW repo. #2044 allows
+                # immediate bookkeeping-field writes (only phase/status must
+                # travel through PhaseResult), so checkpoint the id + its
+                # milestone here rather than deferring into workflow_patch /
+                # milestone_events. (#2044 Phase B review P1-b.)
+                self._update_workflow({"project_repo_url": repo_url})
+                self._create_milestone(
+                    phase="preparation",
+                    milestone_type="repo_setup",
+                    status="completed",
+                    title="Repository created",
+                    result_summary=f"Created repo: {repo_url}",
+                )
             except GitHubOpsError as e:
                 # Failure path preserves legacy semantics: record the failed
                 # milestone inline then re-raise so advance()'s exception
@@ -5906,21 +5924,21 @@ class AutonomousOrchestrator:
                     body=requirements_text,
                 )
                 issue_number = issue_data.get("number")
-                # Persist the created issue number to the workflow so downstream
-                # phases (comment posting, timeline header badge, PR body "Closes
-                # #N") can resolve it. Mirrors the parsed-issue branch above.
-                # Without this, wf.github_issue_number stays NULL and every
-                # `wf.get("github_issue_number")` gate silently no-ops (#1194).
-                workflow_patch["github_issue_number"] = issue_number
-                milestone_events.append(
-                    {
-                        "phase": "preparation",
-                        "milestone_type": "issue_created",
-                        "status": "completed",
-                        "title": f"Issue #{issue_number} created",
-                        "github_issue_number": issue_number,
-                        "result_summary": issue_data.get("url", ""),
-                    }
+                # The issue number is an irreversible external-resource id: a
+                # later raise (e.g. branch creation) must not lose it, or
+                # re-entry would call create_issue again and open a DUPLICATE
+                # issue. #2044 allows immediate bookkeeping-field writes (only
+                # phase/status must travel through PhaseResult), so checkpoint
+                # the number + its milestone here rather than deferring into
+                # workflow_patch / milestone_events. (#2044 Phase B review P1-b.)
+                self._update_workflow({"github_issue_number": issue_number})
+                self._create_milestone(
+                    phase="preparation",
+                    milestone_type="issue_created",
+                    status="completed",
+                    title=f"Issue #{issue_number} created",
+                    github_issue_number=issue_number,
+                    result_summary=issue_data.get("url", ""),
                 )
             except GitHubOpsError as e:
                 # Failure path preserves legacy semantics: record the failed

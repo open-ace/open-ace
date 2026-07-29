@@ -522,9 +522,10 @@ def test_preparation_checkpoints_issue_id_before_branch_raise():
         patch.object(o, "_get_gh", return_value=fake_gh),
         patch("app.modules.workspace.autonomous.orchestrator.GitHubOps", return_value=fake_gh),
     ):
-        # advance() runs preparation then its exception handler on the raise.
-        with pytest.raises(GitHubOpsError):
-            o.advance()
+        # advance() runs preparation; the create_worktree raise is caught by
+        # advance()'s own exception handler (→ _mark_failed), so it does NOT
+        # propagate. The point of the test is what was persisted BEFORE that.
+        o.advance()
 
     # The github_issue_number MUST have been persisted BEFORE the raise. On the
     # unfixed code the number sat in the deferred workflow_patch dict that was
