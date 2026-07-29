@@ -5354,7 +5354,7 @@ class AutonomousOrchestrator:
         the worktree doesn't exist yet, so it's correct for preparation too
         (#2044 Phase B review P1-a).
         """
-        if self._gh is None:
+        if self._gh is None and self.repo is not None:
             self._gh = self._get_gh()
         return PhaseDeps(
             host=self,
