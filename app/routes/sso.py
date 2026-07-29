@@ -1545,6 +1545,10 @@ def _create_user_from_sso(sso_user, provider_name: str) -> int | None:
         username = f"{base_username}_{counter}"
         counter += 1
 
+    # Get tenant_id from Provider configuration
+    provider = get_sso_manager().get_provider(provider_name)
+    tenant_id = provider.config.tenant_id if provider and provider.config.tenant_id else 1
+
     # Create user
     try:
         user_id = user_repo.create_user(
@@ -1552,10 +1556,11 @@ def _create_user_from_sso(sso_user, provider_name: str) -> int | None:
             email=sso_user.email or "",
             password_hash="",  # No password for SSO users
             role="user",
+            tenant_id=tenant_id,
         )
 
         if user_id:
-            logger.info(f"Created user {username} from SSO provider {provider_name}")
+            logger.info(f"Created user {username} from SSO provider {provider_name} with tenant_id={tenant_id}")
 
         return user_id
 
