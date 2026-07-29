@@ -245,7 +245,8 @@ def get_all_system_settings() -> dict[str, Any]:
         Dict of all system settings, or empty dict if not configured.
     """
     config = _read_config()
-    return config.get("system_settings", {})
+    settings: dict[str, Any] = config.get("system_settings", {})
+    return settings
 
 
 def is_sso_enabled() -> bool:
