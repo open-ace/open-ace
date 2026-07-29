@@ -756,7 +756,8 @@ export const translations: Record<Language, Translations> = {
     ssoConfiguration: 'SSO Configuration',
     enableSSO: 'Enable SSO',
     ssoEnabledDesc: 'Enable SSO login for users through configured providers',
-    ssoSystemSettingHint: 'SSO enable switch has been moved to System Settings. Please configure SSO providers here.',
+    ssoSystemSettingHint:
+      'SSO enable switch has been moved to System Settings. Please configure SSO providers here.',
     autoProvisionUsers: 'Auto Provision Users',
     autoProvisionDesc: 'Automatically create user accounts on first SSO login',
     autoProvisionHint: 'Automatically create user accounts for this tenant on first SSO login',
@@ -3599,7 +3600,8 @@ export const translations: Record<Language, Translations> = {
     ssoConfiguration: 'SSO構成',
     enableSSO: 'SSO有効化',
     ssoEnabledDesc: '設定済みのSSOプロバイダーを介してユーザーのSSOログインを有効化',
-    ssoSystemSettingHint: 'SSO有効化スイッチはシステム設定に移動しました。ここでSSOプロバイダーを設定してください。',
+    ssoSystemSettingHint:
+      'SSO有効化スイッチはシステム設定に移動しました。ここでSSOプロバイダーを設定してください。',
     autoProvisionUsers: 'ユーザー自動作成',
     autoProvisionDesc: '初回SSOログイン時にユーザーアカウントを自動作成',
     autoProvisionHint: '初回SSOログイン時にこのテナントのユーザーアカウントを自動作成',
@@ -5177,7 +5179,8 @@ export const translations: Record<Language, Translations> = {
     ssoConfiguration: 'SSO 구성',
     enableSSO: 'SSO 활성화',
     ssoEnabledDesc: '구성된 SSO 제공업체를 통해 사용자 SSO 로그인 활성화',
-    ssoSystemSettingHint: 'SSO 활성화 스위치가 시스템 설정으로 이동되었습니다. 여기서 SSO 제공업체를 구성하세요.',
+    ssoSystemSettingHint:
+      'SSO 활성화 스위치가 시스템 설정으로 이동되었습니다. 여기서 SSO 제공업체를 구성하세요.',
     autoProvisionUsers: '사용자 자동 생성',
     autoProvisionDesc: '첫 SSO 로그인 시 사용자 계정 자동 생성',
     autoProvisionHint: '첫 SSO 로그인 시 이 테넌트의 사용자 계정 자동 생성',
