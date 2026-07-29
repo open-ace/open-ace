@@ -1427,6 +1427,41 @@ with open('$config_file', 'w') as f:
     return 0
 }
 
+# Update config.json with server_url for OAuth callbacks
+update_config_server_url() {
+    local config_file="$1"
+    local server_url="$2"
+
+    if [ ! -f "$config_file" ]; then
+        print_warning "Config file not found: $config_file"
+        return 1
+    fi
+
+    print_info "Updating server_url in $config_file..."
+
+    # Use Python to update JSON
+    if command -v python3 &>/dev/null; then
+        python3 -c "
+import json
+with open('$config_file', 'r') as f:
+    config = json.load(f)
+if 'server' not in config:
+    config['server'] = {}
+config['server']['server_url'] = '$server_url'
+with open('$config_file', 'w') as f:
+    json.dump(config, f, indent=2)
+" 2>/dev/null && print_success "server_url configuration updated: $server_url" || {
+            print_warning "Failed to update server_url in config"
+            return 1
+        }
+    else
+        print_warning "Python3 not available, cannot update server_url config"
+        return 1
+    fi
+
+    return 0
+}
+
 # Systemd service settings
 SERVICE_PORT=""       # Web server port (will be read from config or use default)
 SERVICE_HOST="0.0.0.0" # Web server host
@@ -3817,6 +3852,16 @@ do_fresh_install() {
             # Generate and set secret_key for Flask session and API key encryption
             local secret_key="${SECRET_KEY:-$(openssl rand -hex 32)}"
             update_config_secret_key "$config_dir/config.json" "$secret_key"
+
+            # Update server_url for OAuth callbacks
+            # Get server IP address
+            local server_ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+            if [ -z "$server_ip" ]; then
+                server_ip=$(hostname -f 2>/dev/null || hostname 2>/dev/null || echo "localhost")
+            fi
+            # Get web_port from config or use default
+            local web_port=$(python3 -c "import json; c=json.load(open('$config_dir/config.json')); print(c.get('server', {}).get('web_port', 19888))" 2>/dev/null || echo "19888")
+            update_config_server_url "$config_dir/config.json" "http://${server_ip}:${web_port}"
         fi
     fi
 
@@ -4253,6 +4298,13 @@ with open('$config_dir/config.json', 'w') as f:
                     print_info "Restored database URL from backup"
                 fi
             fi
+            # Update server_url for OAuth callbacks
+            local server_ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+            if [ -z "$server_ip" ]; then
+                server_ip=$(hostname -f 2>/dev/null || hostname 2>/dev/null || echo "localhost")
+            fi
+            local web_port=$(python3 -c "import json; c=json.load(open('$config_dir/config.json')); print(c.get('server', {}).get('web_port', 19888))" 2>/dev/null || echo "19888")
+            update_config_server_url "$config_dir/config.json" "http://${server_ip}:${web_port}"
         else
             print_warning "Cannot create config file. Manual setup required."
         fi
@@ -4286,6 +4338,21 @@ with open('$config_dir/config.json', 'w') as f:
             print_warning "Adding missing secret_key to config.json..."
             local secret_key="${SECRET_KEY:-$(openssl rand -hex 32)}"
             update_config_secret_key "$config_dir/config.json" "$secret_key"
+        fi
+    fi
+
+    # Check and update server_url if it's still localhost (for OAuth callbacks)
+    # This check runs for both fresh install and upgrade scenarios
+    if [ -f "$config_dir/config.json" ]; then
+        local current_server_url=$(python3 -c "import json; c=json.load(open('$config_dir/config.json')); print(c.get('server', {}).get('server_url', ''))" 2>/dev/null)
+        if [ -n "$current_server_url" ] && echo "$current_server_url" | grep -q "localhost"; then
+            print_info "Updating server_url from localhost to server IP..."
+            local server_ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+            if [ -z "$server_ip" ]; then
+                server_ip=$(hostname -f 2>/dev/null || hostname 2>/dev/null || echo "localhost")
+            fi
+            local web_port=$(python3 -c "import json; c=json.load(open('$config_dir/config.json')); print(c.get('server', {}).get('web_port', 19888))" 2>/dev/null || echo "19888")
+            update_config_server_url "$config_dir/config.json" "http://${server_ip}:${web_port}"
         fi
     fi
 
