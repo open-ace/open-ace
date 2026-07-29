@@ -71,6 +71,10 @@ vi.mock('@/api', () => ({
     registerProvider: vi.fn(),
     disableProvider: vi.fn(),
   },
+  systemApi: {
+    getSSOEnabled: vi.fn().mockResolvedValue({ sso_enabled: false }),
+    updateSystemSettings: vi.fn().mockResolvedValue({ success: true, updated: ['sso_enabled'] }),
+  },
   tenantApi: {
     getTenant: vi.fn().mockResolvedValue({
       id: 1,
@@ -197,6 +201,14 @@ describe('SSOSettings Accessibility', () => {
   });
 
   describe('aria-describedby attributes', () => {
+    it('should have aria-describedby on SSO Enable checkbox', async () => {
+      render(<SSOSettings />);
+
+      // Wait for component to load
+      const ssoEnabledInput = await screen.findByRole('checkbox', { name: /Enable SSO/i });
+      expect(ssoEnabledInput).toHaveAttribute('aria-describedby', 'ssoEnabledDesc');
+    });
+
     it('should have aria-describedby on Auto Provision checkbox', async () => {
       render(<SSOSettings />);
 
@@ -210,6 +222,11 @@ describe('SSOSettings Accessibility', () => {
     it('should reference valid description element IDs', async () => {
       render(<SSOSettings />);
 
+      const ssoEnabledInput = await screen.findByRole('checkbox', { name: /Enable SSO/i });
+      const ssoDescId = ssoEnabledInput.getAttribute('aria-describedby');
+      const ssoDescElement = document.getElementById(ssoDescId || '');
+      expect(ssoDescElement).toBeInTheDocument();
+
       const autoProvisionInput = await screen.findByRole('checkbox', {
         name: /Auto Provision Users/i,
       });
@@ -220,6 +237,15 @@ describe('SSOSettings Accessibility', () => {
   });
 
   describe('Visually hidden description elements', () => {
+    it('should have SSO description element with visually-hidden class', async () => {
+      render(<SSOSettings />);
+
+      const ssoDescElement = await screen.findByText(
+        /Enable SSO login for users through configured providers/i
+      );
+      expect(ssoDescElement).toHaveClass('visually-hidden');
+    });
+
     it('should have Auto Provision description element with visually-hidden class', async () => {
       render(<SSOSettings />);
 
@@ -232,8 +258,12 @@ describe('SSOSettings Accessibility', () => {
     it('should have description elements with correct IDs', async () => {
       const { container } = render(<SSOSettings />);
 
-      // Wait for checkbox to be rendered
-      await screen.findByRole('checkbox', { name: /Auto Provision Users/i });
+      // Wait for checkboxes to be rendered
+      await screen.findByRole('checkbox', { name: /Enable SSO/i });
+
+      const ssoDescElement = container.querySelector('#ssoEnabledDesc');
+      expect(ssoDescElement).toBeInTheDocument();
+      expect(ssoDescElement?.id).toBe('ssoEnabledDesc');
 
       const autoDescElement = container.querySelector('#autoProvisionDesc');
       expect(autoDescElement).toBeInTheDocument();
@@ -245,10 +275,24 @@ describe('SSOSettings Accessibility', () => {
     it('should render checkboxes with correct initial state', async () => {
       render(<SSOSettings />);
 
+      const ssoEnabledInput = await screen.findByRole('checkbox', { name: /Enable SSO/i });
+      expect(ssoEnabledInput).not.toBeChecked();
+
       const autoProvisionInput = await screen.findByRole('checkbox', {
         name: /Auto Provision Users/i,
       });
       expect(autoProvisionInput).not.toBeChecked();
+    });
+
+    it('should toggle SSO checkbox on click', async () => {
+      render(<SSOSettings />);
+
+      const ssoEnabledInput = await screen.findByRole('checkbox', { name: /Enable SSO/i });
+      fireEvent.click(ssoEnabledInput);
+      expect(ssoEnabledInput).toBeChecked();
+
+      fireEvent.click(ssoEnabledInput);
+      expect(ssoEnabledInput).not.toBeChecked();
     });
 
     it('should toggle Auto Provision checkbox on click', async () => {
@@ -276,6 +320,9 @@ describe('SSOSettings Accessibility', () => {
     it('should have labels properly associated with inputs', async () => {
       render(<SSOSettings />);
 
+      const ssoEnabledInput = await screen.findByRole('checkbox', { name: /Enable SSO/i });
+      expect(ssoEnabledInput).toHaveAttribute('id', 'ssoEnabled');
+
       const autoProvisionInput = await screen.findByRole('checkbox', {
         name: /Auto Provision Users/i,
       });
@@ -287,12 +334,12 @@ describe('SSOSettings Accessibility', () => {
     it('should have description elements positioned after labels', async () => {
       const { container } = render(<SSOSettings />);
 
-      // Wait for checkbox to be rendered
-      await screen.findByRole('checkbox', { name: /Auto Provision Users/i });
+      // Wait for checkboxes to be rendered
+      await screen.findByRole('checkbox', { name: /Enable SSO/i });
 
       // The description span should be in the DOM after the label
       const formCheckDivs = container.querySelectorAll('.form-check');
-      expect(formCheckDivs.length).toBe(1);
+      expect(formCheckDivs.length).toBe(2);
 
       formCheckDivs.forEach((div) => {
         const input = div.querySelector('input');
