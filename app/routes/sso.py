@@ -1560,7 +1560,9 @@ def _create_user_from_sso(sso_user, provider_name: str) -> int | None:
         )
 
         if user_id:
-            logger.info(f"Created user {username} from SSO provider {provider_name} with tenant_id={tenant_id}")
+            logger.info(
+                f"Created user {username} from SSO provider {provider_name} with tenant_id={tenant_id}"
+            )
 
         return user_id
 
