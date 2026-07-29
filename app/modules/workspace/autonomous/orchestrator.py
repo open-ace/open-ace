@@ -5854,45 +5854,65 @@ class AutonomousOrchestrator:
 
         # --- Normal workflow path ---
 
-        # New project: create GitHub repo
+        # New project: create GitHub repo. The block is gated on the
+        # repo_setup milestone so re-entry is idempotent — is_new_project stays
+        # True across re-entry, but the immediate-checkpointed repo_setup
+        # milestone (written below after create_repo succeeds) tells a later
+        # run the repo was already created. Without this gate a transient
+        # raise after create_repo would re-enter and call create_repo again,
+        # this time with the resolved URL as the name (project_repo_url was
+        # checkpointed) — failing or minting a duplicate. Mirrors the
+        # issue-side github_issue_number gate below. (#2044 Phase B P1-b.)
         if wf.get("is_new_project"):
-            try:
-                gh = GitHubOps(project_path or ".", system_account=system_account)
-                repo_data = gh.create_repo(
-                    name=wf.get("project_repo_url", f"auto-project-{uuid.uuid4().hex[:8]}"),
-                    private=wf.get("is_private", True),
-                    description=wf.get("title", ""),
+            if self._find_existing_milestone("preparation", "repo_setup"):
+                # Repo already created on a prior (partially-failed) run — skip
+                # create_repo (idempotent re-entry). The repo_setup milestone
+                # was immediate-checkpointed, so it survives the raise that
+                # ended the prior run; project_repo_url is also persisted.
+                logger.info(
+                    "Workflow %s: repo_setup milestone exists; skipping create_repo",
+                    self._workflow_id[:8],
                 )
-                repo_url = repo_data.get("url", "")
-                project_path = project_path or "."
-                self._gh = GitHubOps(project_path, system_account=system_account)
-                # The repo URL is an irreversible external-resource id: a later
-                # raise (e.g. branch creation) must not lose it, or re-entry
-                # would call create_repo again and mint a NEW repo. #2044 allows
-                # immediate bookkeeping-field writes (only phase/status must
-                # travel through PhaseResult), so checkpoint the id + its
-                # milestone here rather than deferring into workflow_patch /
-                # milestone_events. (#2044 Phase B review P1-b.)
-                self._update_workflow({"project_repo_url": repo_url})
-                self._create_milestone(
-                    phase="preparation",
-                    milestone_type="repo_setup",
-                    status="completed",
-                    title="Repository created",
-                    result_summary=f"Created repo: {repo_url}",
-                )
-            except GitHubOpsError as e:
-                # Failure path preserves legacy semantics: record the failed
-                # milestone inline then re-raise so advance()'s exception
-                # handler runs _mark_failed. See method docstring.
-                self._create_milestone(
-                    phase="preparation",
-                    milestone_type="repo_setup",
-                    status="failed",
-                    title="Repo creation failed",
-                    error_message=str(e),
-                )
-                raise
+            else:
+                try:
+                    gh = GitHubOps(project_path or ".", system_account=system_account)
+                    repo_data = gh.create_repo(
+                        name=wf.get("project_repo_url", f"auto-project-{uuid.uuid4().hex[:8]}"),
+                        private=wf.get("is_private", True),
+                        description=wf.get("title", ""),
+                    )
+                    repo_url = repo_data.get("url", "")
+                    project_path = project_path or "."
+                    self._gh = GitHubOps(project_path, system_account=system_account)
+                    # The repo URL is an irreversible external-resource id: a
+                    # later raise (e.g. branch creation) must not lose it, or
+                    # re-entry would call create_repo again and mint a NEW
+                    # repo. #2044 allows immediate bookkeeping-field writes
+                    # (only phase/status must travel through PhaseResult), so
+                    # checkpoint the id + its milestone here rather than
+                    # deferring into workflow_patch / milestone_events. The
+                    # completed repo_setup milestone ALSO doubles as the
+                    # re-entry gate above. (#2044 Phase B review P1-b.)
+                    self._update_workflow({"project_repo_url": repo_url})
+                    self._create_milestone(
+                        phase="preparation",
+                        milestone_type="repo_setup",
+                        status="completed",
+                        title="Repository created",
+                        result_summary=f"Created repo: {repo_url}",
+                    )
+                except GitHubOpsError as e:
+                    # Failure path preserves legacy semantics: record the failed
+                    # milestone inline then re-raise so advance()'s exception
+                    # handler runs _mark_failed. See method docstring.
+                    self._create_milestone(
+                        phase="preparation",
+                        milestone_type="repo_setup",
+                        status="failed",
+                        title="Repo creation failed",
+                        error_message=str(e),
+                    )
+                    raise
 
         gh = self._get_gh()
 

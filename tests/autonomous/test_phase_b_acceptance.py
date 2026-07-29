@@ -541,6 +541,137 @@ def test_preparation_checkpoints_issue_id_before_branch_raise():
     )
 
 
+# ── 8b. test_preparation_reentry_skips_create_repo_after_repo_created (P1-b) ─
+#
+# #2044 Phase B review (4th round) regression: the P1-b Issue half correctly
+# gates create_issue on github_issue_number (immediate-checkpointed). The REPO
+# half was NOT idempotent: ``if wf.get("is_new_project")`` is unconditional, so
+# on re-entry (after create_repo succeeded but a later branch-creation raised)
+# is_new_project is still True and the code re-calls
+# ``gh.create_repo(name=wf.get("project_repo_url", ...))`` — but
+# project_repo_url is now the RESOLVED URL (immediate-checkpointed by P1-b),
+# not the original name, so create_repo(name=<URL>) either fails or mints a
+# duplicate repo. The fix gates the create_repo block on the
+# immediate-checkpointed repo_setup milestone (existing idempotency-guard
+# helper _find_existing_milestone), mirroring the issue-side gate.
+
+
+def test_preparation_reentry_skips_create_repo_after_repo_created():
+    from app.modules.workspace.autonomous.github_ops import GitHubOpsError
+
+    # New project, no repo URL yet → create_repo runs on the first advance.
+    wf = _active_workflow(
+        phase="preparation",
+        status="preparing",
+        is_new_project=True,
+        branch_strategy="worktree",
+        requirements_text="build the thing",
+        github_issue_number=None,
+        project_repo_url=None,
+    )
+    wf["project_path"] = "/srv/open-ace"
+
+    o = _make_orchestrator(wf)
+    o._reconcile_worktree_transition = MagicMock(name="reconcile")
+    o._emit = MagicMock(name="_emit")
+
+    # In-memory milestone store so _find_existing_milestone sees the
+    # repo_setup milestone after _create_milestone records it. list_milestones
+    # is queried by phase+status; mirror that filtering.
+    milestone_store: list[dict] = []
+
+    def list_milestones(wid, phase=None, status=None):
+        out = []
+        for ms in milestone_store:
+            if phase is not None and ms.get("phase") != phase:
+                continue
+            if status is not None and ms.get("status") != status:
+                continue
+            out.append(ms)
+        return out
+
+    o.repo.list_milestones.side_effect = list_milestones
+    o.repo.create_milestone.side_effect = lambda kw: (milestone_store.append(dict(kw)) or dict(kw))
+
+    persisted_updates: list[dict] = []
+    real_update = o._update_workflow
+
+    def recording_update(updates):
+        persisted_updates.append(dict(updates))
+        # project_repo_url checkpoints survive across re-entry — reflect the
+        # write into the workflow dict the next get_workflow() returns.
+        merged = dict(o.repo.get_workflow.return_value)
+        merged.update(updates)
+        o.repo.get_workflow.return_value = merged
+        return real_update(updates)
+
+    o._update_workflow = recording_update  # type: ignore[method-assign]
+
+    # gh.create_repo returns a resolved URL; the branch-creation path raises on
+    # the first advance (transient) so the orchestrator marks the workflow
+    # failed WITHOUT committing a phase transition. The repo_setup milestone
+    # (completed) was already immediate-checkpointed, so re-entry finds it.
+    fake_gh = MagicMock(name="gh")
+    fake_gh.create_repo.return_value = {"url": "https://github.com/o/r"}
+    fake_gh.create_issue.return_value = {"number": 4242, "url": "https://x/4242"}
+
+    def run_git(args, **kw):
+        rc = MagicMock(returncode=0, stdout="", stderr="")
+        if "show-ref" in args:
+            rc.returncode = 1
+        elif "rev-parse" in args:
+            rc.stdout = "deadbeef"
+        return rc
+
+    fake_gh._run_git.side_effect = run_git
+    fake_gh.list_worktrees.return_value = []
+    fake_gh.path_exists_as_user.return_value = False
+
+    call_state = {"advances": 0}
+
+    def worktree_side_effect(*a, **kw):
+        call_state["advances"] += 1
+        if call_state["advances"] == 1:
+            # A TRANSIENT error (carries a _TRANSIENT_ORCHESTRATOR_KEYWORDS
+            # token) so advance() keeps the workflow status at "preparing"
+            # and increments transient_retry_count instead of _mark_failed —
+            # the next scheduler tick re-enters _do_preparation. A plain
+            # non-transient raise would mark the workflow terminally failed
+            # and the second advance() would no-op out at the status guard.
+            raise GitHubOpsError("connection reset during branch creation")
+        # Second advance: succeed (worktree created).
+        return {"path": "/srv/open-ace/.worktrees/wf-accept"}
+
+    fake_gh.create_worktree.side_effect = worktree_side_effect
+
+    with (
+        patch.object(o, "_get_gh", return_value=fake_gh),
+        patch("app.modules.workspace.autonomous.orchestrator.GitHubOps", return_value=fake_gh),
+    ):
+        # First advance: create_repo + create_worktree raises → _mark_failed.
+        o.advance()
+        # Second advance: re-entry. The repo_setup milestone exists → skip.
+        o.advance()
+
+    # create_repo MUST have run exactly once across both advances. On unfixed
+    # code the second advance re-entered the is_new_project block and called
+    # create_repo a second time with the resolved URL as the name.
+    assert fake_gh.create_repo.call_count == 1, (
+        "create_repo must be gated on the repo_setup milestone so re-entry "
+        "skips it; got call_count="
+        f"{fake_gh.create_repo.call_count} (expected 1). "
+        f"create_repo calls: {fake_gh.create_repo.call_args_list!r}"
+    )
+    # The repo URL was checkpointed on the first advance.
+    persisted_urls = [
+        u.get("project_repo_url") for u in persisted_updates if "project_repo_url" in u
+    ]
+    assert "https://github.com/o/r" in persisted_urls, (
+        "project_repo_url must be immediate-checkpointed after create_repo "
+        f"succeeds; persisted updates were {persisted_updates!r}"
+    )
+
+
 # ── 9. test_failed_phase_result_preserves_error_message (P2) ────────────────
 #
 # #2044 Phase B review regression: when a workflow re-entered advance() after a
