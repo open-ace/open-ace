@@ -5,6 +5,7 @@ REST API endpoints for system status and administration:
 - Scheduler status
 - Health checks
 - Admin operations
+- System settings (global configuration)
 """
 
 import logging
@@ -23,9 +24,20 @@ logger = logging.getLogger(__name__)
 system_bp = Blueprint("system", __name__)
 
 
+# Public endpoints that don't require authentication
+_PUBLIC_PATHS = [
+    "/settings/sso-enabled",
+]
+
+
 @system_bp.before_request
 def load_user():
     """Load the current user from session token before each request."""
+    # Skip auth for public endpoints
+    for public_path in _PUBLIC_PATHS:
+        if request.path.endswith(public_path):
+            return None
+
     token = _extract_token()
     if token:
         user = _load_user_from_token(token)
@@ -316,4 +328,97 @@ def get_migration_progress():
 
     except Exception as e:
         logger.error(f"Error getting migration progress: {e}")
+        return jsonify({"success": False, "error": "Internal server error"}), 500
+
+
+# ==================== System Settings ====================
+
+
+@system_bp.route("/settings", methods=["GET"])
+def get_system_settings():
+    """Get all system settings.
+
+    Requires authentication. Returns all system-level configuration.
+    """
+    from app.utils.config import get_all_system_settings
+
+    try:
+        settings = get_all_system_settings()
+        return jsonify({"success": True, "data": settings})
+
+    except Exception as e:
+        logger.error(f"Error getting system settings: {e}")
+        return jsonify({"success": False, "error": "Internal server error"}), 500
+
+
+@system_bp.route("/settings", methods=["PUT"])
+def update_system_settings():
+    """Update system settings.
+
+    Requires admin privileges. Updates system-level configuration.
+    """
+    admin_check = _admin_required()
+    if admin_check:
+        return admin_check
+
+    data = request.get_json()
+    if not data:
+        return jsonify({"success": False, "error": "Request body required"}), 400
+
+    from app.utils.config import set_system_setting
+
+    try:
+        updated_keys = []
+        errors = []
+
+        for key, value in data.items():
+            if set_system_setting(key, value):
+                updated_keys.append(key)
+            else:
+                errors.append(f"Failed to update {key}")
+
+        if errors:
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": "Failed to update some settings",
+                        "details": errors,
+                        "updated": updated_keys,
+                    }
+                ),
+                500,
+            )
+
+        return jsonify(
+            {
+                "success": True,
+                "message": "System settings updated",
+                "updated": updated_keys,
+            }
+        )
+
+    except Exception as e:
+        logger.error(f"Error updating system settings: {e}")
+        return jsonify({"success": False, "error": "Internal server error"}), 500
+
+
+# ==================== Public Endpoints ====================
+
+
+@system_bp.route("/settings/sso-enabled", methods=["GET"])
+def get_sso_enabled():
+    """Get SSO enabled status.
+
+    Public endpoint - no authentication required.
+    Used by login page to determine whether to show SSO login options.
+    """
+    from app.utils.config import is_sso_enabled
+
+    try:
+        enabled = is_sso_enabled()
+        return jsonify({"success": True, "data": {"sso_enabled": enabled}})
+
+    except Exception as e:
+        logger.error(f"Error getting SSO enabled status: {e}")
         return jsonify({"success": False, "error": "Internal server error"}), 500

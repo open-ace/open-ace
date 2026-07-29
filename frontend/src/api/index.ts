@@ -161,3 +161,6 @@ export type {
 // model-gateway (removable)
 export { modelGatewayApi } from './modelGateway';
 export type { ModelGatewayConfig, ModelGatewayTestResult } from './modelGateway';
+// system settings
+export { systemApi } from './system';
+export type { SystemSettings } from './system';
