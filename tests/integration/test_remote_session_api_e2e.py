@@ -59,6 +59,14 @@ def manager(sqlite_sm):
             "app.modules.workspace.remote_session_manager.get_evaluator",
             return_value=MagicMock(),
         ),
+        patch(
+            "app.modules.workspace.remote_session_manager.UserRepository",
+            return_value=MagicMock(),
+        ),
+        patch(
+            "app.modules.workspace.remote_session_manager.MessageRepository",
+            return_value=MagicMock(),
+        ),
     ):
         mgr = RemoteSessionManager()
     mgr._session_manager = sqlite_sm

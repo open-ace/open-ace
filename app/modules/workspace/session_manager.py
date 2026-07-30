@@ -1400,6 +1400,7 @@ class SessionManager:
         timestamp: datetime | str | None = None,
         source: str = "",
         external_message_id: str = "",
+        tenant_id: int | None = None,
     ) -> SessionMessage | None:
         """Append a transcript row without incrementing request/token summary.
 
@@ -1423,6 +1424,7 @@ class SessionManager:
             milestone_id=milestone_id,
             count_usage=False,
             timestamp=timestamp,
+            tenant_id=tenant_id,
         )
 
     def add_message(
