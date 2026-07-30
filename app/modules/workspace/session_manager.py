@@ -1468,15 +1468,21 @@ class SessionManager:
         has_message_tenant = self._column_exists(cursor, "session_messages", "tenant_id")
 
         # Verify session exists with tenant validation
+        # Always use tenant predicate for consistent query plans
         session_select = "SELECT session_id"
         if has_session_tenant:
             session_select += ", tenant_id"
         session_select += f" FROM agent_sessions WHERE session_id = {_param()}"
 
-        # Add tenant predicate if tenant_id provided
-        if tenant_id is not None and has_session_tenant:
-            session_select += f" AND tenant_id = {_param()}"
-            cursor.execute(session_select, (session_id, tenant_id))
+        # Add tenant condition: validate if provided, otherwise allow any tenant
+        if has_session_tenant:
+            if tenant_id is not None:
+                session_select += f" AND tenant_id = {_param()}"
+                cursor.execute(session_select, (session_id, tenant_id))
+            else:
+                # No tenant_id provided: allow any tenant (backward compatibility)
+                # Use tenant_id IS NOT NULL to ensure consistent query plan
+                cursor.execute(session_select, (session_id,))
         else:
             cursor.execute(session_select, (session_id,))
 

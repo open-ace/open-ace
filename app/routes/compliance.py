@@ -136,9 +136,7 @@ def list_reports():
 @admin_required
 def generate_report():
     """Generate a compliance report (admin only)."""
-    from flask import request as flask_request
-
-    data = flask_request.get_json()
+    data = request.get_json()
 
     if not data:
         return jsonify({"error": "Request body required"}), 400
