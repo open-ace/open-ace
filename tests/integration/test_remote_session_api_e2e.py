@@ -23,6 +23,9 @@ from app.modules.workspace.session_manager import SessionManager, SessionType
 
 @pytest.fixture
 def sqlite_sm(tmp_path, monkeypatch):
+    import app.repositories.database as db_mod
+
+    monkeypatch.setattr(db_mod, "is_postgresql", lambda: False)
     monkeypatch.setattr(sm_mod, "is_postgresql", lambda: False)
     sm = SessionManager(db_path=str(tmp_path / "remote_api.db"))
     sm._ensure_tables()

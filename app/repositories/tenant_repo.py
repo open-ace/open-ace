@@ -183,10 +183,12 @@ class TenantRepository:
         Returns:
             Optional[Tenant]: Tenant instance or None.
         """
+        from app.repositories.database import adapt_sql
+
         if include_deleted:
-            query = "SELECT * FROM tenants WHERE id = ?"
+            query = adapt_sql("SELECT * FROM tenants WHERE id = ?")
         else:
-            query = "SELECT * FROM tenants WHERE id = ? AND deleted_at IS NULL"
+            query = adapt_sql("SELECT * FROM tenants WHERE id = ? AND deleted_at IS NULL")
 
         row = self.db.fetch_one(query, (tenant_id,))
         return self._row_to_tenant(row) if row else None
@@ -202,10 +204,12 @@ class TenantRepository:
         Returns:
             Optional[Tenant]: Tenant instance or None.
         """
+        from app.repositories.database import adapt_sql
+
         if include_deleted:
-            query = "SELECT * FROM tenants WHERE slug = ?"
+            query = adapt_sql("SELECT * FROM tenants WHERE slug = ?")
         else:
-            query = "SELECT * FROM tenants WHERE slug = ? AND deleted_at IS NULL"
+            query = adapt_sql("SELECT * FROM tenants WHERE slug = ? AND deleted_at IS NULL")
 
         row = self.db.fetch_one(query, (slug,))
         return self._row_to_tenant(row) if row else None

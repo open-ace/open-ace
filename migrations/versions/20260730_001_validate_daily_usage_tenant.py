@@ -49,7 +49,7 @@ def upgrade() -> None:
                 FROM daily_usage
                 GROUP BY date, tool_name, host_name
                 HAVING COUNT(DISTINCT COALESCE(tenant_id, 1)) > 1
-            )
+            ) AS conflict_groups
             """
         )
     ).fetchone()
