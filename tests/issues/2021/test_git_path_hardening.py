@@ -109,17 +109,30 @@ def test_register_trusted_git_context_rejects_common_dir_escape(tmp_path):
 def test_register_trusted_git_context_accepts_linked_worktree(tmp_path):
     """A linked worktree's common_dir points at the MAIN repo's .git (not under
     the worktree path). The new containment direction must accept this layout:
-    repo_path (worktree) lives under common_dir's parent (main repo root)."""
+    repo_path (worktree) lives under common_dir's parent (main repo root).
+
+    NOTE: the git_dir argument here is the worktree's .git *file* path. In a
+    real orchestrator run, _capture_repo_state resolves this file via
+    `git rev-parse --absolute-git-dir` to <main>/.git/worktrees/<name>, which
+    lives under common_dir and passes the git_dir containment check added
+    below. The test passes the file path directly because containment only
+    requires git_dir to be under common_dir after realpath resolution; for
+    the file path realpath returns the file itself, which is NOT under
+    common_dir — so this test uses a git_dir that equals the resolved
+    worktree gitdir directory to mirror the real capture value."""
     main_repo = tmp_path / "repo"
     (main_repo / ".git").mkdir(parents=True)
+    worktree_git_dir = main_repo / ".git" / "worktrees" / "wf-abc"
+    worktree_git_dir.mkdir(parents=True)
     worktree = main_repo / ".worktrees" / "wf-abc"
     worktree.mkdir(parents=True)
-    (worktree / ".git").write_text(f"gitdir: {main_repo}/.git/worktrees/wf-abc\n")
+    (worktree / ".git").write_text(f"gitdir: {worktree_git_dir}\n")
     gh = GitHubOps(str(worktree))
-    # Must NOT raise: worktree path is under main repo root (common_dir parent).
+    # Must NOT raise: worktree path is under main repo root (common_dir parent),
+    # and git_dir is under common_dir (main_repo/.git).
     gh.register_trusted_git_context(
         repo_path=str(worktree),
-        git_dir=str(worktree / ".git"),
+        git_dir=str(worktree_git_dir),
         git_identity="dev:1",
         common_dir=str(main_repo / ".git"),
         common_identity="dev:2",
@@ -171,6 +184,55 @@ def test_register_trusted_git_context_rejects_root_common_dir(tmp_path):
             git_dir=str(repo / ".git"),
             git_identity="dev:1",
             common_dir="/.git",
+            common_identity="dev:2",
+        )
+
+
+def test_register_trusted_git_context_rejects_symlink_common_dir(tmp_path):
+    """A common_dir that is a symlink resolving outside the main repo root
+    must be rejected after realpath canonicalization. Covers the symlink-escape
+    threat for the new containment direction."""
+    main_repo = tmp_path / "repo"
+    (main_repo / ".git").mkdir(parents=True)
+    worktree = main_repo / ".worktrees" / "wf"
+    worktree.mkdir(parents=True)
+    (worktree / ".git").write_text("gitdir: placeholder\n")
+    # evil/.git outside the main repo; symlink main_repo/.git-link -> evil/.git
+    evil = tmp_path / "evil"
+    (evil / ".git").mkdir(parents=True)
+    symlink_common = main_repo / ".git-link"
+    os.symlink(str(evil / ".git"), symlink_common)
+    gh = GitHubOps(str(worktree))
+    # real_common_dir resolves to evil/.git; common_parent=evil does not contain
+    # repo_path (worktree under main_repo) → rejected.
+    with pytest.raises(GitHubOpsError, match="trusted repo_path"):
+        gh.register_trusted_git_context(
+            repo_path=str(worktree),
+            git_dir=str(main_repo / ".git" / "worktrees" / "wf"),
+            git_identity="dev:1",
+            common_dir=str(symlink_common),
+            common_identity="dev:2",
+        )
+
+
+def test_register_trusted_git_context_rejects_git_dir_outside_common(tmp_path):
+    """git_dir must live under common_dir (defense-in-depth). A git_dir pointing
+    outside common_dir is rejected even though identity pinning is the primary
+    defense."""
+    main_repo = tmp_path / "repo"
+    (main_repo / ".git").mkdir(parents=True)
+    worktree = main_repo / ".worktrees" / "wf"
+    worktree.mkdir(parents=True)
+    # An evil git_dir outside common_dir
+    evil_git_dir = tmp_path / "evil-git"
+    evil_git_dir.mkdir()
+    gh = GitHubOps(str(worktree))
+    with pytest.raises(GitHubOpsError, match="trusted git_dir"):
+        gh.register_trusted_git_context(
+            repo_path=str(worktree),
+            git_dir=str(evil_git_dir),
+            git_identity="dev:1",
+            common_dir=str(main_repo / ".git"),
             common_identity="dev:2",
         )
 

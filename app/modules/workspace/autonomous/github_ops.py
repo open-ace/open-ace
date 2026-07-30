@@ -199,10 +199,13 @@ class GitHubOps:
         # confines common_dir to a real git metadata directory named ".git",
         # preventing an arbitrary subdir from being pinned; the root guard
         # rejects a common_dir directly under "/" (e.g. /.git) which would
-        # otherwise contain any repo_path. realpath on both sides already
-        # rejects /repo vs /repo-evil prefix confusion and symlink escapes.
+        # otherwise contain any repo_path. Prefix confusion (/repo vs
+        # /repo-evil) and symlink escapes are rejected by _assert_path_contained
+        # via os.path.realpath + os.path.commonpath on both sides.
         # NOTE: bare repos (basename "repo.git") are not supported here; open-ace
         # only uses regular repos + linked worktrees.
+        # NOTE: the root guard (common_parent == os.sep) is Unix-specific; this
+        # matches the orchestrator's os.sep assumption (Linux/macOS only).
         real_common_dir = os.path.realpath(common_dir)
         if os.path.basename(real_common_dir) != ".git":
             raise GitHubOpsError(f"trusted common_dir is not a .git directory: {real_common_dir}")
@@ -210,6 +213,12 @@ class GitHubOps:
         if common_parent == os.sep:
             raise GitHubOpsError(f"trusted common_dir root escape: {real_common_dir}")
         _assert_path_contained(real_repo, common_parent, label="trusted repo_path")
+        # Defense-in-depth: git_dir must live under common_dir. For a main repo
+        # git_dir == common_dir == <repo>/.git; for a linked worktree git_dir is
+        # <common_dir>/worktrees/<name>. An out-of-tree git_dir is rejected even
+        # though device:inode identity pinning is the primary defense.
+        if real_git_dir != real_common_dir:
+            _assert_path_contained(real_git_dir, real_common_dir, label="trusted git_dir")
         cls._trusted_git_contexts[real_repo] = {
             "git_dir": real_git_dir,
             "work_tree": real_repo,
