@@ -81,7 +81,7 @@ describe('encodeProjectPath', () => {
     const path = '/home/user/demo-project';
     const encoded = encodeProjectPath(path);
     expect(encoded).toMatch(/^b64:/);
-    
+
     // Verify decode returns original
     const decoded = decodeProjectName(encoded);
     expect(decoded).toBe(path);
@@ -99,11 +99,7 @@ describe('encodeProjectPath', () => {
   });
 
   it('should produce decodable output', () => {
-    const testPaths = [
-      '/home/user/project',
-      '/var/www/html',
-      '/Users/test/workspace',
-    ];
+    const testPaths = ['/home/user/project', '/var/www/html', '/Users/test/workspace'];
 
     for (const path of testPaths) {
       const encoded = encodeProjectPath(path);

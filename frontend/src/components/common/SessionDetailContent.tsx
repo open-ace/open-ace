@@ -11,7 +11,12 @@ import { useQueryClient } from '@tanstack/react-query';
 import { t, type Language } from '@/i18n';
 import { Badge } from './Badge';
 import type { BadgeVariant } from './Badge';
-import { formatDateTime, formatTimestampWithSeconds, formatTokens, decodeProjectName } from '@/utils';
+import {
+  formatDateTime,
+  formatTimestampWithSeconds,
+  formatTokens,
+  decodeProjectName,
+} from '@/utils';
 import { useRemoteSession } from '@/hooks';
 import { sessionsApi } from '@/api';
 import type { AgentSession, SessionMessage, MessageCursor } from '@/api/sessions';
