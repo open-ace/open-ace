@@ -57,6 +57,9 @@ export { copyToClipboard } from './clipboard';
 
 export { downloadBlob } from './download';
 
+// Project path utilities
+export { decodeProjectName, encodeProjectPath } from './project';
+
 // Query key utilities
 export {
   hashQueryKey,

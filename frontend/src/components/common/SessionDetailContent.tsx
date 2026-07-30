@@ -11,7 +11,12 @@ import { useQueryClient } from '@tanstack/react-query';
 import { t, type Language } from '@/i18n';
 import { Badge } from './Badge';
 import type { BadgeVariant } from './Badge';
-import { formatDateTime, formatTimestampWithSeconds, formatTokens } from '@/utils';
+import {
+  formatDateTime,
+  formatTimestampWithSeconds,
+  formatTokens,
+  decodeProjectName,
+} from '@/utils';
 import { useRemoteSession } from '@/hooks';
 import { sessionsApi } from '@/api';
 import type { AgentSession, SessionMessage, MessageCursor } from '@/api/sessions';
@@ -250,6 +255,13 @@ export const SessionDetailContent: React.FC<SessionDetailContentProps> = ({
               {t('lastActive', language) ?? 'Last Active'}
             </small>
             <span>{session.updated_at ? formatDateTime(session.updated_at) : '-'}</span>
+          </div>
+          {/* Row 3: Project Path - full width */}
+          <div className="col-12">
+            <small className="text-muted d-block">{t('projectPath', language)}</small>
+            <code style={{ fontSize: '0.85rem' }}>
+              {session.project_path ? decodeProjectName(session.project_path) : '-'}
+            </code>
           </div>
         </div>
       </div>

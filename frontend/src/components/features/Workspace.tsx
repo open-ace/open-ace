@@ -43,7 +43,7 @@ import { Error, Button, Card, useToast, Modal } from '@/components/common';
 import { NewSessionModal } from '@/components/work/NewSessionModal';
 import { TerminalTab } from '@/components/features/TerminalTab';
 import { remoteApi } from '@/api/remote';
-import { cn } from '@/utils';
+import { cn, decodeProjectName } from '@/utils';
 import { buildProjectsPathSegment, injectProjectsPath } from '@/utils/urlUtils';
 
 /**
@@ -75,50 +75,6 @@ const TOKEN_TTL_SECONDS = 86400;
 // For 24h TTL: threshold = 86400 * 0.05 = 4320 seconds (1.2 hours)
 // For 30min TTL: threshold = 1800 * 0.05 = 90 seconds
 const TOKEN_REFRESH_THRESHOLD_RATIO = 0.05;
-
-/**
- * Decode an encoded project name back to the original path.
- * Supports both new (b64:) and legacy (-home-user-project) formats.
- *
- * Issue #2136: Fix encodedProjectName encoding defect causing 403 errors
- *
- * @param encodedName - The encoded project name
- * @returns The decoded project path, or the original string if decoding fails
- */
-const decodeProjectName = (encodedName: string): string => {
-  if (!encodedName) return '';
-
-  const B64_PREFIX = 'b64:';
-
-  // New format: b64:<base64>
-  if (encodedName.startsWith(B64_PREFIX)) {
-    try {
-      const b64Data = encodedName.slice(B64_PREFIX.length);
-      // Add back padding if needed
-      const padding = (4 - (b64Data.length % 4)) % 4;
-      const paddedData = b64Data + '='.repeat(padding);
-      // Use base64 decoding (browser native atob handles URL-safe base64)
-      const decoded = decodeURIComponent(
-        Array.from(atob(paddedData))
-          .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
-          .join('')
-      );
-      return decoded;
-    } catch (e) {
-      console.warn('Failed to decode project name:', encodedName, e);
-      return encodedName;
-    }
-  }
-
-  // Legacy format: -home-user-project (backward compatible)
-  // Convert back: -home-user-demo-project -> /home/user/demo-project
-  if (encodedName.startsWith('-')) {
-    return '/' + encodedName.slice(1).replace(/-/g, '/');
-  }
-
-  // Not encoded, return as-is
-  return encodedName;
-};
 
 /**
  * Parse v2 token and return remaining time in seconds.
