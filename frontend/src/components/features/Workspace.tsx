@@ -322,32 +322,30 @@ export const Workspace: React.FC = () => {
         setConfig(workspaceConfig);
 
         // Get user-specific URL (needed for token and openace_url in both modes)
+        // Always fetch userWebUI — even in terminal-only scenarios, users may create
+        // new sessions or switch to non-terminal tabs, which require userWebUI.
+        // Previously we skipped this for terminal-only URLs, which caused
+        // getEffectiveUrl() to return '' and the UI to show "工作区未配置". (Issue #2138)
         if (workspaceConfig.enabled) {
-          // Check if we only need terminal — skip webui startup if so
-          const wsType = searchParams.get('workspaceType');
-          const hasOnlyTerminalParams = wsType === 'terminal' && searchParams.get('terminalId');
-
-          if (!hasOnlyTerminalParams) {
-            setLoadingStage('startingWorkspace');
-            try {
-              const userWebUIResponse = await workspaceApi.getUserWebUIUrl();
-              if (userWebUIResponse.success) {
-                setUserWebUI(userWebUIResponse);
-              } else {
-                // Log the error when API returns success: false
-                console.error('[Workspace] getUserWebUIUrl failed:', userWebUIResponse.error);
-                // In multi-user mode, token is required - show error to user
-                if (workspaceConfig.multi_user_mode) {
-                  setError('WebUI authentication failed. Please refresh the page.');
-                }
-              }
-            } catch (error) {
-              // Log the error when API call fails
-              console.error('[Workspace] getUserWebUIUrl error:', error);
-              // In multi-user mode, token is required for authentication
+          setLoadingStage('startingWorkspace');
+          try {
+            const userWebUIResponse = await workspaceApi.getUserWebUIUrl();
+            if (userWebUIResponse.success) {
+              setUserWebUI(userWebUIResponse);
+            } else {
+              // Log the error when API returns success: false
+              console.error('[Workspace] getUserWebUIUrl failed:', userWebUIResponse.error);
+              // In multi-user mode, token is required - show error to user
               if (workspaceConfig.multi_user_mode) {
                 setError('WebUI authentication failed. Please refresh the page.');
               }
+            }
+          } catch (error) {
+            // Log the error when API call fails
+            console.error('[Workspace] getUserWebUIUrl error:', error);
+            // In multi-user mode, token is required for authentication
+            if (workspaceConfig.multi_user_mode) {
+              setError('WebUI authentication failed. Please refresh the page.');
             }
           }
           setLoadingStage('ready');
