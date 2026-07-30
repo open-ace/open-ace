@@ -17,7 +17,7 @@ export async function getSSOEnabled(): Promise<{ sso_enabled: boolean }> {
   const response = await apiClient.get<{
     success: boolean;
     data: { sso_enabled: boolean };
-  }>('/api/system/settings/sso-enabled');
+  }>('/api/settings/sso-enabled');
 
   return response.data;
 }
@@ -29,7 +29,7 @@ export async function getSystemSettings(): Promise<SystemSettings> {
   const response = await apiClient.get<{
     success: boolean;
     data: SystemSettings;
-  }>('/api/system/settings');
+  }>('/api/settings');
 
   return response.data;
 }
@@ -44,7 +44,7 @@ export async function updateSystemSettings(
     success: boolean;
     message: string;
     updated: string[];
-  }>('/api/system/settings', settings);
+  }>('/api/settings', settings);
 
   return response;
 }
