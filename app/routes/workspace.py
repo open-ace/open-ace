@@ -12,6 +12,7 @@ API endpoints for workspace functionality including:
 import base64
 import logging
 import os
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -89,6 +90,38 @@ def encode_project_path(project_path: str) -> str:
     # Remove padding for cleaner URLs
     encoded = encoded.rstrip("=")
     return f"{_B64_PREFIX}{encoded}"
+
+
+def encode_project_path_legacy(project_path: str) -> str:
+    r"""Encode a project path to the legacy CLI directory-name format.
+
+    The qwen / claude CLI stores per-project data under
+    ``~/.qwen/projects/<encoded>`` (or ``~/.claude/projects/<encoded>``) where
+    ``<encoded>`` is the project path with every path separator (``/``, ``\``)
+    and common special characters replaced by ``-``.  For example::
+
+        /home/user/demo-project  →  -home-user-demo-project
+
+    This is the format the CLI creates on disk and the format qwen-code-webui
+    expects when resolving the history directory.  Unlike ``encode_project_path``
+    (which produces the ``b64:`` URL-safe base64 form used by the file-changes
+    API and other newer endpoints), this helper must be used whenever the
+    encoded name is consumed by qwen-code-webui's history endpoints or by the
+    on-disk directory lookup (Issue #2142).
+
+    Args:
+        project_path: The absolute path to encode.
+
+    Returns:
+        The legacy encoded directory name, or empty string for empty input.
+    """
+    if not project_path:
+        return ""
+    # Strip a trailing slash so /home/user/ and /home/user encode identically.
+    normalized = project_path.rstrip("/")
+    # Replace '/', '\', ':', '.', and '_' with '-' (matches the CLI encoding
+    # used by qwen-code / claude-code when creating project directories).
+    return re.sub(r"[/\\:._]", "-", normalized)
 
 
 def decode_project_name(encoded_name: str) -> str:
@@ -1612,25 +1645,24 @@ def restore_session(session_id):
                     )
 
         # Generate encodedProjectName based on tool
-        # Issue #2136: Use new encoding format (b64:<base64>)
+        # Issue #2142: qwen-code-webui's history endpoints expect the legacy
+        # CLI directory-name format (-home-user-project), not the b64: format
+        # introduced by Issue #2136.  The b64: prefix contains ':' which the
+        # webui rejects as a dangerous character (400), and even if it didn't,
+        # the on-disk history directory uses the legacy encoding.  Always
+        # produce the legacy form for qwen/claude so the webui can locate the
+        # conversation JSONL files on disk.
         if normalize_tool_name(tool_name) in ["qwen", "claude"]:
-            # project_path may be actual path or encoded name
-            if project_path:
-                if project_path.startswith("/"):
-                    # Actual path, encode using new format
-                    encoded_project_name = encode_project_path(project_path)
-                elif project_path.startswith(_B64_PREFIX):
-                    # Already encoded with new format
-                    encoded_project_name = project_path
-                else:
-                    # Legacy format or empty - try to decode then re-encode
-                    decoded = decode_project_name(project_path)
-                    if decoded:
-                        encoded_project_name = encode_project_path(decoded)
-                    else:
-                        encoded_project_name = project_path
-            else:
-                encoded_project_name = project_path
+            # Resolve project_path to an actual filesystem path first.
+            actual_path = project_path or ""
+            if actual_path.startswith(_B64_PREFIX):
+                actual_path = decode_project_name(actual_path) or ""
+            elif actual_path and not actual_path.startswith("/"):
+                # Legacy encoded or other — decode to get the real path.
+                decoded = decode_project_name(actual_path)
+                if decoded:
+                    actual_path = decoded
+            encoded_project_name = encode_project_path_legacy(actual_path) if actual_path else ""
         elif tool_name == "openclaw":
             # project_path is the agent_name (e.g., "main")
             encoded_project_name = project_path

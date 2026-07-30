@@ -194,3 +194,56 @@ class TestEdgeCases:
         decoded = decode_project_name(encoded)
         assert decoded == path
         assert "--" in decoded  # Consecutive hyphens preserved
+
+
+# Issue #2142: restore_session uses legacy encoding for qwen-code-webui compatibility
+from app.routes.workspace import encode_project_path_legacy
+
+
+class TestEncodeProjectPathLegacy:
+    """Tests for encode_project_path_legacy (Issue #2142)."""
+
+    def test_legacy_simple_path(self):
+        """Legacy format replaces / with -."""
+        assert encode_project_path_legacy("/home/user/demo-project") == "-home-user-demo-project"
+
+    def test_legacy_matches_cli_encoding(self):
+        """Must match the CLI encoding: /, \\, :, ., _ → -."""
+        assert (
+            encode_project_path_legacy("/home/user_name/project.dir")
+            == "-home-user-name-project-dir"
+        )
+
+    def test_legacy_strips_trailing_slash(self):
+        """Trailing slash should not produce a trailing hyphen."""
+        assert encode_project_path_legacy("/home/user/") == "-home-user"
+
+    def test_legacy_empty_path(self):
+        """Empty input returns empty string."""
+        assert encode_project_path_legacy("") == ""
+
+    def test_legacy_no_colon_in_output(self):
+        """Output must never contain ':' so qwen-code-webui validation passes."""
+        for path in ["/home/user/project", "/tmp/test:8080/app", "C:/Users/foo"]:
+            result = encode_project_path_legacy(path)
+            assert ":" not in result, f"Colon found in {result!r} for path {path!r}"
+
+    def test_restore_flow_from_actual_path(self):
+        """DB has actual path → restore produces legacy format."""
+        db_path = "/home/user/demo-project"
+        result = encode_project_path_legacy(db_path)
+        assert result == "-home-user-demo-project"
+
+    def test_restore_flow_from_b64(self):
+        """DB has b64: encoded path → decode then legacy encode."""
+        b64_encoded = encode_project_path("/home/user/demo-project")
+        decoded = decode_project_name(b64_encoded)
+        result = encode_project_path_legacy(decoded)
+        assert result == "-home-user-demo-project"
+
+    def test_restore_flow_from_legacy(self):
+        """DB has legacy encoded path → decode then legacy encode (round-trip)."""
+        legacy = "-home-user-demo-project"
+        decoded = decode_project_name(legacy)
+        result = encode_project_path_legacy(decoded)
+        assert result == "-home-user-demo-project"
