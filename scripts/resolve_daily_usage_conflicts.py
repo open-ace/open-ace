@@ -60,7 +60,7 @@ def resolve_conflict_earliest(date, tool_name, host_name, target_tenant, dry_run
             WHERE date = ? AND tool_name = ? AND host_name = ?
               AND COALESCE(tenant_id, 1) != ?
             """,
-            (date, tool_name, host_name, target_tenant)
+            (date, tool_name, host_name, target_tenant),
         )
         return len(rows) if rows else 0
 
@@ -72,7 +72,7 @@ def resolve_conflict_earliest(date, tool_name, host_name, target_tenant, dry_run
         WHERE date = ? AND tool_name = ? AND host_name = ?
           AND COALESCE(tenant_id, 1) != ?
         """,
-        (target_tenant, date, tool_name, host_name, target_tenant)
+        (target_tenant, date, tool_name, host_name, target_tenant),
     )
 
     # Return rows updated
@@ -87,7 +87,7 @@ def main():
         "--strategy",
         choices=["earliest", "dry-run"],
         default="dry-run",
-        help="Resolution strategy (earliest or dry-run)"
+        help="Resolution strategy (earliest or dry-run)",
     )
     args = parser.parse_args()
 
@@ -143,7 +143,7 @@ def main():
         print(f"  Rows that would be updated: {total_updated}")
         print()
         print("To apply changes, run:")
-        print(f"  python scripts/resolve_daily_usage_conflicts.py --strategy=earliest")
+        print("  python scripts/resolve_daily_usage_conflicts.py --strategy=earliest")
     else:
         print(f"  Rows updated: {total_updated}")
         print()

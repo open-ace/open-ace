@@ -7,9 +7,10 @@ Tests for:
 - Tenant mismatch returns None and logs warning
 """
 
-import pytest
-from unittest.mock import MagicMock, patch
 from datetime import datetime, timezone
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 from app.modules.workspace.session_manager import SessionManager
 

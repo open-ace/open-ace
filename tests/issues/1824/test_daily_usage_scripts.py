@@ -7,9 +7,10 @@ Tests for:
 - resolve_daily_usage_conflicts.py
 """
 
-import pytest
 import sys
 from pathlib import Path
+
+import pytest
 
 
 class TestDailyUsageQualityCheck:
@@ -17,12 +18,16 @@ class TestDailyUsageQualityCheck:
 
     def test_script_exists(self):
         """Script file should exist."""
-        script_path = Path(__file__).parent.parent.parent.parent / "scripts" / "check_daily_usage_quality.py"
+        script_path = (
+            Path(__file__).parent.parent.parent.parent / "scripts" / "check_daily_usage_quality.py"
+        )
         assert script_path.exists()
 
     def test_script_is_executable(self):
         """Script should be importable."""
-        script_path = Path(__file__).parent.parent.parent.parent / "scripts" / "check_daily_usage_quality.py"
+        script_path = (
+            Path(__file__).parent.parent.parent.parent / "scripts" / "check_daily_usage_quality.py"
+        )
         assert script_path.is_file()
 
     def test_script_functions(self):
@@ -45,12 +50,20 @@ class TestDailyUsageConflictDetection:
 
     def test_script_exists(self):
         """Script file should exist."""
-        script_path = Path(__file__).parent.parent.parent.parent / "scripts" / "check_daily_usage_conflicts.py"
+        script_path = (
+            Path(__file__).parent.parent.parent.parent
+            / "scripts"
+            / "check_daily_usage_conflicts.py"
+        )
         assert script_path.exists()
 
     def test_script_is_executable(self):
         """Script should be importable."""
-        script_path = Path(__file__).parent.parent.parent.parent / "scripts" / "check_daily_usage_conflicts.py"
+        script_path = (
+            Path(__file__).parent.parent.parent.parent
+            / "scripts"
+            / "check_daily_usage_conflicts.py"
+        )
         assert script_path.is_file()
 
     def test_script_functions(self):
@@ -70,12 +83,20 @@ class TestDailyUsageConflictResolution:
 
     def test_script_exists(self):
         """Script file should exist."""
-        script_path = Path(__file__).parent.parent.parent.parent / "scripts" / "resolve_daily_usage_conflicts.py"
+        script_path = (
+            Path(__file__).parent.parent.parent.parent
+            / "scripts"
+            / "resolve_daily_usage_conflicts.py"
+        )
         assert script_path.exists()
 
     def test_script_is_executable(self):
         """Script should be importable."""
-        script_path = Path(__file__).parent.parent.parent.parent / "scripts" / "resolve_daily_usage_conflicts.py"
+        script_path = (
+            Path(__file__).parent.parent.parent.parent
+            / "scripts"
+            / "resolve_daily_usage_conflicts.py"
+        )
         assert script_path.is_file()
 
     def test_script_functions(self):
@@ -102,7 +123,7 @@ class TestDailyUsageConflictResolution:
             tool_name="test_tool",
             host_name="localhost",
             target_tenant=1,
-            dry_run=True
+            dry_run=True,
         )
         # Returns 0 rows in dry-run mode
         assert result == 0

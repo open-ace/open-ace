@@ -1805,7 +1805,9 @@ def agent_message():
                 if sync_user_id and not existing.user_id:
                     updates["user_id"] = sync_user_id
                 if updates:
-                    sync_session_mgr.update_session_fields(session_id, updates, require_tenant=False)
+                    sync_session_mgr.update_session_fields(
+                        session_id, updates, require_tenant=False
+                    )
 
             # Fetch existing message uuids for dedup and mirror to daily_messages
             try:

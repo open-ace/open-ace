@@ -150,18 +150,14 @@ def generate_report():
     target_tenant_id = caller_tenant_id
 
     # Admin can request cross-tenant reports with explicit tenant_id
-    if is_admin and "tenant_id" in data:
-        requested_tenant_id = data.get("tenant_id")
-        if requested_tenant_id is not None:
-            # Validate tenant exists
-            db = Database()
-            tenant_row = db.fetch_one(
-                "SELECT id FROM tenants WHERE id = ?",
-                (requested_tenant_id,)
-            )
-            if not tenant_row:
-                return jsonify({"error": f"Tenant {requested_tenant_id} not found"}), 404
-            target_tenant_id = requested_tenant_id
+    if is_admin and data.get("tenant_id") is not None:
+        requested_tenant_id = data["tenant_id"]
+        # Validate tenant exists
+        db = Database()
+        tenant_row = db.fetch_one("SELECT id FROM tenants WHERE id = ?", (requested_tenant_id,))
+        if not tenant_row:
+            return jsonify({"error": f"Tenant {requested_tenant_id} not found"}), 404
+        target_tenant_id = requested_tenant_id
 
     # Non-admin must use their own tenant scope
     if not is_admin and target_tenant_id is None:

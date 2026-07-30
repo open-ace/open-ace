@@ -36,9 +36,7 @@ def upgrade() -> None:
 
     if result and result[0] > 0:
         # Fill NULL tenant_id with default value 1
-        conn.execute(
-            sa.text("UPDATE daily_usage SET tenant_id = 1 WHERE tenant_id IS NULL")
-        )
+        conn.execute(sa.text("UPDATE daily_usage SET tenant_id = 1 WHERE tenant_id IS NULL"))
         print(f"Updated {result[0]} rows with NULL tenant_id to tenant_id=1")
 
     # Check for potential conflicts (same date/tool/host with multiple tenants)
@@ -57,7 +55,9 @@ def upgrade() -> None:
     ).fetchone()
 
     if conflicts and conflicts[0] > 0:
-        print(f"Warning: Found {conflicts[0]} conflict groups (same date/tool/host with multiple tenants)")
+        print(
+            f"Warning: Found {conflicts[0]} conflict groups (same date/tool/host with multiple tenants)"
+        )
         print("Run scripts/check_daily_usage_conflicts.py for details")
         print("Run scripts/resolve_daily_usage_conflicts.py to resolve")
     else:

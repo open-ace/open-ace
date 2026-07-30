@@ -22,9 +22,7 @@ from app.repositories.database import Database
 def check_tenant_id_null() -> int:
     """Count rows where tenant_id is NULL (should be filled by server_default)."""
     db = Database()
-    result = db.fetch_one(
-        "SELECT COUNT(*) as count FROM daily_usage WHERE tenant_id IS NULL"
-    )
+    result = db.fetch_one("SELECT COUNT(*) as count FROM daily_usage WHERE tenant_id IS NULL")
     return result["count"] if result else 0
 
 
@@ -83,15 +81,15 @@ def main():
     null_tenant = check_tenant_id_null()
     print(f"Rows with tenant_id=NULL: {null_tenant}")
     if null_tenant > 0:
-        print(f"  ⚠️  Should be filled by server_default='1'")
+        print("  ⚠️  Should be filled by server_default='1'")
     print()
 
     # Check 2: duplicates
     duplicates = check_duplicates()
     print(f"(date, tool, host) tuples with multiple tenants: {duplicates}")
     if duplicates > 0:
-        print(f"  ⚠️  Would violate unique constraint (tenant_id, date, tool, host)")
-        print(f"     Run scripts/check_daily_usage_conflicts.py for details")
+        print("  ⚠️  Would violate unique constraint (tenant_id, date, tool, host)")
+        print("     Run scripts/check_daily_usage_conflicts.py for details")
     print()
 
     # Tenant distribution

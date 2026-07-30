@@ -7,8 +7,9 @@ Tests for:
 - Fail-closed behavior when tenant_id is None
 """
 
-import pytest
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from app.modules.workspace.session_manager import SessionManager
 

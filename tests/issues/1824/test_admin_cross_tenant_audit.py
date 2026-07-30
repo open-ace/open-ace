@@ -7,8 +7,9 @@ Tests for:
 - Audit record includes admin_tenant, target_tenant, session_id
 """
 
-import pytest
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from app.modules.governance.audit_logger import AuditAction, AuditLogger
 
@@ -26,7 +27,7 @@ class TestAdminCrossTenantAudit:
             user_id=1,
             username="admin",
             tenant_id=1,
-            details={"target_tenant_id": 2, "session_id": "test-session"}
+            details={"target_tenant_id": 2, "session_id": "test-session"},
         )
 
         # Verify log was called successfully
@@ -38,11 +39,7 @@ class TestAdminCrossTenantAudit:
 
         # Admin accessing own tenant - just regular access, not cross-tenant
         result = logger.log_action(
-            AuditAction.LOGIN,
-            user_id=1,
-            username="admin",
-            tenant_id=1,
-            details={"tenant_id": 1}
+            AuditAction.LOGIN, user_id=1, username="admin", tenant_id=1, details={"tenant_id": 1}
         )
 
         # Verify log was successful

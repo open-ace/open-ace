@@ -1884,7 +1884,9 @@ class AutonomousAgentRunner:
             logger.warning("Failed to load tracking session context: %s", e)
 
         try:
-            self.session_manager.update_session_fields(session.session_id, updates, require_tenant=False)
+            self.session_manager.update_session_fields(
+                session.session_id, updates, require_tenant=False
+            )
         except Exception as e:
             logger.warning("Failed to sync sidebar session totals: %s", e)
 

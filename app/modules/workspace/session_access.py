@@ -45,8 +45,9 @@ def check_session_access(
         admin_tenant = g.user.get("tenant_id")
         session_tenant = status.get("tenant_id")
 
-        # Record audit if cross-tenant access (admin tenant != session tenant)
-        if admin_tenant != session_tenant:
+        # Only audit if session has an explicit tenant different from admin
+        # (Historical data without tenant_id should not trigger audit)
+        if session_tenant is not None and admin_tenant != session_tenant:
             try:
                 audit_logger = AuditLogger()
                 audit_logger.log_action(

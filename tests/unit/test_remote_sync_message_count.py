@@ -64,7 +64,9 @@ def _import_like_remote_sync(sm: SessionManager, session_id: str, messages: list
         if getattr(stored, "_was_inserted", False):
             synced_message_delta += 1
     if synced_message_delta:
-        sm.increment_session_usage(session_id, message_delta=synced_message_delta, require_tenant=False)
+        sm.increment_session_usage(
+            session_id, message_delta=synced_message_delta, require_tenant=False
+        )
     return synced_message_delta
 
 

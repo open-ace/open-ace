@@ -7,8 +7,9 @@ Tests for:
 - Audit logs use the same tenant_id as the report
 """
 
-import pytest
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from app.modules.governance.audit_logger import AuditAction, AuditLogger
 
@@ -51,7 +52,7 @@ class TestComplianceTenantValidation:
             user_id=1,
             username="admin",
             tenant_id=2,  # Target tenant
-            details={"report_type": "usage_summary"}
+            details={"report_type": "usage_summary"},
         )
 
         # Verify log was successful
