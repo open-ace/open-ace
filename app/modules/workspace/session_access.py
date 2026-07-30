@@ -24,6 +24,7 @@ from app.auth.decorators import (
     _load_user_from_token,
     enforce_password_change_requirement,
 )
+from app.modules.governance.audit_logger import AuditAction, AuditLogger
 from app.modules.workspace.remote_agent_manager import get_remote_agent_manager
 from app.modules.workspace.remote_session_manager import get_remote_session_manager
 
@@ -40,6 +41,33 @@ def check_session_access(
         return None, (jsonify({"error": "Session not found"}), 404)
     # System admins intentionally have global session visibility for operations.
     if g.user.get("role") == "admin":
+        # Log admin cross-tenant access for audit trail (Issue #1824)
+        admin_tenant = g.user.get("tenant_id")
+        session_tenant = status.get("tenant_id")
+
+        # Only audit if session has an explicit tenant different from admin
+        # (Historical data without tenant_id should not trigger audit)
+        if session_tenant is not None and admin_tenant != session_tenant:
+            try:
+                audit_logger = AuditLogger()
+                audit_logger.log_action(
+                    action=AuditAction.ADMIN_CROSS_TENANT_ACCESS,
+                    user_id=g.user.get("id"),
+                    tenant_id=session_tenant,  # Target tenant
+                    resource_type="session",
+                    resource_id=session_id,
+                    severity="info",
+                    details={
+                        "access_type": "session_status",
+                        "admin_tenant": admin_tenant,
+                        "target_tenant": session_tenant,
+                        "session_id": session_id,
+                    },
+                )
+            except Exception as e:
+                # Don't fail access if audit logging fails
+                logger.warning(f"Failed to log admin cross-tenant access: {e}")
+
         return status, None
     # Session owner
     current_tenant_id = g.user.get("tenant_id")

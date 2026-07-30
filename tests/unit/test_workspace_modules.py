@@ -329,7 +329,9 @@ class TestSessionManager:
             title="Autonomous wrapper",
             context={"workflow_id": "wf-1"},
         )
-        session_manager.update_session_fields(tracking.session_id, {"cli_session_id": "actual-123"})
+        session_manager.update_session_fields(
+            tracking.session_id, {"cli_session_id": "actual-123"}, require_tenant=False
+        )
         session_manager.create_session(
             tool_name="claude",
             user_id=1,
@@ -393,7 +395,9 @@ class TestSessionManager:
             title="Autonomous wrapper",
             context={"workflow_id": "wf-1"},
         )
-        session_manager.update_session_fields(tracking.session_id, {"cli_session_id": "actual-456"})
+        session_manager.update_session_fields(
+            tracking.session_id, {"cli_session_id": "actual-456"}, require_tenant=False
+        )
         session_manager.create_session(
             tool_name="claude",
             user_id=1,

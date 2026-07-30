@@ -168,7 +168,7 @@ class TestListCliSessionIdsForProject:
                 workspace_type="local",
             )
             if cli:
-                sm.update_session_fields(sid, {"cli_session_id": cli})
+                sm.update_session_fields(sid, {"cli_session_id": cli}, require_tenant=False)
 
         ids = sm.list_cli_session_ids_for_project("/proj")
         assert ids == {"main123", "review456"}

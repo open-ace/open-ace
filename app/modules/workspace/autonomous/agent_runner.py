@@ -1806,6 +1806,7 @@ class AutonomousAgentRunner:
                         "status": "active",
                         "cli_session_id": persisted_id,
                     },
+                    require_tenant=False,
                 )
             except Exception as e:
                 session.persisted_session_id = ""
@@ -1883,7 +1884,9 @@ class AutonomousAgentRunner:
             logger.warning("Failed to load tracking session context: %s", e)
 
         try:
-            self.session_manager.update_session_fields(session.session_id, updates)
+            self.session_manager.update_session_fields(
+                session.session_id, updates, require_tenant=False
+            )
         except Exception as e:
             logger.warning("Failed to sync sidebar session totals: %s", e)
 
@@ -2020,6 +2023,7 @@ class AutonomousAgentRunner:
                         self.session_manager.update_session_fields(
                             session_id,
                             {"status": "active", "completed_at": None, "paused_at": None},
+                            require_tenant=False,
                         )
                         logger.info(
                             "Reactivated session %s (was %s) for agent run",
@@ -2099,10 +2103,11 @@ class AutonomousAgentRunner:
                         total_tokens_delta=result.total_tokens or 0,
                         total_input_delta=result.total_input_tokens or 0,
                         total_output_delta=result.total_output_tokens or 0,
+                        require_tenant=False,
                     )
                     status = "completed" if result.success else "error"
                     self.session_manager.update_session_fields(
-                        persisted_session_id, {"status": status}
+                        persisted_session_id, {"status": status}, require_tenant=False
                     )
                 except Exception as e:
                     logger.warning("Failed to update session record: %s", e)
@@ -2117,6 +2122,7 @@ class AutonomousAgentRunner:
                     self.session_manager.update_session_fields(
                         session_id,
                         {"status": "completed" if result.success else "error"},
+                        require_tenant=False,
                     )
                 except Exception as e:
                     logger.warning("Failed to update remote tracking session: %s", e)
@@ -2134,6 +2140,7 @@ class AutonomousAgentRunner:
                             "status": "error",
                             "error_message": result.error or "agent failed to start",
                         },
+                        require_tenant=False,
                     )
                 except Exception as e:
                     logger.warning(
@@ -3481,6 +3488,7 @@ class AutonomousAgentRunner:
                             "status": "active",
                             "cli_session_id": remote_session_id,
                         },
+                        require_tenant=False,
                     )
             except SandboxError as e:
                 # provider.exec failed closed (create/send). No remote session

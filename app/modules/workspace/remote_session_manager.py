@@ -1241,14 +1241,20 @@ class RemoteSessionManager:
 
             # Store if we have meaningful content
             if content and isinstance(content, str) and content.strip():
+                # Get tenant_id from session for fail-closed write
+                session = self._session_manager.get_session(session_id)
+                tenant_id = getattr(session, "tenant_id", None) if session else None
                 stored = self._session_manager.append_transcript_message(
                     session_id=session_id,
                     role="system",
                     content=content,
                     source="remote_live",
+                    tenant_id=tenant_id,
                 )
                 if getattr(stored, "_was_inserted", False):
-                    self._session_manager.increment_session_usage(session_id, message_delta=1)
+                    self._session_manager.increment_session_usage(
+                        session_id, message_delta=1, tenant_id=tenant_id
+                    )
                 self._save_to_daily_messages(session_id, "system", content)
 
         elif msg_type == "result":
@@ -1270,15 +1276,21 @@ class RemoteSessionManager:
             metadata = {}
             if blocks:
                 metadata["content_blocks"] = blocks
+            # Get tenant_id from session for fail-closed write
+            session = self._session_manager.get_session(session_id)
+            tenant_id = getattr(session, "tenant_id", None) if session else None
             stored = self._session_manager.append_transcript_message(
                 session_id=session_id,
                 role="assistant",
                 content=text,
                 metadata=metadata if metadata else None,
                 source="remote_live",
+                tenant_id=tenant_id,
             )
             if getattr(stored, "_was_inserted", False):
-                self._session_manager.increment_session_usage(session_id, message_delta=1)
+                self._session_manager.increment_session_usage(
+                    session_id, message_delta=1, tenant_id=tenant_id
+                )
             self._save_to_daily_messages(session_id, "assistant", text)
 
             # Record assistant_output once per turn (not per stdout chunk) and

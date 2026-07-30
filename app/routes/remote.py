@@ -1598,9 +1598,9 @@ def agent_message():
                 sm.complete_session(terminal_id)
                 logger.info("Terminal session %s marked as completed", terminal_id[:8])
             elif status == "running":
-                sm.update_session_fields(terminal_id, {"status": "active"})
+                sm.update_session_fields(terminal_id, {"status": "active"}, require_tenant=False)
             elif status == "error":
-                sm.update_session_fields(terminal_id, {"status": "error"})
+                sm.update_session_fields(terminal_id, {"status": "error"}, require_tenant=False)
                 logger.warning("Terminal session %s error: %s", terminal_id[:8], error)
 
         return jsonify({"success": True})
@@ -1805,7 +1805,9 @@ def agent_message():
                 if sync_user_id and not existing.user_id:
                     updates["user_id"] = sync_user_id
                 if updates:
-                    sync_session_mgr.update_session_fields(session_id, updates)
+                    sync_session_mgr.update_session_fields(
+                        session_id, updates, require_tenant=False
+                    )
 
             # Fetch existing message uuids for dedup and mirror to daily_messages
             try:
@@ -2003,6 +2005,7 @@ def agent_message():
                         total_tokens_delta=synced_input_tokens + synced_output_tokens,
                         total_input_delta=synced_input_tokens,
                         total_output_delta=synced_output_tokens,
+                        require_tenant=False,
                     )
 
                     # Record usage in QuotaManager for quota tracking
@@ -2092,6 +2095,7 @@ def start_terminal():
                 "key_id": key_id,
             },
         },
+        tenant_id=tenant_id,
     )
     logger.info(
         f"Created terminal session {terminal_id} for user {g.user['id']} on machine {machine_id}"
@@ -2263,6 +2267,7 @@ def start_cli_terminal():
             "workspace_type": "terminal",
             "remote_machine_id": machine_id,
         },
+        tenant_id=tenant_id,
     )
 
     api_proxy = get_api_key_proxy_service()

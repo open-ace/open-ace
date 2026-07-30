@@ -55,11 +55,13 @@ class UserRepository:
             if self.db.is_postgresql:
                 # PostgreSQL uses TRUE/FALSE for boolean columns
                 result = self.db.fetch_one(
-                    """
+                    adapt_sql(
+                        """
                     INSERT INTO users (username, email, password_hash, role, is_active, created_at, system_account, tenant_id)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     RETURNING id
-                """,
+                """
+                    ),
                     (
                         username,
                         email,
@@ -77,10 +79,12 @@ class UserRepository:
                 # SQLite uses 1/0 for boolean columns
                 is_active_int = adapt_boolean_value(is_active)
                 cursor = self.db.execute(
-                    """
+                    adapt_sql(
+                        """
                     INSERT INTO users (username, email, password_hash, role, is_active, created_at, system_account, tenant_id)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
+                """
+                    ),
                     (
                         username,
                         email,
@@ -107,7 +111,7 @@ class UserRepository:
         Returns:
             Optional[Dict]: User data or None.
         """
-        query = "SELECT * FROM users WHERE id = ?"
+        query = adapt_sql("SELECT * FROM users WHERE id = ?")
         return self.db.fetch_one(query, (user_id,))
 
     def get_user_by_username(self, username: str) -> dict | None:
@@ -120,7 +124,7 @@ class UserRepository:
         Returns:
             Optional[Dict]: User data or None.
         """
-        query = "SELECT * FROM users WHERE username = ?"
+        query = adapt_sql("SELECT * FROM users WHERE username = ?")
         return self.db.fetch_one(query, (username,))
 
     def get_user_by_email(self, email: str) -> dict | None:
@@ -133,7 +137,7 @@ class UserRepository:
         Returns:
             Optional[Dict]: User data or None.
         """
-        query = "SELECT * FROM users WHERE email = ?"
+        query = adapt_sql("SELECT * FROM users WHERE email = ?")
         return self.db.fetch_one(query, (email,))
 
     def get_all_users(
@@ -233,7 +237,7 @@ class UserRepository:
             return False
 
         params.append(user_id)
-        query = f"UPDATE users SET {', '.join(updates)} WHERE id = ?"
+        query = adapt_sql(f"UPDATE users SET {', '.join(updates)} WHERE id = ?")
 
         try:
             cursor = self.db.execute(query, tuple(params))
@@ -296,7 +300,7 @@ class UserRepository:
         Returns:
             bool: True if successful.
         """
-        query = "UPDATE users SET last_login = ? WHERE id = ?"
+        query = adapt_sql("UPDATE users SET last_login = ? WHERE id = ?")
 
         try:
             self.db.execute(query, (datetime.now(timezone.utc).replace(tzinfo=None), user_id))
@@ -316,7 +320,7 @@ class UserRepository:
         Returns:
             bool: True if successful.
         """
-        query = "UPDATE users SET avatar_url = ? WHERE id = ?"
+        query = adapt_sql("UPDATE users SET avatar_url = ? WHERE id = ?")
 
         try:
             cursor = self.db.execute(query, (avatar_url, user_id))
@@ -340,7 +344,7 @@ class UserRepository:
             return self.hard_delete_user(user_id)
 
         # Soft delete - set deleted_at timestamp
-        query = "UPDATE users SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL"
+        query = adapt_sql("UPDATE users SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL")
 
         try:
             cursor = self.db.execute(
@@ -361,7 +365,7 @@ class UserRepository:
         Returns:
             bool: True if successful.
         """
-        query = "UPDATE users SET deleted_at = NULL WHERE id = ?"
+        query = adapt_sql("UPDATE users SET deleted_at = NULL WHERE id = ?")
 
         try:
             cursor = self.db.execute(query, (user_id,))
@@ -380,7 +384,7 @@ class UserRepository:
         Returns:
             bool: True if successful.
         """
-        query = "DELETE FROM users WHERE id = ?"
+        query = adapt_sql("DELETE FROM users WHERE id = ?")
 
         try:
             cursor = self.db.execute(query, (user_id,))
@@ -433,7 +437,7 @@ class UserRepository:
             return False
 
         params.append(user_id)
-        query = f"UPDATE users SET {', '.join(updates)} WHERE id = ?"
+        query = adapt_sql(f"UPDATE users SET {', '.join(updates)} WHERE id = ?")
 
         try:
             cursor = self.db.execute(query, tuple(params))
@@ -456,10 +460,12 @@ class UserRepository:
         Returns:
             bool: True if successful.
         """
-        query = """
+        query = adapt_sql(
+            """
             INSERT INTO sessions (user_id, token, created_at, expires_at)
             VALUES (?, ?, ?, ?)
         """
+        )
 
         try:
             # Use local time to match database TIMESTAMP WITHOUT TIME ZONE behavior
@@ -479,12 +485,14 @@ class UserRepository:
         Returns:
             Optional[Dict]: Session data with user info or None.
         """
-        query = """
+        query = adapt_sql(
+            """
             SELECT s.*, u.username, u.email, u.role, u.tenant_id, u.must_change_password
             FROM sessions s
             JOIN users u ON s.user_id = u.id
             WHERE s.token = ? AND s.expires_at > ?
         """
+        )
 
         # Use local time to match database TIMESTAMP WITHOUT TIME ZONE behavior
         return self.db.fetch_one(query, (token, datetime.now()))
@@ -499,7 +507,7 @@ class UserRepository:
         Returns:
             bool: True if successful.
         """
-        query = "DELETE FROM sessions WHERE token = ?"
+        query = adapt_sql("DELETE FROM sessions WHERE token = ?")
 
         try:
             self.db.execute(query, (token,))
@@ -518,7 +526,7 @@ class UserRepository:
         Returns:
             bool: True if successful.
         """
-        query = "UPDATE sessions SET expires_at = ? WHERE token = ?"
+        query = adapt_sql("UPDATE sessions SET expires_at = ? WHERE token = ?")
 
         try:
             self.db.execute(query, (new_expires_at, token))
@@ -534,7 +542,7 @@ class UserRepository:
         Returns:
             int: Number of sessions deleted.
         """
-        query = "DELETE FROM sessions WHERE expires_at < ?"
+        query = adapt_sql("DELETE FROM sessions WHERE expires_at < ?")
 
         try:
             cursor = self.db.execute(query, (datetime.now(timezone.utc).replace(tzinfo=None),))

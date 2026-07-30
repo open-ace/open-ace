@@ -102,6 +102,10 @@ class AuditAction(Enum):
     LEGACY_WEBUI_TOKEN_USED = "legacy_webui_token_used"
     TOKEN_LEAK_SUSPECTED = "token_leak_suspected"
 
+    # Admin cross-tenant access actions (Issue #1824)
+    ADMIN_CROSS_TENANT_ACCESS = "admin_cross_tenant_access"
+    ADMIN_GLOBAL_SESSION_LIST = "admin_global_session_list"
+
 
 class AuditSeverity(Enum):
     """Severity levels for audit events."""
@@ -1002,6 +1006,23 @@ def get_action_categories() -> dict[str, dict[str, Any]]:
                     "value": "token_leak_suspected",
                     "label": "Token Leak Suspected",
                     "i18n_key": "actionTokenLeakSuspected",
+                },
+            ],
+        },
+        "admin_access": {
+            "label": "Admin Access",
+            "i18n_key": "categoryAdminAccess",
+            "resource_types": ["session", "user"],
+            "actions": [
+                {
+                    "value": "admin_cross_tenant_access",
+                    "label": "Admin Cross-Tenant Access",
+                    "i18n_key": "actionAdminCrossTenantAccess",
+                },
+                {
+                    "value": "admin_global_session_list",
+                    "label": "Admin Global Session List",
+                    "i18n_key": "actionAdminGlobalSessionList",
                 },
             ],
         },

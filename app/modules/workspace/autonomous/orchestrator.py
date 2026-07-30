@@ -4450,6 +4450,7 @@ class AutonomousOrchestrator:
                         "context": context,
                         "status": "active",
                     },
+                    require_tenant=False,
                 ):
                     raise RuntimeError("tracking session row was not updated")
             except Exception as exc:
@@ -4960,7 +4961,7 @@ class AutonomousOrchestrator:
                     and tracking_session_id
                 ):
                     self._runner.session_manager.update_session_fields(
-                        tracking_session_id, {"cli_session_id": ""}
+                        tracking_session_id, {"cli_session_id": ""}, require_tenant=False
                     )
             except Exception:
                 logger.warning(
