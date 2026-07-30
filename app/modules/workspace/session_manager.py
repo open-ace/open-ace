@@ -925,7 +925,7 @@ class SessionManager:
         session_id: str,
         fields: dict[str, Any],
         tenant_id: int | None = None,
-        require_tenant: bool = False,
+        require_tenant: bool = True,
     ) -> bool:
         """
         Update specific fields of a session.
@@ -1007,7 +1007,7 @@ class SessionManager:
         total_output_delta: int = 0,
         message_delta: int = 0,
         tenant_id: int | None = None,
-        require_tenant: bool = False,
+        require_tenant: bool = True,
     ) -> bool:
         """Increment a session's cumulative usage counters by the given deltas.
 
@@ -1437,6 +1437,7 @@ class SessionManager:
         source: str = "",
         count_usage: bool = True,
         timestamp: datetime | str | None = None,
+        tenant_id: int | None = None,
     ) -> SessionMessage | None:
         """
         Add a message to a session.
@@ -1466,20 +1467,42 @@ class SessionManager:
         has_session_tenant = self._column_exists(cursor, "agent_sessions", "tenant_id")
         has_message_tenant = self._column_exists(cursor, "session_messages", "tenant_id")
 
-        # Verify session exists
+        # Verify session exists with tenant validation
         session_select = "SELECT session_id"
         if has_session_tenant:
             session_select += ", tenant_id"
         session_select += f" FROM agent_sessions WHERE session_id = {_param()}"
-        cursor.execute(session_select, (session_id,))
+
+        # Add tenant predicate if tenant_id provided
+        if tenant_id is not None and has_session_tenant:
+            session_select += f" AND tenant_id = {_param()}"
+            cursor.execute(session_select, (session_id, tenant_id))
+        else:
+            cursor.execute(session_select, (session_id,))
+
         session_row = cursor.fetchone()
         if not session_row:
             conn.close()
+            # Log tenant validation failure if tenant_id was provided
+            if tenant_id is not None:
+                logger.warning(
+                    f"add_message: session {session_id} not found or tenant mismatch "
+                    f"(expected tenant_id={tenant_id})"
+                )
             return None
+
         if has_session_tenant:
             effective_tenant_id = (
                 session_row.get("tenant_id") if isinstance(session_row, dict) else session_row[1]
             ) or 1
+            # Validate tenant_id matches if both are provided
+            if tenant_id is not None and effective_tenant_id != tenant_id:
+                logger.warning(
+                    f"add_message: tenant mismatch for session {session_id}: "
+                    f"expected {tenant_id}, got {effective_tenant_id}"
+                )
+                conn.close()
+                return None
         else:
             effective_tenant_id = 1
 

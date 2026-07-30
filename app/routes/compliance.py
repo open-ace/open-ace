@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 
 from flask import Blueprint, Response, g, jsonify, request
 
-from app.auth.decorators import admin_required
+from app.auth.decorators import admin_required, resolve_tenant_scope
 from app.modules.compliance.audit import AuditAnalyzer
 from app.modules.compliance.report import ReportGenerator, ReportType
 from app.modules.compliance.retention import DataRetentionManager
@@ -136,8 +136,9 @@ def list_reports():
 @admin_required
 def generate_report():
     """Generate a compliance report (admin only)."""
+    from flask import request as flask_request
 
-    data = request.get_json()
+    data = flask_request.get_json()
 
     if not data:
         return jsonify({"error": "Request body required"}), 400
@@ -145,6 +146,28 @@ def generate_report():
     report_type = data.get("report_type")
     if not report_type:
         return jsonify({"error": "report_type is required"}), 400
+
+    # Resolve tenant scope with validation
+    caller_tenant_id, is_admin = resolve_tenant_scope()
+    target_tenant_id = caller_tenant_id
+
+    # Admin can request cross-tenant reports with explicit tenant_id
+    if is_admin and "tenant_id" in data:
+        requested_tenant_id = data.get("tenant_id")
+        if requested_tenant_id is not None:
+            # Validate tenant exists
+            db = Database()
+            tenant_row = db.fetch_one(
+                "SELECT id FROM tenants WHERE id = ?",
+                (requested_tenant_id,)
+            )
+            if not tenant_row:
+                return jsonify({"error": f"Tenant {requested_tenant_id} not found"}), 404
+            target_tenant_id = requested_tenant_id
+
+    # Non-admin must use their own tenant scope
+    if not is_admin and target_tenant_id is None:
+        return jsonify({"error": "Tenant scope required"}), 403
 
     # Parse date range
     period_start = data.get("period_start")
@@ -160,13 +183,13 @@ def generate_report():
     else:
         period_end = datetime.now(timezone.utc).replace(tzinfo=None)
 
-    # Generate report
+    # Generate report with validated tenant_id
     report = report_generator.generate_report(
         report_type=report_type,
         period_start=period_start,
         period_end=period_end,
         generated_by=g.user_id,
-        tenant_id=data.get("tenant_id", _current_tenant_id()),
+        tenant_id=target_tenant_id,
         filters=data.get("filters"),
     )
 
@@ -195,7 +218,7 @@ def generate_report():
         )
 
     if output_format == "html":
-        # Log report generation action
+        # Log report generation action with validated tenant_id
         try:
             audit_logger = AuditLogger()
             audit_logger.log(
@@ -204,12 +227,14 @@ def generate_report():
                 resource_type="compliance_report",
                 resource_id=report.metadata.report_id,
                 resource_name=report_type,
-                tenant_id=_current_tenant_id(),
+                tenant_id=target_tenant_id,
                 details={
                     "report_type": report_type,
                     "format": output_format,
                     "period_start": period_start.isoformat(),
                     "period_end": period_end.isoformat(),
+                    "caller_tenant_id": caller_tenant_id,
+                    "target_tenant_id": target_tenant_id,
                 },
             )
         except Exception:
@@ -228,7 +253,7 @@ def generate_report():
         return response
 
     if output_format == "excel":
-        # Log report generation action
+        # Log report generation action with validated tenant_id
         try:
             audit_logger = AuditLogger()
             audit_logger.log(
@@ -237,11 +262,14 @@ def generate_report():
                 resource_type="compliance_report",
                 resource_id=report.metadata.report_id,
                 resource_name=report_type,
+                tenant_id=target_tenant_id,
                 details={
                     "report_type": report_type,
                     "format": output_format,
                     "period_start": period_start.isoformat(),
                     "period_end": period_end.isoformat(),
+                    "caller_tenant_id": caller_tenant_id,
+                    "target_tenant_id": target_tenant_id,
                 },
             )
         except Exception:
