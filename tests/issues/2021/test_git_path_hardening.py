@@ -82,19 +82,95 @@ def test_pre_generated_path_rejects_symlink_or_outside_root(tmp_path):
 
 
 def test_register_trusted_git_context_rejects_common_dir_escape(tmp_path):
-    """register_trusted_git_context must reject a common_dir outside repo."""
+    """register_trusted_git_context must reject a common_dir whose parent does
+    not contain repo_path (the /repo vs /repo-evil prefix-confusion case).
+
+    The new containment direction (post-#2057 follow-up) verifies that
+    repo_path lives under the main repo root (= common_dir's parent), not
+    that common_dir lives under repo_path. A common_dir under a sibling
+    directory still fails because repo_path is not under that sibling."""
     repo = tmp_path / "repo"
     repo.mkdir()
     (repo / ".git").mkdir()
     evil = tmp_path / "repo-evil"
     evil.mkdir()
+    (evil / ".git").mkdir()
     gh = GitHubOps(str(repo))
-    with pytest.raises(GitHubOpsError, match="trusted common_dir"):
+    with pytest.raises(GitHubOpsError, match="trusted repo_path"):
         gh.register_trusted_git_context(
             repo_path=str(repo),
             git_dir=str(repo / ".git"),
             git_identity="dev:1",
             common_dir=str(evil / ".git"),
+            common_identity="dev:2",
+        )
+
+
+def test_register_trusted_git_context_accepts_linked_worktree(tmp_path):
+    """A linked worktree's common_dir points at the MAIN repo's .git (not under
+    the worktree path). The new containment direction must accept this layout:
+    repo_path (worktree) lives under common_dir's parent (main repo root)."""
+    main_repo = tmp_path / "repo"
+    (main_repo / ".git").mkdir(parents=True)
+    worktree = main_repo / ".worktrees" / "wf-abc"
+    worktree.mkdir(parents=True)
+    (worktree / ".git").write_text(f"gitdir: {main_repo}/.git/worktrees/wf-abc\n")
+    gh = GitHubOps(str(worktree))
+    # Must NOT raise: worktree path is under main repo root (common_dir parent).
+    gh.register_trusted_git_context(
+        repo_path=str(worktree),
+        git_dir=str(worktree / ".git"),
+        git_identity="dev:1",
+        common_dir=str(main_repo / ".git"),
+        common_identity="dev:2",
+    )
+
+
+def test_register_trusted_git_context_accepts_main_repo(tmp_path):
+    """For the main repo common_dir == repo_path/.git; repo_path trivially
+    lives under common_dir's parent (== repo_path itself)."""
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    gh = GitHubOps(str(repo))
+    gh.register_trusted_git_context(
+        repo_path=str(repo),
+        git_dir=str(repo / ".git"),
+        git_identity="dev:1",
+        common_dir=str(repo / ".git"),
+        common_identity="dev:2",
+    )
+
+
+def test_register_trusted_git_context_rejects_non_git_common_dir(tmp_path):
+    """common_dir whose basename is not '.git' is rejected — prevents an
+    arbitrary subdir from being pinned as trusted."""
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    bogus = repo / "subdir"
+    bogus.mkdir()
+    gh = GitHubOps(str(repo))
+    with pytest.raises(GitHubOpsError, match="not a .git directory"):
+        gh.register_trusted_git_context(
+            repo_path=str(repo),
+            git_dir=str(repo / ".git"),
+            git_identity="dev:1",
+            common_dir=str(bogus),
+            common_identity="dev:2",
+        )
+
+
+def test_register_trusted_git_context_rejects_root_common_dir(tmp_path):
+    """A common_dir directly under '/' (e.g. /.git) would contain any
+    repo_path and must be rejected explicitly."""
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    gh = GitHubOps(str(repo))
+    with pytest.raises(GitHubOpsError, match="root escape"):
+        gh.register_trusted_git_context(
+            repo_path=str(repo),
+            git_dir=str(repo / ".git"),
+            git_identity="dev:1",
+            common_dir="/.git",
             common_identity="dev:2",
         )
 

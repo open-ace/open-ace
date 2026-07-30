@@ -190,13 +190,26 @@ class GitHubOps:
             raise GitHubOpsError("Cannot register an invalid trusted Git context")
         if not git_identity or not common_identity:
             raise GitHubOpsError("Cannot register Git context without filesystem identity")
-        # Containment: the common git dir must live under the canonical repo
-        # root. For a main repo common_dir == <repo>/.git; for a linked
-        # worktree common_dir also points at <repo>/.git. This rejects a
-        # common_dir that escapes the repo (e.g. via a symlink or a malicious
-        # /repo-evil-style prefix) before we pin it as trusted.
+        # Containment: the repo_path must live under the main repo root, i.e.
+        # the parent directory of common_dir. For a main repo common_dir ==
+        # <repo>/.git so its parent is <repo> == repo_path. For a linked
+        # worktree common_dir points at the MAIN repo's <repo>/.git (not under
+        # the worktree path), so we verify the worktree (repo_path) lives under
+        # the main repo root (common_dir's parent) instead. The basename check
+        # confines common_dir to a real git metadata directory named ".git",
+        # preventing an arbitrary subdir from being pinned; the root guard
+        # rejects a common_dir directly under "/" (e.g. /.git) which would
+        # otherwise contain any repo_path. realpath on both sides already
+        # rejects /repo vs /repo-evil prefix confusion and symlink escapes.
+        # NOTE: bare repos (basename "repo.git") are not supported here; open-ace
+        # only uses regular repos + linked worktrees.
         real_common_dir = os.path.realpath(common_dir)
-        _assert_path_contained(real_common_dir, real_repo, label="trusted common_dir")
+        if os.path.basename(real_common_dir) != ".git":
+            raise GitHubOpsError(f"trusted common_dir is not a .git directory: {real_common_dir}")
+        common_parent = os.path.dirname(real_common_dir)
+        if common_parent == os.sep:
+            raise GitHubOpsError(f"trusted common_dir root escape: {real_common_dir}")
+        _assert_path_contained(real_repo, common_parent, label="trusted repo_path")
         cls._trusted_git_contexts[real_repo] = {
             "git_dir": real_git_dir,
             "work_tree": real_repo,
