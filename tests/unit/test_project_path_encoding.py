@@ -209,7 +209,10 @@ class TestEncodeProjectPathLegacy:
 
     def test_legacy_matches_cli_encoding(self):
         """Must match the CLI encoding: /, \\, :, ., _ → -."""
-        assert encode_project_path_legacy("/home/user_name/project.dir") == "-home-user-name-project-dir"
+        assert (
+            encode_project_path_legacy("/home/user_name/project.dir")
+            == "-home-user-name-project-dir"
+        )
 
     def test_legacy_strips_trailing_slash(self):
         """Trailing slash should not produce a trailing hyphen."""

@@ -93,11 +93,11 @@ def encode_project_path(project_path: str) -> str:
 
 
 def encode_project_path_legacy(project_path: str) -> str:
-    """Encode a project path to the legacy CLI directory-name format.
+    r"""Encode a project path to the legacy CLI directory-name format.
 
     The qwen / claude CLI stores per-project data under
     ``~/.qwen/projects/<encoded>`` (or ``~/.claude/projects/<encoded>``) where
-    ``<encoded>`` is the project path with every path separator (``/``, ``\\``)
+    ``<encoded>`` is the project path with every path separator (``/``, ``\``)
     and common special characters replaced by ``-``.  For example::
 
         /home/user/demo-project  →  -home-user-demo-project
@@ -1662,9 +1662,7 @@ def restore_session(session_id):
                 decoded = decode_project_name(actual_path)
                 if decoded:
                     actual_path = decoded
-            encoded_project_name = (
-                encode_project_path_legacy(actual_path) if actual_path else ""
-            )
+            encoded_project_name = encode_project_path_legacy(actual_path) if actual_path else ""
         elif tool_name == "openclaw":
             # project_path is the agent_name (e.g., "main")
             encoded_project_name = project_path
