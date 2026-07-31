@@ -103,6 +103,7 @@ class _MockDatabase:
 def _make_manager(monkeypatch) -> RemoteAgentManager:
     monkeypatch.setattr(ram_mod, "is_postgresql", lambda: False)
     monkeypatch.setattr(RemoteAgentManager, "_start_heartbeat_monitor", lambda self: None)
+    monkeypatch.setattr(RemoteAgentManager, "_start_retention_cleanup", lambda self: None)
     # Real on-disk DB just so RemoteAgentManager construction succeeds; _persist_output
     # is the only path exercised here, and we redirect it to the mock below.
     import tempfile
@@ -112,6 +113,8 @@ def _make_manager(monkeypatch) -> RemoteAgentManager:
     load_schema_from_file(db_url=f"sqlite:///{tmp}", dialect="sqlite")
     mgr = RemoteAgentManager(db_path=str(tmp))
     mgr.db = _MockDatabase()
+    # Set batch size to 1 so every buffer_output triggers immediate flush
+    mgr.OUTPUT_BATCH_SIZE = 1
     return mgr
 
 
@@ -164,6 +167,7 @@ def test_persist_output_propagates_unexpected_errors(monkeypatch):
 def runtime_db(tmp_path, monkeypatch):
     monkeypatch.setattr(ram_mod, "is_postgresql", lambda: False)
     monkeypatch.setattr(RemoteAgentManager, "_start_heartbeat_monitor", lambda self: None)
+    monkeypatch.setattr(RemoteAgentManager, "_start_retention_cleanup", lambda self: None)
     db_path = tmp_path / "remote_runtime.db"
     load_schema_from_file(db_url=f"sqlite:///{db_path}", dialect="sqlite")
     return db_path
@@ -175,6 +179,11 @@ def test_concurrent_buffer_output_assigns_distinct_event_indices(runtime_db):
     db_path = runtime_db
     pod_a = RemoteAgentManager(db_path=str(db_path))
     pod_b = RemoteAgentManager(db_path=str(db_path))
+
+    # Set batch size to 1 so every buffer_output triggers immediate flush
+    # This matches the expected behavior from the original test
+    pod_a.OUTPUT_BATCH_SIZE = 1
+    pod_b.OUTPUT_BATCH_SIZE = 1
 
     n = 200
     barrier = threading.Barrier(2)

@@ -15,7 +15,9 @@ import time
 import uuid
 from collections import deque
 from contextlib import suppress
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from functools import lru_cache
 from typing import Any, cast
 
 import gevent
@@ -36,6 +38,39 @@ logger = logging.getLogger(__name__)
 # constraint then rejects the second INSERT. We re-read MAX+1 and retry rather
 # than dropping the output chunk.
 _PERSIST_OUTPUT_MAX_RETRIES = 8
+
+# Output batching configuration (Issue #1823)
+# Batch size for aggregated writes
+OUTPUT_BATCH_SIZE = 50
+# Time window for batch aggregation (milliseconds)
+OUTPUT_BATCH_INTERVAL_MS = 100
+# Maximum accumulator size per session before forced flush
+OUTPUT_ACCUMULATOR_MAX_SIZE = 500
+
+
+@dataclass
+class AccumulatorBuffer:
+    """Buffer for aggregating output before batch DB write (Issue #1823).
+
+    Reduces DB write amplification by batching multiple output chunks
+    into single transactions while maintaining crash-safety.
+    """
+
+    items: list[dict[str, Any]] = field(default_factory=list)
+    last_flush: float = field(default_factory=time.time)
+
+
+@dataclass
+class CommandResult:
+    """Result of send_command with detailed status (Issue #1823).
+
+    Provides visibility into command persistence status for callers
+    who need more detail than the boolean return from send_command.
+    """
+
+    queued: bool
+    persisted: bool
+    degraded: bool
 
 
 def _is_unique_violation(exc: Exception) -> bool:
@@ -106,6 +141,20 @@ class RemoteAgentManager:
     # Legacy mode deadline in days — machines older than this must re-register
     LEGACY_MODE_DEADLINE_DAYS = 90
 
+    # Output batching configuration (Issue #1823)
+    # These can be overridden for tuning
+    OUTPUT_BATCH_SIZE = OUTPUT_BATCH_SIZE
+    OUTPUT_BATCH_INTERVAL_MS = OUTPUT_BATCH_INTERVAL_MS
+    OUTPUT_ACCUMULATOR_MAX_SIZE = OUTPUT_ACCUMULATOR_MAX_SIZE
+
+    # Table retention cleanup configuration (Issue #1823)
+    RETENTION_CLEANUP_INTERVAL_SECONDS = 300  # 5 minutes
+    RETENTION_BATCH_SIZE = 1000  # Max rows to delete per batch
+    RETENTION_LOCK_TIMEOUT_MS = 5000  # 5 seconds
+
+    # Command claim configuration (Issue #1823)
+    COMMAND_CLAIM_TIMEOUT_SECONDS = 300  # 5 minutes before re-claiming delivered commands
+
     def __init__(self, db_path: str | None = None):
         self.db_path = db_path or str(DB_PATH)
         if db_path:
@@ -145,6 +194,9 @@ class RemoteAgentManager:
         # this process. Cross-process/cross-pod collisions are handled by the
         # uniqueness-constraint retry loop in _persist_output.
         self._persist_output_lock = threading.Lock()
+        # Output accumulator for batch writes (Issue #1823)
+        # {session_id: AccumulatorBuffer}
+        self._output_accumulator: dict[str, AccumulatorBuffer] = {}
         # Token cleanup lazy-start flag
         self._token_cleanup_started: bool = False
         # (removed _last_rotate_unrevoked — rotate_agent_token now returns the info)
@@ -154,6 +206,8 @@ class RemoteAgentManager:
         # sessions are cleaned up. The heartbeat monitor runs every 60 seconds and
         # will naturally clean up stale sessions (Ref: #596).
         self._start_heartbeat_monitor()
+        # Start retention cleanup for remote_runtime tables (Issue #1823)
+        self._start_retention_cleanup()
 
     def _restore_in_memory_state(self) -> None:
         """Restore _session_machines and _session_end_flags from DB after restart.
@@ -211,6 +265,186 @@ class RemoteAgentManager:
 
         gevent.spawn(monitor)
         logger.info("Heartbeat monitor started")
+
+    def _start_retention_cleanup(self) -> None:
+        """Start background task for retention cleanup (Issue #1823).
+
+        Periodically cleans up expired rows from remote_runtime_commands
+        and remote_runtime_outputs tables.
+        """
+
+        def cleanup_loop():
+            while True:
+                try:
+                    gevent.sleep(self.RETENTION_CLEANUP_INTERVAL_SECONDS)
+                    self._run_retention_cleanup()
+                except Exception as e:
+                    logger.error("Retention cleanup error: %s", e)
+
+        gevent.spawn(cleanup_loop)
+        logger.info(
+            "Retention cleanup started (interval=%ds, batch_size=%d)",
+            self.RETENTION_CLEANUP_INTERVAL_SECONDS,
+            self.RETENTION_BATCH_SIZE,
+        )
+
+    def _run_retention_cleanup(self) -> None:
+        """Run retention cleanup for remote_runtime tables (Issue #1823).
+
+        Deletes expired rows in batches to avoid long transactions.
+        Records cleanup statistics to retention_history table.
+        """
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        total_deleted_commands = 0
+        total_deleted_outputs = 0
+
+        # Clean remote_runtime_commands
+        try:
+            total_deleted_commands = self._cleanup_table_batched(
+                "remote_runtime_commands",
+                self.RETENTION_BATCH_SIZE,
+                self.RETENTION_LOCK_TIMEOUT_MS,
+            )
+        except Exception as e:
+            logger.error("Failed to clean remote_runtime_commands: %s", e)
+
+        # Clean remote_runtime_outputs
+        try:
+            total_deleted_outputs = self._cleanup_table_batched(
+                "remote_runtime_outputs",
+                self.RETENTION_BATCH_SIZE,
+                self.RETENTION_LOCK_TIMEOUT_MS,
+            )
+        except Exception as e:
+            logger.error("Failed to clean remote_runtime_outputs: %s", e)
+
+        # Record to retention_history if any deletions occurred
+        if total_deleted_commands > 0 or total_deleted_outputs > 0:
+            try:
+                self._record_retention_stats(
+                    now,
+                    total_deleted_commands,
+                    total_deleted_outputs,
+                )
+            except Exception as e:
+                logger.warning("Failed to record retention stats: %s", e)
+
+        if total_deleted_commands > 0 or total_deleted_outputs > 0:
+            logger.info(
+                "Retention cleanup completed: commands=%d, outputs=%d",
+                total_deleted_commands,
+                total_deleted_outputs,
+            )
+
+    def _cleanup_table_batched(
+        self,
+        table_name: str,
+        batch_size: int,
+        lock_timeout_ms: int,
+    ) -> int:
+        """Delete expired rows from a table in batches (Issue #1823).
+
+        Args:
+            table_name: Table to clean (e.g., 'remote_runtime_commands').
+            batch_size: Maximum rows to delete per batch.
+            lock_timeout_ms: Lock timeout in milliseconds.
+
+        Returns:
+            Total number of rows deleted.
+        """
+        now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+        total_deleted = 0
+        max_retries = 3
+        retry_delay = 30  # seconds
+
+        for attempt in range(max_retries):
+            try:
+                with self.db.connection() as conn:
+                    cursor = conn.cursor()
+
+                    # Set lock timeout
+                    if is_postgresql():
+                        cursor.execute(f"SET lock_timeout = '{lock_timeout_ms}ms'")
+                    else:
+                        cursor.execute(f"PRAGMA busy_timeout = {lock_timeout_ms}")
+
+                    # Batch delete loop
+                    while True:
+                        cursor.execute(
+                            f"DELETE FROM {table_name} WHERE id IN "
+                            f"(SELECT id FROM {table_name} "
+                            f"WHERE expires_at < {_param()} LIMIT {_param()})",
+                            (now, batch_size),
+                        )
+                        deleted = cursor.rowcount
+                        conn.commit()
+
+                        if deleted == 0:
+                            break
+
+                        total_deleted += deleted
+
+                        # Safety check: avoid infinite loop
+                        if total_deleted > 1000000:
+                            logger.warning(
+                                "Retention cleanup deleted >1M rows from %s, stopping",
+                                table_name,
+                            )
+                            break
+
+                # Success, break retry loop
+                break
+
+            except Exception as e:
+                logger.warning(
+                    "Retention cleanup attempt %d/%d failed for %s: %s",
+                    attempt + 1,
+                    max_retries,
+                    table_name,
+                    e,
+                )
+                if attempt < max_retries - 1:
+                    import time as time_module
+
+                    time_module.sleep(retry_delay)
+                else:
+                    # Re-raise on final attempt
+                    raise
+
+        return total_deleted
+
+    def _record_retention_stats(
+        self,
+        timestamp: datetime,
+        commands_deleted: int,
+        outputs_deleted: int,
+    ) -> None:
+        """Record retention cleanup statistics (Issue #1823).
+
+        Args:
+            timestamp: Time of cleanup.
+            commands_deleted: Number of command rows deleted.
+            outputs_deleted: Number of output rows deleted.
+        """
+        report_data = {
+            "commands_deleted": commands_deleted,
+            "outputs_deleted": outputs_deleted,
+            "timestamp": timestamp.isoformat(),
+        }
+
+        try:
+            with self.db.connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    f"""
+                    INSERT INTO retention_history (timestamp, report_data)
+                    VALUES ({_param()}, {_param()})
+                    """,
+                    (timestamp.isoformat(), json.dumps(report_data)),
+                )
+                conn.commit()
+        except Exception as e:
+            logger.warning("Failed to record retention history: %s", e)
 
     def _check_heartbeats(self) -> None:
         """Check for stale heartbeats and mark machines offline.
@@ -1044,14 +1278,39 @@ class RemoteAgentManager:
             command: Command dict with 'type', 'command', etc.
 
         Returns:
-            True if command was queued successfully.
+            True if command was queued successfully (persisted or in-memory).
+            For detailed status, use send_command_with_status().
         """
-        queued = self._persist_command(machine_id, command)
-        if not queued:
+        result = self.send_command_with_status(machine_id, command)
+        return result.queued
+
+    def send_command_with_status(
+        self, machine_id: str, command: dict[str, Any]
+    ) -> CommandResult:
+        """Send command with detailed status (Issue #1823).
+
+        Provides visibility into command persistence status for callers
+        who need more detail than the boolean return from send_command.
+
+        Args:
+            machine_id: Target machine ID.
+            command: Command dict with 'type', 'command', etc.
+
+        Returns:
+            CommandResult with fields:
+            - queued: True if queued (persisted or in-memory)
+            - persisted: True if persisted to DB
+            - degraded: True if degraded to in-memory queue
+        """
+        persisted = self._persist_command(machine_id, command)
+        degraded = False
+
+        if not persisted:
             with self._lock:
                 if machine_id not in self._command_queues:
                     self._command_queues[machine_id] = []
                 self._command_queues[machine_id].append(command)
+            degraded = True
 
         if machine_id not in self._connections:
             logger.info(
@@ -1060,7 +1319,12 @@ class RemoteAgentManager:
             )
         else:
             logger.info("Queued command for agent %s", machine_id)
-        return True
+
+        return CommandResult(
+            queued=True,  # Always queued (persisted or in-memory)
+            persisted=persisted,
+            degraded=degraded,
+        )
 
     def get_pending_commands(self, machine_id: str) -> list[dict]:
         """Get and clear pending commands for an HTTP-mode agent."""
@@ -1105,44 +1369,76 @@ class RemoteAgentManager:
             return False
 
     def _claim_persisted_commands(self, machine_id: str) -> list[dict]:
-        """Claim pending persisted commands for a polling agent."""
-        now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+        """Claim pending persisted commands for a polling agent (Issue #1823).
+
+        Claims both pending commands and timed-out delivered commands.
+        Uses batch UPDATE for efficiency. Fixed NULL handling for delivered_at.
+
+        Returns:
+            List of claimed command payloads.
+        """
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        now_iso = now.isoformat()
+        timeout_threshold = (now - timedelta(seconds=self.COMMAND_CLAIM_TIMEOUT_SECONDS)).isoformat()
+
         claimed: list[dict] = []
         try:
             with self.db.connection() as conn:
                 cursor = conn.cursor()
+
+                # Select pending + timed-out delivered commands (Issue #1823)
+                # Added delivered_at IS NOT NULL check to avoid NULL value trap
                 cursor.execute(
                     f"""
                     SELECT id, payload
                     FROM remote_runtime_commands
                     WHERE machine_id = {_param()}
-                      AND status = 'pending'
+                      AND (
+                          status = 'pending'
+                          OR (
+                              status = 'delivered'
+                              AND delivered_at IS NOT NULL
+                              AND delivered_at < {_param()}
+                          )
+                      )
                       AND (expires_at IS NULL OR expires_at > {_param()})
                     ORDER BY id ASC
                     LIMIT 100
                     """,
-                    (machine_id, now),
+                    (machine_id, timeout_threshold, now_iso),
                 )
                 rows = cursor.fetchall()
+
+                if not rows:
+                    return claimed
+
+                # Batch UPDATE with single statement (Issue #1823)
+                command_ids = [row["id"] for row in rows]
+                id_placeholders = ", ".join([_param()] * len(command_ids))
+
+                cursor.execute(
+                    f"""
+                    UPDATE remote_runtime_commands
+                    SET status = 'delivered', delivered_at = {_param()}
+                    WHERE id IN ({id_placeholders})
+                    AND status IN ('pending', 'delivered')
+                    """,
+                    [now_iso] + command_ids,
+                )
+
+                # Parse payloads for successfully claimed commands
                 for row in rows:
-                    command_id = row["id"]
-                    cursor.execute(
-                        f"""
-                        UPDATE remote_runtime_commands
-                        SET status = 'delivered', delivered_at = {_param()}
-                        WHERE id = {_param()} AND status = 'pending'
-                        """,
-                        (now, command_id),
-                    )
-                    if cursor.rowcount != 1:
-                        continue
                     try:
                         payload = json.loads(row["payload"])
                     except (TypeError, ValueError, json.JSONDecodeError):
-                        logger.warning("Skipping corrupt remote command payload id=%s", command_id)
+                        logger.warning(
+                            "Skipping corrupt remote command payload id=%s",
+                            row["id"],
+                        )
                         continue
                     if isinstance(payload, dict):
                         claimed.append(payload)
+
                 conn.commit()
         except Exception as e:
             logger.warning("Failed to claim persisted commands for %s: %s", machine_id, e)
@@ -1260,10 +1556,15 @@ class RemoteAgentManager:
         if request_id:
             self._persist_command_response(request_id, data.get("result"))
 
-    def _persist_command_response(self, request_id: str, result: Any) -> None:
-        """Persist a command response for cross-pod waiters."""
+    def _persist_command_response(self, request_id: str, result: Any) -> bool:
+        """Persist a command response for cross-pod waiters (Issue #1823).
+
+        Returns:
+            True if updated successfully.
+            False if command row not found (logged at WARNING level).
+        """
         try:
-            self.db.execute(
+            cursor = self.db.execute(
                 f"""
                 UPDATE remote_runtime_commands
                 SET status = {_param()}, response_payload = {_param()}, responded_at = {_param()}
@@ -1276,8 +1577,21 @@ class RemoteAgentManager:
                     request_id,
                 ),
             )
+            if cursor.rowcount == 0:
+                logger.warning(
+                    "Command response update matched 0 rows (request_id=%s). "
+                    "Command may have been in-memory-only on another pod.",
+                    request_id[:8],
+                )
+                return False
+            return True
         except Exception as e:
-            logger.debug("Failed to persist command response %s: %s", request_id[:8], e)
+            logger.warning(
+                "Failed to persist command response %s: %s",
+                request_id[:8],
+                e,
+            )
+            return False
 
     def store_browse_result(self, request_id: str, result: dict) -> None:
         """Store browse result from agent for later retrieval."""
@@ -1391,12 +1705,26 @@ class RemoteAgentManager:
         - _output_buffers: buffered output data
         - _buffer_offsets: buffer trim offset tracking
         - _last_delivered: SSE reconnect position (Issue #1511)
+        - _output_accumulator: batch write accumulator (Issue #1823)
         """
         with self._lock:
             self._session_machines.pop(session_id, None)
             self._output_buffers.pop(session_id, None)
             self._buffer_offsets.pop(session_id, None)
             self._last_delivered.pop(session_id, None)  # Issue #1511: cleanup SSE state
+
+        # Flush and clean up accumulator for this session
+        with self._persist_output_lock:
+            acc = self._output_accumulator.pop(session_id, None)
+            if acc and acc.items:
+                try:
+                    self._flush_accumulator_sync(session_id, acc)
+                except Exception as e:
+                    logger.warning(
+                        "Failed to flush accumulator during unbind for session %s: %s",
+                        session_id[:8],
+                        e,
+                    )
 
     def get_machine_for_session(self, session_id: str) -> str | None:
         """Get the machine ID for a session."""
@@ -1411,25 +1739,215 @@ class RemoteAgentManager:
         When maxlen is reached, oldest entries are automatically dropped, and
         we increment _buffer_offsets to track the dropped count (Issue #1511).
 
+        Output is aggregated and batch-written to DB for performance (Issue #1823):
+        - Accumulates up to OUTPUT_BATCH_SIZE items before writing
+        - Or flushes after OUTPUT_BATCH_INTERVAL_MS timeout
+        - Maintains crash-safety: only loses at most BATCH_SIZE items on crash
+
         Limitation: If SSE disconnects for >3-5 minutes during high-frequency
         output (>5000 messages), old data will be trimmed and lost on reconnect.
         """
-        self._persist_output(session_id, output)
+        # 1. Append to in-memory buffer immediately (no lock needed, deque is thread-safe)
         with self._lock:
             if session_id not in self._output_buffers:
                 self._output_buffers[session_id] = deque(maxlen=self.MAX_BUFFER_SIZE)
                 self._buffer_offsets[session_id] = 0
             buf = self._output_buffers[session_id]
+
+            # Ensure _buffer_offsets entry exists (defensive)
+            if session_id not in self._buffer_offsets:
+                self._buffer_offsets[session_id] = 0
+
             # Track if this append will cause a trim (deque at maxlen)
+            # Issue #1823: Insert gap marker before trim
             if len(buf) == self.MAX_BUFFER_SIZE:
                 self._buffer_offsets[session_id] += 1
+                # Insert gap marker for buffer trim
+                now_iso = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+                gap_marker = {
+                    "type": "gap",
+                    "gap_type": "buffer_trim",
+                    "from_event_index": self._last_delivered.get(session_id, 0),
+                    "to_event_index": self._last_delivered.get(session_id, 0) + self.MAX_BUFFER_SIZE,
+                    "missing_count": 1,  # At least 1 item trimmed
+                    "timestamp": now_iso,
+                    "message": (
+                        "Output gap detected: buffer trimmed, approximately 1+ "
+                        "events may have been lost"
+                    ),
+                }
+                buf.append(gap_marker)
             buf.append(output)
+
+        # 2. Append to accumulator for batch write (Issue #1823)
+        now = time.time()
+        should_flush = False
+
+        with self._persist_output_lock:
+            acc = self._output_accumulator.get(session_id)
+            if acc is None:
+                acc = AccumulatorBuffer()
+                self._output_accumulator[session_id] = acc
+
+            acc.items.append(output)
+
+            # Check flush triggers
+            # Trigger 1: Batch size reached
+            if len(acc.items) >= self.OUTPUT_BATCH_SIZE:
+                should_flush = True
+            # Trigger 2: Time interval exceeded (passive check)
+            elif (now - acc.last_flush) * 1000 >= self.OUTPUT_BATCH_INTERVAL_MS:
+                should_flush = True
+            # Trigger 3: Accumulator max size (force flush to prevent unbounded growth)
+            elif len(acc.items) >= self.OUTPUT_ACCUMULATOR_MAX_SIZE:
+                should_flush = True
+
+            if should_flush:
+                self._flush_accumulator_sync(session_id, acc)
+
+    def _flush_accumulator_sync(self, session_id: str, acc: AccumulatorBuffer) -> None:
+        """Flush accumulator buffer to DB synchronously (Issue #1823).
+
+        Called from buffer_output when batch size or timeout is reached.
+        Must be called with _persist_output_lock held.
+
+        Args:
+            session_id: Session ID to flush.
+            acc: Accumulator buffer to flush.
+        """
+        if not acc.items:
+            return
+
+        # Batch write all accumulated items
+        items_to_write = acc.items[:]
+        acc.items = []
+        acc.last_flush = time.time()
+
+        try:
+            self._persist_output_batch(session_id, items_to_write)
+        except Exception as e:
+            # On failure, re-queue items and re-raise
+            # Items that failed to persist will be lost on crash, but that's
+            # acceptable per the risk assessment (max OUTPUT_BATCH_SIZE items)
+            acc.items = items_to_write + acc.items
+            logger.warning(
+                "Failed to flush output batch for session %s: %s. "
+                "Items remain in accumulator for retry.",
+                session_id[:8],
+                e,
+            )
+            raise
+
+    def _persist_output_batch(self, session_id: str, outputs: list[dict[str, Any]]) -> None:
+        """Persist multiple output items in a single transaction (Issue #1823).
+
+        Uses a single INSERT with multiple rows for efficiency.
+        Event indices are allocated sequentially within the transaction.
+
+        Handles UNIQUE constraint violations by retrying with re-read max index.
+
+        Args:
+            session_id: Session ID for the outputs.
+            outputs: List of output dicts to persist.
+        """
+        if not outputs:
+            return
+
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        expires_at = (now + timedelta(seconds=self.OUTPUT_RETENTION_SECONDS)).isoformat()
+
+        last_exc: Exception | None = None
+        for attempt in range(_PERSIST_OUTPUT_MAX_RETRIES):
+            try:
+                with self.db.connection() as conn:
+                    cursor = conn.cursor()
+                    if is_postgresql():
+                        # Transaction-scoped advisory lock
+                        cursor.execute(
+                            "SELECT pg_advisory_xact_lock(hashtext(%s))",
+                            (session_id,),
+                        )
+                        cursor.fetchone()
+                    else:
+                        # SQLite: acquire write lock before SELECT
+                        cursor.execute("BEGIN IMMEDIATE")
+
+                    # Re-read max event_index on every attempt
+                    cursor.execute(
+                        f"""
+                        SELECT COALESCE(MAX(event_index), 0) + 1 AS next_index
+                        FROM remote_runtime_outputs
+                        WHERE session_id = {_param()}
+                        """,
+                        (session_id,),
+                    )
+                    row = cursor.fetchone()
+                    next_index = int(row["next_index"] if row else 1)
+
+                    # Insert all outputs with sequential event_index
+                    for output in outputs:
+                        payload = json.dumps(output)
+                        stream = str(output.get("stream", "stdout"))
+                        cursor.execute(
+                            f"""
+                            INSERT INTO remote_runtime_outputs
+                            (session_id, event_index, stream, payload, created_at, expires_at)
+                            VALUES ({_params(6)})
+                            """,
+                            (
+                                session_id,
+                                next_index,
+                                stream,
+                                payload,
+                                now.isoformat(),
+                                expires_at,
+                            ),
+                        )
+                        next_index += 1
+
+                    conn.commit()
+                return  # Success
+            except Exception as e:
+                if _is_unique_violation(e):
+                    # Lost the event_index race against a concurrent producer
+                    last_exc = e
+                    continue
+                logger.warning(
+                    "Failed to persist output batch for session %s: %s",
+                    session_id[:8],
+                    e,
+                )
+                raise
+
+        # Exhausted retries on uniqueness collision
+        logger.error(
+            "Could not persist output batch for session %s after %d retries: %s",
+            session_id[:8],
+            _PERSIST_OUTPUT_MAX_RETRIES,
+            last_exc,
+        )
+        raise last_exc  # type: ignore[misc]
+
+    def _check_and_flush_stale_accumulators(self) -> None:
+        """Check and flush any stale accumulators (Issue #1823).
+
+        Called from get_buffered_output as a passive timeout check.
+        This ensures that even if buffer_output isn't called for a while,
+        any pending items get flushed when a client reconnects.
+        """
+        now = time.time()
+        with self._persist_output_lock:
+            for session_id, acc in list(self._output_accumulator.items()):
+                if acc.items and (now - acc.last_flush) * 1000 >= self.OUTPUT_BATCH_INTERVAL_MS:
+                    self._flush_accumulator_sync(session_id, acc)
 
     def get_buffered_output(self, session_id: str, after_index: int = 0) -> list[dict]:
         """Get buffered output for a session after a given index.
 
         Takes into account _buffer_offsets to prevent data loss when
         the buffer was trimmed (Issue #1511).
+
+        Also checks for stale accumulators and flushes them (Issue #1823).
 
         Example:
             - Buffer grew to 6000 items, trimmed to 5000 (offset=1000)
@@ -1440,6 +1958,9 @@ class RemoteAgentManager:
         Returns:
             List of output entries (converted from deque slice).
         """
+        # Check and flush stale accumulators (Issue #1823)
+        self._check_and_flush_stale_accumulators()
+
         persisted = self._get_persisted_output(session_id, after_index=after_index)
         if persisted:
             return persisted
@@ -1548,7 +2069,22 @@ class RemoteAgentManager:
         raise last_exc  # type: ignore[misc]
 
     def _get_persisted_output(self, session_id: str, after_index: int = 0) -> list[dict]:
-        """Read persisted output events after the delivered event index."""
+        """Read persisted output events after the delivered event index.
+
+        Detects and emits gap markers when event_index sequence is non-contiguous
+        (Issue #1823).
+
+        Gap marker format:
+            {
+                "type": "gap",
+                "gap_type": "db_query_gap",
+                "from_event_index": int,
+                "to_event_index": int,
+                "missing_count": int,
+                "timestamp": str,
+                "message": str
+            }
+        """
         try:
             with self.db.connection() as conn:
                 cursor = conn.cursor()
@@ -1575,14 +2111,39 @@ class RemoteAgentManager:
             return []
 
         events: list[dict] = []
+        expected_index = after_index + 1
+        now_iso = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+
         for row in rows:
+            event_index = row["event_index"]
+
+            # Check for gap (Issue #1823)
+            if event_index > expected_index:
+                missing_count = event_index - expected_index
+                gap_marker = {
+                    "type": "gap",
+                    "gap_type": "db_query_gap",
+                    "from_event_index": expected_index - 1,
+                    "to_event_index": event_index - 1,
+                    "missing_count": missing_count,
+                    "timestamp": now_iso,
+                    "message": (
+                        f"Output gap detected: approximately {missing_count} "
+                        "events may have been lost"
+                    ),
+                }
+                events.append(gap_marker)
+
             try:
                 payload = json.loads(row["payload"])
             except (TypeError, ValueError, json.JSONDecodeError):
                 continue
             if isinstance(payload, dict):
-                payload.setdefault("event_index", row["event_index"])
+                payload.setdefault("event_index", event_index)
                 events.append(payload)
+
+            expected_index = event_index + 1
+
         return events
 
     def mark_session_ended(self, session_id: str) -> None:
@@ -1594,18 +2155,53 @@ class RemoteAgentManager:
             self._session_end_flags[session_id] = True
             self._last_delivered.pop(session_id, None)  # Cleanup SSE state
 
+    @lru_cache(maxsize=1000)
+    def _log_session_ended_db_failure_cached(self, session_id: str, minute: int) -> None:
+        """Log DB failure for is_session_ended with rate limiting (Issue #1823).
+
+        Uses LRU cache to limit logging to at most once per minute per session.
+        The minute parameter is derived from time.time() // 60 to create time windows.
+
+        Args:
+            session_id: Session ID that failed DB lookup.
+            minute: Current minute (time.time() // 60) for cache key.
+        """
+        logger.warning(
+            "DB query failed in is_session_ended (session=%s). "
+            "Returning False (fail-open). Check DB connectivity.",
+            session_id[:8],
+        )
+
     def is_session_ended(self, session_id: str) -> bool:
-        """Check if a session has ended (in-memory, no DB query)."""
+        """Check if a session has ended.
+
+        Checks in-memory cache first; queries DB on cache miss.
+        Returns False on DB error (fail-open) with rate-limited warning log.
+
+        Note: This method does NOT throw exceptions to preserve SSE stream
+        stability. Check logs for DB query failures.
+
+        Returns:
+            True if session has ended (completed/stopped/error), False otherwise.
+        """
+        # L1: In-memory cache
         with self._lock:
             if self._session_end_flags.get(session_id, False):
                 return True
+
+        # L2: DB query (no intermediate L2 cache per Issue #1823 decision)
         try:
             row = self.db.fetch_one(
                 f"SELECT status FROM agent_sessions WHERE session_id = {_param()}",
                 (session_id,),
             )
         except Exception:
+            # Log with rate limiting: at most once per minute per session
+            self._log_session_ended_db_failure_cached(
+                session_id, int(time.time()) // 60
+            )
             return False
+
         if row and row.get("status") in ("completed", "error", "stopped"):
             with self._lock:
                 self._session_end_flags[session_id] = True
@@ -1969,6 +2565,28 @@ class RemoteAgentManager:
                 result[mid] = "none"
 
         return result
+
+    def shutdown(self) -> None:
+        """Graceful shutdown: flush all pending accumulators (Issue #1823).
+
+        Should be called before process exit to ensure all buffered output
+        is persisted. Serializes flush to avoid concurrent write issues.
+        """
+        logger.info("Shutting down RemoteAgentManager, flushing %d accumulators", len(self._output_accumulator))
+
+        with self._persist_output_lock:
+            for session_id, acc in list(self._output_accumulator.items()):
+                if acc.items:
+                    try:
+                        self._flush_accumulator_sync(session_id, acc)
+                    except Exception as e:
+                        logger.error(
+                            "Failed to flush accumulator for session %s during shutdown: %s",
+                            session_id[:8],
+                            e,
+                        )
+
+        logger.info("RemoteAgentManager shutdown complete")
 
     def _row_to_machine(self, row) -> dict[str, Any]:
         """Convert a database row to machine dict."""

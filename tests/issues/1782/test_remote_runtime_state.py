@@ -16,6 +16,7 @@ def runtime_db(tmp_path, monkeypatch):
     """RemoteAgentManager instances sharing one SQLite runtime database."""
     monkeypatch.setattr(ram_mod, "is_postgresql", lambda: False)
     monkeypatch.setattr(RemoteAgentManager, "_start_heartbeat_monitor", lambda self: None)
+    monkeypatch.setattr(RemoteAgentManager, "_start_retention_cleanup", lambda self: None)
     db_path = tmp_path / "remote_runtime.db"
     load_schema_from_file(db_url=f"sqlite:///{db_path}", dialect="sqlite")
     return db_path, Database(db_url=f"sqlite:///{db_path}")
@@ -42,6 +43,10 @@ def test_session_output_replays_from_persistent_buffer_after_restart(runtime_db)
     db_path, _ = runtime_db
     first_pod = RemoteAgentManager(db_path=str(db_path))
     second_pod = RemoteAgentManager(db_path=str(db_path))
+
+    # Set batch size to 1 so every buffer_output triggers immediate flush
+    # This matches the expected behavior for cross-pod output replay
+    first_pod.OUTPUT_BATCH_SIZE = 1
 
     first_pod.buffer_output("session-1", {"stream": "stdout", "data": "one"})
     first_pod.buffer_output("session-1", {"stream": "stderr", "data": "two"})
