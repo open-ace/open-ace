@@ -393,7 +393,8 @@ class TestTTLConfiguration:
             payload = json.loads(b64decode(payload_b64))
 
             exp_time = datetime.fromisoformat(payload["exp"])
-            now = datetime.now(timezone.utc).replace(tzinfo=None)
+            # Use local time to match generate_proxy_token behavior
+            now = datetime.now()
 
             # Should be approximately 60 minutes from now (allow 1 minute tolerance)
             ttl_minutes = (exp_time - now).total_seconds() / 60
@@ -423,7 +424,8 @@ class TestTTLConfiguration:
             payload = json.loads(b64decode(payload_b64))
 
             exp_time = datetime.fromisoformat(payload["exp"])
-            now = datetime.now(timezone.utc).replace(tzinfo=None)
+            # Use local time to match generate_proxy_token behavior
+            now = datetime.now()
 
             # Should use default 240 minutes
             ttl_minutes = (exp_time - now).total_seconds() / 60
