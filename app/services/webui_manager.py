@@ -143,7 +143,9 @@ class WorkspaceConfig:
     idle_timeout_minutes: int = 30
     cleanup_interval_minutes: int = 5
     token_secret: str = ""
-    webui_path: str = ""  # Path to qwen-code-webui executable or project directory (leave empty for auto-detect)
+    webui_path: str = (
+        ""  # Path to qwen-code-webui executable or project directory (leave empty for auto-detect)
+    )
     # Optional explicit URL for the webui to reach the LLM proxy (e.g. behind an
     # HTTPS reverse proxy). When set, :web_port is NOT appended. See issue #1730.
     webui_callback_url: str = ""
@@ -1109,9 +1111,7 @@ class WebUIManager:
             if os.path.isfile(self.config.webui_path) and os.access(
                 self.config.webui_path, os.X_OK
             ):
-                logger.info(
-                    f"Using webui executable from config: {self.config.webui_path}"
-                )
+                logger.info(f"Using webui executable from config: {self.config.webui_path}")
                 return self.config.webui_path, None
 
             # Then, check if webui_path is a project directory (development mode)
@@ -1119,16 +1119,12 @@ class WebUIManager:
             node_entry = os.path.join(webui_backend, "dist", "cli", "node.js")
 
             if os.path.isfile(node_entry):
-                logger.info(
-                    f"Using webui from project directory: {self.config.webui_path}"
-                )
+                logger.info(f"Using webui from project directory: {self.config.webui_path}")
                 return node_entry, webui_backend
 
             # Check if project needs to be built
             if os.path.isdir(webui_backend):
-                logger.warning(
-                    f"WebUI project found but not built: {node_entry} not found"
-                )
+                logger.warning(f"WebUI project found but not built: {node_entry} not found")
                 # Try to build it
                 try:
                     subprocess.run(
