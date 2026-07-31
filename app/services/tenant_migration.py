@@ -38,6 +38,45 @@ class TenantMigrationService:
         self.db = db or Database()
         self._lock = threading.Lock()
 
+    def _get_database_type(self) -> str:
+        """
+        Detect database type for compatibility handling.
+
+        Returns:
+            'postgresql', 'sqlite', or 'unknown'
+        """
+        try:
+            # Try to detect database type from connection
+            if hasattr(self.db, '_connection'):
+                conn = self.db._connection
+                if hasattr(conn, 'dialect'):
+                    return str(conn.dialect.name)
+                # Try detecting from connection string
+                if hasattr(conn, 'url'):
+                    url = str(conn.url)
+                    if 'postgresql' in url:
+                        return 'postgresql'
+                    elif 'sqlite' in url:
+                        return 'sqlite'
+
+            # Try executing PostgreSQL-specific query
+            try:
+                self.db.fetch_one("SELECT version()")
+                return 'postgresql'
+            except Exception:
+                pass
+
+            # Try SQLite-specific query
+            try:
+                self.db.fetch_one("SELECT sqlite_version()")
+                return 'sqlite'
+            except Exception:
+                pass
+
+            return 'unknown'
+        except Exception:
+            return 'unknown'
+
     def migrate_user_tenant(
         self,
         user_id: int,
@@ -105,12 +144,22 @@ class TenantMigrationService:
                 )
 
             # Execute migration in transaction
+            affected_sessions = 0
+            affected_projects = 0
+
             with self.db.transaction():
-                # Get advisory lock for this user (PostgreSQL)
-                self.db.execute(
-                    "SELECT pg_advisory_xact_lock(1000000 + ?)",
-                    (user_id,)
-                )
+                # Get advisory lock for this user (PostgreSQL only)
+                # For SQLite/other databases, rely on transaction isolation
+                db_type = self._get_database_type()
+                if db_type == "postgresql":
+                    try:
+                        self.db.execute(
+                            "SELECT pg_advisory_xact_lock(1000000 + ?)",
+                            (user_id,)
+                        )
+                    except Exception as e:
+                        # Advisory lock not available, continue with transaction isolation
+                        logger.warning(f"Advisory lock not available: {e}")
 
                 # Update sessions
                 self.db.execute(
@@ -119,7 +168,13 @@ class TenantMigrationService:
                        WHERE user_id = ?""",
                     (new_tenant_id, user_id)
                 )
-                affected_sessions = self.db.cursor.rowcount if hasattr(self.db, 'cursor') else 0
+
+                # Query affected sessions count (more reliable than rowcount)
+                sessions_result = self.db.fetch_one(
+                    "SELECT COUNT(*) as count FROM agent_sessions WHERE user_id = ? AND tenant_id = ?",
+                    (user_id, new_tenant_id)
+                )
+                affected_sessions = sessions_result.get("count", 0) if sessions_result else 0
 
                 # Update projects
                 self.db.execute(
@@ -128,7 +183,13 @@ class TenantMigrationService:
                        WHERE created_by = ? AND tenant_id = ?""",
                     (new_tenant_id, user_id, old_tenant_id)
                 )
-                affected_projects = self.db.cursor.rowcount if hasattr(self.db, 'cursor') else 0
+
+                # Query affected projects count
+                projects_result = self.db.fetch_one(
+                    "SELECT COUNT(*) as count FROM projects WHERE created_by = ? AND tenant_id = ?",
+                    (user_id, new_tenant_id)
+                )
+                affected_projects = projects_result.get("count", 0) if projects_result else 0
 
                 # Update user tenant_id and version
                 self.db.execute(

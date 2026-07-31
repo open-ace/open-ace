@@ -91,6 +91,9 @@ class TestTenantMigrationService:
             "tenant_version": 1
         }
 
+        # Mock database type detection
+        service._get_database_type = Mock(return_value='sqlite')
+
         # Mock transaction context
         mock_transaction = MagicMock()
         mock_transaction.__enter__ = Mock()
@@ -99,8 +102,6 @@ class TestTenantMigrationService:
 
         # Mock execute
         mock_db.execute.return_value = None
-        mock_db.cursor = Mock()
-        mock_db.cursor.rowcount = 3
 
         result = service.migrate_user_tenant(
             user_id=1,
@@ -111,8 +112,8 @@ class TestTenantMigrationService:
         assert result.success
         assert result.old_tenant_id == 1
         assert result.new_tenant_id == 2
-        # Verify advisory lock was called
-        assert mock_db.execute.called
+        # Verify transaction was used
+        assert mock_db.transaction.called
 
     def test_migrate_users_batch_success(self, service, mock_db):
         """Test batch migration."""
@@ -122,6 +123,9 @@ class TestTenantMigrationService:
             "tenant_version": 1
         }
 
+        # Mock database type detection
+        service._get_database_type = Mock(return_value='sqlite')
+
         # Mock transaction
         mock_transaction = MagicMock()
         mock_transaction.__enter__ = Mock()
@@ -129,8 +133,6 @@ class TestTenantMigrationService:
         mock_db.transaction.return_value = mock_transaction
 
         mock_db.execute.return_value = None
-        mock_db.cursor = Mock()
-        mock_db.cursor.rowcount = 0
 
         user_ids = [1, 2, 3]
         results = service.migrate_users_batch(
@@ -145,10 +147,21 @@ class TestTenantMigrationService:
 
     def test_migrate_users_batch_stops_on_failure(self, service, mock_db):
         """Test batch migration stops on first failure."""
+        # Mock database type detection
+        service._get_database_type = Mock(return_value='sqlite')
+
         mock_db.fetch_one.side_effect = [
             {"tenant_id": 1, "tenant_version": 1},  # success
             None,  # user not found - failure
         ]
+
+        # Mock transaction
+        mock_transaction = MagicMock()
+        mock_transaction.__enter__ = Mock()
+        mock_transaction.__exit__ = Mock()
+        mock_db.transaction.return_value = mock_transaction
+
+        mock_db.execute.return_value = None
 
         user_ids = [1, 2, 3]
         results = service.migrate_users_batch(
@@ -266,7 +279,11 @@ class TestTenantMigrationService:
                 "migrated_by": 2
             },
             {"tenant_id": 2, "tenant_version": 2},  # user query for reverse migration
+            {"tenant_id": 2, "tenant_version": 2},  # user query in migrate_user_tenant
         ]
+
+        # Mock database type detection
+        service._get_database_type = Mock(return_value='sqlite')
 
         # Mock transaction
         mock_transaction = MagicMock()
@@ -275,8 +292,6 @@ class TestTenantMigrationService:
         mock_db.transaction.return_value = mock_transaction
 
         mock_db.execute.return_value = None
-        mock_db.cursor = Mock()
-        mock_db.cursor.rowcount = 0
 
         result = service.rollback_migration(1)
 

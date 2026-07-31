@@ -6,6 +6,7 @@ tenant migration and invalidate sessions accordingly.
 """
 
 import logging
+
 from flask import g, jsonify
 from werkzeug.exceptions import HTTPException
 
