@@ -17,7 +17,6 @@ from collections import deque
 from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from functools import lru_cache
 from typing import Any, cast
 
 import gevent
@@ -199,6 +198,9 @@ class RemoteAgentManager:
         self._output_accumulator: dict[str, AccumulatorBuffer] = {}
         # Token cleanup lazy-start flag
         self._token_cleanup_started: bool = False
+        # Log rate limiting cache for is_session_ended DB failures (Issue #1823)
+        # {session_id_minute: True} - limits logging to once per minute per session
+        self._log_rate_limit_cache: dict[str, int] = {}
         # (removed _last_rotate_unrevoked — rotate_agent_token now returns the info)
         self._restore_in_memory_state()
         # Defer session cleanup to heartbeat monitor instead of running on startup.
@@ -1284,9 +1286,7 @@ class RemoteAgentManager:
         result = self.send_command_with_status(machine_id, command)
         return result.queued
 
-    def send_command_with_status(
-        self, machine_id: str, command: dict[str, Any]
-    ) -> CommandResult:
+    def send_command_with_status(self, machine_id: str, command: dict[str, Any]) -> CommandResult:
         """Send command with detailed status (Issue #1823).
 
         Provides visibility into command persistence status for callers
@@ -1379,7 +1379,9 @@ class RemoteAgentManager:
         """
         now = datetime.now(timezone.utc).replace(tzinfo=None)
         now_iso = now.isoformat()
-        timeout_threshold = (now - timedelta(seconds=self.COMMAND_CLAIM_TIMEOUT_SECONDS)).isoformat()
+        timeout_threshold = (
+            now - timedelta(seconds=self.COMMAND_CLAIM_TIMEOUT_SECONDS)
+        ).isoformat()
 
         claimed: list[dict] = []
         try:
@@ -1768,7 +1770,8 @@ class RemoteAgentManager:
                     "type": "gap",
                     "gap_type": "buffer_trim",
                     "from_event_index": self._last_delivered.get(session_id, 0),
-                    "to_event_index": self._last_delivered.get(session_id, 0) + self.MAX_BUFFER_SIZE,
+                    "to_event_index": self._last_delivered.get(session_id, 0)
+                    + self.MAX_BUFFER_SIZE,
                     "missing_count": 1,  # At least 1 item trimmed
                     "timestamp": now_iso,
                     "message": (
@@ -1793,13 +1796,11 @@ class RemoteAgentManager:
 
             # Check flush triggers
             # Trigger 1: Batch size reached
-            if len(acc.items) >= self.OUTPUT_BATCH_SIZE:
-                should_flush = True
-            # Trigger 2: Time interval exceeded (passive check)
-            elif (now - acc.last_flush) * 1000 >= self.OUTPUT_BATCH_INTERVAL_MS:
-                should_flush = True
-            # Trigger 3: Accumulator max size (force flush to prevent unbounded growth)
-            elif len(acc.items) >= self.OUTPUT_ACCUMULATOR_MAX_SIZE:
+            if (
+                len(acc.items) >= self.OUTPUT_BATCH_SIZE
+                or (now - acc.last_flush) * 1000 >= self.OUTPUT_BATCH_INTERVAL_MS
+                or len(acc.items) >= self.OUTPUT_ACCUMULATOR_MAX_SIZE
+            ):
                 should_flush = True
 
             if should_flush:
@@ -2155,22 +2156,30 @@ class RemoteAgentManager:
             self._session_end_flags[session_id] = True
             self._last_delivered.pop(session_id, None)  # Cleanup SSE state
 
-    @lru_cache(maxsize=1000)
     def _log_session_ended_db_failure_cached(self, session_id: str, minute: int) -> None:
         """Log DB failure for is_session_ended with rate limiting (Issue #1823).
 
-        Uses LRU cache to limit logging to at most once per minute per session.
+        Uses instance-level cache to limit logging to at most once per minute per session.
         The minute parameter is derived from time.time() // 60 to create time windows.
 
         Args:
             session_id: Session ID that failed DB lookup.
             minute: Current minute (time.time() // 60) for cache key.
         """
-        logger.warning(
-            "DB query failed in is_session_ended (session=%s). "
-            "Returning False (fail-open). Check DB connectivity.",
-            session_id[:8],
-        )
+        cache_key = f"{session_id}_{minute}"
+        if cache_key not in self._log_rate_limit_cache:
+            self._log_rate_limit_cache[cache_key] = minute
+            # Simple cache cleanup: remove entries older than 2 minutes
+            # to prevent unbounded growth
+            if len(self._log_rate_limit_cache) > 1000:
+                self._log_rate_limit_cache = {
+                    k: v for k, v in self._log_rate_limit_cache.items() if v >= minute - 1
+                }
+            logger.warning(
+                "DB query failed in is_session_ended (session=%s). "
+                "Returning False (fail-open). Check DB connectivity.",
+                session_id[:8],
+            )
 
     def is_session_ended(self, session_id: str) -> bool:
         """Check if a session has ended.
@@ -2197,9 +2206,7 @@ class RemoteAgentManager:
             )
         except Exception:
             # Log with rate limiting: at most once per minute per session
-            self._log_session_ended_db_failure_cached(
-                session_id, int(time.time()) // 60
-            )
+            self._log_session_ended_db_failure_cached(session_id, int(time.time()) // 60)
             return False
 
         if row and row.get("status") in ("completed", "error", "stopped"):
@@ -2572,7 +2579,10 @@ class RemoteAgentManager:
         Should be called before process exit to ensure all buffered output
         is persisted. Serializes flush to avoid concurrent write issues.
         """
-        logger.info("Shutting down RemoteAgentManager, flushing %d accumulators", len(self._output_accumulator))
+        logger.info(
+            "Shutting down RemoteAgentManager, flushing %d accumulators",
+            len(self._output_accumulator),
+        )
 
         with self._persist_output_lock:
             for session_id, acc in list(self._output_accumulator.items()):

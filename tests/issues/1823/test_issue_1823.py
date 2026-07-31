@@ -39,7 +39,8 @@ def temp_db():
     with db.connection() as conn:
         cursor = conn.cursor()
         # remote_runtime_outputs table
-        cursor.execute("""
+        cursor.execute(
+            """
             CREATE TABLE IF NOT EXISTS remote_runtime_outputs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 session_id TEXT NOT NULL,
@@ -49,9 +50,11 @@ def temp_db():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 expires_at TIMESTAMP
             )
-        """)
+        """
+        )
         # remote_runtime_commands table
-        cursor.execute("""
+        cursor.execute(
+            """
             CREATE TABLE IF NOT EXISTS remote_runtime_commands (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 command_id TEXT NOT NULL,
@@ -66,28 +69,34 @@ def temp_db():
                 responded_at TIMESTAMP,
                 expires_at TIMESTAMP
             )
-        """)
+        """
+        )
         # retention_history table
-        cursor.execute("""
+        cursor.execute(
+            """
             CREATE TABLE IF NOT EXISTS retention_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 report_data TEXT NOT NULL
             )
-        """)
+        """
+        )
         # agent_sessions table
-        cursor.execute("""
+        cursor.execute(
+            """
             CREATE TABLE IF NOT EXISTS agent_sessions (
                 session_id TEXT PRIMARY KEY,
                 status TEXT NOT NULL
             )
-        """)
+        """
+        )
         conn.commit()
 
     yield db_path
 
     # Cleanup
     import os
+
     try:
         os.unlink(db_path)
     except Exception:
@@ -350,8 +359,13 @@ class TestClaimPersistedCommands:
                 "INSERT INTO remote_runtime_commands "
                 "(command_id, machine_id, payload, status, created_at) "
                 "VALUES (?, ?, ?, ?, ?)",
-                ("cmd-1", "machine-1", json.dumps({"command": "test"}), "pending",
-                 datetime.now(timezone.utc).replace(tzinfo=None).isoformat()),
+                (
+                    "cmd-1",
+                    "machine-1",
+                    json.dumps({"command": "test"}),
+                    "pending",
+                    datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
+                ),
             )
             conn.commit()
 
@@ -375,8 +389,14 @@ class TestClaimPersistedCommands:
                 "INSERT INTO remote_runtime_commands "
                 "(command_id, machine_id, payload, status, delivered_at, created_at) "
                 "VALUES (?, ?, ?, ?, ?, ?)",
-                ("cmd-1", "machine-1", json.dumps({"command": "test"}), "delivered",
-                 old_time, now.isoformat()),
+                (
+                    "cmd-1",
+                    "machine-1",
+                    json.dumps({"command": "test"}),
+                    "delivered",
+                    old_time,
+                    now.isoformat(),
+                ),
             )
             conn.commit()
 
@@ -396,8 +416,14 @@ class TestClaimPersistedCommands:
                 "INSERT INTO remote_runtime_commands "
                 "(command_id, machine_id, payload, status, delivered_at, created_at) "
                 "VALUES (?, ?, ?, ?, ?, ?)",
-                ("cmd-1", "machine-1", json.dumps({"command": "test"}), "delivered",
-                 None, datetime.now(timezone.utc).replace(tzinfo=None).isoformat()),
+                (
+                    "cmd-1",
+                    "machine-1",
+                    json.dumps({"command": "test"}),
+                    "delivered",
+                    None,
+                    datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
+                ),
             )
             conn.commit()
 
@@ -435,7 +461,7 @@ class TestSendCommandWithStatus:
         manager = RemoteAgentManager(db_path=temp_db)
 
         # Mock _persist_command to return False (simulating DB failure)
-        with patch.object(manager, '_persist_command', return_value=False):
+        with patch.object(manager, "_persist_command", return_value=False):
             result = manager.send_command_with_status("machine-1", {"command": "test"})
 
         assert result.queued is True  # Still queued in-memory
@@ -453,8 +479,13 @@ class TestSendCommandWithStatus:
                 "INSERT INTO remote_runtime_commands "
                 "(command_id, machine_id, payload, status, created_at) "
                 "VALUES (?, ?, ?, ?, ?)",
-                ("cmd-1", "machine-1", "{}", "pending",
-                 datetime.now(timezone.utc).replace(tzinfo=None).isoformat()),
+                (
+                    "cmd-1",
+                    "machine-1",
+                    "{}",
+                    "pending",
+                    datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
+                ),
             )
             conn.commit()
 
@@ -529,8 +560,13 @@ class TestGapDetection:
                     "INSERT INTO remote_runtime_outputs "
                     "(session_id, event_index, stream, payload, created_at) "
                     "VALUES (?, ?, ?, ?, ?)",
-                    ("test-session", i, "stdout", json.dumps({"text": f"output {i}"}),
-                     now.isoformat()),
+                    (
+                        "test-session",
+                        i,
+                        "stdout",
+                        json.dumps({"text": f"output {i}"}),
+                        now.isoformat(),
+                    ),
                 )
             conn.commit()
 
