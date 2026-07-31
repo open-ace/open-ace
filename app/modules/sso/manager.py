@@ -88,9 +88,19 @@ class SSOManager:
         self._provider_cache_time: dict[str, float] = {}
 
     def serialize_provider_config(self, config_data: dict[str, Any]) -> str:
-        """Serialize provider config for storage, encrypting the client secret."""
+        """Serialize provider config for storage, encrypting the client secret.
+
+        Issue #2174 F5: Handle SecretHolder objects when serializing.
+        """
         stored = dict(config_data)
-        client_secret = cast("str", stored.pop("client_secret", "") or "")
+        client_secret_obj = stored.pop("client_secret", "")
+
+        # Issue #2174 F5: Extract plaintext from SecretHolder if needed
+        if isinstance(client_secret_obj, SecretHolder):
+            client_secret = client_secret_obj.get()
+        else:
+            client_secret = cast("str", client_secret_obj or "")
+
         stored.pop("client_secret_encrypted", None)
         stored["client_secret_encrypted"] = (
             self._password_manager.encrypt(client_secret) if client_secret else ""
