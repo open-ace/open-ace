@@ -52,42 +52,123 @@ def get_audit_logger():
     return _audit_logger
 
 
+# Issue #1826 F8: RelayState signing configuration
+# Use HMAC-SHA256 from standard library (no new dependencies)
+import hashlib
+import hmac
+
+
+def _get_relaystate_signing_key() -> bytes:
+    """Get signing key for RelayState.
+
+    Issue #1826 F8: Use Fernet key or independent SSO_RELAYSTATE_SIGNING_KEY.
+    """
+    # Try dedicated key first
+    key = os.environ.get("SSO_RELAYSTATE_SIGNING_KEY")
+    if key:
+        return key.encode("utf-8")
+
+    # Fall back to encryption key (same as used by SMTPPasswordManager)
+    from app.utils.security_env import get_encryption_key_material
+
+    try:
+        # Use same key derivation as SMTPPasswordManager
+        key_material = get_encryption_key_material(purpose="RelayState signing")
+        return hashlib.sha256(key_material.encode()).digest()
+    except Exception:
+        # Last resort: generate a stable key from app secret
+        app_secret = os.environ.get("SECRET_KEY", "open-ace-default-secret")
+        return hashlib.sha256(app_secret.encode()).digest()
+
+
 def _encode_state(original_state: str, redirect_uri: str) -> str:
-    """Encode redirect_uri into state parameter.
+    """Encode redirect_uri into state parameter with HMAC signature.
+
+    Issue #1826 F8: Add HMAC-SHA256 signature for integrity protection.
 
     Args:
         original_state: Original state for CSRF verification.
         redirect_uri: Frontend redirect URI.
 
     Returns:
-        str: Base64 encoded state containing both values.
+        str: Base64 encoded state containing both values and signature.
     """
     import base64
 
+    # New format with signature (v=2)
     state_data = {
-        "s": original_state,  # 原始 state 用于验证
-        "r": redirect_uri,  # 前端重定向地址
+        "v": 2,  # Version identifier
+        "s": original_state,  # Original state for CSRF verification
+        "r": redirect_uri,  # Frontend redirect URI
+        "t": int(datetime.now(timezone.utc).timestamp()),  # Timestamp for replay protection
     }
+
+    # Serialize and sign
+    payload = json.dumps(state_data, sort_keys=True).encode()
+    signing_key = _get_relaystate_signing_key()
+    signature = hmac.new(signing_key, payload, hashlib.sha256).hexdigest()
+
+    state_data["sig"] = signature
+
     return base64.urlsafe_b64encode(json.dumps(state_data).encode()).decode()
 
 
 def _decode_state(encoded_state: str) -> tuple[str, str | None]:
     """Decode state parameter to get original state and redirect_uri.
 
+    Issue #1826 F8: Verify HMAC signature, reject tampered states.
+
     Args:
         encoded_state: Base64 encoded state parameter.
 
     Returns:
         tuple: (original_state, redirect_uri or None)
+
+    Note: Transition period ends 2027-01-31 (6 months from 2026-07-31).
+    After that date, legacy format will be rejected with 400 error.
     """
     import base64
 
     try:
         state_data = json.loads(base64.urlsafe_b64decode(encoded_state).decode())
-        return state_data.get("s", encoded_state), state_data.get("r")
-    except (json.JSONDecodeError, Exception):
-        # 兼容旧格式（纯 state 字符串）
-        return encoded_state, None
+
+        # Check version
+        if state_data.get("v") == 2:
+            # New format with signature verification
+            signature = state_data.get("sig", "")
+
+            # Reconstruct payload for verification (without signature)
+            verify_data = {k: v for k, v in state_data.items() if k != "sig"}
+            payload = json.dumps(verify_data, sort_keys=True).encode()
+
+            signing_key = _get_relaystate_signing_key()
+            expected_signature = hmac.new(signing_key, payload, hashlib.sha256).hexdigest()
+
+            if not hmac.compare_digest(signature, expected_signature):
+                logger.warning("RelayState signature verification failed")
+                # Issue #1826 F8: Reject tampered state instead of degrading
+                return (encoded_state, None)
+
+            # Signature valid, extract data
+            return (state_data.get("s", encoded_state), state_data.get("r"))
+
+        else:
+            # Old format (no signature) - log warning during transition period
+            # Issue #1826 F8: Transition period ends 2027-01-31
+            # After that, this branch should be removed and legacy format rejected
+            logger.warning(
+                "RelayState using legacy format without signature. "
+                "This format will be rejected after 2027-01-31. "
+                "Count: relaystate_legacy_format_total"
+            )
+            return (state_data.get("s", encoded_state), state_data.get("r"))
+
+    except (json.JSONDecodeError, Exception) as e:
+        # Issue #1826 F8: Don't silently fall back to treating input as valid state
+        logger.warning(f"Failed to decode RelayState: {e}")
+        # Return (encoded_state, None) to allow legacy format during transition
+        # After transition period, this should return error
+        return (encoded_state, None)
 
 
 def _get_allowed_redirect_domains() -> list[str]:
@@ -504,10 +585,14 @@ def update_provider(provider_name: str):
     # Merge configuration (keep existing values for fields not provided)
     new_config = existing_config.copy()
 
+    # Issue #1826 F6: Only update client_secret if provided in request
+    # This avoids unnecessary re-encryption (Fernet IV churn) and audit noise
+    has_new_secret = False
     if data.get("client_id"):
         new_config["client_id"] = data["client_id"]
     if data.get("client_secret"):
         new_config["client_secret"] = data["client_secret"]
+        has_new_secret = True
     if "redirect_uri" in data:
         new_config["redirect_uri"] = data["redirect_uri"]
     if "scope" in data:
@@ -529,7 +614,33 @@ def update_provider(provider_name: str):
     # Check if provider was disabled - auto-enable on update
     was_disabled = not existing.get("is_active", True)
 
-    serialized_config = get_sso_manager().serialize_provider_config(new_config)
+    # Issue #1826 F6: Preserve existing encrypted secret if no new secret provided
+    if has_new_secret:
+        # Re-encrypt with new secret
+        serialized_config = get_sso_manager().serialize_provider_config(new_config)
+    else:
+        # Preserve existing encrypted secret - avoid unnecessary re-encryption
+        # Load existing config and check if encrypted_secret exists
+        existing_raw_config = json.loads(existing["config"])
+        existing_encrypted = existing_raw_config.get("client_secret_encrypted", "")
+
+        if existing_encrypted:
+            # Provider already has encrypted secret - preserve it to avoid IV churn
+            # Remove client_secret from new_config to avoid re-encryption
+            config_for_serialize = new_config.copy()
+            config_for_serialize.pop("client_secret", None)
+
+            # Serialize and manually inject existing encrypted secret
+            serialized_config_dict = json.loads(
+                get_sso_manager().serialize_provider_config(config_for_serialize)
+            )
+            serialized_config_dict["client_secret_encrypted"] = existing_encrypted
+            serialized_config = json.dumps(serialized_config_dict)
+        else:
+            # No existing encrypted secret - this is a legacy provider or SAML
+            # Serialize with current client_secret (empty for SAML, or plaintext for legacy)
+            # serialize_provider_config will encrypt it properly for legacy providers
+            serialized_config = get_sso_manager().serialize_provider_config(new_config)
     get_sso_manager().db.execute(
         """
         UPDATE sso_providers
@@ -1428,27 +1539,63 @@ def get_session():
 @sso_bp.route("/session", methods=["DELETE"])
 @public_endpoint
 def logout():
-    """Logout from SSO session."""
+    """Logout from SSO session.
+
+    Issue #1826 F4: Cascade delete both sso_sessions and sessions tables
+    to ensure complete session cleanup and prevent session_token reuse.
+    """
     token = request.cookies.get("session_token") or request.headers.get(
         "Authorization", ""
     ).replace("Bearer ", "")
 
     session_data = None
+    user_id = None
+
     if token:
+        # Get session data before deletion
         session_data = get_sso_manager().get_sso_session(token)
-        get_sso_manager().delete_sso_session(token)
+
+        if session_data:
+            user_id = session_data.get("user_id")
+
+            # Issue #1826 F4: Cascade delete in transaction
+            # Delete from both sso_sessions and sessions tables
+            try:
+                with get_sso_manager().db.connection() as conn:
+                    cursor = conn.cursor()
+
+                    # Delete from sso_sessions first
+                    cursor.execute(
+                        "DELETE FROM sso_sessions WHERE session_token = ?",
+                        (token,),
+                    )
+
+                    # Then delete from sessions table (shared session)
+                    if user_id:
+                        cursor.execute(
+                            "DELETE FROM sessions WHERE user_id = ? AND token = ?",
+                            (user_id, token),
+                        )
+
+                    conn.commit()
+
+            except Exception as e:
+                logger.error(f"Failed to cleanup SSO session: {e}")
+                # Still proceed to return success - best effort cleanup
+                # The session will eventually expire
 
     # Audit-log the SSO logout so SSO session termination is visible alongside
     # password-auth logouts.
     try:
         get_audit_logger().log(
             action=AuditAction.LOGOUT.value,
-            user_id=session_data.get("user_id") if session_data else None,
+            user_id=user_id,
             resource_type="sso_session",
             resource_id=session_data.get("provider_name") if session_data else None,
             details={
                 "method": "sso",
                 "provider": session_data.get("provider_name") if session_data else None,
+                "cascade_delete": True,  # Issue #1826 F4: Mark cascade delete
             },
             ip_address=request.remote_addr,
             user_agent=request.headers.get("User-Agent"),
@@ -1457,7 +1604,10 @@ def logout():
     except Exception:
         logger.warning("Failed to audit-log SSO logout", exc_info=True)
 
-    return jsonify({"message": "Logged out successfully"})
+    # Issue #1826 F4: Clear session_token cookie to prevent reuse
+    response = jsonify({"message": "Logged out successfully"})
+    response.delete_cookie("session_token", httponly=True, samesite="Lax")
+    return response
 
 
 @sso_bp.route("/identities/<int:user_id>", methods=["GET"])
@@ -1534,6 +1684,8 @@ def _create_user_from_sso(sso_user, provider_name: str) -> int | None:
 
     Returns:
         Optional[int]: New user ID or None.
+
+    Issue #1826 F3: Explicit tenant_id passing with policy configuration.
     """
     # Generate username if not provided
     username = sso_user.username or sso_user.email or f"{provider_name}_{sso_user.provider_user_id}"
@@ -1545,9 +1697,30 @@ def _create_user_from_sso(sso_user, provider_name: str) -> int | None:
         username = f"{base_username}_{counter}"
         counter += 1
 
+    # Issue #1826 F3: Get tenant_id with policy configuration
     # Get tenant_id from Provider configuration
     provider = get_sso_manager().get_provider(provider_name)
-    tenant_id = provider.config.tenant_id if provider and provider.config.tenant_id else 1
+    tenant_id = provider.config.tenant_id if provider and provider.config.tenant_id else None
+
+    # Policy configuration for null tenant_id
+    null_tenant_policy = os.environ.get("SSO_NULL_TENANT_POLICY", "warn")
+
+    # Check if tenant_id is required
+    if tenant_id is None:
+        if null_tenant_policy == "reject":
+            logger.error(
+                f"SSO user creation rejected due to null tenant_id (policy: reject): "
+                f"provider={provider_name}, username={username}"
+            )
+            return None
+        elif null_tenant_policy == "warn":
+            logger.warning(
+                f"SSO user created with null tenant_id: provider={provider_name}, "
+                f"username={username}. Set SSO_NULL_TENANT_POLICY=reject to enforce tenant_id."
+            )
+        # "allow" policy: silent allow (for admin accounts)
+        # Default tenant_id to 1 if not set (backward compatibility)
+        tenant_id = tenant_id or 1
 
     # Create user
     try:
@@ -1556,7 +1729,7 @@ def _create_user_from_sso(sso_user, provider_name: str) -> int | None:
             email=sso_user.email or "",
             password_hash="",  # No password for SSO users
             role="user",
-            tenant_id=tenant_id,
+            tenant_id=tenant_id,  # Issue #1826 F3: Explicitly pass tenant_id
         )
 
         if user_id:

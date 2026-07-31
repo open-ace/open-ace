@@ -65,6 +65,8 @@ def client(sso_manager):
         patch("app.routes.sso.get_audit_logger", return_value=audit_logger),
         patch("app.routes.sso.user_repo.get_user_by_id", return_value=admin_user),
         patch("app.auth.decorators._authenticate", return_value=(True, ADMIN_SESSION)),
+        # Issue #1826: Mock is_postgresql for SQLite tests
+        patch("app.repositories.database.is_postgresql", return_value=False),
     ):
         yield app.test_client()
 
