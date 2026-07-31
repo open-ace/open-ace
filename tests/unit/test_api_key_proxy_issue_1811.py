@@ -27,6 +27,10 @@ class TestFailClosedBehavior:
     @pytest.fixture
     def mock_service(self):
         """Create mock APIKeyProxyService."""
+        # Issue #1820: Reset EncryptionKeyRegistry before setting new key
+        from app.utils.encryption_key_registry import reset_registry
+
+        reset_registry()
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = os.path.join(tmpdir, "test.db")
             with patch.dict(
@@ -34,6 +38,8 @@ class TestFailClosedBehavior:
             ):
                 service = APIKeyProxyService(db_path=db_path)
                 yield service
+        # Issue #1820: Reset EncryptionKeyRegistry after test
+        reset_registry()
 
     def test_session_allows_proxy_token_db_connection_error_returns_false(self, mock_service):
         """Test that DB connection error causes token rejection (fail-closed)."""
@@ -113,6 +119,10 @@ class TestConnectionPool:
     @pytest.fixture
     def mock_service(self):
         """Create mock APIKeyProxyService."""
+        # Issue #1820: Reset EncryptionKeyRegistry before setting new key
+        from app.utils.encryption_key_registry import reset_registry
+
+        reset_registry()
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = os.path.join(tmpdir, "test.db")
             with patch.dict(
@@ -120,6 +130,8 @@ class TestConnectionPool:
             ):
                 service = APIKeyProxyService(db_path=db_path)
                 yield service
+        # Issue #1820: Reset EncryptionKeyRegistry after test
+        reset_registry()
 
     def test_validate_proxy_token_uses_single_connection(self, mock_service):
         """Test that validate_proxy_token uses single connection for all queries."""
@@ -155,6 +167,10 @@ class TestProxyTokenCleanup:
     @pytest.fixture
     def mock_service(self):
         """Create mock APIKeyProxyService."""
+        # Issue #1820: Reset EncryptionKeyRegistry before setting new key
+        from app.utils.encryption_key_registry import reset_registry
+
+        reset_registry()
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = os.path.join(tmpdir, "test.db")
             with patch.dict(
@@ -162,6 +178,8 @@ class TestProxyTokenCleanup:
             ):
                 service = APIKeyProxyService(db_path=db_path)
                 yield service
+        # Issue #1820: Reset EncryptionKeyRegistry after test
+        reset_registry()
 
     def test_cleanup_deletes_expired_records(self, mock_service):
         """Test that cleanup deletes expired records."""
@@ -367,6 +385,10 @@ class TestTTLConfiguration:
     @pytest.fixture
     def mock_service(self):
         """Create mock APIKeyProxyService."""
+        # Issue #1820: Reset EncryptionKeyRegistry before setting new key
+        from app.utils.encryption_key_registry import reset_registry
+
+        reset_registry()
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = os.path.join(tmpdir, "test.db")
             with patch.dict(
@@ -374,6 +396,8 @@ class TestTTLConfiguration:
             ):
                 service = APIKeyProxyService(db_path=db_path)
                 yield service
+        # Issue #1820: Reset EncryptionKeyRegistry after test
+        reset_registry()
 
     def test_ha_pool_ttl_respects_env_variable(self, mock_service):
         """Test that ha_pool TTL respects environment variable."""
