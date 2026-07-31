@@ -227,24 +227,6 @@ CREATE SEQUENCE ai_agent_settings_id_seq
     CACHE 1;
 
 ALTER SEQUENCE ai_agent_settings_id_seq OWNED BY ai_agent_settings.id;
-CREATE TABLE alert_creation_failures (
-    id integer NOT NULL,
-    alert_data text NOT NULL,
-    retry_count integer DEFAULT 0,
-    last_retry_at timestamp without time zone,
-    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
-    status text DEFAULT 'pending'::text
-);
-
-CREATE SEQUENCE alert_creation_failures_id_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-ALTER SEQUENCE alert_creation_failures_id_seq OWNED BY alert_creation_failures.id;
 CREATE TABLE alerts (
     id integer NOT NULL,
     alert_id text NOT NULL,
@@ -845,7 +827,8 @@ CREATE TABLE notification_preferences (
     alert_types text,
     min_severity text DEFAULT 'warning'::text,
     notification_email text,
-    email_verified boolean DEFAULT false
+    email_verified boolean DEFAULT false,
+    dingtalk_webhook_secret text
 );
 
 CREATE TABLE policy_decisions (
@@ -1983,7 +1966,6 @@ ALTER TABLE ONLY aggregation_history ALTER COLUMN id SET DEFAULT nextval('aggreg
 
 ALTER TABLE ONLY ai_agent_settings ALTER COLUMN id SET DEFAULT nextval('ai_agent_settings_id_seq'::regclass);
 
-ALTER TABLE ONLY alert_creation_failures ALTER COLUMN id SET DEFAULT nextval('alert_creation_failures_id_seq'::regclass);
 
 ALTER TABLE ONLY alerts ALTER COLUMN id SET DEFAULT nextval('alerts_id_seq'::regclass);
 
@@ -2149,8 +2131,6 @@ ALTER TABLE ONLY ai_agent_settings
 ALTER TABLE ONLY ai_agent_settings
     ADD CONSTRAINT ai_agent_settings_setting_key_key UNIQUE (setting_key);
 
-ALTER TABLE ONLY alert_creation_failures
-    ADD CONSTRAINT alert_creation_failures_pkey PRIMARY KEY (id);
 
 ALTER TABLE ONLY alerts
     ADD CONSTRAINT alerts_alert_id_key UNIQUE (alert_id);

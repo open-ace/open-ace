@@ -139,14 +139,6 @@ CREATE TABLE ai_agent_settings (
  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE alert_creation_failures (
- id INTEGER PRIMARY KEY AUTOINCREMENT,
- alert_data text NOT NULL,
- retry_count integer DEFAULT 0,
- last_retry_at TIMESTAMP,
- created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
- status text DEFAULT 'pending'
-);
 
 CREATE TABLE alerts (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -568,7 +560,8 @@ CREATE TABLE notification_preferences (
  alert_types text,
  min_severity text DEFAULT 'warning',
  notification_email text,
- email_verified INTEGER DEFAULT 0
+ email_verified INTEGER DEFAULT 0,
+ dingtalk_webhook_secret text
 );
 
 CREATE TABLE policy_decisions (
