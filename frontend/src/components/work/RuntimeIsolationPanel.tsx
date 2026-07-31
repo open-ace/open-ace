@@ -9,11 +9,12 @@
  * an unsupported dimension as protected (the #2082 lesson).
  */
 
-import { useMemo } from 'react';
+import { useId, useMemo, useState } from 'react';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
 import { Badge } from '@/components/common';
 import type { AutonomousWorkflow } from '@/api/autonomous';
+import './RuntimeIsolationPanel.css';
 
 export interface EffectivePolicySnapshot {
   schema_version?: number;
@@ -84,8 +85,18 @@ interface LimitRow {
   enforced?: boolean;
 }
 
+const SUMMARY_LIMIT_KEYS = [
+  'autoPolicyMemory',
+  'autoPolicyPids',
+  'autoPolicyCpu',
+  'autoPolicyWallClock',
+  'autoPolicyStorage',
+] as const;
+
 export function RuntimeIsolationPanel({ workflow }: RuntimeIsolationPanelProps) {
   const language = useLanguage();
+  const [expanded, setExpanded] = useState(false);
+  const bodyId = useId();
   const snapshot = useMemo(
     () => parseEffectivePolicy(workflow.sandbox_effective_policy),
     [workflow.sandbox_effective_policy]
@@ -130,61 +141,94 @@ export function RuntimeIsolationPanel({ workflow }: RuntimeIsolationPanelProps) 
       enforced: enforced.inode,
     },
   ];
+  const summaryRows: LimitRow[] = SUMMARY_LIMIT_KEYS.flatMap((labelKey) => {
+    const row = rows.find((limitRow) => limitRow.labelKey === labelKey);
+    return row && row.value !== '—' ? [row] : [];
+  });
+  const visibleSummaryRows: LimitRow[] = summaryRows.length > 0 ? summaryRows : rows.slice(0, 4);
 
   return (
-    <details className="runtime-isolation-panel mb-2" data-testid="runtime-isolation-panel">
-      <summary className="runtime-isolation-panel__summary">
-        <i className="bi bi-shield-lock me-1"></i>
-        {t('autoPolicyPanelTitle', language)}
-        {snapshot.provider ? (
-          <Badge variant="secondary" className="ms-2">
-            {snapshot.provider}
-          </Badge>
-        ) : null}
-      </summary>
-      <div className="runtime-isolation-panel__body p-2">
-        {snapshot.capabilities && snapshot.capabilities.length > 0 ? (
-          <div className="mb-2">
-            <div className="text-muted small mb-1">{t('autoPolicyCapabilities', language)}</div>
-            <div className="d-flex flex-wrap gap-1">
-              {snapshot.capabilities.map((cap) => (
-                <Badge key={cap} variant="info">
-                  {cap}
-                </Badge>
+    <div className="runtime-isolation-panel" data-testid="runtime-isolation-panel">
+      <button
+        type="button"
+        className="runtime-isolation-panel__toggle"
+        aria-expanded={expanded}
+        aria-controls={expanded ? bodyId : undefined}
+        aria-label={expanded ? t('collapse', language) : t('expand', language)}
+        onClick={() => setExpanded((open) => !open)}
+      >
+        <div className="runtime-isolation-panel__header">
+          <div className="runtime-isolation-panel__title-group">
+            <span className="runtime-isolation-panel__title">
+              <i className="bi bi-shield-lock"></i>
+              {t('autoPolicyPanelTitle', language)}
+            </span>
+            {snapshot.provider ? (
+              <span className="runtime-isolation-panel__provider">{snapshot.provider}</span>
+            ) : null}
+          </div>
+          <span className="runtime-isolation-panel__chevron" aria-hidden="true">
+            <i className={`bi ${expanded ? 'bi-chevron-up' : 'bi-chevron-down'}`}></i>
+          </span>
+        </div>
+        <div className="runtime-isolation-panel__summary-pills">
+          {visibleSummaryRows.map((row) => (
+            <span key={row.labelKey} className="runtime-isolation-panel__summary-pill">
+              <span className="runtime-isolation-panel__summary-label">
+                {t(row.labelKey, language)}
+              </span>
+              <span className="runtime-isolation-panel__summary-value">{row.value}</span>
+            </span>
+          ))}
+        </div>
+      </button>
+
+      {expanded && (
+        <div id={bodyId} className="runtime-isolation-panel__body">
+          {snapshot.capabilities && snapshot.capabilities.length > 0 ? (
+            <div className="runtime-isolation-panel__section">
+              <div className="runtime-isolation-panel__section-label">
+                {t('autoPolicyCapabilities', language)}
+              </div>
+              <div className="runtime-isolation-panel__capabilities">
+                {snapshot.capabilities.map((cap) => (
+                  <Badge key={cap} variant="info">
+                    {cap}
+                  </Badge>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="runtime-isolation-panel__notice">
+              <i className="bi bi-exclamation-triangle me-1"></i>
+              {t('autoPolicyNoCapabilities', language)}
+            </div>
+          )}
+
+          <div className="runtime-isolation-panel__section">
+            <div className="runtime-isolation-panel__section-label">
+              {t('autoPolicyLimit', language)}
+            </div>
+            <div className="runtime-isolation-panel__limit-grid">
+              {rows.map((row) => (
+                <div key={row.labelKey} className="runtime-isolation-panel__limit-card">
+                  <div className="runtime-isolation-panel__limit-header">
+                    <span className="runtime-isolation-panel__limit-label">
+                      {t(row.labelKey, language)}
+                    </span>
+                    <Badge variant={row.enforced ? 'success' : 'warning'}>
+                      {row.enforced
+                        ? t('autoPolicyEnforcedYes', language)
+                        : t('autoPolicyEnforcedNo', language)}
+                    </Badge>
+                  </div>
+                  <div className="runtime-isolation-panel__limit-value">{row.value}</div>
+                </div>
               ))}
             </div>
           </div>
-        ) : (
-          <div className="text-muted small mb-2">
-            <i className="bi bi-exclamation-triangle me-1"></i>
-            {t('autoPolicyNoCapabilities', language)}
-          </div>
-        )}
-        <table className="table table-sm mb-0 runtime-isolation-panel__table">
-          <thead>
-            <tr>
-              <th>{t('autoPolicyLimit', language)}</th>
-              <th>{t('autoPolicyValue', language)}</th>
-              <th>{t('autoPolicyEnforced', language)}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => (
-              <tr key={row.labelKey}>
-                <td>{t(row.labelKey, language)}</td>
-                <td className="font-monospace">{row.value}</td>
-                <td>
-                  {row.enforced ? (
-                    <Badge variant="success">{t('autoPolicyEnforcedYes', language)}</Badge>
-                  ) : (
-                    <Badge variant="warning">{t('autoPolicyEnforcedNo', language)}</Badge>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </details>
+        </div>
+      )}
+    </div>
   );
 }

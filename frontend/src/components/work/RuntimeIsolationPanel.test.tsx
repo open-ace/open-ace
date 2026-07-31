@@ -1,4 +1,4 @@
-import { render, screen } from '@/test/utils';
+import { fireEvent, render, screen } from '@/test/utils';
 import { describe, it, expect } from 'vitest';
 import { RuntimeIsolationPanel, parseEffectivePolicy } from './RuntimeIsolationPanel';
 import type { AutonomousWorkflow } from '@/api/autonomous';
@@ -98,23 +98,32 @@ describe('RuntimeIsolationPanel', () => {
     expect(container.querySelector('[data-testid="runtime-isolation-panel"]')).toBeNull();
   });
 
-  it('renders provider, capabilities, and the limits table for a legacy snapshot', () => {
+  it('renders the provider and summary limits in the collapsed header', () => {
     render(<RuntimeIsolationPanel workflow={workflow(LEGACY_SNAPSHOT)} />);
-    // Provider badge
     expect(screen.getByText('legacy_posix')).toBeInTheDocument();
-    // Capability chip
-    expect(screen.getByText('cpu_mem_pids_time_quota')).toBeInTheDocument();
-    // Limits table: formatted memory (2 GiB) and wall-clock (1h)
     expect(screen.getByText('2 GiB')).toBeInTheDocument();
+    expect(screen.getByText('512')).toBeInTheDocument();
     expect(screen.getByText('1h')).toBeInTheDocument();
+  });
+
+  it('reveals capabilities and detailed limit cards when expanded', () => {
+    render(<RuntimeIsolationPanel workflow={workflow(LEGACY_SNAPSHOT)} />);
+    const toggle = screen.getByRole('button', { name: 'Expand' });
+    expect(toggle).not.toHaveAttribute('aria-controls');
+    fireEvent.click(toggle);
+    const expandedToggle = screen.getByRole('button', { name: 'Collapse' });
+    const bodyId = expandedToggle.getAttribute('aria-controls');
+    expect(bodyId).toBeTruthy();
+    expect(document.getElementById(bodyId ?? '')).toBeInTheDocument();
+    expect(screen.getByText('cpu_mem_pids_time_quota')).toBeInTheDocument();
+    expect(screen.getAllByText('Processes').length).toBeGreaterThanOrEqual(1);
   });
 
   it('shows enforced/not-enforced badges honestly from declared capabilities', () => {
     render(<RuntimeIsolationPanel workflow={workflow(LEGACY_SNAPSHOT)} />);
-    // Legacy declares CPU_MEM_PIDS_TIME_QUOTA → memory enforced
+    fireEvent.click(screen.getByRole('button', { name: 'Expand' }));
     const enforcedBadges = screen.getAllByText('enforced');
-    expect(enforcedBadges.length).toBeGreaterThanOrEqual(4); // memory/pids/cpu/wall_clock
-    // Legacy does NOT declare STORAGE_INODE_QUOTA → storage/inode not enforced
+    expect(enforcedBadges.length).toBeGreaterThanOrEqual(4);
     const notEnforcedBadges = screen.getAllByText('not enforced');
     expect(notEnforcedBadges.length).toBe(2);
   });
@@ -128,7 +137,7 @@ describe('RuntimeIsolationPanel', () => {
     });
     render(<RuntimeIsolationPanel workflow={workflow(remoteSnap)} />);
     expect(screen.getByText('remote_machine')).toBeInTheDocument();
-    // No capability chips, and the "no capabilities" notice shows
+    fireEvent.click(screen.getByRole('button', { name: 'Expand' }));
     expect(
       screen.getByText(/No isolation capabilities declared by this backend/)
     ).toBeInTheDocument();

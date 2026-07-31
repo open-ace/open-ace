@@ -217,18 +217,24 @@ export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
     const shouldReconcileSelection = !preserveInitialSelection || hasUserChangedView || !selectedId;
 
     if (workflows.length === 0) {
-      if (selectedId && shouldReconcileSelection) {
+      if (selectedId && shouldReconcileSelection && !hasActiveFilters) {
         onClearSelection();
       }
       return;
     }
 
     const selectedIsVisible = workflows.some((wf) => wf.workflow_id === selectedId);
-    if (!selectedId || (shouldReconcileSelection && !selectedIsVisible)) {
+    if (!selectedId) {
+      onSelect(workflows[0]);
+      return;
+    }
+
+    if (shouldReconcileSelection && !selectedIsVisible && !hasActiveFilters) {
       onSelect(workflows[0]);
     }
   }, [
     data,
+    hasActiveFilters,
     hasUserChangedView,
     isLoading,
     onClearSelection,
