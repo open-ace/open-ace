@@ -73,18 +73,14 @@ class TestTTLMinimumClamping:
 
     def test_session_specific_ttl_below_minimum_clamped(self, mock_service):
         """Test that session-specific TTL below minimum is clamped."""
-        with patch.dict(
-            os.environ, {"OPENACE_PROXY_TOKEN_TTL_AGENT_MINUTES": "2"}
-        ):
+        with patch.dict(os.environ, {"OPENACE_PROXY_TOKEN_TTL_AGENT_MINUTES": "2"}):
             ttl = mock_service._get_default_proxy_token_ttl_minutes("agent")
 
         assert ttl == 5, "Session-specific TTL below minimum should be clamped"
 
     def test_session_specific_ttl_above_minimum_not_changed(self, mock_service):
         """Test that session-specific TTL above minimum is not changed."""
-        with patch.dict(
-            os.environ, {"OPENACE_PROXY_TOKEN_TTL_AGENT_MINUTES": "15"}
-        ):
+        with patch.dict(os.environ, {"OPENACE_PROXY_TOKEN_TTL_AGENT_MINUTES": "15"}):
             ttl = mock_service._get_default_proxy_token_ttl_minutes("agent")
 
         assert ttl == 15, "Session-specific TTL above minimum should not be changed"
@@ -315,9 +311,7 @@ class TestCleanupTerminatedRecords:
         mock_cursor.rowcount = 0
         mock_conn.cursor.return_value = mock_cursor
 
-        with patch.dict(
-            os.environ, {"OPENACE_PROXY_TOKEN_CLEANUP_TERMINATED_DAYS": "14"}
-        ):
+        with patch.dict(os.environ, {"OPENACE_PROXY_TOKEN_CLEANUP_TERMINATED_DAYS": "14"}):
             with patch.object(mock_service, "_get_connection", return_value=mock_conn):
                 mock_service.cleanup_proxy_token_jtis(days_old=7)
 

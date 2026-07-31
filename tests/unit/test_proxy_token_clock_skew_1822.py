@@ -69,9 +69,7 @@ class TestClockSkewTolerance:
 
     def test_custom_clock_skew_from_env(self, mock_service):
         """Test that clock skew can be configured via environment variable."""
-        with patch.dict(
-            os.environ, {"OPENACE_PROXY_TOKEN_CLOCK_SKEW_DEFAULT_SECONDS": "60"}
-        ):
+        with patch.dict(os.environ, {"OPENACE_PROXY_TOKEN_CLOCK_SKEW_DEFAULT_SECONDS": "60"}):
             now = datetime.now(timezone.utc).replace(tzinfo=None)
             # Token expired 50 seconds ago (within custom 60s skew)
             exp = now - timedelta(seconds=50)
@@ -128,9 +126,7 @@ class TestClockSkewTolerance:
 
     def test_get_clock_skew_seconds_custom_env(self, mock_service):
         """Test _get_clock_skew_seconds reads from environment."""
-        with patch.dict(
-            os.environ, {"OPENACE_PROXY_TOKEN_CLOCK_SKEW_DEFAULT_SECONDS": "45"}
-        ):
+        with patch.dict(os.environ, {"OPENACE_PROXY_TOKEN_CLOCK_SKEW_DEFAULT_SECONDS": "45"}):
             skew = mock_service._get_clock_skew_seconds("agent")
             assert skew == 45, "Clock skew should read from environment"
 
@@ -202,9 +198,7 @@ class TestClockSkewEdgeCases:
 
     def test_zero_clock_skew(self, mock_service):
         """Test that zero clock skew works correctly."""
-        with patch.dict(
-            os.environ, {"OPENACE_PROXY_TOKEN_CLOCK_SKEW_DEFAULT_SECONDS": "0"}
-        ):
+        with patch.dict(os.environ, {"OPENACE_PROXY_TOKEN_CLOCK_SKEW_DEFAULT_SECONDS": "0"}):
             now = datetime.now(timezone.utc).replace(tzinfo=None)
             # Token expired 1 second ago
             exp = now - timedelta(seconds=1)
@@ -221,9 +215,7 @@ class TestClockSkewEdgeCases:
 
     def test_non_numeric_clock_skew_env_uses_default(self, mock_service):
         """Test that non-numeric clock skew env uses default."""
-        with patch.dict(
-            os.environ, {"OPENACE_PROXY_TOKEN_CLOCK_SKEW_HA_POOL_SECONDS": "invalid"}
-        ):
+        with patch.dict(os.environ, {"OPENACE_PROXY_TOKEN_CLOCK_SKEW_HA_POOL_SECONDS": "invalid"}):
             skew = mock_service._get_clock_skew_seconds("ha_pool")
             # Should fall back to default
             assert skew == 30, "Invalid env should fall back to default"

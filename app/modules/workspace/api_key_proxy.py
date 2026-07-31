@@ -2041,12 +2041,12 @@ class APIKeyProxyService:
             # (which also gates on instance-alive) make the call.
             # Issue #1822: Added clock skew tolerance for multi-pod drift scenarios.
             clock_skew = timedelta(seconds=self._get_clock_skew_seconds(str(session_type)))
-            if now > record_exp + clock_skew and not self._webui_instance_alive(session_id, user_id):
+            if now > record_exp + clock_skew and not self._webui_instance_alive(
+                session_id, user_id
+            ):
                 # Issue #1822: Mark expired single-use tokens as terminated for audit
                 if reuse_mode == "single_use":
-                    self._mark_single_use_token_terminated_with_conn(
-                        conn, jti, "expired", now
-                    )
+                    self._mark_single_use_token_terminated_with_conn(conn, jti, "expired", now)
                     conn.commit()
                 logger.warning(
                     "Proxy token server record expired: %s (session_id=%s, session_type=%s)",
