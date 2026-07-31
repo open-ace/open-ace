@@ -1,7 +1,7 @@
 """Add ci_repair_transient_retries to autonomous_workflows.
 
-Revision ID: 20260731_001_add_ci_repair_transient_retries
-Revises: 20260730_001_validate_daily_usage_tenant
+Revision ID: 20260731_002_add_ci_repair_transient_retries
+Revises: 20260731_001_add_tenant_version
 Create Date: 2026-07-31
 
 Issue: #1820
@@ -19,8 +19,8 @@ so each counter has its own lifecycle.
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "20260731_001_add_ci_repair_transient_retries"
-down_revision: str | None = "20260730_001_validate_daily_usage_tenant"
+revision: str = "20260731_002_add_ci_repair_transient_retries"
+down_revision: str | None = "20260731_001_add_tenant_version"
 branch_labels: str | None = None
 depends_on: str | None = None
 
