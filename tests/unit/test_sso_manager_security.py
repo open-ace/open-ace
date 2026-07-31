@@ -81,7 +81,7 @@ def test_register_provider_stores_only_encrypted_client_secret(sso_manager):
     assert "super-secret-value" not in raw_config
 
     restored = sso_manager.deserialize_provider_config(raw_config)
-    assert restored["client_secret"] == "super-secret-value"
+    assert restored["client_secret"].get() == "super-secret-value"
 
 
 def test_deserialize_provider_config_supports_legacy_plaintext_secret(sso_manager):
@@ -99,7 +99,7 @@ def test_deserialize_provider_config_supports_legacy_plaintext_secret(sso_manage
 
     restored = sso_manager.deserialize_provider_config(legacy_config)
 
-    assert restored["client_secret"] == "legacy-secret"
+    assert restored["client_secret"].get() == "legacy-secret"
     assert restored["client_id"] == "legacy-client"
 
 
@@ -283,7 +283,7 @@ def test_deserialize_provider_config_success_with_valid_encrypted_secret(sso_man
     )
 
     restored = sso_manager.deserialize_provider_config(row["config"], provider_name="test-provider")
-    assert restored["client_secret"] == "test-secret-value"
+    assert restored["client_secret"].get() == "test-secret-value"
 
 
 def test_get_provider_returns_none_on_decrypt_failure(sso_manager, caplog):

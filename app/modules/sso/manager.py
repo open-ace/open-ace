@@ -128,6 +128,18 @@ class SSOManager:
         # Issue #2174 F5: Wrap in SecretHolder for decrypt-on-demand
         # SecretHolder will decrypt only when accessed and cache with TTL
         if encrypted_secret:
+            # Issue #1815 Finding 1: Validate encrypted secret by trying to decrypt
+            # This ensures we raise SSOConfigDecryptionError early (at load time)
+            # rather than later when the secret is accessed
+            try:
+                # Validate by attempting decryption (result discarded)
+                _ = self._password_manager.decrypt(encrypted_secret)
+            except Exception as e:
+                # Wrap in SSOConfigDecryptionError with context
+                raise SSOConfigDecryptionError(
+                    provider_name=provider_name or "unknown",
+                    original_error=e,
+                )
             # Wrap in SecretHolder for secure handling
             config_data["client_secret"] = SecretHolder(
                 encrypted_blob=encrypted_secret,
@@ -143,10 +155,24 @@ class SSOManager:
                 ttl_seconds=PROVIDER_CACHE_TTL_SECONDS,
             )
         else:
-            # Field doesn't exist (legacy format) → keep original client_secret
-            # This maintains backward compatibility
+            # Issue #2174 F5: Legacy plaintext secret - encrypt and wrap in SecretHolder
+            # This ensures consistent interface (all secrets accessed via .get())
             client_secret = cast("str", config_data.get("client_secret", "") or "")
-            config_data["client_secret"] = client_secret
+            if client_secret:
+                # Encrypt the plaintext secret before wrapping
+                encrypted_legacy = self._password_manager.encrypt(client_secret)
+                config_data["client_secret"] = SecretHolder(
+                    encrypted_blob=encrypted_legacy,
+                    password_manager=self._password_manager,
+                    ttl_seconds=PROVIDER_CACHE_TTL_SECONDS,
+                )
+            else:
+                # Empty secret - use empty SecretHolder
+                config_data["client_secret"] = SecretHolder(
+                    encrypted_blob="",
+                    password_manager=self._password_manager,
+                    ttl_seconds=PROVIDER_CACHE_TTL_SECONDS,
+                )
 
         return config_data
 

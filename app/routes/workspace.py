@@ -261,7 +261,7 @@ def _session_lookup_tenant_id() -> int | None:
     """
     if not _tenant_scope_required():
         return None
-    tenant_id = getget_current_tenant_id()
+    tenant_id = get_current_tenant_id()
     if tenant_id is None:
         abort(403)
     return tenant_id
