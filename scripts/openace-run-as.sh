@@ -337,13 +337,21 @@ if [ "$isolated" = true ]; then
     task_cgroup=""
     if [ -n "$task_id" ]; then
         cgroup_root="${OPENACE_AGENT_CGROUP_ROOT:-/sys/fs/cgroup/openace-agent}"
-        if [ -w /sys/fs/cgroup/cgroup.kill ]; then
+        # Issue #2020: cgroup v2 root does not expose cgroup.kill (kernel
+        # design — the root cgroup cannot be killed). Test whether
+        # cgroup_root exists and a subgroup can be created under it, rather
+        # than checking /sys/fs/cgroup/cgroup.kill which is never present on
+        # the root cgroup. Also use -f (file exists) instead of -w on
+        # cgroup.procs because cgroup2's virtual files do not honour
+        # traditional access(2) write checks — test -w returns false even
+        # for root on a writable cgroup.procs.
+        if [ -d "$cgroup_root" ]; then
             if [ -d "$cgroup_root/$task_id" ]; then
                 echo 1 > "$cgroup_root/$task_id/cgroup.kill" 2>/dev/null || true
                 rmdir "$cgroup_root/$task_id" 2>/dev/null || true
             fi
             if mkdir -p "$cgroup_root/$task_id" 2>/dev/null \
-               && [ -w "$cgroup_root/$task_id/cgroup.procs" ]; then
+               && [ -f "$cgroup_root/$task_id/cgroup.procs" ]; then
                 task_cgroup="$cgroup_root/$task_id"
             fi
         fi
@@ -420,7 +428,7 @@ if [ "$isolated" = true ]; then
         # descendants); as defense-in-depth also signal the recorded child.
         # The orchestrator's os.killpg(<sudo_pid>) handles the no-cgroup case
         # because the child remains in the launcher's process group.
-        if [ -n "$task_cgroup" ] && [ -w "$task_cgroup/cgroup.kill" ]; then
+        if [ -n "$task_cgroup" ] && [ -f "$task_cgroup/cgroup.kill" ]; then
             echo 1 > "$task_cgroup/cgroup.kill" 2>/dev/null || true
         fi
         if [ -n "${agent_child_pid:-}" ] && kill -0 "${agent_child_pid}" 2>/dev/null; then
