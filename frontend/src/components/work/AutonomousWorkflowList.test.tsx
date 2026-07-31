@@ -284,7 +284,11 @@ describe('AutonomousWorkflowList', () => {
     });
 
     render(
-      <AutonomousWorkflowList selectedId="wf-1" onSelect={onSelect} onClearSelection={onClearSelection} />
+      <AutonomousWorkflowList
+        selectedId="wf-1"
+        onSelect={onSelect}
+        onClearSelection={onClearSelection}
+      />
     );
 
     onSelect.mockClear();

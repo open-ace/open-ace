@@ -2,7 +2,7 @@
  * AutonomousDev Component - AI Autonomous Development page
  */
 
-import React, { useState, useCallback, useMemo, useEffect } from 'react';
+import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { useAppStore, useLanguage, useWorkspaceFullscreen } from '@/store';
 import { t } from '@/i18n';
 import { Button, Loading, EmptyState } from '@/components/common';
@@ -30,6 +30,7 @@ export const AutonomousDev: React.FC = () => {
     return params.get('workflow');
   }, []);
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null>(initialWorkflowId);
+  const selectedWorkflowIdRef = useRef<string | null>(initialWorkflowId);
   const [showNewModal, setShowNewModal] = useState(false);
   const [isNarrowLayout, setIsNarrowLayout] = useState(() =>
     typeof window !== 'undefined' ? window.matchMedia(NARROW_LAYOUT_QUERY).matches : false
@@ -62,13 +63,17 @@ export const AutonomousDev: React.FC = () => {
   }, [leftPanelWidth]);
 
   useEffect(() => {
+    selectedWorkflowIdRef.current = selectedWorkflowId;
+  }, [selectedWorkflowId]);
+
+  useEffect(() => {
     if (typeof window === 'undefined') return;
 
     const mediaQuery = window.matchMedia(NARROW_LAYOUT_QUERY);
     const syncLayout = (matches: boolean) => {
       setIsNarrowLayout(matches);
       if (matches) {
-        setMobilePane(selectedWorkflowId ? 'detail' : 'list');
+        setMobilePane(selectedWorkflowIdRef.current ? 'detail' : 'list');
       }
     };
 
@@ -76,7 +81,7 @@ export const AutonomousDev: React.FC = () => {
     const handleChange = (event: MediaQueryListEvent) => syncLayout(event.matches);
     mediaQuery.addEventListener('change', handleChange);
     return () => mediaQuery.removeEventListener('change', handleChange);
-  }, [selectedWorkflowId]);
+  }, []);
 
   const clampLeftPanelWidth = useCallback((nextWidth: number) => {
     const viewportLimit = Math.max(MIN_LEFT_PANEL_WIDTH, Math.floor(window.innerWidth * 0.55));

@@ -145,8 +145,7 @@ export function RuntimeIsolationPanel({ workflow }: RuntimeIsolationPanelProps) 
     const row = rows.find((limitRow) => limitRow.labelKey === labelKey);
     return row && row.value !== '—' ? [row] : [];
   });
-  const visibleSummaryRows: LimitRow[] =
-    summaryRows.length > 0 ? summaryRows : rows.slice(0, 4);
+  const visibleSummaryRows: LimitRow[] = summaryRows.length > 0 ? summaryRows : rows.slice(0, 4);
 
   return (
     <div className="runtime-isolation-panel" data-testid="runtime-isolation-panel">
@@ -154,7 +153,7 @@ export function RuntimeIsolationPanel({ workflow }: RuntimeIsolationPanelProps) 
         type="button"
         className="runtime-isolation-panel__toggle"
         aria-expanded={expanded}
-        aria-controls={bodyId}
+        aria-controls={expanded ? bodyId : undefined}
         aria-label={expanded ? t('collapse', language) : t('expand', language)}
         onClick={() => setExpanded((open) => !open)}
       >

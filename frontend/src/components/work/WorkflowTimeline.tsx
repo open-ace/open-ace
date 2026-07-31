@@ -1090,6 +1090,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
     workflow.status === 'paused' ||
     workflow.status === 'waiting'
   );
+  const timelineHeaderDetailsId = `timeline-header-details-${workflow.workflow_id}`;
 
   // Callback ref: registers a milestone card node by id, and clears it on
   // unmount so the map never holds detached nodes.
@@ -1930,7 +1931,9 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                   isLiveStatus ? 'timeline-status-pill--live' : ''
                 }`}
               >
-                {isLiveStatus && <span className="timeline-status-pill__spinner" aria-hidden="true"></span>}
+                {isLiveStatus && (
+                  <span className="timeline-status-pill__spinner" aria-hidden="true"></span>
+                )}
                 <span className="timeline-status-pill__icon">
                   <i className={`bi ${workflowStatusConfig.icon}`}></i>
                 </span>
@@ -2040,16 +2043,14 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
               variant="outline-secondary"
               onClick={() => setHeaderCollapsed((collapsed) => !collapsed)}
               aria-expanded={!headerCollapsed}
-              aria-controls={`timeline-header-details-${workflow.workflow_id}`}
+              aria-controls={!headerCollapsed ? timelineHeaderDetailsId : undefined}
               aria-label={
                 headerCollapsed
                   ? t('autoExpandDetails', language)
                   : t('autoCollapseDetails', language)
               }
             >
-              <i
-                className={`bi ${headerCollapsed ? 'bi-chevron-down' : 'bi-chevron-up'} me-1`}
-              ></i>
+              <i className={`bi ${headerCollapsed ? 'bi-chevron-down' : 'bi-chevron-up'} me-1`}></i>
               {headerCollapsed
                 ? t('autoExpandDetails', language)
                 : t('autoCollapseDetails', language)}
@@ -2140,7 +2141,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
         </div>
 
         {!headerCollapsed && (
-          <div id={`timeline-header-details-${workflow.workflow_id}`} className="timeline-header-details">
+          <div id={timelineHeaderDetailsId} className="timeline-header-details">
             {activeStatusHint && !showStateBanner && (
               <div
                 className={`timeline-progress-note timeline-progress-note--${workflowStatusConfig.tone}`}
@@ -2251,67 +2252,66 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                 </Button>
               </div>
             </div>
-
-            {showStateBanner && (
-              <div className={`timeline-state-banner timeline-state-banner--${stateBannerTone}`}>
-                <div className="timeline-state-banner__copy">
-                  <div className="timeline-state-banner__title">{workflowStatusLabel}</div>
-                  {stateBannerMessage && (
-                    <div className="timeline-state-banner__message">{stateBannerMessage}</div>
-                  )}
-                </div>
-                <div className="timeline-state-banner__actions">
-                  {isWaiting && (
-                    <Button
-                      size="sm"
-                      variant="success"
-                      onClick={handleMarkDone}
-                      disabled={markDoneMutation.isPending}
-                    >
-                      <i className="bi bi-check-circle me-1"></i>
-                      {t('autoCompleteWorkflow', language)}
-                    </Button>
-                  )}
-                  {latestFailedMilestone && (
-                    <button
-                      type="button"
-                      className="timeline-inline-link"
-                      onClick={() => expandAndScrollToMilestone(latestFailedMilestone.milestone_id)}
-                    >
-                      {t('autoOpenLatestMilestone', language)}
-                    </button>
-                  )}
-                  {latestMilestoneWithSession && (
-                    <button
-                      type="button"
-                      className="timeline-inline-link"
-                      onClick={() =>
-                        setViewingSession({
-                          milestoneId: latestMilestoneWithSession.milestone_id,
-                          sessionId:
-                            latestMilestoneWithSession.actual_llm_session_id ??
-                            latestMilestoneWithSession.llm_session_id ??
-                            latestMilestoneWithSession.review_session_id ??
-                            latestMilestoneWithSession.session_id ??
-                            '',
-                        })
-                      }
-                    >
-                      {t('autoViewSession', language)}
-                    </button>
-                  )}
-                  {milestoneWithFinalChanges && (
-                    <button
-                      type="button"
-                      className="timeline-inline-link"
-                      onClick={() => setViewingDiff(milestoneWithFinalChanges.milestone_id)}
-                    >
-                      {t('autoViewChanges', language)}
-                    </button>
-                  )}
-                </div>
-              </div>
-            )}
+          </div>
+        )}
+        {showStateBanner && (
+          <div className={`timeline-state-banner timeline-state-banner--${stateBannerTone}`}>
+            <div className="timeline-state-banner__copy">
+              <div className="timeline-state-banner__title">{workflowStatusLabel}</div>
+              {stateBannerMessage && (
+                <div className="timeline-state-banner__message">{stateBannerMessage}</div>
+              )}
+            </div>
+            <div className="timeline-state-banner__actions">
+              {isWaiting && (
+                <Button
+                  size="sm"
+                  variant="success"
+                  onClick={handleMarkDone}
+                  disabled={markDoneMutation.isPending}
+                >
+                  <i className="bi bi-check-circle me-1"></i>
+                  {t('autoCompleteWorkflow', language)}
+                </Button>
+              )}
+              {latestFailedMilestone && (
+                <button
+                  type="button"
+                  className="timeline-inline-link"
+                  onClick={() => expandAndScrollToMilestone(latestFailedMilestone.milestone_id)}
+                >
+                  {t('autoOpenLatestMilestone', language)}
+                </button>
+              )}
+              {latestMilestoneWithSession && (
+                <button
+                  type="button"
+                  className="timeline-inline-link"
+                  onClick={() =>
+                    setViewingSession({
+                      milestoneId: latestMilestoneWithSession.milestone_id,
+                      sessionId:
+                        latestMilestoneWithSession.actual_llm_session_id ??
+                        latestMilestoneWithSession.llm_session_id ??
+                        latestMilestoneWithSession.review_session_id ??
+                        latestMilestoneWithSession.session_id ??
+                        '',
+                    })
+                  }
+                >
+                  {t('autoViewSession', language)}
+                </button>
+              )}
+              {milestoneWithFinalChanges && (
+                <button
+                  type="button"
+                  className="timeline-inline-link"
+                  onClick={() => setViewingDiff(milestoneWithFinalChanges.milestone_id)}
+                >
+                  {t('autoViewChanges', language)}
+                </button>
+              )}
+            </div>
           </div>
         )}
       </div>

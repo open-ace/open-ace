@@ -108,7 +108,13 @@ describe('RuntimeIsolationPanel', () => {
 
   it('reveals capabilities and detailed limit cards when expanded', () => {
     render(<RuntimeIsolationPanel workflow={workflow(LEGACY_SNAPSHOT)} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Expand' }));
+    const toggle = screen.getByRole('button', { name: 'Expand' });
+    expect(toggle).not.toHaveAttribute('aria-controls');
+    fireEvent.click(toggle);
+    const expandedToggle = screen.getByRole('button', { name: 'Collapse' });
+    const bodyId = expandedToggle.getAttribute('aria-controls');
+    expect(bodyId).toBeTruthy();
+    expect(document.getElementById(bodyId ?? '')).toBeInTheDocument();
     expect(screen.getByText('cpu_mem_pids_time_quota')).toBeInTheDocument();
     expect(screen.getAllByText('Processes').length).toBeGreaterThanOrEqual(1);
   });
