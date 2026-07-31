@@ -61,6 +61,7 @@ VERSION
 
 # Secrets - NEVER commit these
 *secret*
+!app/modules/sso/secret_holder.py
 *credential*
 *password*
 *.pem
@@ -77,3 +78,6 @@ QWEN.md
 # Claude local settings
 .claude/
 backups/
+
+# Git worktrees (temporary development artifacts)
+.worktrees/

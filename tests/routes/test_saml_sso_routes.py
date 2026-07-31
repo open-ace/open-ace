@@ -116,7 +116,7 @@ def test_register_saml_provider_does_not_require_client_secret(client, sso_manag
     restored = sso_manager.deserialize_provider_config(row["config"])
     assert stored["provider_type"] == "saml"
     assert stored["client_secret_encrypted"] == ""
-    assert restored["client_secret"] == ""
+    assert restored["client_secret"].get() == ""
 
 
 def test_saml_login_uses_relay_state_and_metadata_endpoint(client):

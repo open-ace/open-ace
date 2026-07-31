@@ -846,8 +846,20 @@ class FeishuOrgSyncService:
         return team_id, True
 
     def _load_synced_teams(self) -> dict[str, dict[str, Any]]:
-        """Return existing teams that are owned by Feishu org sync."""
-        rows = self.db.fetch_all("SELECT team_id, name, settings FROM teams")
+        """Return existing teams that are owned by Feishu org sync.
+
+        Issue #2174 F1/F5: Optimized with WHERE clause and database index
+        to avoid full table scan.
+        """
+        # Use WHERE clause to filter at database level
+        # This leverages the idx_teams_feishu_sync partial index
+        query = """
+            SELECT team_id, name, settings
+            FROM teams
+            WHERE settings->>'sync_source' = ?
+        """
+        rows = self.db.fetch_all(query, (FEISHU_PROVIDER_NAME,))
+
         synced: dict[str, dict[str, Any]] = {}
         for row in rows:
             settings_raw = row.get("settings")
@@ -861,11 +873,11 @@ class FeishuOrgSyncService:
                 continue
             if not isinstance(settings, dict):
                 continue
-            if settings.get("sync_source") != FEISHU_PROVIDER_NAME:
-                continue
+            # Extract department_id (already filtered by sync_source at DB level)
             department_id = settings.get("feishu_department_id")
             if department_id:
                 synced[str(department_id)] = row
+
         return synced
 
     def _resolve_local_user(

@@ -363,6 +363,7 @@ def test_add_message_succeeds_when_row_exists_under_cli_id(env):
         title="Autonomous: wf",
         tool_name="zcode",
         user_id=1,
+        tenant_id=1,
     )
     msg = sm.add_message(session_id=cli_id, role="assistant", content="hello from zcode")
 

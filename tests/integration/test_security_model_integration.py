@@ -32,6 +32,7 @@ import app.repositories.database as db_mod
 # regardless of whether an earlier test already imported them.
 from app.modules.workspace import api_key_proxy as akp_mod
 from app.modules.workspace import remote_agent_manager as ram_mod
+from app.modules.workspace import session_manager as sm_mod
 
 
 @pytest.fixture(autouse=True)
@@ -50,6 +51,7 @@ def _patch_db_compat():
         patch.object(db_mod, "is_postgresql", return_value=False),
         patch.object(akp_mod, "is_postgresql", return_value=False),
         patch.object(ram_mod, "is_postgresql", return_value=False),
+        patch.object(sm_mod, "is_postgresql", return_value=False),
     ):
         orig = db_mod.adapt_sql
         db_mod.adapt_sql = lambda q: q  # type: ignore[assignment]
@@ -140,6 +142,7 @@ class TestEndToEndSecurityFlow:
             session_id="sess-demo",
             tool_name="claude-code",
             user_id=2,
+            tenant_id=1,
             title="demo",
         )
         proxy_token = proxy.generate_proxy_token(
@@ -166,6 +169,7 @@ class TestEndToEndSecurityFlow:
             session_id="sess-complete",
             tool_name="claude-code",
             user_id=2,
+            tenant_id=1,
             title="demo",
         )
         token = proxy.generate_proxy_token(

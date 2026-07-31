@@ -35,6 +35,7 @@ class TestProjectCRUD:
             path="/projects/my-project",
             name="My Project",
             description="A test project",
+            tenant_id=1,
         )
         assert project_id is not None
 
@@ -56,6 +57,7 @@ class TestProjectCRUD:
             name="Shared",
             is_shared=True,
             created_by=user_id,
+            tenant_id=1,
         )
         assert project_id is not None
 
@@ -73,10 +75,7 @@ class TestProjectCRUD:
         """Get project by ID returns Project model."""
         repo = ProjectRepository(db=tmp_db)
 
-        project_id = repo.create_project(
-            path="/projects/test",
-            name="Test Project",
-        )
+        project_id = repo.create_project(path="/projects/test", name="Test Project", tenant_id=1)
 
         project = repo.get_project_by_id(project_id)
         assert project is not None
@@ -90,7 +89,7 @@ class TestProjectCRUD:
         """Get project by path."""
         repo = ProjectRepository(db=tmp_db)
 
-        repo.create_project(path="/projects/unique-path", name="Path Project")
+        repo.create_project(path="/projects/unique-path", name="Path Project", tenant_id=1)
 
         project = repo.get_project_by_path("/projects/unique-path")
         assert project is not None
@@ -132,9 +131,7 @@ class TestProjectCRUD:
         repo = ProjectRepository(db=tmp_db)
 
         project_id = repo.create_project(
-            path="/projects/update-me",
-            name="Old Name",
-            description="Old desc",
+            path="/projects/update-me", name="Old Name", description="Old desc", tenant_id=1
         )
 
         result = repo.update_project(
@@ -153,14 +150,14 @@ class TestProjectCRUD:
     def test_update_project_no_changes(self, tmp_db):
         """Update with no fields returns True (no-op)."""
         repo = ProjectRepository(db=tmp_db)
-        project_id = repo.create_project(path="/projects/noop")
+        project_id = repo.create_project(path="/projects/noop", tenant_id=1)
         assert repo.update_project(project_id) is True
 
     def test_soft_delete_project(self, tmp_db):
         """Soft delete marks project as inactive."""
         repo = ProjectRepository(db=tmp_db)
 
-        project_id = repo.create_project(path="/projects/to-delete", name="Delete Me")
+        project_id = repo.create_project(path="/projects/to-delete", name="Delete Me", tenant_id=1)
         assert repo.get_project_by_id(project_id) is not None
 
         result = repo.delete_project(project_id, soft_delete=True)
@@ -180,8 +177,7 @@ class TestProjectCRUD:
         user_id = _insert_user(tmp_db)
 
         project_id = repo.create_project(
-            path="/projects/hard-delete",
-            created_by=user_id,
+            path="/projects/hard-delete", created_by=user_id, tenant_id=1
         )
 
         # Verify user_project exists
@@ -212,6 +208,7 @@ class TestProjectCRUD:
             description="Original description",
             created_by=user_id,
             is_shared=True,
+            tenant_id=1,
         )
         assert project_id is not None
 
@@ -229,6 +226,7 @@ class TestProjectCRUD:
             description="New description",
             created_by=user_id,
             is_shared=False,
+            tenant_id=1,
         )
 
         # Should return the same project ID (restored)
@@ -257,9 +255,7 @@ class TestProjectCRUD:
         # Create a project with original user
         original_path = "/projects/recreate-user-test"
         project_id = repo.create_project(
-            path=original_path,
-            name="Original",
-            created_by=user_id_original,
+            path=original_path, name="Original", created_by=user_id_original, tenant_id=1
         )
         assert project_id is not None
 
@@ -275,9 +271,7 @@ class TestProjectCRUD:
 
         # Restore with a new creator user
         restored_id = repo.create_project(
-            path=original_path,
-            name="Restored",
-            created_by=user_id_new,
+            path=original_path, name="Restored", created_by=user_id_new, tenant_id=1
         )
 
         # Should return same project ID
@@ -305,7 +299,7 @@ class TestUserProject:
         repo = ProjectRepository(db=tmp_db)
         user_id = _insert_user(tmp_db, username="user1")
 
-        project_id = repo.create_project(path="/projects/up-test")
+        project_id = repo.create_project(path="/projects/up-test", tenant_id=1)
         result = repo.add_user_project(user_id, project_id)
         assert result is not None
 
@@ -322,7 +316,7 @@ class TestUserProject:
         repo = ProjectRepository(db=tmp_db)
         user_id = _insert_user(tmp_db, username="user2")
 
-        project_id = repo.create_project(path="/projects/get-up")
+        project_id = repo.create_project(path="/projects/get-up", tenant_id=1)
         repo.add_user_project(user_id, project_id)
 
         up = repo.get_user_project(user_id, project_id)
@@ -335,7 +329,7 @@ class TestUserProject:
         repo = ProjectRepository(db=tmp_db)
         user_id = _insert_user(tmp_db, username="user3")
 
-        project_id = repo.create_project(path="/projects/stats")
+        project_id = repo.create_project(path="/projects/stats", tenant_id=1)
         repo.add_user_project(user_id, project_id)
 
         repo.update_user_project_stats(
@@ -370,8 +364,8 @@ class TestUserProject:
         repo = ProjectRepository(db=tmp_db)
         user_id = _insert_user(tmp_db, username="user4")
 
-        p1 = repo.create_project(path="/projects/user-p1")
-        p2 = repo.create_project(path="/projects/user-p2")
+        p1 = repo.create_project(path="/projects/user-p1", tenant_id=1)
+        p2 = repo.create_project(path="/projects/user-p2", tenant_id=1)
         repo.add_user_project(user_id, p1)
         repo.add_user_project(user_id, p2)
 
@@ -405,8 +399,8 @@ class TestUserProject:
         repo = ProjectRepository(db=tmp_db)
         user_id = _insert_user(tmp_db, username="creator")
 
-        repo.create_project(path="/projects/all-1", created_by=user_id)
-        repo.create_project(path="/projects/all-2")
+        repo.create_project(path="/projects/all-1", created_by=user_id, tenant_id=1)
+        repo.create_project(path="/projects/all-2", tenant_id=1)
 
         all_projects = repo.get_all_projects()
         assert len(all_projects) == 2
@@ -418,8 +412,8 @@ class TestUserProject:
         """Get all projects including inactive ones."""
         repo = ProjectRepository(db=tmp_db)
 
-        repo.create_project(path="/projects/active-1")
-        p2 = repo.create_project(path="/projects/inactive-1")
+        repo.create_project(path="/projects/active-1", tenant_id=1)
+        p2 = repo.create_project(path="/projects/inactive-1", tenant_id=1)
         repo.delete_project(p2, soft_delete=True)
 
         active_only = repo.get_all_projects()

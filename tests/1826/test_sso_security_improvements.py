@@ -83,10 +83,14 @@ class TestF5EmptySecretBypass:
             }
         )
 
-        # Deserialize should return empty secret
+        # Deserialize should return SecretHolder with empty secret
         config = manager.deserialize_provider_config(raw_config)
 
-        assert config["client_secret"] == ""
+        # Issue #2174 F5: client_secret is now wrapped in SecretHolder
+        from app.modules.sso.secret_holder import SecretHolder
+
+        assert isinstance(config["client_secret"], SecretHolder)
+        assert config["client_secret"].get() == ""
         assert config["name"] == "test_provider"
 
     def test_deserialize_missing_encrypted_field(self):
@@ -104,10 +108,14 @@ class TestF5EmptySecretBypass:
             }
         )
 
-        # Deserialize should keep plaintext
+        # Deserialize should wrap plaintext in SecretHolder
         config = manager.deserialize_provider_config(raw_config)
 
-        assert config["client_secret"] == "plaintext_secret"
+        # Issue #2174 F5: client_secret is now wrapped in SecretHolder
+        from app.modules.sso.secret_holder import SecretHolder
+
+        assert isinstance(config["client_secret"], SecretHolder)
+        assert config["client_secret"].get() == "plaintext_secret"
 
 
 class TestF6AvoidReEncryption:
@@ -214,6 +222,11 @@ class TestF1F7ProviderCacheTTL:
         provider2 = manager.get_provider("test_provider")
         assert provider2 is provider1
 
+        # Cleanup: Clear provider cache to avoid mock reference issues
+        manager._providers.clear()
+        manager._provider_cache_time.clear()
+        del manager
+
     def test_provider_cache_expiry(self):
         """Test that provider cache expires after TTL."""
         manager = SSOManager()
@@ -252,6 +265,11 @@ class TestF1F7ProviderCacheTTL:
         assert provider2 is not None
         # Should be different object (reload)
         # Note: This depends on mock returning new object each call
+
+        # Cleanup: Clear provider cache to avoid mock reference issues
+        manager._providers.clear()
+        manager._provider_cache_time.clear()
+        del manager
 
 
 class TestF8RelayStateSignature:

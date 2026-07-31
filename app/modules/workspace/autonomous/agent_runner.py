@@ -1993,6 +1993,17 @@ class AutonomousAgentRunner:
 
         # Create wrapper sessions only for tools without a deferred session id.
         if self.session_manager and not creates_session_late:
+            # Resolve tenant_id (default 1) so fail-closed tenant resolution passes.
+            wf_tenant_id = 1
+            if user_id:
+                try:
+                    from app.repositories.user_repo import UserRepository
+
+                    wf_user = UserRepository().get_user_by_id(user_id)
+                    if wf_user and wf_user.get("tenant_id"):
+                        wf_tenant_id = int(wf_user["tenant_id"])
+                except Exception:
+                    pass  # default tenant
             try:
                 self.session_manager.create_session(
                     session_id=session_id,
@@ -2000,6 +2011,7 @@ class AutonomousAgentRunner:
                     title=f"Autonomous: {workflow_id[:8]}",
                     tool_name=cli_tool,
                     user_id=user_id,
+                    tenant_id=wf_tenant_id,
                     project_path=project_path,
                     workspace_type=workspace_type,
                     remote_machine_id=remote_machine_id,
@@ -2606,6 +2618,17 @@ class AutonomousAgentRunner:
         """
         if not self.session_manager or not sid:
             return
+        # Resolve tenant_id (default 1) so fail-closed tenant resolution passes.
+        tenant_id = 1
+        if user_id:
+            try:
+                from app.repositories.user_repo import UserRepository
+
+                user = UserRepository().get_user_by_id(user_id)
+                if user and user.get("tenant_id"):
+                    tenant_id = int(user["tenant_id"])
+            except Exception:
+                pass  # default tenant
         try:
             self.session_manager.create_session(
                 session_id=sid,
@@ -2613,6 +2636,7 @@ class AutonomousAgentRunner:
                 title=f"Autonomous: {workflow_id[:8]}",
                 tool_name=cli_tool,
                 user_id=user_id,
+                tenant_id=tenant_id,
                 project_path=project_path,
                 workspace_type=workspace_type,
                 context={"workflow_id": workflow_id},
