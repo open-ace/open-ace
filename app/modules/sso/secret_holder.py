@@ -110,18 +110,8 @@ class SecretHolder:
         This is a best-effort protection against accidental exposure.
         """
         # Clear the cache
-        self._plaintext_cache = None
-
-        # Attempt to zero the encrypted blob memory (best effort)
-        # This may not work reliably in Python due to string immutability
-        # and garbage collection behavior, but we try anyway.
         try:
-            import ctypes
-
-            if self._encrypted:
-                # ctypes.memset may not work on immutable strings,
-                # but we try as a best-effort measure
-                ctypes.memset(id(self._encrypted), 0, len(self._encrypted))
+            self._plaintext_cache = None
         except Exception:
-            # Memory zeroing failed, which is expected for immutable strings
+            # Ignore any errors during cleanup
             pass
