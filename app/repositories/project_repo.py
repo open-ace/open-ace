@@ -39,7 +39,9 @@ class ProjectRepository:
         except (TypeError, ValueError):
             return None
 
-    def _resolve_tenant_id_for_write(self, tenant_id: int | None = None, user_id: int | None = None) -> int:
+    def _resolve_tenant_id_for_write(
+        self, tenant_id: int | None = None, user_id: int | None = None
+    ) -> int:
         """Resolve the effective tenant for project write operations.
 
         Uses fail-closed mode to prevent cross-tenant data leakage.
@@ -57,9 +59,7 @@ class ProjectRepository:
         """
         try:
             return TenantResolver.resolve_for_write(
-                tenant_id=tenant_id,
-                user_id=user_id,
-                db=self.db
+                tenant_id=tenant_id, user_id=user_id, db=self.db
             )
         except TenantResolutionError:
             logger.error(
@@ -67,7 +67,9 @@ class ProjectRepository:
             )
             raise
 
-    def _resolve_tenant_id_for_read(self, tenant_id: int | None = None, user_id: int | None = None, default: int = 1) -> int:
+    def _resolve_tenant_id_for_read(
+        self, tenant_id: int | None = None, user_id: int | None = None, default: int = 1
+    ) -> int:
         """Resolve the effective tenant for project read operations.
 
         Uses fail-open mode with a default fallback.
@@ -82,10 +84,7 @@ class ProjectRepository:
             Resolved tenant ID or default
         """
         result = TenantResolver.resolve_for_read(
-            tenant_id=tenant_id,
-            user_id=user_id,
-            db=self.db,
-            default=default
+            tenant_id=tenant_id, user_id=user_id, db=self.db, default=default
         )
         if result == default and tenant_id is None and user_id is None:
             logger.warning(
@@ -122,7 +121,9 @@ class ProjectRepository:
         try:
             now = datetime.now(timezone.utc).replace(tzinfo=None)
             # Use fail-closed mode for write operations
-            effective_tenant_id = self._resolve_tenant_id_for_write(tenant_id=tenant_id, user_id=created_by)
+            effective_tenant_id = self._resolve_tenant_id_for_write(
+                tenant_id=tenant_id, user_id=created_by
+            )
 
             # Check if a soft-deleted project with the same path exists
             soft_deleted = self.db.fetch_one(

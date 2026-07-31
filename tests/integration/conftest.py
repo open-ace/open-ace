@@ -38,18 +38,21 @@ def tmp_db(tmp_path):
         # Import and patch all repositories that use is_postgresql
         try:
             import app.repositories.usage_repo as usage_repo
+
             patches.append(patch.object(usage_repo, "is_postgresql", return_value=False))
         except ImportError:
             pass
 
         try:
             import app.repositories.daily_stats_repo as daily_stats_repo
+
             patches.append(patch.object(daily_stats_repo, "is_postgresql", return_value=False))
         except ImportError:
             pass
 
         # Combine all patches
         from contextlib import ExitStack
+
         with ExitStack() as stack:
             for p in patches:
                 stack.enter_context(p)

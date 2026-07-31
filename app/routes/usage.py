@@ -4,7 +4,7 @@ Open ACE - AI Computing Explorer - Usage Routes
 API routes for usage data operations.
 """
 
-from flask import Blueprint, g, jsonify, request
+from flask import Blueprint, jsonify, request
 
 from app.auth.decorators import auth_required, require_tenant_scope
 from app.services.summary_service import SummaryService

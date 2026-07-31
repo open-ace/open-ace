@@ -226,7 +226,9 @@ class SAMLProvider(SSOProvider):
             ),
         )
 
-    def get_service_provider_metadata(self, acs_url: str | None = None, slo_url: str | None = None) -> str:
+    def get_service_provider_metadata(
+        self, acs_url: str | None = None, slo_url: str | None = None
+    ) -> str:
         """Return SP metadata XML for configuring an enterprise IdP.
 
         Issue #2174 F7: Include SingleLogoutService endpoint in metadata.
@@ -888,8 +890,7 @@ class SAMLProvider(SSOProvider):
                 in_response_to = root.get("InResponseTo")
                 if in_response_to != request_id:
                     logger.warning(
-                        "SAML LogoutResponse InResponseTo mismatch: "
-                        "expected %s, got %s",
+                        "SAML LogoutResponse InResponseTo mismatch: " "expected %s, got %s",
                         request_id,
                         in_response_to,
                     )

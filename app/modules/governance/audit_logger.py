@@ -28,7 +28,6 @@ from enum import Enum
 from typing import Any, cast
 
 from app.repositories.database import Database, adapt_boolean_value, adapt_sql
-from app.utils.tenant_resolver import TenantResolutionError, TenantResolver
 
 logger = logging.getLogger(__name__)
 

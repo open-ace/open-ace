@@ -8,10 +8,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from app.modules.sso.secret_holder import SecretHolder
+from typing import Any
 
 
 class ProviderType(Enum):

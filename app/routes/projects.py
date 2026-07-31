@@ -11,7 +11,6 @@ import os
 import platform
 import pwd
 import subprocess
-from typing import Any, cast
 
 from flask import Blueprint, g, jsonify, request
 

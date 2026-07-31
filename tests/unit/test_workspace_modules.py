@@ -238,7 +238,11 @@ class TestSessionManager:
     def test_create_session(self, session_manager):
         """Test creating a session."""
         session = session_manager.create_session(
-            tool_name="claude", user_id=1, session_type=SessionType.CHAT.value, title="Test Session", tenant_id=1
+            tool_name="claude",
+            user_id=1,
+            session_type=SessionType.CHAT.value,
+            title="Test Session",
+            tenant_id=1,
         )
 
         assert session.session_id is not None
@@ -315,7 +319,9 @@ class TestSessionManager:
     def test_list_sessions(self, session_manager):
         """Test listing sessions."""
         for i in range(3):
-            session_manager.create_session(tool_name="claude", user_id=1, title=f"Session {i}", tenant_id=1)
+            session_manager.create_session(
+                tool_name="claude", user_id=1, title=f"Session {i}", tenant_id=1
+            )
 
         result = session_manager.list_sessions(user_id=1)
         assert len(result["sessions"]) == 3
@@ -328,7 +334,8 @@ class TestSessionManager:
             session_type=SessionType.WORKFLOW.value,
             title="Autonomous wrapper",
             context={"workflow_id": "wf-1"},
-         tenant_id=1)
+            tenant_id=1,
+        )
         session_manager.update_session_fields(
             tracking.session_id, {"cli_session_id": "actual-123"}, require_tenant=False
         )
@@ -337,7 +344,8 @@ class TestSessionManager:
             user_id=1,
             session_id="actual-123",
             title="Provider session",
-         tenant_id=1)
+            tenant_id=1,
+        )
 
         result = session_manager.list_sessions(user_id=1)
         assert [session.session_id for session in result["sessions"]] == ["actual-123"]
@@ -364,7 +372,7 @@ class TestSessionManager:
             user_id=1,
             session_id="visible-regular",
             title="Regular chat",
-            tenant_id=1
+            tenant_id=1,
         )
 
         result = session_manager.list_sessions(user_id=1)
@@ -374,7 +382,9 @@ class TestSessionManager:
 
     def test_session_expiration(self, session_manager):
         """Test session expiration."""
-        session = session_manager.create_session(tool_name="claude", expires_in_hours=1, tenant_id=1)
+        session = session_manager.create_session(
+            tool_name="claude", expires_in_hours=1, tenant_id=1
+        )
 
         assert session.expires_at is not None
         assert not session.is_expired()
@@ -396,7 +406,8 @@ class TestSessionManager:
             session_type=SessionType.WORKFLOW.value,
             title="Autonomous wrapper",
             context={"workflow_id": "wf-1"},
-         tenant_id=1)
+            tenant_id=1,
+        )
         session_manager.update_session_fields(
             tracking.session_id, {"cli_session_id": "actual-456"}, require_tenant=False
         )
@@ -405,7 +416,8 @@ class TestSessionManager:
             user_id=1,
             session_id="actual-456",
             title="Provider session",
-         tenant_id=1)
+            tenant_id=1,
+        )
 
         stats = session_manager.get_session_stats(user_id=1)
         assert stats["total_sessions"] == 1
@@ -691,8 +703,8 @@ class TestWorkspaceIntegration:
         session_mgr = SessionManager(db_path=temp_db)
         session_mgr._ensure_tables()
         session = session_mgr.create_session(
-            tool_name="claude", user_id=1, title="Integration Test"
-        , tenant_id=1)
+            tool_name="claude", user_id=1, title="Integration Test", tenant_id=1
+        )
 
         # Emit sync events (StateSyncManager.__init__ already calls _ensure_tables)
         sync_mgr = StateSyncManager(db_path=temp_db)

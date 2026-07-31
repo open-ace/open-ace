@@ -75,8 +75,7 @@ class TestProjectCRUD:
         """Get project by ID returns Project model."""
         repo = ProjectRepository(db=tmp_db)
 
-        project_id = repo.create_project(path="/projects/test",
-            name="Test Project", tenant_id=1)
+        project_id = repo.create_project(path="/projects/test", name="Test Project", tenant_id=1)
 
         project = repo.get_project_by_id(project_id)
         assert project is not None
@@ -131,9 +130,9 @@ class TestProjectCRUD:
         """Update project fields."""
         repo = ProjectRepository(db=tmp_db)
 
-        project_id = repo.create_project(path="/projects/update-me",
-            name="Old Name",
-            description="Old desc", tenant_id=1)
+        project_id = repo.create_project(
+            path="/projects/update-me", name="Old Name", description="Old desc", tenant_id=1
+        )
 
         result = repo.update_project(
             project_id,
@@ -177,8 +176,9 @@ class TestProjectCRUD:
         repo = ProjectRepository(db=tmp_db)
         user_id = _insert_user(tmp_db)
 
-        project_id = repo.create_project(path="/projects/hard-delete",
-            created_by=user_id, tenant_id=1)
+        project_id = repo.create_project(
+            path="/projects/hard-delete", created_by=user_id, tenant_id=1
+        )
 
         # Verify user_project exists
         up = tmp_db.fetch_one("SELECT * FROM user_projects WHERE project_id = ?", (project_id,))
@@ -202,11 +202,14 @@ class TestProjectCRUD:
 
         # Create a project
         original_path = "/projects/recreate-test"
-        project_id = repo.create_project(path=original_path,
+        project_id = repo.create_project(
+            path=original_path,
             name="Original Project",
             description="Original description",
             created_by=user_id,
-            is_shared=True, tenant_id=1)
+            is_shared=True,
+            tenant_id=1,
+        )
         assert project_id is not None
 
         # Soft delete the project
@@ -217,11 +220,14 @@ class TestProjectCRUD:
         assert repo.get_project_by_path(original_path) is None
 
         # Recreate project with same path - should restore soft-deleted project
-        new_project_id = repo.create_project(path=original_path,
+        new_project_id = repo.create_project(
+            path=original_path,
             name="New Project",
             description="New description",
             created_by=user_id,
-            is_shared=False, tenant_id=1)
+            is_shared=False,
+            tenant_id=1,
+        )
 
         # Should return the same project ID (restored)
         assert new_project_id == project_id
@@ -248,9 +254,9 @@ class TestProjectCRUD:
 
         # Create a project with original user
         original_path = "/projects/recreate-user-test"
-        project_id = repo.create_project(path=original_path,
-            name="Original",
-            created_by=user_id_original, tenant_id=1)
+        project_id = repo.create_project(
+            path=original_path, name="Original", created_by=user_id_original, tenant_id=1
+        )
         assert project_id is not None
 
         # Verify original user has user_projects association
@@ -264,9 +270,9 @@ class TestProjectCRUD:
         repo.delete_project(project_id, soft_delete=True)
 
         # Restore with a new creator user
-        restored_id = repo.create_project(path=original_path,
-            name="Restored",
-            created_by=user_id_new, tenant_id=1)
+        restored_id = repo.create_project(
+            path=original_path, name="Restored", created_by=user_id_new, tenant_id=1
+        )
 
         # Should return same project ID
         assert restored_id == project_id

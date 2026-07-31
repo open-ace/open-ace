@@ -7,6 +7,7 @@ Revises: 20260731_002_add_ci_repair_transient_retries
 Create Date: 2026-07-31
 
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -19,8 +20,8 @@ if TYPE_CHECKING:
 
 
 # revision identifiers, used by Alembic.
-revision: str = '20260731_003_add_teams_sync_source_indexes'
-down_revision: str | None = '20260731_002_add_ci_repair_transient_retries'
+revision: str = "20260731_003_add_teams_sync_source_indexes"
+down_revision: str | None = "20260731_002_add_ci_repair_transient_retries"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -45,8 +46,8 @@ def upgrade() -> None:
             # Note: Using op.create_index with postgresql_concurrently=True
             # for proper CONCURRENTLY handling per linter rule MIG002
             op.create_index(
-                'idx_teams_feishu_sync',
-                'teams',
+                "idx_teams_feishu_sync",
+                "teams",
                 [
                     sa.text("(settings->>'sync_source')"),
                     sa.text("(settings->>'feishu_department_id')"),
@@ -57,8 +58,8 @@ def upgrade() -> None:
 
             # DingTalk partial index
             op.create_index(
-                'idx_teams_dingtalk_sync',
-                'teams',
+                "idx_teams_dingtalk_sync",
+                "teams",
                 [
                     sa.text("(settings->>'sync_source')"),
                     sa.text("(settings->>'dingtalk_department_id')"),
@@ -71,8 +72,8 @@ def upgrade() -> None:
         # Note: SQLite may not effectively use this index without partial index support
         try:
             op.create_index(
-                'idx_teams_sync_source',
-                'teams',
+                "idx_teams_sync_source",
+                "teams",
                 [sa.text("(settings->>'sync_source')")],
             )
         except Exception:
@@ -87,6 +88,6 @@ def downgrade() -> None:
         op.execute("DROP INDEX IF EXISTS idx_teams_dingtalk_sync")
     else:
         try:
-            op.drop_index('idx_teams_sync_source', table_name='teams')
+            op.drop_index("idx_teams_sync_source", table_name="teams")
         except Exception:
             pass

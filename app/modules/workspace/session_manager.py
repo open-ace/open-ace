@@ -16,7 +16,7 @@ from enum import Enum
 from typing import Any
 
 from app.repositories.database import DB_PATH, escape_like, get_database_url, is_postgresql
-from app.utils.tenant_resolver import TenantResolutionError, TenantResolver
+from app.utils.tenant_resolver import TenantResolutionError
 from app.utils.tool_names import normalize_tool_name
 
 logger = logging.getLogger(__name__)

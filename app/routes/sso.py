@@ -1741,9 +1741,7 @@ def _initiate_saml_logout(
         return jsonify({"message": "Logged out successfully (IdP does not support SLO)"}), 200
 
 
-def _handle_saml_logout_request(
-    provider, saml_request: str, relay_state: str
-):
+def _handle_saml_logout_request(provider, saml_request: str, relay_state: str):
     """Handle IdP-initiated SAML logout request.
 
     Issue #2174 F7: Validate LogoutRequest and return LogoutResponse.
@@ -1796,14 +1794,12 @@ def _handle_saml_logout_request(
             IssueInstant=now,
             InResponseTo=in_response_to,
         )
-        etree.SubElement(
-            response_root, f"{{{SAML_ASSERTION_NS}}}Issuer"
-        ).text = provider.sp_entity_id
+        etree.SubElement(response_root, f"{{{SAML_ASSERTION_NS}}}Issuer").text = (
+            provider.sp_entity_id
+        )
 
         status = etree.SubElement(response_root, f"{{{SAML_PROTOCOL_NS}}}Status")
-        etree.SubElement(
-            status, f"{{{SAML_PROTOCOL_NS}}}StatusCode", Value=SAML_SUCCESS_STATUS
-        )
+        etree.SubElement(status, f"{{{SAML_PROTOCOL_NS}}}StatusCode", Value=SAML_SUCCESS_STATUS)
 
         response_xml = etree.tostring(response_root, xml_declaration=False, encoding="UTF-8")
 
@@ -1835,9 +1831,7 @@ def _handle_saml_logout_request(
         return jsonify({"error": "Failed to process logout request"}), 500
 
 
-def _handle_saml_logout_response(
-    provider, saml_response: str, relay_state: str
-):
+def _handle_saml_logout_response(provider, saml_response: str, relay_state: str):
     """Handle SAML logout response from IdP.
 
     Issue #2174 F7: Validate LogoutResponse and complete local logout.
@@ -2125,7 +2119,9 @@ def _create_user_from_sso(sso_user, provider_name: str) -> int | None:
 
     # Priority 3: Check policy for missing tenant_id
     if tenant_id is None:
-        null_tenant_policy = os.environ.get("SSO_NULL_TENANT_POLICY", "reject")  # Changed default to reject
+        null_tenant_policy = os.environ.get(
+            "SSO_NULL_TENANT_POLICY", "reject"
+        )  # Changed default to reject
 
         if null_tenant_policy == "reject":
             logger.error(
@@ -2151,7 +2147,9 @@ def _create_user_from_sso(sso_user, provider_name: str) -> int | None:
             email=sso_user.email or "",
             password_hash="",  # No password for SSO users
             role="user",
-            tenant_id=tenant_id,  # Issue #1826 F3: Explicitly pass tenant_id
+            tenant_id=(
+                tenant_id if tenant_id is not None else 1
+            ),  # Issue #1826 F3: Use default if None
         )
 
         if user_id:
