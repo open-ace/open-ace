@@ -286,7 +286,7 @@ class TestRunAgentSessionResumeRecovery:
 
         # Verify cli_session_id was cleared via session_manager
         orch._runner.session_manager.update_session_fields.assert_called_once_with(
-            "tracking-sess-1", {"cli_session_id": ""}
+            "tracking-sess-1", {"cli_session_id": ""}, require_tenant=False
         )
 
     def test_resume_failure_recovery_skipped_when_workflow_failed(self):
