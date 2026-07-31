@@ -61,6 +61,8 @@ Creates the `open-ace` namespace with standard Kubernetes labels.
 
 **Sticky routing:** The Service uses `sessionAffinity: ClientIP`, and the nginx Ingress uses cookie affinity. Remote session HTTP control state is persisted and can cross pods, but live terminal relay WebSocket bridges still belong to one web process; sticky routing remains the safest default for active terminal sessions.
 
+**Note** (Issue #1821 F5): With a ClusterIP-type Service, `sessionAffinity: ClientIP` only sees the ingress controller's source IP, not the end-user IP. The effective sticky routing mechanism is the nginx Ingress cookie affinity (`openace_route`, max-age 10800). The Service-level ClientIP affinity provides minimal benefit in this configuration and is retained for consistency with the reference deployment.
+
 **HA Support (Issue #1851):**
 
 Live terminal and VSCode WebSocket connections use a "reconnection recovery" HA model:
@@ -190,7 +192,13 @@ Keys: `SECRET_KEY`, `OPENACE_ENCRYPTION_KEY`, `UPLOAD_AUTH_KEY`, `DB_USER`, `DB_
 
 ### PodDisruptionBudget
 
-- `minAvailable: 2` — Keeps at least two web pods available during voluntary disruptions
+- `minAvailable: 50%` — Keeps at least 50% of web pods available during voluntary disruptions
+
+**PDB Percentage Behavior** (Issue #1821 F6):
+- At 3 replicas: 50% = 2 available (allows 1 disruption) — **same as previous absolute value**
+- At 2 replicas: 50% = 1 available (allows 1 disruption) — **more permissive than previous**
+- At 1 replica: 50% = 1 available (blocks all disruptions)
+- Review this behavior before scaling down the HPA floor below 3 replicas.
 
 ## Configuration
 
@@ -222,6 +230,9 @@ kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/
 ## Monitoring
 
 The `/health` endpoint returns service status and git commit hash.
+
+**Prometheus Monitoring** (Issue #1821 F1):
+The `prometheus.io/scrape` annotation currently points to `/health` which returns HTTP 200 for health checks only. No application metrics are exposed. This annotation is retained for infrastructure monitoring readiness. To enable real metrics collection, implement a `/metrics` endpoint (e.g., using prometheus_client library).
 
 ## Scaling
 
