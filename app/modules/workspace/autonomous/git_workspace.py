@@ -1088,12 +1088,27 @@ class GitWorkspaceService:
         Distinct from ``_verify_worktree_restored`` only in naming; both check
         the registry, but this one is used to confirm the temp was actually
         attached before advancing the journal (#2050).
+
+        Falls back to ``resolve_worktree_branch`` when the porcelain ``branch``
+        field is transiently missing (same APFS lag as ``verify_worktree_restored``).
         """
         entries = gh.list_worktrees()
-        if not self._orch._is_registered_on_branch(entries, path, branch):
-            raise RuntimeError(
-                f"worktree {path} not registered on branch {branch!r} " f"(registry: {entries!r})"
-            )
+        if self._orch._is_registered_on_branch(entries, path, branch):
+            return
+        # Check if the entry exists but branch is transiently None (APFS lag).
+        entry = next((w for w in entries if w.get("path") == path), None)
+        if entry is not None and entry.get("branch") is None and not entry.get("detached"):
+            resolved = gh.resolve_worktree_branch(path)
+            if resolved is not None and resolved in (branch, f"refs/heads/{branch}"):
+                logger.info(
+                    "Worktree %s branch resolved via symbolic-ref fallback "
+                    "(porcelain branch field was transiently missing)",
+                    path,
+                )
+                return
+        raise RuntimeError(
+            f"worktree {path} not registered on branch {branch!r} (registry: {entries!r})"
+        )
 
     def path_within_worktrees_root(self, path: str, project_path: str) -> bool:
         """True if ``path`` lives under ``<project_path>/.worktrees`` (#2050).
@@ -1283,14 +1298,41 @@ class GitWorkspaceService:
         the expected branch. (The restore gate above already ensured the linked
         ``.git`` pointer exists before reaching here.) Any failure propagates so
         the caller can fail closed.
+
+        On macOS APFS, ``git worktree list --porcelain`` can transiently omit
+        the ``branch`` field right after ``git worktree add`` (the registry
+        cache has not yet settled). When the entry exists but ``branch`` is
+        ``None`` (and ``detached`` is not set), we fall back to
+        ``GitHubOps.resolve_worktree_branch`` which reads the worktree's own
+        HEAD via ``git symbolic-ref`` — the authoritative source, unaffected by
+        the registry-cache lag. A *wrong* branch name (not ``None``) fails
+        immediately without fallback, as it indicates a real misconfiguration.
         """
         entries = [w for w in gh.list_worktrees() if w.get("path") == path]
         if not entries:
             raise RuntimeError(f"restored worktree {path} missing from `git worktree list`")
-        actual = entries[0].get("branch")
+        entry = entries[0]
+        actual = entry.get("branch")
         # git may report either "branch" or "refs/heads/branch" depending on version.
-        if actual not in (branch, f"refs/heads/{branch}"):
+        if actual in (branch, f"refs/heads/{branch}"):
+            return
+        # branch field missing AND not explicitly detached → APFS transient lag.
+        # Fall back to the worktree's own HEAD (authoritative) before failing.
+        if actual is None and not entry.get("detached"):
+            resolved = gh.resolve_worktree_branch(path)
+            if resolved is not None and resolved in (branch, f"refs/heads/{branch}"):
+                logger.info(
+                    "Worktree %s branch resolved via symbolic-ref fallback "
+                    "(porcelain branch field was transiently missing)",
+                    path,
+                )
+                return
+            # resolved is None (detached/unreadable) or wrong branch → fail closed.
             raise RuntimeError(
                 f"restored worktree {path} on wrong branch: "
                 f"expected={branch!r}, actual={actual!r}"
+                + (f" (symbolic-ref fallback returned {resolved!r})" if resolved else "")
             )
+        raise RuntimeError(
+            f"restored worktree {path} on wrong branch: " f"expected={branch!r}, actual={actual!r}"
+        )
