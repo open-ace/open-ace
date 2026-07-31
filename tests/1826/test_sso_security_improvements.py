@@ -133,8 +133,8 @@ class TestF3TenantIDStrategy:
         os.environ["SSO_NULL_TENANT_POLICY"] = "warn"
 
         # Import after setting env var
-        from app.routes.sso import _create_user_from_sso
         from app.modules.sso.provider import SSOUser
+        from app.routes.sso import _create_user_from_sso
 
         # Mock provider with no tenant_id
         manager = MagicMock()
@@ -148,12 +148,14 @@ class TestF3TenantIDStrategy:
             mock_repo.create_user.return_value = 123
 
             # Should create user with default tenant_id=1
-            sso_user = SSOUser(
-                provider="test",
-                provider_user_id="123",
-                email="test@example.com",
-                username="testuser"
-            )
+            # Note: This test is a placeholder for integration testing
+            # The actual logic is tested via unit tests for _create_user_from_sso
+            # sso_user = SSOUser(
+            #     provider="test",
+            #     provider_user_id="123",
+            #     email="test@example.com",
+            #     username="testuser"
+            # )
 
             # This would log warning but create user
             # user_id = _create_user_from_sso(sso_user, "test_provider")
@@ -263,7 +265,7 @@ class TestF8RelayStateSignature:
 
     def test_decode_state_valid_signature(self):
         """Test that _decode_state accepts valid signature."""
-        from app.routes.sso import _encode_state, _decode_state
+        from app.routes.sso import _decode_state, _encode_state
 
         encoded = _encode_state("original_state_456", "https://example.com/redirect")
         state, redirect = _decode_state(encoded)
@@ -273,8 +275,9 @@ class TestF8RelayStateSignature:
 
     def test_decode_state_invalid_signature(self):
         """Test that _decode_state rejects invalid signature."""
-        from app.routes.sso import _decode_state
         import base64
+
+        from app.routes.sso import _decode_state
 
         # Create tampered state
         state_data = {
@@ -292,8 +295,9 @@ class TestF8RelayStateSignature:
 
     def test_decode_state_legacy_format(self):
         """Test that _decode_state accepts legacy format during transition."""
-        from app.routes.sso import _decode_state
         import base64
+
+        from app.routes.sso import _decode_state
 
         # Legacy format without signature
         state_data = {
@@ -319,8 +323,9 @@ class TestF8RelayStateSignature:
 
     def test_relaystate_transition_period_documented(self):
         """Test that transition period is properly documented."""
-        from app.routes.sso import _decode_state
         import inspect
+
+        from app.routes.sso import _decode_state
 
         # Check docstring contains transition period end date
         docstring = _decode_state.__doc__
