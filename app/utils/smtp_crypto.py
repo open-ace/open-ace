@@ -6,6 +6,7 @@ Uses Fernet (AES-128-CBC) for symmetric encryption, consistent with API key encr
 """
 
 import base64
+import functools
 import hashlib
 import logging
 from typing import Optional, cast
@@ -13,9 +14,6 @@ from typing import Optional, cast
 from app.utils.security_env import get_encryption_key_material
 
 logger = logging.getLogger(__name__)
-
-# Singleton instance
-_password_manager_instance: Optional["SMTPPasswordManager"] = None
 
 
 class SMTPPasswordManager:
@@ -129,14 +127,14 @@ class SMTPPasswordManager:
         return f"{password[:4]}{'*' * masked_len}"
 
 
+@functools.lru_cache(maxsize=1)
 def get_password_manager() -> SMTPPasswordManager:
     """
     Get the singleton SMTPPasswordManager instance.
 
+    Uses lru_cache for thread-safe singleton pattern without explicit locking.
+
     Returns:
         SMTPPasswordManager instance.
     """
-    global _password_manager_instance
-    if _password_manager_instance is None:
-        _password_manager_instance = SMTPPasswordManager()
-    return _password_manager_instance
+    return SMTPPasswordManager()

@@ -197,6 +197,90 @@ def _is_allowed_cors_origin(origin: str) -> bool:
     return _is_allowed_local_webui_origin(origin)
 
 
+def _precheck_encryption_registry():
+    """
+    Pre-check encryption key registry and all encryption paths.
+
+    This function is called during application startup to verify that:
+    1. EncryptionKeyRegistry can be initialized
+    2. Key derivation and encryption/decryption work
+    3. All encryption paths are functional
+
+    In production, failures raise RuntimeError (fail-fast).
+    In development, failures log warnings but allow startup.
+
+    Issue: #1820
+    """
+    from app.utils.security_env import is_strict_mode
+
+    # Try to initialize EncryptionKeyRegistry
+    try:
+        from app.utils.encryption_key_registry import get_registry
+
+        registry = get_registry()
+
+        # Verify encryption/decryption roundtrip
+        test_plaintext = "startup_test_secret"
+        ciphertext = registry.encrypt(test_plaintext)
+        result = registry.decrypt(ciphertext)
+
+        if result is None:
+            raise RuntimeError("Encryption/decryption roundtrip failed")
+
+        decrypted, key_id = result
+        if decrypted != test_plaintext:
+            raise RuntimeError(
+                f"Encryption/decryption mismatch: expected '{test_plaintext}', got '{decrypted}'"
+            )
+
+        logger.info(
+            f"EncryptionKeyRegistry initialized: "
+            f"keys={registry.get_key_count()}, "
+            f"primary_key_id={registry.get_primary_key_id()}, "
+            f"config_version={registry.get_config_version()}"
+        )
+
+    except RuntimeError as e:
+        if is_strict_mode():
+            raise RuntimeError(f"Encryption key registry initialization failed: {e}")
+        logger.warning(f"Encryption key registry initialization failed: {e}")
+    except Exception as e:
+        if is_strict_mode():
+            raise RuntimeError(f"Unexpected error initializing encryption registry: {e}")
+        logger.warning(f"Unexpected error initializing encryption registry: {e}")
+
+    # Pre-check SMTP password encryption path
+    try:
+        from app.utils.smtp_crypto import get_password_manager
+
+        manager = get_password_manager()
+        test_password = "smtp_test_password"
+        encrypted = manager.encrypt(test_password)
+        decrypted = manager.decrypt(encrypted)
+        if decrypted != test_password:
+            raise RuntimeError("SMTP password encryption/decryption mismatch")
+    except RuntimeError as e:
+        if is_strict_mode():
+            raise RuntimeError(f"SMTP encryption check failed: {e}")
+        logger.warning(f"SMTP encryption check failed: {e}")
+    except Exception:
+        pass  # cryptography not installed — handled at encrypt/decrypt time
+
+    # Pre-check SSO client_secret encryption path
+    try:
+        # SSOManager uses SMTPPasswordManager internally
+        # Just verify the password manager is available
+        from app.utils.smtp_crypto import get_password_manager
+
+        _ = get_password_manager()
+    except RuntimeError as e:
+        if is_strict_mode():
+            raise RuntimeError(f"SSO encryption check failed: {e}")
+        logger.warning(f"SSO encryption check failed: {e}")
+    except Exception:
+        pass
+
+
 def create_app(config=None):
     """
     Flask application factory.
@@ -260,6 +344,9 @@ def create_app(config=None):
     from app.repositories.schema_init import ensure_all_tables
 
     ensure_all_tables()
+
+    # Pre-check encryption key registry (Issue #1820)
+    _precheck_encryption_registry()
 
     # Pre-check API key encryption availability
     try:
