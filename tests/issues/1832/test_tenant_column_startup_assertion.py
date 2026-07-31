@@ -17,7 +17,6 @@ import pytest
 
 from app.modules.workspace.session_manager import SessionManager
 
-
 _LEGACY_AGENT_SESSIONS = """
 CREATE TABLE agent_sessions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

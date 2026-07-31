@@ -4,12 +4,14 @@ Open ACE - SSO Routes
 API endpoints for Single Sign-On authentication.
 """
 
+import hashlib
+import hmac
 import json
 import logging
 import os
 import threading
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlparse, urlunparse
 
 import requests
@@ -88,7 +90,7 @@ def _build_acs_url(provider_name: str) -> str:
     default = url_for("sso.saml_acs", provider_name=provider_name, _external=True)
     canonical_base = get_config_value("sso", "canonical_base_url", None)
     if not canonical_base:
-        return default
+        return cast("str", default)
 
     canonical_base = str(canonical_base).strip().rstrip("/")
     parsed = urlparse(canonical_base)
@@ -98,7 +100,7 @@ def _build_acs_url(provider_name: str) -> str:
             "falling back to request-derived ACS URL",
             canonical_base,
         )
-        return default
+        return cast("str", default)
 
     # Keep the route-defined path/query, swap only scheme + host so the ACS
     # path can never drift from the blueprint registration.
@@ -110,8 +112,6 @@ def _build_acs_url(provider_name: str) -> str:
 
 # Issue #1826 F8: RelayState signing configuration
 # Use HMAC-SHA256 from standard library (no new dependencies)
-import hashlib
-import hmac
 
 
 def _get_relaystate_signing_key() -> bytes:

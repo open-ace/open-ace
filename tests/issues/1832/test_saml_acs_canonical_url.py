@@ -59,9 +59,7 @@ def test_acs_url_uses_canonical_base_when_configured(monkeypatch):
     monkeypatch.setattr(
         "app.routes.sso.get_config_value", lambda *a, **k: "https://canonical.example.com"
     )
-    with _make_app().test_request_context(
-        "/api/sso/acs/foo", base_url="https://spoofed.evil"
-    ):
+    with _make_app().test_request_context("/api/sso/acs/foo", base_url="https://spoofed.evil"):
         url = _build_acs_url("foo")
     assert url == "https://canonical.example.com/api/sso/acs/foo"
     assert "spoofed" not in url

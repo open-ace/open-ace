@@ -17,8 +17,8 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
-from app.repositories.database import Database, adapt_sql, is_postgresql
 from app.modules.governance.alert_notifier import normalize_alert_severity
+from app.repositories.database import Database, adapt_sql, is_postgresql
 
 logger = logging.getLogger(__name__)
 
