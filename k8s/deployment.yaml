@@ -38,7 +38,7 @@ spec:
       containers:
         - name: open-ace
           image: open-ace:latest
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           # HA Support (Issue #1851): preStop hook for graceful terminal relay handoff
           lifecycle:
             preStop:
@@ -46,10 +46,12 @@ spec:
                 command: ["sh", "-c", "sleep 30"]
           securityContext:
             allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop:
                 - ALL
+            seccompProfile:
+              type: RuntimeDefault
           ports:
             - name: http
               containerPort: 19888
@@ -101,6 +103,10 @@ spec:
               subPath: workspace
             - name: logs
               mountPath: /app/logs
+            - name: tmp
+              mountPath: /tmp
+            - name: agent-tasks
+              mountPath: /run/openace-agent-tasks
             - name: config
               mountPath: /home/open-ace/.open-ace
               subPath: config
@@ -109,6 +115,12 @@ spec:
           persistentVolumeClaim:
             claimName: open-ace-data
         - name: logs
+          emptyDir: {}
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 64Mi
+        - name: agent-tasks
           emptyDir: {}
         - name: config
           persistentVolumeClaim:
