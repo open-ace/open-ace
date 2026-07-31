@@ -65,6 +65,7 @@ def test_launcher_no_writable_check_on_cgroup_files():
     src = _src()
     assert '[ -w "$task_cgroup/cgroup.kill" ]' not in src
     assert "[ -w /sys/fs/cgroup/cgroup.kill ]" not in src
+    assert '[ -w "$cgroup_root/$task_id/cgroup.procs" ]' not in src
 
 
 def test_launcher_sets_per_task_home_tmp_xdg():
