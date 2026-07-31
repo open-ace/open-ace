@@ -169,12 +169,8 @@ def get_encryption_key_material(*, purpose: str) -> str:
         )
         return _DEV_ENCRYPTION_KEY
 
-    # Validate strength
-    try:
-        validate_secret_strength(key_env, "OPENACE_ENCRYPTION_KEY", min_length=32)
-    except RuntimeError:
-        # Re-raise in strict mode
-        raise
+    # Validate strength (raises RuntimeError in strict mode if invalid)
+    validate_secret_strength(key_env, "OPENACE_ENCRYPTION_KEY", min_length=32)
 
     return key_env
 
@@ -231,11 +227,7 @@ def get_redis_password(redis_password: str | None = None) -> str:
         logger.warning("Using development REDIS_PASSWORD - DO NOT use in production!")
         return _DEV_REDIS_PASSWORD
 
-    # Validate strength (min_length=24 for Redis)
-    try:
-        validate_secret_strength(redis_password, "REDIS_PASSWORD", min_length=24)
-    except RuntimeError:
-        # Re-raise in strict mode
-        raise
+    # Validate strength (raises RuntimeError in strict mode if invalid)
+    validate_secret_strength(redis_password, "REDIS_PASSWORD", min_length=24)
 
     return redis_password
