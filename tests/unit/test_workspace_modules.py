@@ -238,7 +238,7 @@ class TestSessionManager:
     def test_create_session(self, session_manager):
         """Test creating a session."""
         session = session_manager.create_session(
-            tool_name="claude", user_id=1, session_type=SessionType.CHAT.value, title="Test Session"
+            tool_name="claude", user_id=1, session_type=SessionType.CHAT.value, title="Test Session", tenant_id=1
         )
 
         assert session.session_id is not None
@@ -248,7 +248,7 @@ class TestSessionManager:
 
     def test_get_session(self, session_manager):
         """Test retrieving a session."""
-        created = session_manager.create_session(tool_name="qwen")
+        created = session_manager.create_session(tool_name="qwen", tenant_id=1)
 
         retrieved = session_manager.get_session(created.session_id)
         assert retrieved is not None
@@ -256,7 +256,7 @@ class TestSessionManager:
 
     def test_get_session_filters_messages_by_milestone(self, session_manager):
         """Milestone session detail only returns messages tagged to that milestone."""
-        created = session_manager.create_session(tool_name="qwen")
+        created = session_manager.create_session(tool_name="qwen", tenant_id=1)
         conn = session_manager._get_connection()
         try:
             conn.cursor().execute("ALTER TABLE session_messages ADD COLUMN source TEXT DEFAULT ''")
@@ -293,7 +293,7 @@ class TestSessionManager:
 
     def test_complete_session(self, session_manager):
         """Test completing a session."""
-        session = session_manager.create_session(tool_name="claude")
+        session = session_manager.create_session(tool_name="claude", tenant_id=1)
 
         success = session_manager.complete_session(session.session_id)
         assert success
@@ -304,7 +304,7 @@ class TestSessionManager:
 
     def test_delete_session(self, session_manager):
         """Test deleting a session."""
-        session = session_manager.create_session(tool_name="claude")
+        session = session_manager.create_session(tool_name="claude", tenant_id=1)
 
         success = session_manager.delete_session(session.session_id)
         assert success
@@ -315,7 +315,7 @@ class TestSessionManager:
     def test_list_sessions(self, session_manager):
         """Test listing sessions."""
         for i in range(3):
-            session_manager.create_session(tool_name="claude", user_id=1, title=f"Session {i}")
+            session_manager.create_session(tool_name="claude", user_id=1, title=f"Session {i}", tenant_id=1)
 
         result = session_manager.list_sessions(user_id=1)
         assert len(result["sessions"]) == 3
@@ -328,7 +328,7 @@ class TestSessionManager:
             session_type=SessionType.WORKFLOW.value,
             title="Autonomous wrapper",
             context={"workflow_id": "wf-1"},
-        )
+         tenant_id=1)
         session_manager.update_session_fields(
             tracking.session_id, {"cli_session_id": "actual-123"}, require_tenant=False
         )
@@ -337,7 +337,7 @@ class TestSessionManager:
             user_id=1,
             session_id="actual-123",
             title="Provider session",
-        )
+         tenant_id=1)
 
         result = session_manager.list_sessions(user_id=1)
         assert [session.session_id for session in result["sessions"]] == ["actual-123"]
@@ -354,6 +354,7 @@ class TestSessionManager:
             # No cli_session_id backfill — simulates an agent that never produced
             # a real CLI session id (executable not found / spawn failed).
             context={"workflow_id": "wf-1"},
+            tenant_id=1,
         )
         # Sanity: cli_session_id is indeed empty.
         assert orphan.cli_session_id == ""
@@ -363,6 +364,7 @@ class TestSessionManager:
             user_id=1,
             session_id="visible-regular",
             title="Regular chat",
+            tenant_id=1
         )
 
         result = session_manager.list_sessions(user_id=1)
@@ -372,15 +374,15 @@ class TestSessionManager:
 
     def test_session_expiration(self, session_manager):
         """Test session expiration."""
-        session = session_manager.create_session(tool_name="claude", expires_in_hours=1)
+        session = session_manager.create_session(tool_name="claude", expires_in_hours=1, tenant_id=1)
 
         assert session.expires_at is not None
         assert not session.is_expired()
 
     def test_session_stats(self, session_manager):
         """Test session statistics."""
-        session_manager.create_session(tool_name="claude", user_id=1)
-        session_manager.create_session(tool_name="qwen", user_id=1)
+        session_manager.create_session(tool_name="claude", user_id=1, tenant_id=1)
+        session_manager.create_session(tool_name="qwen", user_id=1, tenant_id=1)
 
         stats = session_manager.get_session_stats(user_id=1)
         assert stats["total_sessions"] == 2
@@ -394,7 +396,7 @@ class TestSessionManager:
             session_type=SessionType.WORKFLOW.value,
             title="Autonomous wrapper",
             context={"workflow_id": "wf-1"},
-        )
+         tenant_id=1)
         session_manager.update_session_fields(
             tracking.session_id, {"cli_session_id": "actual-456"}, require_tenant=False
         )
@@ -403,7 +405,7 @@ class TestSessionManager:
             user_id=1,
             session_id="actual-456",
             title="Provider session",
-        )
+         tenant_id=1)
 
         stats = session_manager.get_session_stats(user_id=1)
         assert stats["total_sessions"] == 1
@@ -690,7 +692,7 @@ class TestWorkspaceIntegration:
         session_mgr._ensure_tables()
         session = session_mgr.create_session(
             tool_name="claude", user_id=1, title="Integration Test"
-        )
+        , tenant_id=1)
 
         # Emit sync events (StateSyncManager.__init__ already calls _ensure_tables)
         sync_mgr = StateSyncManager(db_path=temp_db)

@@ -65,7 +65,7 @@ class TestProjectRepository:
         self.db.execute.return_value = mock_cursor
 
         with patch.object(self.repo, "add_user_project") as mock_add:
-            result = self.repo.create_project(path="/test", name="T")
+            result = self.repo.create_project(path="/test", name="T", tenant_id=1)
         assert result == 2
         mock_add.assert_not_called()
 
@@ -85,8 +85,9 @@ class TestProjectRepository:
         assert "RETURNING id" in second_call_query
 
     def test_create_project_exception(self):
+        self.db.fetch_one.return_value = None  # No soft-deleted project
         self.db.execute.side_effect = Exception("DB error")
-        result = self.repo.create_project(path="/test")
+        result = self.repo.create_project(path="/test", tenant_id=1)
         assert result is None
 
     def test_create_project_restore_soft_deleted_sqlite(self):
