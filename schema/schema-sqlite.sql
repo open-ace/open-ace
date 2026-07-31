@@ -94,7 +94,8 @@ CREATE TABLE agent_sessions (
  remote_machine_id text,
  paused_at TIMESTAMP,
  cli_session_id text DEFAULT '',
- tenant_id integer DEFAULT 1 NOT NULL
+ tenant_id integer DEFAULT 1 NOT NULL,
+ tenant_version integer DEFAULT 1 NOT NULL
 );
 
 CREATE TABLE agent_tokens (
@@ -924,6 +925,20 @@ CREATE TABLE teams (
  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE tenant_migrations (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ user_id integer NOT NULL,
+ old_tenant_id integer NOT NULL,
+ new_tenant_id integer NOT NULL,
+ migrated_by integer NOT NULL,
+ migrated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+ affected_sessions integer,
+ affected_projects integer,
+ batch_number integer,
+ total_batches integer,
+ status TEXT DEFAULT 'pending' NOT NULL
+);
+
 CREATE TABLE tenant_period_history (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  tenant_id integer NOT NULL,
@@ -1161,6 +1176,7 @@ CREATE TABLE users (
  must_change_password INTEGER DEFAULT 0,
  avatar_url TEXT,
  auto_mapping_enabled INTEGER DEFAULT 1,
+ tenant_version integer DEFAULT 1 NOT NULL,
     CONSTRAINT chk_users_role CHECK ((role IN ('admin', 'manager', 'user', 'readonly')))
 );
 
@@ -1629,6 +1645,10 @@ CREATE INDEX idx_team_members_team ON team_members (team_id);
 CREATE INDEX idx_team_members_user ON team_members (user_id);
 
 CREATE INDEX idx_teams_owner ON teams (owner_id);
+
+CREATE INDEX idx_tenant_migrations_status ON tenant_migrations (status);
+
+CREATE INDEX idx_tenant_migrations_user ON tenant_migrations (user_id);
 
 CREATE INDEX idx_tenant_period_history_dates ON tenant_period_history (period_start, period_end);
 

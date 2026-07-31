@@ -137,6 +137,7 @@ def test_complete_authentication_rejects_missing_pkce_verifier(sso_manager):
     """A stored auth state without a code_verifier must hard-fail, not silently
     degrade PKCE by omitting the verifier from the token request."""
     import time
+    from datetime import datetime, timedelta, timezone
 
     provider = MagicMock()
     provider.authenticate.return_value = SSOAuthResult(success=True)
@@ -148,10 +149,12 @@ def test_complete_authentication_rejects_missing_pkce_verifier(sso_manager):
 
     # Simulate the upstream failure mode flagged by the review: state storage
     # produced a row but the verifier never landed in it.
+    # Issue #2163: expires_at is NOT NULL, must provide a value
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=10)
     sso_manager.db.execute(
-        "INSERT INTO sso_auth_states (state, code_verifier, provider_name, nonce) "
-        "VALUES (?, ?, ?, ?)",
-        ("state-no-verifier", "", "google", "nonce-x"),  # empty verifier
+        "INSERT INTO sso_auth_states (state, code_verifier, provider_name, nonce, expires_at) "
+        "VALUES (?, ?, ?, ?, ?)",
+        ("state-no-verifier", "", "google", "nonce-x", expires_at),  # empty verifier
     )
 
     result = sso_manager.complete_authentication(

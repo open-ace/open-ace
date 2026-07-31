@@ -133,7 +133,8 @@ CREATE TABLE agent_sessions (
     remote_machine_id text,
     paused_at timestamp without time zone,
     cli_session_id text DEFAULT ''::text,
-    tenant_id integer DEFAULT 1 NOT NULL
+    tenant_id integer DEFAULT 1 NOT NULL,
+    tenant_version integer DEFAULT 1 NOT NULL
 );
 
 CREATE SEQUENCE agent_sessions_id_seq
@@ -1436,6 +1437,29 @@ CREATE SEQUENCE teams_id_seq
     CACHE 1;
 
 ALTER SEQUENCE teams_id_seq OWNED BY teams.id;
+CREATE TABLE tenant_migrations (
+    id integer NOT NULL,
+    user_id integer NOT NULL,
+    old_tenant_id integer NOT NULL,
+    new_tenant_id integer NOT NULL,
+    migrated_by integer NOT NULL,
+    migrated_at timestamp with time zone DEFAULT now() NOT NULL,
+    affected_sessions integer,
+    affected_projects integer,
+    batch_number integer,
+    total_batches integer,
+    status character varying(20) DEFAULT 'pending'::character varying NOT NULL
+);
+
+CREATE SEQUENCE tenant_migrations_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE tenant_migrations_id_seq OWNED BY tenant_migrations.id;
 CREATE TABLE tenant_period_history (
     id integer NOT NULL,
     tenant_id integer NOT NULL,
@@ -1805,6 +1829,7 @@ CREATE TABLE users (
     must_change_password boolean DEFAULT false,
     avatar_url character varying(500),
     auto_mapping_enabled boolean DEFAULT true,
+    tenant_version integer DEFAULT 1 NOT NULL,
     CONSTRAINT chk_users_role CHECK (((role)::text = ANY ((ARRAY['admin'::character varying, 'manager'::character varying, 'user'::character varying, 'readonly'::character varying])::text[])))
 );
 
@@ -2022,6 +2047,8 @@ ALTER TABLE ONLY sync_events ALTER COLUMN id SET DEFAULT nextval('sync_events_id
 ALTER TABLE ONLY team_members ALTER COLUMN id SET DEFAULT nextval('team_members_id_seq'::regclass);
 
 ALTER TABLE ONLY teams ALTER COLUMN id SET DEFAULT nextval('teams_id_seq'::regclass);
+
+ALTER TABLE ONLY tenant_migrations ALTER COLUMN id SET DEFAULT nextval('tenant_migrations_id_seq'::regclass);
 
 ALTER TABLE ONLY tenant_period_history ALTER COLUMN id SET DEFAULT nextval('tenant_period_history_id_seq'::regclass);
 
@@ -2296,6 +2323,9 @@ ALTER TABLE ONLY teams
 
 ALTER TABLE ONLY teams
     ADD CONSTRAINT teams_team_id_key UNIQUE (team_id);
+
+ALTER TABLE ONLY tenant_migrations
+    ADD CONSTRAINT tenant_migrations_pkey PRIMARY KEY (id);
 
 ALTER TABLE ONLY tenant_period_history
     ADD CONSTRAINT tenant_period_history_pkey PRIMARY KEY (id);
@@ -3031,6 +3061,14 @@ CREATE INDEX idx_team_members_user ON team_members USING btree (user_id);
 
 CREATE INDEX idx_teams_owner ON teams USING btree (owner_id);
 
+CREATE INDEX idx_tenant_migrations_status ON tenant_migrations USING btree (status);
+
+
+--
+--
+
+CREATE INDEX idx_tenant_migrations_user ON tenant_migrations USING btree (user_id);
+
 CREATE INDEX idx_tenant_period_history_dates ON tenant_period_history USING btree (period_start, period_end);
 
 
@@ -3294,6 +3332,12 @@ ALTER TABLE ONLY sso_providers
 
 ALTER TABLE ONLY sso_sessions
     ADD CONSTRAINT sso_sessions_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id);
+
+ALTER TABLE ONLY tenant_migrations
+    ADD CONSTRAINT tenant_migrations_migrated_by_fkey FOREIGN KEY (migrated_by) REFERENCES users(id);
+
+ALTER TABLE ONLY tenant_migrations
+    ADD CONSTRAINT tenant_migrations_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id);
 
 ALTER TABLE ONLY tenant_period_history
     ADD CONSTRAINT tenant_period_history_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE;
