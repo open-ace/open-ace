@@ -42,6 +42,7 @@ from app.repositories.database import (
 )
 from app.services.email_notification_service import get_email_notification_service
 from app.utils.config import get_config_value
+from app.utils.helpers import parse_db_datetime
 from app.utils.outbound_url_guard import is_public_address
 from app.utils.smtp_crypto import get_password_manager
 
@@ -2226,13 +2227,8 @@ class AlertNotifier:
             tool_name=row["tool_name"],
             metadata=json.loads(row["metadata"]) if row["metadata"] else {},
             created_at=(
-                row["created_at"]
-                if isinstance(row["created_at"], datetime)
-                else (
-                    datetime.fromisoformat(row["created_at"])
-                    if row["created_at"]
-                    else datetime.now(timezone.utc).replace(tzinfo=None)
-                )
+                parse_db_datetime(row["created_at"])
+                or datetime.now(timezone.utc).replace(tzinfo=None)
             ),
             read=bool(row["read"]),
             action_url=row["action_url"],

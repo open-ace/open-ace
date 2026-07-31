@@ -19,6 +19,7 @@ from app.repositories.database import (
     escape_like,
 )
 from app.repositories.user_repo import UserRepository
+from app.utils.helpers import parse_db_datetime
 
 logger = logging.getLogger(__name__)
 
@@ -609,16 +610,11 @@ class QuotaManager:
                     percentage=row.get("percentage", 0),
                     message=row.get("message", ""),
                     created_at=(
-                        datetime.fromisoformat(row["created_at"])
-                        if row.get("created_at")
-                        else datetime.now(timezone.utc).replace(tzinfo=None)
+                        parse_db_datetime(row.get("created_at"))
+                        or datetime.now(timezone.utc).replace(tzinfo=None)
                     ),
                     acknowledged=bool(row.get("acknowledged", 0)),
-                    acknowledged_at=(
-                        datetime.fromisoformat(row["acknowledged_at"])
-                        if row.get("acknowledged_at")
-                        else None
-                    ),
+                    acknowledged_at=parse_db_datetime(row.get("acknowledged_at")),
                     acknowledged_by=row.get("acknowledged_by"),
                 )
             )
@@ -773,16 +769,11 @@ class QuotaManager:
                         percentage=row.get("percentage", 0),
                         message=row.get("message", ""),
                         created_at=(
-                            datetime.fromisoformat(row["created_at"])
-                            if row.get("created_at")
-                            else datetime.now(timezone.utc).replace(tzinfo=None)
+                            parse_db_datetime(row.get("created_at"))
+                            or datetime.now(timezone.utc).replace(tzinfo=None)
                         ),
                         acknowledged=bool(row.get("acknowledged", 0)),
-                        acknowledged_at=(
-                            datetime.fromisoformat(row["acknowledged_at"])
-                            if row.get("acknowledged_at")
-                            else None
-                        ),
+                        acknowledged_at=parse_db_datetime(row.get("acknowledged_at")),
                         acknowledged_by=row.get("acknowledged_by"),
                     )
                 )
@@ -872,16 +863,11 @@ class QuotaManager:
                     percentage=row.get("percentage", 0),
                     message=row.get("message", ""),
                     created_at=(
-                        datetime.fromisoformat(row["created_at"])
-                        if row.get("created_at")
-                        else datetime.now(timezone.utc).replace(tzinfo=None)
+                        parse_db_datetime(row.get("created_at"))
+                        or datetime.now(timezone.utc).replace(tzinfo=None)
                     ),
                     acknowledged=bool(row.get("acknowledged", 0)),
-                    acknowledged_at=(
-                        datetime.fromisoformat(row["acknowledged_at"])
-                        if row.get("acknowledged_at")
-                        else None
-                    ),
+                    acknowledged_at=parse_db_datetime(row.get("acknowledged_at")),
                     acknowledged_by=row.get("acknowledged_by"),
                 )
             )
