@@ -8,7 +8,7 @@ This guide explains how to configure DingTalk integration for:
 
 ## Overview
 
-Open ACE can use DingTalk APIs to:
+Open ACE integrates with DingTalk to:
 
 - Display real DingTalk user names instead of raw `userId` values
 - Display DingTalk group names instead of raw `chatId` metadata when available

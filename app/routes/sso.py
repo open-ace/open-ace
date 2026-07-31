@@ -4,12 +4,15 @@ Open ACE - SSO Routes
 API endpoints for Single Sign-On authentication.
 """
 
+import hashlib
+import hmac
 import json
 import logging
 import os
 import threading
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, cast
+from urllib.parse import urlparse, urlunparse
 
 import requests
 from flask import Blueprint, Response, g, jsonify, make_response, redirect, request, url_for
@@ -21,6 +24,7 @@ from app.modules.sso.provider import get_provider_config, list_providers
 from app.repositories.database import adapt_boolean_value
 from app.repositories.user_repo import UserRepository
 from app.services.auth_service import _get_session_timeout_hours
+from app.utils.config import get_config_value
 from app.utils.outbound_url_guard import OutboundUrlBlockedError, safe_request
 
 logger = logging.getLogger(__name__)
@@ -52,10 +56,62 @@ def get_audit_logger():
     return _audit_logger
 
 
+def _build_acs_url(provider_name: str) -> str:
+    """Build the SAML ACS URL, preferring a configured canonical base URL.
+
+    Issue #1832 F7: the three SAML ACS call sites (SP metadata, the SAML
+    branch of ``start_login``, and the ``saml_acs`` callback) previously each
+    called ``url_for("sso.saml_acs", ..., _external=True)``, which derives the
+    host from the incoming request's ``Host`` / ``X-Forwarded-*`` headers. A
+    spoofed Host header can then influence the ACS URL embedded in SP metadata
+    / the AuthnRequest and the one compared against the SAML Response's
+    Destination/Recipient — the three values MUST stay identical, so all three
+    sites route through this single helper.
+
+    When ``sso.canonical_base_url`` is configured (e.g.
+    ``https://openace.example.com``) the ACS URL uses that fixed scheme+host,
+    independent of request headers. When unset or invalid, behavior is
+    unchanged (falls back to ``url_for``). This is a hardening measure, not a
+    directly-exploitable fix; configure it only behind a trusted reverse proxy
+    / fixed public domain.
+
+    Scope (important for operators):
+      * This affects ONLY the three SAML ACS URLs. The OAuth callback
+        (``sso.callback``) is intentionally NOT converged here — its
+        redirect_uri is still derived from the request host, because OAuth
+        providers register redirect URIs out of band and a mismatch would
+        break OAuth login. ``start_login`` calls this helper only on its
+        ``is_saml`` branch.
+      * A single global ``canonical_base_url`` is shared by every SAML
+        provider. Deployments running multiple SAML IdPs behind different
+        public domains are not fully served by this one setting; a
+        per-provider override is left as a future extension.
+    """
+    default = url_for("sso.saml_acs", provider_name=provider_name, _external=True)
+    canonical_base = get_config_value("sso", "canonical_base_url", None)
+    if not canonical_base:
+        return cast("str", default)
+
+    canonical_base = str(canonical_base).strip().rstrip("/")
+    parsed = urlparse(canonical_base)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        logger.error(
+            "sso.canonical_base_url %r is not a valid http(s) URL; "
+            "falling back to request-derived ACS URL",
+            canonical_base,
+        )
+        return cast("str", default)
+
+    # Keep the route-defined path/query, swap only scheme + host so the ACS
+    # path can never drift from the blueprint registration.
+    default_parsed = urlparse(default)
+    return urlunparse(
+        (parsed.scheme, parsed.netloc, default_parsed.path, "", default_parsed.query, "")
+    )
+
+
 # Issue #1826 F8: RelayState signing configuration
 # Use HMAC-SHA256 from standard library (no new dependencies)
-import hashlib
-import hmac
 
 
 def _get_relaystate_signing_key() -> bytes:
@@ -862,7 +918,7 @@ def saml_metadata(provider_name: str):
     if not hasattr(provider, "get_service_provider_metadata"):
         return jsonify({"error": "Provider does not support metadata"}), 400
 
-    acs_url = url_for("sso.saml_acs", provider_name=provider_name, _external=True)
+    acs_url = _build_acs_url(provider_name)
     metadata = provider.get_service_provider_metadata(acs_url=acs_url)
     return Response(metadata, mimetype="application/samlmetadata+xml")
 
@@ -1247,11 +1303,16 @@ def start_login(provider_name: str):
     provider = get_sso_manager().get_provider(provider_name)
     is_saml = bool(provider and provider.provider_type == "saml")
 
-    # Build callback/ACS URL (this is where the provider redirects/posts back to)
-    callback_uri = url_for(
-        "sso.saml_acs" if is_saml else "sso.callback",
-        provider_name=provider_name,
-        _external=True,
+    # Build callback/ACS URL (this is where the provider redirects/posts back to).
+    # Issue #1832 F7: SAML providers route through the canonical ACS helper so the
+    # ACS URL declared to the IdP here is byte-identical to the one compared in the
+    # saml_acs callback. OAuth providers MUST stay on the request-derived callback
+    # (their redirect_uri is registered out of band), so the helper is applied only
+    # on the is_saml branch.
+    callback_uri = (
+        _build_acs_url(provider_name)
+        if is_saml
+        else url_for("sso.callback", provider_name=provider_name, _external=True)
     )
 
     result = get_sso_manager().start_authentication(provider_name, callback_uri)
@@ -1493,7 +1554,7 @@ def saml_acs(provider_name: str):
             return redirect(f"{frontend_url}?sso_error=invalid_request")
         return jsonify({"error": "Missing SAMLResponse or RelayState"}), 400
 
-    acs_url = url_for("sso.saml_acs", provider_name=provider_name, _external=True)
+    acs_url = _build_acs_url(provider_name)
     auth_result = get_sso_manager().complete_saml_authentication(
         provider_name=provider_name,
         saml_response=saml_response,

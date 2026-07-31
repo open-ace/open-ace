@@ -25,6 +25,7 @@ from app.modules.governance.alert_notifier import (
     NotificationPreference,
     _redact_dingtalk_secret,
     get_alert_notifier,
+    normalize_alert_severity,
 )
 
 logger = logging.getLogger(__name__)
@@ -229,6 +230,12 @@ def update_preferences():
             notification_email=data.get("notification_email"),
             email_verified=data.get("email_verified", False),
         )
+        # Issue #1832 F2: reject an unknown min_severity threshold at write time
+        # so it can't silently default the filter to ``warning`` (rank 1) later.
+        try:
+            prefs.min_severity = normalize_alert_severity(prefs.min_severity)
+        except ValueError as e:
+            return jsonify({"success": False, "error": str(e)}), 400
 
         success = notifier.set_notification_preferences(prefs)
 
@@ -262,6 +269,9 @@ def create_test_alert():
         )
 
         return jsonify({"success": True, "data": alert.to_dict()})
+    except ValueError as e:
+        # Issue #1832 F2: invalid severity (or other bad input) → 400, not 500.
+        return jsonify({"success": False, "error": str(e)}), 400
     except Exception as e:
         logger.error(f"Error creating test alert: {e}")
         return jsonify({"success": False, "error": "Internal server error"}), 500

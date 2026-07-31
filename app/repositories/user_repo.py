@@ -105,6 +105,19 @@ class UserRepository:
         """
         Get user by ID.
 
+        Uses ``SELECT *`` so the returned dict carries every column. The auth
+        layer depends on specific fields being present even though they are not
+        named in the SELECT list — narrowing the column set would silently
+        break these callers (Issue #1832 F1 documents this contract and guards
+        it with a regression test):
+          - ``role`` — the WebUI-token admin gate (``admin_required`` path)
+          - ``must_change_password`` — ``enforce_password_change_requirement``
+            reads this; if the key is absent, ``.get`` returns falsy and the
+            forced password change is silently bypassed (a latent auth
+            weakening, NOT fixed by this finding — only made observable)
+          - ``tenant_id`` — assigned to ``g.tenant_id``
+          - ``is_active``
+
         Args:
             user_id: User ID.
 

@@ -56,6 +56,7 @@ vi.mock('./LocalDirectoryBrowser', () => ({
   ),
 }));
 
+import { fsApi } from '@/api/fs';
 import { PersonalFiles } from './PersonalFiles';
 
 describe('PersonalFiles', () => {
@@ -98,5 +99,25 @@ describe('PersonalFiles', () => {
     expect(target).toContain('/work?newTab=true');
     expect(target).toContain('workspaceType=local');
     expect(target).toContain('projectPath=%2Fhome%2Falice%2Fproject');
+  });
+
+  // Issue #1832 F3: cover the home-scoping binding's failure path. The success
+  // path above already asserts rootPath/lockToRoot are wired through; this test
+  // asserts that when the home directory lookup fails, the browser is NOT
+  // rendered unlocked (which would drop the path lock) and an error state shows.
+  it('shows an error state and keeps the browser unmounted when home lookup fails', async () => {
+    vi.mocked(fsApi.browseDirectory).mockRejectedValueOnce(new Error('boom'));
+
+    render(<PersonalFiles />);
+
+    // Error message renders (i18n mock returns the key verbatim)
+    await waitFor(() => {
+      expect(screen.getByText('homeDirectoryLoadError')).toBeInTheDocument();
+    });
+
+    // The locked browser must not render in the error state
+    expect(screen.queryByTestId('local-directory-browser')).not.toBeInTheDocument();
+    // A retry affordance is offered
+    expect(screen.getByText('retry')).toBeInTheDocument();
   });
 });
