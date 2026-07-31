@@ -14,10 +14,8 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 
-// Mock react-router-dom navigate
-const mockNavigate = vi.fn();
 vi.mock('react-router-dom', () => ({
-  useNavigate: () => mockNavigate,
+  useNavigate: () => vi.fn(),
 }));
 
 vi.mock('@/store', () => ({
