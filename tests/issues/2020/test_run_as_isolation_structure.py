@@ -54,6 +54,19 @@ def test_launcher_has_task_scoped_kill():
     assert "setsid" not in src
 
 
+def test_launcher_no_writable_check_on_cgroup_files():
+    """cgroup2 virtual files do not honour access(2) write checks.
+
+    ``test -w`` returns false even for root on cgroup2 files like
+    cgroup.kill and cgroup.procs. The launcher must use ``-f`` (file exists)
+    instead, otherwise cgroup kill and resource enforcement silently
+    never fire.
+    """
+    src = _src()
+    assert '[ -w "$task_cgroup/cgroup.kill" ]' not in src
+    assert "[ -w /sys/fs/cgroup/cgroup.kill ]" not in src
+
+
 def test_launcher_sets_per_task_home_tmp_xdg():
     src = _src()
     assert "task_home" in src and "task_tmp" in src
