@@ -73,9 +73,7 @@ describe('LocalDirectoryBrowser Integration - Issue #1832 F3', () => {
     it('renders with lockToRoot=true and hides up navigation button', async () => {
       vi.mocked(fsApi.browseDirectory).mockResolvedValue({
         path: '/home/alice',
-        directories: [
-          { name: 'project', path: '/home/alice/project', is_writable: true },
-        ],
+        directories: [{ name: 'project', path: '/home/alice/project', is_writable: true }],
         parent: '/home',
         is_writable: true,
       });
@@ -96,9 +94,9 @@ describe('LocalDirectoryBrowser Integration - Issue #1832 F3', () => {
 
       // Issue #1832 F3: Up button should NOT be rendered when locked
       // The component sets lockToRoot=true which disables up navigation
-      const upButtons = screen.queryAllByRole('button').filter(
-        btn => btn.textContent?.toLowerCase().includes('up')
-      );
+      const upButtons = screen
+        .queryAllByRole('button')
+        .filter((btn) => btn.textContent?.toLowerCase().includes('up'));
       expect(upButtons.length).toBe(0);
     });
 
@@ -125,7 +123,7 @@ describe('LocalDirectoryBrowser Integration - Issue #1832 F3', () => {
 
       // Issue #1832 F3: Root "/" button should NOT be rendered when locked
       const buttons = screen.queryAllByRole('button');
-      const rootButton = buttons.find(btn => btn.textContent === '/');
+      const rootButton = buttons.find((btn) => btn.textContent === '/');
       expect(rootButton).toBeUndefined();
     });
 
@@ -133,9 +131,7 @@ describe('LocalDirectoryBrowser Integration - Issue #1832 F3', () => {
       // First call: initial path
       vi.mocked(fsApi.browseDirectory).mockResolvedValueOnce({
         path: '/home/alice',
-        directories: [
-          { name: 'project', path: '/home/alice/project', is_writable: true },
-        ],
+        directories: [{ name: 'project', path: '/home/alice/project', is_writable: true }],
         parent: '/home',
         is_writable: true,
       });
@@ -143,9 +139,7 @@ describe('LocalDirectoryBrowser Integration - Issue #1832 F3', () => {
       // Second call: navigate to project
       vi.mocked(fsApi.browseDirectory).mockResolvedValueOnce({
         path: '/home/alice/project',
-        directories: [
-          { name: 'src', path: '/home/alice/project/src', is_writable: true },
-        ],
+        directories: [{ name: 'src', path: '/home/alice/project/src', is_writable: true }],
         parent: '/home/alice',
         is_writable: true,
       });
@@ -224,9 +218,7 @@ describe('LocalDirectoryBrowser Integration - Issue #1832 F3', () => {
 
       vi.mocked(fsApi.browseDirectory).mockResolvedValue({
         path: '/home/alice',
-        directories: [
-          { name: 'project', path: '/home/alice/project', is_writable: true },
-        ],
+        directories: [{ name: 'project', path: '/home/alice/project', is_writable: true }],
         parent: '/home',
         is_writable: true,
       });
