@@ -46,3 +46,12 @@ def test_launcher_fail_closed_when_cgroup_forced_but_unavailable():
     assert "agent_task_cgroup_enabled" in src
     # a fail-closed exit exists in the cgroup-unavailable branch when forced on
     assert "OPENACE_CGROUP_REQUIRED" in src or 'cgroup_enabled" = "on"' in src
+
+
+def test_launcher_delegates_cgroup_controllers():
+    # cgroup v2 requires the parent to delegate controllers to children via
+    # cgroup.subtree_control. Without this, task subgroups have no memory.max,
+    # pids.max, or cpu.max files and all resource writes silently fail.
+    src = _src()
+    assert "cgroup.subtree_control" in src
+    assert "+memory +pids +cpu" in src

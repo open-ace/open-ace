@@ -196,6 +196,19 @@ else
     log "  $CGROUP_ROOT already exists"
 fi
 
+# ── step 2.5: delegate controllers to child cgroups ─────────────────────────
+
+log "step 2.5: delegating controllers to child cgroups ($CGROUP_ROOT)"
+
+# The parent cgroup's cgroup.subtree_control must list the controllers so
+# task subgroups created by openace-run-as.sh get memory.max, pids.max, and
+# cpu.max files. Without this the subgroups exist but have no resource limit
+# files, and all resource writes silently fail. openace-run-as.sh also does
+# this idempotently at runtime, but setting it here ensures correctness even
+# before the first task launches.
+write_file "$CGROUP_ROOT/cgroup.subtree_control" "+memory +pids +cpu" \
+    || { err "failed to delegate controllers to $CGROUP_ROOT (is it a valid cgroup v2 dir?)"; exit 3; }
+
 # ── step 3: apply resource limits ───────────────────────────────────────────
 
 log "step 3: applying resource limits"
@@ -302,7 +315,7 @@ Type=oneshot
 RemainAfterExit=yes
 # Read resource values from the conf so a re-run of setup-cgroup-v2.sh with
 # different values is picked up on next boot without editing this unit.
-ExecStart=/bin/bash -c 'set -eu; test -f ${CONF_PATH} || exit 0; source ${CONF_PATH}; test -n "\${agent_task_memory_max_bytes:-}" -a "\${agent_task_memory_max_bytes:-}" != "0" || exit 0; echo "+memory +pids +cpu" > /sys/fs/cgroup/cgroup.subtree_control; mkdir -p \${agent_task_cgroup_root}; echo "\${agent_task_memory_max_bytes}" > \${agent_task_cgroup_root}/memory.max; echo "\${agent_task_pids_max}" > \${agent_task_cgroup_root}/pids.max; echo "\${agent_task_cpu_max}" > \${agent_task_cgroup_root}/cpu.max'
+ExecStart=/bin/bash -c 'set -eu; test -f ${CONF_PATH} || exit 0; source ${CONF_PATH}; test -n "\${agent_task_memory_max_bytes:-}" -a "\${agent_task_memory_max_bytes:-}" != "0" || exit 0; echo "+memory +pids +cpu" > /sys/fs/cgroup/cgroup.subtree_control; mkdir -p \${agent_task_cgroup_root}; echo "+memory +pids +cpu" > \${agent_task_cgroup_root}/cgroup.subtree_control; echo "\${agent_task_memory_max_bytes}" > \${agent_task_cgroup_root}/memory.max; echo "\${agent_task_pids_max}" > \${agent_task_cgroup_root}/pids.max; echo "\${agent_task_cpu_max}" > \${agent_task_cgroup_root}/cpu.max'
 
 [Install]
 WantedBy=sysinit.target
