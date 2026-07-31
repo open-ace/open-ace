@@ -1,8 +1,8 @@
 """Middleware module for Open ACE."""
 
 from app.middleware.tenant_check import (
-    TenantMigratedError,
     SessionExpiredError,
+    TenantMigratedError,
     check_tenant_version,
     init_tenant_check_middleware,
 )

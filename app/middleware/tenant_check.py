@@ -62,14 +62,13 @@ def check_tenant_version():
 
         # Raise tenant migrated error with custom response
         raise TenantMigratedError(
-            old_tenant_id=session.get("tenant_id"),
-            new_tenant_id=user.get("tenant_id")
+            old_tenant_id=session.get("tenant_id"), new_tenant_id=user.get("tenant_id")
         )
 
 
 def handle_tenant_migrated_error(error: TenantMigratedError):
     """Handle TenantMigratedError with custom JSON response."""
-    response_data = {
+    response_data: dict[str, int | str] = {
         "error": "TENANT_MIGRATED",
         "code": "AUTH_002",
         "message": "Your account has been migrated to a new tenant. Please re-login.",

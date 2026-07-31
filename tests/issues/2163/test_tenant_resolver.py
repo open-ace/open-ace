@@ -2,13 +2,11 @@
 Unit tests for TenantResolver (Issue #2163).
 """
 
-import pytest
 from unittest.mock import Mock
 
-from app.utils.tenant_resolver import (
-    TenantResolver,
-    TenantResolutionError,
-)
+import pytest
+
+from app.utils.tenant_resolver import TenantResolutionError, TenantResolver
 
 
 class TestTenantResolver:
@@ -64,12 +62,7 @@ class TestTenantResolver:
         mock_db.fetch_one.return_value = None
 
         # With default, should return default
-        result = TenantResolver.resolve(
-            user_id=999,
-            db=mock_db,
-            default=1,
-            fail_closed=False
-        )
+        result = TenantResolver.resolve(user_id=999, db=mock_db, default=1, fail_closed=False)
         assert result == 1
 
     def test_resolve_fail_closed_no_default(self):
@@ -78,21 +71,12 @@ class TestTenantResolver:
         mock_db.fetch_one.return_value = None
 
         with pytest.raises(TenantResolutionError):
-            TenantResolver.resolve(
-                tenant_id=None,
-                user_id=999,
-                db=mock_db,
-                fail_closed=True
-            )
+            TenantResolver.resolve(tenant_id=None, user_id=999, db=mock_db, fail_closed=True)
 
     def test_resolve_fail_open_with_default(self):
         """Test fail-open mode with default."""
         result = TenantResolver.resolve(
-            tenant_id=None,
-            user_id=None,
-            db=None,
-            default=42,
-            fail_closed=False
+            tenant_id=None, user_id=None, db=None, default=42, fail_closed=False
         )
         assert result == 42
 
@@ -100,11 +84,7 @@ class TestTenantResolver:
         """Test that explicit tenant_id takes priority over user lookup."""
         mock_db = Mock()
 
-        result = TenantResolver.resolve(
-            tenant_id=10,
-            user_id=1,
-            db=mock_db
-        )
+        result = TenantResolver.resolve(tenant_id=10, user_id=1, db=mock_db)
 
         assert result == 10
         # Should not query database
@@ -141,11 +121,7 @@ class TestTenantResolver:
         mock_db = Mock()
         mock_db.fetch_one.return_value = None
 
-        result = TenantResolver.resolve_for_read(
-            user_id=999,
-            db=mock_db,
-            default=10
-        )
+        result = TenantResolver.resolve_for_read(user_id=999, db=mock_db, default=10)
 
         assert result == 10
 

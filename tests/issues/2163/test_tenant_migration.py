@@ -2,14 +2,12 @@
 Unit tests for tenant migration service (Issue #2163).
 """
 
-import pytest
 from datetime import datetime, timezone
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import MagicMock, Mock, patch
 
-from app.services.tenant_migration import (
-    TenantMigrationService,
-    MigrationResult,
-)
+import pytest
+
+from app.services.tenant_migration import MigrationResult, TenantMigrationService
 
 
 class TestTenantMigrationService:
@@ -33,11 +31,7 @@ class TestTenantMigrationService:
         """Test migration when user is not found."""
         mock_db.fetch_one.return_value = None
 
-        result = service.migrate_user_tenant(
-            user_id=999,
-            new_tenant_id=2,
-            migrated_by=1
-        )
+        result = service.migrate_user_tenant(user_id=999, new_tenant_id=2, migrated_by=1)
 
         assert not result.success
         assert result.error == "User not found"
@@ -45,16 +39,9 @@ class TestTenantMigrationService:
 
     def test_migrate_user_tenant_same_tenant(self, service, mock_db):
         """Test migration to same tenant (no-op)."""
-        mock_db.fetch_one.return_value = {
-            "tenant_id": 1,
-            "tenant_version": 1
-        }
+        mock_db.fetch_one.return_value = {"tenant_id": 1, "tenant_version": 1}
 
-        result = service.migrate_user_tenant(
-            user_id=1,
-            new_tenant_id=1,
-            migrated_by=2
-        )
+        result = service.migrate_user_tenant(user_id=1, new_tenant_id=1, migrated_by=2)
 
         assert result.success
         assert result.old_tenant_id == 1
@@ -71,10 +58,7 @@ class TestTenantMigrationService:
         ]
 
         result = service.migrate_user_tenant(
-            user_id=1,
-            new_tenant_id=2,
-            migrated_by=2,
-            dry_run=True
+            user_id=1, new_tenant_id=2, migrated_by=2, dry_run=True
         )
 
         assert result.success
@@ -86,13 +70,10 @@ class TestTenantMigrationService:
     def test_migrate_user_tenant_success(self, service, mock_db):
         """Test successful user migration."""
         # Mock user query
-        mock_db.fetch_one.return_value = {
-            "tenant_id": 1,
-            "tenant_version": 1
-        }
+        mock_db.fetch_one.return_value = {"tenant_id": 1, "tenant_version": 1}
 
         # Mock database type detection
-        service._get_database_type = Mock(return_value='sqlite')
+        service._get_database_type = Mock(return_value="sqlite")
 
         # Mock transaction context
         mock_transaction = MagicMock()
@@ -103,11 +84,7 @@ class TestTenantMigrationService:
         # Mock execute
         mock_db.execute.return_value = None
 
-        result = service.migrate_user_tenant(
-            user_id=1,
-            new_tenant_id=2,
-            migrated_by=2
-        )
+        result = service.migrate_user_tenant(user_id=1, new_tenant_id=2, migrated_by=2)
 
         assert result.success
         assert result.old_tenant_id == 1
@@ -118,13 +95,10 @@ class TestTenantMigrationService:
     def test_migrate_users_batch_success(self, service, mock_db):
         """Test batch migration."""
         # Mock user queries
-        mock_db.fetch_one.return_value = {
-            "tenant_id": 1,
-            "tenant_version": 1
-        }
+        mock_db.fetch_one.return_value = {"tenant_id": 1, "tenant_version": 1}
 
         # Mock database type detection
-        service._get_database_type = Mock(return_value='sqlite')
+        service._get_database_type = Mock(return_value="sqlite")
 
         # Mock transaction
         mock_transaction = MagicMock()
@@ -136,10 +110,7 @@ class TestTenantMigrationService:
 
         user_ids = [1, 2, 3]
         results = service.migrate_users_batch(
-            user_ids=user_ids,
-            new_tenant_id=2,
-            migrated_by=10,
-            batch_size=2
+            user_ids=user_ids, new_tenant_id=2, migrated_by=10, batch_size=2
         )
 
         assert len(results) == 3
@@ -148,7 +119,7 @@ class TestTenantMigrationService:
     def test_migrate_users_batch_stops_on_failure(self, service, mock_db):
         """Test batch migration stops on first failure."""
         # Mock database type detection
-        service._get_database_type = Mock(return_value='sqlite')
+        service._get_database_type = Mock(return_value="sqlite")
 
         mock_db.fetch_one.side_effect = [
             {"tenant_id": 1, "tenant_version": 1},  # success
@@ -165,10 +136,7 @@ class TestTenantMigrationService:
 
         user_ids = [1, 2, 3]
         results = service.migrate_users_batch(
-            user_ids=user_ids,
-            new_tenant_id=2,
-            migrated_by=10,
-            batch_size=10
+            user_ids=user_ids, new_tenant_id=2, migrated_by=10, batch_size=10
         )
 
         assert len(results) == 3
@@ -192,7 +160,7 @@ class TestTenantMigrationService:
             "user_id": 123,
             "old_tenant_id": 1,
             "new_tenant_id": 2,
-            "status": "completed"
+            "status": "completed",
         }
 
         result = service.get_migration_progress(1)
@@ -205,10 +173,7 @@ class TestTenantMigrationService:
         """Test validation when user not found."""
         mock_db.fetch_one.return_value = None
 
-        is_possible, error = service.validate_migration_possible(
-            user_id=999,
-            new_tenant_id=2
-        )
+        is_possible, error = service.validate_migration_possible(user_id=999, new_tenant_id=2)
 
         assert not is_possible
         assert "User not found" in error
@@ -220,10 +185,7 @@ class TestTenantMigrationService:
             None,  # tenant not found
         ]
 
-        is_possible, error = service.validate_migration_possible(
-            user_id=1,
-            new_tenant_id=999
-        )
+        is_possible, error = service.validate_migration_possible(user_id=1, new_tenant_id=999)
 
         assert not is_possible
         assert "Target tenant not found" in error
@@ -235,10 +197,7 @@ class TestTenantMigrationService:
             {"id": 2},  # tenant exists
         ]
 
-        is_possible, error = service.validate_migration_possible(
-            user_id=1,
-            new_tenant_id=2
-        )
+        is_possible, error = service.validate_migration_possible(user_id=1, new_tenant_id=2)
 
         assert is_possible
         assert error == ""
@@ -259,7 +218,7 @@ class TestTenantMigrationService:
             "old_tenant_id": 1,
             "new_tenant_id": 2,
             "status": "pending",
-            "migrated_by": 2
+            "migrated_by": 2,
         }
 
         result = service.rollback_migration(1)
@@ -276,14 +235,14 @@ class TestTenantMigrationService:
                 "old_tenant_id": 1,
                 "new_tenant_id": 2,
                 "status": "completed",
-                "migrated_by": 2
+                "migrated_by": 2,
             },
             {"tenant_id": 2, "tenant_version": 2},  # user query for reverse migration
             {"tenant_id": 2, "tenant_version": 2},  # user query in migrate_user_tenant
         ]
 
         # Mock database type detection
-        service._get_database_type = Mock(return_value='sqlite')
+        service._get_database_type = Mock(return_value="sqlite")
 
         # Mock transaction
         mock_transaction = MagicMock()
@@ -295,8 +254,9 @@ class TestTenantMigrationService:
 
         result = service.rollback_migration(1)
 
-        # Should execute rollback
+        # Should execute rollback and return success
         assert mock_db.execute.called
+        assert result is True
 
 
 class TestMigrationResult:
@@ -310,7 +270,7 @@ class TestMigrationResult:
             old_tenant_id=1,
             new_tenant_id=2,
             affected_sessions=5,
-            affected_projects=3
+            affected_projects=3,
         )
 
         assert result.success
@@ -321,11 +281,7 @@ class TestMigrationResult:
     def test_migration_result_with_error(self):
         """Test MigrationResult with error."""
         result = MigrationResult(
-            success=False,
-            user_id=1,
-            old_tenant_id=1,
-            new_tenant_id=2,
-            error="Test error"
+            success=False, user_id=1, old_tenant_id=1, new_tenant_id=2, error="Test error"
         )
 
         assert not result.success

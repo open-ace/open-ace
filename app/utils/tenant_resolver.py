@@ -70,10 +70,7 @@ class TenantResolver:
         # 2. Try user lookup if user_id and db provided
         if user_id is not None and db is not None:
             try:
-                row = db.fetch_one(
-                    "SELECT tenant_id FROM users WHERE id = ?",
-                    (user_id,)
-                )
+                row = db.fetch_one("SELECT tenant_id FROM users WHERE id = ?", (user_id,))
                 if row:
                     return TenantResolver.normalize(row.get("tenant_id"))
             except Exception:
@@ -82,9 +79,7 @@ class TenantResolver:
 
         # 3. Return default or fail closed
         if fail_closed and default is None:
-            raise TenantResolutionError(
-                "Cannot resolve tenant_id and fail_closed=True"
-            )
+            raise TenantResolutionError("Cannot resolve tenant_id and fail_closed=True")
 
         return default
 
@@ -111,10 +106,7 @@ class TenantResolver:
             TenantResolutionError: If cannot resolve
         """
         result = TenantResolver.resolve(
-            tenant_id=tenant_id,
-            user_id=user_id,
-            db=db,
-            fail_closed=True
+            tenant_id=tenant_id, user_id=user_id, db=db, fail_closed=True
         )
         # This should never be None because fail_closed=True
         return result if result is not None else 1
@@ -141,10 +133,6 @@ class TenantResolver:
             Resolved tenant ID or default
         """
         result = TenantResolver.resolve(
-            tenant_id=tenant_id,
-            user_id=user_id,
-            default=default,
-            db=db,
-            fail_closed=False
+            tenant_id=tenant_id, user_id=user_id, default=default, db=db, fail_closed=False
         )
         return result if result is not None else default

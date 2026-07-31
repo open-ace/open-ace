@@ -7,11 +7,11 @@ from flask import Flask, g
 from werkzeug.exceptions import BadRequest
 
 from app.utils.request_context import (
-    get_current_user,
     get_current_tenant_id,
-    require_tenant_id,
     get_current_tenant_version,
+    get_current_user,
     get_current_user_id,
+    require_tenant_id,
 )
 
 

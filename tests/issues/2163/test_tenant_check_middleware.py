@@ -7,11 +7,11 @@ from flask import Flask, g, jsonify
 from werkzeug.test import Client
 
 from app.middleware.tenant_check import (
-    TenantMigratedError,
     SessionExpiredError,
+    TenantMigratedError,
     check_tenant_version,
-    handle_tenant_migrated_error,
     handle_session_expired_error,
+    handle_tenant_migrated_error,
     init_tenant_check_middleware,
 )
 

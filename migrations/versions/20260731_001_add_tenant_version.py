@@ -55,9 +55,7 @@ def upgrade() -> None:
             sa.Column("user_id", sa.Integer, sa.ForeignKey("users.id"), nullable=False),
             sa.Column("old_tenant_id", sa.Integer, nullable=False),
             sa.Column("new_tenant_id", sa.Integer, nullable=False),
-            sa.Column(
-                "migrated_by", sa.Integer, sa.ForeignKey("users.id"), nullable=False
-            ),
+            sa.Column("migrated_by", sa.Integer, sa.ForeignKey("users.id"), nullable=False),
             sa.Column(
                 "migrated_at",
                 sa.DateTime(timezone=True),
@@ -77,12 +75,8 @@ def upgrade() -> None:
         )
 
         # Create indexes
-        op.create_index(
-            "idx_tenant_migrations_user", "tenant_migrations", ["user_id"]
-        )
-        op.create_index(
-            "idx_tenant_migrations_status", "tenant_migrations", ["status"]
-        )
+        op.create_index("idx_tenant_migrations_user", "tenant_migrations", ["user_id"])
+        op.create_index("idx_tenant_migrations_status", "tenant_migrations", ["status"])
 
 
 def downgrade() -> None:

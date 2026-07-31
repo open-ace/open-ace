@@ -9,6 +9,7 @@ import pytest
 def mock_db():
     """Mock database fixture."""
     from unittest.mock import Mock
+
     return Mock()
 
 
@@ -16,6 +17,7 @@ def mock_db():
 def mock_app():
     """Mock Flask app fixture."""
     from flask import Flask
+
     app = Flask(__name__)
     app.config["TESTING"] = True
     return app

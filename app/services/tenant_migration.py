@@ -47,35 +47,35 @@ class TenantMigrationService:
         """
         try:
             # Try to detect database type from connection
-            if hasattr(self.db, '_connection'):
+            if hasattr(self.db, "_connection"):
                 conn = self.db._connection
-                if hasattr(conn, 'dialect'):
+                if hasattr(conn, "dialect"):
                     return str(conn.dialect.name)
                 # Try detecting from connection string
-                if hasattr(conn, 'url'):
+                if hasattr(conn, "url"):
                     url = str(conn.url)
-                    if 'postgresql' in url:
-                        return 'postgresql'
-                    elif 'sqlite' in url:
-                        return 'sqlite'
+                    if "postgresql" in url:
+                        return "postgresql"
+                    elif "sqlite" in url:
+                        return "sqlite"
 
             # Try executing PostgreSQL-specific query
             try:
                 self.db.fetch_one("SELECT version()")
-                return 'postgresql'
+                return "postgresql"
             except Exception:
                 pass
 
             # Try SQLite-specific query
             try:
                 self.db.fetch_one("SELECT sqlite_version()")
-                return 'sqlite'
+                return "sqlite"
             except Exception:
                 pass
 
-            return 'unknown'
+            return "unknown"
         except Exception:
-            return 'unknown'
+            return "unknown"
 
     def migrate_user_tenant(
         self,
@@ -99,8 +99,7 @@ class TenantMigrationService:
         try:
             # Get current user info
             user_row = self.db.fetch_one(
-                "SELECT tenant_id, tenant_version FROM users WHERE id = ?",
-                (user_id,)
+                "SELECT tenant_id, tenant_version FROM users WHERE id = ?", (user_id,)
             )
             if not user_row:
                 return MigrationResult(
@@ -108,7 +107,7 @@ class TenantMigrationService:
                     user_id=user_id,
                     old_tenant_id=0,
                     new_tenant_id=new_tenant_id,
-                    error="User not found"
+                    error="User not found",
                 )
 
             old_tenant_id = user_row.get("tenant_id", 1)
@@ -120,18 +119,16 @@ class TenantMigrationService:
                     old_tenant_id=old_tenant_id,
                     new_tenant_id=new_tenant_id,
                     affected_sessions=0,
-                    affected_projects=0
+                    affected_projects=0,
                 )
 
             if dry_run:
                 # Count affected records
                 sessions_count = self.db.fetch_one(
-                    "SELECT COUNT(*) as count FROM agent_sessions WHERE user_id = ?",
-                    (user_id,)
+                    "SELECT COUNT(*) as count FROM agent_sessions WHERE user_id = ?", (user_id,)
                 )
                 projects_count = self.db.fetch_one(
-                    "SELECT COUNT(*) as count FROM projects WHERE created_by = ?",
-                    (user_id,)
+                    "SELECT COUNT(*) as count FROM projects WHERE created_by = ?", (user_id,)
                 )
                 return MigrationResult(
                     success=True,
@@ -139,7 +136,7 @@ class TenantMigrationService:
                     old_tenant_id=old_tenant_id,
                     new_tenant_id=new_tenant_id,
                     affected_sessions=sessions_count.get("count", 0) if sessions_count else 0,
-                    affected_projects=projects_count.get("count", 0) if projects_count else 0
+                    affected_projects=projects_count.get("count", 0) if projects_count else 0,
                 )
 
             # Execute migration in transaction
@@ -152,10 +149,7 @@ class TenantMigrationService:
                 db_type = self._get_database_type()
                 if db_type == "postgresql":
                     try:
-                        self.db.execute(
-                            "SELECT pg_advisory_xact_lock(1000000 + ?)",
-                            (user_id,)
-                        )
+                        self.db.execute("SELECT pg_advisory_xact_lock(1000000 + ?)", (user_id,))
                     except Exception as e:
                         # Advisory lock not available, continue with transaction isolation
                         logger.warning(f"Advisory lock not available: {e}")
@@ -165,13 +159,13 @@ class TenantMigrationService:
                     """UPDATE agent_sessions
                        SET tenant_id = ?, tenant_version = tenant_version + 1
                        WHERE user_id = ?""",
-                    (new_tenant_id, user_id)
+                    (new_tenant_id, user_id),
                 )
 
                 # Query affected sessions count (more reliable than rowcount)
                 sessions_result = self.db.fetch_one(
                     "SELECT COUNT(*) as count FROM agent_sessions WHERE user_id = ? AND tenant_id = ?",
-                    (user_id, new_tenant_id)
+                    (user_id, new_tenant_id),
                 )
                 affected_sessions = sessions_result.get("count", 0) if sessions_result else 0
 
@@ -180,13 +174,13 @@ class TenantMigrationService:
                     """UPDATE projects
                        SET tenant_id = ?
                        WHERE created_by = ? AND tenant_id = ?""",
-                    (new_tenant_id, user_id, old_tenant_id)
+                    (new_tenant_id, user_id, old_tenant_id),
                 )
 
                 # Query affected projects count
                 projects_result = self.db.fetch_one(
                     "SELECT COUNT(*) as count FROM projects WHERE created_by = ? AND tenant_id = ?",
-                    (user_id, new_tenant_id)
+                    (user_id, new_tenant_id),
                 )
                 affected_projects = projects_result.get("count", 0) if projects_result else 0
 
@@ -195,7 +189,7 @@ class TenantMigrationService:
                     """UPDATE users
                        SET tenant_id = ?, tenant_version = tenant_version + 1
                        WHERE id = ?""",
-                    (new_tenant_id, user_id)
+                    (new_tenant_id, user_id),
                 )
 
                 # Log migration
@@ -204,8 +198,15 @@ class TenantMigrationService:
                        (user_id, old_tenant_id, new_tenant_id, migrated_by, migrated_at,
                         affected_sessions, affected_projects, status)
                        VALUES (?, ?, ?, ?, ?, ?, ?, 'completed')""",
-                    (user_id, old_tenant_id, new_tenant_id, migrated_by,
-                     datetime.now(timezone.utc), affected_sessions, affected_projects)
+                    (
+                        user_id,
+                        old_tenant_id,
+                        new_tenant_id,
+                        migrated_by,
+                        datetime.now(timezone.utc),
+                        affected_sessions,
+                        affected_projects,
+                    ),
                 )
 
             logger.info(
@@ -220,7 +221,7 @@ class TenantMigrationService:
                 old_tenant_id=old_tenant_id,
                 new_tenant_id=new_tenant_id,
                 affected_sessions=affected_sessions,
-                affected_projects=affected_projects
+                affected_projects=affected_projects,
             )
 
         except Exception as e:
@@ -230,7 +231,7 @@ class TenantMigrationService:
                 user_id=user_id,
                 old_tenant_id=0,
                 new_tenant_id=new_tenant_id,
-                error=str(e)
+                error=str(e),
             )
 
     def migrate_users_batch(
@@ -261,9 +262,7 @@ class TenantMigrationService:
             batch_users = user_ids[start_idx:end_idx]
 
             for user_id in batch_users:
-                result = self.migrate_user_tenant(
-                    user_id, new_tenant_id, migrated_by
-                )
+                result = self.migrate_user_tenant(user_id, new_tenant_id, migrated_by)
                 result.batch_number = batch_num + 1
                 results.append(result)
 
@@ -276,13 +275,15 @@ class TenantMigrationService:
                     remaining_start_idx = start_idx + batch_users.index(user_id) + 1
                     remaining_users = user_ids[remaining_start_idx:]
                     for remaining_id in remaining_users:
-                        results.append(MigrationResult(
-                            success=False,
-                            user_id=remaining_id,
-                            old_tenant_id=0,
-                            new_tenant_id=new_tenant_id,
-                            error="Batch migration stopped due to previous failure"
-                        ))
+                        results.append(
+                            MigrationResult(
+                                success=False,
+                                user_id=remaining_id,
+                                old_tenant_id=0,
+                                new_tenant_id=new_tenant_id,
+                                error="Batch migration stopped due to previous failure",
+                            )
+                        )
                     return results
 
         return results
@@ -302,18 +303,14 @@ class TenantMigrationService:
                       migrated_by, migrated_at, affected_sessions, affected_projects,
                       batch_number, total_batches, status
                FROM tenant_migrations WHERE id = ?""",
-            (migration_id,)
+            (migration_id,),
         )
         if not row:
             return None
 
         return dict(row)
 
-    def validate_migration_possible(
-        self,
-        user_id: int,
-        new_tenant_id: int
-    ) -> tuple[bool, str]:
+    def validate_migration_possible(self, user_id: int, new_tenant_id: int) -> tuple[bool, str]:
         """
         Validate if migration is possible.
 
@@ -325,18 +322,12 @@ class TenantMigrationService:
             Tuple of (is_possible, error_message)
         """
         # Check user exists
-        user_row = self.db.fetch_one(
-            "SELECT id, tenant_id FROM users WHERE id = ?",
-            (user_id,)
-        )
+        user_row = self.db.fetch_one("SELECT id, tenant_id FROM users WHERE id = ?", (user_id,))
         if not user_row:
             return False, "User not found"
 
         # Check tenant exists
-        tenant_row = self.db.fetch_one(
-            "SELECT id FROM tenants WHERE id = ?",
-            (new_tenant_id,)
-        )
+        tenant_row = self.db.fetch_one("SELECT id FROM tenants WHERE id = ?", (new_tenant_id,))
         if not tenant_row:
             return False, "Target tenant not found"
 
@@ -369,14 +360,14 @@ class TenantMigrationService:
             result = self.migrate_user_tenant(
                 user_id=user_id,
                 new_tenant_id=old_tenant_id,
-                migrated_by=migration.get("migrated_by")
+                migrated_by=migration.get("migrated_by"),
             )
 
             if result.success:
                 # Mark original migration as rolled back
                 self.db.execute(
                     "UPDATE tenant_migrations SET status = 'rolled_back' WHERE id = ?",
-                    (migration_id,)
+                    (migration_id,),
                 )
                 logger.info(f"Migration {migration_id} rolled back successfully")
                 return True
