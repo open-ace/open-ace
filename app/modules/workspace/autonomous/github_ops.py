@@ -926,9 +926,10 @@ class GitHubOps:
         """List all worktrees.
 
         Returns entries as ``{"path": …, "branch": "refs/heads/<name>"}`` (no
-        ``branch`` key when detached). The ``refs/heads/`` branch format is a
-        contract: ``AutonomousOrchestrator._verify_worktree_restored`` matches
-        against both ``<name>`` and ``refs/heads/<name>``. Parsing is locked by
+        ``branch`` key when detached, but ``detached=True`` is set instead). The
+        ``refs/heads/`` branch format is a contract:
+        ``AutonomousOrchestrator._verify_worktree_restored`` matches against
+        both ``<name>`` and ``refs/heads/<name>``. Parsing is locked by
         ``tests/issues/716/test_github_ops.py::test_list_worktrees``.
 
         Uses ``--porcelain -z`` so paths containing spaces or newlines are
@@ -953,10 +954,43 @@ class GitHubOps:
                     current["branch"] = line[len("branch ") :]
                 elif line == "bare":
                     current["bare"] = True
+                elif line == "detached":
+                    # Record detached HEAD explicitly so callers can distinguish
+                    # "detached" from "branch field transiently missing after a
+                    # fresh `git worktree add` on APFS" (the latter has neither
+                    # ``branch`` nor ``detached`` in the porcelain output).
+                    current["detached"] = True
             if current:
                 worktrees.append(current)
                 current = {}
         return worktrees
+
+    def resolve_worktree_branch(self, path: str) -> str | None:
+        """Return the branch checked out in the worktree at ``path``.
+
+        Reads the worktree's own HEAD via a fresh GitHubOps instance for
+        ``path`` (the worktree's ``.git`` file redirects to the main repo's
+        worktree metadata, so git resolves HEAD from the worktree's private
+        gitdir, not the main repo's). This is the authoritative source,
+        unaffected by the APFS registry-cache lag that can make
+        ``git worktree list --porcelain`` transiently omit the ``branch``
+        field right after ``git worktree add``.
+
+        Returns the short branch name (e.g. ``main``), or ``None`` when the
+        worktree is in detached HEAD state (``symbolic-ref`` exits non-zero)
+        or git itself fails. Callers must fail closed on ``None``.
+        """
+        self._assert_worktree_contained(path)
+        wt_gh = GitHubOps(path, system_account=self.system_account)
+        try:
+            result = wt_gh._run_git(["symbolic-ref", "--short", "HEAD"], check=False)
+        except GitHubOpsError:
+            # git binary not found / timeout — treat as "cannot resolve".
+            return None
+        if result.returncode != 0:
+            # Non-zero exit = detached HEAD (symbolic-ref refuses non-symref HEAD).
+            return None
+        return result.stdout.strip() or None
 
     # ── PR Operations ───────────────────────────────────────────────
 

@@ -72,10 +72,10 @@ def test_remote_with_no_caps_reports_nothing_enforced():
     assert snap["enforced"]["ephemeral_storage"] is False
 
 
-def test_none_policy_yields_safe_default_limits():
+def test_none_policy_marks_the_snapshot_unconfigured():
     snap = build_effective_policy("legacy_posix", _LEGACY_CAPS, None)
-    assert snap["limits"]["memory_max_bytes"] == 0
-    assert snap["limits"]["wall_clock_limit"] == 0
+    assert snap["policy_configured"] is False
+    assert snap["limits"] == {}
     assert snap["cgroup_enabled"] == ""
     # enforced is still derived from caps, independent of policy presence
     assert snap["enforced"]["memory"] is True

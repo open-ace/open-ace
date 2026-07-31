@@ -1,4 +1,6 @@
 .timeline-shell {
+  flex: 1 1 auto;
+  min-height: 0;
   background: var(--bg-primary);
   color: var(--text-primary);
   container-name: workflow-timeline;
@@ -208,15 +210,8 @@
   border-color: color-mix(in srgb, var(--color-danger) 24%, var(--border-color) 76%);
 }
 
-.timeline-status-pill__spinner {
-  display: inline-block;
-  width: 14px;
-  height: 14px;
-  border: 2px solid color-mix(in srgb, currentColor 24%, transparent 76%);
-  border-top-color: currentColor;
-  border-radius: 999px;
-  flex-shrink: 0;
-  animation: timeline-spin 0.9s linear infinite;
+.timeline-status-pill--live .timeline-status-pill__icon i {
+  animation: timeline-spin 2.8s linear infinite;
 }
 
 .timeline-inline-link {
@@ -243,7 +238,7 @@
 
 .timeline-header-meta-grid {
   display: grid;
-  grid-template-columns: minmax(170px, 1.45fr) repeat(3, minmax(108px, 1fr));
+  grid-template-columns: repeat(4, minmax(108px, 1fr));
   gap: 6px;
   min-width: 0;
 }
@@ -1288,7 +1283,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .timeline-status-pill__spinner,
   .timeline-progress-note__indicator {
     animation: none;
   }

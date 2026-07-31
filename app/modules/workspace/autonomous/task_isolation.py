@@ -14,6 +14,7 @@ intentionally untouched.
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,6 +22,8 @@ from pathlib import Path
 # Ephemeral, root-owned parent for every per-task runtime tree. Lives under
 # /run so it is wiped on reboot and never lands inside a user HOME.
 DEFAULT_TASK_ROOT = "/run/openace-agent-tasks"
+DEFAULT_AGENT_LAUNCHER_CONF = "/etc/openace/agent-launcher.conf"
+USER_AGENT_LAUNCHER_CONF = os.path.expanduser("~/.open-ace/agent-launcher.conf")
 
 # Filesystem-safe charset for a task_id used as a single path component.
 # session ids (uuids or CLI-derived) occasionally carry '/', ':', or spaces;
@@ -30,6 +33,33 @@ _SAFE_TASK_ID = re.compile(r"[A-Za-z0-9._-]")
 _MAX_TASK_ID_LEN = 128
 
 _RUNTIME_VARS = ("home", "tmp", "cache", "config", "data")
+
+
+def candidate_agent_task_policy_paths(explicit_path: str | None = None) -> tuple[str, ...]:
+    """Return launcher-conf candidates in precedence order.
+
+    Priority is:
+
+    1. ``OPENACE_LAUNCHER_CONF`` / explicit caller path
+    2. system config ``/etc/openace/agent-launcher.conf``
+    3. user fallback ``~/.open-ace/agent-launcher.conf``
+    """
+
+    candidates = [explicit_path, DEFAULT_AGENT_LAUNCHER_CONF, USER_AGENT_LAUNCHER_CONF]
+    ordered: list[str] = []
+    for candidate in candidates:
+        if candidate and candidate not in ordered:
+            ordered.append(candidate)
+    return tuple(ordered)
+
+
+def resolve_agent_task_policy_path(explicit_path: str | None = None) -> str | None:
+    """Return the first existing launcher-conf path, else ``None``."""
+
+    for candidate in candidate_agent_task_policy_paths(explicit_path):
+        if Path(candidate).is_file():
+            return candidate
+    return None
 
 
 def sanitize_task_id(task_id: str) -> str:

@@ -8748,6 +8748,10 @@ class AutonomousOrchestrator:
             temp_entry = next((w for w in entries if w.get("path") == temp_path), None)
             if temp_entry is not None:
                 actual_branch = temp_entry.get("branch")
+                # APFS transient lag: branch field may be missing right after
+                # add_worktree. Fall back to symbolic-ref before rejecting.
+                if actual_branch is None and not temp_entry.get("detached"):
+                    actual_branch = main_gh.resolve_worktree_branch(temp_path)
                 if actual_branch not in (branch_name, f"refs/heads/{branch_name}"):
                     # A temp registered on the wrong branch is not ours to remove.
                     raise _ReconcileFailed(
@@ -8767,6 +8771,9 @@ class AutonomousOrchestrator:
         original_entry = next((w for w in entries if w.get("path") == original_path), None)
         if original_entry is not None:
             actual_branch = original_entry.get("branch")
+            # APFS transient lag: same fallback as temp above.
+            if actual_branch is None and not original_entry.get("detached"):
+                actual_branch = main_gh.resolve_worktree_branch(original_path)
             if actual_branch not in (branch_name, f"refs/heads/{branch_name}"):
                 raise _ReconcileFailed(
                     f"original worktree {original_path!r} registered on unexpected "

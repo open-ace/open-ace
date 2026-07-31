@@ -143,7 +143,9 @@ class WorkspaceConfig:
     idle_timeout_minutes: int = 30
     cleanup_interval_minutes: int = 5
     token_secret: str = ""
-    webui_path: str = ""  # Path to qwen-code-webui project directory
+    webui_path: str = (
+        ""  # Path to qwen-code-webui executable or project directory (leave empty for auto-detect)
+    )
     # Optional explicit URL for the webui to reach the LLM proxy (e.g. behind an
     # HTTPS reverse proxy). When set, :web_port is NOT appended. See issue #1730.
     webui_callback_url: str = ""
@@ -1100,8 +1102,19 @@ class WebUIManager:
             and working_directory is the backend directory.
             If running global executable, working_directory is None.
         """
-        # Check webui_path from config (project directory mode)
+        # Check webui_path from config
         if self.config.webui_path:
+            # First, check if webui_path is an executable file (global install mode)
+            # This supports users who configured webui_path as the executable path
+            # (e.g., /usr/bin/qwen-code-webui) instead of project directory.
+            # See Issue #2151 for context.
+            if os.path.isfile(self.config.webui_path) and os.access(
+                self.config.webui_path, os.X_OK
+            ):
+                logger.info(f"Using webui executable from config: {self.config.webui_path}")
+                return self.config.webui_path, None
+
+            # Then, check if webui_path is a project directory (development mode)
             webui_backend = os.path.join(self.config.webui_path, "backend")
             node_entry = os.path.join(webui_backend, "dist", "cli", "node.js")
 

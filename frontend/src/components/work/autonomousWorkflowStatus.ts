@@ -58,7 +58,7 @@ export const AUTONOMOUS_WORKFLOW_STATUS_CONFIG: Record<string, AutonomousWorkflo
   },
   merging: {
     variant: 'info',
-    icon: 'bi-git-merge',
+    icon: 'bi-sign-merge-right',
     labelKey: 'autoStatusMerging',
     tone: 'info',
   },

@@ -3837,17 +3837,12 @@ do_fresh_install() {
             if [ "$EUID" -eq 0 ]; then
                 create_webui_symlinks
             fi
-            # Use /usr/bin/qwen-code-webui as preferred path (symlink created above)
-            # Fallback to find_webui_executable if symlink doesn't exist
-            local webui_path="/usr/bin/qwen-code-webui"
-            if [ ! -x "$webui_path" ]; then
-                if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
-                    webui_path=$(find_webui_executable)
-                else
-                    webui_path=$(find_webui_executable 2>/dev/null)
-                fi
-            fi
-            update_config_workspace "$config_dir/config.json" "$webui_path"
+            # Configure webui_path for config.json
+            # Issue #2151: Leave webui_path empty for auto-detection.
+            # The _find_webui_executable method in webui_manager.py will find
+            # the executable from common paths (/usr/bin/qwen-code-webui, etc.)
+            # sudoers configuration still uses the actual path for permission rules.
+            update_config_workspace "$config_dir/config.json" ""
 
             # Generate and set secret_key for Flask session and API key encryption
             local secret_key="${SECRET_KEY:-$(openssl rand -hex 32)}"
@@ -4320,17 +4315,11 @@ with open('$config_dir/config.json', 'w') as f:
         if [ "$EUID" -eq 0 ]; then
             create_webui_symlinks
         fi
-        # Use /usr/bin/qwen-code-webui as preferred path (symlink created above)
-        # Fallback to find_webui_executable if symlink doesn't exist
-        local webui_path="/usr/bin/qwen-code-webui"
-        if [ ! -x "$webui_path" ]; then
-            if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
-                webui_path=$(find_webui_executable)
-            else
-                webui_path=$(find_webui_executable 2>/dev/null)
-            fi
-        fi
-        update_config_workspace "$config_dir/config.json" "$webui_path"
+        # Configure webui_path for config.json
+        # Issue #2151: Leave webui_path empty for auto-detection.
+        # The _find_webui_executable method in webui_manager.py will find
+        # the executable from common paths (/usr/bin/qwen-code-webui, etc.)
+        update_config_workspace "$config_dir/config.json" ""
 
         # Check and set secret_key if missing (upgrade from older version)
         local current_secret=$(python3 -c "import json; c=json.load(open('$config_dir/config.json')); print(c.get('secret_key', ''))" 2>/dev/null)

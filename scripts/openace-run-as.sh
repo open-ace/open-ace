@@ -68,13 +68,30 @@ shift 2
 # `env_keep += OPENACE_*` drift or SETENV grant can redirect the gate or the
 # audit log. The OPENACE_* overrides are honored only for non-root test
 # invocation (`bash $WRAPPER`).
+_resolve_non_root_launcher_conf() {
+    local user_launcher_conf="$HOME/.open-ace/agent-launcher.conf"
+    if [ -n "${OPENACE_LAUNCHER_CONF:-}" ]; then
+        printf '%s\n' "$OPENACE_LAUNCHER_CONF"
+        return
+    fi
+    if [ -f "/etc/openace/agent-launcher.conf" ]; then
+        printf '%s\n' "/etc/openace/agent-launcher.conf"
+        return
+    fi
+    if [ -f "$user_launcher_conf" ]; then
+        printf '%s\n' "$user_launcher_conf"
+        return
+    fi
+    printf '%s\n' "/etc/openace/agent-launcher.conf"
+}
+
 if [ "$(id -u)" -eq 0 ]; then
     _OPENACE_VALIDATE_LAUNCH="/usr/local/libexec/openace-validate-launch"
     _OPENACE_LAUNCHER_CONF="/etc/openace/agent-launcher.conf"
     AUDIT_LOG="/var/log/openace/run-as-audit.log"
 else
     _OPENACE_VALIDATE_LAUNCH="${OPENACE_VALIDATE_LAUNCH:-/usr/local/libexec/openace-validate-launch}"
-    _OPENACE_LAUNCHER_CONF="${OPENACE_LAUNCHER_CONF:-/etc/openace/agent-launcher.conf}"
+    _OPENACE_LAUNCHER_CONF="$(_resolve_non_root_launcher_conf)"
     AUDIT_LOG="${OPENACE_AUDIT_LOG:-/var/log/openace/run-as-audit.log}"
 fi
 
