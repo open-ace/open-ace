@@ -1,23 +1,20 @@
-"""TDD red tests for the SSRF TOCTOU / DNS-rebinding group (PR #1778).
+"""Tests for the SSRF TOCTOU / DNS-rebinding protection (PR #1778).
 
-These tests prove the two High-severity findings on the outbound URL guard:
+These tests verify the outbound URL guard's defense-in-depth approach:
 
-1. TOCTOU / DNS-rebinding: ``validate_public_http_url`` resolves the hostname
-   once and checks the IPs, but callers then hand the *original* URL back to
-   ``requests``/``urllib3``, which performs its OWN independent
-   ``socket.getaddrinfo`` at connect time. Between the two resolutions an
-   attacker-controlled authoritative DNS server can flip the A record
-   (public -> loopback / metadata). The guard is advisory, not enforced.
+1. ``safe_request`` pre-resolves the hostname and verifies all IPs are public.
+   The request URL retains the original hostname so TLS SNI and certificate
+   verification work correctly (HTTPS certificates are issued to domain names,
+   not IP literals).
 
-2. ``_is_public_address`` predicate only checks ``address.is_global`` which
-   returns ``True`` for NAT64-encoded metadata
-   (``64:ff9b::169.254.169.254``), NAT64 of loopback (``64:ff9b::7f00:1``),
-   CGNAT outside Python's narrow private slice (``100.128.0.1``), and
-   multicast. A host resolving to any of these passes the guard outright,
-   even without rebinding.
+2. ``_PinnedIPAdapter`` re-validates at connect time by resolving the hostname
+   again and blocking any IP that is not public. This catches DNS rebinding
+   attacks where the authoritative DNS server flips the A record between the
+   pre-validation and the actual connection.
 
-Both assertions FAIL against current main and PASS after the IP-pinning +
-denylist fix.
+3. ``_is_public_address`` uses an explicit denylist (not just ``is_global``)
+   to reject NAT64-encoded metadata, CGNAT, multicast, and other non-public
+   ranges that ``is_global`` returns ``True`` for.
 """
 
 import ipaddress
@@ -26,46 +23,41 @@ import socket
 import pytest
 import requests
 
-from app.utils.outbound_url_guard import _is_public_address, safe_request, validate_public_http_url
+from app.utils.outbound_url_guard import (
+    OutboundUrlBlockedError,
+    _is_public_address,
+    _PinnedIPAdapter,
+    safe_request,
+    validate_public_http_url,
+)
 
 
 class _RebindingResolver:
-    """getaddrinfo that flips: first call(s) from the guard return a PUBLIC ip,
-    later call(s) from the HTTP client return ``169.254.169.254`` (metadata)."""
+    """getaddrinfo that flips: first call returns a PUBLIC ip,
+    later calls return ``169.254.169.254`` (metadata)."""
 
     def __init__(self) -> None:
         self.calls = 0
 
     def __call__(self, host, *args, **kwargs):
         self.calls += 1
-        # First resolution (the guard): public IP -> passes _is_public_address.
-        # Subsequent resolutions (the connect-time pin re-check): metadata.
         ip = "93.184.216.34" if self.calls == 1 else "169.254.169.254"
         return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, 443))]
 
 
-def test_safe_request_pins_verified_ip_and_never_rebinds(monkeypatch):
-    """``safe_request`` must pin the validated IP into the dial.
+# ── safe_request: URL retains hostname for TLS SNI ──────────────────────
 
-    Before the fix: the guard passed (public) but ``requests`` was given the
-    raw hostname and re-resolved via the system resolver at connect time, so an
-    attacker who controlled DNS could flip the record to ``169.254.169.254``.
 
-    After the fix: ``safe_request`` resolves ONCE (via its ``resolver`` kwarg),
-    pins the verified public IP literal into the outgoing URL, and sets the
-    original hostname as the ``Host`` header so TLS SNI / virtual hosting keeps
-    working. Because the URL host is now an IP literal, ``urllib3`` does not
-    re-resolve — the rebinding window is closed. This test exercises exactly
-    that: the resolver is set up to rebind to metadata on its second call, but
-    only the first (public) call is ever made.
+def test_safe_request_retains_hostname_for_tls_sni(monkeypatch):
+    """safe_request must retain the original hostname in the URL.
+
+    The previous approach replaced the URL hostname with an IP literal, which
+    broke TLS SNI (urllib3 derives SNI from the URL host, not the Host header).
+    This caused SSL certificate verification failures for any HTTPS endpoint
+    with a domain-issued certificate.
     """
     resolver = _RebindingResolver()
-
     captured = {}
-
-    # Patch the pinned adapter's ``send`` so we capture the prepared request
-    # without performing a real network dial.
-    from app.utils.outbound_url_guard import _PinnedIPAdapter
 
     def fake_send(self, request, **kwargs):  # type: ignore[no-untyped-def]
         captured["url"] = request.url
@@ -84,34 +76,91 @@ def test_safe_request_pins_verified_ip_and_never_rebinds(monkeypatch):
         timeout=5,
     )
 
-    # Only ONE resolution happened — the rebinding second call was never made.
-    assert resolver.calls == 1, f"safe_request must resolve once; made {resolver.calls} calls"
-
     outgoing = captured.get("url", "")
-    # The verified public IP is pinned into the URL...
-    assert (
-        "93.184.216.34" in outgoing
-    ), f"safe_request did not pin the verified public IP. url={outgoing!r}"
-    # ...and the metadata IP the attacker wanted to rebind to never appears.
-    assert (
-        "169.254.169.254" not in outgoing
-    ), f"TOCTOU: request would reach metadata IP. url={outgoing!r}"
-    # The original hostname is preserved as Host for SNI / virtual hosting.
-    host_header = captured["headers"].get("Host")
-    assert (
-        host_header == "sso.evil.example"
-    ), f"Host header not preserved when pinning IP: {host_header!r}"
+    # URL retains the original hostname (not IP literal) for TLS SNI
+    assert "sso.evil.example" in outgoing, f"URL should retain hostname for SNI. url={outgoing!r}"
+    assert "93.184.216.34" not in outgoing, f"URL should not contain IP literal. url={outgoing!r}"
+
+
+# ── _PinnedIPAdapter._check_resolved_ip: connect-time re-validation ────
+
+
+def test_adapter_blocks_rebinding_to_metadata():
+    """Adapter must block when connect-time resolution returns a non-public IP."""
+    adapter = _PinnedIPAdapter(
+        allowed_ips={ipaddress.ip_address("93.184.216.34")},
+        resolver=lambda host, *a, **kw: [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("169.254.169.254", 443))
+        ],
+    )
+    with pytest.raises(OutboundUrlBlockedError, match="non-public IP"):
+        adapter._check_resolved_ip("https://sso.evil.example/token")
+
+
+def test_adapter_allows_matching_public_ip():
+    """Adapter must allow when connect-time resolution matches pre-verified IPs."""
+    adapter = _PinnedIPAdapter(
+        allowed_ips={ipaddress.ip_address("93.184.216.34")},
+        resolver=lambda host, *a, **kw: [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))
+        ],
+    )
+    # Should not raise
+    adapter._check_resolved_ip("https://sso.evil.example/token")
+
+
+def test_adapter_allows_different_public_ip_with_warning(caplog):
+    """Adapter should allow (with warning) different public IPs for CDN endpoints."""
+    adapter = _PinnedIPAdapter(
+        allowed_ips={ipaddress.ip_address("93.184.216.34")},
+        resolver=lambda host, *a, **kw: [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("104.16.123.96", 443))
+        ],
+    )
+    with caplog.at_level("WARNING"):
+        adapter._check_resolved_ip("https://sso.evil.example/token")
+    assert "not in pre-verified set" in caplog.text
+
+
+def test_adapter_validates_ip_literal_url():
+    """Adapter must validate IP-literal URLs directly."""
+    adapter = _PinnedIPAdapter(allowed_ips={ipaddress.ip_address("93.184.216.34")})
+    # Public IP literal — should pass
+    adapter._check_resolved_ip("https://93.184.216.34/token")
+    # Non-public IP literal — should block
+    with pytest.raises(OutboundUrlBlockedError, match="non-public IP"):
+        adapter._check_resolved_ip("https://169.254.169.254/token")
+
+
+def test_adapter_blocks_on_dns_failure():
+    """Adapter must block when DNS resolution fails at connect time."""
+
+    def failing_resolver(host, *args, **kwargs):
+        raise OSError("DNS server down")
+
+    adapter = _PinnedIPAdapter(
+        allowed_ips={ipaddress.ip_address("93.184.216.34")},
+        resolver=failing_resolver,
+    )
+    with pytest.raises(OutboundUrlBlockedError, match="DNS resolution failed"):
+        adapter._check_resolved_ip("https://sso.evil.example/token")
+
+
+def test_adapter_blocks_empty_resolution():
+    """Adapter must block when DNS returns no IPs."""
+    adapter = _PinnedIPAdapter(
+        allowed_ips={ipaddress.ip_address("93.184.216.34")},
+        resolver=lambda host, *a, **kw: [],
+    )
+    with pytest.raises(OutboundUrlBlockedError, match="did not resolve"):
+        adapter._check_resolved_ip("https://sso.evil.example/token")
+
+
+# ── safe_request: fails closed on non-public resolution ─────────────────
 
 
 def test_safe_request_fails_closed_when_resolver_returns_metadata():
-    """If the single resolution returns a non-public IP, the request is refused.
-
-    With the pin in place there is no second chance: a metadata answer means
-    delivery is skipped, not dialed. (``pytest.importorskip`` guard for the
-    blocklist import below is unnecessary — this module already imports the
-    guard.)
-    """
-    from app.utils.outbound_url_guard import OutboundUrlBlockedError
+    """If the resolution returns a non-public IP, the request is refused."""
 
     def metadata_resolver(host, *args, **kwargs):
         return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("169.254.169.254", 443))]
@@ -126,6 +175,9 @@ def test_safe_request_fails_closed_when_resolver_returns_metadata():
             resolver=metadata_resolver,
             timeout=5,
         )
+
+
+# ── _is_public_address denylist ─────────────────────────────────────────
 
 
 @pytest.mark.parametrize(
@@ -143,9 +195,6 @@ def test_safe_request_fails_closed_when_resolver_returns_metadata():
     ],
 )
 def test_is_public_address_rejects_metadata_and_other_non_public(addr):
-    """The predicate must use an explicit denylist, not ``is_global`` alone.
-
-    All of these return ``is_global == True`` today and slip past the guard.
-    """
+    """The predicate must use an explicit denylist, not ``is_global`` alone."""
     ip = ipaddress.ip_address(addr)
     assert not _is_public_address(ip), f"{addr} leaked through is_global-only predicate"
