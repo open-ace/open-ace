@@ -370,6 +370,12 @@ if [ "$isolated" = true ]; then
         # traditional access(2) write checks — test -w returns false even
         # for root on a writable cgroup.procs.
         if [ -d "$cgroup_root" ]; then
+            # Issue #2020: delegate controllers from the parent cgroup to its
+            # children so task subgroups get memory.max, pids.max, cpu.max files.
+            # Without this, mkdir creates the subgroup but it has no resource
+            # limit files, and the writes below silently fail (|| true).
+            # Idempotent: re-writing the same controllers is a no-op.
+            echo "+memory +pids +cpu" > "$cgroup_root/cgroup.subtree_control" 2>/dev/null || true
             if [ -d "$cgroup_root/$task_id" ]; then
                 echo 1 > "$cgroup_root/$task_id/cgroup.kill" 2>/dev/null || true
                 rmdir "$cgroup_root/$task_id" 2>/dev/null || true
