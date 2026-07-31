@@ -1331,7 +1331,7 @@ class GitWorkspaceService:
             raise RuntimeError(
                 f"restored worktree {path} on wrong branch: "
                 f"expected={branch!r}, actual={actual!r}"
-                + (f" (symbolic-ref fallback returned {resolved!r})" if resolved else "")
+                f" (symbolic-ref fallback returned {resolved!r})"
             )
         raise RuntimeError(
             f"restored worktree {path} on wrong branch: " f"expected={branch!r}, actual={actual!r}"

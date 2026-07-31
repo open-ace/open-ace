@@ -367,9 +367,10 @@ def test_verify_worktree_registered_falls_back_when_branch_transiently_missing()
     o, _ = _make_orchestrator(_make_workflow())
     gh = MagicMock()
     gh.list_worktrees.return_value = [{"path": WT_PATH}]
-    gh.resolve_worktree_branch.return_value = f"refs/heads/{BRANCH}"
+    # symbolic-ref --short returns the short branch name (no refs/heads/ prefix).
+    gh.resolve_worktree_branch.return_value = BRANCH
 
-    # Must not raise — fallback resolved the branch (refs/heads/ form accepted).
+    # Must not raise — fallback resolved the branch.
     o._git_workspace.verify_worktree_registered(gh, WT_PATH, BRANCH)
     gh.resolve_worktree_branch.assert_called_once_with(WT_PATH)
 
@@ -402,3 +403,88 @@ def test_list_worktrees_parses_detached_keyword():
     assert entries[0]["branch"] == "refs/heads/main"
     assert entries[1].get("detached") is True
     assert "branch" not in entries[1]
+
+
+# ── resolve_worktree_branch internals ──────────────────────────────────
+
+
+def test_resolve_worktree_branch_returns_short_name():
+    """``resolve_worktree_branch`` returns the short branch name from
+    ``symbolic-ref --short HEAD``."""
+    gh = MagicMock(spec=GitHubOps)
+    gh._assert_worktree_contained = MagicMock()
+    gh.system_account = None
+    fake_result = MagicMock()
+    fake_result.returncode = 0
+    fake_result.stdout = "auto-dev/wf2041\n"
+    fake_result.stderr = ""
+    # Patch GitHubOps.__new__ to return our mock for the temp instance.
+    with patch.object(GitHubOps, "__new__", return_value=gh):
+        gh._run_git.return_value = fake_result
+        result = GitHubOps.resolve_worktree_branch(gh, WT_PATH)
+    assert result == "auto-dev/wf2041"
+
+
+def test_resolve_worktree_branch_returns_none_for_detached_head():
+    """When ``symbolic-ref`` exits non-zero (detached HEAD), return None."""
+    gh = MagicMock(spec=GitHubOps)
+    gh._assert_worktree_contained = MagicMock()
+    gh.system_account = None
+    fake_result = MagicMock()
+    fake_result.returncode = 1
+    fake_result.stdout = ""
+    fake_result.stderr = "fatal: ref HEAD is not a symbolic ref"
+    with patch.object(GitHubOps, "__new__", return_value=gh):
+        gh._run_git.return_value = fake_result
+        result = GitHubOps.resolve_worktree_branch(gh, WT_PATH)
+    assert result is None
+
+
+def test_resolve_worktree_branch_returns_none_on_git_error():
+    """When git itself fails (GitHubOpsError), return None (fail-closed)."""
+    gh = MagicMock(spec=GitHubOps)
+    gh._assert_worktree_contained = MagicMock()
+    gh.system_account = None
+    with patch.object(GitHubOps, "__new__", return_value=gh):
+        gh._run_git.side_effect = GitHubOpsError("git not found")
+        result = GitHubOps.resolve_worktree_branch(gh, WT_PATH)
+    assert result is None
+
+
+# ── verify_worktree_registered edge cases ──────────────────────────────
+
+
+def test_verify_worktree_registered_wrong_branch_no_fallback():
+    """A wrong branch name (not None) must fail immediately in
+    ``verify_worktree_registered`` without calling symbolic-ref."""
+    o, _ = _make_orchestrator(_make_workflow())
+    gh = MagicMock()
+    gh.list_worktrees.return_value = [{"path": WT_PATH, "branch": "refs/heads/main"}]
+
+    with pytest.raises(RuntimeError, match="(?i)not registered"):
+        o._git_workspace.verify_worktree_registered(gh, WT_PATH, BRANCH)
+    gh.resolve_worktree_branch.assert_not_called()
+
+
+def test_verify_worktree_registered_missing_entry_no_fallback():
+    """When the worktree entry is entirely absent, ``verify_worktree_registered``
+    must fail without calling symbolic-ref."""
+    o, _ = _make_orchestrator(_make_workflow())
+    gh = MagicMock()
+    gh.list_worktrees.return_value = [{"path": "/other", "branch": "refs/heads/main"}]
+
+    with pytest.raises(RuntimeError, match="(?i)not registered"):
+        o._git_workspace.verify_worktree_registered(gh, WT_PATH, BRANCH)
+    gh.resolve_worktree_branch.assert_not_called()
+
+
+def test_verify_worktree_registered_detached_no_fallback():
+    """When the entry is explicitly detached, ``verify_worktree_registered``
+    must not fall back."""
+    o, _ = _make_orchestrator(_make_workflow())
+    gh = MagicMock()
+    gh.list_worktrees.return_value = [{"path": WT_PATH, "detached": True}]
+
+    with pytest.raises(RuntimeError, match="(?i)not registered"):
+        o._git_workspace.verify_worktree_registered(gh, WT_PATH, BRANCH)
+    gh.resolve_worktree_branch.assert_not_called()
