@@ -27,7 +27,7 @@ def _require_auth():
 def _require_tenant_scope():
     """Fail closed for non-admins with no tenant (Issue #1775).
 
-    Without this gate, ``getget_current_tenant_id()`` returns ``None`` and the
+    Without this gate, ``get_current_tenant_id()`` returns ``None`` and the
     repository layer treats it as a wildcard/global filter, leaking
     cross-tenant usage data to a no-tenant non-admin. Admins keep global
     scope; tenant-scoped non-admins keep their tenant.
