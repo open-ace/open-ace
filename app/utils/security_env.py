@@ -70,9 +70,7 @@ def is_weak_secret_value(value: str | None) -> bool:
     return any(normalized.startswith(prefix) for prefix in _WEAK_SECRET_PREFIXES)
 
 
-def validate_secret_strength(
-    value: str | None, purpose: str, *, min_length: int = 32
-) -> None:
+def validate_secret_strength(value: str | None, purpose: str, *, min_length: int = 32) -> None:
     """
     Validate that a secret key meets minimum strength requirements.
 
@@ -95,20 +93,14 @@ def validate_secret_strength(
     # Check for empty value
     if not value:
         if is_strict_mode():
-            raise RuntimeError(
-                f"{purpose} environment variable must be set in production!"
-            )
-        logger.warning(
-            "%s is empty; this is insecure for production use", purpose
-        )
+            raise RuntimeError(f"{purpose} environment variable must be set in production!")
+        logger.warning("%s is empty; this is insecure for production use", purpose)
         return
 
     # Check for weak values
     if is_weak_secret_value(value):
         if is_strict_mode():
-            raise RuntimeError(
-                f"{purpose} must be set to a strong, unique value in production!"
-            )
+            raise RuntimeError(f"{purpose} must be set to a strong, unique value in production!")
         logger.warning(
             "%s uses a weak development value - DO NOT use in production!",
             purpose,

@@ -78,10 +78,7 @@ def validate_encryption_keys() -> dict:
     try:
         import os
 
-        from app.utils.security_env import (
-            is_strict_mode,
-            is_weak_secret_value,
-        )
+        from app.utils.security_env import is_strict_mode, is_weak_secret_value
 
         results["info"]["mode"] = "strict" if is_strict_mode() else "development"
 
@@ -117,9 +114,7 @@ def validate_encryption_keys() -> dict:
                     "length": len(encryption_key),
                 }
         else:
-            results["warnings"].append(
-                "OPENACE_ENCRYPTION_KEY not set (using development default)"
-            )
+            results["warnings"].append("OPENACE_ENCRYPTION_KEY not set (using development default)")
 
     except Exception as e:
         results["warnings"].append(f"Secret strength validation error: {e}")
@@ -129,9 +124,7 @@ def validate_encryption_keys() -> dict:
 
 def main():
     """Main entry point."""
-    parser = argparse.ArgumentParser(
-        description="Validate encryption key configuration"
-    )
+    parser = argparse.ArgumentParser(description="Validate encryption key configuration")
     parser.add_argument(
         "--json",
         action="store_true",

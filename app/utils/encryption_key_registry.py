@@ -186,7 +186,9 @@ class EncryptionKeyRegistry:
             raise RuntimeError("OPENACE_ENCRYPTION_KEYS must have at least one key")
 
         if len(keys_list) > MAX_KEY_COUNT:
-            raise RuntimeError(f"OPENACE_ENCRYPTION_KEYS cannot have more than {MAX_KEY_COUNT} keys")
+            raise RuntimeError(
+                f"OPENACE_ENCRYPTION_KEYS cannot have more than {MAX_KEY_COUNT} keys"
+            )
 
         # Validate primary_key_id
         primary_key_id = config.get("primary_key_id")
@@ -294,9 +296,7 @@ class EncryptionKeyRegistry:
         self._config_hash = hashlib.sha256(config_str.encode()).hexdigest()
 
         # Derive version from first 4 bytes of hash (32-bit)
-        self._config_version = int.from_bytes(
-            bytes.fromhex(self._config_hash[:8]), byteorder="big"
-        )
+        self._config_version = int.from_bytes(bytes.fromhex(self._config_hash[:8]), byteorder="big")
 
     def reload(self) -> None:
         """
@@ -360,11 +360,13 @@ class EncryptionKeyRegistry:
                 for k in config.get("keys", []):
                     key_value = k.get("value", "")
                     derived_key = hashlib.sha256(key_value.encode()).digest()
-                    keys_for_hash.append({
-                        "id": k.get("id"),
-                        "status": k.get("status", "deprecated"),
-                        "key_hash": hashlib.sha256(derived_key).hexdigest()[:16],
-                    })
+                    keys_for_hash.append(
+                        {
+                            "id": k.get("id"),
+                            "status": k.get("status", "deprecated"),
+                            "key_hash": hashlib.sha256(derived_key).hexdigest()[:16],
+                        }
+                    )
                 config_for_hash = {
                     "keys": keys_for_hash,
                     "primary_key_id": config.get("primary_key_id"),
@@ -421,7 +423,7 @@ class EncryptionKeyRegistry:
             fernet = Fernet(fernet_key)
 
             # Encrypt
-            ciphertext = fernet.encrypt(plaintext.encode()).decode()
+            ciphertext: str = fernet.encrypt(plaintext.encode()).decode()
 
             # For legacy key_id=0, don't add prefix (backward compatibility)
             if primary_key.key_id == 0:
@@ -464,9 +466,7 @@ class EncryptionKeyRegistry:
                     return (result, key_id)
 
                 # Key-specific decryption failed, try all keys
-                logger.warning(
-                    f"Decryption with key_id {key_id} failed, trying all keys"
-                )
+                logger.warning(f"Decryption with key_id {key_id} failed, trying all keys")
 
                 # Use actual_ciphertext for trying all keys (has key_id prefix removed)
                 ciphertext_to_try = actual_ciphertext
@@ -559,7 +559,7 @@ class EncryptionKeyRegistry:
             fernet = Fernet(fernet_key)
 
             # Decrypt
-            decrypted = fernet.decrypt(ciphertext.encode()).decode()
+            decrypted: str = fernet.decrypt(ciphertext.encode()).decode()
             return decrypted
 
         except InvalidToken:

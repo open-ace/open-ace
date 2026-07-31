@@ -155,10 +155,11 @@ class TestEncryptionKeyRegistryEncryptDecrypt:
             registry = EncryptionKeyRegistry()
 
             # Create legacy ciphertext using Fernet directly
-            from cryptography.fernet import Fernet
             import hashlib
 
-            key = hashlib.sha256("test-encryption-key-32-chars-long".encode()).digest()
+            from cryptography.fernet import Fernet
+
+            key = hashlib.sha256(b"test-encryption-key-32-chars-long").digest()
             fernet_key = base64.urlsafe_b64encode(key)
             fernet = Fernet(fernet_key)
 
@@ -191,9 +192,10 @@ class TestEncryptionKeyRegistryEncryptDecrypt:
         ):
             # Encrypt with key-1
             import hashlib
+
             from cryptography.fernet import Fernet
 
-            key1 = hashlib.sha256("key-1-value-32-chars-long".encode()).digest()
+            key1 = hashlib.sha256(b"key-1-value-32-chars-long").digest()
             fernet1 = Fernet(base64.urlsafe_b64encode(key1))
             plaintext = "encrypted_with_key1"
             ciphertext_key1 = fernet1.encrypt(plaintext.encode()).decode()
