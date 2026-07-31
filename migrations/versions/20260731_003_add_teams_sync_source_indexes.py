@@ -33,44 +33,26 @@ def _is_postgresql() -> bool:
 
 
 def upgrade() -> None:
-    """Add partial indexes for organization sync performance.
+    """Add index for organization sync performance.
 
-    These indexes optimize the _load_synced_teams queries in
+    This index optimizes the _load_synced_teams queries in
     feishu_org_sync.py and dingtalk_org_sync.py by filtering
     at the database level instead of in Python.
-    """
-    if _is_postgresql():
-        # PostgreSQL: Create partial indexes with JSON expressions using proper pattern
-        # Note: settings column is TEXT, so we must cast to jsonb before using ->>
-        with op.get_context().autocommit_block():
-            # Feishu partial index
-            # Note: Using op.create_index with postgresql_concurrently=True
-            # for proper CONCURRENTLY handling per linter rule MIG002
-            op.create_index(
-                "idx_teams_feishu_sync",
-                "teams",
-                [
-                    sa.text("(settings::jsonb->>'sync_source')"),
-                    sa.text("(settings::jsonb->>'feishu_department_id')"),
-                ],
-                postgresql_where=sa.text("settings::jsonb->>'sync_source' = 'feishu'"),
-                postgresql_concurrently=True,
-            )
 
-            # DingTalk partial index
-            op.create_index(
-                "idx_teams_dingtalk_sync",
-                "teams",
-                [
-                    sa.text("(settings::jsonb->>'sync_source')"),
-                    sa.text("(settings::jsonb->>'dingtalk_department_id')"),
-                ],
-                postgresql_where=sa.text("settings::jsonb->>'sync_source' = 'dingtalk'"),
-                postgresql_concurrently=True,
-            )
+    Note: We use a simple index on sync_source rather than partial indexes
+    because partial indexes with JSON expressions have compatibility issues
+    between PostgreSQL and SQLite schema snapshots.
+    """
+    # Create simple index on sync_source for both PostgreSQL and SQLite
+    if _is_postgresql():
+        # PostgreSQL: Cast settings to jsonb before extracting sync_source
+        op.create_index(
+            "idx_teams_sync_source",
+            "teams",
+            [sa.text("(settings::jsonb->>'sync_source')")],
+        )
     else:
-        # SQLite fallback: Regular index (partial indexes not well supported)
-        # Note: SQLite may not effectively use this index without partial index support
+        # SQLite: Use ->> operator directly (no cast needed)
         try:
             op.create_index(
                 "idx_teams_sync_source",
@@ -83,10 +65,9 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """Remove organization sync performance indexes."""
+    """Remove organization sync performance index."""
     if _is_postgresql():
-        op.execute("DROP INDEX IF EXISTS idx_teams_feishu_sync")
-        op.execute("DROP INDEX IF EXISTS idx_teams_dingtalk_sync")
+        op.execute("DROP INDEX IF EXISTS idx_teams_sync_source")
     else:
         try:
             op.drop_index("idx_teams_sync_source", table_name="teams")

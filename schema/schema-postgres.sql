@@ -3062,6 +3062,8 @@ CREATE INDEX idx_team_members_user ON team_members USING btree (user_id);
 
 CREATE INDEX idx_teams_owner ON teams USING btree (owner_id);
 
+CREATE INDEX idx_teams_sync_source ON teams USING btree ((settings::jsonb ->> 'sync_source'::text));
+
 CREATE INDEX idx_tenant_migrations_status ON tenant_migrations USING btree (status);
 
 
