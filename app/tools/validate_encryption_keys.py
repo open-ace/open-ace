@@ -76,13 +76,12 @@ def validate_encryption_keys() -> dict:
 
     # Check secret strength
     try:
+        import os
+
         from app.utils.security_env import (
-            get_encryption_key_material,
-            get_secret_key_for_app,
             is_strict_mode,
             is_weak_secret_value,
         )
-        import os
 
         results["info"]["mode"] = "strict" if is_strict_mode() else "development"
 
