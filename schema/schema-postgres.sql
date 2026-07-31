@@ -453,7 +453,6 @@ CREATE TABLE autonomous_workflows (
     last_ci_failure_signature text DEFAULT ''::text,
     last_ci_failure_head_sha text DEFAULT ''::text,
     ci_diagnostics_attempts integer DEFAULT 0,
-    ci_repair_transient_retries integer DEFAULT 0,
     worktree_transition_state text,
     transition_original_path text,
     transition_temp_path text,
@@ -473,7 +472,8 @@ CREATE TABLE autonomous_workflows (
     sandbox_policy_digest text,
     sandbox_last_error text,
     sandbox_remote_session_id text,
-    sandbox_effective_policy text
+    sandbox_effective_policy text,
+    ci_repair_transient_retries integer DEFAULT 0
 );
 
 CREATE SEQUENCE autonomous_workflows_id_seq
