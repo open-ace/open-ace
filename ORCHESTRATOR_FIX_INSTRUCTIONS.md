@@ -25,9 +25,8 @@ git push
 **Problem**: Committed schema files don't match what alembic migrations produce.
 
 **Specific Issues**:
-1. `alert_creation_failures` table in committed schema but not in migrations (runtime-created table)
-2. Multiple indexes in committed schema but not in migrations
-3. Column drift in several tables (e.g., `dingtalk_webhook_secret` missing from `notification_preferences`, extra columns in `registration_tokens`)
+1. Multiple indexes in committed schema but not in migrations
+2. Column drift in several tables (e.g., `dingtalk_webhook_secret` missing from `notification_preferences`, extra columns in `registration_tokens`)
 
 **Root Cause**: Schema files were manually edited or generated from a database with runtime-created tables, not from pure migrations.
 
@@ -54,7 +53,6 @@ git push
 
 ## Current State
 
-- `alert_creation_failures` table has been removed from schema files (partial fix)
 - `.worktrees/` submodules still in git index (blocking git operations)
 - Schema drift still exists (requires PostgreSQL to fix properly)
 
@@ -68,10 +66,8 @@ The orchestrator should:
 
 ## Files Modified
 
-- `scripts/fix_worktrees.sh` - Script to remove worktree submodules
-- `scripts/fix_schema_drift.py` - Script to remove runtime-created tables
-- `schema/schema-postgres.sql` - Partially fixed (removed alert_creation_failures)
-- `schema/schema-sqlite.sql` - Partially fixed (removed alert_creation_failures)
+- `schema/schema-postgres.sql` - Needs rebuild from clean migrations
+- `schema/schema-sqlite.sql` - Needs rebuild from clean migrations
 
 ## Verification
 

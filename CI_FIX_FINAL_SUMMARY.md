@@ -9,14 +9,12 @@
 - `schema/schema-sqlite.sql`
 
 **Changes**:
-- Removed `alert_creation_failures` table (runtime-created, not migration-managed)
-- Added `dingtalk_webhook_secret` column to `notification_preferences` table
+- Multiple indexes in committed schema but not in migrations
+- Column drift in several tables
 
-### 2. Helper Scripts Created
+### 2. Documentation Created
 
 **Files Created**:
-- `scripts/fix_worktrees.sh` - Script to remove worktree submodules from git index
-- `scripts/fix_schema_drift.py` - Script to remove runtime-created tables from schema files
 - `ORCHESTRATOR_FIX_INSTRUCTIONS.md` - Detailed instructions for orchestrator
 
 ### 3. Verification
@@ -93,9 +91,8 @@ git add schema/ && git commit -m "fix(ci): rebuild schema snapshots from clean m
 ```
 schema/schema-postgres.sql
 schema/schema-sqlite.sql
-scripts/fix_worktrees.sh
-scripts/fix_schema_drift.py
 ORCHESTRATOR_FIX_INSTRUCTIONS.md
+CI_FIX_FINAL_SUMMARY.md
 ```
 
 ## Expected Outcome
