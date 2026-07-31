@@ -24,6 +24,10 @@ from typing import Any
 from urllib.parse import urlparse, urlunparse
 
 import requests
+import urllib3
+import urllib3.connection
+import urllib3.connectionpool
+import urllib3.poolmanager
 from requests.adapters import HTTPAdapter
 
 logger = logging.getLogger(__name__)
@@ -298,10 +302,10 @@ def safe_request(
     This collapses validate+connect into a single resolution: the hostname is
     resolved exactly once via ``resolver``, every returned IP is checked with
     :func:`_is_public_address`, and the request is sent to the verified IP
-    literal while preserving the original hostname as the ``Host`` header (so
-    TLS SNI / virtual-host routing still works). Because the request URL
-    contains an IP literal, ``urllib3`` does not re-resolve via the system
-    resolver, which closes the DNS-rebinding TOCTOU window.
+    literal while preserving the original hostname for TLS SNI and certificate
+    verification. Because the request URL contains an IP literal, ``urllib3``
+    does not re-resolve via the system resolver, which closes the
+    DNS-rebinding TOCTOU window.
 
     Fails closed (raises :class:`OutboundUrlBlockedError`) if no public IP can
     be pinned.
@@ -317,10 +321,6 @@ def safe_request(
     pinned_url = f"{scheme}://{pinned_host}{port_suffix}{path_and_query}"
 
     headers = dict(kwargs.pop("headers", {}) or {})
-    headers.setdefault("Host", original_host)
-    # ``urllib3`` derives the TLS SNI/Host header from the URL host. Because we
-    # pinned an IP literal we must set the original host explicitly so HTTPS
-    # virtual hosting and SNI keep working.
     headers["Host"] = original_host
 
     own_session = False
@@ -328,7 +328,10 @@ def safe_request(
         session = requests.Session()
         own_session = True
     try:
-        adapter = _PinnedIPAdapter(allowed_ips=public_ips)
+        adapter = _PinnedIPAdapter(
+            allowed_ips=public_ips,
+            original_host=original_host,
+        )
         session.mount(f"{scheme}://", adapter)
         return session.request(method, pinned_url, headers=headers, **kwargs)
     finally:
@@ -336,20 +339,135 @@ def safe_request(
             session.close()
 
 
-class _PinnedIPAdapter(HTTPAdapter):
-    """HTTPAdapter that re-validates the connect-time IP against an allowlist.
+# ---------------------------------------------------------------------------
+# Custom urllib3 pool manager that keeps the original hostname as the pool-key
+# host so that connection pools are keyed correctly when multiple outbound
+# requests target different domains through the same adapter.
+# ---------------------------------------------------------------------------
 
-    Defense in depth: even though ``safe_request`` builds a URL whose host is
-    the pinned IP literal (so ``urllib3`` should not re-resolve), this adapter
-    intercepts the connection pool and refuses any IP that is not on the
-    verified allowlist or that fails the public-address predicate. This guards
-    against proxy configuration or future urllib3 changes re-introducing a
-    resolution step.
+class _OriginalHostPoolManager(urllib3.poolmanager.PoolManager):
+    """PoolManager that always returns the pinned connection pool regardless of
+    the requested host/port.
+
+    Because ``safe_request`` constructs exactly one pinned pool per request,
+    this PoolManager only needs to hand it out for every lookup.
     """
 
-    def __init__(self, *args: Any, allowed_ips: Iterable[IPAddress] = (), **kwargs: Any):
+    def __init__(self, pinned_pool: urllib3.connectionpool.HTTPSConnectionPool, **kwargs: Any):
+        super().__init__(**kwargs)
+        self._pinned_pool = pinned_pool
+
+    def connection_from_host(
+        self,
+        host: str | None,
+        port: int | None = None,
+        scheme: str = "http",
+        pool_kwargs: dict[str, Any] | None = None,
+    ) -> urllib3.connectionpool.ConnectionPool:
+        return self._pinned_pool
+
+
+class _PinnedIPAdapter(HTTPAdapter):
+    """HTTPAdapter that pins the connect-time IP to a verified public address
+    while keeping the original hostname for TLS SNI and certificate verification.
+
+    The previous implementation replaced the URL hostname with the pinned IP
+    literal and set the ``Host`` header to the original domain.  However,
+    ``urllib3`` derives TLS SNI from the URL host, not the ``Host`` header.
+    This caused ``SSL: CERTIFICATE_VERIFY_FAILED`` errors when the TLS
+    certificate did not cover the raw IP address (e.g. github.com).
+
+    The fix creates a purpose-built ``urllib3.HTTPSConnectionPool`` whose
+    ``host`` is the pinned IP (so TCP connects to the verified address) and
+    whose ``conn_kw`` contains ``server_hostname=<original_host>`` (so TLS SNI
+    and certificate validation use the correct domain).  A companion
+    ``_OriginalHostPoolManager`` ensures pool-key lookups use the original
+    hostname.
+    """
+
+    def __init__(self, *args: Any, allowed_ips: Iterable[IPAddress] = (), original_host: str = "", **kwargs: Any):
         super().__init__(*args, **kwargs)
         self._allowed_ips = {str(ip) for ip in allowed_ips}
+        self._original_host = original_host
+
+    # -- public entry points used by requests/urllib3 ----------------------
+
+    def send(self, request, stream=False, timeout=None, verify=True, cert=None, proxies=None):  # type: ignore[override]
+        """Send a prepared request using the pinned-IP connection pool.
+
+        Creates a one-shot ``urllib3.HTTPSConnectionPool`` whose TCP target is
+        the verified IP but whose TLS SNI / cert validation uses the original
+        hostname.  The urllib3 response is then wrapped in a
+        ``requests.Response`` for API compatibility.
+        """
+        self._check_pinned_url(request.url)
+
+        parsed = urlparse(request.url)
+        pinned_ip_str = (parsed.hostname or "").strip("[]")
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+
+        # -- build pinned urllib3 pool with correct SNI --------------------
+        conn_kw: dict[str, Any] = {}
+        if parsed.scheme == "https":
+            conn_kw["server_hostname"] = self._original_host
+            # Propagate SSL verification setting from the caller
+            if isinstance(verify, str):
+                conn_kw["ca_certs"] = verify
+                conn_kw["cert_reqs"] = "CERT_REQUIRED"
+            elif verify:
+                conn_kw["cert_reqs"] = "CERT_REQUIRED"
+            else:
+                conn_kw["cert_reqs"] = "CERT_NONE"
+
+        pinned_pool = urllib3.connectionpool.HTTPSConnectionPool(
+            host=pinned_ip_str,
+            port=port,
+            timeout=timeout if not isinstance(timeout, tuple) else timeout[0],
+            **conn_kw,
+        )
+
+        pool_manager = _OriginalHostPoolManager(
+            pinned_pool=pinned_pool,
+        )
+
+        # -- issue request via original-domain URL -------------------------
+        # Use the original domain in the URL so that urllib3's internal pool
+        # key lookup (based on host) matches our pre-populated pool entry.
+        orig_port_suffix = f":{port}" if port != (443 if parsed.scheme == "https" else 80) else ""
+        orig_url = f"{parsed.scheme}://{self._original_host}{orig_port_suffix}{parsed.path}"
+        if parsed.query:
+            orig_url += f"?{parsed.query}"
+
+        headers = dict(request.headers)
+        headers["Host"] = self._original_host
+
+        try:
+            urllib3_resp = pool_manager.request(
+                method=request.method,
+                url=orig_url,
+                headers=headers,
+                body=request.body,
+                redirect=False,
+                preload_content=True,
+                timeout=timeout if not isinstance(timeout, tuple) else timeout[0],
+            )
+        except Exception:
+            pinned_pool.close()
+            raise
+
+        # -- wrap urllib3 response as requests.Response --------------------
+        response = requests.Response()
+        response.status_code = urllib3_resp.status
+        response.headers = requests.structures.CaseInsensitiveDict(
+            urllib3_resp.headers.items()
+        )
+        response.url = orig_url
+        response.raw = urllib3_resp
+        response.encoding = urllib3_resp.headers.get("Content-Encoding", "utf-8") if urllib3_resp.headers.get("Content-Encoding") else "utf-8"
+        # Populate _content so .text / .json work without re-reading the stream.
+        response._content = urllib3_resp.data
+
+        return response
 
     def get_connection_with_tls_context(self, request, verify, proxies=None, cert=None):
         self._check_pinned_url(request.url)
