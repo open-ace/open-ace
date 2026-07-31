@@ -19,6 +19,7 @@ const LEFT_PANEL_WIDTH_KEY = 'autonomous-dev-left-panel-width';
 const DEFAULT_LEFT_PANEL_WIDTH = 360;
 const MIN_LEFT_PANEL_WIDTH = 300;
 const MAX_LEFT_PANEL_WIDTH = 720;
+const NARROW_LAYOUT_QUERY = '(max-width: 900px)';
 
 export const AutonomousDev: React.FC = () => {
   const language = useLanguage();
@@ -30,6 +31,16 @@ export const AutonomousDev: React.FC = () => {
   }, []);
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null>(initialWorkflowId);
   const [showNewModal, setShowNewModal] = useState(false);
+  const [isNarrowLayout, setIsNarrowLayout] = useState(() =>
+    typeof window !== 'undefined' ? window.matchMedia(NARROW_LAYOUT_QUERY).matches : false
+  );
+  const [mobilePane, setMobilePane] = useState<'list' | 'detail'>(() =>
+    typeof window !== 'undefined' &&
+    window.matchMedia(NARROW_LAYOUT_QUERY).matches &&
+    initialWorkflowId
+      ? 'detail'
+      : 'list'
+  );
   const [workflowListState, setWorkflowListState] = useState({
     total: 0,
     isLoading: true,
@@ -49,6 +60,23 @@ export const AutonomousDev: React.FC = () => {
   useEffect(() => {
     window.localStorage.setItem(LEFT_PANEL_WIDTH_KEY, String(leftPanelWidth));
   }, [leftPanelWidth]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const mediaQuery = window.matchMedia(NARROW_LAYOUT_QUERY);
+    const syncLayout = (matches: boolean) => {
+      setIsNarrowLayout(matches);
+      if (matches) {
+        setMobilePane(selectedWorkflowId ? 'detail' : 'list');
+      }
+    };
+
+    syncLayout(mediaQuery.matches);
+    const handleChange = (event: MediaQueryListEvent) => syncLayout(event.matches);
+    mediaQuery.addEventListener('change', handleChange);
+    return () => mediaQuery.removeEventListener('change', handleChange);
+  }, [selectedWorkflowId]);
 
   const clampLeftPanelWidth = useCallback((nextWidth: number) => {
     const viewportLimit = Math.max(MIN_LEFT_PANEL_WIDTH, Math.floor(window.innerWidth * 0.55));
@@ -109,15 +137,21 @@ export const AutonomousDev: React.FC = () => {
   const handleSelectWorkflow = useCallback(
     (workflow: AutonomousWorkflow) => {
       setSelectedWorkflowId(workflow.workflow_id);
+      if (isNarrowLayout) {
+        setMobilePane('detail');
+      }
       updateUrl(workflow.workflow_id);
     },
-    [updateUrl]
+    [isNarrowLayout, updateUrl]
   );
 
   const handleClearWorkflow = useCallback(() => {
     setSelectedWorkflowId(null);
+    if (isNarrowLayout) {
+      setMobilePane('list');
+    }
     updateUrl(null);
-  }, [updateUrl]);
+  }, [isNarrowLayout, updateUrl]);
 
   const handleListStateChange = useCallback(
     (state: {
@@ -150,23 +184,33 @@ export const AutonomousDev: React.FC = () => {
   const handleWorkflowCreated = useCallback(
     (workflow: AutonomousWorkflow) => {
       setSelectedWorkflowId(workflow.workflow_id);
+      if (isNarrowLayout) {
+        setMobilePane('detail');
+      }
       updateUrl(workflow.workflow_id);
       setShowNewModal(false);
     },
-    [updateUrl]
+    [isNarrowLayout, updateUrl]
   );
 
   return (
     <div
       className={cn(
         'd-flex h-100 autonomous-dev-layout',
-        workspaceFullscreen && 'autonomous-dev-layout-fullscreen'
+        workspaceFullscreen && 'autonomous-dev-layout-fullscreen',
+        isNarrowLayout && 'autonomous-dev-layout-narrow'
       )}
     >
       {/* Left Panel - Workflow List */}
       <div
-        className="border-end d-flex flex-column autonomous-dev-left-panel"
-        style={{ width: `${leftPanelWidth}px`, minWidth: `${MIN_LEFT_PANEL_WIDTH}px` }}
+        className={cn(
+          'border-end d-flex flex-column autonomous-dev-left-panel',
+          isNarrowLayout && mobilePane === 'detail' && 'autonomous-dev-pane-hidden'
+        )}
+        style={{
+          width: isNarrowLayout ? '100%' : `${leftPanelWidth}px`,
+          minWidth: isNarrowLayout ? '0' : `${MIN_LEFT_PANEL_WIDTH}px`,
+        }}
       >
         <div className="d-flex align-items-center justify-content-between p-3 border-bottom">
           <h6 className="mb-0 fw-semibold">
@@ -189,6 +233,12 @@ export const AutonomousDev: React.FC = () => {
               <i className="bi bi-plus-lg me-1"></i>
               {t('autoNewTask', language)}
             </Button>
+            {isNarrowLayout && selectedWorkflowId && (
+              <Button size="sm" variant="outline-secondary" onClick={() => setMobilePane('detail')}>
+                <i className="bi bi-arrow-right-circle me-1"></i>
+                {t('timeline', language)}
+              </Button>
+            )}
           </div>
         </div>
         <div className="flex-grow-1 overflow-auto autonomous-dev-list-scroll">
@@ -210,7 +260,27 @@ export const AutonomousDev: React.FC = () => {
       />
 
       {/* Right Panel - Timeline */}
-      <div className="flex-grow-1 d-flex flex-column overflow-hidden autonomous-dev-right-panel">
+      <div
+        className={cn(
+          'flex-grow-1 d-flex flex-column overflow-hidden autonomous-dev-right-panel',
+          isNarrowLayout && mobilePane === 'list' && 'autonomous-dev-pane-hidden'
+        )}
+      >
+        {isNarrowLayout && (
+          <div className="autonomous-dev-mobile-bar border-bottom">
+            <Button size="sm" variant="outline-secondary" onClick={() => setMobilePane('list')}>
+              <i className="bi bi-arrow-left me-1"></i>
+              {t('autoBackToWorkflowList', language)}
+            </Button>
+            {selectedWorkflow && (
+              <span className="autonomous-dev-mobile-title text-truncate">
+                {selectedWorkflow.title ||
+                  selectedWorkflow.requirements_text?.slice(0, 60) ||
+                  selectedWorkflow.workflow_id}
+              </span>
+            )}
+          </div>
+        )}
         {selectedWorkflow ? (
           <>
             <RuntimeIsolationPanel workflow={selectedWorkflow} />

@@ -340,6 +340,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
   } | null>(null);
   const [contentFullscreen, setContentFullscreen] = useState(false);
   const [viewingPrDiff, setViewingPrDiff] = useState(false);
+  const [headerCollapsed, setHeaderCollapsed] = useState(false);
 
   const { data: timelineData, isLoading } = useWorkflowTimeline(workflow.workflow_id);
   const pauseMutation = usePauseWorkflow();
@@ -1013,7 +1014,6 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
       day: '2-digit',
       hour: '2-digit',
       minute: '2-digit',
-      second: '2-digit',
       hour12: false,
     }).format(parsed);
   };
@@ -1608,11 +1608,6 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                   <span className={`timeline-chip timeline-chip--${statusDisplay.tone}`}>
                     {statusDisplay.label}
                   </span>
-                  {milestone.round_number > 0 && (
-                    <span className="timeline-chip timeline-chip--subtle">
-                      R{milestone.round_number}
-                    </span>
-                  )}
                   {showUsageMetrics && (
                     <>
                       <span className="timeline-chip timeline-chip--neutral">
@@ -1774,10 +1769,6 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                 </div>
                 <div className="timeline-milestone-section-body">
                   <div className="timeline-milestone-activity">
-                    <div className="timeline-milestone-activity-title">
-                      <span className="timeline-live-dot"></span>
-                      {t('autoAiActivity', language)}
-                    </div>
                     <div className="timeline-milestone-activity-list" aria-live="polite">
                       {hasLiveActivity ? (
                         visibleMilestoneActivities.map((activity) => {
@@ -1920,7 +1911,11 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
 
   return (
     <div className="timeline-shell d-flex flex-column h-100">
-      <div className={`timeline-header ${activeStatusHint ? 'timeline-header--active' : ''}`}>
+      <div
+        className={`timeline-header ${activeStatusHint ? 'timeline-header--active' : ''} ${
+          headerCollapsed ? 'timeline-header--collapsed' : ''
+        }`}
+      >
         <div className="timeline-header-top">
           <div className="timeline-header-main">
             <div className="timeline-header-title-row">
@@ -1935,6 +1930,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                   isLiveStatus ? 'timeline-status-pill--live' : ''
                 }`}
               >
+                {isLiveStatus && <span className="timeline-status-pill__spinner" aria-hidden="true"></span>}
                 <span className="timeline-status-pill__icon">
                   <i className={`bi ${workflowStatusConfig.icon}`}></i>
                 </span>
@@ -2039,6 +2035,25 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
           </div>
 
           <div className="timeline-header-actions">
+            <Button
+              size="sm"
+              variant="outline-secondary"
+              onClick={() => setHeaderCollapsed((collapsed) => !collapsed)}
+              aria-expanded={!headerCollapsed}
+              aria-controls={`timeline-header-details-${workflow.workflow_id}`}
+              aria-label={
+                headerCollapsed
+                  ? t('autoExpandDetails', language)
+                  : t('autoCollapseDetails', language)
+              }
+            >
+              <i
+                className={`bi ${headerCollapsed ? 'bi-chevron-down' : 'bi-chevron-up'} me-1`}
+              ></i>
+              {headerCollapsed
+                ? t('autoExpandDetails', language)
+                : t('autoCollapseDetails', language)}
+            </Button>
             {workspaceFullscreen && (
               <Button
                 size="sm"
@@ -2124,179 +2139,179 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
           </div>
         </div>
 
-        {activeStatusHint && !showStateBanner && (
-          <div
-            className={`timeline-progress-note timeline-progress-note--${workflowStatusConfig.tone}`}
-          >
-            <span className="timeline-progress-note__indicator" aria-hidden="true"></span>
-            <div className="timeline-progress-note__copy">
-              <div className="timeline-progress-note__title">{workflowPhaseLabel}</div>
-              <div className="timeline-progress-note__message">{activeStatusHint}</div>
-            </div>
-          </div>
-        )}
+        {!headerCollapsed && (
+          <div id={`timeline-header-details-${workflow.workflow_id}`} className="timeline-header-details">
+            {activeStatusHint && !showStateBanner && (
+              <div
+                className={`timeline-progress-note timeline-progress-note--${workflowStatusConfig.tone}`}
+              >
+                <span className="timeline-progress-note__indicator" aria-hidden="true"></span>
+                <div className="timeline-progress-note__copy">
+                  <div className="timeline-progress-note__title">{workflowPhaseLabel}</div>
+                  <div className="timeline-progress-note__message">{activeStatusHint}</div>
+                </div>
+              </div>
+            )}
 
-        <div className="timeline-header-meta-grid">
-          <div className="timeline-meta-item timeline-meta-item--phase">
-            <span className="timeline-meta-item__label">{t('autoCurrentPhase', language)}</span>
-            <span className="timeline-meta-item__value timeline-meta-item__value--phase">
-              {workflowPhaseLabel}
-            </span>
-          </div>
-          <div className="timeline-meta-item timeline-meta-item--start">
-            <span className="timeline-meta-item__label">{t('autoStartTime', language)}</span>
-            <span className="timeline-meta-item__value">
-              {formatWorkflowDateTime(workflowStartTime)}
-            </span>
-          </div>
-          <div className="timeline-meta-item">
-            <span className="timeline-meta-item__label">{t('autoDuration', language)}</span>
-            <span className="timeline-meta-item__value">
-              {formatDuration(workflowStartTime, workflow.completed_at ?? workflow.updated_at)}
-            </span>
-          </div>
-          <div className="timeline-meta-item">
-            <span className="timeline-meta-item__label">{t('autoTokenUsage', language)}</span>
-            <span className="timeline-meta-item__value">{formatTokens(workflow.total_tokens)}</span>
-          </div>
-          <div className="timeline-meta-item">
-            <span className="timeline-meta-item__label">{t('totalRequests', language)}</span>
-            <span className="timeline-meta-item__value">{workflow.total_requests}</span>
-          </div>
-        </div>
-
-        <div className="timeline-output-rail">
-          <div className="timeline-output-rail__buttons">
-            <Button
-              size="sm"
-              variant="outline-secondary"
-              className="timeline-output-btn"
-              disabled={!latestPlanFinalized}
-              onClick={() =>
-                latestPlanFinalized &&
-                setViewingContent({
-                  title: t('autoViewPlanTitle', language),
-                  content: latestPlanFinalized.plan_content,
-                })
-              }
-            >
-              <i className="bi bi-clipboard-check me-1"></i>
-              {t('autoFinalPlan', language)}
-              {latestPlanFinalized && (latestPlanFinalized.dev_round || 1) > 1 && (
-                <Badge variant="light" className="ms-1" style={{ fontSize: '0.65rem' }}>
-                  {t('autoRoundBadge', language).replace(
-                    '{n}',
-                    String(latestPlanFinalized.dev_round || 1)
-                  )}
-                </Badge>
-              )}
-            </Button>
-            <Button
-              size="sm"
-              variant="outline-secondary"
-              className="timeline-output-btn"
-              disabled={!latestPrReviewSummary}
-              onClick={() =>
-                latestPrReviewSummary &&
-                setViewingContent({
-                  title: t('autoViewReviewTitle', language),
-                  content: latestPrReviewSummary.review_content,
-                })
-              }
-            >
-              <i className="bi bi-check2-circle me-1"></i>
-              {t('autoPrReviewSummary', language)}
-              {latestPrReviewSummary && (latestPrReviewSummary.dev_round || 1) > 1 && (
-                <Badge variant="light" className="ms-1" style={{ fontSize: '0.65rem' }}>
-                  {t('autoRoundBadge', language).replace(
-                    '{n}',
-                    String(latestPrReviewSummary.dev_round || 1)
-                  )}
-                </Badge>
-              )}
-            </Button>
-            <Button
-              size="sm"
-              variant="outline-secondary"
-              className="timeline-output-btn"
-              disabled={!hasPr}
-              onClick={() => setViewingPrDiff(true)}
-              title={hasPrSummary ? prSummaryAriaLabel : undefined}
-              aria-label={
-                hasPrSummary
-                  ? `${t('autoFinalCodeChanges', language)}. ${prSummaryAriaLabel}`
-                  : undefined
-              }
-            >
-              <i className="bi bi-file-diff me-1"></i>
-              {t('autoFinalCodeChanges', language)}
-              {hasPrSummary && (
-                <span className="timeline-output-btn__summary" aria-hidden="true">
-                  {prSummaryText}
+            <div className="timeline-header-meta-grid">
+              <div className="timeline-meta-item timeline-meta-item--start">
+                <span className="timeline-meta-item__label">{t('autoStartTime', language)}</span>
+                <span className="timeline-meta-item__value">
+                  {formatWorkflowDateTime(workflowStartTime)}
                 </span>
-              )}
-            </Button>
-          </div>
-        </div>
-
-        {showStateBanner && (
-          <div className={`timeline-state-banner timeline-state-banner--${stateBannerTone}`}>
-            <div className="timeline-state-banner__copy">
-              <div className="timeline-state-banner__title">{workflowStatusLabel}</div>
-              {stateBannerMessage && (
-                <div className="timeline-state-banner__message">{stateBannerMessage}</div>
-              )}
+              </div>
+              <div className="timeline-meta-item">
+                <span className="timeline-meta-item__label">{t('autoDuration', language)}</span>
+                <span className="timeline-meta-item__value">
+                  {formatDuration(workflowStartTime, workflow.completed_at ?? workflow.updated_at)}
+                </span>
+              </div>
+              <div className="timeline-meta-item">
+                <span className="timeline-meta-item__label">{t('autoTokenUsage', language)}</span>
+                <span className="timeline-meta-item__value">
+                  {formatTokens(workflow.total_tokens)}
+                </span>
+              </div>
+              <div className="timeline-meta-item">
+                <span className="timeline-meta-item__label">{t('totalRequests', language)}</span>
+                <span className="timeline-meta-item__value">{workflow.total_requests}</span>
+              </div>
             </div>
-            <div className="timeline-state-banner__actions">
-              {isWaiting && (
+
+            <div className="timeline-output-rail">
+              <div className="timeline-output-rail__buttons">
                 <Button
                   size="sm"
-                  variant="success"
-                  onClick={handleMarkDone}
-                  disabled={markDoneMutation.isPending}
-                >
-                  <i className="bi bi-check-circle me-1"></i>
-                  {t('autoCompleteWorkflow', language)}
-                </Button>
-              )}
-              {latestFailedMilestone && (
-                <button
-                  type="button"
-                  className="timeline-inline-link"
-                  onClick={() => expandAndScrollToMilestone(latestFailedMilestone.milestone_id)}
-                >
-                  {t('autoOpenLatestMilestone', language)}
-                </button>
-              )}
-              {latestMilestoneWithSession && (
-                <button
-                  type="button"
-                  className="timeline-inline-link"
+                  variant="outline-secondary"
+                  className="timeline-output-btn"
+                  disabled={!latestPlanFinalized}
                   onClick={() =>
-                    setViewingSession({
-                      milestoneId: latestMilestoneWithSession.milestone_id,
-                      sessionId:
-                        latestMilestoneWithSession.actual_llm_session_id ??
-                        latestMilestoneWithSession.llm_session_id ??
-                        latestMilestoneWithSession.review_session_id ??
-                        latestMilestoneWithSession.session_id ??
-                        '',
+                    latestPlanFinalized &&
+                    setViewingContent({
+                      title: t('autoViewPlanTitle', language),
+                      content: latestPlanFinalized.plan_content,
                     })
                   }
                 >
-                  {t('autoViewSession', language)}
-                </button>
-              )}
-              {milestoneWithFinalChanges && (
-                <button
-                  type="button"
-                  className="timeline-inline-link"
-                  onClick={() => setViewingDiff(milestoneWithFinalChanges.milestone_id)}
+                  <i className="bi bi-clipboard-check me-1"></i>
+                  {t('autoFinalPlan', language)}
+                  {latestPlanFinalized && (latestPlanFinalized.dev_round || 1) > 1 && (
+                    <Badge variant="light" className="ms-1" style={{ fontSize: '0.65rem' }}>
+                      {t('autoRoundBadge', language).replace(
+                        '{n}',
+                        String(latestPlanFinalized.dev_round || 1)
+                      )}
+                    </Badge>
+                  )}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline-secondary"
+                  className="timeline-output-btn"
+                  disabled={!latestPrReviewSummary}
+                  onClick={() =>
+                    latestPrReviewSummary &&
+                    setViewingContent({
+                      title: t('autoViewReviewTitle', language),
+                      content: latestPrReviewSummary.review_content,
+                    })
+                  }
                 >
-                  {t('autoViewChanges', language)}
-                </button>
-              )}
+                  <i className="bi bi-check2-circle me-1"></i>
+                  {t('autoPrReviewSummary', language)}
+                  {latestPrReviewSummary && (latestPrReviewSummary.dev_round || 1) > 1 && (
+                    <Badge variant="light" className="ms-1" style={{ fontSize: '0.65rem' }}>
+                      {t('autoRoundBadge', language).replace(
+                        '{n}',
+                        String(latestPrReviewSummary.dev_round || 1)
+                      )}
+                    </Badge>
+                  )}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline-secondary"
+                  className="timeline-output-btn"
+                  disabled={!hasPr}
+                  onClick={() => setViewingPrDiff(true)}
+                  title={hasPrSummary ? prSummaryAriaLabel : undefined}
+                  aria-label={
+                    hasPrSummary
+                      ? `${t('autoFinalCodeChanges', language)}. ${prSummaryAriaLabel}`
+                      : undefined
+                  }
+                >
+                  <i className="bi bi-file-diff me-1"></i>
+                  {t('autoFinalCodeChanges', language)}
+                  {hasPrSummary && (
+                    <span className="timeline-output-btn__summary" aria-hidden="true">
+                      {prSummaryText}
+                    </span>
+                  )}
+                </Button>
+              </div>
             </div>
+
+            {showStateBanner && (
+              <div className={`timeline-state-banner timeline-state-banner--${stateBannerTone}`}>
+                <div className="timeline-state-banner__copy">
+                  <div className="timeline-state-banner__title">{workflowStatusLabel}</div>
+                  {stateBannerMessage && (
+                    <div className="timeline-state-banner__message">{stateBannerMessage}</div>
+                  )}
+                </div>
+                <div className="timeline-state-banner__actions">
+                  {isWaiting && (
+                    <Button
+                      size="sm"
+                      variant="success"
+                      onClick={handleMarkDone}
+                      disabled={markDoneMutation.isPending}
+                    >
+                      <i className="bi bi-check-circle me-1"></i>
+                      {t('autoCompleteWorkflow', language)}
+                    </Button>
+                  )}
+                  {latestFailedMilestone && (
+                    <button
+                      type="button"
+                      className="timeline-inline-link"
+                      onClick={() => expandAndScrollToMilestone(latestFailedMilestone.milestone_id)}
+                    >
+                      {t('autoOpenLatestMilestone', language)}
+                    </button>
+                  )}
+                  {latestMilestoneWithSession && (
+                    <button
+                      type="button"
+                      className="timeline-inline-link"
+                      onClick={() =>
+                        setViewingSession({
+                          milestoneId: latestMilestoneWithSession.milestone_id,
+                          sessionId:
+                            latestMilestoneWithSession.actual_llm_session_id ??
+                            latestMilestoneWithSession.llm_session_id ??
+                            latestMilestoneWithSession.review_session_id ??
+                            latestMilestoneWithSession.session_id ??
+                            '',
+                        })
+                      }
+                    >
+                      {t('autoViewSession', language)}
+                    </button>
+                  )}
+                  {milestoneWithFinalChanges && (
+                    <button
+                      type="button"
+                      className="timeline-inline-link"
+                      onClick={() => setViewingDiff(milestoneWithFinalChanges.milestone_id)}
+                    >
+                      {t('autoViewChanges', language)}
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

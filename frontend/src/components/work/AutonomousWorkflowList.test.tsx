@@ -253,6 +253,53 @@ describe('AutonomousWorkflowList', () => {
     expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ workflow_id: 'wf-1' }));
   });
 
+  it('keeps the current selection when filters hide it from the list', () => {
+    const onSelect = vi.fn();
+    const onClearSelection = vi.fn();
+
+    mockUseWorkflows.mockImplementation((filters) => {
+      if (filters?.search === 'other') {
+        return {
+          data: {
+            success: true,
+            workflows: [workflow({ workflow_id: 'wf-2', title: 'Other workflow' })],
+            total: 1,
+            limit: 50,
+            offset: 0,
+          },
+          isLoading: false,
+        } as ReturnType<typeof useWorkflows>;
+      }
+
+      return {
+        data: {
+          success: true,
+          workflows: [workflow({ workflow_id: 'wf-1', title: 'Selected workflow' })],
+          total: 1,
+          limit: 50,
+          offset: 0,
+        },
+        isLoading: false,
+      } as ReturnType<typeof useWorkflows>;
+    });
+
+    render(
+      <AutonomousWorkflowList selectedId="wf-1" onSelect={onSelect} onClearSelection={onClearSelection} />
+    );
+
+    onSelect.mockClear();
+    fireEvent.change(screen.getByPlaceholderText('Search workflows...'), {
+      target: { value: 'other' },
+    });
+
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(onClearSelection).not.toHaveBeenCalled();
+  });
+
   it('collapses batch workflows and expands them in ascending batch order', () => {
     mockWorkflowList([
       workflow({
