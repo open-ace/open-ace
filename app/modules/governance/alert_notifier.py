@@ -352,6 +352,31 @@ class AlertSeverity(Enum):
     CRITICAL = "critical"
 
 
+# Issue #1832 F2: AlertSeverity is the single source of truth for the accepted
+# severity set. It existed before but was never used to validate input —
+# severity was stored verbatim and only ranked via _SEVERITY_ORDER.get(..., 0),
+# so an unknown severity silently ranked as ``info`` (lowest priority) and was
+# still persisted. Creation now fails fast on an unknown severity instead.
+VALID_ALERT_SEVERITIES = frozenset(member.value for member in AlertSeverity)
+
+
+def normalize_alert_severity(severity: str) -> str:
+    """Normalize and validate an alert severity string.
+
+    Accepted values are the ``AlertSeverity`` enum values, case-insensitive.
+    Returns the normalized lowercase severity, or raises ``ValueError`` so the
+    route layer can convert it to an HTTP 400 instead of persisting a value
+    that would silently rank as the lowest priority.
+    """
+    normalized = (severity or "").strip().lower()
+    if normalized not in VALID_ALERT_SEVERITIES:
+        raise ValueError(
+            f"Invalid alert severity {severity!r}; "
+            f"expected one of {sorted(VALID_ALERT_SEVERITIES)}"
+        )
+    return normalized
+
+
 @dataclass
 class Alert:
     """Alert data structure."""
@@ -444,6 +469,10 @@ class AlertNotifier:
             )
             return False
 
+        # Issue #1832 F2: the ``.get(..., 0)`` default is defensive only. Since
+        # alert creation now rejects unknown severities (normalize_alert_severity),
+        # alert.severity is always a real key at runtime; the fallback keeps this
+        # read path safe against any alert persisted before that guard existed.
         if _SEVERITY_ORDER.get(alert.severity, 0) < _SEVERITY_ORDER.get(prefs.min_severity, 1):
             logger.debug(
                 "Alert severity %s below user %s threshold %s for %s",
@@ -1443,6 +1472,9 @@ class AlertNotifier:
         Returns:
             Alert: The created alert.
         """
+        # Issue #1832 F2: reject unknown severities at creation instead of
+        # persisting them and silently ranking them as the lowest priority.
+        severity = normalize_alert_severity(severity)
         alert = Alert(
             alert_id=str(uuid.uuid4()),
             alert_type=alert_type,

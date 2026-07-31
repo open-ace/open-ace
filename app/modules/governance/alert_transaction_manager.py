@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
 from app.repositories.database import Database, adapt_sql, is_postgresql
+from app.modules.governance.alert_notifier import normalize_alert_severity
 
 logger = logging.getLogger(__name__)
 
@@ -55,13 +56,26 @@ class QuotaAlertData:
             "message": self._generate_message(),
         }
 
+    @property
+    def severity(self) -> str:
+        """Map original_alert_type to the alerts-table severity.
+
+        Issue #1832 F2: centralizes the warning/critical/exceeded→critical
+        mapping so both persistence and pre-write validation share one source
+        of truth.
+        """
+        if self.original_alert_type == "exceeded":
+            return "critical"
+        return self.original_alert_type
+
     def to_alerts_dict(self) -> dict:
         """Convert to alerts table format."""
-        # Map alert_type to severity
-        if self.original_alert_type == "exceeded":
-            severity = "critical"
-        else:
-            severity = self.original_alert_type
+        # Issue #1832 F2: validate the derived severity. This path writes the
+        # alerts table directly (bypassing AlertNotifier.create_alert), so the
+        # severity guard must be applied here too — original_alert_type is a
+        # public field and must not persist an unknown value that would later
+        # silently rank as the lowest priority.
+        severity = normalize_alert_severity(self.severity)
 
         return {
             "alert_id": str(uuid.uuid4()),
@@ -193,6 +207,12 @@ class AlertTransactionManager:
         Returns:
             Tuple of (success, alert_id). alert_id is None on failure.
         """
+        # Issue #1832 F2: this path bypasses AlertNotifier.create_alert, so
+        # validate the derived severity up front (fail fast). Doing it before
+        # the dedup/retry loop means an unknown severity raises immediately
+        # instead of being retried, queued for compensation, or persisted.
+        normalize_alert_severity(alert_data.severity)
+
         # Check for recent alerts (deduplication).
         #
         # NOTE (Issue #1831 webhook-fan-out analysis): a sustained quota breach

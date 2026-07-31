@@ -527,6 +527,32 @@ class SessionManager:
         db_url = f"sqlite:///{self.db_path}" if dialect == "sqlite" and self.db_path else None
         load_schema_from_file(db_url=db_url, dialect=dialect)
 
+        # Issue #1832 F8: fail fast at startup if the tenant-scoping column is
+        # absent. The runtime tenant predicate (_tenant_scope_condition) silently
+        # degrades when tenant_id is missing — reads return no tenant clause and
+        # writes (require_tenant=True) fall through to ``"", []`` (no clause),
+        # i.e. a cross-tenant write. The authoritative schema and the back-fill
+        # in load_schema_from_file() guarantee these columns exist, so reaching
+        # this error means real schema drift that must surface loudly instead of
+        # weakening tenant isolation. Read-only introspection — performs no DDL.
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            missing = [
+                table
+                for table in ("agent_sessions", "session_messages")
+                if not self._column_exists(cursor, table, "tenant_id")
+            ]
+            if missing:
+                raise RuntimeError(
+                    "Required tenant_id column missing on "
+                    + ", ".join(missing)
+                    + "; tenant isolation cannot be enforced. "
+                    "Run schema initialization or migrations to repair the schema."
+                )
+        finally:
+            conn.close()
+
     @staticmethod
     def _extract_external_message_id(metadata: dict[str, Any] | None) -> str:
         """Extract a stable external message identity from transcript metadata."""

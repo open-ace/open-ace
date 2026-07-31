@@ -258,6 +258,11 @@ def _backfill_missing_columns(conn, dialect: str) -> None:
             ("workspace_type", "TEXT", "'local'"),
             ("remote_machine_id", "TEXT", None),
             ("paused_at", "TIMESTAMP" if not is_postgres else "timestamp without time zone", None),
+            # tenant_id is in the authoritative CREATE TABLE, so fresh DBs always
+            # have it; legacy pre-tenant DBs need it back-filled (DEFAULT 1, the
+            # default tenant) so the runtime tenant predicate does not silently
+            # degrade to global scope (Issue #1832 F8).
+            ("tenant_id", "INTEGER", "1"),
         ]
         for col_name, col_type, default in agent_sessions_columns:
             if not _column_exists(conn, "agent_sessions", col_name, dialect):
@@ -282,6 +287,10 @@ def _backfill_missing_columns(conn, dialect: str) -> None:
             ("external_message_id", "TEXT", "''"),
             ("content_blocks", "TEXT", None),
             ("milestone_id", "TEXT", "''"),
+            # See agent_sessions above: back-fill tenant_id on legacy DBs so the
+            # write-path tenant predicate does not silently match all tenants
+            # (Issue #1832 F8).
+            ("tenant_id", "INTEGER", "1"),
         ]
         for col_name, col_type, default in session_messages_columns:
             if not _column_exists(conn, "session_messages", col_name, dialect):

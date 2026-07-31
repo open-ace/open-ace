@@ -713,6 +713,24 @@ def admin_required(f=None):
                         user_repo = UserRepository()
                         user = user_repo.get_user_by_id(user_id)
                         if user:
+                            # Issue #1832 F1: surface a latent security
+                            # weakening without changing behavior. get_user_by_id
+                            # returns SELECT * and must carry must_change_password;
+                            # if the key is ever absent (e.g. a future SELECT
+                            # narrowing), enforce_password_change_requirement
+                            # silently treats it as falsy and the forced password
+                            # change is bypassed. Historical behavior is to
+                            # proceed, so we keep doing that but log so the silent
+                            # bypass is observable. This finding does NOT fix the
+                            # semantics — it only makes the weakening visible.
+                            if "must_change_password" not in user:
+                                logger.warning(
+                                    "WebUI-token admin path: user dict lacks "
+                                    "'must_change_password' key (user_id=%s); "
+                                    "forced password change cannot be enforced "
+                                    "— latent auth weakening, see Issue #1832 F1",
+                                    user_id,
+                                )
                             if user.get("role") != "admin":
                                 return jsonify({"error": "Admin access required"}), 403
 
