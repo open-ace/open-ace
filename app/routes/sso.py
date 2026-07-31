@@ -68,12 +68,13 @@ def _get_relaystate_signing_key() -> bytes:
     if key:
         return key.encode("utf-8")
 
-    # Fall back to Fernet key (if available)
-    from app.utils.smtp_crypto import get_password_manager
+    # Fall back to encryption key (same as used by SMTPPasswordManager)
+    from app.utils.security_env import get_encryption_key_material
+
     try:
-        # Use first 32 bytes of Fernet key as HMAC key
-        fernet_key = get_password_manager().key
-        return fernet_key[:32]
+        # Use same key derivation as SMTPPasswordManager
+        key_material = get_encryption_key_material(purpose="RelayState signing")
+        return hashlib.sha256(key_material.encode()).digest()
     except Exception:
         # Last resort: generate a stable key from app secret
         app_secret = os.environ.get("SECRET_KEY", "open-ace-default-secret")
@@ -619,18 +620,12 @@ def update_provider(provider_name: str):
         serialized_config = get_sso_manager().serialize_provider_config(new_config)
     else:
         # Preserve existing encrypted secret - avoid unnecessary re-encryption
-        # Load existing config and keep the encrypted_secret field
-        try:
-            existing_raw_config = json.loads(existing["config"])
-            existing_encrypted = existing_raw_config.get("client_secret_encrypted", "")
+        # Load existing config and check if encrypted_secret exists
+        existing_raw_config = json.loads(existing["config"])
+        existing_encrypted = existing_raw_config.get("client_secret_encrypted", "")
 
-            # Issue #1826 F6: If existing_encrypted is empty, it means:
-            # 1. Provider was created without a client_secret (e.g., SAML)
-            # 2. Or legacy provider with plaintext secret that was never encrypted
-            # In both cases, we serialize the new_config which will encrypt the current secret
-            # (empty string for SAML, or the existing plaintext for legacy providers)
-            # This is safe because serialize_provider_config handles empty secrets correctly
-
+        if existing_encrypted:
+            # Provider already has encrypted secret - preserve it to avoid IV churn
             # Remove client_secret from new_config to avoid re-encryption
             config_for_serialize = new_config.copy()
             config_for_serialize.pop("client_secret", None)
@@ -641,9 +636,10 @@ def update_provider(provider_name: str):
             )
             serialized_config_dict["client_secret_encrypted"] = existing_encrypted
             serialized_config = json.dumps(serialized_config_dict)
-
-        except Exception as e:
-            logger.warning(f"Failed to preserve encrypted secret, falling back to re-encrypt: {e}")
+        else:
+            # No existing encrypted secret - this is a legacy provider or SAML
+            # Serialize with current client_secret (empty for SAML, or plaintext for legacy)
+            # serialize_provider_config will encrypt it properly for legacy providers
             serialized_config = get_sso_manager().serialize_provider_config(new_config)
     get_sso_manager().db.execute(
         """

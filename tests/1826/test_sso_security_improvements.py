@@ -42,7 +42,7 @@ class TestF2AuthStateExceptionHandling:
                 state="test_state",
                 code_verifier="test_verifier",
                 provider_name="test_provider",
-                nonce="test_nonce"
+                nonce="test_nonce",
             )
 
     def test_store_auth_state_success_path(self):
@@ -57,7 +57,7 @@ class TestF2AuthStateExceptionHandling:
             state="test_state",
             code_verifier="test_verifier",
             provider_name="test_provider",
-            nonce="test_nonce"
+            nonce="test_nonce",
         )
 
         # Verify DB was called
@@ -72,14 +72,16 @@ class TestF5EmptySecretBypass:
         manager = SSOManager()
 
         # Config with empty encrypted secret and non-empty plaintext
-        raw_config = json.dumps({
-            "name": "test_provider",
-            "client_id": "test_client_id",
-            "client_secret": "should_be_ignored",
-            "client_secret_encrypted": "",
-            "authorization_url": "https://example.com/auth",
-            "token_url": "https://example.com/token",
-        })
+        raw_config = json.dumps(
+            {
+                "name": "test_provider",
+                "client_id": "test_client_id",
+                "client_secret": "should_be_ignored",
+                "client_secret_encrypted": "",
+                "authorization_url": "https://example.com/auth",
+                "token_url": "https://example.com/token",
+            }
+        )
 
         # Deserialize should return empty secret
         config = manager.deserialize_provider_config(raw_config)
@@ -92,13 +94,15 @@ class TestF5EmptySecretBypass:
         manager = SSOManager()
 
         # Config without encrypted field (legacy)
-        raw_config = json.dumps({
-            "name": "test_provider",
-            "client_id": "test_client_id",
-            "client_secret": "plaintext_secret",
-            "authorization_url": "https://example.com/auth",
-            "token_url": "https://example.com/token",
-        })
+        raw_config = json.dumps(
+            {
+                "name": "test_provider",
+                "client_id": "test_client_id",
+                "client_secret": "plaintext_secret",
+                "authorization_url": "https://example.com/auth",
+                "token_url": "https://example.com/token",
+            }
+        )
 
         # Deserialize should keep plaintext
         config = manager.deserialize_provider_config(raw_config)
@@ -118,7 +122,6 @@ class TestF6AvoidReEncryption:
         # Mock scenario: update only scope, not client_secret
         # The update_provider route should preserve existing encrypted_secret
         # Implementation is in routes/sso.py lines 504-545
-
         # This is a placeholder for integration testing
         # Real test would use Flask test client
         pass
@@ -178,20 +181,24 @@ class TestF1F7ProviderCacheTTL:
         manager = SSOManager()
 
         # Mock DB
-        manager.db.fetch_one = MagicMock(return_value={
-            "name": "test_provider",
-            "provider_type": "oauth2",
-            "config": json.dumps({
+        manager.db.fetch_one = MagicMock(
+            return_value={
                 "name": "test_provider",
-                "client_id": "test_client_id",
-                "client_secret_encrypted": "test_encrypted",
-                "authorization_url": "https://example.com/auth",
-                "token_url": "https://example.com/token",
                 "provider_type": "oauth2",
-            }),
-            "tenant_id": 1,
-            "is_active": True
-        })
+                "config": json.dumps(
+                    {
+                        "name": "test_provider",
+                        "client_id": "test_client_id",
+                        "client_secret_encrypted": "test_encrypted",
+                        "authorization_url": "https://example.com/auth",
+                        "token_url": "https://example.com/token",
+                        "provider_type": "oauth2",
+                    }
+                ),
+                "tenant_id": 1,
+                "is_active": True,
+            }
+        )
 
         # Mock password manager to avoid decryption
         manager._password_manager.decrypt = MagicMock(return_value="test_secret")
@@ -212,20 +219,24 @@ class TestF1F7ProviderCacheTTL:
         manager = SSOManager()
 
         # Mock DB
-        manager.db.fetch_one = MagicMock(return_value={
-            "name": "test_provider",
-            "provider_type": "oauth2",
-            "config": json.dumps({
+        manager.db.fetch_one = MagicMock(
+            return_value={
                 "name": "test_provider",
-                "client_id": "test_client_id",
-                "client_secret_encrypted": "test_encrypted",
-                "authorization_url": "https://example.com/auth",
-                "token_url": "https://example.com/token",
                 "provider_type": "oauth2",
-            }),
-            "tenant_id": 1,
-            "is_active": True
-        })
+                "config": json.dumps(
+                    {
+                        "name": "test_provider",
+                        "client_id": "test_client_id",
+                        "client_secret_encrypted": "test_encrypted",
+                        "authorization_url": "https://example.com/auth",
+                        "token_url": "https://example.com/token",
+                        "provider_type": "oauth2",
+                    }
+                ),
+                "tenant_id": 1,
+                "is_active": True,
+            }
+        )
 
         manager._password_manager.decrypt = MagicMock(return_value="test_secret")
 
@@ -254,6 +265,7 @@ class TestF8RelayStateSignature:
 
         # Should be valid base64
         import base64
+
         decoded = json.loads(base64.urlsafe_b64decode(encoded))
 
         # Should have version, signature, etc.
@@ -285,7 +297,7 @@ class TestF8RelayStateSignature:
             "s": "original_state",
             "r": "https://attacker.com/malicious",
             "t": int(datetime.now(timezone.utc).timestamp()),
-            "sig": "invalid_signature_12345"
+            "sig": "invalid_signature_12345",
         }
         encoded = base64.urlsafe_b64encode(json.dumps(state_data).encode()).decode()
 
@@ -300,10 +312,7 @@ class TestF8RelayStateSignature:
         from app.routes.sso import _decode_state
 
         # Legacy format without signature
-        state_data = {
-            "s": "legacy_state",
-            "r": "https://example.com/legacy"
-        }
+        state_data = {"s": "legacy_state", "r": "https://example.com/legacy"}
         encoded = base64.urlsafe_b64encode(json.dumps(state_data).encode()).decode()
 
         # Should accept (with warning logged)
@@ -350,6 +359,7 @@ class TestF4SessionCascadeCleanup:
 
         # Verify the implementation includes cookie clearing
         from app.routes.sso import logout
+
         source = inspect.getsource(logout)
 
         # Check for delete_cookie call
@@ -367,7 +377,7 @@ class TestF4SessionCascadeCleanup:
         # Verify cookie deletion is implemented
         assert "delete_cookie" in source
         assert "httponly=True" in source
-        assert "samesite=\"Lax\"" in source
+        assert 'samesite="Lax"' in source
 
 
 class TestIntegration:

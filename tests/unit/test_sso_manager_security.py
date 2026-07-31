@@ -44,10 +44,12 @@ def sso_manager(tmp_path, monkeypatch):
     manager = SSOManager(db=db)
     load_schema_from_file(db_url=manager.db.db_url, dialect="sqlite")
 
-    try:
-        yield manager
-    finally:
-        smtp_crypto._password_manager_instance = None
+    # Issue #1826: Mock is_postgresql for all SQLite tests
+    with patch("app.repositories.database.is_postgresql", return_value=False):
+        try:
+            yield manager
+        finally:
+            smtp_crypto._password_manager_instance = None
 
 
 def test_register_provider_stores_only_encrypted_client_secret(sso_manager):
@@ -103,11 +105,15 @@ def test_deserialize_provider_config_supports_legacy_plaintext_secret(sso_manage
 
 def test_complete_authentication_passes_pkce_verifier_to_provider(sso_manager):
     """The stored PKCE verifier must be forwarded during code exchange."""
+    import time
+
     provider = MagicMock()
     provider.authenticate.return_value = SSOAuthResult(success=True)
 
     with sso_manager._providers_lock:
         sso_manager._providers["google"] = provider
+        # Issue #1826 F1/F7: Set cache timestamp to prevent TTL expiry
+        sso_manager._provider_cache_time["google"] = time.time()
 
     sso_manager._store_auth_state("state-1", "verifier-1", "google", "nonce-1")
 
@@ -130,45 +136,49 @@ def test_complete_authentication_passes_pkce_verifier_to_provider(sso_manager):
 def test_complete_authentication_rejects_missing_pkce_verifier(sso_manager):
     """A stored auth state without a code_verifier must hard-fail, not silently
     degrade PKCE by omitting the verifier from the token request."""
+    import time
+
     provider = MagicMock()
     provider.authenticate.return_value = SSOAuthResult(success=True)
 
     with sso_manager._providers_lock:
         sso_manager._providers["google"] = provider
+        # Issue #1826 F1/F7: Set cache timestamp to prevent TTL expiry
+        sso_manager._provider_cache_time["google"] = time.time()
 
-    # The fixture uses SQLite; force the SQLite placeholder path so the INSERT
-    # below is not mis-adapted to '%s' by a leaked global PostgreSQL config.
-    with patch("app.repositories.database.is_postgresql", return_value=False):
-        # Simulate the upstream failure mode flagged by the review: state storage
-        # produced a row but the verifier never landed in it.
-        sso_manager.db.execute(
-            "INSERT INTO sso_auth_states (state, code_verifier, provider_name, nonce) "
-            "VALUES (?, ?, ?, ?)",
-            ("state-no-verifier", "", "google", "nonce-x"),  # empty verifier
-        )
+    # Simulate the upstream failure mode flagged by the review: state storage
+    # produced a row but the verifier never landed in it.
+    sso_manager.db.execute(
+        "INSERT INTO sso_auth_states (state, code_verifier, provider_name, nonce) "
+        "VALUES (?, ?, ?, ?)",
+        ("state-no-verifier", "", "google", "nonce-x"),  # empty verifier
+    )
 
-        result = sso_manager.complete_authentication(
-            provider_name="google",
-            code="auth-code",
-            state="state-no-verifier",
-            redirect_uri="https://app.example.com/api/sso/callback/google",
-        )
+    result = sso_manager.complete_authentication(
+        provider_name="google",
+        code="auth-code",
+        state="state-no-verifier",
+        redirect_uri="https://app.example.com/api/sso/callback/google",
+    )
 
     assert result.success is False
     assert result.error == "invalid_state"
     provider.authenticate.assert_not_called()  # the load-bearing assertion
-    with patch("app.repositories.database.is_postgresql", return_value=False):
-        assert sso_manager._get_auth_state("state-no-verifier") is None
+    assert sso_manager._get_auth_state("state-no-verifier") is None
 
 
 def test_complete_authentication_rejects_missing_pkce_verifier_key(sso_manager):
     """A stored auth state whose row lacks the code_verifier key entirely (e.g. a
     future schema regression or a partially-written state) must hard-fail."""
+    import time
+
     provider = MagicMock()
     provider.authenticate.return_value = SSOAuthResult(success=True)
 
     with sso_manager._providers_lock:
         sso_manager._providers["google"] = provider
+        # Issue #1826 F1/F7: Set cache timestamp to prevent TTL expiry
+        sso_manager._provider_cache_time["google"] = time.time()
 
     # Inject a row-shaped auth state that carries no code_verifier at all, to
     # exercise the dict-miss path (auth_state.get("code_verifier") -> None).
@@ -200,10 +210,14 @@ def test_complete_authentication_rejects_missing_pkce_verifier_key(sso_manager):
 
 def test_complete_authentication_rejects_state_bound_to_other_provider(sso_manager):
     """Auth state cannot be replayed across providers."""
+    import time
+
     provider = MagicMock()
 
     with sso_manager._providers_lock:
         sso_manager._providers["github"] = provider
+        # Issue #1826 F1/F7: Set cache timestamp to prevent TTL expiry
+        sso_manager._provider_cache_time["github"] = time.time()
 
     sso_manager._store_auth_state("state-2", "verifier-2", "google", "nonce-2")
 
