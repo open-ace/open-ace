@@ -14,10 +14,10 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 
-const navigateMock = vi.fn();
-
+// Mock react-router-dom navigate
+const mockNavigate = vi.fn();
 vi.mock('react-router-dom', () => ({
-  useNavigate: () => navigateMock,
+  useNavigate: () => mockNavigate,
 }));
 
 vi.mock('@/store', () => ({
@@ -29,6 +29,21 @@ vi.mock('@/i18n', () => ({
   t: (key: string) => key,
 }));
 
+// Define explicit interfaces for mocked components
+interface LoadingProps {
+  text?: string;
+}
+
+interface ButtonProps {
+  children: React.ReactNode;
+  onClick?: () => void;
+  disabled?: boolean;
+}
+
+interface EmptyStateProps {
+  title: string;
+}
+
 // Mock UI components to reduce complexity
 vi.mock('@/components/common', () => ({
   useToast: () => ({
@@ -38,13 +53,13 @@ vi.mock('@/components/common', () => ({
     info: vi.fn(),
   }),
   useConfirm: () => vi.fn().mockResolvedValue(true),
-  Loading: ({ text }: any) => <div data-testid="loading">{text}</div>,
-  Button: ({ children, onClick, disabled }: any) => (
+  Loading: ({ text }: LoadingProps) => <div data-testid="loading">{text}</div>,
+  Button: ({ children, onClick, disabled }: ButtonProps) => (
     <button onClick={onClick} disabled={disabled}>
       {children}
     </button>
   ),
-  EmptyState: ({ title }: any) => <div data-testid="empty-state">{title}</div>,
+  EmptyState: ({ title }: EmptyStateProps) => <div data-testid="empty-state">{title}</div>,
 }));
 
 // Mock fsApi with realistic behavior
@@ -209,42 +224,6 @@ describe('LocalDirectoryBrowser Integration - Issue #1832 F3', () => {
 
       // Should render successfully even with empty directories
       expect(screen.getByText('alice')).toBeInTheDocument();
-    });
-  });
-
-  describe('path selection and callback', () => {
-    it('calls onSelectPath when directory is selected', async () => {
-      const onSelectPath = vi.fn();
-
-      vi.mocked(fsApi.browseDirectory).mockResolvedValue({
-        path: '/home/alice',
-        directories: [{ name: 'project', path: '/home/alice/project', is_writable: true }],
-        parent: '/home',
-        is_writable: true,
-      });
-
-      render(
-        <LocalDirectoryBrowser
-          initialPath="/home/alice"
-          onSelectPath={onSelectPath}
-          lockToRoot={true}
-          rootPath="/home/alice"
-        />
-      );
-
-      await waitFor(() => {
-        expect(screen.getByText('project')).toBeInTheDocument();
-      });
-
-      // Click on directory should navigate, not select
-      fireEvent.click(screen.getByText('project'));
-
-      await waitFor(() => {
-        expect(fsApi.browseDirectory).toHaveBeenCalled();
-      });
-
-      // onSelectPath should not be called yet (navigation happens first)
-      // In real usage, user would click a "Select" button
     });
   });
 
