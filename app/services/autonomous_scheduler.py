@@ -51,9 +51,7 @@ def get_max_concurrent_workflows() -> int:
             resolve_agent_task_policy_path,
         )
 
-        conf = resolve_agent_task_policy_path(
-            _AGENT_LAUNCHER_CONF if "OPENACE_LAUNCHER_CONF" in os.environ else None
-        )
+        conf = resolve_agent_task_policy_path(os.environ.get("OPENACE_LAUNCHER_CONF"))
         if not conf:
             return MAX_CONCURRENT_WORKFLOWS
         return read_agent_task_policy(

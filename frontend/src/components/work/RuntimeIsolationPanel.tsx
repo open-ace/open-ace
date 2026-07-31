@@ -143,13 +143,15 @@ export function RuntimeIsolationPanel({ workflow }: RuntimeIsolationPanelProps) 
       enforced: enforced.inode,
     },
   ];
-  const summaryRows: LimitRow[] = !policyConfigured
-    ? []
-    : SUMMARY_LIMIT_KEYS.flatMap((labelKey) => {
-        const row = rows.find((limitRow) => limitRow.labelKey === labelKey);
-        return row && row.value !== '—' ? [row] : [];
-      });
-  const visibleSummaryRows: LimitRow[] = summaryRows.length > 0 ? summaryRows : rows.slice(0, 4);
+  const visibleSummaryRows: LimitRow[] | null = policyConfigured
+    ? (() => {
+        const summaryRows: LimitRow[] = SUMMARY_LIMIT_KEYS.flatMap((labelKey) => {
+          const row = rows.find((limitRow) => limitRow.labelKey === labelKey);
+          return row && row.value !== '—' ? [row] : [];
+        });
+        return summaryRows.length > 0 ? summaryRows : rows.slice(0, 4);
+      })()
+    : null;
 
   return (
     <div className="runtime-isolation-panel" data-testid="runtime-isolation-panel">
@@ -176,7 +178,7 @@ export function RuntimeIsolationPanel({ workflow }: RuntimeIsolationPanelProps) 
           </span>
         </div>
         <div className="runtime-isolation-panel__summary-pills">
-          {policyConfigured ? (
+          {visibleSummaryRows ? (
             visibleSummaryRows.map((row) => (
               <span key={row.labelKey} className="runtime-isolation-panel__summary-pill">
                 <span className="runtime-isolation-panel__summary-label">
