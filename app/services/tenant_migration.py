@@ -112,7 +112,6 @@ class TenantMigrationService:
                 )
 
             old_tenant_id = user_row.get("tenant_id", 1)
-            current_version = user_row.get("tenant_version", 1)
 
             if old_tenant_id == new_tenant_id:
                 return MigrationResult(
@@ -365,7 +364,6 @@ class TenantMigrationService:
 
             user_id = migration.get("user_id")
             old_tenant_id = migration.get("old_tenant_id")
-            new_tenant_id = migration.get("new_tenant_id")
 
             # Reverse the migration
             result = self.migrate_user_tenant(
