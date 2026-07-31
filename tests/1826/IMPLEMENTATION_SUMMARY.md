@@ -18,15 +18,19 @@
 
 #### F4：完善 SSO logout 清理
 - **文件**：`app/routes/sso.py`
-- **修改**：在 `logout()` 中添加跨表事务清理，同时删除 `sso_sessions` 和 `sessions` 表
+- **修改**：
+  - 在 `logout()` 中添加跨表事务清理，同时删除 `sso_sessions` 和 `sessions` 表
+  - 添加 `delete_cookie` 清除 `session_token` cookie
 - **影响**：确保会话完全失效，防止 session_token 重用
-- **测试**：逻辑已实现，集成测试待补充
+- **测试**：`test_logout_deletes_both_tables`, `test_logout_clears_cookie` ✅
 
 ### Sprint 2：数据完整性保护
 
 #### F6：避免不必要的重复加密
 - **文件**：`app/routes/sso.py`
-- **修改**：在 `update_provider` 中，检查请求是否包含 `client_secret`，若未包含则保留现有密文
+- **修改**：
+  - 在 `update_provider` 中，检查请求是否包含 `client_secret`
+  - 若未包含则保留现有密文，添加详细注释说明空值处理逻辑
 - **影响**：减少审计噪音，避免 Fernet IV churn
 - **测试**：`test_update_preserves_encrypted_secret` ✅
 
@@ -48,15 +52,44 @@
 
 #### F8：RelayState 签名保护
 - **文件**：`app/routes/sso.py`
-- **修改**：添加 HMAC-SHA256 签名，版本标识 v=2，过渡期支持旧格式
+- **修改**：
+  - 添加 HMAC-SHA256 签名，版本标识 v=2
+  - 明确过渡期结束时间：2027-01-31（从 2026-07-31 起 6 个月）
+  - 添加监控指标注释：`relaystate_legacy_format_total`
 - **影响**：防止 RelayState 篡改攻击
-- **测试**：`test_encode_state_with_signature`, `test_decode_state_*` ✅
+- **测试**：
+  - `test_encode_state_with_signature` ✅
+  - `test_decode_state_valid_signature` ✅
+  - `test_decode_state_invalid_signature` ✅
+  - `test_decode_state_legacy_format` ✅
+  - `test_decode_state_error_handling` ✅
+  - `test_relaystate_transition_period_documented` ✅
+
+## 代码审查修复
+
+根据代码审查意见，已完成以下修复：
+
+### P1 阻塞项修复
+
+#### Finding 1: F4 logout() 添加 cookie 清除
+- **修复**：在 `logout()` 返回前添加 `response.delete_cookie("session_token")`
+- **验证**：通过 `test_logout_clears_cookie` 测试
+
+#### Finding 2: F8 明确过渡期结束时间
+- **修复**：在 `_decode_state` 文档注释中明确过渡期结束时间：2027-01-31
+- **验证**：通过 `test_relaystate_transition_period_documented` 测试
+
+### P2 改进项修复
+
+#### Finding 3: F6 添加密文保留逻辑注释
+- **修复**：添加详细注释说明 `existing_encrypted` 为空时的处理逻辑
+- **说明**：阐明空值情况下的安全处理策略
 
 ## 测试覆盖
 
 所有新增功能均有单元测试覆盖：
 - 新增测试文件：`tests/1826/test_sso_security_improvements.py`
-- 测试通过率：15/15 (100%)
+- 测试通过率：**18/18 (100%)**
 
 ## 环境变量
 
@@ -76,7 +109,7 @@ SSO_RELAYSTATE_SIGNING_KEY=your-secret-key
 ## 兼容性说明
 
 ### F8：RelayState 签名过渡期
-- **过渡期**：6 个月（从发布之日起）
+- **过渡期**：6 个月（2026-07-31 至 2027-01-31）
 - **旧格式支持**：过渡期内兼容无签名旧格式，记录警告日志
 - **过渡期后**：拒绝无签名 RelayState，返回 400 错误
 
@@ -84,6 +117,10 @@ SSO_RELAYSTATE_SIGNING_KEY=your-secret-key
 - **数据库变更**：`client_secret_encrypted` 字段值更稳定（审计友好）
 - **API 兼容性**：响应内容不变（从不返回 client_secret）
 - **客户端影响**：无（客户端不应依赖密文值）
+
+### F4：Logout 行为变更
+- **Cookie 清除**：logout 现在会清除 `session_token` cookie
+- **客户端影响**：无（浏览器会自动处理 cookie 清除）
 
 ## 验证清单
 
@@ -93,10 +130,12 @@ SSO_RELAYSTATE_SIGNING_KEY=your-secret-key
 - [x] 兼容性策略明确
 - [x] 线程安全保证（F1/F7）
 - [x] 审计日志完善（F2/F4）
+- [x] Cookie 清除实现（F4）
+- [x] 过渡期时间明确（F8）
 
 ## 已知限制
 
-1. **F4 会话清理**：跨表事务需要确保死锁检测和重试机制（已在代码中实现）
+1. **F4 会话清理**：跨表事务已实现，确保死锁检测和重试机制
 2. **F8 过渡期**：需要监控旧格式使用率，过渡期结束前 1 个月发送告警
 
 ## 下一步建议

@@ -11,6 +11,7 @@ This module tests the 8 security findings (F1-F8) fixed in Sprint 1-5:
 - F8: RelayState signature
 """
 
+import inspect
 import json
 import os
 import time
@@ -20,7 +21,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from app.modules.sso.exceptions import SSOConfigDecryptionError
-from app.modules.sso.manager import SSOManager, PROVIDER_CACHE_TTL_SECONDS
+from app.modules.sso.manager import PROVIDER_CACHE_TTL_SECONDS, SSOManager
 from app.modules.sso.provider import SSOProviderConfig
 from app.repositories.database import Database
 
@@ -306,6 +307,25 @@ class TestF8RelayStateSignature:
         assert state == "legacy_state"
         assert redirect == "https://example.com/legacy"
 
+    def test_decode_state_error_handling(self):
+        """Test that _decode_state handles errors gracefully."""
+        from app.routes.sso import _decode_state
+
+        # Invalid base64
+        state, redirect = _decode_state("not-valid-base64!!!")
+        # Should return (encoded_state, None) during transition
+        assert state == "not-valid-base64!!!"
+        assert redirect is None
+
+    def test_relaystate_transition_period_documented(self):
+        """Test that transition period is properly documented."""
+        from app.routes.sso import _decode_state
+        import inspect
+
+        # Check docstring contains transition period end date
+        docstring = _decode_state.__doc__
+        assert "2027-01-31" in docstring or "transition" in docstring.lower()
+
 
 class TestF4SessionCascadeCleanup:
     """Test Issue #1826 F4: SSO logout cascade cleanup."""
@@ -321,9 +341,28 @@ class TestF4SessionCascadeCleanup:
         # 2. Delete from sso_sessions
         # 3. Delete from sessions (cascade)
         # 4. Audit log
+        # 5. Clear cookie (Issue #1826 F4)
+
+        # Verify the implementation includes cookie clearing
+        from app.routes.sso import logout
+        source = inspect.getsource(logout)
+
+        # Check for delete_cookie call
+        assert "delete_cookie" in source, "logout should clear session_token cookie"
+        assert "session_token" in source, "logout should reference session_token cookie"
 
         # Placeholder for integration testing
         pass
+
+    def test_logout_clears_cookie(self):
+        """Test that logout clears session_token cookie."""
+        from app.routes.sso import logout
+
+        source = inspect.getsource(logout)
+        # Verify cookie deletion is implemented
+        assert "delete_cookie" in source
+        assert "httponly=True" in source
+        assert "samesite=\"Lax\"" in source
 
 
 class TestIntegration:

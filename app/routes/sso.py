@@ -57,6 +57,7 @@ def get_audit_logger():
 import hashlib
 import hmac
 
+
 def _get_relaystate_signing_key() -> bytes:
     """Get signing key for RelayState.
 
@@ -122,8 +123,8 @@ def _decode_state(encoded_state: str) -> tuple[str, str | None]:
     Returns:
         tuple: (original_state, redirect_uri or None)
 
-    Note: During 6-month transition period, old format is still accepted
-    with warning. After transition, invalid signature returns error.
+    Note: Transition period ends 2027-01-31 (6 months from 2026-07-31).
+    After that date, legacy format will be rejected with 400 error.
     """
     import base64
 
@@ -143,7 +144,7 @@ def _decode_state(encoded_state: str) -> tuple[str, str | None]:
             expected_signature = hmac.new(signing_key, payload, hashlib.sha256).hexdigest()
 
             if not hmac.compare_digest(signature, expected_signature):
-                logger.warning(f"RelayState signature verification failed")
+                logger.warning("RelayState signature verification failed")
                 # Issue #1826 F8: Reject tampered state instead of degrading
                 return (encoded_state, None)
 
@@ -152,9 +153,12 @@ def _decode_state(encoded_state: str) -> tuple[str, str | None]:
 
         else:
             # Old format (no signature) - log warning during transition period
+            # Issue #1826 F8: Transition period ends 2027-01-31
+            # After that, this branch should be removed and legacy format rejected
             logger.warning(
                 "RelayState using legacy format without signature. "
-                "This format will be rejected after transition period (6 months)."
+                "This format will be rejected after 2027-01-31. "
+                "Count: relaystate_legacy_format_total"
             )
             return (state_data.get("s", encoded_state), state_data.get("r"))
 
@@ -619,6 +623,13 @@ def update_provider(provider_name: str):
         try:
             existing_raw_config = json.loads(existing["config"])
             existing_encrypted = existing_raw_config.get("client_secret_encrypted", "")
+
+            # Issue #1826 F6: If existing_encrypted is empty, it means:
+            # 1. Provider was created without a client_secret (e.g., SAML)
+            # 2. Or legacy provider with plaintext secret that was never encrypted
+            # In both cases, we serialize the new_config which will encrypt the current secret
+            # (empty string for SAML, or the existing plaintext for legacy providers)
+            # This is safe because serialize_provider_config handles empty secrets correctly
 
             # Remove client_secret from new_config to avoid re-encryption
             config_for_serialize = new_config.copy()
@@ -1597,7 +1608,10 @@ def logout():
     except Exception:
         logger.warning("Failed to audit-log SSO logout", exc_info=True)
 
-    return jsonify({"message": "Logged out successfully"})
+    # Issue #1826 F4: Clear session_token cookie to prevent reuse
+    response = jsonify({"message": "Logged out successfully"})
+    response.delete_cookie("session_token", httponly=True, samesite="Lax")
+    return response
 
 
 @sso_bp.route("/identities/<int:user_id>", methods=["GET"])
