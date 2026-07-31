@@ -41,6 +41,7 @@ def upgrade() -> None:
     """
     if _is_postgresql():
         # PostgreSQL: Create partial indexes with JSON expressions using proper pattern
+        # Note: settings column is TEXT, so we must cast to jsonb before using ->>
         with op.get_context().autocommit_block():
             # Feishu partial index
             # Note: Using op.create_index with postgresql_concurrently=True
@@ -49,10 +50,10 @@ def upgrade() -> None:
                 "idx_teams_feishu_sync",
                 "teams",
                 [
-                    sa.text("(settings->>'sync_source')"),
-                    sa.text("(settings->>'feishu_department_id')"),
+                    sa.text("(settings::jsonb->>'sync_source')"),
+                    sa.text("(settings::jsonb->>'feishu_department_id')"),
                 ],
-                postgresql_where=sa.text("settings->>'sync_source' = 'feishu'"),
+                postgresql_where=sa.text("settings::jsonb->>'sync_source' = 'feishu'"),
                 postgresql_concurrently=True,
             )
 
@@ -61,10 +62,10 @@ def upgrade() -> None:
                 "idx_teams_dingtalk_sync",
                 "teams",
                 [
-                    sa.text("(settings->>'sync_source')"),
-                    sa.text("(settings->>'dingtalk_department_id')"),
+                    sa.text("(settings::jsonb->>'sync_source')"),
+                    sa.text("(settings::jsonb->>'dingtalk_department_id')"),
                 ],
-                postgresql_where=sa.text("settings->>'sync_source' = 'dingtalk'"),
+                postgresql_where=sa.text("settings::jsonb->>'sync_source' = 'dingtalk'"),
                 postgresql_concurrently=True,
             )
     else:

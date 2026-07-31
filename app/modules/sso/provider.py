@@ -8,7 +8,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any
+from typing import Any, cast
 
 
 class ProviderType(Enum):
@@ -57,7 +57,7 @@ class SSOProviderConfig:
         from app.modules.sso.secret_holder import SecretHolder
 
         if isinstance(self.client_secret, SecretHolder):
-            return self.client_secret.get()
+            return cast("str", self.client_secret.get())
         return self.client_secret or ""
 
     def to_dict(self) -> dict:

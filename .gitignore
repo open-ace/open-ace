@@ -77,3 +77,6 @@ QWEN.md
 # Claude local settings
 .claude/
 backups/
+
+# Git worktrees (temporary development artifacts)
+.worktrees/
