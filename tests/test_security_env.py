@@ -144,7 +144,7 @@ class TestGetSecretKeyForApp:
 
     def test_returns_dev_key_in_development(self):
         """Test that development key is returned in dev mode."""
-        with patch.dict(os.environ, {"FLASK_ENV": "development"}, clear=False):
+        with patch.dict(os.environ, {"FLASK_ENV": "development", "SECRET_KEY": ""}, clear=False):
             key = get_secret_key_for_app()
             assert key == "dev-secret-key"
 

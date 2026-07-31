@@ -9,7 +9,7 @@ import base64
 import functools
 import hashlib
 import logging
-from typing import Optional, cast
+from typing import cast
 
 from app.utils.security_env import get_encryption_key_material
 

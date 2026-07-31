@@ -146,12 +146,8 @@ def get_secret_key_for_app(secret_key: str | None = None) -> str:
         logger.warning("Using development SECRET_KEY - DO NOT use in production!")
         return _DEV_SECRET_KEY
 
-    # Validate strength
-    try:
-        validate_secret_strength(secret_key, "SECRET_KEY", min_length=32)
-    except RuntimeError:
-        # Re-raise in strict mode
-        raise
+    # Validate strength (raises RuntimeError in strict mode if invalid)
+    validate_secret_strength(secret_key, "SECRET_KEY", min_length=32)
 
     return secret_key
 

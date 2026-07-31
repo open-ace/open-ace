@@ -18,7 +18,6 @@ singleton that coordinates all encryption/decryption operations across:
 from __future__ import annotations
 
 import base64
-import functools
 import hashlib
 import json
 import logging
@@ -27,7 +26,10 @@ import threading
 import time
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional, cast
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from cryptography.fernet import Fernet
 
 logger = logging.getLogger(__name__)
 
@@ -71,11 +73,11 @@ class EncryptionKey:
 # Global Singleton
 # ============================================================================
 
-_registry_instance: Optional["EncryptionKeyRegistry"] = None
+_registry_instance: EncryptionKeyRegistry | None = None
 _registry_lock = threading.Lock()
 
 
-def get_registry() -> "EncryptionKeyRegistry":
+def get_registry() -> EncryptionKeyRegistry:
     """
     Get the singleton EncryptionKeyRegistry instance.
 
@@ -251,16 +253,10 @@ class EncryptionKeyRegistry:
         Raises:
             RuntimeError: If key is missing in production.
         """
-        key_env = os.environ.get("OPENACE_ENCRYPTION_KEY")
-
-        # Check for development fallback
         from app.utils.security_env import get_encryption_key_material
 
-        try:
-            key_value = get_encryption_key_material(purpose="EncryptionKeyRegistry initialization")
-        except RuntimeError:
-            # In production without key - let it fail
-            raise
+        # Get key value (raises RuntimeError in production if missing)
+        key_value = get_encryption_key_material(purpose="EncryptionKeyRegistry initialization")
 
         # Derive key
         derived_key = hashlib.sha256(key_value.encode()).digest()
@@ -436,7 +432,7 @@ class EncryptionKeyRegistry:
             # Using ':' as separator (not in Fernet alphabet)
             return f"v1k{primary_key.key_id}:{ciphertext}"
 
-    def decrypt(self, ciphertext: str) -> Optional[tuple[str, int]]:
+    def decrypt(self, ciphertext: str) -> tuple[str, int] | None:
         """
         Decrypt ciphertext using all available keys.
 
@@ -444,9 +440,12 @@ class EncryptionKeyRegistry:
 
         Args:
             ciphertext: Ciphertext to decrypt (may have key_id prefix or be legacy format).
+                Empty string is treated as a valid input and returns ("", 0).
 
         Returns:
-            Tuple of (decrypted_text, key_id) or None if decryption fails.
+            Tuple of (decrypted_text, key_id) if decryption succeeds.
+            Returns ("", 0) for empty input (valid result, not failure).
+            Returns None if decryption fails for non-empty input.
         """
         if not ciphertext:
             return ("", 0)
@@ -489,7 +488,7 @@ class EncryptionKeyRegistry:
             logger.error(f"Decryption failed for all {len(self._keys)} keys")
             return None
 
-    def _parse_ciphertext_prefix(self, ciphertext: str) -> tuple[Optional[int], str]:
+    def _parse_ciphertext_prefix(self, ciphertext: str) -> tuple[int | None, str]:
         """
         Parse key_id prefix from ciphertext if present.
 
@@ -538,7 +537,7 @@ class EncryptionKeyRegistry:
             logger.debug(f"Failed to parse ciphertext prefix: {e}")
             return (None, ciphertext)
 
-    def _try_decrypt_with_key(self, ciphertext: str, key_id: int) -> Optional[str]:
+    def _try_decrypt_with_key(self, ciphertext: str, key_id: int) -> str | None:
         """
         Try to decrypt ciphertext with a specific key.
 
@@ -570,7 +569,7 @@ class EncryptionKeyRegistry:
             logger.debug(f"Decryption failed with key_id {key_id}: {e}")
             return None
 
-    def get_fernet(self, key_id: int) -> Optional["Fernet"]:
+    def get_fernet(self, key_id: int) -> Fernet | None:
         """
         Get a Fernet instance for a specific key.
 
@@ -593,7 +592,7 @@ class EncryptionKeyRegistry:
             except ImportError:
                 return None
 
-    def get_hmac_key(self, key_id: int) -> Optional[bytes]:
+    def get_hmac_key(self, key_id: int) -> bytes | None:
         """
         Get HMAC key bytes for a specific key.
 

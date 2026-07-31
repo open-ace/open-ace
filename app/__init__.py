@@ -250,6 +250,7 @@ def _precheck_encryption_registry():
         logger.warning(f"Unexpected error initializing encryption registry: {e}")
 
     # Pre-check SMTP password encryption path
+    # This also covers SSO client_secret encryption (uses same password manager)
     try:
         from app.utils.smtp_crypto import get_password_manager
 
@@ -265,20 +266,6 @@ def _precheck_encryption_registry():
         logger.warning(f"SMTP encryption check failed: {e}")
     except Exception:
         pass  # cryptography not installed — handled at encrypt/decrypt time
-
-    # Pre-check SSO client_secret encryption path
-    try:
-        # SSOManager uses SMTPPasswordManager internally
-        # Just verify the password manager is available
-        from app.utils.smtp_crypto import get_password_manager
-
-        _ = get_password_manager()
-    except RuntimeError as e:
-        if is_strict_mode():
-            raise RuntimeError(f"SSO encryption check failed: {e}")
-        logger.warning(f"SSO encryption check failed: {e}")
-    except Exception:
-        pass
 
 
 def create_app(config=None):
