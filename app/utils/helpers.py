@@ -113,6 +113,10 @@ def parse_db_datetime(value) -> datetime | None:
     if isinstance(value, datetime):
         return value
     if isinstance(value, str):
+        # Empty/whitespace-only strings are treated as NULL (legacy SQLite data
+        # may store "" instead of NULL). Avoids ValueError from fromisoformat.
+        if not value.strip():
+            return None
         normalized = value.replace("Z", "+00:00")
         if len(normalized) >= 10 and normalized[10] == " ":
             normalized = normalized[:10] + "T" + normalized[11:]

@@ -1,6 +1,6 @@
 """Unit tests for helper utilities."""
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 import pytest
@@ -203,3 +203,15 @@ class TestParseDbDatetime:
         assert result is not None
         assert result.tzinfo is not None
         assert result.utcoffset() == timedelta(0)
+
+    def test_empty_string_returns_none(self):
+        """Empty/whitespace strings should be treated as NULL, not raise."""
+        assert parse_db_datetime("") is None
+        assert parse_db_datetime("   ") is None
+
+    def test_aware_datetime_returned_unchanged(self):
+        """PostgreSQL TIMESTAMPTZ returns aware datetime objects."""
+        dt = datetime(2026, 1, 15, 10, 30, 0, tzinfo=timezone.utc)
+        result = parse_db_datetime(dt)
+        assert result is dt
+        assert result.tzinfo is not None
