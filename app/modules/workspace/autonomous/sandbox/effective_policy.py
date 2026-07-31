@@ -42,18 +42,24 @@ def build_effective_policy(
     """
     has_time_quota = SandboxCapability.CPU_MEM_PIDS_TIME_QUOTA in capabilities
     has_storage_quota = SandboxCapability.STORAGE_INODE_QUOTA in capabilities
+    policy_configured = policy is not None
     return {
         "schema_version": _SCHEMA_VERSION,
         "provider": provider_name,
         "capabilities": sorted(cap.value for cap in capabilities),
-        "limits": {
-            "memory_max_bytes": policy.memory_max_bytes if policy else 0,
-            "pids_max": policy.pids_max if policy else 0,
-            "cpu_max": policy.cpu_max if policy else "",
-            "wall_clock_limit": policy.wall_clock_limit if policy else 0,
-            "ephemeral_storage_limit": policy.ephemeral_storage_limit if policy else 0,
-            "inode_limit": policy.inode_limit if policy else 0,
-        },
+        "policy_configured": policy_configured,
+        "limits": (
+            {
+                "memory_max_bytes": policy.memory_max_bytes,
+                "pids_max": policy.pids_max,
+                "cpu_max": policy.cpu_max,
+                "wall_clock_limit": policy.wall_clock_limit,
+                "ephemeral_storage_limit": policy.ephemeral_storage_limit,
+                "inode_limit": policy.inode_limit,
+            }
+            if policy
+            else {}
+        ),
         "cgroup_enabled": policy.cgroup_enabled if policy else "",
         "task_root": policy.task_root if policy else "",
         # Derived from declared capabilities — honest, not hardcoded per provider.

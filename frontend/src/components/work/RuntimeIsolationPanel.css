@@ -1,4 +1,5 @@
 .runtime-isolation-panel {
+  flex-shrink: 0;
   margin-bottom: 6px;
   border: 1px solid var(--border-color);
   border-radius: 12px;
@@ -58,6 +59,12 @@
   color: var(--text-secondary);
   font-size: 12px;
   font-weight: 600;
+}
+
+.runtime-isolation-panel__summary-pill--warning {
+  border-color: color-mix(in srgb, var(--color-warning) 28%, var(--border-color) 72%);
+  background: color-mix(in srgb, var(--color-warning) 10%, var(--bg-primary) 90%);
+  color: var(--text-primary);
 }
 
 .runtime-isolation-panel__provider {
@@ -132,6 +139,10 @@
   padding-top: 12px;
   color: var(--text-muted);
   font-size: 0.82rem;
+}
+
+.runtime-isolation-panel__notice--warning {
+  color: var(--color-warning-dark, var(--color-warning));
 }
 
 .runtime-isolation-panel__limit-grid {

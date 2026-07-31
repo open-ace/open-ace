@@ -36,7 +36,7 @@ const STATUS_CONFIG: Record<string, { variant: string; icon: string; labelKey: s
   pr_review: { variant: 'warning', icon: 'bi-eye', labelKey: 'autoStatusPRReview' },
   reporting: { variant: 'info', icon: 'bi-file-text', labelKey: 'autoStatusReporting' },
   waiting: { variant: 'secondary', icon: 'bi-clock', labelKey: 'autoStatusWaiting' },
-  merging: { variant: 'info', icon: 'bi-git-merge', labelKey: 'autoStatusMerging' },
+  merging: { variant: 'info', icon: 'bi-sign-merge-right', labelKey: 'autoStatusMerging' },
   completed: { variant: 'success', icon: 'bi-check-circle', labelKey: 'autoStatusCompleted' },
   failed: { variant: 'danger', icon: 'bi-x-circle', labelKey: 'autoStatusFailed' },
   cancelled: { variant: 'secondary', icon: 'bi-slash-circle', labelKey: 'autoStatusCancelled' },

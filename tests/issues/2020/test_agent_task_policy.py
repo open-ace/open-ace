@@ -9,7 +9,12 @@ contract is pinned here.
 
 from __future__ import annotations
 
-from app.modules.workspace.autonomous.task_isolation import AgentTaskPolicy, read_agent_task_policy
+from app.modules.workspace.autonomous.task_isolation import (
+    AgentTaskPolicy,
+    candidate_agent_task_policy_paths,
+    read_agent_task_policy,
+    resolve_agent_task_policy_path,
+)
 
 
 def _write_conf(tmp_path, body: str):
@@ -91,3 +96,34 @@ def test_cgroup_enabled_normalizes_and_rejects_unknown(tmp_path):
     ):
         conf = _write_conf(tmp_path, f"agent_task_cgroup_enabled={raw}")
         assert read_agent_task_policy(conf).cgroup_enabled == expected
+
+
+def test_resolve_agent_task_policy_path_prefers_existing_candidates(tmp_path, monkeypatch):
+    explicit = tmp_path / "explicit.conf"
+    explicit.write_text("agent_task_memory_max_bytes=1\n", encoding="utf-8")
+    system = tmp_path / "system.conf"
+    system.write_text("agent_task_memory_max_bytes=2\n", encoding="utf-8")
+    user = tmp_path / "user.conf"
+    user.write_text("agent_task_memory_max_bytes=3\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        "app.modules.workspace.autonomous.task_isolation.DEFAULT_AGENT_LAUNCHER_CONF",
+        str(system),
+    )
+    monkeypatch.setattr(
+        "app.modules.workspace.autonomous.task_isolation.USER_AGENT_LAUNCHER_CONF",
+        str(user),
+    )
+
+    assert candidate_agent_task_policy_paths(str(explicit)) == (
+        str(explicit),
+        str(system),
+        str(user),
+    )
+    assert resolve_agent_task_policy_path(str(explicit)) == str(explicit)
+    explicit.unlink()
+    assert resolve_agent_task_policy_path(str(explicit)) == str(system)
+    system.unlink()
+    assert resolve_agent_task_policy_path(str(explicit)) == str(user)
+    user.unlink()
+    assert resolve_agent_task_policy_path(str(explicit)) is None

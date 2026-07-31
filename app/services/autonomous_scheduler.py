@@ -46,10 +46,18 @@ _SANDBOX_REAP_INTERVAL_SECONDS = float(os.environ.get("OPENACE_SANDBOX_REAP_INTE
 def get_max_concurrent_workflows() -> int:
     """Resolve the concurrency cap from agent-launcher.conf (default 3)."""
     try:
-        from app.modules.workspace.autonomous.task_isolation import read_agent_task_policy
+        from app.modules.workspace.autonomous.task_isolation import (
+            read_agent_task_policy,
+            resolve_agent_task_policy_path,
+        )
 
+        conf = resolve_agent_task_policy_path(
+            _AGENT_LAUNCHER_CONF if "OPENACE_LAUNCHER_CONF" in os.environ else None
+        )
+        if not conf:
+            return MAX_CONCURRENT_WORKFLOWS
         return read_agent_task_policy(
-            _AGENT_LAUNCHER_CONF, concurrency_default=MAX_CONCURRENT_WORKFLOWS
+            conf, concurrency_default=MAX_CONCURRENT_WORKFLOWS
         ).max_concurrent_workflows
     except Exception:
         return MAX_CONCURRENT_WORKFLOWS

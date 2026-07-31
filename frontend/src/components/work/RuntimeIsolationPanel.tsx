@@ -20,6 +20,7 @@ export interface EffectivePolicySnapshot {
   schema_version?: number;
   provider?: string;
   capabilities?: string[];
+  policy_configured?: boolean;
   limits?: {
     memory_max_bytes?: number;
     pids_max?: number;
@@ -104,6 +105,7 @@ export function RuntimeIsolationPanel({ workflow }: RuntimeIsolationPanelProps) 
 
   if (!snapshot) return null;
 
+  const policyConfigured = snapshot.policy_configured !== false;
   const limits = snapshot.limits ?? {};
   const enforced = snapshot.enforced ?? {};
   const rows: LimitRow[] = [
@@ -141,10 +143,12 @@ export function RuntimeIsolationPanel({ workflow }: RuntimeIsolationPanelProps) 
       enforced: enforced.inode,
     },
   ];
-  const summaryRows: LimitRow[] = SUMMARY_LIMIT_KEYS.flatMap((labelKey) => {
-    const row = rows.find((limitRow) => limitRow.labelKey === labelKey);
-    return row && row.value !== '—' ? [row] : [];
-  });
+  const summaryRows: LimitRow[] = !policyConfigured
+    ? []
+    : SUMMARY_LIMIT_KEYS.flatMap((labelKey) => {
+        const row = rows.find((limitRow) => limitRow.labelKey === labelKey);
+        return row && row.value !== '—' ? [row] : [];
+      });
   const visibleSummaryRows: LimitRow[] = summaryRows.length > 0 ? summaryRows : rows.slice(0, 4);
 
   return (
@@ -172,19 +176,33 @@ export function RuntimeIsolationPanel({ workflow }: RuntimeIsolationPanelProps) 
           </span>
         </div>
         <div className="runtime-isolation-panel__summary-pills">
-          {visibleSummaryRows.map((row) => (
-            <span key={row.labelKey} className="runtime-isolation-panel__summary-pill">
-              <span className="runtime-isolation-panel__summary-label">
-                {t(row.labelKey, language)}
+          {policyConfigured ? (
+            visibleSummaryRows.map((row) => (
+              <span key={row.labelKey} className="runtime-isolation-panel__summary-pill">
+                <span className="runtime-isolation-panel__summary-label">
+                  {t(row.labelKey, language)}
+                </span>
+                <span className="runtime-isolation-panel__summary-value">{row.value}</span>
               </span>
-              <span className="runtime-isolation-panel__summary-value">{row.value}</span>
+            ))
+          ) : (
+            <span className="runtime-isolation-panel__summary-pill runtime-isolation-panel__summary-pill--warning">
+              <i className="bi bi-exclamation-circle"></i>
+              <span>{t('autoPolicyNotConfigured', language)}</span>
             </span>
-          ))}
+          )}
         </div>
       </button>
 
       {expanded && (
         <div id={bodyId} className="runtime-isolation-panel__body">
+          {!policyConfigured ? (
+            <div className="runtime-isolation-panel__notice runtime-isolation-panel__notice--warning">
+              <i className="bi bi-exclamation-triangle me-1"></i>
+              {t('autoPolicyConfigMissing', language)}
+            </div>
+          ) : null}
+
           {snapshot.capabilities && snapshot.capabilities.length > 0 ? (
             <div className="runtime-isolation-panel__section">
               <div className="runtime-isolation-panel__section-label">
@@ -205,28 +223,30 @@ export function RuntimeIsolationPanel({ workflow }: RuntimeIsolationPanelProps) 
             </div>
           )}
 
-          <div className="runtime-isolation-panel__section">
-            <div className="runtime-isolation-panel__section-label">
-              {t('autoPolicyLimit', language)}
-            </div>
-            <div className="runtime-isolation-panel__limit-grid">
-              {rows.map((row) => (
-                <div key={row.labelKey} className="runtime-isolation-panel__limit-card">
-                  <div className="runtime-isolation-panel__limit-header">
-                    <span className="runtime-isolation-panel__limit-label">
-                      {t(row.labelKey, language)}
-                    </span>
-                    <Badge variant={row.enforced ? 'success' : 'warning'}>
-                      {row.enforced
-                        ? t('autoPolicyEnforcedYes', language)
-                        : t('autoPolicyEnforcedNo', language)}
-                    </Badge>
+          {policyConfigured ? (
+            <div className="runtime-isolation-panel__section">
+              <div className="runtime-isolation-panel__section-label">
+                {t('autoPolicyLimit', language)}
+              </div>
+              <div className="runtime-isolation-panel__limit-grid">
+                {rows.map((row) => (
+                  <div key={row.labelKey} className="runtime-isolation-panel__limit-card">
+                    <div className="runtime-isolation-panel__limit-header">
+                      <span className="runtime-isolation-panel__limit-label">
+                        {t(row.labelKey, language)}
+                      </span>
+                      <Badge variant={row.enforced ? 'success' : 'warning'}>
+                        {row.enforced
+                          ? t('autoPolicyEnforcedYes', language)
+                          : t('autoPolicyEnforcedNo', language)}
+                      </Badge>
+                    </div>
+                    <div className="runtime-isolation-panel__limit-value">{row.value}</div>
                   </div>
-                  <div className="runtime-isolation-panel__limit-value">{row.value}</div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
-          </div>
+          ) : null}
         </div>
       )}
     </div>
