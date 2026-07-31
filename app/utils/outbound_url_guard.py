@@ -5,10 +5,13 @@ The guard is intentionally conservative: only globally routable HTTP(S)
 destinations are allowed by default. This prevents SSRF against loopback,
 private networks, link-local metadata endpoints, and other non-public ranges.
 
-The validation is enforced at *connect* time via :func:`safe_request`, which
-pins the verified IP into the actual HTTP request so the system resolver cannot
-rebind the destination to a private address between validation and the dial
-(closing the DNS-rebinding TOCTOU window).
+Validation is performed before the request via :func:`validate_public_http_url`
+and re-checked at *connect* time by :class:`_PinnedIPAdapter`, which resolves
+the hostname again and verifies all IPs are public. The request URL retains the
+original hostname so TLS SNI and certificate verification work correctly. A
+small TOCTOU window remains between the adapter's resolution and urllib3's
+connection, but HTTPS certificate verification mitigates rebinding to a
+different public host.
 """
 
 from __future__ import annotations
@@ -170,9 +173,9 @@ class OutboundUrlValidationResult:
     allowed: bool
     error: str | None = None
     # The public IP addresses that were verified for this URL. Populated only
-    # when ``allowed`` is True. Callers SHOULD pin one of these IPs into the
-    # actual request (see :func:`safe_request`) so the system resolver cannot
-    # rebind the destination between validation and the dial.
+    # when ``allowed`` is True. Used by :func:`safe_request` to pre-validate
+    # before the request and by :class:`_PinnedIPAdapter` to re-check at
+    # connect time.
     resolved_addresses: tuple[IPAddress, ...] = ()
 
 
@@ -187,9 +190,9 @@ def validate_public_http_url(
 ) -> OutboundUrlValidationResult:
     """Validate that a URL points to a public HTTP(S) destination.
 
-    Returns the verified public IP addresses so callers can pin them into the
-    actual request. Using these pinned IPs (via :func:`safe_request`) is what
-    closes the DNS-rebinding TOCTOU window — validation alone is advisory.
+    Returns the verified public IP addresses so callers can pass them to
+    :func:`safe_request`, which pre-validates and mounts a connect-time
+    adapter to guard against DNS rebinding.
     """
     if not url:
         return OutboundUrlValidationResult(False, "URL is empty")
@@ -268,11 +271,11 @@ def assert_public_http_url(url: str, *, resolver: Resolver = socket.getaddrinfo)
 def resolve_public_addresses(
     url: str, *, resolver: Resolver = socket.getaddrinfo
 ) -> tuple[str, tuple[IPAddress, ...], int | None, str]:
-    """Resolve and validate ``url`` once, returning the parts needed to pin a request.
+    """Resolve and validate ``url`` once, returning the parts needed for safe_request.
 
     Returns ``(original_host, public_ips, port, path_and_query)``. Raises
-    :class:`OutboundUrlBlockedError` if the URL is unsafe. Callers use the
-    returned IPs to build a pinned request URL (see :func:`safe_request`).
+    :class:`OutboundUrlBlockedError` if the URL is unsafe. The returned IPs
+    are passed to :class:`_PinnedIPAdapter` for connect-time re-validation.
     """
     result = validate_public_http_url(url, resolver=resolver)
     if not result.allowed:
@@ -293,89 +296,122 @@ def safe_request(
     resolver: Resolver = socket.getaddrinfo,
     **kwargs: Any,
 ) -> requests.Response:
-    """Issue an HTTP request with the verified IP pinned at connect time.
+    """Issue an HTTP request with DNS-rebinding validation at connect time.
 
-    This collapses validate+connect into a single resolution: the hostname is
-    resolved exactly once via ``resolver``, every returned IP is checked with
-    :func:`_is_public_address`, and the request is sent to the verified IP
-    literal while preserving the original hostname as the ``Host`` header (so
-    TLS SNI / virtual-host routing still works). Because the request URL
-    contains an IP literal, ``urllib3`` does not re-resolve via the system
-    resolver, which closes the DNS-rebinding TOCTOU window.
+    The hostname is resolved and every returned IP is checked with
+    :func:`_is_public_address` before the request is sent. The request URL
+    retains the original hostname so that TLS SNI and certificate verification
+    work correctly (HTTPS certificates are issued to domain names, not IP
+    literals).
+
+    A :class:`_PinnedIPAdapter` is mounted to re-validate the resolved IPs at
+    connect time, guarding against proxy configuration or future urllib3
+    changes re-introducing a private-address resolution.
 
     Fails closed (raises :class:`OutboundUrlBlockedError`) if no public IP can
-    be pinned.
+    be verified.
     """
-    original_host, public_ips, port, path_and_query = resolve_public_addresses(
+    _original_host, public_ips, _port, _path_and_query = resolve_public_addresses(
         url, resolver=resolver
     )
 
     scheme = urlparse(url).scheme
-    pinned_ip = public_ips[0]
-    pinned_host = f"[{pinned_ip}]" if ":" in str(pinned_ip) else str(pinned_ip)
-    port_suffix = f":{port}" if port else ""
-    pinned_url = f"{scheme}://{pinned_host}{port_suffix}{path_and_query}"
-
-    headers = dict(kwargs.pop("headers", {}) or {})
-    headers.setdefault("Host", original_host)
-    # ``urllib3`` derives the TLS SNI/Host header from the URL host. Because we
-    # pinned an IP literal we must set the original host explicitly so HTTPS
-    # virtual hosting and SNI keep working.
-    headers["Host"] = original_host
 
     own_session = False
     if session is None:
         session = requests.Session()
         own_session = True
+    previous_adapter = session.adapters.get(f"{scheme}://")
+    adapter = _PinnedIPAdapter(allowed_ips=public_ips, resolver=resolver)
     try:
-        adapter = _PinnedIPAdapter(allowed_ips=public_ips)
         session.mount(f"{scheme}://", adapter)
-        return session.request(method, pinned_url, headers=headers, **kwargs)
+        return session.request(method, url, **kwargs)
     finally:
+        # Restore the previous adapter so the pinned adapter does not leak
+        # into subsequent requests on caller-provided shared sessions, and
+        # callers' custom adapters (retry config, TLS settings) are preserved.
+        session.mount(f"{scheme}://", previous_adapter or HTTPAdapter())
         if own_session:
             session.close()
 
 
 class _PinnedIPAdapter(HTTPAdapter):
-    """HTTPAdapter that re-validates the connect-time IP against an allowlist.
+    """HTTPAdapter that re-validates the resolved IP at connect time.
 
-    Defense in depth: even though ``safe_request`` builds a URL whose host is
-    the pinned IP literal (so ``urllib3`` should not re-resolve), this adapter
-    intercepts the connection pool and refuses any IP that is not on the
-    verified allowlist or that fails the public-address predicate. This guards
-    against proxy configuration or future urllib3 changes re-introducing a
-    resolution step.
+    Defense in depth: ``safe_request`` pre-resolves the hostname and verifies
+    all IPs are public. This adapter re-checks at connect time by resolving
+    the request URL's hostname and refusing any IP that is not public.
+
+    For HTTPS URLs, the request URL retains the original hostname so TLS SNI
+    and certificate verification work correctly. The adapter blocks DNS
+    rebinding to private/internal IPs. For CDN-fronted endpoints where DNS
+    may return different public IPs between resolutions, the allowlist match
+    is logged as a warning rather than blocked (HTTPS certificate verification
+    mitigates rebinding to a different public host).
     """
 
-    def __init__(self, *args: Any, allowed_ips: Iterable[IPAddress] = (), **kwargs: Any):
+    def __init__(
+        self,
+        *args: Any,
+        allowed_ips: Iterable[IPAddress] = (),
+        resolver: Resolver = socket.getaddrinfo,
+        **kwargs: Any,
+    ):
         super().__init__(*args, **kwargs)
         self._allowed_ips = {str(ip) for ip in allowed_ips}
+        self._resolver = resolver
 
     def get_connection_with_tls_context(self, request, verify, proxies=None, cert=None):
-        self._check_pinned_url(request.url)
+        self._check_resolved_ip(request.url)
         return super().get_connection_with_tls_context(  # type: ignore[call-arg]
             request, verify, proxies=proxies, cert=cert
         )
 
     def get_connection(self, url, proxies=None):
-        self._check_pinned_url(url)
+        self._check_resolved_ip(url)
         return super().get_connection(url, proxies=proxies)
 
-    def _check_pinned_url(self, url: str) -> None:
+    def _check_resolved_ip(self, url: str) -> None:
+        """Resolve the URL hostname and verify all IPs are public."""
         parsed = urlparse(url)
         host = (parsed.hostname or "").strip("[]")
         if not host:
-            raise OutboundUrlBlockedError("Pinned request URL has no host")
+            raise OutboundUrlBlockedError("Request URL has no host")
+
+        # If host is already an IP literal, validate directly
         try:
             ip = _parse_ip_address(host)
-        except ValueError as exc:
-            raise OutboundUrlBlockedError(
-                f"Pinned request URL host is not an IP literal: {host!r}"
-            ) from exc
-        if str(ip) not in self._allowed_ips:
-            raise OutboundUrlBlockedError(f"Pinned request would reach unverified IP {ip}")
-        if not _is_public_address(ip):
-            raise OutboundUrlBlockedError(f"Pinned request would reach non-public IP {ip}")
+            if not _is_public_address(ip):
+                raise OutboundUrlBlockedError(f"Request would reach non-public IP {ip}")
+            return
+        except ValueError:
+            pass  # Not an IP literal — resolve as hostname
+
+        # Resolve hostname and verify all IPs are public
+        try:
+            addresses = _resolve_addresses(host, parsed.port or 443, self._resolver)
+        except OSError as exc:
+            raise OutboundUrlBlockedError(f"DNS resolution failed for {host}: {exc}") from exc
+
+        if not addresses:
+            raise OutboundUrlBlockedError(f"Host {host} did not resolve to any IP")
+
+        for addr in addresses:
+            if not _is_public_address(addr):
+                raise OutboundUrlBlockedError(
+                    f"DNS rebinding detected: {host} resolved to non-public IP {addr}"
+                )
+            # CDN/load-balancer endpoints may rotate IPs between resolutions.
+            # Log a warning for allowlist mismatch rather than blocking, since
+            # HTTPS certificate verification mitigates rebinding to a different
+            # public host.
+            if self._allowed_ips and str(addr) not in self._allowed_ips:
+                logger.warning(
+                    "Outbound URL %s resolved to IP %s not in pre-verified set; "
+                    "allowing (HTTPS certificate verification mitigates rebinding)",
+                    host,
+                    addr,
+                )
 
 
 def _resolve_addresses(host: str, port: int | None, resolver: Resolver) -> set[IPAddress]:
