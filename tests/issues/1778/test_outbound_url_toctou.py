@@ -177,6 +177,74 @@ def test_safe_request_fails_closed_when_resolver_returns_metadata():
         )
 
 
+# ── safe_request: adapter unmount on shared sessions ───────────────────
+
+
+def test_safe_request_restores_previous_adapter_on_shared_session(monkeypatch):
+    """safe_request must restore the previous adapter, not replace it with a vanilla one."""
+    from requests.adapters import HTTPAdapter
+
+    def stable_resolver(host, *args, **kwargs):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))]
+
+    def fake_send(self, request, **kwargs):
+        resp = requests.Response()
+        resp.status_code = 200
+        return resp
+
+    monkeypatch.setattr(_PinnedIPAdapter, "send", fake_send)
+
+    sess = requests.Session()
+    # Simulate a caller-provided custom adapter (e.g. with retry config)
+    custom_adapter = HTTPAdapter(max_retries=3)
+    sess.mount("https://", custom_adapter)
+
+    safe_request(
+        "GET",
+        "https://sso.evil.example/token",
+        session=sess,
+        resolver=stable_resolver,
+        timeout=5,
+    )
+
+    # The pinned adapter must have been removed; the original custom adapter
+    # must be restored (not replaced with a vanilla HTTPAdapter).
+    restored = sess.adapters.get("https://")
+    assert restored is custom_adapter, f"Previous adapter should be restored, got {restored!r}"
+
+
+def test_safe_request_unmounts_pinned_adapter_after_request(monkeypatch):
+    """After safe_request, the session must not retain the _PinnedIPAdapter."""
+    from requests.adapters import HTTPAdapter
+
+    def stable_resolver(host, *args, **kwargs):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))]
+
+    def fake_send(self, request, **kwargs):
+        resp = requests.Response()
+        resp.status_code = 200
+        return resp
+
+    monkeypatch.setattr(_PinnedIPAdapter, "send", fake_send)
+
+    sess = requests.Session()
+
+    safe_request(
+        "GET",
+        "https://sso.evil.example/token",
+        session=sess,
+        resolver=stable_resolver,
+        timeout=5,
+    )
+
+    # The adapter must not be a _PinnedIPAdapter (it should be restored to the
+    # default or a vanilla HTTPAdapter).
+    current = sess.adapters.get("https://")
+    assert not isinstance(
+        current, _PinnedIPAdapter
+    ), f"_PinnedIPAdapter leaked into shared session: {current!r}"
+
+
 # ── _is_public_address denylist ─────────────────────────────────────────
 
 

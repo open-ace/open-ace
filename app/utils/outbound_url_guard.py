@@ -311,7 +311,7 @@ def safe_request(
     Fails closed (raises :class:`OutboundUrlBlockedError`) if no public IP can
     be verified.
     """
-    original_host, public_ips, _port, _path_and_query = resolve_public_addresses(
+    _original_host, public_ips, _port, _path_and_query = resolve_public_addresses(
         url, resolver=resolver
     )
 
@@ -321,14 +321,16 @@ def safe_request(
     if session is None:
         session = requests.Session()
         own_session = True
+    previous_adapter = session.adapters.get(f"{scheme}://")
     adapter = _PinnedIPAdapter(allowed_ips=public_ips, resolver=resolver)
     try:
         session.mount(f"{scheme}://", adapter)
         return session.request(method, url, **kwargs)
     finally:
-        # Unmount the adapter so it does not leak into subsequent requests on
-        # caller-provided shared sessions (M3).
-        session.mount(f"{scheme}://", HTTPAdapter())
+        # Restore the previous adapter so the pinned adapter does not leak
+        # into subsequent requests on caller-provided shared sessions, and
+        # callers' custom adapters (retry config, TLS settings) are preserved.
+        session.mount(f"{scheme}://", previous_adapter or HTTPAdapter())
         if own_session:
             session.close()
 
