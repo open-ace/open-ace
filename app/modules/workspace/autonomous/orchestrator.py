@@ -886,6 +886,10 @@ _CONTEXT_OVERFLOW_RE = re.compile(
 MAX_TEST_RETRIES = 2  # max retries when test agent itself fails
 MAX_DEV_RETRIES_ON_TEST_FAIL = 2  # max dev round retries for unfixable test failures
 MAX_CI_REPAIR_ATTEMPTS = 3  # max automatic dev-round retries for merge-phase CI failures
+# Separate cap for transient-API deferrals during CI repair: a 503/429 must
+# not loop forever, but must allow more retries than the 3-attempt budget
+# (which is consumed only by real agent repair attempts, not infra glitches).
+MAX_CI_REPAIR_TRANSIENT_RETRIES = 6
 MAX_PRE_COMMIT_CONVERGENCE_PASSES = 3
 PRE_COMMIT_CONVERGENCE_TIMEOUT = 600
 CI_PRE_COMMIT_SKIP = "bandit,no-commit-to-branch"
@@ -2463,6 +2467,22 @@ class AutonomousOrchestrator:
             return
 
         if not sha_changed:
+            # Transient API errors (429/5xx/overload) may cause the agent to
+            # produce no code changes without consuming a real repair attempt.
+            # Defer to the next scheduler cycle instead of wasting a bounded
+            # attempt on an infra glitch (#1820: 2/3 attempts burned — 1 by a
+            # 503 — then failed). The retry budget is bounded separately by
+            # MAX_CI_REPAIR_TRANSIENT_RETRIES in _start_ci_repair_round.
+            if self._should_retry_transient_api_failure(repair_result):
+                message = (
+                    "CI repair deferred: transient API error - "
+                    f"{repair_result.error or repair_result.response_text}"
+                )
+                milestone_updates["status"] = "failed"
+                milestone_updates["error_message"] = message
+                self.repo.update_milestone(repair_ms.get("milestone_id", ""), milestone_updates)
+                self._update_workflow({"status": "merging", "error_message": message})
+                return
             # Preserve the context-overflow signal in the error message so the
             # next round's _collect_prior_ci_repair_failures filters it out
             # (an overflow failure has no actionable signal — the agent never
@@ -3430,7 +3450,36 @@ class AutonomousOrchestrator:
         """Repair merge-phase CI failures in-place on the existing PR branch."""
         dev_round = int(wf.get("dev_round", 1) or 1)
         previous_attempts = int(wf.get("ci_repair_attempts", 0) or 0)
-        next_attempt = previous_attempts + 1
+        # If the previous round was deferred by a transient API error (503/429),
+        # re-enter the same attempt instead of consuming a new one. Bound the
+        # total transient deferrals so a sustained outage cannot loop forever.
+        prev_error = wf.get("error_message", "") or ""
+        is_transient_deferred = prev_error.startswith("CI repair deferred: transient API error")
+        transient_retries = int(wf.get("ci_repair_transient_retries", 0) or 0)
+        if is_transient_deferred:
+            if transient_retries >= MAX_CI_REPAIR_TRANSIENT_RETRIES:
+                message = (
+                    f"CI repair failed: transient API errors persisted across "
+                    f"{MAX_CI_REPAIR_TRANSIENT_RETRIES} retries"
+                )
+                self._create_milestone(
+                    phase="merge",
+                    dev_round=dev_round,
+                    round_number=previous_attempts,
+                    milestone_type="ci_repair_transient_exhausted",
+                    status="failed",
+                    title="CI repair transient retry limit reached",
+                    error_message=message,
+                )
+                self._update_workflow({"status": "failed", "error_message": message})
+                return
+            # Don't increment ci_repair_attempts; bump ci_repair_transient_retries
+            # as a transient-retry counter (reset to 0 on a successful round).
+            next_attempt = previous_attempts
+            transient_retries += 1
+        else:
+            next_attempt = previous_attempts + 1
+            transient_retries = 0
         preferred_worktree_path = self._get_preferred_worktree_path(wf)
         gh = self._get_gh()
         current_head_sha = ""
@@ -3512,11 +3561,24 @@ class AutonomousOrchestrator:
 
         if actionable_count and excerpt_count < actionable_count:
             diagnostics_attempt = int(wf.get("ci_diagnostics_attempts", 0) or 0) + 1
-            message = (
-                f"PR #{pr_number} CI diagnostics incomplete "
-                f"({excerpt_count}/{actionable_count} failed checks have logs; "
-                f"poll {diagnostics_attempt}/{MAX_CI_DIAGNOSTICS_ATTEMPTS})"
-            )
+            # When re-entering a transient-deferred round, preserve the
+            # "CI repair deferred: transient API error" prefix so the next
+            # _start_ci_repair_round call still detects the transient state
+            # and does NOT consume a real ci_repair_attempts slot. Otherwise
+            # the diagnostics-incomplete message would overwrite the signal
+            # and the transient retry budget would be lost (#1820).
+            if is_transient_deferred:
+                message = (
+                    "CI repair deferred: transient API error "
+                    f"(awaiting CI diagnostics: {excerpt_count}/{actionable_count} "
+                    f"logs; poll {diagnostics_attempt}/{MAX_CI_DIAGNOSTICS_ATTEMPTS})"
+                )
+            else:
+                message = (
+                    f"PR #{pr_number} CI diagnostics incomplete "
+                    f"({excerpt_count}/{actionable_count} failed checks have logs; "
+                    f"poll {diagnostics_attempt}/{MAX_CI_DIAGNOSTICS_ATTEMPTS})"
+                )
             pending_ms = self._create_milestone(
                 phase="merge",
                 dev_round=dev_round,
@@ -3541,6 +3603,7 @@ class AutonomousOrchestrator:
                         "status": "failed",
                         "error_message": terminal,
                         "ci_diagnostics_attempts": diagnostics_attempt,
+                        "ci_repair_transient_retries": transient_retries,
                     }
                 )
                 return
@@ -3550,6 +3613,9 @@ class AutonomousOrchestrator:
                     "status": "merging",
                     "error_message": message,
                     "ci_diagnostics_attempts": diagnostics_attempt,
+                    # Persist the in-memory transient counter so it survives
+                    # across diagnostics polling cycles (#1820).
+                    "ci_repair_transient_retries": transient_retries,
                 }
             )
             return
@@ -3655,6 +3721,11 @@ class AutonomousOrchestrator:
             "agent_session_id": "",
             "error_message": "",
             "ci_repair_attempts": next_attempt,
+            "ci_repair_transient_retries": transient_retries,
+            # Reset the diagnostics poll counter: each (re-)entry into a CI
+            # repair round gets a fresh log-fetch budget (MAX_CI_DIAGNOSTICS_ATTEMPTS).
+            # This was previously a side effect of reusing ci_diagnostics_attempts
+            # for transient tracking; the fields are now separate (#1820).
             "ci_diagnostics_attempts": 0,
             "ci_repair_context": context,
             "last_ci_failure_signature": signature,
