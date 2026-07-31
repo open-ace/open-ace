@@ -1911,7 +1911,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
   // ── Main Render ───────────────────────────────────────────────────
 
   return (
-    <div className="timeline-shell d-flex flex-column h-100">
+    <div className="timeline-shell d-flex flex-column">
       <div
         className={`timeline-header ${activeStatusHint ? 'timeline-header--active' : ''} ${
           headerCollapsed ? 'timeline-header--collapsed' : ''
@@ -1931,9 +1931,6 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                   isLiveStatus ? 'timeline-status-pill--live' : ''
                 }`}
               >
-                {isLiveStatus && (
-                  <span className="timeline-status-pill__spinner" aria-hidden="true"></span>
-                )}
                 <span className="timeline-status-pill__icon">
                   <i className={`bi ${workflowStatusConfig.icon}`}></i>
                 </span>

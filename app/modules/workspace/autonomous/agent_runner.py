@@ -793,9 +793,14 @@ class AutonomousAgentRunner:
         conf is missing/unreadable.
         """
         try:
-            from app.modules.workspace.autonomous.task_isolation import read_agent_task_policy
+            from app.modules.workspace.autonomous.task_isolation import (
+                read_agent_task_policy,
+                resolve_agent_task_policy_path,
+            )
 
-            conf = os.environ.get("OPENACE_LAUNCHER_CONF", "/etc/openace/agent-launcher.conf")
+            conf = resolve_agent_task_policy_path(os.environ.get("OPENACE_LAUNCHER_CONF"))
+            if not conf:
+                return None
             return read_agent_task_policy(conf)
         except Exception:
             return None

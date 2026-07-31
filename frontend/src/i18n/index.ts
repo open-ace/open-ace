@@ -1555,6 +1555,9 @@ export const translations: Record<Language, Translations> = {
     autoPolicyPanelTitle: 'Runtime & Isolation',
     autoPolicyCapabilities: 'Declared capabilities',
     autoPolicyNoCapabilities: 'No isolation capabilities declared by this backend',
+    autoPolicyNotConfigured: 'Policy not configured',
+    autoPolicyConfigMissing:
+      'No agent launcher policy file was found for this run, so no runtime limits were recorded.',
     autoPolicyLimit: 'Limit',
     autoPolicyValue: 'Value',
     autoPolicyEnforced: 'Enforced',
@@ -3267,6 +3270,8 @@ export const translations: Record<Language, Translations> = {
     autoPolicyPanelTitle: '运行时与隔离',
     autoPolicyCapabilities: '声明的能力',
     autoPolicyNoCapabilities: '此后端未声明任何隔离能力',
+    autoPolicyNotConfigured: '未配置策略',
+    autoPolicyConfigMissing: '本次运行未找到 agent launcher 策略文件，因此没有记录任何运行时限额。',
     autoPolicyLimit: '限额',
     autoPolicyValue: '值',
     autoPolicyEnforced: '是否强制',
@@ -4768,6 +4773,9 @@ export const translations: Record<Language, Translations> = {
     autoPolicyPanelTitle: 'ランタイムと分離',
     autoPolicyCapabilities: '宣言された能力',
     autoPolicyNoCapabilities: 'このバックエンドは分離能力を宣言していません',
+    autoPolicyNotConfigured: 'ポリシー未設定',
+    autoPolicyConfigMissing:
+      'この実行では agent launcher のポリシーファイルが見つからず、ランタイム制限は記録されませんでした。',
     autoPolicyLimit: 'リミット',
     autoPolicyValue: '値',
     autoPolicyEnforced: '強制',
@@ -6356,6 +6364,9 @@ export const translations: Record<Language, Translations> = {
     autoPolicyPanelTitle: '런타임 및 격리',
     autoPolicyCapabilities: '선언된 기능',
     autoPolicyNoCapabilities: '이 백엔드는 격리 기능을 선언하지 않았습니다',
+    autoPolicyNotConfigured: '정책 미구성',
+    autoPolicyConfigMissing:
+      '이번 실행에서는 agent launcher 정책 파일을 찾지 못해 런타임 제한이 기록되지 않았습니다.',
     autoPolicyLimit: '제한',
     autoPolicyValue: '값',
     autoPolicyEnforced: '적용 여부',

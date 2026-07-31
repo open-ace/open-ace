@@ -51,6 +51,7 @@ function workflow(policy: string | null | undefined): AutonomousWorkflow {
 const LEGACY_SNAPSHOT = JSON.stringify({
   schema_version: 1,
   provider: 'legacy_posix',
+  policy_configured: true,
   capabilities: ['private_home_tmp_xdg', 'filesystem_acl', 'cpu_mem_pids_time_quota'],
   limits: {
     memory_max_bytes: 2147483648,
@@ -131,6 +132,7 @@ describe('RuntimeIsolationPanel', () => {
   it('reports nothing enforced for a backend that declares no capabilities', () => {
     const remoteSnap = JSON.stringify({
       provider: 'remote_machine',
+      policy_configured: true,
       capabilities: [],
       limits: {},
       enforced: { memory: false, pids: false, cpu: false, wall_clock: false },
@@ -141,5 +143,22 @@ describe('RuntimeIsolationPanel', () => {
     expect(
       screen.getByText(/No isolation capabilities declared by this backend/)
     ).toBeInTheDocument();
+  });
+
+  it('shows an explicit notice when no launcher policy was configured for the run', () => {
+    const unconfiguredSnap = JSON.stringify({
+      provider: 'legacy_posix',
+      policy_configured: false,
+      capabilities: ['private_home_tmp_xdg', 'cpu_mem_pids_time_quota'],
+      limits: {},
+      enforced: { memory: true, pids: true, cpu: true, wall_clock: true },
+    });
+    render(<RuntimeIsolationPanel workflow={workflow(unconfiguredSnap)} />);
+    expect(screen.getByText('Policy not configured')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Expand' }));
+    expect(
+      screen.getByText(/No agent launcher policy file was found for this run/)
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Limit')).not.toBeInTheDocument();
   });
 });
