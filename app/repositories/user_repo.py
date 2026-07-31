@@ -33,7 +33,7 @@ class UserRepository:
         role: str = "user",
         is_active: bool = True,
         system_account: str | None = None,
-        tenant_id: int = 1,
+        tenant_id: int | None = None,
     ) -> int | None:
         """
         Create a new user.
@@ -45,11 +45,16 @@ class UserRepository:
             role: User role.
             is_active: Whether user is active.
             system_account: System account name for multi-user workspace mode.
-            tenant_id: Tenant ID for multi-tenant support.
+            tenant_id: Tenant ID for multi-tenant support. If None, defaults to 1.
 
         Returns:
             Optional[int]: User ID if successful, None otherwise.
         """
+        # Issue #1826 F6: Handle None tenant_id (allow policy from SSO)
+        # When tenant_id is None (e.g., SSO allow policy), use default tenant 1
+        # This maintains consistency across PostgreSQL (no schema default) and SQLite
+        effective_tenant_id = tenant_id if tenant_id is not None else 1
+
         try:
             # Use RETURNING for PostgreSQL, or lastrowid for SQLite
             if self.db.is_postgresql:
@@ -70,7 +75,7 @@ class UserRepository:
                         is_active,
                         datetime.now(timezone.utc).replace(tzinfo=None),
                         system_account,
-                        tenant_id,
+                        effective_tenant_id,
                     ),
                     commit=True,
                 )
@@ -93,7 +98,7 @@ class UserRepository:
                         is_active_int,
                         datetime.now(timezone.utc).replace(tzinfo=None),
                         system_account,
-                        tenant_id,
+                        effective_tenant_id,
                     ),
                 )
                 return cast("int", cursor.lastrowid)
