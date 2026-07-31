@@ -188,6 +188,7 @@ class TestF3TenantIDStrategy:
 
         try:
             from flask import Flask, g
+
             from app.modules.sso.provider import SSOUser
             from app.routes.sso import _create_user_from_sso
 
@@ -197,8 +198,10 @@ class TestF3TenantIDStrategy:
 
             with app.app_context():
                 # Mock dependencies
-                with patch("app.routes.sso.get_sso_manager") as mock_manager, \
-                     patch("app.routes.sso.user_repo") as mock_repo:
+                with (
+                    patch("app.routes.sso.get_sso_manager") as mock_manager,
+                    patch("app.routes.sso.user_repo") as mock_repo,
+                ):
 
                     # Mock provider with no tenant_id
                     mock_provider = MagicMock()
@@ -218,7 +221,7 @@ class TestF3TenantIDStrategy:
                         provider="test_oidc",
                         provider_user_id="user123",
                         email="user@example.com",
-                        username="testuser"
+                        username="testuser",
                     )
 
                     # Should return None (reject creation)
@@ -245,6 +248,7 @@ class TestF3TenantIDStrategy:
 
         try:
             from flask import Flask, g
+
             from app.modules.sso.provider import SSOUser
             from app.routes.sso import _create_user_from_sso
 
@@ -254,8 +258,10 @@ class TestF3TenantIDStrategy:
 
             with app.app_context():
                 # Mock dependencies
-                with patch("app.routes.sso.get_sso_manager") as mock_manager, \
-                     patch("app.routes.sso.user_repo") as mock_repo:
+                with (
+                    patch("app.routes.sso.get_sso_manager") as mock_manager,
+                    patch("app.routes.sso.user_repo") as mock_repo,
+                ):
 
                     # Mock provider with no tenant_id
                     mock_provider = MagicMock()
@@ -276,7 +282,7 @@ class TestF3TenantIDStrategy:
                         provider="test_oidc",
                         provider_user_id="user456",
                         email="admin@example.com",
-                        username="adminuser"
+                        username="adminuser",
                     )
 
                     # Should create user
