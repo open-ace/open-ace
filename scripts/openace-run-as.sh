@@ -323,9 +323,33 @@ if [ "$isolated" = true ]; then
         task_cache="${task_base}/cache"
         task_config="${task_base}/config"
         task_data="${task_base}/data"
+        # Issue #2035: preserve Claude CLI session files across task invocations.
+        # The per-task HOME is ephemeral, but Claude CLI stores conversation
+        # history under ~/.claude/projects/. These files must survive task_base
+        # cleanup so that --resume can find them on the next invocation with the
+        # same task_id (session line). Without this, every resume attempt fails
+        # with "no conversation found with session id", triggering repeated
+        # session_resume_recovery events and wasting agent tokens.
+        #
+        # The preserve path is fixed (not conditional on .claude existing) so
+        # that a crashed previous invocation — which moved .claude to the
+        # preserve path but never moved it back — is recovered: the
+        # unconditional restore below finds the orphaned preserve dir and
+        # restores it even though $task_home/.claude was already moved away.
+        preserve_claude_dir="${task_base}.claude-preserve"
+        if [ -d "$task_home/.claude" ]; then
+            rm -rf -- "$preserve_claude_dir" 2>/dev/null || true
+            mv "$task_home/.claude" "$preserve_claude_dir" 2>/dev/null || true
+        fi
         rm -rf -- "$task_base" 2>/dev/null || true
         mkdir -p "$task_home" "$task_tmp" "$task_cache" "$task_config" "$task_data"
         chmod 700 "$task_base" "$task_home" "$task_tmp" "$task_cache" "$task_config" "$task_data"
+        # Unconditional restore: works even if a previous invocation crashed
+        # between the preserve-mv and the restore-mv (the .claude dir was moved
+        # out but never moved back). The chown on $task_base below covers .claude.
+        if [ -d "$preserve_claude_dir" ]; then
+            mv "$preserve_claude_dir" "$task_home/.claude" 2>/dev/null || true
+        fi
         chown -R "$target_user":"$(id -g "$target_user")" "$task_base" 2>/dev/null || true
     fi
 
