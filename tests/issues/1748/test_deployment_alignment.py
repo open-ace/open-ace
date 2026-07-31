@@ -78,9 +78,9 @@ class TestKubernetesManifestAlignment:
         deployment = (ROOT / "k8s" / "deployment.yaml").read_text(encoding="utf-8")
 
         # Verify capabilities.drop contains ALL
-        assert re.search(r"drop:\s*\n\s*-\s*ALL", deployment), (
-            "deployment.yaml container securityContext must have capabilities.drop:[ALL]"
-        )
+        assert re.search(
+            r"drop:\s*\n\s*-\s*ALL", deployment
+        ), "deployment.yaml container securityContext must have capabilities.drop:[ALL]"
 
     def test_deployment_container_seccompprofile_runtime_default(self):
         """Issue #1821 F2a: Verify seccompProfile type RuntimeDefault."""
@@ -94,22 +94,22 @@ class TestKubernetesManifestAlignment:
         """Issue #1821 F2b: Verify readOnlyRootFilesystem is true."""
         deployment = (ROOT / "k8s" / "deployment.yaml").read_text(encoding="utf-8")
 
-        assert "readOnlyRootFilesystem: true" in deployment, (
-            "deployment.yaml must have readOnlyRootFilesystem: true"
-        )
+        assert (
+            "readOnlyRootFilesystem: true" in deployment
+        ), "deployment.yaml must have readOnlyRootFilesystem: true"
 
     def test_deployment_container_tmp_volume_mount(self):
         """Issue #1821 F2b: Verify /tmp is mounted as tmpfs emptyDir."""
         deployment = (ROOT / "k8s" / "deployment.yaml").read_text(encoding="utf-8")
 
         # Verify /tmp volume mount exists
-        assert re.search(r"- name: tmp\s*\n\s*mountPath: /tmp", deployment), (
-            "deployment.yaml must have /tmp volume mount"
-        )
+        assert re.search(
+            r"- name: tmp\s*\n\s*mountPath: /tmp", deployment
+        ), "deployment.yaml must have /tmp volume mount"
         # Verify tmp volume uses tmpfs
-        assert re.search(r"- name: tmp\s*\n\s*emptyDir:\s*\n\s*medium: Memory", deployment), (
-            "deployment.yaml must have tmp volume with medium: Memory (tmpfs)"
-        )
+        assert re.search(
+            r"- name: tmp\s*\n\s*emptyDir:\s*\n\s*medium: Memory", deployment
+        ), "deployment.yaml must have tmp volume with medium: Memory (tmpfs)"
 
     def test_deployment_container_agent_tasks_volume_mount(self):
         """Issue #1821 F2b: Verify /run/openace-agent-tasks is mounted as emptyDir."""
@@ -120,17 +120,17 @@ class TestKubernetesManifestAlignment:
             r"- name: agent-tasks\s*\n\s*mountPath: /run/openace-agent-tasks", deployment
         ), "deployment.yaml must have /run/openace-agent-tasks volume mount"
         # Verify agent-tasks volume is emptyDir
-        assert re.search(r"- name: agent-tasks\s*\n\s*emptyDir: \{\}", deployment), (
-            "deployment.yaml must have agent-tasks volume as emptyDir"
-        )
+        assert re.search(
+            r"- name: agent-tasks\s*\n\s*emptyDir: \{\}", deployment
+        ), "deployment.yaml must have agent-tasks volume as emptyDir"
 
     def test_deployment_image_pull_policy_always(self):
         """Issue #1821 F3: Verify imagePullPolicy is Always."""
         deployment = (ROOT / "k8s" / "deployment.yaml").read_text(encoding="utf-8")
 
-        assert "imagePullPolicy: Always" in deployment, (
-            "deployment.yaml must have imagePullPolicy: Always"
-        )
+        assert (
+            "imagePullPolicy: Always" in deployment
+        ), "deployment.yaml must have imagePullPolicy: Always"
 
 
 class TestComposeSunset:
