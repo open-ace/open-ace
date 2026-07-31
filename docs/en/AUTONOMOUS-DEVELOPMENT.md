@@ -367,6 +367,61 @@ Internal limits referenced elsewhere in this document are also module-level cons
 
 When upgrading an older installation, run the installer validation/upgrade path and confirm that legacy broad `openace-run-as` sudoers files are disabled.
 
+### 14.1 Enabling cgroup v2 resource limits (bare-metal / VM deployments)
+
+The standard installer and Dockerfile do not enable cgroup resource limits by default — inside containers cgroupfs is usually read-only and the launcher falls back to `prlimit`. On bare-metal or VM deployments, run `scripts/setup-cgroup-v2.sh` to enable per-task memory, PID, and CPU limits in one step:
+
+```bash
+sudo bash scripts/setup-cgroup-v2.sh
+```
+
+The script will:
+
+1. Delegate `memory`/`pids`/`cpu` controllers at the root cgroup
+2. Create the parent cgroup `/sys/fs/cgroup/openace-agent`
+3. Apply default resource limits (memory 2 GiB, pids 512, CPU 2 cores)
+4. Update `/etc/openace/agent-launcher.conf` to set `agent_task_cgroup_enabled=on`
+5. Install a systemd unit `openace-cgroup-setup.service` that re-applies the settings on every boot
+
+**Customising limits:**
+
+```bash
+sudo bash scripts/setup-cgroup-v2.sh --memory 4G --pids 1024 --cpu 4
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--memory` | `2147483648` (2 GiB) | Memory cap per agent task. Suffixes `512M`/`2G`/`4G` accepted |
+| `--pids` | `512` | Max processes per agent task |
+| `--cpu` | `2` | CPU cores available to each agent task |
+| `--cgroup-enabled` | `on` | `on` forces; `auto` enables only when cgroupfs is writable; `off` disables |
+| `--concurrency` | `3` | Max concurrent workflows advanced by the scheduler |
+| `--wall-clock` | `3600` | Per-task wall-clock timeout in seconds |
+| `--conf` | `/etc/openace/agent-launcher.conf` | Configuration file path |
+| `--cgroup-root` | `/sys/fs/cgroup/openace-agent` | Parent cgroup path |
+| `--dry-run` | — | Preview actions without making changes |
+
+**Prerequisite:** the kernel must expose cgroup v2 (Rocky/RHEL/CentOS 9+ satisfies this by default). The script fails closed with a non-zero exit code when controllers are missing or cgroupfs is not writable.
+
+**Relationship to runtime isolation:**
+
+| Resource | Enforced by | Mechanism |
+|----------|-------------|-----------|
+| Memory | kernel (cgroup v2) | OOM kill |
+| PIDs | kernel (cgroup v2) | fork failure |
+| CPU | kernel (cgroup v2) | CPU throttling |
+| Wall-clock timeout | Python runner | `Event.wait` timeout + process termination (paused time excluded) |
+
+**Disabling cgroup limits:**
+
+```bash
+sudo systemctl disable --now openace-cgroup-setup.service
+sudo rm /etc/systemd/system/openace-cgroup-setup.service
+# Then edit /etc/openace/agent-launcher.conf and set agent_task_cgroup_enabled=off
+```
+
+Do not run this script inside containers — `/sys/fs/cgroup` is typically read-only. To enable in a privileged container, run the container with `--cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw`.
+
 ## 15. API overview
 
 All endpoints require authentication and enforce workflow ownership or administrator access.
