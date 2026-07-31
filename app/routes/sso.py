@@ -1747,7 +1747,10 @@ def _create_user_from_sso(sso_user, provider_name: str) -> int | None:
         Optional[int]: New user ID or None.
 
     Issue #1826 F3: Explicit tenant_id passing with policy configuration.
+    Issue #2174 F6: Fail-closed tenant resolution with priority chain.
     """
+    from flask import g
+
     # Generate username if not provided
     username = sso_user.username or sso_user.email or f"{provider_name}_{sso_user.provider_user_id}"
 
@@ -1758,30 +1761,49 @@ def _create_user_from_sso(sso_user, provider_name: str) -> int | None:
         username = f"{base_username}_{counter}"
         counter += 1
 
-    # Issue #1826 F3: Get tenant_id with policy configuration
-    # Get tenant_id from Provider configuration
+    # Issue #2174 F6: Tenant resolution priority chain
+    # Priority 1: Provider configuration (default_tenant_id in provider config)
+    # Priority 2: Request tenant context (from authenticated session)
+    # Priority 3: REJECT if neither available
+
     provider = get_sso_manager().get_provider(provider_name)
-    tenant_id = provider.config.tenant_id if provider and provider.config.tenant_id else None
+    tenant_id = None
 
-    # Policy configuration for null tenant_id
-    null_tenant_policy = os.environ.get("SSO_NULL_TENANT_POLICY", "warn")
+    # Priority 1: Try provider configuration default_tenant_id
+    if provider and provider.config:
+        # Try extra_params first (where default_tenant_id is typically configured)
+        if provider.config.extra_params:
+            tenant_id = provider.config.extra_params.get("default_tenant_id")
+        # Fall back to provider's tenant_id if not in extra_params
+        if not tenant_id:
+            tenant_id = provider.config.tenant_id
 
-    # Check if tenant_id is required
+    # Priority 2: Try request tenant context from authenticated session
     if tenant_id is None:
+        request_tenant_id = getattr(g, "tenant_id", None) or getattr(g, "user", {}).get("tenant_id")
+        if request_tenant_id:
+            tenant_id = int(request_tenant_id)
+
+    # Priority 3: Check policy for missing tenant_id
+    if tenant_id is None:
+        null_tenant_policy = os.environ.get("SSO_NULL_TENANT_POLICY", "reject")  # Changed default to reject
+
         if null_tenant_policy == "reject":
             logger.error(
-                f"SSO user creation rejected due to null tenant_id (policy: reject): "
-                f"provider={provider_name}, username={username}"
+                f"SSO user creation rejected - no tenant binding: "
+                f"provider={provider_name}, username={username}. "
+                f"Contact administrator to configure default_tenant_id for this provider."
             )
             return None
         elif null_tenant_policy == "warn":
             logger.warning(
                 f"SSO user created with null tenant_id: provider={provider_name}, "
-                f"username={username}. Set SSO_NULL_TENANT_POLICY=reject to enforce tenant_id."
+                f"username={username}. Set provider default_tenant_id or use reject policy."
             )
-        # "allow" policy: silent allow (for admin accounts)
-        # Default tenant_id to 1 if not set (backward compatibility)
-        tenant_id = tenant_id or 1
+            # Set to None explicitly (NOT 1)
+            tenant_id = None
+        # "allow" policy: silent allow (for admin accounts with global scope)
+        # tenant_id remains None
 
     # Create user
     try:

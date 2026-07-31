@@ -36,6 +36,7 @@ from app.modules.workspace.session_manager import (
 from app.modules.workspace.state_sync import get_state_sync_manager
 from app.modules.workspace.tool_connector import get_tool_connector
 from app.routes.fs import is_valid_path
+from app.utils.request_context import get_current_tenant_id
 from app.utils.tool_names import TOOL_NAME_ALIASES, normalize_tool_name
 from app.utils.workspace import get_workspace_base_dir, get_workspace_base_dirs
 
@@ -243,20 +244,6 @@ def format_datetime(dt):
     return dt
 
 
-def _current_tenant_id() -> int | None:
-    """Return the current authenticated tenant id, if any."""
-    if not hasattr(g, "user") or not g.user:
-        return None
-    raw_tenant_id = g.user.get("tenant_id")
-    if raw_tenant_id in (None, ""):
-        return None
-    try:
-        tenant_id = int(raw_tenant_id)
-    except (TypeError, ValueError):
-        return None
-    return tenant_id if tenant_id > 0 else None
-
-
 def _tenant_scope_required() -> bool:
     """Whether workspace data should be tenant-scoped for this request."""
     current_role = g.user.get("role") if hasattr(g, "user") and g.user else None
@@ -274,7 +261,7 @@ def _session_lookup_tenant_id() -> int | None:
     """
     if not _tenant_scope_required():
         return None
-    tenant_id = _current_tenant_id()
+    tenant_id = getget_current_tenant_id()
     if tenant_id is None:
         abort(403)
     return tenant_id
@@ -829,7 +816,7 @@ def list_sessions():
 
         # Get user_id from g.user to filter sessions
         user_id = g.user.get("id") if hasattr(g, "user") and g.user else None
-        tenant_id = _current_tenant_id()
+        tenant_id = get_current_tenant_id()
 
         # Valid values for status and session_type (whitelist validation)
         VALID_STATUS_VALUES = {"active", "paused", "completed", "error"}
@@ -1113,7 +1100,7 @@ def get_remote_projects():
         p = get_param_placeholder()
 
         user_id = g.user.get("id") if hasattr(g, "user") and g.user else None
-        tenant_id = _current_tenant_id()
+        tenant_id = get_current_tenant_id()
         if not user_id:
             return jsonify({"success": False, "error": "Authentication required"}), 401
 
@@ -1202,7 +1189,7 @@ def create_session():
         tool_name = normalize_tool_name(tool_name)
 
         user_id = g.user.get("id") if hasattr(g, "user") and g.user else None
-        tenant_id = _current_tenant_id()
+        tenant_id = get_current_tenant_id()
 
         # Get project info from request or look up by path
         project_id = data.get("project_id")
@@ -1270,7 +1257,7 @@ def _check_session_access(session, *, require_owner: bool = True):
         return None
     current_user_id = g.user.get("id") if hasattr(g, "user") and g.user else None
     current_role = g.user.get("role") if hasattr(g, "user") and g.user else None
-    current_tenant_id = _current_tenant_id()
+    current_tenant_id = get_current_tenant_id()
     if current_role != "admin":
         if current_tenant_id is not None and session.tenant_id != current_tenant_id:
             return jsonify({"success": False, "error": "Access denied"}), 403
@@ -1507,7 +1494,7 @@ def restore_session(session_id):
         conn = get_connection()
         cursor = conn.cursor()
         p = get_param_placeholder()
-        tenant_id = _current_tenant_id()
+        tenant_id = get_current_tenant_id()
         tenant_clause = ""
         params = [session_id]
         if tenant_id is not None and _tenant_scope_required():
@@ -1545,7 +1532,7 @@ def restore_session(session_id):
         # Ownership check: only the session owner or admin can restore
         current_user_id = g.user.get("id") if hasattr(g, "user") and g.user else None
         current_role = g.user.get("role") if hasattr(g, "user") and g.user else None
-        current_tenant_id = _current_tenant_id()
+        current_tenant_id = get_current_tenant_id()
         session_user_id = session_data.get("user_id")
         if current_role != "admin":
             if current_tenant_id is not None and session_data.get("tenant_id") != current_tenant_id:
