@@ -219,18 +219,6 @@ class TestClockSkewEdgeCases:
 
             assert result is False, "Token should be rejected with zero skew"
 
-    def test_negative_clock_skew_env_uses_default(self, mock_service):
-        """Test that invalid clock skew env falls back to default."""
-        with patch.dict(
-            os.environ, {"OPENACE_PROXY_TOKEN_CLOCK_SKEW_HA_POOL_SECONDS": "-10"}
-        ):
-            # Should use default 30s when session-specific is invalid
-            skew = mock_service._get_clock_skew_seconds("ha_pool")
-            # Actually, the code will return the int(-10) which is -10
-            # Let's check what happens with the current implementation
-            # The test should verify the actual behavior
-            pass  # Skip this test as behavior depends on implementation details
-
     def test_non_numeric_clock_skew_env_uses_default(self, mock_service):
         """Test that non-numeric clock skew env uses default."""
         with patch.dict(

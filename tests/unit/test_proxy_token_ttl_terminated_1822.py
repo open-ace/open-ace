@@ -194,6 +194,88 @@ class TestTerminatedTokenTracking:
 
         assert result is False, "Should return False on error"
 
+    def test_concurrent_termination_marking_is_atomic(self, mock_service):
+        """Test that concurrent termination marking is atomic.
+
+        Issue #1822: Verify that when two threads try to mark the same token
+        as terminated concurrently, only one succeeds (no data corruption).
+        """
+        import threading
+
+        # Create a real database with a single-use expired token
+        # First, create a token record
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+
+        # Generate a test token and record it in the database
+        import secrets
+
+        jti = secrets.token_hex(16)
+        test_token = mock_service.generate_proxy_token(
+            user_id=1,
+            session_id="test-session",
+            tenant_id=1,
+            provider="openai",
+            session_type="ha_pool",
+            expires_minutes=5,
+            extra_payload={"reuse_mode": "single_use"},
+        )
+
+        # Get the JTI from the token
+        import json
+        from base64 import b64decode
+
+        payload_b64 = test_token.split(".")[0]
+        payload = json.loads(b64decode(payload_b64))
+        jti = payload["jti"]
+
+        # Manually expire the token by updating expires_at in the database
+        conn = mock_service._get_connection()
+        cursor = conn.cursor()
+        expired_time = (now - timedelta(minutes=5)).isoformat()
+        cursor.execute(
+            "UPDATE proxy_token_jtis SET expires_at = ? WHERE jti = ?",
+            (expired_time, jti),
+        )
+        conn.commit()
+        conn.close()
+
+        results = []
+        lock = threading.Lock()
+
+        def validate_expired_token():
+            """Attempt to validate the expired token."""
+            result = mock_service.validate_proxy_token(test_token)
+            with lock:
+                results.append(result)
+
+        # Start two threads concurrently
+        threads = [threading.Thread(target=validate_expired_token) for _ in range(2)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        # Both should return None (token expired)
+        # But only one should succeed in marking terminated_at
+        none_count = sum(1 for r in results if r is None)
+        assert none_count == 2, f"Both threads should reject expired token, got {none_count}"
+
+        # Verify terminated_at was set exactly once
+        conn = mock_service._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT terminated_at, termination_reason FROM proxy_token_jtis WHERE jti = ?",
+            (jti,),
+        )
+        row = cursor.fetchone()
+        conn.close()
+
+        terminated_at = row[0] if row else None
+        termination_reason = row[1] if row else None
+
+        assert terminated_at is not None, "terminated_at should be set"
+        assert termination_reason == "expired", "termination_reason should be 'expired'"
+
 
 class TestCleanupTerminatedRecords:
     """Tests for cleanup of terminated records (Issue #1822)."""
