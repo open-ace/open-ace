@@ -104,6 +104,7 @@ def upgrade() -> None:
             "must_change_password": "INTEGER DEFAULT 0",
             "avatar_url": "TEXT",
             "auto_mapping_enabled": "INTEGER DEFAULT 1",
+            "tenant_version": "INTEGER DEFAULT 1 NOT NULL",
         }
 
         # Build CREATE TABLE statement dynamically
@@ -213,6 +214,7 @@ def downgrade() -> None:
             "must_change_password": "INTEGER DEFAULT 0",
             "avatar_url": "TEXT",
             "auto_mapping_enabled": "INTEGER DEFAULT 1",
+            "tenant_version": "INTEGER DEFAULT 1 NOT NULL",
         }
 
         # Build CREATE TABLE statement dynamically
