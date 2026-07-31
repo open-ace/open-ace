@@ -89,7 +89,7 @@ CREATE TABLE agent_sessions (
  expires_at TIMESTAMP,
  project_id integer,
  project_path TEXT,
- request_count integer DEFAULT 0,
+ request_count integer,
  workspace_type text DEFAULT 'local',
  remote_machine_id text,
  paused_at TIMESTAMP,
@@ -100,13 +100,14 @@ CREATE TABLE agent_sessions (
 
 CREATE TABLE agent_tokens (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
- token_hash TEXT NOT NULL,
- machine_id TEXT NOT NULL,
+ machine_id text NOT NULL,
+ token_hash text NOT NULL,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+ rotated_at TIMESTAMP,
+ rotated_by integer,
  is_revoked INTEGER DEFAULT 0,
  revoked_at TIMESTAMP,
- revoked_by integer,
- rotated_at TIMESTAMP
+ revoked_by integer
 );
 
 CREATE TABLE aggregation_history (
@@ -136,6 +137,15 @@ CREATE TABLE ai_agent_settings (
  description text,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE alert_creation_failures (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ alert_data text NOT NULL,
+ retry_count integer DEFAULT 0,
+ last_retry_at TIMESTAMP,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+ status text DEFAULT 'pending'
 );
 
 CREATE TABLE alerts (
@@ -208,7 +218,7 @@ CREATE TABLE api_key_store (
  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
  cli_tools text,
  cli_settings text,
- scope text DEFAULT 'shared',
+ scope text DEFAULT 'remote',
  priority integer DEFAULT 0,
  weight integer DEFAULT 100,
  resolved_ips text,
@@ -235,7 +245,7 @@ CREATE TABLE audit_logs (
 
 CREATE TABLE autonomous_workflows (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
- workflow_id TEXT NOT NULL,
+ workflow_id text NOT NULL,
  user_id integer,
  title text DEFAULT '',
  status text DEFAULT 'pending',
@@ -244,7 +254,6 @@ CREATE TABLE autonomous_workflows (
  project_path text DEFAULT '',
  project_repo_url text DEFAULT '',
  is_new_project INTEGER DEFAULT 0,
- is_private INTEGER DEFAULT 1,
  cli_tool text DEFAULT '',
  model text DEFAULT '',
  permission_mode text DEFAULT 'auto-edit',
@@ -261,16 +270,20 @@ CREATE TABLE autonomous_workflows (
  dev_round integer DEFAULT 1,
  max_plan_rounds integer DEFAULT 3,
  max_pr_review_rounds integer DEFAULT 5,
- require_full_review_rounds INTEGER DEFAULT 0,
  total_tokens integer DEFAULT 0,
  total_input_tokens integer DEFAULT 0,
  total_output_tokens integer DEFAULT 0,
  total_requests integer DEFAULT 0,
  error_message text DEFAULT '',
- created_at TIMESTAMP,
- updated_at TIMESTAMP,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+ updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
  completed_at TIMESTAMP,
  paused_at TIMESTAMP,
+ is_private INTEGER DEFAULT 1,
+ retry_count integer DEFAULT 0,
+ task_timeout integer,
+ locked_at text,
+ locked_by text,
  planning_timeout_extension integer DEFAULT 0,
  parent_workflow_id text,
  fork_milestone_id text,
@@ -286,11 +299,9 @@ CREATE TABLE autonomous_workflows (
  main_session_id text DEFAULT '' NOT NULL,
  review_session_id text DEFAULT '' NOT NULL,
  test_session_id text DEFAULT '' NOT NULL,
- content_language text DEFAULT 'en' NOT NULL,
- locked_at TIMESTAMP,
- locked_by text DEFAULT '',
  transient_retry_count integer DEFAULT 0,
- retry_count integer DEFAULT 0,
+ content_language text DEFAULT 'en' NOT NULL,
+ require_full_review_rounds INTEGER DEFAULT 0 NOT NULL,
  test_retries integer DEFAULT 0,
  skip_retries integer DEFAULT 0,
  dev_retries_on_test_fail integer DEFAULT 0,
@@ -531,7 +542,7 @@ CREATE TABLE machine_assignments (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  machine_id text NOT NULL,
  user_id integer NOT NULL,
- permission text DEFAULT 'user',
+ permission text DEFAULT 'use',
  granted_by integer,
  granted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -557,8 +568,7 @@ CREATE TABLE notification_preferences (
  alert_types text,
  min_severity text DEFAULT 'warning',
  notification_email text,
- email_verified INTEGER DEFAULT 0,
- dingtalk_webhook_secret text
+ email_verified INTEGER DEFAULT 0
 );
 
 CREATE TABLE policy_decisions (
@@ -716,13 +726,15 @@ CREATE TABLE quota_usage (
 
 CREATE TABLE registration_tokens (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
- token_hash TEXT NOT NULL,
+ token text,
  tenant_id integer NOT NULL,
- created_by integer NOT NULL,
+ created_by integer,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
- expires_at TIMESTAMP,
+ expires_at TIMESTAMP NOT NULL,
  is_consumed INTEGER DEFAULT 0,
- consumed_at TIMESTAMP
+ consumed_at TIMESTAMP,
+ consumed_machine_id text,
+ token_hash TEXT
 );
 
 CREATE TABLE remote_machines (
@@ -802,9 +814,9 @@ CREATE TABLE session_messages (
  "timestamp" TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
  metadata text,
  milestone_id text DEFAULT '' NOT NULL,
- source text DEFAULT '' NOT NULL,
+ source text DEFAULT '',
  source_timestamp TIMESTAMP,
- external_message_id text DEFAULT '' NOT NULL,
+ external_message_id text DEFAULT '',
  content_blocks text,
  tenant_id integer DEFAULT 1 NOT NULL
 );
@@ -858,7 +870,7 @@ CREATE TABLE sso_auth_states (
  provider_name text NOT NULL,
  nonce text,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
- expires_at TIMESTAMP DEFAULT (datetime('now', '+600 seconds')) NOT NULL
+ expires_at TIMESTAMP NOT NULL
 );
 
 CREATE TABLE sso_identities (
@@ -991,9 +1003,9 @@ CREATE TABLE tenant_settings (
  custom_branding INTEGER DEFAULT 0,
  branding_name TEXT,
  branding_logo_url TEXT,
- auto_provision_users INTEGER DEFAULT 0,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+ auto_provision_users INTEGER DEFAULT 0,
  block_sensitive_keyword INTEGER DEFAULT 0,
  sensitive_keyword_match_mode TEXT DEFAULT 'word_boundary'
 );
@@ -1207,8 +1219,8 @@ CREATE TABLE webhook_deliveries (
 
 CREATE TABLE workflow_events (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
- workflow_id TEXT NOT NULL,
- milestone_id TEXT DEFAULT '',
+ workflow_id text NOT NULL,
+ milestone_id text DEFAULT '',
  event_type text DEFAULT '' NOT NULL,
  event_data text DEFAULT '',
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -1216,8 +1228,8 @@ CREATE TABLE workflow_events (
 
 CREATE TABLE workflow_milestones (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
- workflow_id TEXT NOT NULL,
- milestone_id TEXT NOT NULL,
+ workflow_id text NOT NULL,
+ milestone_id text NOT NULL,
  phase text DEFAULT '' NOT NULL,
  dev_round integer DEFAULT 1,
  round_number integer DEFAULT 0,
@@ -1257,6 +1269,8 @@ CREATE UNIQUE INDEX agent_runs_run_id_key ON agent_runs (run_id);
 
 CREATE UNIQUE INDEX agent_sessions_session_id_key ON agent_sessions (session_id);
 
+CREATE UNIQUE INDEX agent_tokens_machine_id_key ON agent_tokens (machine_id);
+
 CREATE UNIQUE INDEX agent_tokens_token_hash_key ON agent_tokens (token_hash);
 
 CREATE UNIQUE INDEX ai_agent_settings_setting_key_key ON ai_agent_settings (setting_key);
@@ -1275,11 +1289,15 @@ CREATE UNIQUE INDEX knowledge_base_entry_id_key ON knowledge_base (entry_id);
 
 CREATE UNIQUE INDEX machine_assignments_machine_id_user_id_key ON machine_assignments (machine_id, user_id);
 
+CREATE UNIQUE INDEX policy_decisions_decision_id_key ON policy_decisions (decision_id);
+
 CREATE UNIQUE INDEX proxy_token_jtis_jti_key ON proxy_token_jtis (jti);
 
 CREATE UNIQUE INDEX proxy_token_jtis_token_hash_key ON proxy_token_jtis (token_hash);
 
 CREATE UNIQUE INDEX registration_tokens_token_hash_key ON registration_tokens (token_hash);
+
+CREATE UNIQUE INDEX registration_tokens_token_key ON registration_tokens (token);
 
 CREATE UNIQUE INDEX remote_machines_machine_id_key ON remote_machines (machine_id);
 
@@ -1384,6 +1402,10 @@ CREATE INDEX idx_agent_sessions_user_id ON agent_sessions (user_id);
 CREATE INDEX idx_agent_tokens_hash ON agent_tokens (token_hash);
 
 CREATE INDEX idx_agent_tokens_machine ON agent_tokens (machine_id);
+
+CREATE INDEX idx_agent_tokens_machine_id ON agent_tokens (machine_id);
+
+CREATE INDEX idx_agent_tokens_token_hash ON agent_tokens (token_hash);
 
 CREATE INDEX idx_aggregation_history_status ON aggregation_history (status);
 
@@ -1541,6 +1563,8 @@ CREATE INDEX idx_policy_rules_current_enabled ON policy_rules (is_current, enabl
 
 CREATE INDEX idx_policy_rules_key_current ON policy_rules (rule_key, is_current);
 
+CREATE UNIQUE INDEX idx_policy_rules_key_version ON policy_rules (rule_key, version);
+
 CREATE INDEX idx_project_categories_sort_order ON project_categories (sort_order);
 
 CREATE INDEX idx_projects_created_by ON projects (created_by);
@@ -1573,7 +1597,11 @@ CREATE INDEX idx_quota_usage_date ON quota_usage (date);
 
 CREATE INDEX idx_quota_usage_user ON quota_usage (user_id);
 
+CREATE INDEX idx_registration_tokens_expires ON registration_tokens (expires_at);
+
 CREATE INDEX idx_registration_tokens_hash ON registration_tokens (token_hash);
+
+CREATE INDEX idx_registration_tokens_token ON registration_tokens (token);
 
 CREATE INDEX idx_remote_machines_hostname_tenant ON remote_machines (hostname, tenant_id);
 
@@ -1647,7 +1675,7 @@ CREATE INDEX idx_team_members_user ON team_members (user_id);
 
 CREATE INDEX idx_teams_owner ON teams (owner_id);
 
-CREATE INDEX idx_teams_sync_source ON teams ((settings->>'sync_source'));
+CREATE INDEX idx_teams_sync_source ON teams ((((settings) ->> 'sync_source')));
 
 CREATE INDEX idx_tenant_migrations_status ON tenant_migrations (status);
 
@@ -1725,6 +1753,8 @@ CREATE INDEX idx_users_system_account ON users (system_account) WHERE ((deleted_
 
 CREATE INDEX idx_users_tenant ON users (tenant_id);
 
+CREATE INDEX idx_users_tenant_quota_active ON users (tenant_id, is_active, deleted_at);
+
 CREATE INDEX idx_users_username ON users (username) WHERE ((deleted_at IS NULL) AND (is_active = true));
 
 CREATE INDEX idx_webhook_deliveries_alert ON webhook_deliveries (alert_id);
@@ -1742,8 +1772,6 @@ CREATE INDEX idx_workflows_status_created ON autonomous_workflows (status, creat
 CREATE INDEX idx_workflows_user_status ON autonomous_workflows (user_id, status);
 
 CREATE UNIQUE INDEX ix_anomaly_status_type_hash ON anomaly_status (anomaly_type, affected_users_hash);
-
-CREATE UNIQUE INDEX policy_decisions_decision_id_key ON policy_decisions (decision_id);
 
 CREATE UNIQUE INDEX policy_rules_rule_key_version_key ON policy_rules (rule_key, version);
 
