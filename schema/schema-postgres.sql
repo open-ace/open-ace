@@ -993,7 +993,10 @@ CREATE TABLE proxy_token_jtis (
     revoked_at timestamp without time zone,
     revoke_reason text,
     use_count integer DEFAULT 0 NOT NULL,
-    metadata text
+    metadata text,
+    -- Issue #1822: Track token termination for audit and cleanup
+    terminated_at timestamp without time zone,
+    termination_reason text
 );
 
 CREATE SEQUENCE proxy_token_jtis_id_seq
