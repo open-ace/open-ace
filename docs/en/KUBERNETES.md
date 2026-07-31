@@ -197,7 +197,7 @@ Keys: `SECRET_KEY`, `OPENACE_ENCRYPTION_KEY`, `UPLOAD_AUTH_KEY`, `DB_USER`, `DB_
 **PDB Percentage Behavior** (Issue #1821 F6):
 - At 3 replicas: 50% = 2 available (allows 1 disruption) — **same as previous absolute value**
 - At 2 replicas: 50% = 1 available (allows 1 disruption) — **more permissive than previous**
-- At 1 replica: 50% = 1 available (blocks all disruptions)
+- At 1 replica: 50% = 1 available (allows 0 disruptions)
 - Review this behavior before scaling down the HPA floor below 3 replicas.
 
 ## Configuration
@@ -233,6 +233,13 @@ The `/health` endpoint returns service status and git commit hash.
 
 **Prometheus Monitoring** (Issue #1821 F1):
 The `prometheus.io/scrape` annotation currently points to `/health` which returns HTTP 200 for health checks only. No application metrics are exposed. This annotation is retained for infrastructure monitoring readiness. To enable real metrics collection, implement a `/metrics` endpoint (e.g., using prometheus_client library).
+
+**Image Registry Dependency** (Issue #1821 F3):
+With `imagePullPolicy: Always`, the container registry becomes a critical dependency. If the registry is unavailable:
+- New pods cannot start (even with cached images on nodes)
+- Pod restarts and rescheduling will fail
+- Consider implementing a registry cache (e.g., Harbor proxy cache) for production deployments
+- In Phase 2, digest pinning will reduce this dependency by allowing cached images to be reused
 
 ## Scaling
 
