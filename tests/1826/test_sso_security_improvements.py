@@ -180,6 +180,123 @@ class TestF3TenantIDStrategy:
         # Implementation in _create_user_from_sso
         pass
 
+    def test_null_tenant_policy_warn_rejects_creation(self):
+        """Test Issue #1826 F6: warn policy rejects user creation."""
+        # Set policy to warn
+        original_policy = os.environ.get("SSO_NULL_TENANT_POLICY")
+        os.environ["SSO_NULL_TENANT_POLICY"] = "warn"
+
+        try:
+            from flask import Flask, g
+            from app.modules.sso.provider import SSOUser
+            from app.routes.sso import _create_user_from_sso
+
+            # Create a minimal Flask app for context
+            app = Flask(__name__)
+            app.config["TESTING"] = True
+
+            with app.app_context():
+                # Mock dependencies
+                with patch("app.routes.sso.get_sso_manager") as mock_manager, \
+                     patch("app.routes.sso.user_repo") as mock_repo:
+
+                    # Mock provider with no tenant_id
+                    mock_provider = MagicMock()
+                    mock_provider.config.tenant_id = None
+                    mock_provider.config.extra_params = {}
+
+                    mock_manager.return_value.get_provider.return_value = mock_provider
+
+                    mock_repo.get_user_by_username.return_value = None
+
+                    # Set g attributes for tenant_id resolution
+                    g.tenant_id = None
+                    g.user = {}
+
+                    # Create SSO user
+                    sso_user = SSOUser(
+                        provider="test_oidc",
+                        provider_user_id="user123",
+                        email="user@example.com",
+                        username="testuser"
+                    )
+
+                    # Should return None (reject creation)
+                    user_id = _create_user_from_sso(sso_user, "test_oidc")
+
+                    # Verify user creation was rejected
+                    assert user_id is None
+
+                    # Verify create_user was NOT called
+                    mock_repo.create_user.assert_not_called()
+
+        finally:
+            # Restore original policy
+            if original_policy is not None:
+                os.environ["SSO_NULL_TENANT_POLICY"] = original_policy
+            else:
+                os.environ.pop("SSO_NULL_TENANT_POLICY", None)
+
+    def test_null_tenant_policy_allow_uses_db_default(self):
+        """Test Issue #1826 F6: allow policy passes None to database."""
+        # Set policy to allow
+        original_policy = os.environ.get("SSO_NULL_TENANT_POLICY")
+        os.environ["SSO_NULL_TENANT_POLICY"] = "allow"
+
+        try:
+            from flask import Flask, g
+            from app.modules.sso.provider import SSOUser
+            from app.routes.sso import _create_user_from_sso
+
+            # Create a minimal Flask app for context
+            app = Flask(__name__)
+            app.config["TESTING"] = True
+
+            with app.app_context():
+                # Mock dependencies
+                with patch("app.routes.sso.get_sso_manager") as mock_manager, \
+                     patch("app.routes.sso.user_repo") as mock_repo:
+
+                    # Mock provider with no tenant_id
+                    mock_provider = MagicMock()
+                    mock_provider.config.tenant_id = None
+                    mock_provider.config.extra_params = {}
+
+                    mock_manager.return_value.get_provider.return_value = mock_provider
+
+                    mock_repo.get_user_by_username.return_value = None
+                    mock_repo.create_user.return_value = 456
+
+                    # Set g attributes for tenant_id resolution
+                    g.tenant_id = None
+                    g.user = {}
+
+                    # Create SSO user
+                    sso_user = SSOUser(
+                        provider="test_oidc",
+                        provider_user_id="user456",
+                        email="admin@example.com",
+                        username="adminuser"
+                    )
+
+                    # Should create user
+                    user_id = _create_user_from_sso(sso_user, "test_oidc")
+
+                    # Verify user was created
+                    assert user_id == 456
+
+                    # Verify create_user was called with tenant_id=None
+                    mock_repo.create_user.assert_called_once()
+                    call_kwargs = mock_repo.create_user.call_args[1]
+                    assert call_kwargs["tenant_id"] is None
+
+        finally:
+            # Restore original policy
+            if original_policy is not None:
+                os.environ["SSO_NULL_TENANT_POLICY"] = original_policy
+            else:
+                os.environ.pop("SSO_NULL_TENANT_POLICY", None)
+
 
 class TestF1F7ProviderCacheTTL:
     """Test Issue #1826 F1/F7: Provider cache TTL."""

@@ -30,6 +30,16 @@ from app.utils.outbound_url_guard import OutboundUrlBlockedError, safe_request
 
 logger = logging.getLogger(__name__)
 
+# Issue #1826 F6: Transition warning for SSO_NULL_TENANT_POLICY=warn
+# Check at module load time and emit deprecation notice if warn policy is configured
+_null_tenant_policy = os.environ.get("SSO_NULL_TENANT_POLICY", "reject")
+if _null_tenant_policy == "warn":
+    logger.warning(
+        "DEPRECATION NOTICE: SSO_NULL_TENANT_POLICY=warn currently rejects user creation. "
+        "This behavior will continue in future versions. "
+        "Please migrate to 'reject' or configure provider default_tenant_id."
+    )
+
 # Create blueprint
 sso_bp = Blueprint("sso", __name__, url_prefix="/api/sso")
 
@@ -2132,11 +2142,12 @@ def _create_user_from_sso(sso_user, provider_name: str) -> int | None:
             return None
         elif null_tenant_policy == "warn":
             logger.warning(
-                f"SSO user created with null tenant_id: provider={provider_name}, "
-                f"username={username}. Set provider default_tenant_id or use reject policy."
+                f"SSO user creation rejected - no tenant binding (policy=warn): "
+                f"provider={provider_name}, username={username}. "
+                f"DEPRECATION NOTICE: SSO_NULL_TENANT_POLICY=warn will reject user creation. "
+                f"Please migrate to 'reject' or configure provider default_tenant_id."
             )
-            # Set to None explicitly (NOT 1)
-            tenant_id = None
+            return None  # Issue #1826 F6: Reject creation instead of falling back to tenant 1
         # "allow" policy: silent allow (for admin accounts with global scope)
         # tenant_id remains None
 
@@ -2147,9 +2158,7 @@ def _create_user_from_sso(sso_user, provider_name: str) -> int | None:
             email=sso_user.email or "",
             password_hash="",  # No password for SSO users
             role="user",
-            tenant_id=(
-                tenant_id if tenant_id is not None else 1
-            ),  # Issue #1826 F3: Use default if None
+            tenant_id=tenant_id,  # Issue #1826 F6: Pass None directly for allow policy
         )
 
         if user_id:
