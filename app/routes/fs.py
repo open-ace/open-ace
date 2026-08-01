@@ -23,6 +23,7 @@ from flask import Blueprint, Response, g, jsonify, request, stream_with_context
 from app.repositories.user_repo import UserRepository
 from app.utils.workspace import (
     OPENACE_CHOWN_WRAPPER,
+    OPENACE_RM_WRAPPER,
     OPENACE_WRITE_AS_WRAPPER,
     _is_wrapper_available,
     get_workspace_base_dir,
@@ -1367,8 +1368,10 @@ def api_delete_file():
             # 【安全加固 Issue #2181】使用 openace-rm 安全 wrapper 替代 rm 通配
             # openace-rm 验证：目标用户、路径白名单、symlink 逃逸、owner 匹配、危险选项拒绝
             result = subprocess.run(
-                ["sudo", "/usr/local/bin/openace-rm", effective, target_path],
-                capture_output=True, text=True, timeout=30
+                ["sudo", OPENACE_RM_WRAPPER, effective, target_path],
+                capture_output=True,
+                text=True,
+                timeout=30,
             )
             if result.returncode != 0:
                 stderr = (result.stderr or "").strip()

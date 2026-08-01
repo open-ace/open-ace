@@ -222,9 +222,7 @@ class TestAgentRunnerUsesWrappers:
         assert "openace-mkdir" in content, "agent_runner.py should reference openace-mkdir wrapper"
 
 
-@pytest.mark.skipif(
-    not wrapper_available(OPENACE_RM), reason="openace-rm wrapper not available"
-)
+@pytest.mark.skipif(not wrapper_available(OPENACE_RM), reason="openace-rm wrapper not available")
 class TestOpenaceRm:
     """Tests for openace-rm security wrapper (Issue #2181)."""
 
@@ -333,49 +331,61 @@ class TestSudoersSecurityBaseline:
 
     def test_docker_entrypoint_no_rm_wildcard(self):
         """docker-entrypoint.sh should not contain rm * wildcard."""
-        entrypoint_path = Path("/home/rhuang/open-ace/.worktrees/caade971-ac6b-4d62-921c-329d30c20162/docker-entrypoint.sh")
+        entrypoint_path = Path(
+            "/home/rhuang/open-ace/.worktrees/caade971-ac6b-4d62-921c-329d30c20162/docker-entrypoint.sh"
+        )
         if not entrypoint_path.exists():
             pytest.skip("docker-entrypoint.sh not found")
 
         content = entrypoint_path.read_text()
 
         # Check that OPENACE_UTILS does not contain rm *
-        lines = content.split('\n')
+        lines = content.split("\n")
         for line in lines:
-            if 'Cmnd_Alias OPENACE_UTILS' in line:
-                assert '/usr/bin/rm *' not in line, "OPENACE_UTILS should not contain rm * wildcard"
-                assert '/usr/bin/cat *' not in line, "OPENACE_UTILS should not contain cat * wildcard"
-                assert '/usr/bin/chown *' not in line, "OPENACE_UTILS should not contain chown * wildcard"
-                assert '/usr/bin/useradd *' not in line, "OPENACE_UTILS should not contain useradd * wildcard"
+            if "Cmnd_Alias OPENACE_UTILS" in line:
+                assert "/usr/bin/rm *" not in line, "OPENACE_UTILS should not contain rm * wildcard"
+                assert (
+                    "/usr/bin/cat *" not in line
+                ), "OPENACE_UTILS should not contain cat * wildcard"
+                assert (
+                    "/usr/bin/chown *" not in line
+                ), "OPENACE_UTILS should not contain chown * wildcard"
+                assert (
+                    "/usr/bin/useradd *" not in line
+                ), "OPENACE_UTILS should not contain useradd * wildcard"
 
     def test_docker_entrypoint_no_openace_cli(self):
         """docker-entrypoint.sh should not define OPENACE_CLI alias."""
-        entrypoint_path = Path("/home/rhuang/open-ace/.worktrees/caade971-ac6b-4d62-921c-329d30c20162/docker-entrypoint.sh")
+        entrypoint_path = Path(
+            "/home/rhuang/open-ace/.worktrees/caade971-ac6b-4d62-921c-329d30c20162/docker-entrypoint.sh"
+        )
         if not entrypoint_path.exists():
             pytest.skip("docker-entrypoint.sh not found")
 
         content = entrypoint_path.read_text()
 
         # OPENACE_CLI should be removed
-        assert 'Cmnd_Alias OPENACE_CLI' not in content, "OPENACE_CLI alias should be removed"
+        assert "Cmnd_Alias OPENACE_CLI" not in content, "OPENACE_CLI alias should be removed"
 
     def test_docker_entrypoint_env_keep_clean(self):
         """docker-entrypoint.sh env_keep should not contain sensitive variables."""
-        entrypoint_path = Path("/home/rhuang/open-ace/.worktrees/caade971-ac6b-4d62-921c-329d30c20162/docker-entrypoint.sh")
+        entrypoint_path = Path(
+            "/home/rhuang/open-ace/.worktrees/caade971-ac6b-4d62-921c-329d30c20162/docker-entrypoint.sh"
+        )
         if not entrypoint_path.exists():
             pytest.skip("docker-entrypoint.sh not found")
 
         content = entrypoint_path.read_text()
 
         # Find env_keep line
-        for line in content.split('\n'):
-            if 'env_keep' in line and 'OPENAI_API_KEY' in line:
+        for line in content.split("\n"):
+            if "env_keep" in line and "OPENAI_API_KEY" in line:
                 pytest.fail("env_keep should not contain OPENAI_API_KEY")
-            if 'env_keep' in line and 'ANTHROPIC_API_KEY' in line:
+            if "env_keep" in line and "ANTHROPIC_API_KEY" in line:
                 pytest.fail("env_keep should not contain ANTHROPIC_API_KEY")
-            if 'env_keep' in line and 'GH_TOKEN' in line:
+            if "env_keep" in line and "GH_TOKEN" in line:
                 pytest.fail("env_keep should not contain GH_TOKEN")
-            if 'env_keep' in line and 'OPENCLAW_TOKEN' in line:
+            if "env_keep" in line and "OPENCLAW_TOKEN" in line:
                 pytest.fail("env_keep should not contain OPENCLAW_TOKEN")
 
 
