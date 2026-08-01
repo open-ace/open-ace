@@ -3531,7 +3531,7 @@ class AutonomousOrchestrator:
 
         # Resolve log evidence before consuming an attempt.  A repair agent
         # that only knows "lint failed" can at best guess and historically
-        # burned all three rounds fixing one superficial layer at a time.
+        # burned all its repair rounds fixing one superficial layer at a time.
         # Keep completed/cancelled jobs out of the actionable set and cache the
         # excerpts on the check dict so fingerprint/context construction does
         # not download each log twice.
