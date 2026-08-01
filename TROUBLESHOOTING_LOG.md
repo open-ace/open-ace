@@ -67,37 +67,43 @@
 
 ---
 
-## 问题 3：远程机器注册时 code-server 安装失败（非 ASCII 路径编码问题）
+## 问题 3：远程机器注册时 code-server 安装失败
 
 - **处理时间**：2026-08-01
 - **故障现象**：
-  在远程机器（Windows）上执行注册令牌生成的 PowerShell 安装命令后，agent 文件下载成功、Python 依赖安装成功、CLI 工具（qwen-code-cli）安装成功，但在安装 code-server 阶段报错：`[ERROR] Script failed: interval.sys の yyloader: p1 を 24 行`。脚本因此中止，远程机器注册流程未完成。
+  在远程机器（Windows, Node.js v24.16.0）上执行注册令牌生成的 PowerShell 安装命令后，agent 文件下载成功、Python 依赖安装成功、CLI 工具（qwen-code-cli）安装成功，但在检查 code-server 是否已安装时脚本崩溃。错误信息：`node:internal/modules/cjs/loader:1503` + `Error: Cannot find module '...\node_modules\code-server\out\node\entry.js'`。
 
 - **诊断结论**：
-  经代码审查和错误截图分析，确认存在 Windows 路径编码兼容性问题：
-  1. 远程机器的 Windows 用户名包含非 ASCII 字符（如中文/日文），导致 `$env:USERPROFILE` 路径（如 `C:\Users\用户名`）含非 ASCII 字符。
-  2. Windows 上 `npm install -g` 默认将全局包安装到 `%APPDATA%\npm`（位于用户目录下），因此 npm 全局安装路径也包含非 ASCII 字符。
-  3. `code-server` npm 包依赖 `yyloader`（Node.js 原生模块），该模块在非 ASCII 路径下加载时因编码问题失败。
-  4. 相比之下，`qwen-code-cli` 包的依赖较简单，不涉及原生模块，因此安装成功。
+  经多轮诊断，确认存在以下多层问题（逐层暴露）：
+
+  1. **code-server 安装不完整（残留 shim）**：之前失败的 `npm install -g code-server` 留下了 `code-server.ps1` 命令文件，但 `node_modules\code-server\` 目录不存在。脚本检查 `Get-Command code-server` 找到了 shim，执行 `code-server --version` 时因 entry.js 缺失报错，`$ErrorActionPreference = "Stop"` + `2>&1` 将 stderr 包装为终止性错误，触发 `trap` 导致脚本退出。
+
+  2. **Node.js v24 与 code-server 不兼容**：code-server@4.3.0（npm 上 Node 24 解析到的版本）依赖 argon2@0.28.4，需要 node-gyp 编译 C++ 原生模块。argon2@0.28.4 的 `binding.gyp` 引用 `node-addon-api` v4，但 Node.js v24 的 npm 依赖提升行为导致 `node-addon-api` 不可见，`binding.gyp` 报 `Undefined variable module_name`。
+
+  3. **Node.js 18 下安装 code-server 需要多个 VS 组件**：通过 nvm-windows 安装 Node.js 18 LTS 后，code-server@4.89.1 的 postinstall 脚本需要 `sh`（Git for Windows 提供），其 VSCode 依赖包含 6 个原生模块（native-watchdog、@vscode/windows-process-tree、@vscode/spdlog 等）需要编译。编译需要：
+     - VC++ toolset v143（已有）
+     - Windows 11 SDK（需安装）
+     - **Spectre 缓解库**（`MSVC v143 - VS 2022 C++ x64/x86 Spectre 缓解库`，需手动安装）— `native-watchdog` 和 `@vscode/windows-registry` 报 `MSB8040: 此项目需要缓解了 Spectre 漏洞的库`
+
+  4. **nvm 符号链接导致 wrapper 路径错误**：nvm-windows 使用 junction（`C:\nvm4w\nodejs`）指向当前激活版本。脚本用 `(Get-Command node).Source` 获取的路径是符号链接路径，`nvm use 24` 后该路径指向 Node.js 24，导致 wrapper 脚本用错误的 Node.js 版本启动 code-server。
 
 - **根本原因**：
-  `remote-agent/install.ps1` 脚本中 `npm install -g code-server` 和 `npm install -g @qwen-code/qwen-code@latest` 直接使用默认的 npm 全局前缀（位于非 ASCII 路径下），导致 Node.js 原生模块（yyloader）无法正确加载。
+  1. install.ps1 的 code-server 版本检查无容错处理，损坏的 shim 导致脚本崩溃
+  2. Node.js v24 与 code-server npm 包的原生模块不兼容
+  3. code-server 原生模块编译需要 Spectre 缓解库，VS Build Tools 默认不包含
+  4. nvm 符号链接在版本切换后路径变化，wrapper 需要解析到真实路径
 
 - **解决办法**：
-  修改 `install.ps1`，添加非 ASCII 路径检测和自动规避机制：
-  1. 在脚本开头添加路径检测逻辑：检查 `$env:USERPROFILE` 和 `$env:APPDATA` 是否包含非 ASCII 字符（正则 `^[\x00-\x7F]+$`）。
-  2. 若检测到非 ASCII 字符，设置 `$needAsciiNpmPrefix = $true`，创建 ASCII-only 的 npm 全局前缀目录（`C:\npm-global`），并设置 `$env:NPM_CONFIG_PREFIX` 环境变量指向该目录。
-  3. Step 5（CLI 工具安装）和 Step 5.5（code-server 安装）的 `npm install -g` 命令无需修改——`NPM_CONFIG_PREFIX` 环境变量会自动重定向全局安装到 ASCII 路径。
-  4. code-server 的 `Start-Job` 脚本块不继承当前会话环境变量，因此通过 `-ArgumentList` 显式传递 prefix 值，在 job 内部设置 `$env:NPM_CONFIG_PREFIX`。
-  5. 安装完成后，将 ASCII npm 前缀目录（注意：Windows 上 npm 将 .cmd 脚本直接放在 prefix 目录，而非 `bin/` 子目录）添加到用户 PATH 环境变量。
-  6. 当 code-server 安装到自定义前缀后，脚本增加了 PATH 未更新情况下的降级提示逻辑（检查 `code-server.cmd` 是否存在）。
+  1. **用 nvm-windows 安装 Node.js 18 LTS**：解决 Node.js v24 与 code-server 不兼容问题。code-server@4.89.1 在 Node.js 18 下可正确安装。
+  2. **安装 VS Build Tools 完整组件**：VC++ toolset v143 + Windows 11 SDK + Spectre 缓解库（通过 VS Installer 手动安装）。
+  3. **添加 Git 的 sh.exe 到 PATH**：code-server postinstall 脚本需要 `sh` 命令，由 Git for Windows 的 `bin\sh.exe` 提供。
+  4. **创建 wrapper 脚本**：在 `%APPDATA%\npm` 下创建 `code-server.cmd` 和 `code-server.ps1`，硬编码 Node.js 18 的真实路径（非 nvm 符号链接）来启动 code-server，使 code-server 始终用 Node.js 18 运行，其他工具继续用 Node.js 24。
+  5. **解析 nvm 符号链接**：脚本在切换回 Node.js 24 之前，解析 nvm junction 到真实路径（如 `C:\Users\nuc\AppData\Local\nvm\v18.20.8`），用真实路径更新 wrapper 脚本。
 
 - **修改的文件**：
-  1. `remote-agent/install.ps1`
-     - 新增非 ASCII 路径检测逻辑和 `NPM_CONFIG_PREFIX` 环境变量设置（第 53-80 行）
-     - Step 5 CLI 工具安装：添加 PATH 更新（使用 prefix 目录本身，非 `bin/` 子目录）
-     - Step 5.5 code-server 安装：Start-Job 传递 prefix 参数并在内部设置环境变量，安装后添加 PATH 及降级提示
+  1. `fix-code-server.ps1`（项目根目录辅助脚本）— 完整的 code-server 安装修复脚本，包含 nvm 安装、Node 18 安装、Spectre 库检测、code-server 安装、wrapper 创建、符号链接解析
+  2. `remote-agent/install.ps1` — 待修改：添加 code-server 版本检查容错、清理残留 shim、安装失败降级处理
 
-- **状态**：未解决（NPM_CONFIG_PREFIX 方案无效，已回退修改，待重新诊断）
+- **状态**：已解决（code-server 安装成功并可通过 wrapper 验证）
 
 ---
