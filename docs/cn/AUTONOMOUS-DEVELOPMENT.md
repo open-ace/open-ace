@@ -359,7 +359,7 @@ AI Activity 只挂在真正运行 Agent 的 planning、development、pr_review�
 | 常量 | 默认值 | 来源 | 用途 |
 |------|--------|------|------|
 | `MAX_CONCURRENT_WORKFLOWS` | `3` | `app/services/autonomous_scheduler.py` | 调度器同时推进的工作流数（另见 §6） |
-| `MAX_CI_REPAIR_ATTEMPTS` | `3` | `app/modules/workspace/autonomous/orchestrator.py` | 合并阶段自动 CI 修复次数（§9.2） |
+| `MAX_CI_REPAIR_ATTEMPTS` | `5` | `app/modules/workspace/autonomous/orchestrator.py` | 合并阶段自动 CI 修复次数（§9.2） |
 | `MAX_CI_DIAGNOSTICS_ATTEMPTS` | `6` | `app/modules/workspace/autonomous/orchestrator.py` | 失败日志暂不可用时的调度轮询上限（§9.2） |
 | `MAX_PRE_COMMIT_CONVERGENCE_PASSES` | `3` | `app/modules/workspace/autonomous/orchestrator.py` | 隔离 `pre-commit` 收敛轮数（§9.2） |
 | `API_RETRY_TOTAL_TIMEOUT` | `1800` 秒 | `app/modules/workspace/autonomous/orchestrator.py` | 瞬时 API 错误的最大退避总时长，约 30 分钟（§10） |
