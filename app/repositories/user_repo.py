@@ -57,7 +57,7 @@ class UserRepository:
         """
         # Fail-Closed: 非平台管理员用户必须指定 tenant_id
         # 平台管理员（role='platform_admin' 或 'admin'）可以没有 tenant_id
-        if tenant_id is None and role not in ('platform_admin', 'admin'):
+        if tenant_id is None and role not in ("platform_admin", "admin"):
             raise ValueError(
                 f"创建用户必须指定 tenant_id。"
                 f"用户名: {username}, 角色: {role}。"

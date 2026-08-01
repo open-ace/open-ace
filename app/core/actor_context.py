@@ -101,11 +101,33 @@ class ActorContext:
 
         Returns:
             ActorContext: Actor 上下文实例
+
+        Raises:
+            ValueError: 如果缺少必需字段或类型不匹配
         """
+        user_id = data.get("user_id")
+        role = data.get("role")
+        tenant_id = data.get("tenant_id")
+
+        # 类型检查和验证
+        if user_id is None:
+            raise ValueError("缺少 user_id")
+        if not isinstance(user_id, int):
+            raise ValueError(f"user_id 必须是 int 类型，实际为 {type(user_id).__name__}")
+
+        if role is None:
+            raise ValueError("缺少 role")
+        if not isinstance(role, str):
+            raise ValueError(f"role 必须是 str 类型，实际为 {type(role).__name__}")
+
+        # tenant_id 可以为 None，但如果存在必须是 int
+        if tenant_id is not None and not isinstance(tenant_id, int):
+            raise ValueError(f"tenant_id 必须是 int 或 None，实际为 {type(tenant_id).__name__}")
+
         return cls(
-            user_id=data.get("user_id"),
-            role=data.get("role"),
-            tenant_id=data.get("tenant_id"),
+            user_id=user_id,
+            role=role,
+            tenant_id=tenant_id,
         )
 
     @classmethod
@@ -120,13 +142,13 @@ class ActorContext:
         """
         from flask import g
 
-        user = getattr(g, 'user', {})
+        user = getattr(g, "user", {})
         if not user:
             raise ValueError("Flask g.user 未设置")
 
-        user_id = user.get('id') or g.get('user_id')
-        role = user.get('role') or g.get('user_role')
-        tenant_id = user.get('tenant_id') or g.get('tenant_id')
+        user_id = user.get("id") or g.get("user_id")
+        role = user.get("role") or g.get("user_role")
+        tenant_id = user.get("tenant_id") or g.get("tenant_id")
 
         if user_id is None:
             raise ValueError("缺少 user_id")

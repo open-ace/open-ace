@@ -29,7 +29,7 @@ def list_api_keys():
     tenant_id = data.get("tenant_id")
     if tenant_id is None:
         # 尝试从 Flask g 获取
-        tenant_id = g.get('tenant_id')
+        tenant_id = g.get("tenant_id")
         if tenant_id is None:
             return jsonify({"error": "tenant_id is required"}), 400
     tenant_id = int(tenant_id)
@@ -59,7 +59,7 @@ def store_api_key():
     tenant_id = data.get("tenant_id")
     if tenant_id is None:
         # 尝试从 Flask g 获取
-        tenant_id = g.get('tenant_id')
+        tenant_id = g.get("tenant_id")
         if tenant_id is None:
             return jsonify({"error": "tenant_id is required"}), 400
     tenant_id = int(tenant_id)
@@ -121,7 +121,7 @@ def update_api_key(key_id):
     tenant_id = data.get("tenant_id")
     if tenant_id is None:
         # 尝试从 Flask g 获取
-        tenant_id = g.get('tenant_id')
+        tenant_id = g.get("tenant_id")
         if tenant_id is None:
             return jsonify({"error": "tenant_id is required"}), 400
     tenant_id = int(tenant_id)
@@ -159,7 +159,7 @@ def delete_api_key(key_id):
     tenant_id = data.get("tenant_id")
     if tenant_id is None:
         # 尝试从 Flask g 获取
-        tenant_id = g.get('tenant_id')
+        tenant_id = g.get("tenant_id")
         if tenant_id is None:
             return jsonify({"error": "tenant_id is required"}), 400
     tenant_id = int(tenant_id)

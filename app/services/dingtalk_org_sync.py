@@ -192,8 +192,7 @@ class DingTalkOrgSyncService:
         effective_tenant_id = tenant_id or config.get("org_sync_tenant_id")
         if effective_tenant_id is None:
             raise ValueError(
-                "钉钉同步未配置 org_sync_tenant_id。"
-                "请在租户设置中配置同步目标租户。"
+                "钉钉同步未配置 org_sync_tenant_id。" "请在租户设置中配置同步目标租户。"
             )
         effective_tenant_id = int(effective_tenant_id)
         root_department_id = str(config.get("org_sync_root_dept_id") or DINGTALK_ROOT_DEPARTMENT_ID)

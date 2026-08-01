@@ -908,10 +908,7 @@ def _extract_target_tenant_id() -> int | None:
     if len(sources) > 1:
         values = {v for _, v in sources}
         if len(values) > 1:
-            logger.warning(
-                "Tenant ID sources inconsistent: %s, rejecting request",
-                sources
-            )
+            logger.warning("Tenant ID sources inconsistent: %s, rejecting request", sources)
             return None  # Fail closed
 
     return target_tenant_id
@@ -1072,19 +1069,26 @@ def same_tenant_or_platform_admin(f=None):
 
             user_role = user.get("role")
             user_tenant_id = user.get("tenant_id")
+            user_id = user.get("id")
 
             # Platform admin: allow with audit logging
             if user_role == "platform_admin":
                 g.user = user
-                g.user_id = user.get("id")
+                g.user_id = user_id
                 g.user_role = user_role
                 g.tenant_id = user_tenant_id
 
                 # Log cross-tenant operations
                 target_tenant_id = _extract_target_tenant_id()
                 if target_tenant_id is not None and user_tenant_id != target_tenant_id:
+                    # 类型断言：user_id 在此处必定存在且为 int
+                    if user_id is None:
+                        return jsonify({"error": "User ID missing"}), 401
+                    if not isinstance(user_id, int):
+                        return jsonify({"error": "Invalid user ID type"}), 401
+
                     _log_cross_tenant_operation(
-                        actor_user_id=user.get("id"),
+                        actor_user_id=user_id,
                         actor_tenant_id=user_tenant_id,
                         target_tenant_id=target_tenant_id,
                         action=f"{request.method} {request.path}",
@@ -1161,10 +1165,7 @@ def _log_cross_tenant_operation(
             "DELETE": AuditAction.ADMIN_CROSS_TENANT_ACCESS,
         }
 
-        audit_action = method_action_map.get(
-            request.method,
-            AuditAction.ADMIN_CROSS_TENANT_ACCESS
-        )
+        audit_action = method_action_map.get(request.method, AuditAction.ADMIN_CROSS_TENANT_ACCESS)
 
         audit_logger.log_action(
             audit_action,
@@ -1179,7 +1180,7 @@ def _log_cross_tenant_operation(
                 "action": action,
                 "request_method": request.method,
                 "request_path": request.path,
-            }
+            },
         )
 
         logger.info(

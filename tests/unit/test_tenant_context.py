@@ -14,7 +14,7 @@ from app.core.tenant_context import TenantContext, TenantContextError
 def app():
     """Create a minimal Flask app for testing"""
     app = Flask(__name__)
-    app.config['TESTING'] = True
+    app.config["TESTING"] = True
     return app
 
 

@@ -408,7 +408,7 @@ def get_session_models():
     if workspace_type == "local":
         # Issue #2179: Fail-Closed - 从 g 获取 tenant_id 而不是硬编码
         # Local workspace is single-tenant; use the authenticated user's tenant
-        tenant_id = g.get('tenant_id')
+        tenant_id = g.get("tenant_id")
         if tenant_id is None:
             # 如果没有租户上下文，使用默认租户 1（单租户模式）
             logger.warning("No tenant_id in context for local workspace, using default tenant 1")

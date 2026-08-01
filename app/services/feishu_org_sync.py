@@ -184,8 +184,7 @@ class FeishuOrgSyncService:
         effective_tenant_id = tenant_id or config.get("org_sync_tenant_id")
         if effective_tenant_id is None:
             raise ValueError(
-                "飞书同步未配置 org_sync_tenant_id。"
-                "请在租户设置中配置同步目标租户。"
+                "飞书同步未配置 org_sync_tenant_id。" "请在租户设置中配置同步目标租户。"
             )
         effective_tenant_id = int(effective_tenant_id)
         result = FeishuOrgSyncResult(

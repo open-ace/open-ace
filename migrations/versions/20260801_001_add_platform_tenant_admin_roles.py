@@ -46,11 +46,13 @@ def upgrade() -> None:
     # 检查 tenant_id 列的数据类型
     if is_postgresql:
         result = connection.execute(
-            sa.text("""
+            sa.text(
+                """
                 SELECT data_type
                 FROM information_schema.columns
                 WHERE table_name = 'users' AND column_name = 'tenant_id'
-            """)
+            """
+            )
         )
         tenant_id_type = result.scalar() or "integer"
     else:
@@ -74,26 +76,25 @@ def upgrade() -> None:
 
         if empty_string_count > 0:
             log.warning(
-                f"发现 {empty_string_count} 个管理员账号的 tenant_id 为空字符串，"
-                "将规范化为 NULL"
+                f"发现 {empty_string_count} 个管理员账号的 tenant_id 为空字符串，" "将规范化为 NULL"
             )
 
             # 规范化空字符串为 NULL
-            connection.execute(
-                sa.text("UPDATE users SET tenant_id = NULL WHERE tenant_id = ''")
-            )
+            connection.execute(sa.text("UPDATE users SET tenant_id = NULL WHERE tenant_id = ''"))
 
     # 检查孤儿账号（tenant_id 不存在于 tenants 表）
     # 这里只记录警告，不阻止迁移
     try:
         result = connection.execute(
-            sa.text("""
+            sa.text(
+                """
                 SELECT COUNT(*)
                 FROM users u
                 WHERE u.role = 'admin'
                   AND u.tenant_id IS NOT NULL
                   AND NOT EXISTS (SELECT 1 FROM tenants t WHERE t.id = u.tenant_id)
-            """)
+            """
+            )
         )
         orphan_count = result.scalar() or 0
 
@@ -110,15 +111,15 @@ def upgrade() -> None:
 
     if is_postgresql:
         # PostgreSQL: 删除旧约束，添加新约束
+        connection.execute(sa.text("ALTER TABLE users DROP CONSTRAINT IF EXISTS chk_users_role"))
         connection.execute(
-            sa.text("ALTER TABLE users DROP CONSTRAINT IF EXISTS chk_users_role")
-        )
-        connection.execute(
-            sa.text("""
+            sa.text(
+                """
                 ALTER TABLE users
                 ADD CONSTRAINT chk_users_role
                 CHECK (role IN ('admin', 'platform_admin', 'tenant_admin', 'manager', 'user', 'readonly'))
-            """)
+            """
+            )
         )
     else:
         # SQLite: 需要重建表（参考之前的迁移脚本）
@@ -126,11 +127,13 @@ def upgrade() -> None:
         # 注意：SQLite 在某些版本支持直接修改约束
         try:
             connection.execute(
-                sa.text("""
+                sa.text(
+                    """
                     ALTER TABLE users
                     ADD CONSTRAINT chk_users_role_new
                     CHECK (role IN ('admin', 'platform_admin', 'tenant_admin', 'manager', 'user', 'readonly'))
-                """)
+                """
+                )
             )
         except Exception:
             # 如果失败，尝试删除旧约束再添加
@@ -160,24 +163,28 @@ def upgrade() -> None:
 
     # 迁移无 tenant_id 的管理员 → 平台管理员
     result = connection.execute(
-        sa.text(f"""
+        sa.text(
+            f"""
             UPDATE users
             SET role = 'platform_admin'
             WHERE role = 'admin'
               AND {null_condition}
-        """)
+        """
+        )
     )
     platform_count = result.rowcount
     log.info(f"迁移了 {platform_count} 个平台管理员")
 
     # 迁移有 tenant_id 的管理员 → 租户管理员
     result = connection.execute(
-        sa.text(f"""
+        sa.text(
+            f"""
             UPDATE users
             SET role = 'tenant_admin'
             WHERE role = 'admin'
               AND {not_null_condition}
-        """)
+        """
+        )
     )
     tenant_count = result.rowcount
     log.info(f"迁移了 {tenant_count} 个租户管理员")
@@ -197,33 +204,27 @@ def upgrade() -> None:
 
         try:
             connection.execute(
-                sa.text(f"""
+                sa.text(
+                    f"""
                     ALTER TABLE users
                     ADD CONSTRAINT chk_tenant_admin_requires_tenant
                     CHECK (NOT (role = 'tenant_admin' AND ({constraint_condition})))
-                """)
+                """
+                )
             )
             log.info("添加了租户管理员一致性约束")
         except Exception as e:
             log.warning(f"添加一致性约束失败: {e}")
 
     # Step 5: 记录迁移日志
-    log.info(
-        f"迁移完成: {platform_count} 个平台管理员, "
-        f"{tenant_count} 个租户管理员"
-    )
+    log.info(f"迁移完成: {platform_count} 个平台管理员, " f"{tenant_count} 个租户管理员")
 
     # 验证没有遗留的 admin 角色
-    result = connection.execute(
-        sa.text("SELECT COUNT(*) FROM users WHERE role = 'admin'")
-    )
+    result = connection.execute(sa.text("SELECT COUNT(*) FROM users WHERE role = 'admin'"))
     remaining_admin = result.scalar() or 0
 
     if remaining_admin > 0:
-        log.warning(
-            f"仍有 {remaining_admin} 个用户使用 'admin' 角色，"
-            "请检查迁移是否正确执行"
-        )
+        log.warning(f"仍有 {remaining_admin} 个用户使用 'admin' 角色，" "请检查迁移是否正确执行")
 
     log.info("管理员角色迁移成功")
 
@@ -240,10 +241,12 @@ def downgrade() -> None:
     if is_postgresql:
         try:
             connection.execute(
-                sa.text("""
+                sa.text(
+                    """
                     ALTER TABLE users
                     DROP CONSTRAINT IF EXISTS chk_tenant_admin_requires_tenant
-                """)
+                """
+                )
             )
             log.info("移除了租户管理员一致性约束")
         except Exception as e:
@@ -251,26 +254,28 @@ def downgrade() -> None:
 
     # Step 2: 回滚所有新角色为 admin
     result = connection.execute(
-        sa.text("""
+        sa.text(
+            """
             UPDATE users
             SET role = 'admin'
             WHERE role IN ('platform_admin', 'tenant_admin')
-        """)
+        """
+        )
     )
     rollback_count = result.rowcount
     log.info(f"回滚了 {rollback_count} 个管理员账号")
 
     # Step 3: 恢复原 CHECK 约束
     if is_postgresql:
+        connection.execute(sa.text("ALTER TABLE users DROP CONSTRAINT IF EXISTS chk_users_role"))
         connection.execute(
-            sa.text("ALTER TABLE users DROP CONSTRAINT IF EXISTS chk_users_role")
-        )
-        connection.execute(
-            sa.text("""
+            sa.text(
+                """
                 ALTER TABLE users
                 ADD CONSTRAINT chk_users_role
                 CHECK (role IN ('admin', 'manager', 'user', 'readonly'))
-            """)
+            """
+            )
         )
 
     log.info("管理员角色迁移回滚成功")

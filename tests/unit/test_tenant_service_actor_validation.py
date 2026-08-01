@@ -21,10 +21,7 @@ class TestTenantServiceActorValidation:
         actor = ActorContext(user_id=2, role="tenant_admin", tenant_id=1)
 
         with pytest.raises(PermissionError) as exc_info:
-            service.create_tenant(
-                name="Test Tenant",
-                actor=actor
-            )
+            service.create_tenant(name="Test Tenant", actor=actor)
 
         assert "platform_admin" in str(exc_info.value)
 
@@ -37,9 +34,7 @@ class TestTenantServiceActorValidation:
 
         with pytest.raises(PermissionError) as exc_info:
             service.update_tenant(
-                tenant_id=999,  # Different tenant
-                updates={"name": "Hacked"},
-                actor=actor
+                tenant_id=999, updates={"name": "Hacked"}, actor=actor  # Different tenant
             )
 
         assert "无权修改租户" in str(exc_info.value)
@@ -55,7 +50,7 @@ class TestTenantServiceActorValidation:
             service.update_quota(
                 tenant_id=999,  # Different tenant
                 quota_updates={"daily_token_limit": 1000000},
-                actor=actor
+                actor=actor,
             )
 
         assert "无权修改租户" in str(exc_info.value)
@@ -68,11 +63,7 @@ class TestTenantServiceActorValidation:
         actor = ActorContext(user_id=2, role="tenant_admin", tenant_id=1)
 
         with pytest.raises(PermissionError) as exc_info:
-            service.suspend_tenant(
-                tenant_id=1,
-                reason="Test",
-                actor=actor
-            )
+            service.suspend_tenant(tenant_id=1, reason="Test", actor=actor)
 
         assert "platform_admin" in str(exc_info.value)
 
@@ -84,10 +75,7 @@ class TestTenantServiceActorValidation:
         actor = ActorContext(user_id=2, role="tenant_admin", tenant_id=1)
 
         with pytest.raises(PermissionError) as exc_info:
-            service.activate_tenant(
-                tenant_id=1,
-                actor=actor
-            )
+            service.activate_tenant(tenant_id=1, actor=actor)
 
         assert "platform_admin" in str(exc_info.value)
 
@@ -99,10 +87,7 @@ class TestTenantServiceActorValidation:
         actor = ActorContext(user_id=2, role="tenant_admin", tenant_id=1)
 
         with pytest.raises(PermissionError) as exc_info:
-            service.delete_tenant(
-                tenant_id=1,
-                actor=actor
-            )
+            service.delete_tenant(tenant_id=1, actor=actor)
 
         assert "platform_admin" in str(exc_info.value)
 
@@ -115,16 +100,14 @@ class TestTenantServiceActorValidation:
 
         # Mock the repository to avoid DB requirement
         from unittest.mock import Mock
+
         service.tenant_repo = Mock()
         service.tenant_repo.get_by_slug.return_value = None  # Slug doesn't exist
         service.tenant_repo.create.return_value = 1  # Mock tenant ID
 
         # This should not raise PermissionError
         try:
-            service.create_tenant(
-                name="Test Tenant",
-                actor=actor
-            )
+            service.create_tenant(name="Test Tenant", actor=actor)
             # Should have attempted to create
             assert service.tenant_repo.create.called
         except PermissionError:
@@ -140,9 +123,7 @@ class TestTenantServiceActorValidation:
         # Should not raise PermissionError
         try:
             result = service.update_tenant(
-                tenant_id=1,  # Own tenant
-                updates={"name": "Updated"},
-                actor=actor
+                tenant_id=1, updates={"name": "Updated"}, actor=actor  # Own tenant
             )
             # Result will be False because tenant doesn't exist, but no PermissionError
             assert result is False or result is True  # Just checking no exception
@@ -160,7 +141,7 @@ class TestTenantServiceActorValidation:
             service.update_settings(
                 tenant_id=999,  # Different tenant
                 settings_updates={"content_filter_enabled": True},
-                actor=actor
+                actor=actor,
             )
 
         assert "无权修改租户" in str(exc_info.value)
@@ -172,11 +153,7 @@ class TestTenantServiceActorValidation:
         # None actor should not raise PermissionError
         # This ensures backward compatibility
         try:
-            result = service.update_tenant(
-                tenant_id=999,
-                updates={"name": "Test"},
-                actor=None
-            )
+            result = service.update_tenant(tenant_id=999, updates={"name": "Test"}, actor=None)
             # Will return False because tenant doesn't exist, but no PermissionError
             assert result is False or result is True
         except PermissionError:

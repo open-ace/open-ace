@@ -8,7 +8,6 @@ Issue #2179: 租户管理员权限模型
 """
 
 
-
 class TenantContextError(Exception):
     """租户上下文缺失异常"""
 
@@ -39,7 +38,7 @@ class TenantContext:
         """
         from flask import g
 
-        tenant_id = getattr(g, 'tenant_id', None)
+        tenant_id = getattr(g, "tenant_id", None)
 
         if tenant_id is None:
             # 明确禁止的模式
@@ -52,6 +51,12 @@ class TenantContext:
                 "1. 请求已通过权限装饰器验证\n"
                 "2. 用户已正确分配 tenant_id\n"
                 "3. 非平台管理员操作必须有租户归属"
+            )
+
+        # 类型断言：此时 tenant_id 必定是 int
+        if not isinstance(tenant_id, int):
+            raise TenantContextError(
+                f"tenant_id 类型错误：期望 int，实际为 {type(tenant_id).__name__}"
             )
 
         return tenant_id
@@ -67,7 +72,8 @@ class TenantContext:
             Optional[int]: 租户ID或None
         """
         from flask import g
-        return getattr(g, 'tenant_id', None)
+
+        return getattr(g, "tenant_id", None)
 
     @staticmethod
     def set_tenant_id(tenant_id: int | None) -> None:
@@ -78,4 +84,5 @@ class TenantContext:
             tenant_id: 租户ID，可以为None（平台管理员）
         """
         from flask import g
+
         g.tenant_id = tenant_id

@@ -242,7 +242,9 @@ def update_tenant(tenant_id: int):
         return jsonify({"error": "No valid fields to update"}), 400
 
     try:
-        success = tenant_service.update_tenant(tenant_id, updates, actor=actor)  # Issue #2179: 传入 actor
+        success = tenant_service.update_tenant(
+            tenant_id, updates, actor=actor
+        )  # Issue #2179: 传入 actor
     except PermissionError as e:
         return jsonify({"error": str(e)}), 403
 
@@ -275,7 +277,9 @@ def update_tenant_quota(tenant_id: int):
         return jsonify({"error": "Request body required"}), 400
 
     try:
-        success = tenant_service.update_quota(tenant_id, data, actor=actor)  # Issue #2179: 传入 actor
+        success = tenant_service.update_quota(
+            tenant_id, data, actor=actor
+        )  # Issue #2179: 传入 actor
     except PermissionError as e:
         return jsonify({"error": str(e)}), 403
 
@@ -308,7 +312,9 @@ def update_tenant_settings(tenant_id: int):
         return jsonify({"error": "Request body required"}), 400
 
     try:
-        success = tenant_service.update_settings(tenant_id, data, actor=actor)  # Issue #2179: 传入 actor
+        success = tenant_service.update_settings(
+            tenant_id, data, actor=actor
+        )  # Issue #2179: 传入 actor
     except PermissionError as e:
         return jsonify({"error": str(e)}), 403
 
@@ -347,7 +353,9 @@ def suspend_tenant(tenant_id: int):
     reason = data.get("reason")
 
     try:
-        success = tenant_service.suspend_tenant(tenant_id, reason, actor=actor)  # Issue #2179: 传入 actor
+        success = tenant_service.suspend_tenant(
+            tenant_id, reason, actor=actor
+        )  # Issue #2179: 传入 actor
     except PermissionError as e:
         return jsonify({"error": str(e)}), 403
 
@@ -405,7 +413,9 @@ def delete_tenant(tenant_id: int):
     hard = request.args.get("hard", "false").lower() == "true"
 
     try:
-        success = tenant_service.delete_tenant(tenant_id, hard=hard, actor=actor)  # Issue #2179: 传入 actor
+        success = tenant_service.delete_tenant(
+            tenant_id, hard=hard, actor=actor
+        )  # Issue #2179: 传入 actor
     except PermissionError as e:
         return jsonify({"error": str(e)}), 403
 
