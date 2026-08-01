@@ -28,6 +28,10 @@ ADMIN_SESSION = {
 
 @pytest.fixture
 def sso_manager(tmp_path, monkeypatch):
+    # Issue #1820: Reset EncryptionKeyRegistry before setting new key
+    from app.utils.encryption_key_registry import reset_registry
+
+    reset_registry()
     monkeypatch.setenv("OPENACE_ENCRYPTION_KEY", "test-saml-route-encryption-key")
     smtp_crypto._password_manager_instance = None
 
@@ -39,6 +43,8 @@ def sso_manager(tmp_path, monkeypatch):
         yield manager
     finally:
         smtp_crypto._password_manager_instance = None
+        # Issue #1820: Reset EncryptionKeyRegistry after test
+        reset_registry()
 
 
 @pytest.fixture

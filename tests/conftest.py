@@ -37,6 +37,16 @@ def _clear_cache():
     except ImportError:
         pass
 
+    # Issue #1820: Reset EncryptionKeyRegistry to prevent cross-test key pollution
+    # The singleton caches the encryption key at first use; tests that set
+    # OPENACE_ENCRYPTION_KEY need a fresh instance to pick up the test-specific key.
+    try:
+        from app.utils.encryption_key_registry import reset_registry
+
+        reset_registry()
+    except ImportError:
+        pass
+
 
 class TestConfig:
     """Test configuration that mimics the real config module."""

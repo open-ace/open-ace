@@ -36,6 +36,11 @@ ADMIN_SESSION = {
 @pytest.fixture
 def sso_manager(tmp_path, monkeypatch):
     """Isolated SSO manager for route tests."""
+    # Issue #1820: Reset EncryptionKeyRegistry before setting new key
+    # to ensure the singleton picks up the test-specific encryption key
+    from app.utils.encryption_key_registry import reset_registry
+
+    reset_registry()
     monkeypatch.setenv("OPENACE_ENCRYPTION_KEY", "test-route-sso-encryption-key")
     smtp_crypto._password_manager_instance = None
 
@@ -47,6 +52,9 @@ def sso_manager(tmp_path, monkeypatch):
         yield manager
     finally:
         smtp_crypto._password_manager_instance = None
+        # Issue #1820: Reset EncryptionKeyRegistry after test to avoid
+        # contaminating other tests with the test-specific key
+        reset_registry()
 
 
 @pytest.fixture
