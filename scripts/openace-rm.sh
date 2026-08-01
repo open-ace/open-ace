@@ -84,8 +84,9 @@ if [[ ! "$TARGET_USER" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]; then
 fi
 
 # Check for shell injection in options
+INJECTION_PATTERN='[;|`$]'
 for opt in "${RM_OPTIONS[@]}"; do
-    if [[ "$opt" =~ [;\|\$\`] ]]; then
+    if [[ "$opt" =~ $INJECTION_PATTERN ]]; then
         echo "ERROR: Option contains forbidden characters: $opt" >&2
         log_audit "caller=$(whoami) target=${TARGET_USER} path=${TARGET_PATH} result=reject_injection"
         exit 1
