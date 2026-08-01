@@ -75,6 +75,10 @@ AUTH_DECORATORS: set[str] = {
     "admin_required",
     "public_endpoint",
     "security_annotated",  # Issue #1897: Mark endpoints with ownership checks
+    # Issue #2179: New role-based authentication decorators
+    "platform_admin_required",
+    "tenant_admin_required",
+    "same_tenant_or_platform_admin",
 }
 
 AUTH_INLINE_CALLS: set[str] = {

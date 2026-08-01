@@ -2,6 +2,9 @@
 Open ACE - Tenant Routes
 
 API endpoints for multi-tenant management.
+
+Issue #2179: 租户管理员权限模型
+- 路由层传入 ActorContext 到 Service 层
 """
 
 import logging
@@ -10,7 +13,12 @@ from typing import cast
 import bcrypt
 from flask import Blueprint, jsonify, request
 
-from app.auth.decorators import admin_required
+from app.auth.decorators import (
+    auth_required,
+    platform_admin_required,
+    same_tenant_or_platform_admin,
+)
+from app.core.actor_context import ActorContext
 from app.repositories.user_repo import UserRepository
 from app.services.auth_service import get_security_settings_cached
 from app.services.tenant_service import TenantService
@@ -32,9 +40,12 @@ def _hash_password(password: str) -> str:
 
 
 @tenant_bp.route("", methods=["GET"])
-@admin_required
+@platform_admin_required
 def list_tenants():
-    """List all tenants (admin only)."""
+    """List all tenants (platform admin only).
+
+    Issue #2179: Only platform admins can list all tenants.
+    """
 
     # Get query parameters
     status = request.args.get("status")
@@ -55,9 +66,12 @@ def list_tenants():
 
 
 @tenant_bp.route("/<int:tenant_id>", methods=["GET"])
-@admin_required
+@platform_admin_required
 def get_tenant(tenant_id: int):
-    """Get tenant by ID (admin only)."""
+    """Get tenant by ID (platform admin only).
+
+    Issue #2179: Only platform admins can view any tenant.
+    """
 
     tenant = tenant_service.get_tenant(tenant_id)
 
@@ -68,9 +82,12 @@ def get_tenant(tenant_id: int):
 
 
 @tenant_bp.route("/slug/<slug>", methods=["GET"])
-@admin_required
+@platform_admin_required
 def get_tenant_by_slug(slug: str):
-    """Get tenant by slug (admin only)."""
+    """Get tenant by slug (platform admin only).
+
+    Issue #2179: Only platform admins can view any tenant by slug.
+    """
 
     tenant = tenant_service.get_tenant_by_slug(slug)
 
@@ -81,9 +98,18 @@ def get_tenant_by_slug(slug: str):
 
 
 @tenant_bp.route("", methods=["POST"])
-@admin_required
+@platform_admin_required
 def create_tenant():
-    """Create a new tenant (admin only). Optionally create an admin user."""
+    """Create a new tenant (platform admin only). Optionally create an admin user.
+
+    Issue #2179: Only platform admins can create new tenants.
+    """
+
+    # Issue #2179: 创建 ActorContext 传入 Service 层
+    try:
+        actor = ActorContext.from_flask_g()
+    except ValueError as e:
+        return jsonify({"error": f"Authentication context error: {e}"}), 401
 
     data = request.get_json()
 
@@ -103,6 +129,7 @@ def create_tenant():
         contact_email=data.get("contact_email", ""),
         contact_name=data.get("contact_name"),
         trial_days=data.get("trial_days"),
+        actor=actor,  # Issue #2179: 传入 actor
     )
 
     if not tenant:
@@ -147,11 +174,12 @@ def create_tenant():
         # Create admin user
         password_hash = _hash_password(admin_password)
         admin_email_final = admin_email or f"{admin_username}@{slug or 'tenant'}.local"
+        # Issue #2179: Use tenant_admin role instead of legacy admin
         admin_user_id = user_repo.create_user(
             username=admin_username,
             email=admin_email_final,
             password_hash=password_hash,
-            role="admin",
+            role="tenant_admin",
             is_active=True,
             tenant_id=tenant_id,
         )
@@ -163,7 +191,7 @@ def create_tenant():
                 "user_id": admin_user_id,
                 "username": admin_username,
                 "email": admin_email_final,
-                "role": "admin",
+                "role": "tenant_admin",
             }
             logger.info(f"Created admin user {admin_username} for tenant {tenant.name}")
         else:
@@ -177,9 +205,18 @@ def create_tenant():
 
 
 @tenant_bp.route("/<int:tenant_id>", methods=["PUT"])
-@admin_required
+@platform_admin_required
 def update_tenant(tenant_id: int):
-    """Update tenant (admin only)."""
+    """Update tenant (platform admin only).
+
+    Issue #2179: Only platform admins can update any tenant.
+    """
+
+    # Issue #2179: 创建 ActorContext 传入 Service 层
+    try:
+        actor = ActorContext.from_flask_g()
+    except ValueError as e:
+        return jsonify({"error": f"Authentication context error: {e}"}), 401
 
     data = request.get_json()
 
@@ -204,7 +241,12 @@ def update_tenant(tenant_id: int):
     if not updates:
         return jsonify({"error": "No valid fields to update"}), 400
 
-    success = tenant_service.update_tenant(tenant_id, updates)
+    try:
+        success = tenant_service.update_tenant(
+            tenant_id, updates, actor=actor
+        )  # Issue #2179: 传入 actor
+    except PermissionError as e:
+        return jsonify({"error": str(e)}), 403
 
     if not success:
         return jsonify({"error": "Failed to update tenant"}), 500
@@ -216,16 +258,30 @@ def update_tenant(tenant_id: int):
 
 
 @tenant_bp.route("/<int:tenant_id>/quota", methods=["PUT"])
-@admin_required
+@platform_admin_required
 def update_tenant_quota(tenant_id: int):
-    """Update tenant quota (admin only)."""
+    """Update tenant quota (platform admin only).
+
+    Issue #2179: Only platform admins can modify tenant quota.
+    """
+
+    # Issue #2179: 创建 ActorContext 传入 Service 层
+    try:
+        actor = ActorContext.from_flask_g()
+    except ValueError as e:
+        return jsonify({"error": f"Authentication context error: {e}"}), 401
 
     data = request.get_json()
 
     if not data:
         return jsonify({"error": "Request body required"}), 400
 
-    success = tenant_service.update_quota(tenant_id, data)
+    try:
+        success = tenant_service.update_quota(
+            tenant_id, data, actor=actor
+        )  # Issue #2179: 传入 actor
+    except PermissionError as e:
+        return jsonify({"error": str(e)}), 403
 
     if not success:
         return jsonify({"error": "Failed to update tenant quota"}), 500
@@ -237,16 +293,30 @@ def update_tenant_quota(tenant_id: int):
 
 
 @tenant_bp.route("/<int:tenant_id>/settings", methods=["PUT"])
-@admin_required
+@same_tenant_or_platform_admin
 def update_tenant_settings(tenant_id: int):
-    """Update tenant settings (admin only)."""
+    """Update tenant settings (same tenant or platform admin).
+
+    Issue #2179: Tenant admins can modify their own tenant's settings.
+    """
+
+    # Issue #2179: 创建 ActorContext 传入 Service 层
+    try:
+        actor = ActorContext.from_flask_g()
+    except ValueError as e:
+        return jsonify({"error": f"Authentication context error: {e}"}), 401
 
     data = request.get_json()
 
     if not data:
         return jsonify({"error": "Request body required"}), 400
 
-    success = tenant_service.update_settings(tenant_id, data)
+    try:
+        success = tenant_service.update_settings(
+            tenant_id, data, actor=actor
+        )  # Issue #2179: 传入 actor
+    except PermissionError as e:
+        return jsonify({"error": str(e)}), 403
 
     if not success:
         return jsonify({"error": "Failed to update tenant settings"}), 500
@@ -266,14 +336,28 @@ def update_tenant_settings(tenant_id: int):
 
 
 @tenant_bp.route("/<int:tenant_id>/suspend", methods=["POST"])
-@admin_required
+@platform_admin_required
 def suspend_tenant(tenant_id: int):
-    """Suspend a tenant (admin only)."""
+    """Suspend a tenant (platform admin only).
+
+    Issue #2179: Only platform admins can suspend tenants.
+    """
+
+    # Issue #2179: 创建 ActorContext 传入 Service 层
+    try:
+        actor = ActorContext.from_flask_g()
+    except ValueError as e:
+        return jsonify({"error": f"Authentication context error: {e}"}), 401
 
     data = request.get_json() or {}
     reason = data.get("reason")
 
-    success = tenant_service.suspend_tenant(tenant_id, reason)
+    try:
+        success = tenant_service.suspend_tenant(
+            tenant_id, reason, actor=actor
+        )  # Issue #2179: 传入 actor
+    except PermissionError as e:
+        return jsonify({"error": str(e)}), 403
 
     if not success:
         return jsonify({"error": "Failed to suspend tenant"}), 500
@@ -285,11 +369,23 @@ def suspend_tenant(tenant_id: int):
 
 
 @tenant_bp.route("/<int:tenant_id>/activate", methods=["POST"])
-@admin_required
+@platform_admin_required
 def activate_tenant(tenant_id: int):
-    """Activate a suspended tenant (admin only)."""
+    """Activate a suspended tenant (platform admin only).
 
-    success = tenant_service.activate_tenant(tenant_id)
+    Issue #2179: Only platform admins can activate tenants.
+    """
+
+    # Issue #2179: 创建 ActorContext 传入 Service 层
+    try:
+        actor = ActorContext.from_flask_g()
+    except ValueError as e:
+        return jsonify({"error": f"Authentication context error: {e}"}), 401
+
+    try:
+        success = tenant_service.activate_tenant(tenant_id, actor=actor)  # Issue #2179: 传入 actor
+    except PermissionError as e:
+        return jsonify({"error": str(e)}), 403
 
     if not success:
         return jsonify({"error": "Failed to activate tenant"}), 500
@@ -301,13 +397,27 @@ def activate_tenant(tenant_id: int):
 
 
 @tenant_bp.route("/<int:tenant_id>", methods=["DELETE"])
-@admin_required
+@platform_admin_required
 def delete_tenant(tenant_id: int):
-    """Delete a tenant (admin only)."""
+    """Delete a tenant (platform admin only).
+
+    Issue #2179: Only platform admins can delete tenants.
+    """
+
+    # Issue #2179: 创建 ActorContext 传入 Service 层
+    try:
+        actor = ActorContext.from_flask_g()
+    except ValueError as e:
+        return jsonify({"error": f"Authentication context error: {e}"}), 401
 
     hard = request.args.get("hard", "false").lower() == "true"
 
-    success = tenant_service.delete_tenant(tenant_id, hard=hard)
+    try:
+        success = tenant_service.delete_tenant(
+            tenant_id, hard=hard, actor=actor
+        )  # Issue #2179: 传入 actor
+    except PermissionError as e:
+        return jsonify({"error": str(e)}), 403
 
     if not success:
         return jsonify({"error": "Failed to delete tenant"}), 500
@@ -316,9 +426,12 @@ def delete_tenant(tenant_id: int):
 
 
 @tenant_bp.route("/<int:tenant_id>/usage", methods=["GET"])
-@admin_required
+@same_tenant_or_platform_admin
 def get_tenant_usage(tenant_id: int):
-    """Get tenant usage history (admin only)."""
+    """Get tenant usage history (same tenant or platform admin).
+
+    Issue #2179: Tenant admins can view their own tenant's usage.
+    """
 
     days = request.args.get("days", 30, type=int)
 
@@ -334,9 +447,12 @@ def get_tenant_usage(tenant_id: int):
 
 
 @tenant_bp.route("/<int:tenant_id>/stats", methods=["GET"])
-@admin_required
+@same_tenant_or_platform_admin
 def get_tenant_stats(tenant_id: int):
-    """Get tenant statistics (admin only)."""
+    """Get tenant statistics (same tenant or platform admin).
+
+    Issue #2179: Tenant admins can view their own tenant's statistics.
+    """
 
     stats = tenant_service.get_tenant_stats(tenant_id)
 
@@ -347,9 +463,12 @@ def get_tenant_stats(tenant_id: int):
 
 
 @tenant_bp.route("/<int:tenant_id>/check-quota", methods=["POST"])
-@admin_required
+@same_tenant_or_platform_admin
 def check_tenant_quota(tenant_id: int):
-    """Check if tenant has quota available."""
+    """Check if tenant has quota available (same tenant or platform admin).
+
+    Issue #2179: Tenant admins can check their own tenant's quota.
+    """
 
     data = request.get_json() or {}
 
@@ -363,9 +482,12 @@ def check_tenant_quota(tenant_id: int):
 
 
 @tenant_bp.route("/plans", methods=["GET"])
-@admin_required
+@auth_required
 def get_plan_quotas():
-    """Get quota configurations for all plans."""
+    """Get quota configurations for all plans (authenticated users).
+
+    Issue #2179: All authenticated users can view plan configurations.
+    """
     quotas = tenant_service.get_plan_quotas()
     return jsonify(quotas)
 

@@ -67,7 +67,10 @@ def api_create_user():
     email: str = data.get("email", "")
     password: str = data.get("password", "")
     role = data.get("role", "user")
-    tenant_id = data.get("tenant_id", 1)
+    # Issue #2179: Fail-Closed - 必须显式指定 tenant_id
+    tenant_id = data.get("tenant_id")
+    if tenant_id is None:
+        return jsonify({"error": "tenant_id is required"}), 400
 
     # Validate inputs
     if not validate_username(username):
@@ -156,7 +159,11 @@ def api_update_user(user_id):
         # Check if user exists and get current tenant
         current_user = user_repo.get_user_by_id(user_id)
         if current_user:
-            current_tenant_id = current_user.get("tenant_id", 1)
+            # Issue #2179: Fail-Closed - 不再使用默认值
+            current_tenant_id = current_user.get("tenant_id")
+            if current_tenant_id is None:
+                logger.warning(f"User {user_id} has no tenant_id")
+                current_tenant_id = 0  # 用于比较，不会匹配任何租户
             # If tenant is changing, check quota for new tenant
             if new_tenant_id != current_tenant_id:
                 if not tenant_service.can_add_user(new_tenant_id):

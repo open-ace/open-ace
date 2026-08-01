@@ -406,10 +406,16 @@ def get_session_models():
     api_proxy = get_api_key_proxy_service()
 
     if workspace_type == "local":
-        # Local workspace is single-tenant; tenant_id=1 is the default tenant.
-        # This must be updated if multi-tenant local workspaces are introduced.
+        # Issue #2179: Fail-Closed - 从 g 获取 tenant_id 而不是硬编码
+        # Local workspace is single-tenant; use the authenticated user's tenant
+        tenant_id = g.get("tenant_id")
+        if tenant_id is None:
+            # 如果没有租户上下文，使用默认租户 1（单租户模式）
+            logger.warning("No tenant_id in context for local workspace, using default tenant 1")
+            tenant_id = 1
+
         pool = api_proxy.get_tool_model_pool(
-            tenant_id=1,
+            tenant_id=tenant_id,
             tool_name="qwen-code",
             scope="local",
             provider="openai",

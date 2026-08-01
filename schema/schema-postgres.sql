@@ -1833,7 +1833,8 @@ CREATE TABLE users (
     avatar_url character varying(500),
     auto_mapping_enabled boolean DEFAULT true,
     tenant_version integer DEFAULT 1 NOT NULL,
-    CONSTRAINT chk_users_role CHECK (((role)::text = ANY ((ARRAY['admin'::character varying, 'manager'::character varying, 'user'::character varying, 'readonly'::character varying])::text[])))
+    CONSTRAINT chk_tenant_admin_requires_tenant CHECK ((NOT (((role)::text = 'tenant_admin'::text) AND (tenant_id IS NULL)))),
+    CONSTRAINT chk_users_role CHECK (((role)::text = ANY ((ARRAY['admin'::character varying, 'platform_admin'::character varying, 'tenant_admin'::character varying, 'manager'::character varying, 'user'::character varying, 'readonly'::character varying])::text[])))
 );
 
 CREATE SEQUENCE users_id_seq

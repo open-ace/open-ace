@@ -13,8 +13,11 @@ class UserRole(Enum):
     """User role enumeration."""
 
     ADMIN = "admin"
+    PLATFORM_ADMIN = "platform_admin"
+    TENANT_ADMIN = "tenant_admin"
     MANAGER = "manager"
     USER = "user"
+    READONLY = "readonly"
 
 
 @dataclass
@@ -108,7 +111,70 @@ class User:
 
     def is_admin(self) -> bool:
         """Check if user is an admin."""
-        return self.role == "admin"
+        return self.role in ("admin", "platform_admin", "tenant_admin")
+
+    def is_platform_admin(self) -> bool:
+        """Check if user is a platform admin.
+
+        Platform admins can access all tenants.
+
+        Returns:
+            bool: True if user is a platform admin
+        """
+        return self.role == "platform_admin"
+
+    def is_tenant_admin(self) -> bool:
+        """Check if user is a tenant admin.
+
+        Tenant admins must have a tenant_id.
+
+        Returns:
+            bool: True if user is a tenant admin with tenant_id
+        """
+        return self.role == "tenant_admin" and self.tenant_id is not None
+
+    def can_access_tenant(self, target_tenant_id: int | None) -> bool:
+        """Check if user can access the specified tenant.
+
+        Permission rules:
+        - platform_admin: can access any tenant
+        - tenant_admin: can only access own tenant
+        - others: no access
+
+        Args:
+            target_tenant_id: The tenant ID to check access for
+
+        Returns:
+            bool: True if user can access the tenant
+        """
+        # Platform admins can access any tenant
+        if self.is_platform_admin():
+            return True
+
+        # Tenant admins can only access their own tenant
+        if self.is_tenant_admin():
+            return self.tenant_id == target_tenant_id
+
+        # Other roles cannot access tenants
+        return False
+
+    def validate_role_tenant_consistency(self) -> list[str]:
+        """Validate role and tenant_id consistency.
+
+        Returns:
+            list[str]: List of error messages, empty if valid
+        """
+        errors = []
+
+        # Tenant admins must have tenant_id
+        if self.role == "tenant_admin" and self.tenant_id is None:
+            errors.append("租户管理员必须有 tenant_id")
+
+        # Empty string tenant_id should be normalized to None
+        if self.tenant_id == "":
+            errors.append("tenant_id 不应为空字符串，请使用 NULL")
+
+        return errors
 
 
 @dataclass
