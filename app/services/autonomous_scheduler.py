@@ -303,9 +303,7 @@ class AutonomousScheduler:
         workspace, branch = self._conflict_keys(wf)
         if workspace and workspace in self._in_progress_workspaces and not is_waiting:
             return True
-        if branch and branch in self._in_progress_branches and not is_waiting:
-            return True
-        return False
+        return bool(branch and branch in self._in_progress_branches and not is_waiting)
 
     def _reclaim_paused_slots(self, repo) -> None:
         """Release git-conflict keys held by workflows that have since been paused.

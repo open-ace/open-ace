@@ -11,6 +11,7 @@ from typing import Any, cast
 from app.models.project import Project, ProjectDailyStats, ProjectStats, UserProject
 from app.repositories.database import Database, adapt_boolean_value
 from app.utils.helpers import parse_db_datetime
+from app.utils.tenant_resolver import TenantResolutionError, TenantResolver
 
 logger = logging.getLogger(__name__)
 
@@ -30,26 +31,66 @@ class ProjectRepository:
     @staticmethod
     def _normalize_tenant_id(value: Any) -> int | None:
         """Normalize tenant identifiers to positive integers."""
+        if value in (None, "", 0, "0"):
+            return None
         try:
             tenant_id = int(value)
+            return tenant_id if tenant_id > 0 else None
         except (TypeError, ValueError):
             return None
-        return tenant_id if tenant_id > 0 else None
 
-    def _resolve_tenant_id(self, tenant_id: int | None = None, user_id: int | None = None) -> int:
-        """Resolve the effective tenant for project writes."""
-        normalized = self._normalize_tenant_id(tenant_id)
-        if normalized is not None:
-            return normalized
+    def _resolve_tenant_id_for_write(
+        self, tenant_id: int | None = None, user_id: int | None = None
+    ) -> int:
+        """Resolve the effective tenant for project write operations.
 
-        if user_id is not None:
-            row = self.db.fetch_one("SELECT tenant_id FROM users WHERE id = ?", (user_id,))
-            if row:
-                normalized = self._normalize_tenant_id(row.get("tenant_id"))
-                if normalized is not None:
-                    return normalized
+        Uses fail-closed mode to prevent cross-tenant data leakage.
+        Raises TenantResolutionError if tenant cannot be resolved.
 
-        return 1
+        Args:
+            tenant_id: Explicitly provided tenant ID
+            user_id: User ID to look up tenant from
+
+        Returns:
+            Resolved tenant ID
+
+        Raises:
+            TenantResolutionError: If tenant cannot be resolved
+        """
+        try:
+            return TenantResolver.resolve_for_write(
+                tenant_id=tenant_id, user_id=user_id, db=self.db
+            )
+        except TenantResolutionError:
+            logger.error(
+                f"Cannot resolve tenant for write operation - tenant_id={tenant_id}, user_id={user_id}"
+            )
+            raise
+
+    def _resolve_tenant_id_for_read(
+        self, tenant_id: int | None = None, user_id: int | None = None, default: int = 1
+    ) -> int:
+        """Resolve the effective tenant for project read operations.
+
+        Uses fail-open mode with a default fallback.
+        Logs a warning if falling back to default tenant.
+
+        Args:
+            tenant_id: Explicitly provided tenant ID
+            user_id: User ID to look up tenant from
+            default: Default tenant ID if cannot resolve (default: 1)
+
+        Returns:
+            Resolved tenant ID or default
+        """
+        result = TenantResolver.resolve_for_read(
+            tenant_id=tenant_id, user_id=user_id, db=self.db, default=default
+        )
+        if result == default and tenant_id is None and user_id is None:
+            logger.warning(
+                f"Using default tenant {default} for read operation - no tenant context provided"
+            )
+        return result
 
     def create_project(
         self,
@@ -79,7 +120,10 @@ class ProjectRepository:
         """
         try:
             now = datetime.now(timezone.utc).replace(tzinfo=None)
-            effective_tenant_id = self._resolve_tenant_id(tenant_id=tenant_id, user_id=created_by)
+            # Use fail-closed mode for write operations
+            effective_tenant_id = self._resolve_tenant_id_for_write(
+                tenant_id=tenant_id, user_id=created_by
+            )
 
             # Check if a soft-deleted project with the same path exists
             soft_deleted = self.db.fetch_one(
@@ -190,6 +234,10 @@ class ProjectRepository:
                 self.add_user_project(created_by, project_id)
 
             return project_id
+        except TenantResolutionError as e:
+            # Fail-closed: Do not create project without valid tenant context
+            logger.error(f"Tenant resolution failed for project creation: {e}")
+            raise
         except Exception as e:
             logger.error(f"Error creating project: {e}")
             return None

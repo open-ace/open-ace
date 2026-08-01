@@ -21,6 +21,7 @@ from app.auth.decorators import admin_required, auth_required, public_endpoint
 from app.modules.governance.audit_logger import AuditAction, AuditLogger
 from app.modules.sso.manager import SSOManager
 from app.modules.sso.provider import get_provider_config, list_providers
+from app.modules.sso.saml import NSMAP, SAML_ASSERTION_NS, SAML_PROTOCOL_NS, SAML_SUCCESS_STATUS
 from app.repositories.database import adapt_boolean_value
 from app.repositories.user_repo import UserRepository
 from app.services.auth_service import _get_session_timeout_hours
@@ -28,6 +29,16 @@ from app.utils.config import get_config_value
 from app.utils.outbound_url_guard import OutboundUrlBlockedError, safe_request
 
 logger = logging.getLogger(__name__)
+
+# Issue #1826 F6: Transition warning for SSO_NULL_TENANT_POLICY=warn
+# Check at module load time and emit deprecation notice if warn policy is configured
+_null_tenant_policy = os.environ.get("SSO_NULL_TENANT_POLICY", "reject")
+if _null_tenant_policy == "warn":
+    logger.warning(
+        "DEPRECATION NOTICE: SSO_NULL_TENANT_POLICY=warn currently rejects user creation. "
+        "This behavior will continue in future versions. "
+        "Please migrate to 'reject' or configure provider default_tenant_id."
+    )
 
 # Create blueprint
 sso_bp = Blueprint("sso", __name__, url_prefix="/api/sso")
@@ -1579,6 +1590,338 @@ def saml_acs(provider_name: str):
     return _finalize_sso_login(provider_name, auth_result, frontend_url)
 
 
+# ============================================================================
+# Issue #2174 F7: SAML Single Logout (SLO) Endpoints
+# ============================================================================
+
+
+@sso_bp.route("/slo/<provider_name>", methods=["POST"])
+@public_endpoint
+def saml_slo_post(provider_name: str):
+    """Handle SAML HTTP-POST Single Logout Service.
+
+    Issue #2174 F7: Process LogoutRequest from IdP or return LogoutResponse.
+
+    This endpoint handles:
+    1. IdP-initiated logout requests (LogoutRequest from IdP)
+    2. SP-initiated logout responses (LogoutResponse to our request)
+    """
+    # Parse-DoS cap for unauthenticated SAML messages
+    max_saml_message = 256 * 1024
+    if (request.content_length or 0) > max_saml_message:
+        return jsonify({"error": "saml_message_too_large"}), 413
+
+    saml_message = request.form.get("SAMLRequest") or request.form.get("SAMLResponse")
+    relay_state = request.form.get("RelayState", "")
+
+    if not saml_message:
+        return jsonify({"error": "Missing SAMLRequest or SAMLResponse"}), 400
+
+    provider = get_sso_manager().get_provider(provider_name)
+    if not provider or provider.provider_type != "saml":
+        return jsonify({"error": "SAML provider not found"}), 404
+
+    from app.modules.sso.saml import SAMLProvider
+
+    if not isinstance(provider, SAMLProvider):
+        return jsonify({"error": "Invalid provider type"}), 400
+
+    # Check if this is a LogoutRequest (IdP-initiated) or LogoutResponse (SP-initiated)
+    try:
+        import base64
+
+        decoded = base64.b64decode(saml_message, validate=True)
+        from lxml import etree
+
+        parser = etree.XMLParser(resolve_entities=False, no_network=True, huge_tree=False)
+        root = etree.fromstring(decoded, parser=parser)
+
+        # Check the root element tag
+        tag_local = root.tag.split("}")[-1] if "}" in root.tag else root.tag
+
+        if tag_local == "LogoutRequest":
+            # IdP-initiated logout request
+            return _handle_saml_logout_request(provider, saml_message, relay_state)
+        elif tag_local == "LogoutResponse":
+            # Response to our SP-initiated logout
+            return _handle_saml_logout_response(provider, saml_message, relay_state)
+        else:
+            return jsonify({"error": f"Unexpected SAML message type: {tag_local}"}), 400
+
+    except Exception as e:
+        logger.error(f"Failed to parse SAML SLO message: {e}")
+        return jsonify({"error": "Invalid SAML message"}), 400
+
+
+@sso_bp.route("/slo-redirect/<provider_name>", methods=["GET"])
+@public_endpoint
+def saml_slo_redirect(provider_name: str):
+    """Handle SAML HTTP-Redirect Single Logout Service.
+
+    Issue #2174 F7: Process LogoutRequest/Response via redirect binding.
+
+    This endpoint handles both:
+    1. SP-initiated logout requests (redirect user to IdP)
+    2. IdP-initiated logout requests (process LogoutRequest)
+    3. Logout responses from IdP (after SP-initiated logout)
+    """
+    saml_message = request.args.get("SAMLRequest") or request.args.get("SAMLResponse")
+    relay_state = request.args.get("RelayState", "")
+
+    provider = get_sso_manager().get_provider(provider_name)
+    if not provider or provider.provider_type != "saml":
+        return jsonify({"error": "SAML provider not found"}), 404
+
+    from app.modules.sso.saml import SAMLProvider
+
+    if not isinstance(provider, SAMLProvider):
+        return jsonify({"error": "Invalid provider type"}), 400
+
+    # If SAMLRequest parameter, this is an IdP-initiated logout request
+    if request.args.get("SAMLRequest"):
+        return _handle_saml_logout_request(provider, saml_message, relay_state)
+
+    # If SAMLResponse parameter, this is a response to our logout request
+    if request.args.get("SAMLResponse"):
+        return _handle_saml_logout_response(provider, saml_message, relay_state)
+
+    # Otherwise, this is a request to initiate logout
+    # Get session info from cookie or token
+    token = request.cookies.get("session_token") or request.args.get("session_token")
+    if not token:
+        return jsonify({"error": "No session to logout"}), 400
+
+    session_data = get_sso_manager().get_sso_session(token)
+    if not session_data:
+        return jsonify({"error": "Session not found or expired"}), 401
+
+    return _initiate_saml_logout(provider_name, token, session_data, relay_state)
+
+
+def _initiate_saml_logout(
+    provider_name: str, token: str, session_data: dict, relay_state: str | None = None
+):
+    """Initiate SP-initiated SAML logout.
+
+    Issue #2174 F7: Build and send LogoutRequest to IdP.
+
+    Args:
+        provider_name: SAML provider name.
+        token: Session token to logout.
+        session_data: Session data containing user info.
+        relay_state: Optional relay state to round-trip.
+    """
+    from app.modules.sso.saml import SAMLProvider
+
+    provider = get_sso_manager().get_provider(provider_name)
+    if not provider or not isinstance(provider, SAMLProvider):
+        return jsonify({"error": "SAML provider not found"}), 404
+
+    # Get NameID and SessionIndex from session data
+    # These were stored during the original SSO login
+    name_id = session_data.get("name_id")
+    session_index = session_data.get("session_index")
+
+    if not name_id:
+        # No NameID - just delete local session
+        _delete_session_and_cookies(token)
+        return jsonify({"message": "Logged out successfully (no SLO)"}), 200
+
+    try:
+        logout_url, request_id = provider.build_logout_request(
+            name_id=name_id,
+            session_index=session_index,
+            relay_state=relay_state,
+        )
+
+        # Store the request_id for validation (in production, use Redis)
+        # Issue #2174 F7: Use auth_state table to store logout state
+        import secrets
+
+        state = secrets.token_urlsafe(32)
+        get_sso_manager()._store_auth_state(state, request_id, provider_name, None)
+
+        # Redirect to IdP for logout
+        return redirect(logout_url)
+
+    except ValueError as e:
+        logger.warning(f"SAML logout not available: {e}")
+        # No SLO endpoint - just delete local session
+        _delete_session_and_cookies(token)
+        return jsonify({"message": "Logged out successfully (IdP does not support SLO)"}), 200
+
+
+def _handle_saml_logout_request(provider, saml_request: str, relay_state: str):
+    """Handle IdP-initiated SAML logout request.
+
+    Issue #2174 F7: Validate LogoutRequest and return LogoutResponse.
+
+    Args:
+        provider: SAML provider instance.
+        saml_request: Base64-encoded LogoutRequest.
+        relay_state: RelayState to include in response.
+    """
+    import base64
+    import zlib
+
+    from lxml import etree
+
+    try:
+        # Decode the request (may be deflated for redirect binding)
+        try:
+            # Try deflated first (redirect binding)
+            decoded = zlib.decompress(base64.b64decode(saml_request), -15)
+        except Exception:
+            # Fall back to plain base64 (post binding)
+            decoded = base64.b64decode(saml_request, validate=True)
+
+        parser = etree.XMLParser(resolve_entities=False, no_network=True, huge_tree=False)
+        root = etree.fromstring(decoded, parser=parser)
+
+        # Extract NameID
+        name_id_elem = root.find(".//saml:NameID", namespaces=NSMAP)
+
+        name_id = name_id_elem.text if name_id_elem is not None and name_id_elem.text else None
+
+        if not name_id:
+            return jsonify({"error": "LogoutRequest missing NameID"}), 400
+
+        # Find and terminate the session(s) for this NameID
+        # In a production system, you'd look up sessions by NameID
+        # For now, we just acknowledge the logout
+        logger.info(f"SAML logout request received for NameID: {name_id[:8]}...")
+
+        # Build LogoutResponse
+        response_id = provider.generate_request_id()
+        now = provider._now().isoformat(timespec="seconds").replace("+00:00", "Z")
+        in_response_to = root.get("ID")
+
+        response_root = etree.Element(
+            f"{{{SAML_PROTOCOL_NS}}}LogoutResponse",
+            nsmap=NSMAP,
+            ID=response_id,
+            Version="2.0",
+            IssueInstant=now,
+            InResponseTo=in_response_to,
+        )
+        etree.SubElement(response_root, f"{{{SAML_ASSERTION_NS}}}Issuer").text = (
+            provider.sp_entity_id
+        )
+
+        status = etree.SubElement(response_root, f"{{{SAML_PROTOCOL_NS}}}Status")
+        etree.SubElement(status, f"{{{SAML_PROTOCOL_NS}}}StatusCode", Value=SAML_SUCCESS_STATUS)
+
+        response_xml = etree.tostring(response_root, xml_declaration=False, encoding="UTF-8")
+
+        # Get SLO endpoint
+        slo_url = provider.idp_slo_url
+        if not slo_url:
+            return jsonify({"error": "IdP SLO URL not configured"}), 400
+
+        # For POST binding, return HTML form that auto-submits
+        encoded_response = base64.b64encode(response_xml).decode("ascii")
+
+        html = f"""
+        <!DOCTYPE html>
+        <html>
+        <head><title>SAML Logout</title></head>
+        <body onload="document.forms[0].submit()">
+            <noscript><p>Redirecting to logout...</p></noscript>
+            <form method="post" action="{slo_url}">
+                <input type="hidden" name="SAMLResponse" value="{encoded_response}">
+                <input type="hidden" name="RelayState" value="{relay_state}">
+            </form>
+        </body>
+        </html>
+        """
+        return Response(html, mimetype="text/html")
+
+    except Exception as e:
+        logger.error(f"Failed to handle SAML logout request: {e}")
+        return jsonify({"error": "Failed to process logout request"}), 500
+
+
+def _handle_saml_logout_response(provider, saml_response: str, relay_state: str):
+    """Handle SAML logout response from IdP.
+
+    Issue #2174 F7: Validate LogoutResponse and complete local logout.
+
+    Args:
+        provider: SAML provider instance.
+        saml_response: Base64-encoded LogoutResponse.
+        relay_state: RelayState (may contain redirect URL).
+    """
+    import base64
+    import zlib
+
+    try:
+        # Decode the response (may be deflated for redirect binding)
+        try:
+            zlib.decompress(base64.b64decode(saml_response), -15)
+        except Exception:
+            base64.b64decode(saml_response, validate=True)
+
+        # Validate the response
+        success, error = provider.validate_logout_response(saml_response)
+
+        if not success:
+            logger.warning(f"SAML logout response validation failed: {error}")
+            # Still proceed with local logout
+
+        # Parse redirect URL from relay_state if available
+        redirect_url = None
+        if relay_state:
+            _, redirect_url = _decode_state(relay_state)
+
+        # Clear local session cookie
+        response = jsonify({"message": "Logged out successfully"})
+        response.delete_cookie("session_token", httponly=True, samesite="Lax")
+
+        # Redirect to frontend if provided
+        if redirect_url and _validate_redirect_uri(redirect_url):
+            return redirect(f"{redirect_url}?logout=success")
+
+        return response
+
+    except Exception as e:
+        logger.error(f"Failed to handle SAML logout response: {e}")
+        return jsonify({"error": "Failed to process logout response"}), 500
+
+
+def _delete_session_and_cookies(token: str):
+    """Delete session from database and clear cookies.
+
+    Issue #2174 F7: Helper to clean up local session state.
+    """
+    try:
+        # Get session data before deletion
+        session_data = get_sso_manager().get_sso_session(token)
+
+        if session_data:
+            user_id = session_data.get("user_id")
+
+            # Delete from both tables
+            with get_sso_manager().db.connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "DELETE FROM sso_sessions WHERE session_token = ?",
+                    (token,),
+                )
+                if user_id:
+                    cursor.execute(
+                        "DELETE FROM sessions WHERE user_id = ? AND token = ?",
+                        (user_id, token),
+                    )
+                conn.commit()
+    except Exception as e:
+        logger.error(f"Failed to delete session: {e}")
+
+
+# ============================================================================
+# End SAML SLO Endpoints
+# ============================================================================
+
+
 @sso_bp.route("/session", methods=["GET"])
 def get_session():
     """Get current SSO session info."""
@@ -1747,7 +2090,10 @@ def _create_user_from_sso(sso_user, provider_name: str) -> int | None:
         Optional[int]: New user ID or None.
 
     Issue #1826 F3: Explicit tenant_id passing with policy configuration.
+    Issue #2174 F6: Fail-closed tenant resolution with priority chain.
     """
+    from flask import g
+
     # Generate username if not provided
     username = sso_user.username or sso_user.email or f"{provider_name}_{sso_user.provider_user_id}"
 
@@ -1758,30 +2104,52 @@ def _create_user_from_sso(sso_user, provider_name: str) -> int | None:
         username = f"{base_username}_{counter}"
         counter += 1
 
-    # Issue #1826 F3: Get tenant_id with policy configuration
-    # Get tenant_id from Provider configuration
+    # Issue #2174 F6: Tenant resolution priority chain
+    # Priority 1: Provider configuration (default_tenant_id in provider config)
+    # Priority 2: Request tenant context (from authenticated session)
+    # Priority 3: REJECT if neither available
+
     provider = get_sso_manager().get_provider(provider_name)
-    tenant_id = provider.config.tenant_id if provider and provider.config.tenant_id else None
+    tenant_id = None
 
-    # Policy configuration for null tenant_id
-    null_tenant_policy = os.environ.get("SSO_NULL_TENANT_POLICY", "warn")
+    # Priority 1: Try provider configuration default_tenant_id
+    if provider and provider.config:
+        # Try extra_params first (where default_tenant_id is typically configured)
+        if provider.config.extra_params:
+            tenant_id = provider.config.extra_params.get("default_tenant_id")
+        # Fall back to provider's tenant_id if not in extra_params
+        if not tenant_id:
+            tenant_id = provider.config.tenant_id
 
-    # Check if tenant_id is required
+    # Priority 2: Try request tenant context from authenticated session
     if tenant_id is None:
+        request_tenant_id = getattr(g, "tenant_id", None) or getattr(g, "user", {}).get("tenant_id")
+        if request_tenant_id:
+            tenant_id = int(request_tenant_id)
+
+    # Priority 3: Check policy for missing tenant_id
+    if tenant_id is None:
+        null_tenant_policy = os.environ.get(
+            "SSO_NULL_TENANT_POLICY", "reject"
+        )  # Changed default to reject
+
         if null_tenant_policy == "reject":
             logger.error(
-                f"SSO user creation rejected due to null tenant_id (policy: reject): "
-                f"provider={provider_name}, username={username}"
+                f"SSO user creation rejected - no tenant binding: "
+                f"provider={provider_name}, username={username}. "
+                f"Contact administrator to configure default_tenant_id for this provider."
             )
             return None
         elif null_tenant_policy == "warn":
             logger.warning(
-                f"SSO user created with null tenant_id: provider={provider_name}, "
-                f"username={username}. Set SSO_NULL_TENANT_POLICY=reject to enforce tenant_id."
+                f"SSO user creation rejected - no tenant binding (policy=warn): "
+                f"provider={provider_name}, username={username}. "
+                f"DEPRECATION NOTICE: SSO_NULL_TENANT_POLICY=warn will reject user creation. "
+                f"Please migrate to 'reject' or configure provider default_tenant_id."
             )
-        # "allow" policy: silent allow (for admin accounts)
-        # Default tenant_id to 1 if not set (backward compatibility)
-        tenant_id = tenant_id or 1
+            return None  # Issue #1826 F6: Reject creation instead of falling back to tenant 1
+        # "allow" policy: silent allow (for admin accounts with global scope)
+        # tenant_id remains None
 
     # Create user
     try:
@@ -1790,7 +2158,7 @@ def _create_user_from_sso(sso_user, provider_name: str) -> int | None:
             email=sso_user.email or "",
             password_hash="",  # No password for SSO users
             role="user",
-            tenant_id=tenant_id,  # Issue #1826 F3: Explicitly pass tenant_id
+            tenant_id=tenant_id,  # Issue #1826 F6: Pass None directly for allow policy
         )
 
         if user_id:

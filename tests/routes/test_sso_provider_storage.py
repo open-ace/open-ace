@@ -19,6 +19,7 @@ if project_root not in sys.path:
 
 import app.utils.smtp_crypto as smtp_crypto
 from app.modules.sso.manager import SSOManager
+from app.modules.sso.secret_holder import SecretHolder
 from app.repositories.database import Database, adapt_boolean_value
 from app.repositories.schema_init import load_schema_from_file
 from app.routes.sso import _test_url_accessible, sso_bp
@@ -124,7 +125,11 @@ def test_update_provider_rewrites_legacy_plaintext_secret_as_encrypted(client, s
     assert "client_secret" not in stored
     assert stored["client_secret_encrypted"]
     assert "legacy-secret" not in raw_config
-    assert restored["client_secret"] == "legacy-secret"
+
+    # Issue #2174 F5: client_secret is now wrapped in SecretHolder
+    assert isinstance(restored["client_secret"], SecretHolder)
+    assert restored["client_secret"].get() == "legacy-secret"
+
     assert restored["client_id"] == "updated-client"
     assert restored["authorization_url"] == "https://example.com/oauth2/authorize"
 

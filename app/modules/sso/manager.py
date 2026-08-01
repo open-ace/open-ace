@@ -23,6 +23,7 @@ from app.modules.sso.provider import (
     get_provider_config,
 )
 from app.modules.sso.saml import SAMLProvider
+from app.modules.sso.secret_holder import SecretHolder
 from app.repositories.database import Database, adapt_boolean_condition, adapt_boolean_value
 from app.utils.smtp_crypto import get_password_manager
 
@@ -87,9 +88,19 @@ class SSOManager:
         self._provider_cache_time: dict[str, float] = {}
 
     def serialize_provider_config(self, config_data: dict[str, Any]) -> str:
-        """Serialize provider config for storage, encrypting the client secret."""
+        """Serialize provider config for storage, encrypting the client secret.
+
+        Issue #2174 F5: Handle SecretHolder objects when serializing.
+        """
         stored = dict(config_data)
-        client_secret = cast("str", stored.pop("client_secret", "") or "")
+        client_secret_obj = stored.pop("client_secret", "")
+
+        # Issue #2174 F5: Extract plaintext from SecretHolder if needed
+        if isinstance(client_secret_obj, SecretHolder):
+            client_secret = client_secret_obj.get()
+        else:
+            client_secret = cast("str", client_secret_obj or "")
+
         stored.pop("client_secret_encrypted", None)
         stored["client_secret_encrypted"] = (
             self._password_manager.encrypt(client_secret) if client_secret else ""
@@ -110,6 +121,9 @@ class SSOManager:
 
         Raises:
             SSOConfigDecryptionError: If decryption fails (Issue #1815 Finding 1).
+
+        Issue #2174 F5: Wrap decrypted secrets in SecretHolder to prevent
+        accidental logging and implement decrypt-on-demand caching.
         """
         config_data = (
             cast("dict[str, Any]", json.loads(raw_config))
@@ -121,33 +135,55 @@ class SSOManager:
         has_encrypted_field = "client_secret_encrypted" in config_data
         encrypted_secret = config_data.pop("client_secret_encrypted", "")
 
-        client_secret = cast("str", config_data.get("client_secret", "") or "")
-
-        # Issue #1826 F5: Prevent empty encrypted secret from bypassing encryption
-        # If encrypted_secret field exists but is empty, force client_secret to empty
-        # This prevents returning plaintext secret when encrypted blob is empty
+        # Issue #2174 F5: Wrap in SecretHolder for decrypt-on-demand
+        # SecretHolder will decrypt only when accessed and cache with TTL
         if encrypted_secret:
+            # Issue #1815 Finding 1: Validate encrypted secret by trying to decrypt
+            # This ensures we raise SSOConfigDecryptionError early (at load time)
+            # rather than later when the secret is accessed
             try:
-                client_secret = self._password_manager.decrypt(encrypted_secret)
+                # Validate by attempting decryption (result discarded)
+                _ = self._password_manager.decrypt(encrypted_secret)
             except Exception as e:
-                # Issue #1815 Finding 1: Fail-fast instead of silent fallback
-                # Determine provider name for error message
-                name = provider_name or config_data.get("name", "unknown")
-                logger.error(
-                    f"SSO provider '{name}' client_secret decryption failed: {e}",
-                    exc_info=True,
-                )
+                # Wrap in SSOConfigDecryptionError with context
                 raise SSOConfigDecryptionError(
-                    provider_name=name,
+                    provider_name=provider_name or "unknown",
                     original_error=e,
-                ) from e
+                )
+            # Wrap in SecretHolder for secure handling
+            config_data["client_secret"] = SecretHolder(
+                encrypted_blob=encrypted_secret,
+                password_manager=self._password_manager,
+                ttl_seconds=PROVIDER_CACHE_TTL_SECONDS,
+            )
         elif has_encrypted_field:
             # Issue #1826 F5: Field exists (possibly empty) → force empty secret
-            # This closes the bypass where empty encrypted blob allows plaintext
-            client_secret = ""
-        # else: Field doesn't exist (legacy format) → keep original client_secret
+            # Use empty SecretHolder that returns empty string
+            config_data["client_secret"] = SecretHolder(
+                encrypted_blob="",
+                password_manager=self._password_manager,
+                ttl_seconds=PROVIDER_CACHE_TTL_SECONDS,
+            )
+        else:
+            # Issue #2174 F5: Legacy plaintext secret - encrypt and wrap in SecretHolder
+            # This ensures consistent interface (all secrets accessed via .get())
+            client_secret = cast("str", config_data.get("client_secret", "") or "")
+            if client_secret:
+                # Encrypt the plaintext secret before wrapping
+                encrypted_legacy = self._password_manager.encrypt(client_secret)
+                config_data["client_secret"] = SecretHolder(
+                    encrypted_blob=encrypted_legacy,
+                    password_manager=self._password_manager,
+                    ttl_seconds=PROVIDER_CACHE_TTL_SECONDS,
+                )
+            else:
+                # Empty secret - use empty SecretHolder
+                config_data["client_secret"] = SecretHolder(
+                    encrypted_blob="",
+                    password_manager=self._password_manager,
+                    ttl_seconds=PROVIDER_CACHE_TTL_SECONDS,
+                )
 
-        config_data["client_secret"] = client_secret
         return config_data
 
     def _ensure_tables(self) -> None:

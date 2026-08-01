@@ -36,6 +36,12 @@ def sqlite_sm(tmp_path, monkeypatch):
             cur.execute(f"ALTER TABLE agent_sessions ADD COLUMN {col} TEXT")
         except Exception:
             pass
+    # Create default user with tenant_id for fail-closed tenant resolution
+    cur.execute(
+        "INSERT INTO users (id, username, email, password_hash, role, tenant_id) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (1, "test-user", "test@example.com", "hash", "user", 1),
+    )
     conn.commit()
     conn.close()
     return sm
