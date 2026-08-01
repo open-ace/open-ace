@@ -218,7 +218,7 @@ PR 审查由 `review` 会话执行。审查结论是结构化信号，而不是�
 ### 9.2 诊断与重试边界
 
 - CI 日志暂不可用时最多轮询 6 次，不让 Agent 盲猜；
-- 自动 CI 修复最多 3 次；
+- 自动 CI 修复最多 5 次；
 - pre-commit 最多收敛 3 轮；
 - 同一失败指纹在代码已变化后仍完全不变，会提前停止；
 - 没有日志时的降级指纹不能触发“失败未变化”误判；
@@ -359,7 +359,7 @@ AI Activity 只挂在真正运行 Agent 的 planning、development、pr_review�
 | 常量 | 默认值 | 来源 | 用途 |
 |------|--------|------|------|
 | `MAX_CONCURRENT_WORKFLOWS` | `3` | `app/services/autonomous_scheduler.py` | 调度器同时推进的工作流数（另见 §6） |
-| `MAX_CI_REPAIR_ATTEMPTS` | `3` | `app/modules/workspace/autonomous/orchestrator.py` | 合并阶段自动 CI 修复次数（§9.2） |
+| `MAX_CI_REPAIR_ATTEMPTS` | `5` | `app/modules/workspace/autonomous/orchestrator.py` | 合并阶段自动 CI 修复次数（§9.2） |
 | `MAX_CI_DIAGNOSTICS_ATTEMPTS` | `6` | `app/modules/workspace/autonomous/orchestrator.py` | 失败日志暂不可用时的调度轮询上限（§9.2） |
 | `MAX_PRE_COMMIT_CONVERGENCE_PASSES` | `3` | `app/modules/workspace/autonomous/orchestrator.py` | 隔离 `pre-commit` 收敛轮数（§9.2） |
 | `API_RETRY_TOTAL_TIMEOUT` | `1800` 秒 | `app/modules/workspace/autonomous/orchestrator.py` | 瞬时 API 错误的最大退避总时长，约 30 分钟（§10） |
