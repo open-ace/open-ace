@@ -29,47 +29,66 @@ class TestRemoteMachineTenantIsolation:
         """Create test client."""
         return app.test_client()
 
-    def test_tenant_admin_cannot_register_machine_for_other_tenant(self, app, client):
+    def test_tenant_admin_cannot_register_machine_for_other_tenant(self):
         """
         Tenant admin should not be able to register machine for other tenant.
 
         Issue #2180: tenant_id from auth context only.
         """
-        # Mock authenticated tenant admin
-        with app.test_request_context():
-            g.user = {
+        from app import create_app
+
+        # Mock authentication to return tenant_admin
+        with patch(
+            "app.auth.decorators._load_user_from_token",
+            return_value={
                 "id": 1,
                 "role": "tenant_admin",
                 "tenant_id": 1,
-            }
-            # Attempt to register machine for tenant 2
-            response = client.post(
-                "/api/remote/machines/register",
-                json={"tenant_id": 2},
-                headers={"Authorization": "Bearer test-token"},
-            )
-            # Should succeed but tenant_id should be 1 (from auth context)
-            assert response.status_code in (200, 201, 400, 403)
+                "username": "test_admin",
+                "email": "test@example.com",
+            },
+        ):
+            app = create_app()
+            app.config["TESTING"] = True
+            with app.test_client() as client:
+                # Attempt to register machine for tenant 2
+                response = client.post(
+                    "/api/remote/machines/register",
+                    json={"tenant_id": 2},
+                    headers={"Authorization": "Bearer test-token"},
+                )
+                # Should succeed but tenant_id should be 1 (from auth context)
+                # or return 403 if cross-tenant attempted
+                assert response.status_code in (200, 201, 400, 403)
 
-    def test_platform_admin_must_specify_tenant_id(self, app, client):
+    def test_platform_admin_must_specify_tenant_id(self):
         """
         Platform admin must explicitly specify tenant_id.
 
         Issue #2180: No default tenant_id for platform admin.
         """
-        with app.test_request_context():
-            g.user = {
+        from app import create_app
+
+        with patch(
+            "app.auth.decorators._load_user_from_token",
+            return_value={
                 "id": 1,
                 "role": "platform_admin",
                 "tenant_id": None,
-            }
-            response = client.post(
-                "/api/remote/machines/register",
-                json={},
-                headers={"Authorization": "Bearer test-token"},
-            )
-            # Should reject with 400 (tenant_id required)
-            assert response.status_code == 400
+                "username": "test_platform_admin",
+                "email": "platform@example.com",
+            },
+        ):
+            app = create_app()
+            app.config["TESTING"] = True
+            with app.test_client() as client:
+                response = client.post(
+                    "/api/remote/machines/register",
+                    json={},
+                    headers={"Authorization": "Bearer test-token"},
+                )
+                # Should reject with 400 (tenant_id required)
+                assert response.status_code == 400
 
 
 class TestMappingRulesTenantIsolation:
