@@ -69,9 +69,12 @@ class ToolAccountAutoMappingService:
             for row in rows
         ]
 
-    def get_unmapped_accounts(self) -> list[dict]:
-        """Get unmapped tool accounts from daily_messages."""
-        return self.mapping_repo.get_unmapped_tool_accounts()
+    def get_unmapped_accounts(self, tenant_id: int | None = None) -> list[dict]:
+        """Get unmapped tool accounts from daily_messages.
+
+        Issue #2180: If tenant_id is provided, filter by tenant.
+        """
+        return self.mapping_repo.get_unmapped_tool_accounts(tenant_id=tenant_id)
 
     def try_match_by_username_or_email(
         self, tool_account: str, users: list[User]
@@ -214,12 +217,17 @@ class ToolAccountAutoMappingService:
             return mapping.id
         return None
 
-    def run_auto_mapping(self, dry_run: bool = False) -> tuple[list[AutoMappingResult], list[dict]]:
+    def run_auto_mapping(
+        self, dry_run: bool = False, tenant_id: int | None = None
+    ) -> tuple[list[AutoMappingResult], list[dict]]:
         """
         Run auto-mapping for all unmapped tool accounts.
 
         Args:
             dry_run: If True, only report what would be mapped without creating mappings
+            tenant_id: If provided, only auto-map accounts for users in this tenant
+
+        Issue #2180: Tenant filtering support.
 
         Returns:
             Tuple of (successful_mappings, remaining_unmapped)
@@ -227,7 +235,7 @@ class ToolAccountAutoMappingService:
         # Clear cache to ensure fresh user data
         self._users_cache = None
 
-        unmapped = self.get_unmapped_accounts()
+        unmapped = self.get_unmapped_accounts(tenant_id=tenant_id)
         results = []
         still_unmapped = []
 
@@ -318,9 +326,13 @@ class ToolAccountAutoMappingService:
 
         return rules
 
-    def get_mapping_stats(self) -> dict:
-        """Get statistics about mapping status."""
-        unmapped = self.get_unmapped_accounts()
+    def get_mapping_stats(self, tenant_id: int | None = None) -> dict:
+        """
+        Get statistics about mapping status.
+
+        Issue #2180: If tenant_id is provided, filter stats by tenant.
+        """
+        unmapped = self.get_unmapped_accounts(tenant_id=tenant_id)
         mapped = self.mapping_repo.get_all()
 
         # Count unmapped by inferred tool type

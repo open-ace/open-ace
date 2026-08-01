@@ -657,6 +657,8 @@ def admin_required(f=None):
     Issue #1896: Query parameter session tokens are rejected.
     WebUI tokens are validated and logged for audit.
 
+    Issue #2179: Accept admin, platform_admin, and tenant_admin roles.
+
     Sets g.user, g.user_id, g.user_role on success.
     """
 
@@ -668,12 +670,14 @@ def admin_required(f=None):
             if token:
                 user = _load_user_from_token(token)
                 if user:
-                    if user.get("role") != "admin":
+                    # Issue #2179: Accept all admin variants
+                    user_role = user.get("role")
+                    if user_role not in ("admin", "platform_admin", "tenant_admin"):
                         return jsonify({"error": "Admin access required"}), 403
 
                     g.user = user
                     g.user_id = user.get("id")
-                    g.user_role = user.get("role")
+                    g.user_role = user_role
                     g.tenant_id = user.get("tenant_id")
 
                     password_change_response = enforce_password_change_requirement(user)
@@ -731,12 +735,14 @@ def admin_required(f=None):
                                     "— latent auth weakening, see Issue #1832 F1",
                                     user_id,
                                 )
-                            if user.get("role") != "admin":
+                            # Issue #2179: Accept all admin variants
+                            user_role = user.get("role")
+                            if user_role not in ("admin", "platform_admin", "tenant_admin"):
                                 return jsonify({"error": "Admin access required"}), 403
 
                             g.user = user
                             g.user_id = user_id
-                            g.user_role = user.get("role")
+                            g.user_role = user_role
                             g.tenant_id = user.get("tenant_id")
 
                             password_change_response = enforce_password_change_requirement(user)
