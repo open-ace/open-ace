@@ -52,15 +52,20 @@ def upgrade() -> None:
                 WHERE table_name = 'users' AND column_name = 'tenant_id'
             """)
         )
-        tenant_id_type = result.scalar()
+        tenant_id_type = result.scalar() or "integer"
     else:
         # SQLite: 假设是整数类型
         tenant_id_type = "integer"
 
     log.info(f"tenant_id 列类型: {tenant_id_type}")
 
+    # 判断 tenant_id 是否为整数类型
+    # PostgreSQL 返回 "integer"，SQLite 返回 "integer"
+    is_integer_type = tenant_id_type in ("integer", "smallint", "bigint")
+
     # 只有字符串类型才检查空字符串
-    if tenant_id_type in ("character varying", "varchar", "text"):
+    # 整数类型的 tenant_id 不可能等于空字符串
+    if not is_integer_type:
         # 检查 tenant_id 为空字符串的管理员账号
         result = connection.execute(
             sa.text("SELECT COUNT(*) FROM users WHERE role = 'admin' AND tenant_id = ''")
@@ -144,14 +149,14 @@ def upgrade() -> None:
     log.info("Step 3: 迁移管理员角色...")
 
     # 根据数据类型构建 SQL 条件
-    if tenant_id_type in ("character varying", "varchar", "text"):
-        # 字符串类型：检查 NULL 和空字符串
-        null_condition = "(tenant_id IS NULL OR tenant_id = '')"
-        not_null_condition = "tenant_id IS NOT NULL AND tenant_id != ''"
-    else:
-        # 整数类型：只检查 NULL
+    # 整数类型：只检查 NULL
+    # 字符串类型：检查 NULL 和空字符串
+    if is_integer_type:
         null_condition = "tenant_id IS NULL"
         not_null_condition = "tenant_id IS NOT NULL"
+    else:
+        null_condition = "(tenant_id IS NULL OR tenant_id = '')"
+        not_null_condition = "tenant_id IS NOT NULL AND tenant_id != ''"
 
     # 迁移无 tenant_id 的管理员 → 平台管理员
     result = connection.execute(
@@ -183,12 +188,12 @@ def upgrade() -> None:
     if is_postgresql:
         # 添加约束：租户管理员必须有 tenant_id
         # 根据数据类型构建不同的约束条件
-        if tenant_id_type in ("character varying", "varchar", "text"):
-            # 字符串类型：检查 NULL 和空字符串
-            constraint_condition = "tenant_id IS NULL OR tenant_id = ''"
-        else:
+        if is_integer_type:
             # 整数类型：只检查 NULL
             constraint_condition = "tenant_id IS NULL"
+        else:
+            # 字符串类型：检查 NULL 和空字符串
+            constraint_condition = "tenant_id IS NULL OR tenant_id = ''"
 
         try:
             connection.execute(
