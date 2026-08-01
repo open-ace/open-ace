@@ -885,9 +885,9 @@ _CONTEXT_OVERFLOW_RE = re.compile(
 # Test failure retry configuration.
 MAX_TEST_RETRIES = 2  # max retries when test agent itself fails
 MAX_DEV_RETRIES_ON_TEST_FAIL = 2  # max dev round retries for unfixable test failures
-MAX_CI_REPAIR_ATTEMPTS = 3  # max automatic dev-round retries for merge-phase CI failures
+MAX_CI_REPAIR_ATTEMPTS = 5  # max automatic dev-round retries for merge-phase CI failures
 # Separate cap for transient-API deferrals during CI repair: a 503/429 must
-# not loop forever, but must allow more retries than the 3-attempt budget
+# not loop forever, but must allow more retries than the 5-attempt budget
 # (which is consumed only by real agent repair attempts, not infra glitches).
 MAX_CI_REPAIR_TRANSIENT_RETRIES = 6
 MAX_PRE_COMMIT_CONVERGENCE_PASSES = 3
