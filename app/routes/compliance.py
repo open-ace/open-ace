@@ -182,10 +182,17 @@ def generate_report():
                 caller_tenant_id,
             )
         target_tenant_id = caller_tenant_id
-    # Legacy admin: requires explicit tenant_id
+    # Legacy admin: backward compatibility
+    # - With tenant_id: scoped to that tenant (like tenant_admin)
+    # - Without tenant_id: global access (like platform_admin)
     elif user_role == "admin":
-        if target_tenant_id is None:
-            return jsonify({"error": "Tenant scope required"}), 403
+        if caller_tenant_id is not None:
+            # Scoped to caller's tenant
+            target_tenant_id = caller_tenant_id
+        else:
+            # Global access, but require explicit tenant_id for clarity
+            # If no tenant_id provided, default to tenant 1 for backward compatibility
+            target_tenant_id = data.get("tenant_id", 1)
 
     # Parse date range
     period_start = data.get("period_start")

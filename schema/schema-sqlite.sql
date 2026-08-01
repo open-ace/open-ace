@@ -1650,7 +1650,7 @@ CREATE INDEX idx_team_members_user ON team_members (user_id);
 
 CREATE INDEX idx_teams_owner ON teams (owner_id);
 
-CREATE INDEX idx_teams_sync_source ON teams ((((settings) ->> 'sync_source')));
+CREATE INDEX idx_teams_sync_source ON teams ((json_extract(settings, '$.sync_source')));
 
 CREATE INDEX idx_tenant_migrations_status ON tenant_migrations (status);
 

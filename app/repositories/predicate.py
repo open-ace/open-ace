@@ -9,10 +9,7 @@ Issue #2180: Ensures all repository queries include proper tenant isolation.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Callable
-
-if TYPE_CHECKING:
-    from sqlalchemy.orm import Query
+from typing import Any
 
 logger = logging.getLogger(__name__)
 

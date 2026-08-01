@@ -6,8 +6,8 @@ Issue #2180: Tests for TenantScopedService and TenantPredicateBuilder.
 
 import pytest
 
-from app.services.base import TenantScopedService, CrossTenantAccessError
 from app.repositories.predicate import TenantPredicateBuilder
+from app.services.base import CrossTenantAccessError, TenantScopedService
 
 
 class TestTenantScopedService:

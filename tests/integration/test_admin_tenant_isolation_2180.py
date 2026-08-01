@@ -4,9 +4,10 @@ Integration tests for tenant isolation in admin routes.
 Issue #2180: Verifies that tenant admin cannot access other tenant's resources.
 """
 
+from unittest.mock import Mock, patch
+
 import pytest
 from flask import Flask, g
-from unittest.mock import Mock, patch
 
 # These tests verify the tenant isolation fixes for Issue #2180
 
