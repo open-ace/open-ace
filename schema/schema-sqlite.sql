@@ -681,7 +681,6 @@ CREATE TABLE proxy_token_jtis (
  revoke_reason text,
  use_count integer DEFAULT 0 NOT NULL,
  metadata text,
- -- Issue #1822: Track token termination for audit and cleanup
  terminated_at TIMESTAMP,
  termination_reason text
 );
