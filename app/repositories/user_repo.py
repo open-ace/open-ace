@@ -45,15 +45,27 @@ class UserRepository:
             role: User role.
             is_active: Whether user is active.
             system_account: System account name for multi-user workspace mode.
-            tenant_id: Tenant ID for multi-tenant support. If None, defaults to 1.
+            tenant_id: Tenant ID for multi-tenant support. REQUIRED for non-platform-admin users.
 
         Returns:
             Optional[int]: User ID if successful, None otherwise.
+
+        Raises:
+            ValueError: If tenant_id is None for non-platform-admin users.
+
+        Issue #2179: 消除静默回退到 tenant_id=1，建立 Fail-Closed 机制
         """
-        # Issue #1826 F6: Handle None tenant_id (allow policy from SSO)
-        # When tenant_id is None (e.g., SSO allow policy), use default tenant 1
-        # This maintains consistency across PostgreSQL (no schema default) and SQLite
-        effective_tenant_id = tenant_id if tenant_id is not None else 1
+        # Fail-Closed: 非平台管理员用户必须指定 tenant_id
+        # 平台管理员（role='platform_admin' 或 'admin'）可以没有 tenant_id
+        if tenant_id is None and role not in ('platform_admin', 'admin'):
+            raise ValueError(
+                f"创建用户必须指定 tenant_id。"
+                f"用户名: {username}, 角色: {role}。"
+                f"平台管理员用户请显式传 None。"
+            )
+
+        # 对于平台管理员，允许 tenant_id 为 None
+        effective_tenant_id = tenant_id  # 不再回退到 1
 
         try:
             # Use RETURNING for PostgreSQL, or lastrowid for SQLite

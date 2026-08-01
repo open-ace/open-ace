@@ -188,7 +188,14 @@ class DingTalkOrgSyncService:
         if not app_key or not app_secret:
             raise ValueError("DingTalk app_key and app_secret must be configured before syncing")
 
-        effective_tenant_id = int(tenant_id or config.get("org_sync_tenant_id") or 1)
+        # Issue #2179: Fail-Closed - 必须显式配置同步目标租户
+        effective_tenant_id = tenant_id or config.get("org_sync_tenant_id")
+        if effective_tenant_id is None:
+            raise ValueError(
+                "钉钉同步未配置 org_sync_tenant_id。"
+                "请在租户设置中配置同步目标租户。"
+            )
+        effective_tenant_id = int(effective_tenant_id)
         root_department_id = str(config.get("org_sync_root_dept_id") or DINGTALK_ROOT_DEPARTMENT_ID)
         result = DingTalkOrgSyncResult(
             tenant_id=effective_tenant_id,
@@ -449,9 +456,8 @@ class DingTalkOrgSyncService:
                 "app_key": get_config_value("dingtalk", "app_key", ""),
                 "app_secret": get_config_value("dingtalk", "app_secret", ""),
                 "org_sync_enabled": bool(get_config_value("dingtalk", "org_sync_enabled", False)),
-                "org_sync_tenant_id": int(
-                    get_config_value("dingtalk", "org_sync_tenant_id", 1) or 1
-                ),
+                # Issue #2179: Fail-Closed - 不再默认为 1，必须显式配置
+                "org_sync_tenant_id": get_config_value("dingtalk", "org_sync_tenant_id"),
                 "org_sync_interval_minutes": int(
                     get_config_value("dingtalk", "org_sync_interval_minutes", 60) or 60
                 ),
@@ -461,7 +467,8 @@ class DingTalkOrgSyncService:
             }
 
         config.setdefault("org_sync_enabled", False)
-        config.setdefault("org_sync_tenant_id", 1)
+        # Issue #2179: Fail-Closed - 不再设置默认值
+        # config.setdefault("org_sync_tenant_id", 1)
         config.setdefault("org_sync_interval_minutes", 60)
         config.setdefault("org_sync_root_dept_id", DINGTALK_ROOT_DEPARTMENT_ID)
         # Watchdog ceiling for a single sync run; a run exceeding this is treated

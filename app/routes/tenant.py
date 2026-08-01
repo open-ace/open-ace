@@ -10,7 +10,12 @@ from typing import cast
 import bcrypt
 from flask import Blueprint, jsonify, request
 
-from app.auth.decorators import admin_required
+from app.auth.decorators import (
+    admin_required,
+    auth_required,
+    platform_admin_required,
+    same_tenant_or_platform_admin,
+)
 from app.repositories.user_repo import UserRepository
 from app.services.auth_service import get_security_settings_cached
 from app.services.tenant_service import TenantService
@@ -32,9 +37,12 @@ def _hash_password(password: str) -> str:
 
 
 @tenant_bp.route("", methods=["GET"])
-@admin_required
+@platform_admin_required
 def list_tenants():
-    """List all tenants (admin only)."""
+    """List all tenants (platform admin only).
+
+    Issue #2179: Only platform admins can list all tenants.
+    """
 
     # Get query parameters
     status = request.args.get("status")
@@ -55,9 +63,12 @@ def list_tenants():
 
 
 @tenant_bp.route("/<int:tenant_id>", methods=["GET"])
-@admin_required
+@platform_admin_required
 def get_tenant(tenant_id: int):
-    """Get tenant by ID (admin only)."""
+    """Get tenant by ID (platform admin only).
+
+    Issue #2179: Only platform admins can view any tenant.
+    """
 
     tenant = tenant_service.get_tenant(tenant_id)
 
@@ -68,9 +79,12 @@ def get_tenant(tenant_id: int):
 
 
 @tenant_bp.route("/slug/<slug>", methods=["GET"])
-@admin_required
+@platform_admin_required
 def get_tenant_by_slug(slug: str):
-    """Get tenant by slug (admin only)."""
+    """Get tenant by slug (platform admin only).
+
+    Issue #2179: Only platform admins can view any tenant by slug.
+    """
 
     tenant = tenant_service.get_tenant_by_slug(slug)
 
@@ -81,9 +95,12 @@ def get_tenant_by_slug(slug: str):
 
 
 @tenant_bp.route("", methods=["POST"])
-@admin_required
+@platform_admin_required
 def create_tenant():
-    """Create a new tenant (admin only). Optionally create an admin user."""
+    """Create a new tenant (platform admin only). Optionally create an admin user.
+
+    Issue #2179: Only platform admins can create new tenants.
+    """
 
     data = request.get_json()
 
@@ -177,9 +194,12 @@ def create_tenant():
 
 
 @tenant_bp.route("/<int:tenant_id>", methods=["PUT"])
-@admin_required
+@platform_admin_required
 def update_tenant(tenant_id: int):
-    """Update tenant (admin only)."""
+    """Update tenant (platform admin only).
+
+    Issue #2179: Only platform admins can update any tenant.
+    """
 
     data = request.get_json()
 
@@ -216,9 +236,12 @@ def update_tenant(tenant_id: int):
 
 
 @tenant_bp.route("/<int:tenant_id>/quota", methods=["PUT"])
-@admin_required
+@platform_admin_required
 def update_tenant_quota(tenant_id: int):
-    """Update tenant quota (admin only)."""
+    """Update tenant quota (platform admin only).
+
+    Issue #2179: Only platform admins can modify tenant quota.
+    """
 
     data = request.get_json()
 
@@ -237,9 +260,12 @@ def update_tenant_quota(tenant_id: int):
 
 
 @tenant_bp.route("/<int:tenant_id>/settings", methods=["PUT"])
-@admin_required
+@same_tenant_or_platform_admin
 def update_tenant_settings(tenant_id: int):
-    """Update tenant settings (admin only)."""
+    """Update tenant settings (same tenant or platform admin).
+
+    Issue #2179: Tenant admins can modify their own tenant's settings.
+    """
 
     data = request.get_json()
 
@@ -266,9 +292,12 @@ def update_tenant_settings(tenant_id: int):
 
 
 @tenant_bp.route("/<int:tenant_id>/suspend", methods=["POST"])
-@admin_required
+@platform_admin_required
 def suspend_tenant(tenant_id: int):
-    """Suspend a tenant (admin only)."""
+    """Suspend a tenant (platform admin only).
+
+    Issue #2179: Only platform admins can suspend tenants.
+    """
 
     data = request.get_json() or {}
     reason = data.get("reason")
@@ -285,9 +314,12 @@ def suspend_tenant(tenant_id: int):
 
 
 @tenant_bp.route("/<int:tenant_id>/activate", methods=["POST"])
-@admin_required
+@platform_admin_required
 def activate_tenant(tenant_id: int):
-    """Activate a suspended tenant (admin only)."""
+    """Activate a suspended tenant (platform admin only).
+
+    Issue #2179: Only platform admins can activate tenants.
+    """
 
     success = tenant_service.activate_tenant(tenant_id)
 
@@ -301,9 +333,12 @@ def activate_tenant(tenant_id: int):
 
 
 @tenant_bp.route("/<int:tenant_id>", methods=["DELETE"])
-@admin_required
+@platform_admin_required
 def delete_tenant(tenant_id: int):
-    """Delete a tenant (admin only)."""
+    """Delete a tenant (platform admin only).
+
+    Issue #2179: Only platform admins can delete tenants.
+    """
 
     hard = request.args.get("hard", "false").lower() == "true"
 
@@ -316,9 +351,12 @@ def delete_tenant(tenant_id: int):
 
 
 @tenant_bp.route("/<int:tenant_id>/usage", methods=["GET"])
-@admin_required
+@same_tenant_or_platform_admin
 def get_tenant_usage(tenant_id: int):
-    """Get tenant usage history (admin only)."""
+    """Get tenant usage history (same tenant or platform admin).
+
+    Issue #2179: Tenant admins can view their own tenant's usage.
+    """
 
     days = request.args.get("days", 30, type=int)
 
@@ -334,9 +372,12 @@ def get_tenant_usage(tenant_id: int):
 
 
 @tenant_bp.route("/<int:tenant_id>/stats", methods=["GET"])
-@admin_required
+@same_tenant_or_platform_admin
 def get_tenant_stats(tenant_id: int):
-    """Get tenant statistics (admin only)."""
+    """Get tenant statistics (same tenant or platform admin).
+
+    Issue #2179: Tenant admins can view their own tenant's statistics.
+    """
 
     stats = tenant_service.get_tenant_stats(tenant_id)
 
@@ -347,9 +388,12 @@ def get_tenant_stats(tenant_id: int):
 
 
 @tenant_bp.route("/<int:tenant_id>/check-quota", methods=["POST"])
-@admin_required
+@same_tenant_or_platform_admin
 def check_tenant_quota(tenant_id: int):
-    """Check if tenant has quota available."""
+    """Check if tenant has quota available (same tenant or platform admin).
+
+    Issue #2179: Tenant admins can check their own tenant's quota.
+    """
 
     data = request.get_json() or {}
 
@@ -363,9 +407,12 @@ def check_tenant_quota(tenant_id: int):
 
 
 @tenant_bp.route("/plans", methods=["GET"])
-@admin_required
+@auth_required
 def get_plan_quotas():
-    """Get quota configurations for all plans."""
+    """Get quota configurations for all plans (authenticated users).
+
+    Issue #2179: All authenticated users can view plan configurations.
+    """
     quotas = tenant_service.get_plan_quotas()
     return jsonify(quotas)
 
