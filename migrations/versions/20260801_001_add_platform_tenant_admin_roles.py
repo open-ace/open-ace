@@ -43,22 +43,40 @@ def upgrade() -> None:
     # Step 1: 预检查 - 检查异常数据
     log.info("Step 1: 预检查数据一致性...")
 
-    # 检查 tenant_id 为空字符串的管理员账号
-    result = connection.execute(
-        sa.text("SELECT COUNT(*) FROM users WHERE role = 'admin' AND tenant_id = ''")
-    )
-    empty_string_count = result.scalar() or 0
-
-    if empty_string_count > 0:
-        log.warning(
-            f"发现 {empty_string_count} 个管理员账号的 tenant_id 为空字符串，"
-            "将规范化为 NULL"
+    # 检查 tenant_id 列的数据类型
+    if is_postgresql:
+        result = connection.execute(
+            sa.text("""
+                SELECT data_type
+                FROM information_schema.columns
+                WHERE table_name = 'users' AND column_name = 'tenant_id'
+            """)
         )
+        tenant_id_type = result.scalar()
+    else:
+        # SQLite: 假设是整数类型
+        tenant_id_type = "integer"
 
-        # 规范化空字符串为 NULL
-        connection.execute(
-            sa.text("UPDATE users SET tenant_id = NULL WHERE tenant_id = ''")
+    log.info(f"tenant_id 列类型: {tenant_id_type}")
+
+    # 只有字符串类型才检查空字符串
+    if tenant_id_type in ("character varying", "varchar", "text"):
+        # 检查 tenant_id 为空字符串的管理员账号
+        result = connection.execute(
+            sa.text("SELECT COUNT(*) FROM users WHERE role = 'admin' AND tenant_id = ''")
         )
+        empty_string_count = result.scalar() or 0
+
+        if empty_string_count > 0:
+            log.warning(
+                f"发现 {empty_string_count} 个管理员账号的 tenant_id 为空字符串，"
+                "将规范化为 NULL"
+            )
+
+            # 规范化空字符串为 NULL
+            connection.execute(
+                sa.text("UPDATE users SET tenant_id = NULL WHERE tenant_id = ''")
+            )
 
     # 检查孤儿账号（tenant_id 不存在于 tenants 表）
     # 这里只记录警告，不阻止迁移
@@ -125,13 +143,23 @@ def upgrade() -> None:
     # Step 3: 迁移管理员角色
     log.info("Step 3: 迁移管理员角色...")
 
+    # 根据数据类型构建 SQL 条件
+    if tenant_id_type in ("character varying", "varchar", "text"):
+        # 字符串类型：检查 NULL 和空字符串
+        null_condition = "(tenant_id IS NULL OR tenant_id = '')"
+        not_null_condition = "tenant_id IS NOT NULL AND tenant_id != ''"
+    else:
+        # 整数类型：只检查 NULL
+        null_condition = "tenant_id IS NULL"
+        not_null_condition = "tenant_id IS NOT NULL"
+
     # 迁移无 tenant_id 的管理员 → 平台管理员
     result = connection.execute(
-        sa.text("""
+        sa.text(f"""
             UPDATE users
             SET role = 'platform_admin'
             WHERE role = 'admin'
-              AND (tenant_id IS NULL OR tenant_id = '')
+              AND {null_condition}
         """)
     )
     platform_count = result.rowcount
@@ -139,12 +167,11 @@ def upgrade() -> None:
 
     # 迁移有 tenant_id 的管理员 → 租户管理员
     result = connection.execute(
-        sa.text("""
+        sa.text(f"""
             UPDATE users
             SET role = 'tenant_admin'
             WHERE role = 'admin'
-              AND tenant_id IS NOT NULL
-              AND tenant_id != ''
+              AND {not_null_condition}
         """)
     )
     tenant_count = result.rowcount
@@ -155,12 +182,20 @@ def upgrade() -> None:
 
     if is_postgresql:
         # 添加约束：租户管理员必须有 tenant_id
+        # 根据数据类型构建不同的约束条件
+        if tenant_id_type in ("character varying", "varchar", "text"):
+            # 字符串类型：检查 NULL 和空字符串
+            constraint_condition = "tenant_id IS NULL OR tenant_id = ''"
+        else:
+            # 整数类型：只检查 NULL
+            constraint_condition = "tenant_id IS NULL"
+
         try:
             connection.execute(
-                sa.text("""
+                sa.text(f"""
                     ALTER TABLE users
                     ADD CONSTRAINT chk_tenant_admin_requires_tenant
-                    CHECK (NOT (role = 'tenant_admin' AND (tenant_id IS NULL OR tenant_id = '')))
+                    CHECK (NOT (role = 'tenant_admin' AND ({constraint_condition})))
                 """)
             )
             log.info("添加了租户管理员一致性约束")
