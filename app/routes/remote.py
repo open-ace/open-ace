@@ -908,10 +908,6 @@ def get_machine_users(machine_id):
 
     agent_mgr = get_remote_agent_manager()
     assignments = agent_mgr.get_machine_assignments(machine_id)
-    """Get list of users assigned to a machine. System admin or machine admin."""
-    # P2-1: Permission check moved to decorator @machine_admin_required
-    agent_mgr = get_remote_agent_manager()
-    assignments = agent_mgr.get_machine_assignments(machine_id)
 
     return jsonify(
         {
