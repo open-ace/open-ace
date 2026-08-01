@@ -1030,10 +1030,11 @@ except Exception as e:
 openace ALL=(root) NOPASSWD: ${WRAPPER_PATH} --isolated *"
         fi
 
-        # 【安全加固 Issue #1855】安全 wrapper 脚本 sudoers 规则
+        # 【安全加固 Issue #1855 + #2181】安全 wrapper 脚本 sudoers 规则
         # 使用 wrapper 替代通配命令，wrapper 内部做参数校验和审计日志
+        # Issue #2181: 添加 openace-rm wrapper 替代 rm * 通配
         SECURITY_WRAPPERS_RULE=""
-        for wrapper in openace-chown openace-useradd openace-cat openace-mkdir openace-write-as; do
+        for wrapper in openace-chown openace-useradd openace-cat openace-mkdir openace-write-as openace-rm; do
             wrapper_path="/usr/local/bin/${wrapper}"
             if [ -x "$wrapper_path" ]; then
                 SECURITY_WRAPPERS_RULE="${SECURITY_WRAPPERS_RULE}open-ace ALL=(root) NOPASSWD: ${wrapper_path} *
@@ -1137,30 +1138,32 @@ Cmnd_Alias GH_SAFE = \
     ${GH_PATH} api repos/*/pulls/*/comments --jq *, \
     ${GH_PATH} api repos/*/issues/*/comments --jq *
 
-# 【安全加固 Issue #1855】移除高风险通配命令
-# 原 cat/chown/useradd 通配已移除，改用安全 wrapper 脚本
-# 保留的低风险命令：test, ls, stat, mkdir, id, rm
+# 【安全加固 Issue #1855 + #2181】移除高风险通配命令
+# 原 cat/chown/useradd/rm 通配已移除，改用安全 wrapper 脚本
+# 保留的低风险命令：test, ls, stat, mkdir, id, find
 # 注意：mkdir 和 id 保留通配，因为参数风险较低
-# rm 通配用于个人文件页删除（Issue #1902）：sudo -u <owner> rm <path>，
-# 仅能删除目标用户有权删除的文件（DAC 充分约束）。
-Cmnd_Alias OPENACE_UTILS = /usr/bin/test *, /usr/bin/ls *, /usr/bin/stat *, /usr/bin/mkdir *, /usr/bin/id *, /usr/bin/rm *
+# find 是只读操作，DAC 已保护敏感目录
+# rm 通过 openace-rm wrapper 实现（Issue #2181）
+Cmnd_Alias OPENACE_UTILS = /usr/bin/test *, /usr/bin/ls *, /usr/bin/stat *, /usr/bin/mkdir *, /usr/bin/id *, /usr/bin/find *
 
-# 【修复 Issue #1395】autonomous 开发 CLI 工具权限
-Cmnd_Alias OPENACE_CLI = /usr/bin/qwen *, /usr/local/bin/qwen *, /usr/bin/qwen-code *, /usr/local/bin/qwen-code *, /usr/bin/codex *, /usr/local/bin/codex *, /usr/bin/claude *, /usr/local/bin/claude *, /usr/bin/openclaw *, /usr/local/bin/openclaw *, /usr/bin/zcode *, /usr/local/bin/zcode *
+# 【安全加固 Issue #2181】删除 AI CLI 通配规则
+# 原 OPENACE_CLI 已删除，所有 AI CLI 启动必须通过 openace-run-as --isolated
+# 该 wrapper 已实现目标用户验证、禁止 root 运行、环境隔离
 
 # ============================================================================
 # 用户权限配置
 # ============================================================================
+# WebUI 启动规则：允许以任意用户运行，Python 层验证目标用户是否在数据库映射中
 open-ace ALL=(ALL) NOPASSWD: ${WEBUI_PATH} *
 openace ALL=(ALL) NOPASSWD: ${WEBUI_PATH} *
-open-ace ALL=(ALL) NOPASSWD: GIT_SAFE
-openace ALL=(ALL) NOPASSWD: GIT_SAFE
-open-ace ALL=(ALL) NOPASSWD: GH_SAFE
-openace ALL=(ALL) NOPASSWD: GH_SAFE
-open-ace ALL=(ALL) NOPASSWD: OPENACE_UTILS
-openace ALL=(ALL) NOPASSWD: OPENACE_UTILS
-open-ace ALL=(ALL) NOPASSWD: OPENACE_CLI
-openace ALL=(ALL) NOPASSWD: OPENACE_CLI
+# Git/GH 精确白名单：参数已限定，无法注入危险操作
+open-ace ALL=(root) NOPASSWD: GIT_SAFE
+openace ALL=(root) NOPASSWD: GIT_SAFE
+open-ace ALL=(root) NOPASSWD: GH_SAFE
+openace ALL=(root) NOPASSWD: GH_SAFE
+# 低风险工具：test, ls, stat, mkdir, id, find（只读或低风险）
+open-ace ALL=(root) NOPASSWD: OPENACE_UTILS
+openace ALL=(root) NOPASSWD: OPENACE_UTILS
 ${WRAPPER_RULE}
 ${SECURITY_WRAPPERS_RULE}
 # ============================================================================
@@ -1173,12 +1176,14 @@ ${SECURITY_WRAPPERS_RULE}
 # ============================================================================
 # Preserve environment variables for sudo env_keep passing.
 # ============================================================================
-# PATH is preserved so the sudo'd qwen-code-webui subprocess can resolve the
-# node binary (Issue #1083). NODE_PATH is intentionally NOT preserved: the
-# webui_manager no longer sets it (it controls Node *module* resolution, not
-# the binary path), so keeping it here was dead config.
-# GH_TOKEN and GIT_* vars are for autonomous dev GitHub operations (Issue #1517).
-Defaults env_keep += "OPENAI_API_KEY OPENAI_BASE_URL BAILIAN_CODING_PLAN_API_KEY ANTHROPIC_API_KEY ANTHROPIC_BASE_URL GEMINI_API_KEY GEMINI_BASE_URL OPENCLAW_TOKEN OPENCLAW_GATEWAY_URL OPENACE_LOG_DIR OPENACE_PROXY_TOKEN OPENACE_PROXY_URL SESSION_TIMEOUT_MS KEEPALIVE_INTERVAL_MS PATH GH_TOKEN GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL"
+# 【安全加固 Issue #2181】清理敏感变量
+# Agent 进程通过 openace-run-as --isolated 使用 env -i，不继承 env_keep
+# env_keep 主要用于 WebUI 启动（sudo -u），需要清理敏感凭据
+# 移除：OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY, OPENCLAW_TOKEN, GH_TOKEN
+# 保留：非敏感变量（proxy_token, GIT_*签名变量, PATH）
+Defaults env_keep += "OPENACE_PROXY_TOKEN OPENACE_PROXY_URL OPENACE_MODEL OPENACE_LOG_DIR PATH"
+Defaults env_keep += "GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL"
+Defaults env_keep += "SESSION_TIMEOUT_MS KEEPALIVE_INTERVAL_MS"
 SUDOERS_EOF
         chmod 440 /etc/sudoers.d/open-ace-webui
 
