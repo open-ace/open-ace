@@ -639,7 +639,12 @@ class AuthService:
         if not is_auth:
             return False, session
 
-        if session is None or session.get("role") != "admin":
+        # Issue #2179: Accept admin, platform_admin, and tenant_admin roles
+        if session is None or session.get("role") not in (
+            "admin",
+            "platform_admin",
+            "tenant_admin",
+        ):
             return False, {"error": "Admin access required"}
 
         return True, session

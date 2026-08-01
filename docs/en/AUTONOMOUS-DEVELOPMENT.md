@@ -218,7 +218,7 @@ Base synchronization, worktree restoration, and waiting for CI logs do not consu
 ### 9.2 Diagnostic and retry boundaries
 
 - Missing CI logs are polled up to six times; the Agent is not asked to guess.
-- Automatic CI repair is capped at three attempts.
+- Automatic CI repair is capped at five attempts.
 - Pre-commit convergence is capped at three passes.
 - An unchanged meaningful failure fingerprint after a code change stops early.
 - A degraded fingerprint without logs cannot trigger a false “unchanged failure.”
@@ -359,7 +359,7 @@ Internal limits referenced elsewhere in this document are also module-level cons
 | Constant | Default | Source | Purpose |
 |----------|---------|--------|---------|
 | `MAX_CONCURRENT_WORKFLOWS` | `3` | `app/services/autonomous_scheduler.py` | Concurrent workflows advanced by the scheduler (see also §6) |
-| `MAX_CI_REPAIR_ATTEMPTS` | `3` | `app/modules/workspace/autonomous/orchestrator.py` | Automatic merge-phase CI repair attempts (§9.2) |
+| `MAX_CI_REPAIR_ATTEMPTS` | `5` | `app/modules/workspace/autonomous/orchestrator.py` | Automatic merge-phase CI repair attempts (§9.2) |
 | `MAX_CI_DIAGNOSTICS_ATTEMPTS` | `6` | `app/modules/workspace/autonomous/orchestrator.py` | Bounded scheduler polls when failed-job logs stay unavailable (§9.2) |
 | `MAX_PRE_COMMIT_CONVERGENCE_PASSES` | `3` | `app/modules/workspace/autonomous/orchestrator.py` | Isolated `pre-commit` convergence rounds (§9.2) |
 | `API_RETRY_TOTAL_TIMEOUT` | `1800` seconds | `app/modules/workspace/autonomous/orchestrator.py` | Maximum total backoff window for transient API errors, roughly 30 minutes (§10) |

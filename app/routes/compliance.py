@@ -135,7 +135,11 @@ def list_reports():
 @compliance_bp.route("/reports", methods=["POST"])
 @admin_required
 def generate_report():
-    """Generate a compliance report (admin only)."""
+    """
+    Generate a compliance report (admin only).
+
+    Issue #2180: Tenant isolation for compliance reports.
+    """
     data = request.get_json()
 
     if not data:
@@ -145,12 +149,13 @@ def generate_report():
     if not report_type:
         return jsonify({"error": "report_type is required"}), 400
 
-    # Resolve tenant scope with validation
+    # Issue #2180: Role-based tenant isolation
     caller_tenant_id, is_admin = resolve_tenant_scope()
+    user_role = g.user.get("role")
     target_tenant_id = caller_tenant_id
 
-    # Admin can request cross-tenant reports with explicit tenant_id
-    if is_admin and data.get("tenant_id") is not None:
+    # Platform admin can request cross-tenant reports with explicit tenant_id
+    if user_role == "platform_admin" and data.get("tenant_id") is not None:
         requested_tenant_id = data["tenant_id"]
         # Validate tenant exists
         db = Database()
@@ -158,10 +163,36 @@ def generate_report():
         if not tenant_row:
             return jsonify({"error": f"Tenant {requested_tenant_id} not found"}), 404
         target_tenant_id = requested_tenant_id
-
-    # Non-admin must use their own tenant scope
-    if not is_admin and target_tenant_id is None:
-        return jsonify({"error": "Tenant scope required"}), 403
+        # Log cross-tenant operation
+        logger.info(
+            "Platform admin %s generating report for tenant %s",
+            g.user.get("id"),
+            target_tenant_id,
+        )
+    # Tenant admin can only generate reports for their own tenant
+    elif user_role == "tenant_admin":
+        if caller_tenant_id is None:
+            return jsonify({"error": "Tenant admin must have tenant_id"}), 403
+        # Ignore any tenant_id in request body
+        if data.get("tenant_id") is not None and data.get("tenant_id") != caller_tenant_id:
+            logger.warning(
+                "Tenant admin %s attempted to generate report for tenant %s (own tenant: %s)",
+                g.user.get("id"),
+                data.get("tenant_id"),
+                caller_tenant_id,
+            )
+        target_tenant_id = caller_tenant_id
+    # Legacy admin: backward compatibility
+    # - With tenant_id: scoped to that tenant (like tenant_admin)
+    # - Without tenant_id: global access (like platform_admin)
+    elif user_role == "admin":
+        if caller_tenant_id is not None:
+            # Scoped to caller's tenant
+            target_tenant_id = caller_tenant_id
+        else:
+            # Global access, but require explicit tenant_id for clarity
+            # If no tenant_id provided, default to tenant 1 for backward compatibility
+            target_tenant_id = data.get("tenant_id", 1)
 
     # Parse date range
     period_start = data.get("period_start")
