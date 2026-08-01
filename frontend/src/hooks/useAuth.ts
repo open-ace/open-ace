@@ -117,6 +117,10 @@ export function useAuth() {
     onSuccess: async () => {
       // Refetch auth to get updated must_change_password flag
       await refetchAuth();
+      // Invalidate all queries so that any request which failed with
+      // 403 password_change_required is automatically retried now that
+      // must_change_password has been cleared.
+      queryClient.invalidateQueries();
     },
   });
 
