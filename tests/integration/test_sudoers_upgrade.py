@@ -74,7 +74,9 @@ class TestSudoersUpgrade:
     def test_upgrade_script_exists(self):
         """Verify upgrade script exists and is executable."""
         assert UPGRADE_SCRIPT.exists(), f"Upgrade script not found: {UPGRADE_SCRIPT}"
-        assert os.access(UPGRADE_SCRIPT, os.X_OK), f"Upgrade script not executable: {UPGRADE_SCRIPT}"
+        assert os.access(
+            UPGRADE_SCRIPT, os.X_OK
+        ), f"Upgrade script not executable: {UPGRADE_SCRIPT}"
 
     def test_check_mode_detects_legacy_rules(self, tmp_path: Path):
         """Test that --check mode detects legacy rules that need upgrading."""
@@ -88,7 +90,7 @@ class TestSudoersUpgrade:
             [str(UPGRADE_SCRIPT), "--check"],
             capture_output=True,
             text=True,
-            env={**os.environ, "SUDOERS_FILE": str(test_sudoers)}
+            env={**os.environ, "SUDOERS_FILE": str(test_sudoers)},
         )
 
         # Should detect that upgrade is needed
@@ -107,7 +109,7 @@ class TestSudoersUpgrade:
             [str(UPGRADE_SCRIPT), "--dry-run"],
             capture_output=True,
             text=True,
-            env={**os.environ, "SUDOERS_FILE": str(test_sudoers)}
+            env={**os.environ, "SUDOERS_FILE": str(test_sudoers)},
         )
 
         # Should show changes
@@ -223,7 +225,7 @@ class TestFunctionalityRegression:
             [str(UPGRADE_SCRIPT), "--check"],
             capture_output=True,
             text=True,
-            env={**os.environ, "SUDOERS_FILE": "/nonexistent/sudoers"}
+            env={**os.environ, "SUDOERS_FILE": "/nonexistent/sudoers"},
         )
         # Should not crash
         assert result.returncode in [0, 1, 2]
