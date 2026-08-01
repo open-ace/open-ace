@@ -479,6 +479,58 @@ def _check_machine_access(machine_id):
     return None
 
 
+def _check_machine_tenant_access(machine_id: str) -> tuple[dict | None, tuple | None]:
+    """
+    Check machine access with tenant validation.
+
+    Issue #2180: Ensures tenant admin can only access machines in their tenant.
+
+    Returns:
+        (machine_data, None) on success.
+        (None, error_response) on failure.
+    """
+    agent_mgr = get_remote_agent_manager()
+    machine = agent_mgr.get_machine(machine_id)
+
+    if not machine:
+        return None, (jsonify({"error": "Machine not found"}), 404)
+
+    machine_tenant_id = machine.get("tenant_id")
+    user_role = g.user.get("role")
+    user_tenant_id = g.user.get("tenant_id")
+
+    # Platform admin: can access any machine
+    if user_role == "platform_admin":
+        return machine, None
+
+    # Tenant admin: can only access machines in their tenant
+    if user_role == "tenant_admin":
+        if user_tenant_id is None:
+            return None, (jsonify({"error": "Tenant admin must have tenant_id"}), 403)
+        if machine_tenant_id != user_tenant_id:
+            logger.warning(
+                "Tenant admin %s attempted to access machine %s (tenant %s, own tenant: %s)",
+                g.user.get("id"),
+                machine_id,
+                machine_tenant_id,
+                user_tenant_id,
+            )
+            return None, (jsonify({"error": "Machine not found"}), 404)
+        return machine, None
+
+    # Legacy admin: check tenant_id if available
+    if user_role == "admin":
+        if user_tenant_id is not None and machine_tenant_id != user_tenant_id:
+            return None, (jsonify({"error": "Machine not found"}), 404)
+        return machine, None
+
+    # Non-admin: check user access
+    if not agent_mgr.check_user_access(machine_id, g.user["id"]):
+        return None, (jsonify({"error": "Permission denied"}), 403)
+
+    return machine, None
+
+
 def machine_access_required(f):
     """Decorator: Check machine access permission (system admin or assigned user)."""
     from functools import wraps
@@ -518,13 +570,46 @@ def register_machine():
     """
     Generate a registration token for a new machine.
     Admin only - the token is used by the agent to authenticate registration.
+
+    Issue #2180: Tenant isolation - tenant_id from auth context, not request body.
     """
 
     data = request.get_json() or {}
     agent_mgr = get_remote_agent_manager()
 
-    # Get tenant_id from user or request
-    tenant_id = data.get("tenant_id", 1)
+    # Issue #2180: Fail-closed - tenant_id from auth context only
+    # Platform admin can specify target tenant, tenant admin must use their own
+    user_role = g.user.get("role")
+    user_tenant_id = g.user.get("tenant_id")
+
+    if user_role == "platform_admin":
+        # Platform admin must explicitly specify target tenant
+        tenant_id = data.get("tenant_id")
+        if tenant_id is None:
+            return jsonify({"error": "tenant_id is required for platform admin"}), 400
+        tenant_id = int(tenant_id)
+    elif user_role == "tenant_admin":
+        # Tenant admin can only register machines for their own tenant
+        if user_tenant_id is None:
+            return jsonify({"error": "Tenant admin must have tenant_id"}), 403
+        tenant_id = user_tenant_id
+        # Ignore any tenant_id in request body - force to user's tenant
+        if data.get("tenant_id") is not None and data.get("tenant_id") != tenant_id:
+            logger.warning(
+                "Tenant admin %s attempted to register machine for tenant %s (own tenant: %s)",
+                g.user.get("id"),
+                data.get("tenant_id"),
+                tenant_id,
+            )
+    else:
+        # Regular admin (legacy role) - requires explicit tenant_id
+        tenant_id = data.get("tenant_id")
+        if tenant_id is None:
+            # Try from auth context
+            tenant_id = user_tenant_id
+            if tenant_id is None:
+                return jsonify({"error": "tenant_id is required"}), 400
+        tenant_id = int(tenant_id)
 
     token = agent_mgr.create_registration_token(
         tenant_id=tenant_id,
@@ -542,20 +627,46 @@ def register_machine():
 
 @remote_bp.route("/machines", methods=["GET"])
 def list_machines():
-    """List machines. Admin sees all, regular users see assigned machines."""
+    """
+    List machines with tenant isolation.
+
+    Issue #2180: Tenant admin sees only their tenant's machines.
+    Platform admin must specify tenant_id for cross-tenant access.
+    """
 
     agent_mgr = get_remote_agent_manager()
+    user_role = g.user.get("role")
+    user_tenant_id = g.user.get("tenant_id")
 
-    if g.user.get("role") == "admin":
-        machines = agent_mgr.list_machines()
+    # Issue #2180: Role-based tenant isolation
+    if user_role == "platform_admin":
+        # Platform admin: must specify tenant_id for cross-tenant access
+        tenant_id = request.args.get("tenant_id", type=int)
+        if tenant_id is None:
+            return jsonify({"error": "tenant_id parameter is required for platform admin"}), 400
+        machines = agent_mgr.list_machines(tenant_id=tenant_id)
+    elif user_role == "tenant_admin":
+        # Tenant admin: only see their own tenant's machines
+        if user_tenant_id is None:
+            return jsonify({"error": "Tenant admin must have tenant_id"}), 403
+        machines = agent_mgr.list_machines(tenant_id=user_tenant_id)
+    elif user_role == "admin":
+        # Legacy admin role: requires explicit tenant_id or fall back to user's tenant
+        tenant_id = request.args.get("tenant_id", type=int)
+        if tenant_id is None:
+            tenant_id = user_tenant_id
+            if tenant_id is None:
+                return jsonify({"error": "tenant_id is required"}), 400
+        machines = agent_mgr.list_machines(tenant_id=tenant_id)
     else:
+        # Regular user: only see machines assigned to them
         machines = agent_mgr.list_machines(user_id=g.user["id"])
 
     return jsonify(
         {
             "success": True,
             "machines": machines,
-            "user_role": g.user.get("role"),  # P1-2: Explicit user role for frontend
+            "user_role": user_role,  # P1-2: Explicit user role for frontend
         }
     )
 
@@ -583,7 +694,16 @@ def get_machine(machine_id):
 @remote_bp.route("/machines/<machine_id>", methods=["DELETE"])
 @admin_required
 def deregister_machine(machine_id):
-    """Deregister a remote machine. Admin only."""
+    """
+    Deregister a remote machine. Admin only.
+
+    Issue #2180: Tenant admin can only deregister machines in their tenant.
+    """
+
+    # Validate tenant access
+    machine, error = _check_machine_tenant_access(machine_id)
+    if error:
+        return error
 
     agent_mgr = get_remote_agent_manager()
     success = agent_mgr.deregister_machine(machine_id)
@@ -596,15 +716,22 @@ def deregister_machine(machine_id):
 @remote_bp.route("/machines/<machine_id>/assign", methods=["POST"])
 @machine_admin_required
 def assign_user(machine_id):
-    """Assign a user to a machine. System admin or machine admin."""
-    # P2-1: Permission check moved to decorator @machine_admin_required
+    """
+    Assign a user to a machine. System admin or machine admin.
+
+    Issue #2180: Validate machine tenant access.
+    """
+    # Validate tenant access
+    machine, error = _check_machine_tenant_access(machine_id)
+    if error:
+        return error
 
     data = request.get_json() or {}
     user_id = data.get("user_id")
     permission = data.get("permission", "user")
 
     # Machine admins can only assign 'user' permission
-    if g.user.get("role") != "admin":
+    if g.user.get("role") not in ("admin", "platform_admin"):
         permission = "user"
 
     if not user_id:
@@ -626,11 +753,18 @@ def assign_user(machine_id):
 @remote_bp.route("/machines/<machine_id>/assign/<int:user_id>", methods=["DELETE"])
 @machine_admin_required
 def revoke_user(machine_id, user_id):
-    """Revoke a user's access to a machine. System admin or machine admin."""
-    # P2-1: Permission check moved to decorator @machine_admin_required
+    """
+    Revoke a user's access to a machine. System admin or machine admin.
+
+    Issue #2180: Validate machine tenant access.
+    """
+    # Validate tenant access
+    machine, error = _check_machine_tenant_access(machine_id)
+    if error:
+        return error
 
     # Machine admins cannot revoke other admins
-    if g.user.get("role") != "admin":
+    if g.user.get("role") not in ("admin", "platform_admin"):
         mgr = get_remote_agent_manager()
         target_perm = mgr.get_user_permission(machine_id, user_id)
         if target_perm == "admin":
@@ -647,12 +781,20 @@ def revoke_user(machine_id, user_id):
 @remote_bp.route("/machines/<machine_id>/token/rotate", methods=["POST"])
 @admin_required
 def rotate_machine_token(machine_id):
-    """Rotate the agent token for a machine. System admin only.
+    """
+    Rotate the agent token for a machine. System admin only.
+
+    Issue #2180: Validate machine tenant access.
 
     Revokes all existing tokens and issues a new one. If the existing
     tokens were already revoked (i.e., the machine was previously
     revoked and is being re-activated), this is logged as an unrevoke.
     """
+    # Validate tenant access
+    machine, error = _check_machine_tenant_access(machine_id)
+    if error:
+        return error
+
     agent_mgr = get_remote_agent_manager()
 
     result = agent_mgr.rotate_agent_token(
@@ -713,7 +855,16 @@ def rotate_machine_token(machine_id):
 @remote_bp.route("/machines/<machine_id>/token/revoke", methods=["POST"])
 @admin_required
 def revoke_machine_token(machine_id):
-    """Revoke all agent tokens for a machine. System admin only."""
+    """
+    Revoke all agent tokens for a machine. System admin only.
+
+    Issue #2180: Validate machine tenant access.
+    """
+    # Validate tenant access
+    machine, error = _check_machine_tenant_access(machine_id)
+    if error:
+        return error
+
     agent_mgr = get_remote_agent_manager()
 
     success = agent_mgr.revoke_agent_token(
@@ -745,6 +896,18 @@ def revoke_machine_token(machine_id):
 @remote_bp.route("/machines/<machine_id>/users", methods=["GET"])
 @machine_admin_required
 def get_machine_users(machine_id):
+    """
+    Get list of users assigned to a machine. System admin or machine admin.
+
+    Issue #2180: Validate machine tenant access.
+    """
+    # Validate tenant access
+    machine, error = _check_machine_tenant_access(machine_id)
+    if error:
+        return error
+
+    agent_mgr = get_remote_agent_manager()
+    assignments = agent_mgr.get_machine_assignments(machine_id)
     """Get list of users assigned to a machine. System admin or machine admin."""
     # P2-1: Permission check moved to decorator @machine_admin_required
     agent_mgr = get_remote_agent_manager()
