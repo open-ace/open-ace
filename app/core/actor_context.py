@@ -7,7 +7,6 @@ Issue #2179: 租户管理员权限模型
 """
 
 from dataclasses import dataclass
-from typing import Optional
 
 
 @dataclass
@@ -19,7 +18,7 @@ class ActorContext:
 
     user_id: int
     role: str
-    tenant_id: Optional[int] = None
+    tenant_id: int | None = None
 
     def is_platform_admin(self) -> bool:
         """是否为平台管理员
@@ -39,7 +38,7 @@ class ActorContext:
         """
         return self.role == "tenant_admin" and self.tenant_id is not None
 
-    def can_access_tenant(self, target_tenant_id: Optional[int]) -> bool:
+    def can_access_tenant(self, target_tenant_id: int | None) -> bool:
         """是否有权访问指定租户
 
         权限规则：

@@ -182,7 +182,6 @@ alembic downgrade -1
 | `/api/tenants/<id>` | DELETE | platform_admin |
 | `/api/tenants/<id>/suspend` | POST | platform_admin |
 | `/api/tenants/<id>/activate` | POST | platform_admin |
-| `/api/tenants/<id>/quota` | GET | same_tenant_or_platform_admin |
 | `/api/tenants/<id>/quota` | PUT | platform_admin |
 | `/api/tenants/<id>/settings` | PUT | same_tenant_or_platform_admin |
 | `/api/tenants/<id>/usage` | GET | same_tenant_or_platform_admin |

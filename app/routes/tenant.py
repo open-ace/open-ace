@@ -11,7 +11,6 @@ import bcrypt
 from flask import Blueprint, jsonify, request
 
 from app.auth.decorators import (
-    admin_required,
     auth_required,
     platform_admin_required,
     same_tenant_or_platform_admin,
@@ -164,11 +163,12 @@ def create_tenant():
         # Create admin user
         password_hash = _hash_password(admin_password)
         admin_email_final = admin_email or f"{admin_username}@{slug or 'tenant'}.local"
+        # Issue #2179: Use tenant_admin role instead of legacy admin
         admin_user_id = user_repo.create_user(
             username=admin_username,
             email=admin_email_final,
             password_hash=password_hash,
-            role="admin",
+            role="tenant_admin",
             is_active=True,
             tenant_id=tenant_id,
         )
@@ -180,7 +180,7 @@ def create_tenant():
                 "user_id": admin_user_id,
                 "username": admin_username,
                 "email": admin_email_final,
-                "role": "admin",
+                "role": "tenant_admin",
             }
             logger.info(f"Created admin user {admin_username} for tenant {tenant.name}")
         else:

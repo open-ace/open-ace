@@ -906,7 +906,7 @@ def _extract_target_tenant_id() -> int | None:
 
     # Validate consistency
     if len(sources) > 1:
-        values = set(v for _, v in sources)
+        values = {v for _, v in sources}
         if len(values) > 1:
             logger.warning(
                 "Tenant ID sources inconsistent: %s, rejecting request",
@@ -1147,8 +1147,9 @@ def _log_cross_tenant_operation(
     Issue #2179: Audit logging for cross-tenant operations
     """
     try:
-        from app.modules.governance.audit_logger import AuditAction, AuditLogger
         from flask import request
+
+        from app.modules.governance.audit_logger import AuditAction, AuditLogger
 
         audit_logger = AuditLogger()
 

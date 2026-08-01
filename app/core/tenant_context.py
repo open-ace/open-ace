@@ -7,7 +7,6 @@ Eliminates silent fallback to tenant_id=1 patterns.
 Issue #2179: 租户管理员权限模型
 """
 
-from typing import Optional
 
 
 class TenantContextError(Exception):
@@ -58,7 +57,7 @@ class TenantContext:
         return tenant_id
 
     @staticmethod
-    def get_optional_tenant_id() -> Optional[int]:
+    def get_optional_tenant_id() -> int | None:
         """
         获取当前租户ID（可选）
 
@@ -71,7 +70,7 @@ class TenantContext:
         return getattr(g, 'tenant_id', None)
 
     @staticmethod
-    def set_tenant_id(tenant_id: Optional[int]) -> None:
+    def set_tenant_id(tenant_id: int | None) -> None:
         """
         设置当前请求的租户ID
 

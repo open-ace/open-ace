@@ -24,9 +24,6 @@ import logging
 import sqlalchemy as sa
 from alembic import op
 
-if TYPE_CHECKING:
-    from collections.abc import Sequence
-
 log = logging.getLogger(__name__)
 
 revision: str = "20260801_001_add_platform_tenant_admin_roles"
