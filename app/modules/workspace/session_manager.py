@@ -16,6 +16,7 @@ from enum import Enum
 from typing import Any
 
 from app.repositories.database import DB_PATH, escape_like, get_database_url, is_postgresql
+from app.utils.tenant_resolver import TenantResolutionError
 from app.utils.tool_names import normalize_tool_name
 
 logger = logging.getLogger(__name__)
@@ -459,11 +460,28 @@ class SessionManager:
         tenant_id: int | None = None,
         user_id: int | None = None,
     ) -> int:
-        """Resolve the effective tenant for a session write path."""
+        """Resolve the effective tenant for a session write path.
+
+        Uses fail-closed mode to prevent cross-tenant data leakage.
+        Raises TenantResolutionError if tenant cannot be resolved.
+
+        Args:
+            cursor: Database cursor for queries
+            tenant_id: Explicitly provided tenant ID
+            user_id: User ID to look up tenant from
+
+        Returns:
+            Resolved tenant ID
+
+        Raises:
+            TenantResolutionError: If tenant cannot be resolved
+        """
+        # Try explicit tenant_id first
         normalized = self._normalize_tenant_id(tenant_id)
         if normalized is not None:
             return normalized
 
+        # Try user lookup if user_id provided
         if user_id is not None:
             cursor.execute(f"SELECT tenant_id FROM users WHERE id = {_param()}", (user_id,))
             row = cursor.fetchone()
@@ -473,7 +491,14 @@ class SessionManager:
                 if normalized is not None:
                     return normalized
 
-        return 1
+        # Fail-closed: Do not return default tenant
+        logger.error(
+            f"Cannot resolve tenant for session write - tenant_id={tenant_id}, user_id={user_id}"
+        )
+        raise TenantResolutionError(
+            "Cannot resolve tenant for session write operation. "
+            "Provide explicit tenant_id or ensure user has valid tenant assignment."
+        )
 
     def _tenant_scope_condition(
         self,

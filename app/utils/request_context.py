@@ -5,7 +5,7 @@ Provides centralized helpers for accessing request context data
 like current user and tenant.
 """
 
-from typing import TypedDict
+from typing import TypedDict, cast
 
 from flask import g
 from werkzeug.exceptions import BadRequest
@@ -30,7 +30,7 @@ def get_current_user() -> UserContext | None:
     """
     user = getattr(g, "user", None)
     if user and isinstance(user, dict):
-        return user
+        return cast("UserContext | None", user)
     return None
 
 

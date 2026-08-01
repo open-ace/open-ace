@@ -24,21 +24,45 @@ def tmp_db(tmp_path):
     Patches is_postgresql/adapt_sql only within this fixture's scope so that
     PostgreSQL tests are unaffected.
     """
-    with patch.object(db_mod, "is_postgresql", return_value=False):
-        orig = db_mod.adapt_sql
-        db_mod.adapt_sql = lambda q: q
+    orig_adapt_sql = db_mod.adapt_sql
+    db_mod.adapt_sql = lambda q: q
+    try:
+        db_path = str(tmp_path / "test.db")
+        os.makedirs(os.path.dirname(db_path), exist_ok=True)
+        db = Database(db_url=f"sqlite:///{db_path}")
+        _create_sqlite_tables(db)
+
+        # Patch is_postgresql in database module and all modules that import it
+        patches = [patch.object(db_mod, "is_postgresql", return_value=False)]
+
+        # Import and patch all repositories that use is_postgresql
         try:
-            db_path = str(tmp_path / "test.db")
-            os.makedirs(os.path.dirname(db_path), exist_ok=True)
-            db = Database(db_url=f"sqlite:///{db_path}")
-            _create_sqlite_tables(db)
+            import app.repositories.usage_repo as usage_repo
+
+            patches.append(patch.object(usage_repo, "is_postgresql", return_value=False))
+        except ImportError:
+            pass
+
+        try:
+            import app.repositories.daily_stats_repo as daily_stats_repo
+
+            patches.append(patch.object(daily_stats_repo, "is_postgresql", return_value=False))
+        except ImportError:
+            pass
+
+        # Combine all patches
+        from contextlib import ExitStack
+
+        with ExitStack() as stack:
+            for p in patches:
+                stack.enter_context(p)
             yield db
-        finally:
-            db_mod.adapt_sql = orig
-            try:
-                os.unlink(db_path)
-            except OSError:
-                pass
+    finally:
+        db_mod.adapt_sql = orig_adapt_sql
+        try:
+            os.unlink(db_path)
+        except OSError:
+            pass
 
 
 def _create_sqlite_tables(db):

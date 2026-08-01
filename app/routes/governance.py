@@ -17,6 +17,7 @@ from app.modules.governance.audit_logger import AuditAction, AuditLogger, get_ac
 from app.modules.governance.content_filter import ContentFilter
 from app.modules.governance.quota_manager import QuotaManager
 from app.repositories.governance_repo import GovernanceRepository
+from app.utils.request_context import get_current_tenant_id
 
 governance_bp = Blueprint("governance", __name__)
 audit_logger = AuditLogger()
@@ -32,12 +33,6 @@ def get_client_info():
         "ip_address": request.remote_addr,
         "user_agent": request.headers.get("User-Agent", ""),
     }
-
-
-def _current_tenant_id():
-    """Return the authenticated user's tenant scope when available."""
-    user = getattr(g, "user", None) or {}
-    return user.get("tenant_id")
 
 
 # ============================================================================
@@ -74,7 +69,7 @@ def api_get_audit_logs():
         severity=severity,
         start_time=start_time,
         end_time=end_time,
-        tenant_id=_current_tenant_id(),
+        tenant_id=get_current_tenant_id(),
         limit=min(limit, 1000),  # Cap at 1000
         offset=offset,
     )
@@ -88,7 +83,7 @@ def api_get_audit_logs():
         severity=severity,
         start_time=start_time,
         end_time=end_time,
-        tenant_id=_current_tenant_id(),
+        tenant_id=get_current_tenant_id(),
     )
 
     return jsonify(
@@ -200,7 +195,7 @@ def api_export_audit_logs():
         start_time=start_time,
         end_time=end_time,
         format=format_type,
-        tenant_id=_current_tenant_id(),
+        tenant_id=get_current_tenant_id(),
     )
 
     # Log the export action
@@ -211,7 +206,7 @@ def api_export_audit_logs():
         username=g.user.get("username"),
         resource_type="audit_logs",
         details={"format": format_type, "start": start_date, "end": end_date},
-        tenant_id=_current_tenant_id(),
+        tenant_id=get_current_tenant_id(),
         **client_info,
     )
 
@@ -243,7 +238,7 @@ def api_user_activity(user_id):
 
     days = request.args.get("days", default=30, type=int)
 
-    activity = audit_logger.get_user_activity(user_id, days=days, tenant_id=_current_tenant_id())
+    activity = audit_logger.get_user_activity(user_id, days=days, tenant_id=get_current_tenant_id())
 
     return jsonify(activity)
 
@@ -335,7 +330,7 @@ def api_check_content():
     content = data.get("content", "")
 
     # Get tenant-specific sensitive keyword config
-    tenant_id = _current_tenant_id()
+    tenant_id = get_current_tenant_id()
     tenant_config = None
     if tenant_id:
         try:
