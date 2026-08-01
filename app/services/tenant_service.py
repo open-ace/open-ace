@@ -2,6 +2,10 @@
 Open ACE - AI Computing Explorer - Tenant Service
 
 Business logic for multi-tenant management.
+
+Issue #2179: 租户管理员权限模型
+- Service 层必须验证 actor 权限
+- 涉及租户修改、删除、暂停、配额和设置的写操作必须接收或验证 actor scope
 """
 
 import logging
@@ -9,6 +13,7 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from app.core.actor_context import ActorContext
 from app.models.tenant import QuotaConfig, Tenant, TenantSettings, TenantUsage
 from app.repositories.tenant_repo import TenantRepository
 from app.repositories.user_repo import UserRepository
@@ -78,9 +83,12 @@ class TenantService:
         contact_email: str = "",
         contact_name: str | None = None,
         trial_days: int | None = None,
+        actor: ActorContext | None = None,
     ) -> Tenant | None:
         """
         Create a new tenant.
+
+        Issue #2179: 需要 platform_admin 权限
 
         Args:
             name: Tenant name.
@@ -89,10 +97,20 @@ class TenantService:
             contact_email: Contact email.
             contact_name: Contact name.
             trial_days: Number of trial days (for trial tenants).
+            actor: 操作者上下文（必须为 platform_admin）
 
         Returns:
             Optional[Tenant]: Created tenant or None on failure.
+
+        Raises:
+            PermissionError: 权限不足
         """
+        # 权限验证：只有 platform_admin 可以创建租户
+        if actor and not actor.is_platform_admin():
+            raise PermissionError(
+                f"用户 {actor.user_id} 无权创建租户，需要 platform_admin 权限"
+            )
+
         # Generate slug if not provided
         if not slug:
             slug = self._generate_slug(name)
@@ -177,17 +195,29 @@ class TenantService:
         """
         return self.tenant_repo.get_all(status=status, plan=plan, limit=limit, offset=offset)
 
-    def update_tenant(self, tenant_id: int, updates: dict[str, Any]) -> bool:
+    def update_tenant(self, tenant_id: int, updates: dict[str, Any], actor: ActorContext | None = None) -> bool:
         """
         Update tenant fields.
+
+        Issue #2179: 需要 platform_admin 权限
 
         Args:
             tenant_id: Tenant ID.
             updates: Dictionary of fields to update.
+            actor: 操作者上下文（必须有权访问该租户）
 
         Returns:
             bool: True if successful.
+
+        Raises:
+            PermissionError: 权限不足
         """
+        # 权限验证
+        if actor and not actor.can_access_tenant(tenant_id):
+            raise PermissionError(
+                f"用户 {actor.user_id} 无权修改租户 {tenant_id}"
+            )
+
         # Handle quota updates
         if "plan" in updates:
             new_plan = updates["plan"]
@@ -196,17 +226,29 @@ class TenantService:
 
         return self.tenant_repo.update(tenant_id, updates)
 
-    def update_quota(self, tenant_id: int, quota_updates: dict[str, int]) -> bool:
+    def update_quota(self, tenant_id: int, quota_updates: dict[str, int], actor: ActorContext | None = None) -> bool:
         """
         Update tenant quota configuration.
+
+        Issue #2179: 需要 platform_admin 权限
 
         Args:
             tenant_id: Tenant ID.
             quota_updates: Quota fields to update.
+            actor: 操作者上下文（必须有权访问该租户）
 
         Returns:
             bool: True if successful.
+
+        Raises:
+            PermissionError: 权限不足
         """
+        # 权限验证
+        if actor and not actor.can_access_tenant(tenant_id):
+            raise PermissionError(
+                f"用户 {actor.user_id} 无权修改租户 {tenant_id} 的配额"
+            )
+
         tenant = self.get_tenant(tenant_id)
         if not tenant:
             return False
@@ -216,17 +258,29 @@ class TenantService:
 
         return self.tenant_repo.update(tenant_id, {"quota": current_quota})
 
-    def update_settings(self, tenant_id: int, settings_updates: dict[str, Any]) -> bool:
+    def update_settings(self, tenant_id: int, settings_updates: dict[str, Any], actor: ActorContext | None = None) -> bool:
         """
         Update tenant settings.
+
+        Issue #2179: tenant_admin 可修改自己租户，platform_admin 可修改任意租户
 
         Args:
             tenant_id: Tenant ID.
             settings_updates: Settings fields to update.
+            actor: 操作者上下文（必须有权访问该租户）
 
         Returns:
             bool: True if successful.
+
+        Raises:
+            PermissionError: 权限不足
         """
+        # 权限验证
+        if actor and not actor.can_access_tenant(tenant_id):
+            raise PermissionError(
+                f"用户 {actor.user_id} 无权修改租户 {tenant_id} 的设置"
+            )
+
         tenant = self.get_tenant(tenant_id)
         if not tenant:
             return False
@@ -312,43 +366,79 @@ class TenantService:
 
         logger.info("Cleared %d ROI cache entries for tenant_id=%s", cleared_count, tenant_id)
 
-    def suspend_tenant(self, tenant_id: int, reason: str | None = None) -> bool:
+    def suspend_tenant(self, tenant_id: int, reason: str | None = None, actor: ActorContext | None = None) -> bool:
         """
         Suspend a tenant.
+
+        Issue #2179: 需要 platform_admin 权限
 
         Args:
             tenant_id: Tenant ID.
             reason: Reason for suspension.
+            actor: 操作者上下文（必须为 platform_admin）
 
         Returns:
             bool: True if successful.
+
+        Raises:
+            PermissionError: 权限不足
         """
+        # 权限验证：只有 platform_admin 可以暂停租户
+        if actor and not actor.is_platform_admin():
+            raise PermissionError(
+                f"用户 {actor.user_id} 无权暂停租户，需要 platform_admin 权限"
+            )
+
         logger.info(f"Suspending tenant {tenant_id}: {reason or 'No reason provided'}")
         return self.tenant_repo.update(tenant_id, {"status": "suspended"})
 
-    def activate_tenant(self, tenant_id: int) -> bool:
+    def activate_tenant(self, tenant_id: int, actor: ActorContext | None = None) -> bool:
         """
         Activate a suspended tenant.
 
+        Issue #2179: 需要 platform_admin 权限
+
         Args:
             tenant_id: Tenant ID.
+            actor: 操作者上下文（必须为 platform_admin）
 
         Returns:
             bool: True if successful.
+
+        Raises:
+            PermissionError: 权限不足
         """
+        # 权限验证：只有 platform_admin 可以激活租户
+        if actor and not actor.is_platform_admin():
+            raise PermissionError(
+                f"用户 {actor.user_id} 无权激活租户，需要 platform_admin 权限"
+            )
+
         return self.tenant_repo.update(tenant_id, {"status": "active"})
 
-    def delete_tenant(self, tenant_id: int, hard: bool = False) -> bool:
+    def delete_tenant(self, tenant_id: int, hard: bool = False, actor: ActorContext | None = None) -> bool:
         """
         Delete a tenant.
+
+        Issue #2179: 需要 platform_admin 权限
 
         Args:
             tenant_id: Tenant ID.
             hard: If True, permanently delete; otherwise soft delete.
+            actor: 操作者上下文（必须为 platform_admin）
 
         Returns:
             bool: True if successful.
+
+        Raises:
+            PermissionError: 权限不足
         """
+        # 权限验证：只有 platform_admin 可以删除租户
+        if actor and not actor.is_platform_admin():
+            raise PermissionError(
+                f"用户 {actor.user_id} 无权删除租户，需要 platform_admin 权限"
+            )
+
         if hard:
             logger.warning(f"Hard deleting tenant {tenant_id}")
             return self.tenant_repo.hard_delete(tenant_id)

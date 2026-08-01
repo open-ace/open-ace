@@ -2,6 +2,9 @@
 Open ACE - Tenant Routes
 
 API endpoints for multi-tenant management.
+
+Issue #2179: 租户管理员权限模型
+- 路由层传入 ActorContext 到 Service 层
 """
 
 import logging
@@ -15,6 +18,7 @@ from app.auth.decorators import (
     platform_admin_required,
     same_tenant_or_platform_admin,
 )
+from app.core.actor_context import ActorContext
 from app.repositories.user_repo import UserRepository
 from app.services.auth_service import get_security_settings_cached
 from app.services.tenant_service import TenantService
@@ -101,6 +105,12 @@ def create_tenant():
     Issue #2179: Only platform admins can create new tenants.
     """
 
+    # Issue #2179: 创建 ActorContext 传入 Service 层
+    try:
+        actor = ActorContext.from_flask_g()
+    except ValueError as e:
+        return jsonify({"error": f"Authentication context error: {e}"}), 401
+
     data = request.get_json()
 
     if not data:
@@ -119,6 +129,7 @@ def create_tenant():
         contact_email=data.get("contact_email", ""),
         contact_name=data.get("contact_name"),
         trial_days=data.get("trial_days"),
+        actor=actor,  # Issue #2179: 传入 actor
     )
 
     if not tenant:
@@ -201,6 +212,12 @@ def update_tenant(tenant_id: int):
     Issue #2179: Only platform admins can update any tenant.
     """
 
+    # Issue #2179: 创建 ActorContext 传入 Service 层
+    try:
+        actor = ActorContext.from_flask_g()
+    except ValueError as e:
+        return jsonify({"error": f"Authentication context error: {e}"}), 401
+
     data = request.get_json()
 
     if not data:
@@ -224,7 +241,10 @@ def update_tenant(tenant_id: int):
     if not updates:
         return jsonify({"error": "No valid fields to update"}), 400
 
-    success = tenant_service.update_tenant(tenant_id, updates)
+    try:
+        success = tenant_service.update_tenant(tenant_id, updates, actor=actor)  # Issue #2179: 传入 actor
+    except PermissionError as e:
+        return jsonify({"error": str(e)}), 403
 
     if not success:
         return jsonify({"error": "Failed to update tenant"}), 500
@@ -243,12 +263,21 @@ def update_tenant_quota(tenant_id: int):
     Issue #2179: Only platform admins can modify tenant quota.
     """
 
+    # Issue #2179: 创建 ActorContext 传入 Service 层
+    try:
+        actor = ActorContext.from_flask_g()
+    except ValueError as e:
+        return jsonify({"error": f"Authentication context error: {e}"}), 401
+
     data = request.get_json()
 
     if not data:
         return jsonify({"error": "Request body required"}), 400
 
-    success = tenant_service.update_quota(tenant_id, data)
+    try:
+        success = tenant_service.update_quota(tenant_id, data, actor=actor)  # Issue #2179: 传入 actor
+    except PermissionError as e:
+        return jsonify({"error": str(e)}), 403
 
     if not success:
         return jsonify({"error": "Failed to update tenant quota"}), 500
@@ -267,12 +296,21 @@ def update_tenant_settings(tenant_id: int):
     Issue #2179: Tenant admins can modify their own tenant's settings.
     """
 
+    # Issue #2179: 创建 ActorContext 传入 Service 层
+    try:
+        actor = ActorContext.from_flask_g()
+    except ValueError as e:
+        return jsonify({"error": f"Authentication context error: {e}"}), 401
+
     data = request.get_json()
 
     if not data:
         return jsonify({"error": "Request body required"}), 400
 
-    success = tenant_service.update_settings(tenant_id, data)
+    try:
+        success = tenant_service.update_settings(tenant_id, data, actor=actor)  # Issue #2179: 传入 actor
+    except PermissionError as e:
+        return jsonify({"error": str(e)}), 403
 
     if not success:
         return jsonify({"error": "Failed to update tenant settings"}), 500
@@ -299,10 +337,19 @@ def suspend_tenant(tenant_id: int):
     Issue #2179: Only platform admins can suspend tenants.
     """
 
+    # Issue #2179: 创建 ActorContext 传入 Service 层
+    try:
+        actor = ActorContext.from_flask_g()
+    except ValueError as e:
+        return jsonify({"error": f"Authentication context error: {e}"}), 401
+
     data = request.get_json() or {}
     reason = data.get("reason")
 
-    success = tenant_service.suspend_tenant(tenant_id, reason)
+    try:
+        success = tenant_service.suspend_tenant(tenant_id, reason, actor=actor)  # Issue #2179: 传入 actor
+    except PermissionError as e:
+        return jsonify({"error": str(e)}), 403
 
     if not success:
         return jsonify({"error": "Failed to suspend tenant"}), 500
@@ -321,7 +368,16 @@ def activate_tenant(tenant_id: int):
     Issue #2179: Only platform admins can activate tenants.
     """
 
-    success = tenant_service.activate_tenant(tenant_id)
+    # Issue #2179: 创建 ActorContext 传入 Service 层
+    try:
+        actor = ActorContext.from_flask_g()
+    except ValueError as e:
+        return jsonify({"error": f"Authentication context error: {e}"}), 401
+
+    try:
+        success = tenant_service.activate_tenant(tenant_id, actor=actor)  # Issue #2179: 传入 actor
+    except PermissionError as e:
+        return jsonify({"error": str(e)}), 403
 
     if not success:
         return jsonify({"error": "Failed to activate tenant"}), 500
@@ -340,9 +396,18 @@ def delete_tenant(tenant_id: int):
     Issue #2179: Only platform admins can delete tenants.
     """
 
+    # Issue #2179: 创建 ActorContext 传入 Service 层
+    try:
+        actor = ActorContext.from_flask_g()
+    except ValueError as e:
+        return jsonify({"error": f"Authentication context error: {e}"}), 401
+
     hard = request.args.get("hard", "false").lower() == "true"
 
-    success = tenant_service.delete_tenant(tenant_id, hard=hard)
+    try:
+        success = tenant_service.delete_tenant(tenant_id, hard=hard, actor=actor)  # Issue #2179: 传入 actor
+    except PermissionError as e:
+        return jsonify({"error": str(e)}), 403
 
     if not success:
         return jsonify({"error": "Failed to delete tenant"}), 500

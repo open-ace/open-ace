@@ -1180,7 +1180,7 @@ CREATE TABLE users (
  avatar_url TEXT,
  auto_mapping_enabled INTEGER DEFAULT 1,
  tenant_version integer DEFAULT 1 NOT NULL,
-    CONSTRAINT chk_users_role CHECK ((role IN ('admin', 'manager', 'user', 'readonly')))
+    CONSTRAINT chk_users_role CHECK ((role IN ('admin', 'platform_admin', 'tenant_admin', 'manager', 'user', 'readonly')))
 );
 
 CREATE TABLE web_user_auth_sessions (
