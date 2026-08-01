@@ -603,7 +603,8 @@ def convert_to_sqlite(postgres_sql):
             # Remove PostgreSQL-specific syntax
             full_idx = re.sub(r" USING [a-z]+", "", full_idx)
             full_idx = re.sub(r" INCLUDE \([^)]+\)", "", full_idx)
-            # Remove ::type casts in WHERE clauses
+            # Remove ::type casts in WHERE clauses and index expressions
+            # This includes ::jsonb and ::text casts in JSONB expressions
             full_idx = re.sub(r"::[a-z_\[\]]+", "", full_idx)
             # Remove varchar_pattern_ops
             full_idx = re.sub(r"\s+varchar_pattern_ops", "", full_idx)
@@ -614,6 +615,8 @@ def convert_to_sqlite(postgres_sql):
             full_idx = re.sub(r"\((\w+)\)::text\s*=\s*'([^']*)'::text", r"\1 = '\2'", full_idx)
             # Convert (user_id IS NOT NULL) AND ... in WHERE
             full_idx = re.sub(r"\((\w+)\)::text\s*=\s*'([^']*)'", r"\1 = '\2'", full_idx)
+            # Note: We preserve ->> and -> operators for SQLite 3.38+ compatibility
+            # SQLite 3.38+ natively supports these JSON operators
 
             # Skip indexes on materialized views (not supported in SQLite)
             if re.match(r"CREATE(?: UNIQUE)? INDEX\s+\w+\s+ON\s+session_stats\b", full_idx):

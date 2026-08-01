@@ -1650,7 +1650,7 @@ CREATE INDEX idx_team_members_user ON team_members (user_id);
 
 CREATE INDEX idx_teams_owner ON teams (owner_id);
 
-CREATE INDEX idx_teams_sync_source ON teams ((json_extract(settings, '$.sync_source')));
+CREATE INDEX idx_teams_sync_source ON teams ((((settings) ->> 'sync_source')));
 
 CREATE INDEX idx_tenant_migrations_status ON tenant_migrations (status);
 
@@ -1753,3 +1753,4 @@ CREATE UNIQUE INDEX policy_rules_rule_key_version_key ON policy_rules (rule_key,
 CREATE UNIQUE INDEX uq_projects_path ON projects (tenant_id, path) WHERE (is_active IS TRUE);
 
 CREATE UNIQUE INDEX uq_user_projects_user_project ON user_projects (user_id, project_id);
+
