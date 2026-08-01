@@ -201,18 +201,19 @@ class TestF1F7ProviderCacheTTL:
         )
 
         # Mock password manager to avoid decryption
-        manager._password_manager.decrypt = MagicMock(return_value="test_secret")
+        # Use patch.object context manager so the mock is auto-cleaned,
+        # preventing test pollution that leaks into test_sso_provider_storage.py.
+        with patch.object(manager._password_manager, "decrypt", return_value="test_secret"):
+            # First call - loads from DB
+            provider1 = manager.get_provider("test_provider")
+            assert provider1 is not None
 
-        # First call - loads from DB
-        provider1 = manager.get_provider("test_provider")
-        assert provider1 is not None
+            # Cache time should be set
+            assert "test_provider" in manager._provider_cache_time
 
-        # Cache time should be set
-        assert "test_provider" in manager._provider_cache_time
-
-        # Second call immediately - should use cache
-        provider2 = manager.get_provider("test_provider")
-        assert provider2 is provider1
+            # Second call immediately - should use cache
+            provider2 = manager.get_provider("test_provider")
+            assert provider2 is provider1
 
     def test_provider_cache_expiry(self):
         """Test that provider cache expires after TTL."""
@@ -238,20 +239,21 @@ class TestF1F7ProviderCacheTTL:
             }
         )
 
-        manager._password_manager.decrypt = MagicMock(return_value="test_secret")
+        with patch.object(manager._password_manager, "decrypt", return_value="test_secret"):
+            # Load provider
+            provider1 = manager.get_provider("test_provider")
+            assert provider1 is not None
 
-        # Load provider
-        provider1 = manager.get_provider("test_provider")
-        assert provider1 is not None
+            # Simulate time passage (beyond TTL)
+            manager._provider_cache_time["test_provider"] = (
+                time.time() - PROVIDER_CACHE_TTL_SECONDS - 1
+            )
 
-        # Simulate time passage (beyond TTL)
-        manager._provider_cache_time["test_provider"] = time.time() - PROVIDER_CACHE_TTL_SECONDS - 1
-
-        # Next call should reload from DB
-        provider2 = manager.get_provider("test_provider")
-        assert provider2 is not None
-        # Should be different object (reload)
-        # Note: This depends on mock returning new object each call
+            # Next call should reload from DB
+            provider2 = manager.get_provider("test_provider")
+            assert provider2 is not None
+            # Should be different object (reload)
+            # Note: This depends on mock returning new object each call
 
 
 class TestF8RelayStateSignature:
