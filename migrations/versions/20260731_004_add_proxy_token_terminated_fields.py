@@ -1,7 +1,7 @@
 """Add terminated_at and termination_reason to proxy_token_jtis
 
-Revision ID: 20260731_003_add_proxy_token_terminated_fields
-Revises: 20260731_002_add_ci_repair_transient_retries
+Revision ID: 20260731_004_add_proxy_token_terminated_fields
+Revises: 20260731_003_add_teams_sync_source_indexes
 Create Date: 2026-07-31
 
 Issue: #1822
@@ -13,8 +13,8 @@ as 'terminated' to distinguish from 'consumed' for audit queries.
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "20260731_003_add_proxy_token_terminated_fields"
-down_revision: str | None = "20260731_002_add_ci_repair_transient_retries"
+revision: str = "20260731_004_add_proxy_token_terminated_fields"
+down_revision: str | None = "20260731_003_add_teams_sync_source_indexes"
 branch_labels: str | None = None
 depends_on: str | None = None
 
