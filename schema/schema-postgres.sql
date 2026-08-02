@@ -3447,7 +3447,8 @@ CREATE TABLE legal_holds (
 );
 
 CREATE INDEX idx_legal_holds_tenant ON legal_holds(tenant_id);
-CREATE INDEX idx_legal_holds_active ON legal_holds(lifted_at IS NULL);
+-- PostgreSQL: partial index for active (unlifted) holds
+CREATE INDEX idx_legal_holds_active ON legal_holds WHERE lifted_at IS NULL;
 CREATE INDEX idx_legal_holds_data_type ON legal_holds(data_type);
 
 CREATE TABLE retention_evidence (

@@ -12,7 +12,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
-from app.repositories.database import Database, adapt_sql
+from app.repositories.database import Database, adapt_boolean_condition, adapt_sql
 
 logger = logging.getLogger(__name__)
 
@@ -47,9 +47,9 @@ class RetentionPolicyRepository:
         if tenant_id is not None:
             row = self.db.fetch_one(
                 adapt_sql(
-                    """
+                    f"""
                     SELECT * FROM retention_policies
-                    WHERE tenant_id = ? AND data_type = ? AND enabled = 1
+                    WHERE tenant_id = ? AND data_type = ? AND {adapt_boolean_condition('enabled', True)}
                     ORDER BY version DESC LIMIT 1
                 """
                 ),
@@ -61,9 +61,9 @@ class RetentionPolicyRepository:
         # Fallback to global default
         row = self.db.fetch_one(
             adapt_sql(
-                """
+                f"""
                 SELECT * FROM retention_policies
-                WHERE tenant_id IS NULL AND data_type = ? AND enabled = 1
+                WHERE tenant_id IS NULL AND data_type = ? AND {adapt_boolean_condition('enabled', True)}
                 ORDER BY version DESC LIMIT 1
             """
             ),
@@ -103,9 +103,9 @@ class RetentionPolicyRepository:
             else:
                 rows = self.db.fetch_all(
                     adapt_sql(
-                        """
+                        f"""
                         SELECT * FROM retention_policies
-                        WHERE tenant_id = ? AND enabled = 1
+                        WHERE tenant_id = ? AND {adapt_boolean_condition('enabled', True)}
                         ORDER BY data_type, version DESC
                     """
                     ),
@@ -122,9 +122,9 @@ class RetentionPolicyRepository:
                 )
             else:
                 rows = self.db.fetch_all(
-                    """
+                    f"""
                     SELECT * FROM retention_policies
-                    WHERE tenant_id IS NULL AND enabled = 1
+                    WHERE tenant_id IS NULL AND {adapt_boolean_condition('enabled', True)}
                     ORDER BY data_type, version DESC
                 """
                 )

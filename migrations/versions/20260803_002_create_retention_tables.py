@@ -180,10 +180,22 @@ def upgrade() -> None:
 
     # Create indexes for legal_holds (using IF NOT EXISTS)
     # Note: idx_legal_holds_active uses expression (lifted_at IS NULL)
+    # PostgreSQL requires partial index syntax (WHERE clause)
+    # SQLite supports expression index directly
     op.execute("CREATE INDEX IF NOT EXISTS idx_legal_holds_tenant ON legal_holds (tenant_id)")
-    op.execute(
-        "CREATE INDEX IF NOT EXISTS idx_legal_holds_active ON legal_holds (lifted_at IS NULL)"
-    )
+
+    connection = op.get_bind()
+    if connection.dialect.name == "postgresql":
+        # PostgreSQL: partial index with WHERE clause
+        op.execute(
+            "CREATE INDEX IF NOT EXISTS idx_legal_holds_active ON legal_holds WHERE lifted_at IS NULL"
+        )
+    else:
+        # SQLite: expression index
+        op.execute(
+            "CREATE INDEX IF NOT EXISTS idx_legal_holds_active ON legal_holds (lifted_at IS NULL)"
+        )
+
     op.execute("CREATE INDEX IF NOT EXISTS idx_legal_holds_data_type ON legal_holds (data_type)")
 
     # 4. retention_evidence table
