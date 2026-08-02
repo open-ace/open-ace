@@ -2718,7 +2718,11 @@ class AutonomousOrchestrator:
         """Prefer agent summary, but synthesize a concise fallback when it is noisy/empty."""
         cleaned = artifact_text.strip()
         if cleaned:
-            return cleaned[:300]
+            # Keep the agent's full repair summary; the PR comment body is
+            # capped later by GITHUB_COMMENT_MAX_CHARS (65000) in
+            # _post_github_comment. The previous hard [:300] cut repair
+            # summaries mid-sentence (PR #2198 attempts 2-N).
+            return cleaned
 
         status = "Development completed" if success else "Development failed"
         parts = [status]
@@ -3091,13 +3095,27 @@ class AutonomousOrchestrator:
             )
 
     def _find_existing_milestone(
-        self, phase: str, milestone_type: str, dev_round: int = None, round_number: int = None
+        self,
+        phase: str,
+        milestone_type: str,
+        dev_round: int = None,
+        round_number: int = None,
+        completed: bool = True,
     ) -> dict | None:
-        """Check if a milestone of this type already exists (idempotency guard)."""
+        """Check if a milestone of this type already exists (idempotency guard).
+
+        ``completed=False`` skips completed milestones — used for ci_repair_*
+        milestones so a prior cycle's completed milestone (same dev_round +
+        round_number, since cycle restarts don't bump dev_round) doesn't block a
+        new cycle's attempt. Only a still-in_progress milestone (a true
+        concurrent duplicate) blocks in that case.
+        """
         existing = self.repo.list_milestones(self._workflow_id, phase=phase, status="in_progress")
-        # Also check completed ones
-        completed = self.repo.list_milestones(self._workflow_id, phase=phase, status="completed")
-        candidates = existing + completed
+        candidates = existing
+        if completed:
+            candidates = candidates + self.repo.list_milestones(
+                self._workflow_id, phase=phase, status="completed"
+            )
 
         for ms in candidates:
             if ms.get("milestone_type") != milestone_type:
@@ -3113,12 +3131,18 @@ class AutonomousOrchestrator:
         """Create a milestone and emit event. Idempotent — returns existing if found."""
         kwargs.setdefault("workflow_id", self._workflow_id)
 
+        milestone_type = kwargs.get("milestone_type", "")
+        # ci_repair_* milestones are one-per-attempt; a prior cycle's completed
+        # ci_repair milestone (same dev_round + round_number, since cycle restarts
+        # don't bump dev_round) must not block a new cycle's attempt.
+        match_completed = not milestone_type.startswith("ci_repair_")
         # Idempotency guard: skip creation if matching milestone already exists
         existing = self._find_existing_milestone(
             phase=kwargs.get("phase", ""),
-            milestone_type=kwargs.get("milestone_type", ""),
+            milestone_type=milestone_type,
             dev_round=kwargs.get("dev_round"),
             round_number=kwargs.get("round_number"),
+            completed=match_completed,
         )
         if existing:
             logger.info(
