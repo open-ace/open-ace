@@ -1391,6 +1391,8 @@ def api_delete_file():
         return jsonify({"success": True, "path": target_path})
     except PermissionError:
         return jsonify({"error": "Permission denied"}), 403
+    except subprocess.TimeoutExpired:
+        return jsonify({"error": "Delete operation timeout"}), 500
     except OSError as e:
         logger.error(f"Delete failed for {target_path}: {e}")
         return jsonify({"error": f"Delete failed: {e}"}), 500
