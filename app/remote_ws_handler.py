@@ -630,15 +630,38 @@ class RemoteWSHandler(WSGIHandler):
 
         machine_id, info = found
 
+        # Issue #2183: Check session status first
+        if info.get("status") != "running":
+            logger.warning("VSCode WS handler: session not running %s", vscode_id[:8])
+            ws_frame.send_close(self.socket, 4003, "VSCode session is not running")
+            self.close_connection = True
+            return
+
+        # Issue #2183: Check if session is expired
+        import time as _time
+        expires_at = info.get("expires_at")
+        if expires_at and _time.time() > expires_at:
+            logger.warning("VSCode WS handler: session expired %s", vscode_id[:8])
+            ws_frame.send_close(self.socket, 4003, "VSCode session expired")
+            self.close_connection = True
+            return
+
         # Validate token.
+        # Issue #2183: No fallback to stored_token - must provide valid token
         stored_token = info.get("token", "")
         if not token:
             token = _cookie_value(
                 self.environ.get("HTTP_COOKIE", ""),
                 f"vscode_token_{vscode_id}",
             )
-        if not token and info.get("status") == "running":
-            token = stored_token
+
+        # Issue #2183: Require valid token - no fallback
+        if not token:
+            logger.warning("VSCode WS handler: no token provided for %s", vscode_id[:8])
+            ws_frame.send_close(self.socket, 4001, "Authentication required")
+            self.close_connection = True
+            return
+
         # Handle URL-encoded tokens (Issue #1886)
         from app.auth.decorators import normalize_token
 
@@ -648,8 +671,12 @@ class RemoteWSHandler(WSGIHandler):
             or not stored_token
             or not hmac.compare_digest(decoded_token, stored_token)
         ):
-            logger.warning("VSCode WS handler: invalid token for vscode %s", vscode_id[:8])
-            ws_frame.send_close(self.socket, 4001)
+            logger.warning(
+                "VSCode WS handler: invalid token for vscode %s (prefix: %s)",
+                vscode_id[:8],
+                token[:8] if len(token) > 8 else "short",
+            )
+            ws_frame.send_close(self.socket, 4001, "Invalid token")
             self.close_connection = True
             return
 

@@ -8,8 +8,12 @@ import time
 
 logger = logging.getLogger(__name__)
 
+# Default TTL for VSCode sessions (Issue #2183)
+# Shorter TTL for security - 1 hour instead of 24 hours
+VSCODE_SESSION_TTL = 3600  # 1 hour
+
 # Entries older than this (seconds) are considered stale and removed.
-TTL_SECONDS = 24 * 3600  # 24 hours
+TTL_SECONDS = 24 * 3600  # 24 hours (for backward compatibility)
 CLEANUP_INTERVAL = 10 * 60  # 10 minutes
 MAX_ENTRIES = 1000
 
@@ -149,13 +153,18 @@ class VSCodeInfoStore:
             return info
 
     def cleanup_stale(self) -> int:
-        """Remove entries older than TTL. Returns number of removed entries."""
+        """Remove entries older than TTL or expired (Issue #2183). Returns number of removed entries."""
         now = time.time()
         removed = 0
         with self._lock:
-            stale_keys = [
-                k for k, v in self._store.items() if now - v.get("_updated_at", 0) > self._ttl
-            ]
+            stale_keys = []
+            for k, v in self._store.items():
+                # Check both old TTL and new expires_at (Issue #2183)
+                is_stale = now - v.get("_updated_at", 0) > self._ttl
+                is_expired = now > v.get("expires_at", float("inf"))
+                if is_stale or is_expired:
+                    stale_keys.append(k)
+
             for k in stale_keys:
                 info = self._store.get(k)
                 if info:
@@ -166,8 +175,75 @@ class VSCodeInfoStore:
                 self._vscode_index.pop(k[1], None)
                 removed += 1
         if removed:
-            logger.info("Cleaned up %d stale VSCode entries", removed)
+            logger.info("Cleaned up %d stale/expired VSCode entries", removed)
         return removed
+
+    def is_expired(self, machine_id: str, vscode_id: str) -> bool:
+        """Check if a VSCode session is expired (Issue #2183).
+
+        Args:
+            machine_id: Machine ID.
+            vscode_id: VSCode session ID.
+
+        Returns:
+            True if session is expired, False otherwise.
+        """
+        info = self.get(machine_id, vscode_id)
+        if not info:
+            return True  # Not found is treated as expired
+        expires_at = info.get("expires_at")
+        if expires_at is None:
+            return False  # No expiry set, not expired
+        return time.time() > expires_at
+
+    def revoke_session(self, machine_id: str, vscode_id: str) -> bool:
+        """Immediately revoke a VSCode session (Issue #2183).
+
+        Args:
+            machine_id: Machine ID.
+            vscode_id: VSCode session ID.
+
+        Returns:
+            True if session was revoked, False if not found.
+        """
+        with self._lock:
+            info = self._store.get((machine_id, vscode_id))
+            if info:
+                # Mark as revoked
+                info["status"] = "revoked"
+                info["revoked_at"] = time.time()
+                # Clear token to invalidate immediately
+                token = info.get("token", "")
+                if token and token in self._token_index:
+                    self._token_index.pop(token, None)
+                info["token"] = ""
+                logger.info("Revoked VSCode session %s", vscode_id[:8])
+                return True
+            return False
+
+    def mark_stopped(self, machine_id: str, vscode_id: str) -> bool:
+        """Mark a VSCode session as stopped and invalidate token (Issue #2183).
+
+        Args:
+            machine_id: Machine ID.
+            vscode_id: VSCode session ID.
+
+        Returns:
+            True if session was marked, False if not found.
+        """
+        with self._lock:
+            info = self._store.get((machine_id, vscode_id))
+            if info:
+                info["status"] = "stopped"
+                info["stopped_at"] = time.time()
+                # Clear token to invalidate immediately
+                token = info.get("token", "")
+                if token and token in self._token_index:
+                    self._token_index.pop(token, None)
+                info["token"] = ""
+                logger.info("Marked VSCode session %s as stopped", vscode_id[:8])
+                return True
+            return False
 
 
 # Module-level singleton — cleanup timer is started lazily on first use

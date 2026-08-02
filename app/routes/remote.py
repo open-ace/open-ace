@@ -1810,7 +1810,7 @@ def agent_message():
 
     elif msg_type == "vscode_status":
         # Agent reports VSCode (code-server) status
-        from app.modules.workspace.vscode_store import vscode_info_store
+        from app.modules.workspace.vscode_store import vscode_info_store, VSCODE_SESSION_TTL
 
         vscode_id = data.get("vscode_id", "")
         status = data.get("status", "")
@@ -1829,6 +1829,41 @@ def agent_message():
             import secrets as _secrets
 
             browser_token = _secrets.token_hex(32)
+
+            # Issue #2183: Inject tenant_id and owner_user_id from machine
+            tenant_id = None
+            owner_user_id = None
+            try:
+                machine = agent_mgr.get_machine(machine_id_for_vs)
+                if machine:
+                    tenant_id = machine.get("tenant_id")
+                    owner_user_id = machine.get("created_by")
+                else:
+                    logger.error(
+                        "Cannot create VSCode session: machine %s not found",
+                        machine_id_for_vs[:8],
+                    )
+                    return jsonify({"success": False, "error": "Machine not found"}), 404
+            except Exception as e:
+                logger.error(
+                    "Failed to query machine %s for VSCode session: %s",
+                    machine_id_for_vs[:8],
+                    e,
+                )
+                # Continue with default values for backward compatibility
+
+            # Use default tenant_id if not found (backward compatibility)
+            if tenant_id is None:
+                tenant_id = 1
+                logger.warning(
+                    "VSCode session %s created with default tenant_id",
+                    vscode_id[:8],
+                )
+
+            # Calculate expiration time
+            now = time.time()
+            expires_at = now + VSCODE_SESSION_TTL
+
             vscode_info_store.put(
                 machine_id_for_vs,
                 vscode_id,
@@ -1840,11 +1875,24 @@ def agent_message():
                     "token": browser_token,
                     "machine_id": machine_id_for_vs,
                     "project_path": data.get("project_path", ""),
+                    # Issue #2183: New required fields
+                    "owner_user_id": owner_user_id,
+                    "tenant_id": tenant_id,
+                    "created_at": now,
+                    "expires_at": expires_at,
                 },
             )
-            logger.info("VSCode %s running on %s", vscode_id[:8], http_url)
+            logger.info(
+                "VSCode %s running on %s (tenant=%s, owner=%s, expires=%ds)",
+                vscode_id[:8],
+                http_url,
+                tenant_id,
+                owner_user_id,
+                VSCODE_SESSION_TTL,
+            )
         elif status == "stopped":
-            vscode_info_store.pop(machine_id_for_vs, vscode_id)
+            # Issue #2183: Mark as stopped and invalidate token
+            vscode_info_store.mark_stopped(machine_id_for_vs, vscode_id)
             logger.info("VSCode %s stopped", vscode_id[:8])
         elif status == "error":
             vscode_info_store.put(
@@ -3487,10 +3535,10 @@ def remote_vscode_stop():
         },
     )
 
-    # Clean up local store
+    # Issue #2183: Mark as stopped to invalidate token immediately
     from app.modules.workspace.vscode_store import vscode_info_store
 
-    vscode_info_store.pop(machine_id, vscode_id)
+    vscode_info_store.mark_stopped(machine_id, vscode_id)
 
     return jsonify({"success": True})
 
@@ -3573,17 +3621,16 @@ def remote_vscode_attach(vscode_id):
 def remote_vscode_proxy(vscode_id, path=""):
     """HTTP reverse proxy to remote code-server.
 
-    Authentication is via the token in query string, validated against
-    vscode_info_store. No session_token cookie required (needed for iframe access).
+    Issue #2183: Strict authentication required.
 
-    For subsequent requests (static assets, API calls), the token can also be
-    provided via a vscode_token cookie, which is set on the first successful
-    request with a token in the query string.
+    Authentication methods (in priority order):
+    1. VSCode browser token from query string, cookie, or Authorization header
+    2. Open ACE user session with owner/tenant/machine access validation
 
-    For nested iframe scenarios where cookies don't work, we also allow
-    requests without token if the session is known to be running.
+    No fallback to stored token - caller must provide valid credentials.
     """
     import hmac as _hmac
+    import time as _time
 
     from app.modules.workspace.vscode_proxy import build_target_url, proxy_request_streaming
     from app.modules.workspace.vscode_store import vscode_info_store
@@ -3594,42 +3641,114 @@ def remote_vscode_proxy(vscode_id, path=""):
 
     machine_id, info = found
 
+    # Issue #2183: Check session status first
+    if info.get("status") != "running":
+        return jsonify({"error": "VSCode session is not running"}), 503
+
+    # Issue #2183: Check if session is expired
+    expires_at = info.get("expires_at")
+    if expires_at and _time.time() > expires_at:
+        logger.warning("Attempt to access expired VSCode session %s", vscode_id[:8])
+        return jsonify({"error": "VSCode session expired"}), 403
+
     # Get stored token
     stored_token = info.get("token", "")
 
     if not stored_token:
         return jsonify({"error": "VSCode session has no token"}), 500
 
-    # Validate token from query string or cookie
-    # Query string token takes precedence (used for initial iframe load)
+    # Issue #2183: Extract token from multiple sources
+    # Priority: query string > cookie > Authorization header
     token = request.args.get("token", "")
 
-    # If no token in query string, try cookie (for static assets, API calls)
     if not token:
         token = request.cookies.get(f"vscode_token_{vscode_id}", "")
 
-    # For nested iframe scenarios (cookies blocked by SameSite), allow requests
-    # without explicit token if the session is running. The proxy URL path
-    # itself provides authentication (only valid vscode_id can be accessed).
-    # This is a capability URL design - the security relies solely on:
-    # 1. vscode_id is a UUID4 (~122 bits of randomness), hard to guess
-    # 2. The URL is only visible to the user who started the session
-    # 3. The session is scoped to a specific machine and project
-    # Note: In this fallback case, we use stored_token for HMAC validation
-    # but the caller does NOT prove they hold it. The real access control
-    # is the vscode_id in the URL path (capability URL semantics).
-    if not token and info.get("status") == "running":
-        # Use stored token for internal validation (not sent to browser)
-        token = stored_token
-
     if not token:
-        return jsonify({"error": "Invalid or missing token"}), 403
+        # Try Authorization header (Bearer token)
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            token = auth_header[7:]
 
-    if not _hmac.compare_digest(token, stored_token):
+    # Issue #2183: Try user session authentication if no token provided
+    user_authenticated = False
+    if not token and hasattr(g, "user") and g.user:
+        # Validate user access to this session
+        user_tenant_id = g.user.get("tenant_id")
+        session_tenant_id = info.get("tenant_id")
+        owner_user_id = info.get("owner_user_id")
+
+        # Check tenant isolation (Issue #2183)
+        if session_tenant_id is not None and user_tenant_id != session_tenant_id:
+            # Platform admin can access cross-tenant (with audit)
+            if g.user.get("role") == "platform_admin":
+                audit_logger.log(
+                    action=AuditAction.ADMIN_CROSS_TENANT_ACCESS.value,
+                    severity="info",
+                    user_id=g.user.get("id"),
+                    tenant_id=session_tenant_id,
+                    resource_type="vscode_session",
+                    resource_id=vscode_id,
+                    details={
+                        "admin_tenant": user_tenant_id,
+                        "target_tenant": session_tenant_id,
+                        "vscode_id": vscode_id[:8],
+                    },
+                )
+                user_authenticated = True
+            else:
+                # Log cross-tenant access attempt (security event)
+                audit_logger.log(
+                    action="CROSS_TENANT_VSCODE_ACCESS_ATTEMPT",
+                    severity="warning",
+                    user_id=g.user.get("id"),
+                    details={
+                        "user_tenant_id": user_tenant_id,
+                        "target_tenant_id": session_tenant_id,
+                        "vscode_id": vscode_id[:8],
+                    },
+                )
+                logger.warning(
+                    "Cross-tenant VSCode access denied: user=%s tenant=%s, session tenant=%s",
+                    g.user.get("id"),
+                    user_tenant_id,
+                    session_tenant_id,
+                )
+                return jsonify({"error": "Access denied"}), 403
+
+        # Check if user is owner
+        if g.user.get("id") == owner_user_id:
+            user_authenticated = True
+
+        # Check if user is tenant admin
+        if not user_authenticated and g.user.get("role") == "tenant_admin":
+            if user_tenant_id == session_tenant_id:
+                user_authenticated = True
+
+        # Check if user is machine admin
+        if not user_authenticated:
+            agent_mgr = get_remote_agent_manager()
+            perm = agent_mgr.get_user_permission(machine_id, g.user["id"])
+            if perm == "admin":
+                user_authenticated = True
+
+        # System admin can access any session
+        if g.user.get("role") in ("admin", "platform_admin"):
+            user_authenticated = True
+
+    # Issue #2183: Require valid token or user authentication
+    # NO FALLBACK to stored_token
+    if not token and not user_authenticated:
+        return jsonify({"error": "Authentication required"}), 401
+
+    # Validate token if provided
+    if token and not _hmac.compare_digest(token, stored_token):
+        logger.warning(
+            "Invalid token for VSCode session %s (token prefix: %s)",
+            vscode_id[:8],
+            token[:8] if len(token) > 8 else "short",
+        )
         return jsonify({"error": "Invalid token"}), 403
-
-    if info.get("status") != "running":
-        return jsonify({"error": "VSCode session is not running"}), 503
 
     original_http_url = info.get("original_http_url", "")
     if not original_http_url:

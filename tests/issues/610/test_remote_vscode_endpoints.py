@@ -15,6 +15,7 @@ Tests cover:
 import json
 import os
 import sys
+import time
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -584,8 +585,8 @@ class TestVSCodeProxy(unittest.TestCase):
         data = resp.get_json()
         self.assertIn("not found", data["error"].lower())
 
-    def test_missing_token_uses_running_session_fallback(self):
-        """Running sessions may proxy resource requests after initial load."""
+    def test_missing_token_returns_401(self):
+        """Issue #2183: Missing token should return 401, not fallback."""
         mgr = MagicMock()
         app, vs_mod, orig, mock_store = self._make_app_with_store(
             mgr,
@@ -595,32 +596,26 @@ class TestVSCodeProxy(unittest.TestCase):
                     "status": "running",
                     "token": "valid-token",
                     "original_http_url": "http://remote:8080",
+                    # Issue #2183: Add required fields
+                    "tenant_id": 1,
+                    "owner_user_id": 1,
+                    "created_at": time.time(),
+                    "expires_at": time.time() + 3600,
                 },
             ),
         )
 
-        def _gen():
-            yield b"<h1>VSCode</h1>"
-
-        mock_proxy_result = (200, {"Content-Type": "text/html"}, _gen())
-
-        with (
-            patch(
-                "app.modules.workspace.vscode_proxy.build_target_url",
-                return_value="http://remote:8080/",
-            ),
-            patch(
-                "app.modules.workspace.vscode_proxy.proxy_request_streaming",
-                return_value=mock_proxy_result,
-            ),
-        ):
+        with app.test_client() as client:
             try:
-                with app.test_client() as client:
-                    resp = client.get("/api/remote/vscode/vs1/proxy/")
+                # No token provided - should return 401 (Issue #2183)
+                resp = client.get("/api/remote/vscode/vs1/proxy/")
             finally:
                 self._restore_store(vs_mod, orig)
 
-        self.assertEqual(resp.status_code, 200)
+        # Issue #2183: Changed from 200 to 401
+        self.assertEqual(resp.status_code, 401)
+        data = resp.get_json()
+        self.assertIn("Authentication required", data.get("error", ""))
 
     def test_invalid_token_returns_403(self):
         """Wrong token returns 403."""
