@@ -294,10 +294,22 @@ class TestCrossTenantIsolation(unittest.TestCase):
 
         with patch.object(vs_mod, "vscode_info_store", test_store):
             app = _make_app(mgr)
-            with app.test_client() as client:
-                # Set a valid user session token (user from tenant 1)
-                client.set_cookie("session_token", "test-token-1-user-1")
 
+            # Set g.user in application context
+            @app.before_request
+            def set_cross_tenant_user():
+                from flask import g, request
+
+                # Only set for this specific test
+                if request.path == f"/api/remote/vscode/{vscode_id}/proxy/":
+                    g.user = {
+                        "id": 1,
+                        "username": "user1",
+                        "role": "user",
+                        "tenant_id": 1,  # User from tenant 1
+                    }
+
+            with app.test_client() as client:
                 # Mock user loading to return a tenant 1 user
                 with patch("app.routes.remote._load_user_from_token") as mock_load:
                     mock_load.return_value = {
@@ -307,20 +319,13 @@ class TestCrossTenantIsolation(unittest.TestCase):
                         "role": "user",
                         "tenant_id": 1,  # User from tenant 1
                     }
-                    with patch("flask.g") as mock_g:
-                        mock_g.user = {
-                            "id": 1,
-                            "username": "user1",
-                            "role": "user",
-                            "tenant_id": 1,
-                        }
-                        resp = client.get(
-                            f"/api/remote/vscode/{vscode_id}/proxy/",
-                        )
+                    resp = client.get(
+                        f"/api/remote/vscode/{vscode_id}/proxy/",
+                    )
 
-                        # Should return 403 for cross-tenant access
-                        # Note: May return 401 if user auth fails, which is also acceptable
-                        self.assertIn(resp.status_code, [401, 403])
+                    # Should return 403 for cross-tenant access
+                    # Note: May return 401 if user auth fails, which is also acceptable
+                    self.assertIn(resp.status_code, [401, 403])
 
 
 class TestSessionExpiration(unittest.TestCase):

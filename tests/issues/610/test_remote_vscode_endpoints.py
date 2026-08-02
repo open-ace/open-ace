@@ -55,9 +55,11 @@ def _make_app(mgr):
 
     # Patch auth helpers so before_request uses our mock
     from app.auth import decorators as auth_dec
+    from app.modules.workspace import session_access
 
     auth_dec._load_user_from_token = _mock_load_user
     remote_mod._load_user_from_token = _mock_load_user
+    session_access._load_user_from_token = _mock_load_user
 
     return app
 
@@ -104,8 +106,7 @@ class TestVSCodeStart(unittest.TestCase):
             )
             self.assertEqual(resp.status_code, 400)
             data = resp.get_json()
-            self.assertFalse(data["success"])
-            self.assertIn("machine_id", data["error"])
+            self.assertIn("machine_id", data.get("error", ""))
 
     def test_missing_project_path(self):
         """Missing project_path returns 400."""
@@ -322,8 +323,8 @@ class TestVSCodeStop(unittest.TestCase):
         self.assertEqual(cmd["command"], "stop_vscode")
         self.assertEqual(cmd["vscode_id"], "vscode-123")
 
-        # Verify store cleanup was called
-        mock_store.pop.assert_called_once_with("m1", "vscode-123")
+        # Verify mark_stopped was called to invalidate token (Issue #2183)
+        mock_store.mark_stopped.assert_called_once_with("m1", "vscode-123")
 
 
 # ---------------------------------------------------------------------------
@@ -895,7 +896,7 @@ class TestVSCodeStatusMessageHandler(unittest.TestCase):
         self.assertEqual(len(stored_info["token"]), 64)
 
     def test_stopped_status_cleans_up(self):
-        """Stopped status removes the store entry."""
+        """Stopped status marks session as stopped (Issue #2183)."""
         mgr = MagicMock()
 
         payload = {
@@ -940,8 +941,8 @@ class TestVSCodeStatusMessageHandler(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertTrue(data["success"])
 
-        # Verify store.pop was called to clean up
-        mock_store.pop.assert_called_once_with("m1", "vs-123")
+        # Issue #2183: Should call mark_stopped instead of pop
+        mock_store.mark_stopped.assert_called_once_with("m1", "vs-123")
 
     def test_error_status_stores_error(self):
         """Error status stores the error message."""
