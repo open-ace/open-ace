@@ -15,8 +15,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v6
-        with:
-          submodules: false
+      with:
+        submodules: false
 
     - name: Setup Node.js
       uses: actions/setup-node@v6
@@ -76,8 +76,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v6
-        with:
-          submodules: false
+      with:
+        submodules: false
 
     - name: Set up Python
       uses: actions/setup-python@v6

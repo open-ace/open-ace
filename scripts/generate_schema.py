@@ -627,18 +627,15 @@ def convert_to_sqlite(postgres_sql):
             # Note: This check must come AFTER cleaning PostgreSQL syntax
             if "->>" in full_idx or " -> " in full_idx:
                 # This is a JSON expression index - skip it with explanatory comment
-                idx_name_match = re.search(r"CREATE(?: UNIQUE)? INDEX\s+(\w+)", full_idx)
-                if idx_name_match:
-                    idx_name = idx_name_match.group(1)
-                    output_lines.append(
-                        f"-- Issue #2174: SQLite does not support JSON expression indexes before 3.38.0"
-                    )
-                    output_lines.append(
-                        f"-- Applications needing this index should use PostgreSQL or upgrade SQLite."
-                    )
-                    # Comment out the entire index definition for reference
-                    output_lines.append(f"-- {full_idx};")
-                    output_lines.append("")
+                output_lines.append(
+                    "-- Issue #2174: SQLite does not support JSON expression indexes before 3.38.0"
+                )
+                output_lines.append(
+                    "-- Applications needing this index should use PostgreSQL or upgrade SQLite."
+                )
+                # Comment out the entire index definition for reference
+                output_lines.append(f"-- {full_idx};")
+                output_lines.append("")
                 i += 1
                 continue
 
