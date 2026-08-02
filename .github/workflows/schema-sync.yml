@@ -56,10 +56,9 @@ jobs:
       - name: Configure Git for checkout
         run: |
           # Configure Git to ignore submodule issues during checkout
-          # These settings help Git skip validation of submodule entries
+          # Work around erroneously committed .worktrees submodule entries
           git config --global submodule.ignore all
           git config --global submodule.active false
-          git config --global checkout.checkStats false
 
       - uses: actions/checkout@v6
         with:
