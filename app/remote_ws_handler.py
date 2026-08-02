@@ -639,6 +639,7 @@ class RemoteWSHandler(WSGIHandler):
 
         # Issue #2183: Check if session is expired
         import time as _time
+
         expires_at = info.get("expires_at")
         if expires_at and _time.time() > expires_at:
             logger.warning("VSCode WS handler: session expired %s", vscode_id[:8])

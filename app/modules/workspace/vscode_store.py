@@ -191,7 +191,7 @@ class VSCodeInfoStore:
         info = self.get(machine_id, vscode_id)
         if not info:
             return True  # Not found is treated as expired
-        expires_at = info.get("expires_at")
+        expires_at: float | None = info.get("expires_at")
         if expires_at is None:
             return False  # No expiry set, not expired
         return time.time() > expires_at

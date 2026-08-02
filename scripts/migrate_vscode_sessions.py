@@ -20,8 +20,8 @@ import time
 # Add project root to path
 sys.path.insert(0, ".")
 
-from app.modules.workspace.vscode_store import vscode_info_store
 from app.modules.workspace.remote_agent_manager import get_remote_agent_manager
+from app.modules.workspace.vscode_store import vscode_info_store
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -105,9 +105,7 @@ def migrate_legacy_sessions(dry_run: bool = False, verbose: bool = False) -> tup
             migration_data["expires_at"] = expires_at
 
         if dry_run:
-            logger.info(
-                f"[DRY RUN] Would migrate session {vscode_id[:8]}: {migration_data}"
-            )
+            logger.info(f"[DRY RUN] Would migrate session {vscode_id[:8]}: {migration_data}")
             migrated_count += 1
         else:
             # Apply migration
@@ -135,13 +133,17 @@ def main():
     if args.dry_run:
         logger.info("DRY RUN MODE: No changes will be made")
 
-    migrated_count, failed_count = migrate_legacy_sessions(dry_run=args.dry_run, verbose=args.verbose)
+    migrated_count, failed_count = migrate_legacy_sessions(
+        dry_run=args.dry_run, verbose=args.verbose
+    )
 
     logger.info(f"Migration complete: {migrated_count} migrated, {failed_count} failed")
 
     if failed_count > 0:
         logger.warning("Some sessions could not be migrated due to missing machine info")
-        logger.warning("These sessions will need to be restarted after the 30-day transition period")
+        logger.warning(
+            "These sessions will need to be restarted after the 30-day transition period"
+        )
 
     return 0 if failed_count == 0 else 1
 

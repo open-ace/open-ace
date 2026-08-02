@@ -1810,7 +1810,7 @@ def agent_message():
 
     elif msg_type == "vscode_status":
         # Agent reports VSCode (code-server) status
-        from app.modules.workspace.vscode_store import vscode_info_store, VSCODE_SESSION_TTL
+        from app.modules.workspace.vscode_store import VSCODE_SESSION_TTL, vscode_info_store
 
         vscode_id = data.get("vscode_id", "")
         status = data.get("status", "")
@@ -1857,10 +1857,10 @@ def agent_message():
                     "Cannot create VSCode session %s: unable to determine tenant_id",
                     vscode_id[:8],
                 )
-                return jsonify({
-                    "success": False,
-                    "error": "Cannot determine tenant for machine"
-                }), 500
+                return (
+                    jsonify({"success": False, "error": "Cannot determine tenant for machine"}),
+                    500,
+                )
 
             # Calculate expiration time
             now = time.time()
