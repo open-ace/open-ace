@@ -592,12 +592,18 @@ chmod -R 755 ~/.open-ace/
 
 ## Security Considerations
 
-1. **Authentication**: Enable user authentication in production
-2. **HTTPS**: Use reverse proxy (nginx/Apache) with SSL
-3. **Firewall**: Restrict access to port 19888
-4. **Secrets**: Use environment variables or a secret manager for sensitive data
-5. **Dedicated encryption key**: Set `OPENACE_ENCRYPTION_KEY` explicitly; encrypted secret storage no longer derives from `SECRET_KEY`
-6. **No placeholder secrets**: Do not use the following placeholder values in production:
+1. **Security Mode**: Must explicitly set `OPENACE_SECURITY_MODE` (Issue #2185)
+   - `production`: Enforce security checks. Secrets must be explicitly set. Weak passwords forbidden.
+   - `pilot`: Allow auto-generated secrets with strong warnings. Suitable for trial environments.
+   - `development`: Allow auto-generated secrets with general warnings. Suitable for development.
+   - **Important**: The system no longer silently falls back to a default mode. Explicit configuration required.
+
+2. **Authentication**: Enable user authentication in production
+3. **HTTPS**: Use reverse proxy (nginx/Apache) with SSL
+4. **Firewall**: Restrict access to port 19888
+5. **Secrets**: Use environment variables or a secret manager for sensitive data
+6. **Dedicated encryption key**: Set `OPENACE_ENCRYPTION_KEY` explicitly; encrypted secret storage no longer derives from `SECRET_KEY`
+7. **No placeholder secrets**: Do not use the following placeholder values in production:
    - `change-me-in-production`
    - `replace-with-random-*` (k8s manifest placeholders)
    - Development placeholders like `dev-secret-key`, `dev-smtp-password-key`, `default-secret-key`
