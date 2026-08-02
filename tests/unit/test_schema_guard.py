@@ -81,6 +81,32 @@ class TestCheckSchemaCompatibility:
             # Should not raise
             check_schema_compatibility(conn)
 
+    def test_normal_version_after_baseline_passes(self):
+        """Test that a normal timestamp version after baseline passes check."""
+        engine = sa.create_engine("sqlite:///:memory:")
+        with engine.connect() as conn:
+            conn.execute(sa.text("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)"))
+            conn.execute(sa.text("INSERT INTO alembic_version (version_num) VALUES ('20260802_001')"))
+            conn.commit()
+
+            # Should not raise - this is a valid version after baseline
+            check_schema_compatibility(conn)
+
+    def test_older_timestamp_version_with_explicit_min(self):
+        """Test that older timestamp version fails with explicit min_revision."""
+        engine = sa.create_engine("sqlite:///:memory:")
+        with engine.connect() as conn:
+            conn.execute(sa.text("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)"))
+            conn.execute(sa.text("INSERT INTO alembic_version (version_num) VALUES ('20260701_001')"))
+            conn.commit()
+
+            # Should raise when checking against a newer timestamp revision
+            with pytest.raises(SchemaCompatibilityError) as exc_info:
+                check_schema_compatibility(conn, min_revision="20260801_001")
+
+            assert exc_info.value.current_revision == "20260701_001"
+            assert exc_info.value.min_revision == "20260801_001"
+
     def test_incompatible_version_raises(self):
         """Test that incompatible version raises error."""
         engine = sa.create_engine("sqlite:///:memory:")

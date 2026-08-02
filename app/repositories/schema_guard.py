@@ -129,7 +129,6 @@ def check_schema_compatibility(
 
     # Heuristic: valid revisions typically start with a date pattern (YYYYMMDD)
     # or are the baseline. Unknown revisions are rejected.
-    import re
     if not (current_revision.startswith("20") or current_revision == "baseline_2026_06_23"):
         # Unknown revision format - reject it
         raise SchemaCompatibilityError(
@@ -141,7 +140,18 @@ def check_schema_compatibility(
         )
 
     # Known revision format - check if it's at least baseline
-    # For timestamp-based revisions, lexicographical comparison works
+    # SPECIAL CASE: baseline starts with 'b', timestamp revisions start with '20'
+    # Lexicographical comparison fails here: '2' < 'b', so "20260802" < "baseline"
+    # We handle this explicitly: any timestamp revision (starts with '20') is
+    # assumed to be >= baseline because baseline is the starting point.
+    if current_revision.startswith("20") and min_revision.startswith("baseline"):
+        # Timestamp revision (starts with '20') is always >= baseline
+        # because baseline is the starting point and timestamp revisions come after
+        logger.info(f"Database schema version check passed: {current_revision}")
+        return
+
+    # For other cases, use lexicographical comparison
+    # (e.g., comparing two timestamp revisions)
     if current_revision < min_revision:
         raise SchemaCompatibilityError(
             f"Database schema revision '{current_revision}' is below minimum "
