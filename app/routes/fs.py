@@ -23,6 +23,7 @@ from flask import Blueprint, Response, g, jsonify, request, stream_with_context
 from app.repositories.user_repo import UserRepository
 from app.utils.workspace import (
     OPENACE_CHOWN_WRAPPER,
+    OPENACE_RM_WRAPPER,
     OPENACE_WRITE_AS_WRAPPER,
     _is_wrapper_available,
     get_workspace_base_dir,
@@ -1364,26 +1365,34 @@ def api_delete_file():
         else:
             effective = get_effective_system_account(system_account)
             assert effective is not None  # _is_direct_access 为 False 时 effective 必定非 None
-            result = run_as_user(effective, ["rm", "--", target_path])
+            # 【安全加固 Issue #2181】使用 openace-rm 安全 wrapper 替代 rm 通配
+            # openace-rm 验证：目标用户、路径白名单、symlink 逃逸、owner 匹配、危险选项拒绝
+            result = subprocess.run(
+                ["sudo", OPENACE_RM_WRAPPER, effective, target_path],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
             if result.returncode != 0:
                 stderr = (result.stderr or "").strip()
-                logger.warning(f"rm as {effective} failed for {target_path}: {stderr}")
-                # sudoers policy denial vs. filesystem permission error
-                if "not allowed" in stderr.lower() or "sudo" in stderr.lower():
-                    return (
-                        jsonify(
-                            {
-                                "error": "Cannot delete file as owner "
-                                "(sudoers policy missing 'rm' for this deployment)"
-                            }
-                        ),
-                        500,
-                    )
-                return jsonify({"error": "Permission denied"}), 403
+                logger.warning(f"openace-rm as {effective} failed for {target_path}: {stderr}")
+                # Parse wrapper exit codes for appropriate error messages
+                if result.returncode == 2:
+                    return jsonify({"error": "Invalid path or access denied"}), 403
+                elif result.returncode == 3:
+                    return jsonify({"error": "Invalid target user"}), 403
+                elif result.returncode == 7:
+                    return jsonify({"error": "Symlink escape detected"}), 403
+                elif result.returncode in (4, 6):
+                    logger.error(f"TOCTOU or lock error for {target_path}")
+                    return jsonify({"error": "System error, please retry"}), 500
+                return jsonify({"error": f"Delete failed: {stderr}"}), 500
         logger.info(f"Deleted file: {target_path}")
         return jsonify({"success": True, "path": target_path})
     except PermissionError:
         return jsonify({"error": "Permission denied"}), 403
+    except subprocess.TimeoutExpired:
+        return jsonify({"error": "Delete operation timeout"}), 500
     except OSError as e:
         logger.error(f"Delete failed for {target_path}: {e}")
         return jsonify({"error": f"Delete failed: {e}"}), 500

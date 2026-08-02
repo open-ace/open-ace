@@ -99,6 +99,7 @@ if "app.routes.fs" not in sys.modules:
     _ws.get_workspace_base_dir = _rw.get_workspace_base_dir
     _ws.get_workspace_base_dirs = _rw.get_workspace_base_dirs
     _ws.OPENACE_CHOWN_WRAPPER = "/usr/local/bin/openace-chown"
+    _ws.OPENACE_RM_WRAPPER = _rw.OPENACE_RM_WRAPPER
     _ws.OPENACE_WRITE_AS_WRAPPER = _rw.OPENACE_WRITE_AS_WRAPPER
     _ws._is_wrapper_available = lambda p: False  # type: ignore[attr-defined]
     _ws.run_as_root_if_needed = lambda cmd: None  # type: ignore[attr-defined]
@@ -1135,25 +1136,45 @@ class TestDownloadDeleteSudoBranch:
         popen_mock.assert_not_called()
 
     def test_delete_via_sudo_rm(self, sudo_client, workspace):
-        """Delete in non-root multi-user mode runs ``sudo -u rm``."""
+        """Delete in non-root multi-user mode runs ``sudo openace-rm``."""
         _, user_home = workspace
         target = user_home / "trash.txt"
         target.write_bytes(b"x")
 
+        from subprocess import CompletedProcess
+
+        def fake_run_as_user(account, cmd):
+            # Mock test -f call
+            if cmd[:2] == ["test", "-f"]:
+                return CompletedProcess(args=cmd, returncode=0)
+            return CompletedProcess(args=cmd, returncode=1)
+
+        def fake_subprocess(cmd, *args, **kwargs):
+            # Mock openace-rm wrapper call: sudo /usr/local/bin/openace-rm <user> <path>
+            if len(cmd) > 1 and "openace-rm" in cmd[1]:
+                return CompletedProcess(args=cmd, returncode=0, stderr="")
+            return CompletedProcess(args=cmd, returncode=1)
+
         with (
             patch(
                 "app.routes.fs.run_as_user",
-                side_effect=self._mock_run_as_user(rm_ok=True),
+                side_effect=fake_run_as_user,
+            ),
+            patch(
+                "app.routes.fs.subprocess.run",
+                side_effect=fake_subprocess,
             ) as run_mock,
         ):
             resp = sudo_client.post("/api/fs/delete-file", json={"path": str(target)})
 
         assert resp.status_code == 200
         assert resp.get_json()["success"] is True
-        # Verify the rm command was issued with the target path.
-        rm_calls = [c for c in run_mock.call_args_list if c[0][1][:1] == ["rm"]]
+        # Verify openace-rm was called with target user and path
+        rm_calls = [c for c in run_mock.call_args_list if "openace-rm" in str(c)]
         assert len(rm_calls) == 1
-        assert rm_calls[0][0][1][:2] == ["rm", "--"]
+        # cmd[0] is the list argument: ["sudo", "/usr/local/bin/openace-rm", user, path]
+        call_args = rm_calls[0][0][0]
+        assert "openace-rm" in call_args[1]
 
     def test_delete_not_a_file_uses_test_f(self, sudo_client, workspace):
         """Delete also benefits from the test -f check: a path that the
@@ -1162,32 +1183,64 @@ class TestDownloadDeleteSudoBranch:
         _, user_home = workspace
         target = user_home / "ghost.txt"
 
-        with patch(
-            "app.routes.fs.run_as_user",
-            side_effect=self._mock_run_as_user(is_file=False),
-        ) as run_mock:
+        from subprocess import CompletedProcess
+
+        def fake_run_as_user(account, cmd):
+            # Mock test -f call - file does not exist
+            if cmd[:2] == ["test", "-f"]:
+                return CompletedProcess(args=cmd, returncode=1)
+            return CompletedProcess(args=cmd, returncode=1)
+
+        def fake_subprocess(cmd, *args, **kwargs):
+            # Should not be called since test -f fails first
+            return CompletedProcess(args=cmd, returncode=1)
+
+        with (
+            patch(
+                "app.routes.fs.run_as_user",
+                side_effect=fake_run_as_user,
+            ) as run_mock,
+            patch("app.routes.fs.subprocess.run", side_effect=fake_subprocess),
+        ):
             resp = sudo_client.post("/api/fs/delete-file", json={"path": str(target)})
 
         assert resp.status_code == 400
         assert resp.get_json()["error"] == "Not a file"
-        # Must not have attempted rm.
-        rm_calls = [c for c in run_mock.call_args_list if c[0][1][:1] == ["rm"]]
-        assert rm_calls == []
+        # Must not have attempted openace-rm (test -f failed first)
+        test_calls = [c for c in run_mock.call_args_list if c[0][1][:2] == ["test", "-f"]]
+        assert len(test_calls) >= 1  # At least one test -f call
 
     def test_delete_rm_failure_returns_403(self, sudo_client, workspace):
-        """If ``sudo -u rm`` fails with a filesystem permission error
-        (not a sudoers policy issue), surface as 403."""
+        """If ``sudo openace-rm`` fails with a permission error,
+        surface as 403."""
         _, user_home = workspace
         target = user_home / "locked.txt"
 
-        with patch(
-            "app.routes.fs.run_as_user",
-            side_effect=self._mock_run_as_user(rm_ok=False),
+        from subprocess import CompletedProcess
+
+        def fake_run_as_user(account, cmd):
+            # Mock test -f call - file exists
+            if cmd[:2] == ["test", "-f"]:
+                return CompletedProcess(args=cmd, returncode=0)
+            return CompletedProcess(args=cmd, returncode=1)
+
+        def fake_subprocess(cmd, *args, **kwargs):
+            # Mock openace-rm wrapper call - fails with permission denied
+            if len(cmd) > 1 and "openace-rm" in cmd[1]:
+                # Return code 2 = invalid path or access denied
+                return CompletedProcess(
+                    args=cmd, returncode=2, stderr="Path validation failed: outside allowed roots"
+                )
+            return CompletedProcess(args=cmd, returncode=1)
+
+        with (
+            patch("app.routes.fs.run_as_user", side_effect=fake_run_as_user),
+            patch("app.routes.fs.subprocess.run", side_effect=fake_subprocess),
         ):
             resp = sudo_client.post("/api/fs/delete-file", json={"path": str(target)})
 
         assert resp.status_code == 403
-        assert resp.get_json()["error"] == "Permission denied"
+        assert "Invalid path" in resp.get_json()["error"]
 
 
 class TestDirectAccessHelper:

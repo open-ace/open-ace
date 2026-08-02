@@ -1950,18 +1950,18 @@ install_run_as_wrapper() {
     install -o root -g root -m 755 "$validate_src" "$validate_dst" || return 1
 
     # Single source of truth for the account pin + workspace roots, shared by
-    # the wrapper and its sudoers provisioning. root:root 0640 so the openace
-    # service account cannot alter the constraints.
+    # the wrapper and its sudoers provisioning. root:root 0644 so the openace
+    # service account can read but not alter the constraints.
     local agent_account="${OPENACE_AUTONOMOUS_AGENT_ACCOUNT:-openace-agent}"
     install -d -o root -g root -m 755 /etc/openace || return 1
     cat > /etc/openace/agent-launcher.conf <<CONF_EOF
 # Issue #2018: constraints for openace-run-as --isolated.
-# root:root 0640 — the openace service account cannot edit this file.
+# root:root 0644 — the openace service account can read but not edit this file.
 OPENACE_AUTONOMOUS_AGENT_ACCOUNT="${agent_account}"
 ALLOWED_WORKSPACE_ROOTS="/home /workspace"
 CONF_EOF
     chown root:root /etc/openace/agent-launcher.conf 2>/dev/null || true
-    chmod 0640 /etc/openace/agent-launcher.conf
+    chmod 0644 /etc/openace/agent-launcher.conf
     print_success "Installed run-as wrapper to $dst"
     return 0
 }
@@ -2071,12 +2071,12 @@ agent_account="${OPENACE_AUTONOMOUS_AGENT_ACCOUNT:-openace-agent}"
 conf_tmp="$(mktemp)"
 cat > "$conf_tmp" <<CONF_EOF
 # Issue #2018: constraints for openace-run-as --isolated.
-# root:root 0640 — the openace service account cannot edit this file.
+# root:root 0644 — the openace service account can read but not edit this file.
 OPENACE_AUTONOMOUS_AGENT_ACCOUNT="${agent_account}"
 ALLOWED_WORKSPACE_ROOTS="/home /workspace"
 CONF_EOF
 as_root install -d -o root -g root -m 755 /etc/openace
-as_root install -o root -g root -m 640 "$conf_tmp" /etc/openace/.agent-launcher.conf.new
+as_root install -o root -g root -m 644 "$conf_tmp" /etc/openace/.agent-launcher.conf.new
 as_root mv /etc/openace/.agent-launcher.conf.new /etc/openace/agent-launcher.conf
 
 service_user="$(systemctl show open-ace.service -p User --value 2>/dev/null || true)"
@@ -2219,35 +2219,41 @@ $run_user ALL=(root) NOPASSWD: $python_bin $script_path *"
         webui_local_rule="$run_user ALL=(ALL) NOPASSWD: $webui_local_path *"
     fi
 
-    # 【修复 Issue #1262】使用 Cmnd_Alias 引用，避免重复定义命令列表
+    # 【安全加固 Issue #1262 + #2181】使用 Cmnd_Alias 引用
     # utility_rule 在用户规则中引用 OPENACE_UTILS Cmnd_Alias
-    local utility_rule="$run_user ALL=(ALL) NOPASSWD: OPENACE_UTILS"
+    # 【Issue #2181】限制 runas 为 root（原 ALL 改为 root）
+    local utility_rule="$run_user ALL=(root) NOPASSWD: OPENACE_UTILS"
 
-    # 【修复 Issue #1395】autonomous 开发 CLI 工具权限
-    local cli_rule="$run_user ALL=(ALL) NOPASSWD: OPENACE_CLI"
+    # 【安全加固 Issue #2181】删除 AI CLI 通配规则
+    # 原 cli_rule 已删除，所有 AI CLI 启动必须通过 openace-run-as --isolated
+    # 不再需要 cli_rule 变量
 
     # 【修复 Issue #1395】跨用户启动 agent CLI 的 run-as wrapper 权限。
     # wrapper 以 root 身份 cd 到项目目录，再用 runuser 切换到目标用户 exec CLI，
     # 解决 Popen(cwd=用户私有目录) 的 [Errno 13]。只授权 wrapper 本身，不放开
     # bash/node/claude。wrapper 路径必须与 scripts/openace-run-as.sh 安装位置一致。
+    # 【Issue #2181】保留此规则，openace-run-as 是特殊的需要 --isolated 参数
     local wrapper_path="/usr/local/bin/openace-run-as"
     local wrapper_rule=""
     if [ -x "$wrapper_path" ]; then
         wrapper_rule="$run_user ALL=(root) NOPASSWD: $wrapper_path --isolated *"
     fi
 
-    # 【修复 Issue #1916】跨用户文件写入 wrapper 权限。
-    # Package 非 root 多用户模式下，服务账号无法写入用户 0700 家目录，
-    # 且 cp/tee/mv 不在 OPENACE_UTILS 白名单。该 wrapper 以 root 身份运行，
-    # 内部用 runuser 切换到目标用户写文件。只授权 wrapper 本身。
-    local write_as_wrapper_path="/usr/local/bin/openace-write-as"
-    local write_as_wrapper_rule=""
-    if [ -x "$write_as_wrapper_path" ]; then
-        write_as_wrapper_rule="$run_user ALL=(root) NOPASSWD: $write_as_wrapper_path *"
-    fi
+    # 【安全加固 Issue #2181】安全 wrapper 规则生成
+    # 遍历所有安全 wrapper，为每个存在的 wrapper 生成规则
+    # 注意：openace-write-as 已包含在此循环中，不再单独处理
+    local security_wrapper_rules=""
+    for wrapper in openace-chown openace-useradd openace-cat openace-mkdir openace-rm openace-write-as; do
+        local wrapper_bin="/usr/local/bin/${wrapper}"
+        if [ -x "$wrapper_bin" ]; then
+            security_wrapper_rules="${security_wrapper_rules}
+$run_user ALL=(root) NOPASSWD: $wrapper_bin *"
+        fi
+    done
 
     # Build current user's complete rule block (avoid empty lines from empty variables)
     local current_user_rules="# Rules for $run_user (updated on $(date '+%Y-%m-%d %H:%M:%S'))
+# WebUI 启动规则：允许以任意用户运行，Python 层验证目标用户
 $run_user ALL=(ALL) NOPASSWD: $webui_path *"
 
     # Only add webui_local_rule if not empty
@@ -2256,21 +2262,21 @@ $run_user ALL=(ALL) NOPASSWD: $webui_path *"
 ${webui_local_rule}"
     fi
 
-    # Always add utility and CLI rules (they reference Cmnd_Alias, never empty)
+    # Add utility rule (references Cmnd_Alias)
     current_user_rules="${current_user_rules}
-${utility_rule}
-${cli_rule}"
+${utility_rule}"
+
+    # Add security wrapper rules if any
+    if [ -n "$security_wrapper_rules" ]; then
+        current_user_rules="${current_user_rules}
+${security_wrapper_rules}"
+    fi
 
     # Add run-as wrapper rule if the wrapper is installed (Issue #1395)
+    # 【Issue #2181】openace-run-as 是特殊的，需要 --isolated 参数
     if [ -n "$wrapper_rule" ]; then
         current_user_rules="${current_user_rules}
 ${wrapper_rule}"
-    fi
-
-    # Add write-as wrapper rule if the wrapper is installed (Issue #1916)
-    if [ -n "$write_as_wrapper_rule" ]; then
-        current_user_rules="${current_user_rules}
-${write_as_wrapper_rule}"
     fi
 
     # Only add fetch_rules if not empty
@@ -2285,10 +2291,15 @@ ${fetch_rules}"
 # Allows the service account to run qwen-code-webui as other users
 # and perform file system operations as other users"
 
-    local defaults_section="# Preserve auth environment variables for qwen CLI authentication
-# and webui environment variables for sudo env_keep passing
-# GH_TOKEN and GIT_* vars are for autonomous dev GitHub operations (Issue #1517).
-Defaults env_keep += \"OPENAI_API_KEY OPENAI_BASE_URL BAILIAN_CODING_PLAN_API_KEY ANTHROPIC_API_KEY ANTHROPIC_BASE_URL GEMINI_API_KEY GEMINI_BASE_URL OPENCLAW_TOKEN OPENCLAW_GATEWAY_URL OPENACE_LOG_DIR OPENACE_PROXY_TOKEN OPENACE_PROXY_URL SESSION_TIMEOUT_MS KEEPALIVE_INTERVAL_MS PATH GH_TOKEN GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL\"
+    local defaults_section="# Preserve environment variables for sudo env_keep passing
+# 【安全加固 Issue #2181】清理敏感变量
+# Agent 进程通过 openace-run-as --isolated 使用 env -i，不继承 env_keep
+# env_keep 主要用于 WebUI 启动（sudo -u），需要清理敏感凭据
+# 移除：OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY, OPENCLAW_TOKEN, GH_TOKEN
+# 保留：非敏感变量（proxy_token, GIT_*签名变量, PATH）
+Defaults env_keep += \"OPENACE_PROXY_TOKEN OPENACE_PROXY_URL OPENACE_MODEL OPENACE_LOG_DIR PATH\"
+Defaults env_keep += \"GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL\"
+Defaults env_keep += \"SESSION_TIMEOUT_MS KEEPALIVE_INTERVAL_MS\"
 
 # Fix: Add /usr/local/bin to secure_path for Node.js v20+ compatibility
 # qwen-code-webui requires Node.js >= 20, which may be installed in /usr/local/bin
@@ -2302,18 +2313,25 @@ Defaults secure_path = /usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin"
     # 【修复 Issue #1395】添加 autonomous 开发所需的 CLI 工具和 git/gh 命令
     # CLI 工具路径可能是 /usr/bin/qwen-code 或 /usr/local/bin/qwen-code（取决于 npm 安装方式）
     # 使用通配符覆盖所有可能的 CLI 工具路径
-    local cmnd_alias_section="# Utility commands for multi-user workspace operations
+    local cmnd_alias_section="# 【安全加固 Issue #1855 + #2181】安全命令别名定义
+# Utility commands for multi-user workspace operations
 # Commands must have '*' suffix to allow arguments (Issue #1262)
 # useradd/id: for creating system users in Package multi-user mode (uid >= 1000 validated in code)
 # git/gh: for autonomous development workflows (Issue #1395)
-# cat/rm: for personal-files download/delete as the file owner (Issue #1902).
-#   sudo -u <owner> cat|rm <path> — DAC constrains operations to files the
-#   target user already owns/can access.
-Cmnd_Alias OPENACE_UTILS = /usr/bin/test *, /usr/bin/ls *, /usr/bin/cat *, /usr/bin/stat *, /usr/bin/mkdir *, /usr/bin/chown *, /usr/bin/useradd *, /usr/bin/id *, /usr/bin/rm *, /usr/bin/find *, /usr/bin/git *, /usr/bin/gh *, /usr/local/bin/git *, /usr/local/bin/gh *
+# 【Issue #2181】移除高风险通配命令 cat/chown/useradd/rm，改用安全 wrapper
+# 保留：test, ls, stat, mkdir, id, find（低风险或只读）
+# find 是只读操作，DAC 已保护敏感目录
+Cmnd_Alias OPENACE_UTILS = /usr/bin/test *, /usr/bin/ls *, /usr/bin/stat *, /usr/bin/mkdir *, /usr/bin/id *, /usr/bin/find *, /usr/bin/git *, /usr/bin/gh *, /usr/local/bin/git *, /usr/local/bin/gh *
 
-# Autonomous development CLI tools (Issue #1395)
-# Allow running qwen-code/codex/etc. as target user for permission isolation
-Cmnd_Alias OPENACE_CLI = /usr/bin/qwen-code *, /usr/local/bin/qwen-code *, /usr/bin/codex *, /usr/local/bin/codex *, /usr/bin/qwen *, /usr/local/bin/qwen *, /usr/bin/claude *, /usr/local/bin/claude *, /usr/bin/openclaw *, /usr/local/bin/openclaw *, /usr/bin/zcode *, /usr/local/bin/zcode *"
+# 【安全加固 Issue #2181】安全 wrapper 规则
+# 以下 wrapper 替代原通配命令，内部验证参数安全性
+# openace-chown: 替代 chown *
+# openace-useradd: 替代 useradd *
+# openace-cat: 替代 cat *
+# openace-mkdir: 安全目录创建
+# openace-rm: 替代 rm *，验证路径/用户/owner
+# openace-write-as: 跨用户文件写入
+# 注意：实际规则在 current_user_rules 中动态生成（仅当 wrapper 存在时）"
 
     # ===== Incremental update logic =====
     if [ -f "$sudoers_file" ]; then
@@ -2422,37 +2440,29 @@ ${line}"
             need_update=true
         fi
 
-        # 【修复 Issue #1395】Check OPENACE_CLI Cmnd_Alias completeness.
-        # The CLI list grew over time (qwen-code/codex/qwen → +claude/openclaw/
-        # zcode). Without this probe a pre-existing sudoers file whose other
-        # checks all pass would skip the rewrite, leaving the stale short CLI
-        # list in place — claude/openclaw/zcode would lack direct-sudo fallback
-        # authorization. Check the Cmnd_Alias definition line for each newer
-        # CLI path; any missing one trips a rewrite.
-        local cli_alias_line=""
-        cli_alias_line=$(grep "Cmnd_Alias OPENACE_CLI" "$sudoers_file" 2>/dev/null || true)
-        if [ -n "$cli_alias_line" ]; then
-            for cli in claude openclaw zcode; do
-                if ! echo "$cli_alias_line" | grep -qE "/${cli} \*"; then
-                    print_warning "Sudoers OPENACE_CLI missing '$cli' (CLI list incomplete)"
-                    need_update=true
-                    break
-                fi
-            done
-        fi
+        # 【安全加固 Issue #2181】检查安全 wrapper 规则完整性
+        # 确保所有已安装的安全 wrapper 都有对应的 sudoers 规则
+        for wrapper in openace-chown openace-useradd openace-cat openace-mkdir openace-rm; do
+            local wrapper_bin="/usr/local/bin/${wrapper}"
+            if [ -x "$wrapper_bin" ] && \
+               ! grep -E "^${run_user} .*(NOPASSWD: )?${wrapper_bin}( |\*|$)" "$sudoers_file" 2>/dev/null; then
+                print_warning "Sudoers missing $wrapper rule for user '$run_user'"
+                need_update=true
+                break
+            fi
+        done
 
-        # 【修复 Issue #1522】Check env_keep contains GH_TOKEN and GIT_* vars.
-        # The env_keep list grew over time (Issue #1517 added GH_TOKEN/GIT_* vars).
-        # Without this check, incremental upgrades skip the rewrite when other
-        # checks pass, leaving GH_TOKEN missing and breaking autonomous dev
-        # workflows (gh issue view fails with "exit 4: populate the GH_TOKEN").
-        if ! grep -q "GH_TOKEN" "$sudoers_file" 2>/dev/null; then
-            print_warning "Sudoers env_keep missing GH_TOKEN (autonomous dev will fail)"
+        # 【安全加固 Issue #2181】检查是否存在已废弃的 OPENACE_CLI 规则
+        # 如果存在，触发更新以删除这些规则
+        if grep -q "Cmnd_Alias OPENACE_CLI" "$sudoers_file" 2>/dev/null; then
+            print_warning "Sudoers contains deprecated OPENACE_CLI rule (removed in Issue #2181)"
             need_update=true
         fi
 
-        if ! grep -q "GIT_AUTHOR_NAME" "$sudoers_file" 2>/dev/null; then
-            print_warning "Sudoers env_keep missing GIT_* vars (git commits may have wrong author)"
+        # 【安全加固 Issue #2181】检查 env_keep 是否包含敏感变量
+        # 如果包含 API_KEY 或 GH_TOKEN，触发更新以清理
+        if grep -E "env_keep.*(OPENAI_API_KEY|ANTHROPIC_API_KEY|GEMINI_API_KEY|OPENCLAW_TOKEN|GH_TOKEN)" "$sudoers_file" 2>/dev/null | grep -q "."; then
+            print_warning "Sudoers env_keep contains sensitive variables (triggering cleanup per Issue #2181)"
             need_update=true
         fi
 

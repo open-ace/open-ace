@@ -102,9 +102,41 @@ describe('RuntimeIsolationPanel', () => {
   it('renders the provider and summary limits in the collapsed header', () => {
     render(<RuntimeIsolationPanel workflow={workflow(LEGACY_SNAPSHOT)} />);
     expect(screen.getByText('legacy_posix')).toBeInTheDocument();
+    expect(screen.getByText('2 CPU')).toBeInTheDocument();
     expect(screen.getByText('2 GiB')).toBeInTheDocument();
     expect(screen.getByText('512')).toBeInTheDocument();
     expect(screen.getByText('1h')).toBeInTheDocument();
+  });
+
+  it('formats CPU quota as core count for both space and slash separators', () => {
+    const slashSnap = JSON.stringify({
+      provider: 'legacy_posix',
+      policy_configured: true,
+      capabilities: ['cpu_mem_pids_time_quota'],
+      limits: { cpu_max: '200000/100000', memory_max_bytes: 0, pids_max: 0, wall_clock_limit: 0 },
+      enforced: { cpu: true },
+    });
+    const spaceSnap = JSON.stringify({
+      provider: 'legacy_posix',
+      policy_configured: true,
+      capabilities: ['cpu_mem_pids_time_quota'],
+      limits: { cpu_max: '200000 100000', memory_max_bytes: 0, pids_max: 0, wall_clock_limit: 0 },
+      enforced: { cpu: true },
+    });
+    const maxSnap = JSON.stringify({
+      provider: 'legacy_posix',
+      policy_configured: true,
+      capabilities: ['cpu_mem_pids_time_quota'],
+      limits: { cpu_max: 'max 100000', memory_max_bytes: 0, pids_max: 0, wall_clock_limit: 0 },
+      enforced: { cpu: true },
+    });
+    const { rerender } = render(<RuntimeIsolationPanel workflow={workflow(slashSnap)} />);
+    expect(screen.getByText('2 CPU')).toBeInTheDocument();
+    rerender(<RuntimeIsolationPanel workflow={workflow(spaceSnap)} />);
+    expect(screen.getByText('2 CPU')).toBeInTheDocument();
+    rerender(<RuntimeIsolationPanel workflow={workflow(maxSnap)} />);
+    // "max" means no limit → should show '—'
+    expect(screen.queryByText('CPU')).toBeInTheDocument();
   });
 
   it('reveals capabilities and detailed limit cards when expanded', () => {

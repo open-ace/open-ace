@@ -195,7 +195,7 @@ RUN chmod 755 /usr/local/bin/openace-run-as \
     mkdir -p /etc/openace && \
     printf '%s\n' \
         '# Issue #2018: constraints shared by openace-run-as and its sudoers' \
-        '# rule. root:root 0640 — the openace service account cannot edit it.' \
+        '# rule. root:root 0644 — the openace service account can read but not edit it.' \
         'OPENACE_AUTONOMOUS_AGENT_ACCOUNT="openace-agent"' \
         'ALLOWED_WORKSPACE_ROOTS="/home /workspace"' \
         '# Issue #2020: per-task isolation + resource policy (read by the' \
@@ -211,7 +211,7 @@ RUN chmod 755 /usr/local/bin/openace-run-as \
         'agent_max_concurrent_workflows=3' \
         > /etc/openace/agent-launcher.conf && \
     chown root:root /etc/openace/agent-launcher.conf && \
-    chmod 0640 /etc/openace/agent-launcher.conf && \
+    chmod 0644 /etc/openace/agent-launcher.conf && \
     printf '%s\n' \
         '# Credentialless autonomous agent launcher' \
         'open-ace ALL=(root) NOPASSWD: /usr/local/bin/openace-run-as --isolated *' \
@@ -219,21 +219,24 @@ RUN chmod 755 /usr/local/bin/openace-run-as \
     chmod 440 /etc/sudoers.d/open-ace-autonomous-agent && \
     visudo -c -f /etc/sudoers.d/open-ace-autonomous-agent
 
-# Install security wrappers for multi-user mode (Issue #1855)
+# Install security wrappers for multi-user mode (Issue #1855 + #2181)
 # These wrappers enforce path validation, UID range checks, and audit logging
-# for privileged operations like chown, useradd, cat, mkdir.
+# for privileged operations like chown, useradd, cat, mkdir, rm.
 COPY scripts/openace-chown.sh /usr/local/bin/openace-chown
 COPY scripts/openace-useradd.sh /usr/local/bin/openace-useradd
 COPY scripts/openace-cat.sh /usr/local/bin/openace-cat
 COPY scripts/openace-mkdir.sh /usr/local/bin/openace-mkdir
+COPY scripts/openace-rm.sh /usr/local/bin/openace-rm
 COPY scripts/openace-write-as.sh /usr/local/bin/openace-write-as
 COPY scripts/openace-restore-sudoers.sh /usr/local/bin/openace-restore-sudoers
 RUN chmod 755 /usr/local/bin/openace-chown /usr/local/bin/openace-useradd \
              /usr/local/bin/openace-cat /usr/local/bin/openace-mkdir \
-             /usr/local/bin/openace-write-as /usr/local/bin/openace-restore-sudoers && \
+             /usr/local/bin/openace-rm /usr/local/bin/openace-write-as \
+             /usr/local/bin/openace-restore-sudoers && \
     chown root:root /usr/local/bin/openace-chown /usr/local/bin/openace-useradd \
                     /usr/local/bin/openace-cat /usr/local/bin/openace-mkdir \
-                    /usr/local/bin/openace-write-as /usr/local/bin/openace-restore-sudoers && \
+                    /usr/local/bin/openace-rm /usr/local/bin/openace-write-as \
+                    /usr/local/bin/openace-restore-sudoers && \
     mkdir -p /var/lock && chmod 1777 /var/lock
 
 # NOTE: The image defaults to the non-root open-ace user (uid 1000) so that

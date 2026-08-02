@@ -640,20 +640,43 @@ Add the following content:
 ```bash
 # Allow open-ace service account to run qwen-code-webui as any user
 # Replace 'open-ace' with your actual service account name
+# Note: Python layer validates target user is in database mapping at WebUI startup
 
 open-ace ALL=(ALL) NOPASSWD: /usr/local/bin/qwen-code-webui *
 open-ace ALL=(ALL) NOPASSWD: /usr/bin/qwen-code-webui *
 open-ace ALL=(ALL) NOPASSWD: /opt/qwen-code-webui/bin/qwen-code-webui *
 
-# Allow open-ace to perform file system operations as other users
-# Required for directory browser and project creation in multi-user mode
-open-ace ALL=(ALL) NOPASSWD: /usr/bin/test, /usr/bin/ls, /usr/bin/cat, /usr/bin/stat, /usr/bin/mkdir
+# 【Issue #2181 Security Hardening】Low-risk utility commands
+# Removed cat/chown/useradd/rm wildcards, replaced with secure wrappers
+open-ace ALL=(root) NOPASSWD: /usr/bin/test *, /usr/bin/ls *, /usr/bin/stat *, /usr/bin/mkdir *, /usr/bin/id *, /usr/bin/find *
+
+# 【Issue #2181】Secure wrapper rules
+# These wrappers validate paths, users, and permissions internally
+open-ace ALL=(root) NOPASSWD: /usr/local/bin/openace-chown *
+open-ace ALL=(root) NOPASSWD: /usr/local/bin/openace-useradd *
+open-ace ALL=(root) NOPASSWD: /usr/local/bin/openace-cat *
+open-ace ALL=(root) NOPASSWD: /usr/local/bin/openace-mkdir *
+open-ace ALL=(root) NOPASSWD: /usr/local/bin/openace-rm *
+
+# 【Issue #2181】Cross-user Agent launch wrapper
+# All AI CLI must be launched through this wrapper
+open-ace ALL=(root) NOPASSWD: /usr/local/bin/openace-run-as --isolated *
+
+# 【Issue #2181】Environment variable preservation (non-sensitive only)
+# Agent processes use env -i via openace-run-as --isolated, not inheriting env_keep
+# env_keep is mainly for WebUI startup
+Defaults env_keep += "OPENACE_PROXY_TOKEN OPENACE_PROXY_URL OPENACE_MODEL OPENACE_LOG_DIR PATH"
+Defaults env_keep += "GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL"
+Defaults env_keep += "SESSION_TIMEOUT_MS KEEPALIVE_INTERVAL_MS"
 ```
 
 **Security notes:**
 - Use full paths to prevent path manipulation attacks
 - The `NOPASSWD` flag is required for non-interactive service operation
 - Limit to specific executable paths, not generic `sudo` access
+- **Issue #2181 Hardening**: cat/chown/useradd/rm wildcards removed, replaced with secure wrappers
+- **Issue #2181 Hardening**: env_keep no longer contains sensitive variables (API Keys, GH_TOKEN, etc.)
+- Agent processes launched via `openace-run-as --isolated` use `env -i` for complete environment isolation
 
 ### qwen-code-webui Installation
 
