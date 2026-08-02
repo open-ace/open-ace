@@ -7143,50 +7143,85 @@ class AutonomousOrchestrator:
                     except Exception:
                         pass
             elif branch_has_changes_vs_base and commit_sha == commit_before:
-                # Branch has pre-existing divergence (e.g. it was created
-                # behind main), but the agent produced NO new commit this
-                # session. The diff is NOT the agent's work — treat as failure.
-                logger.warning(
-                    "Branch has %d commits vs origin/main but HEAD unchanged "
-                    "this session (commit_sha == commit_before) — not agent work",
-                    base_diff_stats.get("commits", 0),
-                )
-                if primary_error:
-                    logger.warning(
-                        "Agent failed before producing a new commit; preserving primary error: %s",
-                        primary_error,
+                # Branch has pre-existing divergence, but the agent produced
+                # NO new commit this session. Before declaring failure, check
+                # whether the branch divergence is the agent's own work from a
+                # prior dev round (resume scenario): when a workflow is reset
+                # after an infra failure, the development phase resumes the
+                # prior session; the agent finds the task already done and
+                # correctly produces no new commit. The branch's existing
+                # commits (e.g. "auto: development changes") ARE the work.
+                branch_has_agent_commits = False
+                try:
+                    if branch_name:
+                        log_result = gh._run_git(
+                            ["log", "--oneline", "origin/main..HEAD"], check=False
+                        )
+                        commits_log = log_result.stdout or ""
+                        # Agent-authored auto-dev commits indicate prior work
+                        branch_has_agent_commits = any(
+                            "auto:" in line.lower() or "dev round" in line.lower()
+                            for line in commits_log.splitlines()
+                        )
+                except Exception:
+                    pass
+
+                if branch_has_agent_commits and not primary_error:
+                    # The branch carries the agent's own prior development
+                    # work; the resume correctly produced no duplicate commit.
+                    logger.info(
+                        "Branch '%s' has %d agent-authored commits vs "
+                        "origin/main; accepting as prior work on resume",
+                        branch_name,
+                        base_diff_stats.get("commits", 0),
                     )
+                    diff_stats = base_diff_stats
+                    sha_changed = True  # treat existing branch work as valid
                 else:
+                    # Genuinely no agent work: either no auto-dev commits in
+                    # the divergence (e.g. branch created behind main) or the
+                    # agent reported an error before producing any commit.
                     logger.warning(
-                        "Agent reported success but no new commits detected (SHA unchanged)"
+                        "Branch has %d commits vs origin/main but HEAD unchanged "
+                        "this session (commit_sha == commit_before) — not agent work",
+                        base_diff_stats.get("commits", 0),
                     )
-                milestone_error = (
-                    primary_error
-                    if primary_error
-                    else "Agent produced no code changes (commit SHA unchanged)"
-                )
-                workflow_error = (
-                    f"Development failed: {primary_error}"
-                    if primary_error
-                    else "Development failed: agent produced no code changes"
-                )
-                self.repo.update_milestone(
-                    ms.get("milestone_id", ""),
-                    {
-                        "status": "failed",
-                        "session_id": result.session_id,
-                        "result_summary": self._artifact_text(result)[:300],
-                        "tldr": self._artifact_tldr(result),
-                        "error_message": milestone_error,
-                    },
-                )
-                self._update_workflow(
-                    {
-                        "status": "failed",
-                        "error_message": workflow_error,
-                    }
-                )
-                return
+                    if primary_error:
+                        logger.warning(
+                            "Agent failed before producing a new commit; preserving primary error: %s",
+                            primary_error,
+                        )
+                    else:
+                        logger.warning(
+                            "Agent reported success but no new commits detected (SHA unchanged)"
+                        )
+                    milestone_error = (
+                        primary_error
+                        if primary_error
+                        else "Agent produced no code changes (commit SHA unchanged)"
+                    )
+                    workflow_error = (
+                        f"Development failed: {primary_error}"
+                        if primary_error
+                        else "Development failed: agent produced no code changes"
+                    )
+                    self.repo.update_milestone(
+                        ms.get("milestone_id", ""),
+                        {
+                            "status": "failed",
+                            "session_id": result.session_id,
+                            "result_summary": self._artifact_text(result)[:300],
+                            "tldr": self._artifact_tldr(result),
+                            "error_message": milestone_error,
+                        },
+                    )
+                    self._update_workflow(
+                        {
+                            "status": "failed",
+                            "error_message": workflow_error,
+                        }
+                    )
+                    return
 
         # Block accidental repository-wide rewrites before they can proceed to
         # tests/PR creation.  The threshold is intentionally configurable for
