@@ -139,8 +139,10 @@ class TestGetEnvironmentMode:
             "FLASK_ENV": "production",
         }
         with patch.dict(os.environ, env, clear=False):
-            result = get_environment_mode()
-            assert result == "production"
+            # Mock is_postgresql to return False (SQLite) so Flask_ENV takes effect
+            with patch("app.repositories.database.is_postgresql", return_value=False):
+                result = get_environment_mode()
+                assert result == "production"
 
     def test_default_development_mode(self):
         """Test default development mode."""
@@ -148,7 +150,7 @@ class TestGetEnvironmentMode:
         env = {}
         with patch.dict(os.environ, env, clear=False):
             # Mock is_postgresql to return False (SQLite)
-            with patch("app.repositories.schema_guard.is_postgresql", return_value=False):
+            with patch("app.repositories.database.is_postgresql", return_value=False):
                 result = get_environment_mode()
                 assert result == "development"
 

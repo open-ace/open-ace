@@ -1,7 +1,7 @@
 """Backfill agent_sessions columns missing from historical migrations
 
 Revision ID: 20260802_001_backfill_agent_sessions_columns
-Revises: baseline_2026_06_23
+Revises: 20260801_001_add_platform_tenant_admin_roles
 Create Date: 2026-08-02
 
 Issue: #2190
@@ -101,6 +101,31 @@ def downgrade() -> None:
         return
 
     existing_columns = _column_names(inspector, "agent_sessions")
+
+    # Drop indexes that depend on the columns we're about to remove
+    # These indexes are defined in schema.sql but created by baseline
+    if conn.dialect.name == "postgresql":
+        # PostgreSQL: drop indexes directly
+        try:
+            op.execute("DROP INDEX IF EXISTS idx_agent_sessions_project")
+        except Exception:
+            pass  # Index may not exist
+        try:
+            op.execute("DROP INDEX IF EXISTS idx_agent_sessions_remote_machine_id")
+        except Exception:
+            pass  # Index may not exist
+    else:
+        # SQLite: use batch_alter_table for safety
+        try:
+            with op.batch_alter_table("agent_sessions") as batch_op:
+                batch_op.drop_index("idx_agent_sessions_project")
+        except Exception:
+            pass  # Index may not exist
+        try:
+            with op.batch_alter_table("agent_sessions") as batch_op:
+                batch_op.drop_index("idx_agent_sessions_remote_machine_id")
+        except Exception:
+            pass  # Index may not exist
 
     # Drop columns in reverse order
     if "paused_at" in existing_columns:

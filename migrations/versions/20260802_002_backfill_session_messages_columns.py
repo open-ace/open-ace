@@ -93,6 +93,31 @@ def downgrade() -> None:
 
     existing_columns = _column_names(inspector, "session_messages")
 
+    # Drop indexes that depend on the columns we're about to remove
+    # These indexes are defined in schema.sql but created by baseline
+    if conn.dialect.name == "postgresql":
+        # PostgreSQL: drop indexes directly
+        try:
+            op.execute("DROP INDEX IF EXISTS idx_session_messages_external_message_id")
+        except Exception:
+            pass  # Index may not exist
+        try:
+            op.execute("DROP INDEX IF EXISTS idx_session_messages_source")
+        except Exception:
+            pass  # Index may not exist
+    else:
+        # SQLite: use batch_alter_table for safety
+        try:
+            with op.batch_alter_table("session_messages") as batch_op:
+                batch_op.drop_index("idx_session_messages_external_message_id")
+        except Exception:
+            pass  # Index may not exist
+        try:
+            with op.batch_alter_table("session_messages") as batch_op:
+                batch_op.drop_index("idx_session_messages_source")
+        except Exception:
+            pass  # Index may not exist
+
     # Drop columns in reverse order
     if "milestone_id" in existing_columns:
         if conn.dialect.name == "postgresql":

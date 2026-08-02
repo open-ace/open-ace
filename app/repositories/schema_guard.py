@@ -113,8 +113,35 @@ def check_schema_compatibility(
         return
 
     # Check if current revision meets minimum requirement
-    # For now, we just check if it's at least baseline
-    # More sophisticated version comparison could be added if needed
+    # We use a simple heuristic: if the revision is not at least baseline,
+    # it's considered incompatible. Revision IDs are timestamps, so we can
+    # compare them lexicographically. However, we need to handle edge cases
+    # where the revision ID doesn't follow the expected pattern.
+    #
+    # A revision is considered compatible if:
+    # 1. It matches the min_revision exactly, OR
+    # 2. It's a known valid revision (starts with a timestamp pattern)
+    #    and is lexicographically >= min_revision, OR
+    # 3. It's a custom/unknown revision (in which case we reject it)
+    if current_revision == min_revision:
+        logger.info(f"Database schema version check passed: {current_revision}")
+        return
+
+    # Heuristic: valid revisions typically start with a date pattern (YYYYMMDD)
+    # or are the baseline. Unknown revisions are rejected.
+    import re
+    if not (current_revision.startswith("20") or current_revision == "baseline_2026_06_23"):
+        # Unknown revision format - reject it
+        raise SchemaCompatibilityError(
+            f"Database schema revision '{current_revision}' is not recognized. "
+            f"Minimum supported revision is '{min_revision}'. "
+            f"Run 'alembic upgrade head' to migrate database.",
+            current_revision=current_revision,
+            min_revision=min_revision,
+        )
+
+    # Known revision format - check if it's at least baseline
+    # For timestamp-based revisions, lexicographical comparison works
     if current_revision < min_revision:
         raise SchemaCompatibilityError(
             f"Database schema revision '{current_revision}' is below minimum "
@@ -132,7 +159,7 @@ def get_environment_mode() -> str:
 
     Priority:
     1. OPENACE_PRODUCTION_MODE=1 → production
-    2. Database type (PostgreSQL → production, SQLite → development)
+    2. Database type inference (PostgreSQL → production candidate)
     3. FLASK_ENV=production → production
     4. Default → development
 
@@ -144,13 +171,12 @@ def get_environment_mode() -> str:
         return "production"
 
     # Priority 2: Database type inference
+    # PostgreSQL indicates production candidate, but continue checking other signals
     try:
         from app.repositories.database import is_postgresql
 
         if is_postgresql():
             return "production"
-        else:
-            return "development"
     except ImportError:
         pass
 
