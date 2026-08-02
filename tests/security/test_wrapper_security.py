@@ -1,7 +1,7 @@
 """
-Security wrapper tests for Issue #1855.
+Security wrapper tests for Issue #1855 + #2181.
 
-Tests the openace-chown, openace-useradd, openace-cat, and openace-mkdir
+Tests the openace-chown, openace-useradd, openace-cat, openace-mkdir, and openace-rm
 wrapper scripts for security constraints and proper behavior.
 """
 
@@ -17,6 +17,7 @@ OPENACE_CHOWN = "/usr/local/bin/openace-chown"
 OPENACE_USERADD = "/usr/local/bin/openace-useradd"
 OPENACE_CAT = "/usr/local/bin/openace-cat"
 OPENACE_MKDIR = "/usr/local/bin/openace-mkdir"
+OPENACE_RM = "/usr/local/bin/openace-rm"
 
 
 def wrapper_available(wrapper_path: str) -> bool:
@@ -219,6 +220,173 @@ class TestAgentRunnerUsesWrappers:
 
         assert "openace-cat" in content, "agent_runner.py should reference openace-cat wrapper"
         assert "openace-mkdir" in content, "agent_runner.py should reference openace-mkdir wrapper"
+
+
+@pytest.mark.skipif(not wrapper_available(OPENACE_RM), reason="openace-rm wrapper not available")
+class TestOpenaceRm:
+    """Tests for openace-rm security wrapper (Issue #2181)."""
+
+    def test_nonexistent_user_rejected(self):
+        """Nonexistent user should be rejected."""
+        result = subprocess.run(
+            [OPENACE_RM, "nonexistent_user_12345", "/tmp/test"],
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode == 3, f"Expected exit code 3, got {result.returncode}"
+        assert "does not exist" in result.stderr.lower() or "user" in result.stderr.lower()
+
+    def test_reserved_username_rejected(self):
+        """Reserved usernames like 'root' should be rejected."""
+        result = subprocess.run(
+            [OPENACE_RM, "root", "/tmp/test"],
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode in [3, 1], f"Expected exit code 3 or 1, got {result.returncode}"
+        assert "reserved" in result.stderr.lower() or "invalid" in result.stderr.lower()
+
+    def test_path_outside_allowed_rejected(self):
+        """Path outside /workspace or /home should be rejected."""
+        result = subprocess.run(
+            [OPENACE_RM, "testuser", "/etc/passwd"],
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode == 2, f"Expected exit code 2, got {result.returncode}"
+        assert "outside allowed" in result.stderr.lower() or "path" in result.stderr.lower()
+
+    def test_protected_path_rejected(self):
+        """Protected paths like /etc should be rejected."""
+        result = subprocess.run(
+            [OPENACE_RM, "testuser", "/etc/test"],
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode == 2, f"Expected exit code 2, got {result.returncode}"
+        assert "forbidden" in result.stderr.lower() or "pattern" in result.stderr.lower()
+
+    def test_root_directory_rejected(self):
+        """Root directory '/' should be rejected."""
+        result = subprocess.run(
+            [OPENACE_RM, "testuser", "/"],
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode == 2, f"Expected exit code 2, got {result.returncode}"
+        assert "root" in result.stderr.lower() or "not allowed" in result.stderr.lower()
+
+    def test_dangerous_option_rejected(self):
+        """Dangerous options like --no-preserve-root should be rejected."""
+        result = subprocess.run(
+            [OPENACE_RM, "testuser", "/tmp/test", "--no-preserve-root"],
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode == 1, f"Expected exit code 1, got {result.returncode}"
+        assert "dangerous" in result.stderr.lower() or "option" in result.stderr.lower()
+
+    def test_command_injection_rejected(self):
+        """Options with shell injection characters should be rejected."""
+        result = subprocess.run(
+            [OPENACE_RM, "testuser", "/tmp/test", ";", "ls"],
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode == 1, f"Expected exit code 1, got {result.returncode}"
+        assert "forbidden" in result.stderr.lower() or "characters" in result.stderr.lower()
+
+    def test_empty_path_rejected(self):
+        """Empty path should be rejected."""
+        result = subprocess.run(
+            [OPENACE_RM, "testuser", ""],
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode == 2, f"Expected exit code 2, got {result.returncode}"
+        assert "empty" in result.stderr.lower() or "path" in result.stderr.lower()
+
+    def test_invalid_username_format_rejected(self):
+        """Invalid username format should be rejected."""
+        result = subprocess.run(
+            [OPENACE_RM, "Invalid-User-Name", "/tmp/test"],
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode == 1, f"Expected exit code 1, got {result.returncode}"
+        assert "invalid" in result.stderr.lower() or "format" in result.stderr.lower()
+
+
+class TestSudoersSecurityBaseline:
+    """Tests for sudoers security baseline (Issue #2181)."""
+
+    def test_docker_entrypoint_no_rm_wildcard(self):
+        """docker-entrypoint.sh should not contain rm * wildcard."""
+        entrypoint_path = Path(
+            "/home/rhuang/open-ace/.worktrees/caade971-ac6b-4d62-921c-329d30c20162/docker-entrypoint.sh"
+        )
+        if not entrypoint_path.exists():
+            pytest.skip("docker-entrypoint.sh not found")
+
+        content = entrypoint_path.read_text()
+
+        # Check that OPENACE_UTILS does not contain rm *
+        lines = content.split("\n")
+        for line in lines:
+            if "Cmnd_Alias OPENACE_UTILS" in line:
+                assert "/usr/bin/rm *" not in line, "OPENACE_UTILS should not contain rm * wildcard"
+                assert (
+                    "/usr/bin/cat *" not in line
+                ), "OPENACE_UTILS should not contain cat * wildcard"
+                assert (
+                    "/usr/bin/chown *" not in line
+                ), "OPENACE_UTILS should not contain chown * wildcard"
+                assert (
+                    "/usr/bin/useradd *" not in line
+                ), "OPENACE_UTILS should not contain useradd * wildcard"
+
+    def test_docker_entrypoint_no_openace_cli(self):
+        """docker-entrypoint.sh should not define OPENACE_CLI alias."""
+        entrypoint_path = Path(
+            "/home/rhuang/open-ace/.worktrees/caade971-ac6b-4d62-921c-329d30c20162/docker-entrypoint.sh"
+        )
+        if not entrypoint_path.exists():
+            pytest.skip("docker-entrypoint.sh not found")
+
+        content = entrypoint_path.read_text()
+
+        # OPENACE_CLI should be removed
+        assert "Cmnd_Alias OPENACE_CLI" not in content, "OPENACE_CLI alias should be removed"
+
+    def test_docker_entrypoint_env_keep_clean(self):
+        """docker-entrypoint.sh env_keep should not contain sensitive variables."""
+        entrypoint_path = Path(
+            "/home/rhuang/open-ace/.worktrees/caade971-ac6b-4d62-921c-329d30c20162/docker-entrypoint.sh"
+        )
+        if not entrypoint_path.exists():
+            pytest.skip("docker-entrypoint.sh not found")
+
+        content = entrypoint_path.read_text()
+
+        # Find env_keep line
+        for line in content.split("\n"):
+            if "env_keep" in line and "OPENAI_API_KEY" in line:
+                pytest.fail("env_keep should not contain OPENAI_API_KEY")
+            if "env_keep" in line and "ANTHROPIC_API_KEY" in line:
+                pytest.fail("env_keep should not contain ANTHROPIC_API_KEY")
+            if "env_keep" in line and "GH_TOKEN" in line:
+                pytest.fail("env_keep should not contain GH_TOKEN")
+            if "env_keep" in line and "OPENCLAW_TOKEN" in line:
+                pytest.fail("env_keep should not contain OPENCLAW_TOKEN")
 
 
 if __name__ == "__main__":

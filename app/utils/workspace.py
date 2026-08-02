@@ -25,10 +25,13 @@ __all__ = [
     "ensure_user_workspace",
 ]
 
-# Wrapper script paths (Issue #1855)
+# Wrapper script paths (Issue #1855 + #2181)
 OPENACE_USERADD_WRAPPER = "/usr/local/bin/openace-useradd"
 OPENACE_CHOWN_WRAPPER = "/usr/local/bin/openace-chown"
+OPENACE_CAT_WRAPPER = "/usr/local/bin/openace-cat"
 OPENACE_MKDIR_WRAPPER = "/usr/local/bin/openace-mkdir"
+# Secure rm wrapper (Issue #2181): validates path, user, owner, and dangerous options
+OPENACE_RM_WRAPPER = "/usr/local/bin/openace-rm"
 # Cross-user file write wrapper (Issue #1916): used by the upload endpoint in
 # Package non-root multi-user mode to write into a user's 0700 home directory.
 # cp/tee/mv are NOT in the sudoers OPENACE_UTILS whitelist, so uploads delegate
