@@ -1404,6 +1404,41 @@ class TestOrchestratorDevelopment:
             for update in workflow_updates
         )
 
+    def test_development_resume_accepts_prior_agent_commits(self):
+        """Resume scenario: agent produced no NEW commit this session, but the
+        branch already has agent-authored commits from a prior dev round (e.g.
+        after an infra-failure reset). Must NOT fail as 'no code changes'."""
+        wf = _make_workflow(
+            current_phase="development",
+            status="developing",
+            branch_name="auto-dev/resume-wf",
+        )
+        orch, mock_repo = self._make_orchestrator(wf)
+        orch._runner = MagicMock()
+        orch._runner.run_agent_task.return_value = _make_agent_result(
+            success=True, text="Task already completed in prior session"
+        )
+        # commit_before == commit_sha (HEAD did not move this session)
+        orch._gh.get_current_commit.side_effect = ["abc1234", "abc1234"]
+        orch._gh.get_commit_diff_stats.return_value = {"files": 0, "additions": 0, "deletions": 0}
+        # Branch has 3 commits vs origin/main (prior agent work)
+        orch._gh.get_diff_stats.return_value = {"commits": 3, "files": 5, "additions": 100}
+        orch._gh.has_uncommitted_changes.return_value = False
+        # The branch log shows agent-authored commits
+        orch._gh._run_git.return_value = MagicMock(
+            stdout="abc1234 auto: development changes (round 1)\n"
+            "def5678 auto: ci repair (attempt 1)\n"
+            "ghi9012 Merge commit into auto-dev\n"
+        )
+
+        orch._do_development(wf)
+
+        # Must NOT set workflow to failed with "no code changes"
+        workflow_updates = [c[0][1] for c in mock_repo.update_workflow.call_args_list]
+        assert not any(
+            "no code changes" in (u.get("error_message") or "") for u in workflow_updates
+        ), "resume with prior agent commits must not fail as 'no code changes'"
+
     def test_development_test_failure_sets_error(self):
         """When tests fail past max retries, workflow status becomes failed."""
         from app.modules.workspace.autonomous.orchestrator import MAX_TEST_RETRIES

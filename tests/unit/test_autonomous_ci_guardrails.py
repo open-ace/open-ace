@@ -92,7 +92,12 @@ def test_actions_job_log_prefers_rest_api_without_run_cache():
         )
 
     assert "app/x.py" in excerpt
-    assert calls == [(["api", "repos/open-ace/open-ace/actions/jobs/456/logs"], False)]
+    assert calls == [
+        (
+            ["api", "repos/open-ace/open-ace/actions/jobs/456/logs", "--allow-escape-sequences"],
+            False,
+        )
+    ]
 
 
 def test_actions_job_log_uses_ghes_hostname_without_run_cache():
@@ -120,7 +125,13 @@ def test_actions_job_log_uses_ghes_hostname_without_run_cache():
     assert "failed" in excerpt
     assert calls == [
         (
-            ["api", "--hostname", "gh.example.com", "repos/team/project/actions/jobs/34/logs"],
+            [
+                "api",
+                "--hostname",
+                "gh.example.com",
+                "repos/team/project/actions/jobs/34/logs",
+                "--allow-escape-sequences",
+            ],
             False,
         )
     ]
