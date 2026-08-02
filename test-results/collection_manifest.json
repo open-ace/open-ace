@@ -1,0 +1,11 @@
+{
+  "category": "critical",
+  "split_group": 1,
+  "split_total": 1,
+  "test_files": [
+    "tests/e2e/regression/test_login.py",
+    "tests/e2e/regression/test_navigation.py"
+  ],
+  "test_count": 2,
+  "timestamp": "2026-08-03T04:45:07.080079"
+}
