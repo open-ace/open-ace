@@ -4053,8 +4053,14 @@ class AutonomousAgentRunner:
                             )
 
                     elif msg_type in {"system", "initialized"}:
-                        if msg_type == "initialized" or parsed.get("subtype") == "initialized":
-                            self._capture_cli_session_id(session, parsed, "system.initialized")
+                        subtype = parsed.get("subtype", "")
+                        # Claude CLI emits subtype "init" (older versions used
+                        # "initialized"); accept both so the real cli_session_id
+                        # is captured at agent start instead of via mtime fallback.
+                        if msg_type == "initialized" or subtype in ("initialized", "init"):
+                            self._capture_cli_session_id(
+                                session, parsed, f"system.{subtype or 'init'}"
+                            )
                         # Forward key system events to the UI so the workflow
                         # detail shows progress during long LLM waits.
                         # Without this, an agent stuck in api_retry (upstream
@@ -4062,7 +4068,6 @@ class AutonomousAgentRunner:
                         # — which never triggered _activity_callback — so the
                         # UI showed "no AI activity" for minutes until the
                         # first `assistant` event finally arrived.
-                        subtype = parsed.get("subtype", "")
                         # This is a high-frequency cumulative estimate, not a
                         # discrete user-visible activity. Skipping the event
                         # also prevents one sidebar fallback probe per token.
