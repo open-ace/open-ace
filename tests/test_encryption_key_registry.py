@@ -238,7 +238,7 @@ class TestEncryptionKeyRegistryHotReload:
         """Test that reload() updates keys from environment."""
         with patch.dict(
             os.environ,
-            {"OPENACE_ENCRYPTION_KEY": "initial-key-32-chars-long"},
+            {"OPENACE_ENCRYPTION_KEY": "initial-encryption-key-32-chars"},
             clear=False,
         ):
             registry = EncryptionKeyRegistry()
@@ -247,7 +247,7 @@ class TestEncryptionKeyRegistryHotReload:
             # Change key
             with patch.dict(
                 os.environ,
-                {"OPENACE_ENCRYPTION_KEY": "changed-key-32-chars-long"},
+                {"OPENACE_ENCRYPTION_KEY": "changed-encryption-key-32-chars"},
                 clear=False,
             ):
                 registry.reload()
@@ -284,7 +284,7 @@ class TestEncryptionKeyRegistryConfigVersion:
         """Test that config version changes when keys change."""
         with patch.dict(
             os.environ,
-            {"OPENACE_ENCRYPTION_KEY": "key-1-32-chars-long"},
+            {"OPENACE_ENCRYPTION_KEY": "key-1-encryption-32-characters"},
             clear=False,
         ):
             registry1 = EncryptionKeyRegistry()
@@ -294,7 +294,7 @@ class TestEncryptionKeyRegistryConfigVersion:
 
         with patch.dict(
             os.environ,
-            {"OPENACE_ENCRYPTION_KEY": "key-2-32-chars-long"},
+            {"OPENACE_ENCRYPTION_KEY": "key-2-encryption-32-characters"},
             clear=False,
         ):
             registry2 = EncryptionKeyRegistry()
