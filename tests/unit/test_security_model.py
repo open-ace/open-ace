@@ -88,6 +88,11 @@ def _patch_db_compat():
 def proxy_service(tmp_path, monkeypatch):
     """An APIKeyProxyService against an isolated SQLite DB with a known key."""
     from app.modules.workspace import api_key_proxy as akp
+    from app.utils.security_mode import reset_security_mode_cache
+
+    # Issue #2185: Security mode must be explicitly set
+    monkeypatch.setenv("OPENACE_SECURITY_MODE", "development")
+    reset_security_mode_cache()
 
     monkeypatch.setenv("OPENACE_ENCRYPTION_KEY", "test-encryption-key-for-unit-tests")
     db_path = str(tmp_path / "test_keys.db")
@@ -99,10 +104,15 @@ def proxy_service(tmp_path, monkeypatch):
 
 
 @pytest.fixture
-def manager(tmp_path):
+def manager(tmp_path, monkeypatch):
     """A RemoteAgentManager backed by a temp SQLite database."""
     from app.modules.workspace.remote_agent_manager import RemoteAgentManager
     from app.repositories.schema_init import load_schema_from_file
+    from app.utils.security_mode import reset_security_mode_cache
+
+    # Issue #2185: Security mode must be explicitly set
+    monkeypatch.setenv("OPENACE_SECURITY_MODE", "development")
+    reset_security_mode_cache()
 
     db_path = str(tmp_path / "test_agent.db")
     mgr = RemoteAgentManager(db_path=db_path)
@@ -111,10 +121,15 @@ def manager(tmp_path):
 
 
 @pytest.fixture
-def session_manager(tmp_path):
+def session_manager(tmp_path, monkeypatch):
     """A SessionManager backed by a temp SQLite database."""
     from app.modules.workspace.session_manager import SessionManager
     from app.repositories.schema_init import load_schema_from_file
+    from app.utils.security_mode import reset_security_mode_cache
+
+    # Issue #2185: Security mode must be explicitly set
+    monkeypatch.setenv("OPENACE_SECURITY_MODE", "development")
+    reset_security_mode_cache()
 
     db_path = str(tmp_path / "test_session.db")
     mgr = SessionManager(db_path=db_path)
@@ -154,15 +169,20 @@ class TestApiEncryption:
     def test_key_is_derived_via_sha256_of_env(self, monkeypatch):
         """The Fernet key must be base64(sha256(env)), never the raw env value."""
         from app.modules.workspace import api_key_proxy as akp
+        from app.utils.security_mode import reset_security_mode_cache
 
-        monkeypatch.setenv("OPENACE_ENCRYPTION_KEY", "my-secret")
+        # Issue #2185: Security mode must be explicitly set
+        monkeypatch.setenv("OPENACE_SECURITY_MODE", "development")
+        reset_security_mode_cache()
+
+        monkeypatch.setenv("OPENACE_ENCRYPTION_KEY", "my-secret-key-at-least-32-characters-long")
         monkeypatch.delenv("SECRET_KEY", raising=False)
         svc = akp.APIKeyProxyService.__new__(akp.APIKeyProxyService)
         derived = svc._get_encryption_key()
 
-        assert derived == hashlib.sha256(b"my-secret").digest()
+        assert derived == hashlib.sha256(b"my-secret-key-at-least-32-characters-long").digest()
         # The raw env value must not be usable directly as the Fernet key.
-        assert derived != b"my-secret"
+        assert derived != b"my-secret-key-at-least-32-characters-long"
         # base64-wrapping the derived key yields a valid 32-byte Fernet key.
         fernet_key = base64.urlsafe_b64encode(derived)
         from cryptography.fernet import Fernet
@@ -170,14 +190,20 @@ class TestApiEncryption:
         Fernet(fernet_key)  # does not raise
 
     def test_dev_fallback_is_independent_from_secret_key(self, monkeypatch):
-        """Development fallback must not derive encryption from SECRET_KEY."""
+        """Development mode now requires explicit encryption key (Issue #2185)."""
         from app.modules.workspace import api_key_proxy as akp
+        from app.utils.security_mode import reset_security_mode_cache
 
-        monkeypatch.delenv("OPENACE_ENCRYPTION_KEY", raising=False)
-        monkeypatch.setenv("SECRET_KEY", "flask-secret")
-        monkeypatch.setenv("FLASK_ENV", "development")
+        # Issue #2185: Must set both security mode and encryption key explicitly
+        monkeypatch.setenv("OPENACE_SECURITY_MODE", "development")
+        monkeypatch.setenv("OPENACE_ENCRYPTION_KEY", "test-encryption-key-32-chars-minimum")
+        reset_security_mode_cache()
+
+        monkeypatch.delenv("SECRET_KEY", raising=False)
         svc = akp.APIKeyProxyService.__new__(akp.APIKeyProxyService)
-        assert svc._get_encryption_key() == hashlib.sha256(b"openace-dev-encryption-key").digest()
+        # With explicit encryption key set, it should derive from that key
+        expected = hashlib.sha256(b"test-encryption-key-32-chars-minimum").digest()
+        assert svc._get_encryption_key() == expected
 
     def test_tampered_ciphertext_is_rejected(self, proxy_service):
         """Fernet's HMAC must catch tampering (integrity guarantee)."""
@@ -190,8 +216,14 @@ class TestApiEncryption:
 class TestSmtpEncryption:
     """SECURITY.md §2 — SMTP passwords use the same Fernet path."""
 
-    def test_smtp_password_round_trip_and_mask(self):
+    def test_smtp_password_round_trip_and_mask(self, monkeypatch):
         from app.utils.smtp_crypto import SMTPPasswordManager
+        from app.utils.security_mode import reset_security_mode_cache
+
+        # Issue #2185: Security mode must be explicitly set
+        monkeypatch.setenv("OPENACE_SECURITY_MODE", "development")
+        monkeypatch.setenv("OPENACE_ENCRYPTION_KEY", "smtp-test-encryption-key-32-chars")
+        reset_security_mode_cache()
 
         mgr = SMTPPasswordManager()
         encrypted = mgr.encrypt("super-secret-smtp-pass")
