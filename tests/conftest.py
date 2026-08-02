@@ -13,6 +13,23 @@ import sys
 
 import pytest
 
+# =============================================================================
+# Issue #2185: Set default security mode for tests
+# Tests should run in development mode by default.
+# This MUST be set before importing any app modules.
+# =============================================================================
+if "OPENACE_SECURITY_MODE" not in os.environ:
+    os.environ["OPENACE_SECURITY_MODE"] = "development"
+
+# Set test encryption keys for development mode
+# These are ONLY used for testing, never in production
+if "OPENACE_ENCRYPTION_KEY" not in os.environ:
+    os.environ["OPENACE_ENCRYPTION_KEY"] = "test-encryption-key-for-unit-tests-32ch"
+if "SECRET_KEY" not in os.environ:
+    os.environ["SECRET_KEY"] = "test-secret-key-for-unit-tests-32-char"
+if "UPLOAD_AUTH_KEY" not in os.environ:
+    os.environ["UPLOAD_AUTH_KEY"] = "test-upload-auth-key-for-unit-tests-32"
+
 # Add scripts/shared to path for imports
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 shared_path = os.path.join(project_root, "scripts", "shared")
@@ -34,6 +51,14 @@ def _clear_cache():
         from app.services.auth_service import _security_settings_cache
 
         _security_settings_cache.clear()
+    except ImportError:
+        pass
+
+    # Issue #2185: Reset security mode cache to prevent cross-test pollution
+    try:
+        from app.utils.security_mode import reset_security_mode_cache
+
+        reset_security_mode_cache()
     except ImportError:
         pass
 

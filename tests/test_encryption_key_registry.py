@@ -49,8 +49,8 @@ class TestEncryptionKeyRegistryInit:
         """Test initialization with OPENACE_ENCRYPTION_KEYS."""
         config = {
             "keys": [
-                {"id": 1, "value": "key-1-value-32-chars-long", "status": "deprecated"},
-                {"id": 2, "value": "key-2-value-32-chars-long", "status": "active"},
+                {"id": 1, "value": "key-1-value-32-chars-long-abc-xx", "status": "deprecated"},
+                {"id": 2, "value": "key-2-value-32-chars-long-abc-xx", "status": "active"},
             ],
             "primary_key_id": 2,
         }
@@ -70,8 +70,8 @@ class TestEncryptionKeyRegistryInit:
         """Test that config must have exactly one active key."""
         config = {
             "keys": [
-                {"id": 1, "value": "key-1-value-32-chars-long", "status": "active"},
-                {"id": 2, "value": "key-2-value-32-chars-long", "status": "active"},
+                {"id": 1, "value": "key-1-value-32-chars-long-abc-xx", "status": "active"},
+                {"id": 2, "value": "key-2-value-32-chars-long-abc-xx", "status": "active"},
             ],
             "primary_key_id": 1,
         }
@@ -88,7 +88,7 @@ class TestEncryptionKeyRegistryInit:
         """Test that key_id must be in range 1-255."""
         config = {
             "keys": [
-                {"id": 0, "value": "key-value-32-chars-long", "status": "active"},
+                {"id": 0, "value": "key-value-32-chars-long-abc-xxxxx", "status": "active"},
             ],
             "primary_key_id": 0,
         }
@@ -104,7 +104,7 @@ class TestEncryptionKeyRegistryInit:
     def test_init_max_key_count(self):
         """Test that max key count is enforced."""
         keys = [
-            {"id": i, "value": f"key-{i}-value-32-chars-long", "status": "deprecated"}
+            {"id": i, "value": f"key-{i}-value-32-chars-long-abcdef", "status": "deprecated"}
             for i in range(1, 7)  # 6 keys > MAX_KEY_COUNT (5)
         ]
         keys[5]["status"] = "active"  # Make last one active
@@ -179,8 +179,8 @@ class TestEncryptionKeyRegistryEncryptDecrypt:
         """Test that decryption tries all available keys."""
         config = {
             "keys": [
-                {"id": 1, "value": "key-1-value-32-chars-long", "status": "deprecated"},
-                {"id": 2, "value": "key-2-value-32-chars-long", "status": "active"},
+                {"id": 1, "value": "key-1-value-32-chars-long-abc-xx", "status": "deprecated"},
+                {"id": 2, "value": "key-2-value-32-chars-long-abc-xx", "status": "active"},
             ],
             "primary_key_id": 2,
         }
@@ -195,7 +195,7 @@ class TestEncryptionKeyRegistryEncryptDecrypt:
 
             from cryptography.fernet import Fernet
 
-            key1 = hashlib.sha256(b"key-1-value-32-chars-long").digest()
+            key1 = hashlib.sha256(b"key-1-value-32-chars-long-abc-xx").digest()
             fernet1 = Fernet(base64.urlsafe_b64encode(key1))
             plaintext = "encrypted_with_key1"
             ciphertext_key1 = fernet1.encrypt(plaintext.encode()).decode()
@@ -238,7 +238,7 @@ class TestEncryptionKeyRegistryHotReload:
         """Test that reload() updates keys from environment."""
         with patch.dict(
             os.environ,
-            {"OPENACE_ENCRYPTION_KEY": "initial-key-32-chars-long"},
+            {"OPENACE_ENCRYPTION_KEY": "initial-encryption-key-32-chars-xx"},
             clear=False,
         ):
             registry = EncryptionKeyRegistry()
@@ -247,7 +247,7 @@ class TestEncryptionKeyRegistryHotReload:
             # Change key
             with patch.dict(
                 os.environ,
-                {"OPENACE_ENCRYPTION_KEY": "changed-key-32-chars-long"},
+                {"OPENACE_ENCRYPTION_KEY": "changed-encryption-key-32-chars-xx"},
                 clear=False,
             ):
                 registry.reload()
@@ -284,7 +284,7 @@ class TestEncryptionKeyRegistryConfigVersion:
         """Test that config version changes when keys change."""
         with patch.dict(
             os.environ,
-            {"OPENACE_ENCRYPTION_KEY": "key-1-32-chars-long"},
+            {"OPENACE_ENCRYPTION_KEY": "key-1-encryption-32-characters-xx"},
             clear=False,
         ):
             registry1 = EncryptionKeyRegistry()
@@ -294,7 +294,7 @@ class TestEncryptionKeyRegistryConfigVersion:
 
         with patch.dict(
             os.environ,
-            {"OPENACE_ENCRYPTION_KEY": "key-2-32-chars-long"},
+            {"OPENACE_ENCRYPTION_KEY": "key-2-encryption-32-characters-xx"},
             clear=False,
         ):
             registry2 = EncryptionKeyRegistry()
@@ -307,7 +307,7 @@ class TestEncryptionKeyRegistryConfigVersion:
         """Test that config version is same for same config."""
         config = {
             "keys": [
-                {"id": 1, "value": "key-1-value-32-chars-long", "status": "active"},
+                {"id": 1, "value": "key-1-value-32-chars-long-abc-xx", "status": "active"},
             ],
             "primary_key_id": 1,
         }

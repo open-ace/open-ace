@@ -40,6 +40,8 @@ jobs:
       - name: Checkout code
         if: steps.check-week.outputs.should_create == 'true'
         uses: actions/checkout@v6
+        with:
+          submodules: false
 
       - name: Setup Python
         if: steps.check-week.outputs.should_create == 'true'

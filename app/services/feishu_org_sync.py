@@ -861,10 +861,12 @@ class FeishuOrgSyncService:
         """
         # Use WHERE clause to filter at database level
         # This leverages the idx_teams_feishu_sync partial index
+        # Note: Using JSON_EXTRACT for SQLite compatibility (Issue #2174)
+        # PostgreSQL supports settings->>'sync_source', but SQLite requires json_extract
         query = """
             SELECT team_id, name, settings
             FROM teams
-            WHERE settings->>'sync_source' = ?
+            WHERE json_extract(settings, '$.sync_source') = ?
         """
         rows = self.db.fetch_all(query, (FEISHU_PROVIDER_NAME,))
 

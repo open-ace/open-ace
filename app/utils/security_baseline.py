@@ -1,24 +1,27 @@
 """
-Security Baseline Checker for Open ACE (Issue #1893)
+Security Baseline Checker for Open ACE (Issue #1893, #2185)
 
 This module provides security baseline checking functionality for Docker Compose
-deployments. It detects security mode and enforces baseline checks.
+deployments. It uses the unified SecurityMode API from security_mode.py.
 
 Security Modes:
 - development: Allow empty/default passwords with warnings (default for trial)
 - pilot: Allow empty/default passwords with strong warnings
 - production: Reject empty/default passwords, fail-fast on security issues
+
+Issue #2185: Uses unified security mode detection from security_mode.py
 """
 
 import os
 import re
 from dataclasses import dataclass
-from enum import Enum
+
+# Import unified SecurityMode from security_mode.py (Issue #2185)
+from app.utils.security_mode import SecurityMode, get_security_mode
 
 __all__ = [
-    "SecurityMode",
+    "SecurityMode",  # Re-exported from security_mode.py
     "CheckResult",
-    "detect_security_mode",
     "is_forbidden_password",
     "is_placeholder_password",
     "check_database_password",
@@ -28,14 +31,6 @@ __all__ = [
     "check_all",
     "FORBIDDEN_DB_PASSWORDS",
 ]
-
-
-class SecurityMode(Enum):
-    """Security mode enumeration."""
-
-    DEVELOPMENT = "development"
-    PILOT = "pilot"
-    PRODUCTION = "production"
 
 
 @dataclass
@@ -68,33 +63,6 @@ PLACEHOLDER_PATTERNS = [
     r"^default-secret",
     r"^change-me-in-production",
 ]
-
-
-def detect_security_mode() -> SecurityMode:
-    """
-    Detect security mode based on environment variables.
-
-    Priority: OPENACE_SECURITY_MODE > FLASK_ENV > default (development)
-
-    Returns:
-        SecurityMode: The detected security mode.
-    """
-    # Priority 1: Explicit security mode variable
-    mode = os.environ.get("OPENACE_SECURITY_MODE", "").lower()
-    if mode == "production":
-        return SecurityMode.PRODUCTION
-    if mode == "pilot":
-        return SecurityMode.PILOT
-    if mode == "development":
-        return SecurityMode.DEVELOPMENT
-
-    # Priority 2: Flask environment inference (backward compatibility)
-    flask_env = os.environ.get("FLASK_ENV", "").lower()
-    if flask_env == "production":
-        return SecurityMode.PRODUCTION
-
-    # Default: development mode
-    return SecurityMode.DEVELOPMENT
 
 
 def is_forbidden_password(password: str) -> bool:
@@ -288,10 +256,13 @@ def check_all() -> dict:
     """
     Run all security baseline checks.
 
+    Uses unified security mode detection from security_mode.py (Issue #2185).
+
     Returns:
         dict: Dictionary with check results and overall status.
     """
-    mode = detect_security_mode()
+    # Use unified security mode API (Issue #2185)
+    mode = get_security_mode()
 
     # Get environment values
     db_password = os.environ.get("DB_PASSWORD")

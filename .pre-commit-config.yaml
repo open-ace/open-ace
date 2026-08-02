@@ -139,6 +139,8 @@ repos:
         exclude: ^static/|^templates/
       - id: check-yaml
         args: [--unsafe]
+        # Kubernetes manifests use multi-document YAML format which is not supported by check-yaml
+        exclude: ^k8s/
       - id: check-json
         exclude: tsconfig\.json$
       - id: check-toml
@@ -147,6 +149,8 @@ repos:
       - id: check-merge-conflict
       - id: check-case-conflict
       - id: check-executables-have-shebangs
+        # Exclude files that are incorrectly marked executable by the filesystem
+        exclude: ^frontend/|^migrations/|^tests/issues/|^tests/e2e/|^app/utils/senders\.py$
       - id: check-shebang-scripts-are-executable
         exclude: ^tests/|\.qwen/
       - id: debug-statements

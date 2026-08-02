@@ -1,31 +1,33 @@
 """
-Unit tests for Security Baseline Checker (Issue #1893)
+Unit tests for Security Baseline Checker (Issue #1893, #2185)
 
 Tests cover:
-- Security mode detection
 - Password checking (forbidden values, placeholders, length)
 - Secret key checking
 - Encryption key checking
 - Root user authorization checking
+
+Issue #2185: Security mode detection is now in security_mode.py
 """
 
 import os
 
 import pytest
 
-# Import the module under test
+# Import from security_baseline.py for baseline checking
 from app.utils.security_baseline import (
     CheckResult,
-    SecurityMode,
     check_all,
     check_database_password,
     check_encryption_key,
     check_root_user,
     check_secret_key,
-    detect_security_mode,
     is_forbidden_password,
     is_placeholder_password,
 )
+
+# Import from security_mode.py for unified mode detection (Issue #2185)
+from app.utils.security_mode import SecurityMode, detect_security_mode, reset_security_mode_cache
 
 
 class TestDetectSecurityMode:
@@ -33,39 +35,46 @@ class TestDetectSecurityMode:
 
     def test_production_mode_from_openace_security_mode(self, monkeypatch):
         """Test production mode detection from OPENACE_SECURITY_MODE."""
+        reset_security_mode_cache()
         monkeypatch.setenv("OPENACE_SECURITY_MODE", "production")
         assert detect_security_mode() == SecurityMode.PRODUCTION
 
     def test_pilot_mode_from_openace_security_mode(self, monkeypatch):
         """Test pilot mode detection from OPENACE_SECURITY_MODE."""
+        reset_security_mode_cache()
         monkeypatch.setenv("OPENACE_SECURITY_MODE", "pilot")
         assert detect_security_mode() == SecurityMode.PILOT
 
     def test_development_mode_from_openace_security_mode(self, monkeypatch):
         """Test development mode detection from OPENACE_SECURITY_MODE."""
+        reset_security_mode_cache()
         monkeypatch.setenv("OPENACE_SECURITY_MODE", "development")
         assert detect_security_mode() == SecurityMode.DEVELOPMENT
 
     def test_production_mode_from_flask_env(self, monkeypatch):
         """Test production mode detection from FLASK_ENV (backward compatibility)."""
+        reset_security_mode_cache()
         monkeypatch.delenv("OPENACE_SECURITY_MODE", raising=False)
         monkeypatch.setenv("FLASK_ENV", "production")
         assert detect_security_mode() == SecurityMode.PRODUCTION
 
     def test_openace_security_mode_priority_over_flask_env(self, monkeypatch):
         """Test OPENACE_SECURITY_MODE has priority over FLASK_ENV."""
+        reset_security_mode_cache()
         monkeypatch.setenv("OPENACE_SECURITY_MODE", "development")
         monkeypatch.setenv("FLASK_ENV", "production")
         assert detect_security_mode() == SecurityMode.DEVELOPMENT
 
-    def test_default_development_mode(self, monkeypatch):
-        """Test default development mode when no env vars are set."""
+    def test_default_mode_returns_development(self, monkeypatch):
+        """Test default returns development mode when not configured (Issue #2185 backward compat)."""
+        reset_security_mode_cache()
         monkeypatch.delenv("OPENACE_SECURITY_MODE", raising=False)
         monkeypatch.delenv("FLASK_ENV", raising=False)
         assert detect_security_mode() == SecurityMode.DEVELOPMENT
 
     def test_case_insensitive_mode_detection(self, monkeypatch):
         """Test case-insensitive mode detection."""
+        reset_security_mode_cache()
         monkeypatch.setenv("OPENACE_SECURITY_MODE", "PRODUCTION")
         assert detect_security_mode() == SecurityMode.PRODUCTION
 
@@ -276,11 +285,11 @@ class TestCheckAll:
 
     def test_check_all_returns_dict(self, monkeypatch):
         """Test that check_all returns a dictionary."""
+        reset_security_mode_cache()
+        monkeypatch.setenv("OPENACE_SECURITY_MODE", "development")
         monkeypatch.delenv("DB_PASSWORD", raising=False)
         monkeypatch.delenv("SECRET_KEY", raising=False)
         monkeypatch.delenv("OPENACE_ENCRYPTION_KEY", raising=False)
-        monkeypatch.delenv("OPENACE_SECURITY_MODE", raising=False)
-        monkeypatch.delenv("FLASK_ENV", raising=False)
 
         result = check_all()
         assert isinstance(result, dict)
@@ -289,11 +298,11 @@ class TestCheckAll:
 
     def test_check_all_includes_all_checks(self, monkeypatch):
         """Test that check_all includes all check categories."""
+        reset_security_mode_cache()
+        monkeypatch.setenv("OPENACE_SECURITY_MODE", "development")
         monkeypatch.delenv("DB_PASSWORD", raising=False)
         monkeypatch.delenv("SECRET_KEY", raising=False)
         monkeypatch.delenv("OPENACE_ENCRYPTION_KEY", raising=False)
-        monkeypatch.delenv("OPENACE_SECURITY_MODE", raising=False)
-        monkeypatch.delenv("FLASK_ENV", raising=False)
 
         result = check_all()
         assert "database_password" in result
@@ -303,6 +312,7 @@ class TestCheckAll:
 
     def test_check_all_production_mode_unhealthy_with_defaults(self, monkeypatch):
         """Test that production mode returns unhealthy with default values."""
+        reset_security_mode_cache()
         monkeypatch.setenv("OPENACE_SECURITY_MODE", "production")
         monkeypatch.setenv("DB_PASSWORD", "ace-secret")
         monkeypatch.setenv("SECRET_KEY", "")
@@ -314,10 +324,11 @@ class TestCheckAll:
 
     def test_check_all_development_mode_warning_with_defaults(self, monkeypatch):
         """Test that development mode returns warning with default values."""
+        reset_security_mode_cache()
+        monkeypatch.setenv("OPENACE_SECURITY_MODE", "development")
         monkeypatch.delenv("DB_PASSWORD", raising=False)
         monkeypatch.delenv("SECRET_KEY", raising=False)
         monkeypatch.delenv("OPENACE_ENCRYPTION_KEY", raising=False)
-        monkeypatch.delenv("OPENACE_SECURITY_MODE", raising=False)
 
         result = check_all()
         assert result["status"] in ["warning", "healthy"]  # Depends on auto-generation

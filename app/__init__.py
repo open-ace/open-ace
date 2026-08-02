@@ -373,7 +373,9 @@ def create_app(config=None):
 
         APIKeyProxyService()  # __init__ calls _get_encryption_key() internally
     except RuntimeError as e:
-        if os.environ.get("FLASK_ENV") == "production":
+        from app.utils.security_mode import is_production
+
+        if is_production():
             raise RuntimeError(f"API key encryption misconfigured: {e}")
         logger.warning(f"API key proxy unavailable: {e}. Storing API keys will fail.")
     except Exception:
