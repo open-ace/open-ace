@@ -136,7 +136,7 @@ authorized_reviewers:
   - name: "security-team"
     email: "security@company.com"
     valid_from: "2023-01-01"
-  
+
   - name: "ops-team"
     email: "ops@company.com"
     valid_from: "2023-01-01"

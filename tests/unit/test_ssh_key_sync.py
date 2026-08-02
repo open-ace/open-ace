@@ -17,24 +17,25 @@ SSH 密钥同步安全加固单元测试
 """
 
 import os
-import stat
-import tempfile
 import shutil
-import unittest
-from pathlib import Path
-from unittest.mock import Mock, patch, MagicMock
+import stat
 import subprocess
 import sys
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import MagicMock, Mock, patch
 
 # 直接 exec 脚本文件加载模块
-_script_path = os.path.join(os.path.dirname(__file__), '..', '..', 'scripts', 'openace-ssh-sync')
-with open(_script_path, 'r') as f:
+_script_path = os.path.join(os.path.dirname(__file__), "..", "..", "scripts", "openace-ssh-sync")
+with open(_script_path) as f:
     script_code = f.read()
 
 # 创建一个临时模块命名空间
 import types
-openace_ssh_sync = types.ModuleType('openace_ssh_sync')
-exec(compile(script_code, _script_path, 'exec'), openace_ssh_sync.__dict__)
+
+openace_ssh_sync = types.ModuleType("openace_ssh_sync")
+exec(compile(script_code, _script_path, "exec"), openace_ssh_sync.__dict__)
 
 # 导入需要测试的类和函数
 SSHFileSyncContext = openace_ssh_sync.SSHFileSyncContext
@@ -75,13 +76,14 @@ class TestSSHFileSyncContext(unittest.TestCase):
         ctx = SSHFileSyncContext(src_path, username)
 
         # Mock realpath 返回相对于 /root/.ssh 的路径
-        with patch('os.path.realpath') as mock_realpath:
+        with patch("os.path.realpath") as mock_realpath:
+
             def realpath_side_effect(path):
                 if path == src_path:
                     # 返回一个看起来在 /root/.ssh 下的路径
                     return f"/root/.ssh/{os.path.basename(src_path)}"
-                elif path == '/root/.ssh':
-                    return '/root/.ssh'
+                elif path == "/root/.ssh":
+                    return "/root/.ssh"
                 else:
                     return os.path.realpath(path)
 
@@ -92,7 +94,7 @@ class TestSSHFileSyncContext(unittest.TestCase):
         """测试上下文管理器清理资源"""
         # 创建测试文件
         test_file = os.path.join(self.root_ssh, "known_hosts")
-        with open(test_file, 'w') as f:
+        with open(test_file, "w") as f:
             f.write("github.com ssh-rsa AAAAB3NzaC1yc2E...\n")
 
         # 测试上下文管理器
@@ -107,7 +109,7 @@ class TestSSHFileSyncContext(unittest.TestCase):
         """测试 symlink 被拒绝"""
         # 创建目标文件
         target_file = os.path.join(self.temp_dir, "target")
-        with open(target_file, 'w') as f:
+        with open(target_file, "w") as f:
             f.write("secret content")
 
         # 创建 symlink
@@ -118,21 +120,23 @@ class TestSSHFileSyncContext(unittest.TestCase):
         with SSHFileSyncContext(symlink_file, "testuser") as ctx:
             self.assertIsNone(ctx)  # symlink 导致打开失败
 
-    @patch('os.path.realpath')
+    @patch("os.path.realpath")
     def test_validate_regular_file_allowed_for_known_hosts(self, mock_realpath):
         """测试 known_hosts 文件被允许"""
+
         def realpath_side_effect(path):
-            if 'known_hosts' in path:
-                return '/root/.ssh/known_hosts'
-            elif path == '/root/.ssh':
-                return '/root/.ssh'
+            if "known_hosts" in path:
+                return "/root/.ssh/known_hosts"
+            elif path == "/root/.ssh":
+                return "/root/.ssh"
             else:
                 return path
+
         mock_realpath.side_effect = realpath_side_effect
 
         # 创建 known_hosts 文件
         known_hosts = os.path.join(self.root_ssh, "known_hosts")
-        with open(known_hosts, 'w') as f:
+        with open(known_hosts, "w") as f:
             f.write("github.com ssh-rsa AAAAB3NzaC1yc2E...\n")
 
         # 验证
@@ -142,21 +146,23 @@ class TestSSHFileSyncContext(unittest.TestCase):
                 self.assertTrue(result.allowed)
                 self.assertIn("default allowlist", result.reason)
 
-    @patch('os.path.realpath')
+    @patch("os.path.realpath")
     def test_validate_private_key_denied(self, mock_realpath):
         """测试私钥文件被拒绝"""
+
         def realpath_side_effect(path):
-            if 'id_rsa' in path:
-                return '/root/.ssh/id_rsa'
-            elif path == '/root/.ssh':
-                return '/root/.ssh'
+            if "id_rsa" in path:
+                return "/root/.ssh/id_rsa"
+            elif path == "/root/.ssh":
+                return "/root/.ssh"
             else:
                 return path
+
         mock_realpath.side_effect = realpath_side_effect
 
         # 创建私钥文件
         private_key = os.path.join(self.root_ssh, "id_rsa")
-        with open(private_key, 'w') as f:
+        with open(private_key, "w") as f:
             f.write("-----BEGIN RSA PRIVATE KEY-----\n")
             f.write("MIIEpAIBAAKCAQEA...\n")
             f.write("-----END RSA PRIVATE KEY-----\n")
@@ -168,21 +174,23 @@ class TestSSHFileSyncContext(unittest.TestCase):
                 self.assertFalse(result.allowed)
                 self.assertIn("denylist", result.reason.lower())
 
-    @patch('os.path.realpath')
+    @patch("os.path.realpath")
     def test_validate_pem_file_denied(self, mock_realpath):
         """测试 *.pem 文件被拒绝"""
+
         def realpath_side_effect(path):
-            if '.pem' in path:
-                return '/root/.ssh/certificate.pem'
-            elif path == '/root/.ssh':
-                return '/root/.ssh'
+            if ".pem" in path:
+                return "/root/.ssh/certificate.pem"
+            elif path == "/root/.ssh":
+                return "/root/.ssh"
             else:
                 return path
+
         mock_realpath.side_effect = realpath_side_effect
 
         # 创建 pem 文件
         pem_file = os.path.join(self.root_ssh, "certificate.pem")
-        with open(pem_file, 'w') as f:
+        with open(pem_file, "w") as f:
             f.write("-----BEGIN CERTIFICATE-----\n")
 
         # 验证
@@ -199,21 +207,23 @@ class TestSSHFileSyncContext(unittest.TestCase):
         # 由于我们无法在普通文件系统上创建 socket，我们通过模拟来测试
         pass
 
-    @patch('os.path.realpath')
+    @patch("os.path.realpath")
     def test_validate_token_file_denied(self, mock_realpath):
         """测试 token 文件被拒绝"""
+
         def realpath_side_effect(path):
-            if 'token_' in path:
-                return '/root/.ssh/token_abc123'
-            elif path == '/root/.ssh':
-                return '/root/.ssh'
+            if "token_" in path:
+                return "/root/.ssh/token_abc123"
+            elif path == "/root/.ssh":
+                return "/root/.ssh"
             else:
                 return path
+
         mock_realpath.side_effect = realpath_side_effect
 
         # 创建 token 文件
         token_file = os.path.join(self.root_ssh, "token_abc123")
-        with open(token_file, 'w') as f:
+        with open(token_file, "w") as f:
             f.write("secret_token")
 
         # 验证
@@ -223,21 +233,23 @@ class TestSSHFileSyncContext(unittest.TestCase):
                 self.assertFalse(result.allowed)
                 self.assertIn("denylist", result.reason.lower())
 
-    @patch('os.path.realpath')
+    @patch("os.path.realpath")
     def test_validate_hardlink_detected(self, mock_realpath):
         """测试硬链接被检测"""
+
         def realpath_side_effect(path):
-            if 'hardlink' in path:
-                return '/root/.ssh/hardlink'
-            elif path == '/root/.ssh':
-                return '/root/.ssh'
+            if "hardlink" in path:
+                return "/root/.ssh/hardlink"
+            elif path == "/root/.ssh":
+                return "/root/.ssh"
             else:
                 return path
+
         mock_realpath.side_effect = realpath_side_effect
 
         # 创建原始文件
         original_file = os.path.join(self.temp_dir, "original")
-        with open(original_file, 'w') as f:
+        with open(original_file, "w") as f:
             f.write("original content")
 
         # 创建硬链接
@@ -251,21 +263,23 @@ class TestSSHFileSyncContext(unittest.TestCase):
                 self.assertFalse(result.allowed)
                 self.assertIn("hardlink", result.reason.lower())
 
-    @patch('os.path.realpath')
+    @patch("os.path.realpath")
     def test_validate_content_check_detects_private_key(self, mock_realpath):
         """测试内容检测能发现私钥"""
+
         def realpath_side_effect(path):
-            if 'safe_config.txt' in path:
-                return '/root/.ssh/safe_config.txt'
-            elif path == '/root/.ssh':
-                return '/root/.ssh'
+            if "safe_config.txt" in path:
+                return "/root/.ssh/safe_config.txt"
+            elif path == "/root/.ssh":
+                return "/root/.ssh"
             else:
                 return path
+
         mock_realpath.side_effect = realpath_side_effect
 
         # 创建伪装文件名的私钥
         fake_file = os.path.join(self.root_ssh, "safe_config.txt")
-        with open(fake_file, 'w') as f:
+        with open(fake_file, "w") as f:
             f.write("-----BEGIN RSA PRIVATE KEY-----\n")
             f.write("MIIEpAIBAAKCAQEA...\n")
             f.write("-----END RSA PRIVATE KEY-----\n")
@@ -325,13 +339,13 @@ class TestLegacyKeyDetection(unittest.TestCase):
         """测试检测到指纹匹配的 legacy 私钥"""
         # 创建 root 私钥
         root_key = os.path.join(self.root_ssh, "id_rsa")
-        with open(root_key, 'w') as f:
+        with open(root_key, "w") as f:
             f.write("-----BEGIN RSA PRIVATE KEY-----\nroot key\n-----END RSA PRIVATE KEY-----\n")
         os.chmod(root_key, 0o600)
 
         # 创建用户私钥（相同内容）
         user_key = os.path.join(self.user_ssh, "id_rsa")
-        with open(user_key, 'w') as f:
+        with open(user_key, "w") as f:
             f.write("-----BEGIN RSA PRIVATE KEY-----\nroot key\n-----END RSA PRIVATE KEY-----\n")
         os.chmod(user_key, 0o600)
 
@@ -347,14 +361,16 @@ class TestLegacyKeyDetection(unittest.TestCase):
         """测试不同内容的私钥不被检测"""
         # 创建 root 私钥
         root_key = os.path.join(self.root_ssh, "id_rsa")
-        with open(root_key, 'w') as f:
+        with open(root_key, "w") as f:
             f.write("-----BEGIN RSA PRIVATE KEY-----\nroot key\n-----END RSA PRIVATE KEY-----\n")
         os.chmod(root_key, 0o600)
 
         # 创建用户私钥（不同内容）
         user_key = os.path.join(self.user_ssh, "id_rsa")
-        with open(user_key, 'w') as f:
-            f.write("-----BEGIN RSA PRIVATE KEY-----\nuser's own key\n-----END RSA PRIVATE KEY-----\n")
+        with open(user_key, "w") as f:
+            f.write(
+                "-----BEGIN RSA PRIVATE KEY-----\nuser's own key\n-----END RSA PRIVATE KEY-----\n"
+            )
         os.chmod(user_key, 0o600)
 
         # 计算实际指纹
@@ -385,7 +401,7 @@ class TestSha256File(unittest.TestCase):
 
     def setUp(self):
         """测试前准备"""
-        self.temp_file = tempfile.NamedTemporaryFile(mode='w', delete=False)
+        self.temp_file = tempfile.NamedTemporaryFile(mode="w", delete=False)
         self.temp_file.write("test content\n")
         self.temp_file.close()
 
@@ -411,7 +427,7 @@ class TestSha256File(unittest.TestCase):
     def test_sha256_file_different_content(self):
         """测试不同内容产生不同指纹"""
         # 创建另一个文件
-        temp_file2 = tempfile.NamedTemporaryFile(mode='w', delete=False)
+        temp_file2 = tempfile.NamedTemporaryFile(mode="w", delete=False)
         temp_file2.write("different content\n")
         temp_file2.close()
 
@@ -487,7 +503,7 @@ class TestSyncSSHKeys(unittest.TestCase):
 
         # 创建 known_hosts 文件
         known_hosts = os.path.join(self.root_ssh, "known_hosts")
-        with open(known_hosts, 'w') as f:
+        with open(known_hosts, "w") as f:
             f.write("github.com ssh-rsa AAAAB3NzaC1yc2E...\n")
 
         # 验证文件内容
@@ -497,24 +513,26 @@ class TestSyncSSHKeys(unittest.TestCase):
         hash_result = sha256_file(known_hosts)
         self.assertTrue(len(hash_result) == 64)  # SHA-256 是 64 个十六进制字符
 
-    @patch('os.path.realpath')
+    @patch("os.path.realpath")
     def test_sync_private_key_denied(self, mock_realpath):
         """测试私钥被拒绝同步"""
+
         def realpath_side_effect(path):
-            if 'id_rsa' in path:
-                return '/root/.ssh/id_rsa'
-            elif path == '/root/.ssh':
-                return '/root/.ssh'
-            elif 'test_ssh_key_sync' in path:
+            if "id_rsa" in path:
+                return "/root/.ssh/id_rsa"
+            elif path == "/root/.ssh":
+                return "/root/.ssh"
+            elif "test_ssh_key_sync" in path:
                 # 审计日志路径
                 return path
             else:
                 return path
+
         mock_realpath.side_effect = realpath_side_effect
 
         # 创建私钥
         private_key = os.path.join(self.root_ssh, "id_rsa")
-        with open(private_key, 'w') as f:
+        with open(private_key, "w") as f:
             f.write("-----BEGIN RSA PRIVATE KEY-----\n")
 
         results = sync_ssh_keys("testuser", dry_run=True)
@@ -536,7 +554,7 @@ class TestHandleLegacyKeys(unittest.TestCase):
                 source="/root/.ssh/id_rsa",
                 sha256="abc123",
                 mtime="2024-01-01T00:00:00",
-                username="user"
+                username="user",
             )
         ]
 
@@ -561,7 +579,7 @@ class TestTOCTOUProtection(unittest.TestCase):
         temp_dir = tempfile.mkdtemp()
         try:
             test_file = os.path.join(temp_dir, "test")
-            with open(test_file, 'w') as f:
+            with open(test_file, "w") as f:
                 f.write("test")
 
             # SSHFileSyncContext 应该使用 fstat
@@ -570,8 +588,8 @@ class TestTOCTOUProtection(unittest.TestCase):
                     # ctx._src_st 应该是通过 fstat 获得的
                     self.assertIsNotNone(ctx._src_st)
                     # 验证它是一个 stat 结果
-                    self.assertTrue(hasattr(ctx._src_st, 'st_mode'))
-                    self.assertTrue(hasattr(ctx._src_st, 'st_nlink'))
+                    self.assertTrue(hasattr(ctx._src_st, "st_mode"))
+                    self.assertTrue(hasattr(ctx._src_st, "st_nlink"))
         finally:
             shutil.rmtree(temp_dir)
 
@@ -590,5 +608,5 @@ class TestSecurityReviewValidation(unittest.TestCase):
         pass
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main(verbosity=2)
