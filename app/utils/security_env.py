@@ -140,9 +140,11 @@ def get_upload_auth_key() -> str | None:
     In production mode:
     - If upload endpoints are needed, key MUST be set explicitly.
     - Weak/placeholder keys are rejected.
+    - Minimum length requirement enforced.
 
     In pilot/development mode:
     - Allows auto-generation if needed.
+    - Weak keys are rejected but length check is advisory only.
 
     Returns:
         A validated upload auth key, or None if not set.
@@ -154,13 +156,14 @@ def get_upload_auth_key() -> str | None:
     if not upload_auth_key:
         return None
 
-    mode = get_security_mode()
-
-    # Check for weak values - always reject
+    # Check for weak values - always log warning but handle differently per mode
     if is_weak_secret_value(upload_auth_key):
         logger.error(
             "UPLOAD_AUTH_KEY uses an insecure placeholder value; upload endpoints disabled"
         )
+        # In production, raise error to prevent silent misconfiguration
+        # In pilot/development, just disable the endpoint (return None)
+        mode = get_security_mode()
         if mode == SecurityMode.PRODUCTION:
             raise RuntimeError(
                 "UPLOAD_AUTH_KEY uses an insecure placeholder value in production! "
@@ -168,8 +171,15 @@ def get_upload_auth_key() -> str | None:
             )
         return None
 
-    # Validate strength in production mode
-    validate_secret_strength(upload_auth_key, "UPLOAD_AUTH_KEY", min_length=32)
+    # Validate strength only in production mode
+    mode = get_security_mode()
+    if mode == SecurityMode.PRODUCTION:
+        # Only enforce length in production
+        if len(upload_auth_key) < 32:
+            raise RuntimeError(
+                f"UPLOAD_AUTH_KEY must be at least 32 characters long "
+                f"(got {len(upload_auth_key)}); current value is too short for production"
+            )
 
     return upload_auth_key
 
