@@ -73,7 +73,7 @@ if __name__ == "__main__":
 TEST_COUNT=$(echo "$COLLECT_OUTPUT" | grep -oP 'collected \K\d+|\d+(?= items)' | head -1 || echo "0")
 ```
 
-**验证结果**: 
+**验证结果**:
 - 输入: "collected 3956 items"
 - 输出: 3956
 - ✅ 正确提取测试数量

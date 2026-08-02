@@ -6,8 +6,9 @@
 """
 
 import json
-import pytest
 from pathlib import Path
+
+import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -23,9 +24,11 @@ class TestVerifyTestFiles:
     def test_can_import(self):
         """验证可以导入脚本"""
         import sys
+
         sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
         try:
             import verify_test_files
+
             assert hasattr(verify_test_files, "find_e2e_test_files")
             assert hasattr(verify_test_files, "verify_test_file")
         finally:
@@ -108,12 +111,12 @@ class TestTestLogoutFix:
         content = test_file.read_text()
 
         # 验证没有 except Exception: pass
-        assert "except Exception:\n                    pass" not in content, \
-            "test_logout should not have 'except Exception: pass'"
+        assert (
+            "except Exception:\n                    pass" not in content
+        ), "test_logout should not have 'except Exception: pass'"
 
         # 验证有 pytest.fail 调用
-        assert "pytest.fail" in content, \
-            "test_logout should use pytest.fail for explicit failures"
+        assert "pytest.fail" in content, "test_logout should use pytest.fail for explicit failures"
 
 
 if __name__ == "__main__":

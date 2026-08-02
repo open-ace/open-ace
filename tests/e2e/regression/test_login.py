@@ -202,15 +202,12 @@ def test_logout():
             try:
                 page.wait_for_url(lambda url: "/login" in url or url.endswith("/"), timeout=10000)
             except Exception:
-                pytest.fail(
-                    f"Logout did not redirect to login page. "
-                    f"Current URL: {page.url}"
-                )
+                pytest.fail(f"Logout did not redirect to login page. " f"Current URL: {page.url}")
 
             # 验证重定向到登录页面
-            assert "/login" in page.url or page.url.endswith("/"), (
-                f"登出后应重定向到登录页面或首页，当前URL: {page.url}"
-            )
+            assert "/login" in page.url or page.url.endswith(
+                "/"
+            ), f"登出后应重定向到登录页面或首页，当前URL: {page.url}"
 
             save_screenshot(page, MODULE_NAME, "04_logout")
             return True

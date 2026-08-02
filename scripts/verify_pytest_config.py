@@ -108,7 +108,9 @@ def compare_configs(strict: bool = False) -> tuple[bool, list[str]]:
             print(f"✓ {key}: {ini_value}")
         else:
             print(f"✗ {key}: pytest.ini={ini_value}, pyproject.toml={toml_value}")
-            messages.append(f"配置项 '{key}' 不一致: pytest.ini={ini_value}, pyproject.toml={toml_value}")
+            messages.append(
+                f"配置项 '{key}' 不一致: pytest.ini={ini_value}, pyproject.toml={toml_value}"
+            )
             all_consistent = False
 
     return all_consistent, messages

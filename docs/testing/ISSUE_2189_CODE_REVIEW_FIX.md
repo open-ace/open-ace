@@ -6,7 +6,7 @@
 
 **问题位置**: `scripts/run_extended_tests.py` line 324
 
-**问题描述**: 
+**问题描述**:
 - 错误传递 `targets`（目录路径列表）而非 `all_files`（已发现的测试文件列表）
 - 导致分片一致性验证逻辑错误
 
@@ -15,13 +15,13 @@
 # 修复前（错误）
 for i in range(args.split_total):
     shard = apply_split(targets, args.split_total, i + 1)
-    
+
 # 修复后（正确）
 for i in range(args.split_total):
     shard = apply_split(all_files, args.split_total, i + 1)
 ```
 
-**验证**: 
+**验证**:
 - ✅ 脚本语法正确
 - ✅ 参数传递符合函数签名
 - ✅ 分片逻辑基于文件列表而非目录路径
@@ -30,7 +30,7 @@ for i in range(args.split_total):
 
 **问题位置**: `scripts/check_test_baseline.py`
 
-**问题描述**: 
+**问题描述**:
 - 审查意见认为文件截断，缺少返回退出码和主程序入口点
 - 实际检查发现文件完整（223 行）
 - 已包含正确的返回值和主程序入口点
@@ -50,7 +50,7 @@ if __name__ == "__main__":
     raise SystemExit(main())
 ```
 
-**验证**: 
+**验证**:
 - ✅ 文件完整，无截断
 - ✅ 返回值逻辑正确
 - ✅ 主程序入口点正确
@@ -59,7 +59,7 @@ if __name__ == "__main__":
 
 **问题位置**: `.github/workflows/ci.yml`
 
-**问题描述**: 
+**问题描述**:
 - 缺少 test collection 验证步骤
 - 缺少 baseline 检查步骤
 
@@ -68,7 +68,7 @@ if __name__ == "__main__":
 1. **Verify test collection**: 验证测试收集数量，0 tests 时失败
 2. **Check test baseline**: 验证 baseline 阈值
 
-**验证**: 
+**验证**:
 - ✅ CI workflow 文件语法正确
 - ✅ 步骤顺序正确（collection → baseline → tests）
 - ✅ 错误处理正确（0 tests 失败，baseline 失败）
