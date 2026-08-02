@@ -44,6 +44,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
+        with:
+          submodules: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -105,6 +107,8 @@ jobs:
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v6
+        with:
+          submodules: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -169,6 +173,8 @@ jobs:
         group: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v6
+        with:
+          submodules: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -229,6 +235,8 @@ jobs:
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v6
+        with:
+          submodules: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v6

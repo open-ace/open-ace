@@ -53,7 +53,16 @@ jobs:
           --health-retries 5
 
     steps:
+      - name: Configure Git for checkout
+        run: |
+          # Configure Git to ignore submodule issues during checkout
+          # Work around erroneously committed .worktrees submodule entries
+          git config --global submodule.ignore all
+          git config --global submodule.active false
+
       - uses: actions/checkout@v6
+        with:
+          submodules: false
 
       - name: Set up Python
         uses: actions/setup-python@v6

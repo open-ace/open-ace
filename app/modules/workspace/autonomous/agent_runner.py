@@ -1398,7 +1398,7 @@ class AutonomousAgentRunner:
         in development unless OPENACE_ALLOW_RAW_KEY_FALLBACK=1 is set. The agent
         never inherits a real key from the service env.
         """
-        from app.utils.security_env import is_production_environment
+        from app.utils.security_mode import is_production
 
         env = dict(os.environ)
         guard_bin = AutonomousAgentRunner._resolve_agent_guard_bin()
@@ -1522,7 +1522,7 @@ class AutonomousAgentRunner:
                 llm_provider_keys=llm_keys,
                 proxy_env_vars=proxy_env_vars,
                 proxy_ok=proxy_ok,
-                is_production=is_production_environment(),
+                is_production=is_production(),
                 raw_fallback_allowed=os.environ.get("OPENACE_ALLOW_RAW_KEY_FALLBACK") == "1",
             ),
         )

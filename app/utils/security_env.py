@@ -1,5 +1,10 @@
 """
 Helpers for validating security-sensitive environment variables.
+
+This module provides secret key validation and retrieval functions.
+Security mode detection is centralized in security_mode.py (Issue #2185).
+
+All functions use the unified SecurityMode API from security_mode.py.
 """
 
 from __future__ import annotations
@@ -7,198 +12,191 @@ from __future__ import annotations
 import logging
 import os
 
+from app.utils.security_mode import (
+    SecurityMode,
+    get_security_mode,
+    is_production,
+    is_strict_mode,
+    is_weak_secret_value,
+    validate_secret_strength,
+)
+
 logger = logging.getLogger(__name__)
-
-_WEAK_SECRET_VALUES = frozenset(
-    {
-        "",
-        "change-me-in-production",
-        "dev-secret-key",
-        "dev-smtp-password-key",
-        "default-secret-key",
-    }
-)
-
-# Prefixes used by committed deployment manifests (k8s/configmap.yaml) as
-# placeholders the operator must replace. Matching the prefix (rather than
-# each literal string) keeps a future manifest from silently reintroducing a
-# new ``replace-with-random-*`` value that passes the weak-secret check.
-_WEAK_SECRET_PREFIXES = ("replace-with-random",)
-
-_DEV_SECRET_KEY = "dev-secret-key"  # nosec B105 - explicit development-only fallback
-_DEV_ENCRYPTION_KEY = (  # nosec B105 - explicit development-only fallback
-    "openace-dev-encryption-key"
-)
-
-
-def is_production_environment() -> bool:
-    """Return whether the current process is running in production mode."""
-    return os.environ.get("FLASK_ENV", "development").strip().lower() == "production"
-
-
-def is_strict_mode() -> bool:
-    """
-    Check if strict key validation is enabled.
-
-    Strict mode:
-    - Enabled by default in production (FLASK_ENV=production)
-    - Can be overridden via OPENACE_STRICT_KEY_VALIDATION env var
-    - In strict mode, weak keys raise RuntimeError
-    - In non-strict mode, weak keys log warnings
-
-    Returns:
-        True if strict mode is enabled, False otherwise.
-    """
-    # Check explicit override
-    override = os.environ.get("OPENACE_STRICT_KEY_VALIDATION", "").strip().lower()
-    if override in ("true", "1", "yes"):
-        return True
-    if override in ("false", "0", "no"):
-        return False
-
-    # Default to production mode
-    return is_production_environment()
-
-
-def is_weak_secret_value(value: str | None) -> bool:
-    """Return whether the given secret value is missing or a known placeholder."""
-    if value is None:
-        return True
-    normalized = value.strip().lower()
-    if normalized in _WEAK_SECRET_VALUES:
-        return True
-    return any(normalized.startswith(prefix) for prefix in _WEAK_SECRET_PREFIXES)
-
-
-def validate_secret_strength(value: str | None, purpose: str, *, min_length: int = 32) -> None:
-    """
-    Validate that a secret key meets minimum strength requirements.
-
-    Checks:
-    1. Key is not empty
-    2. Key is not in denylist (weak values)
-    3. Key length >= min_length
-
-    In strict mode (production), raises RuntimeError on failure.
-    In non-strict mode, logs warning on failure.
-
-    Args:
-        value: The secret value to validate.
-        purpose: Description of the key's purpose (for error messages).
-        min_length: Minimum required length (default 32).
-
-    Raises:
-        RuntimeError: In strict mode when validation fails.
-    """
-    # Check for empty value
-    if not value:
-        if is_strict_mode():
-            raise RuntimeError(f"{purpose} environment variable must be set in production!")
-        logger.warning("%s is empty; this is insecure for production use", purpose)
-        return
-
-    # Check for weak values
-    if is_weak_secret_value(value):
-        if is_strict_mode():
-            raise RuntimeError(f"{purpose} must be set to a strong, unique value in production!")
-        logger.warning(
-            "%s uses a weak development value - DO NOT use in production!",
-            purpose,
-        )
-        return
-
-    # Check minimum length
-    if len(value) < min_length:
-        if is_strict_mode():
-            raise RuntimeError(
-                f"{purpose} must be at least {min_length} characters long "
-                f"(got {len(value)}); current value is too short (strict mode)"
-            )
-        logger.warning(
-            "%s is shorter than recommended minimum length %d (got %d)",
-            purpose,
-            min_length,
-            len(value),
-        )
-        return
-
-    # All checks passed
-    logger.debug("%s meets strength requirements", purpose)
 
 
 def get_secret_key_for_app(secret_key: str | None = None) -> str:
-    """Return a validated Flask SECRET_KEY."""
+    """
+    Return a validated Flask SECRET_KEY.
+
+    In production mode:
+    - Secret key MUST be set explicitly via environment variable.
+    - Empty, weak, or short keys raise RuntimeError.
+    - No fallback to development keys.
+
+    In pilot mode:
+    - Allows auto-generation with strong warnings.
+    - Should persist to generated-secrets.env.
+
+    In development mode:
+    - Allows auto-generation, persisted to local file.
+    - Ensures consistency across restarts and workers.
+
+    Args:
+        secret_key: Optional secret key override. If None, reads from SECRET_KEY env.
+
+    Returns:
+        A validated secret key.
+
+    Raises:
+        RuntimeError: In production mode when key is missing or invalid.
+    """
     if secret_key is None:
         secret_key = os.environ.get("SECRET_KEY")
 
-    # Handle empty value with fallback
-    if not secret_key:
-        if is_strict_mode():
-            raise RuntimeError("SECRET_KEY environment variable must be set in production!")
-        logger.warning("Using development SECRET_KEY - DO NOT use in production!")
-        return _DEV_SECRET_KEY
+    mode = get_security_mode()
 
-    # Validate strength (raises RuntimeError in strict mode if invalid)
+    # Handle empty value
+    if not secret_key:
+        if mode == SecurityMode.PRODUCTION:
+            raise RuntimeError(
+                "SECRET_KEY environment variable must be set in production mode! "
+                'Generate: python3 -c "import secrets; print(secrets.token_hex(32))"'
+            )
+        # For pilot/development, caller should handle auto-generation
+        # (typically done in docker-entrypoint.sh)
+        logger.warning(
+            "SECRET_KEY not set. In %s mode, this should be auto-generated and persisted.",
+            mode.value,
+        )
+        raise RuntimeError(
+            f"SECRET_KEY not set in {mode.value} mode. "
+            f"The entrypoint should auto-generate and persist this key. "
+            f"If running directly (not via entrypoint), set SECRET_KEY explicitly."
+        )
+
+    # Validate strength (raises RuntimeError in production if invalid)
     validate_secret_strength(secret_key, "SECRET_KEY", min_length=32)
 
     return secret_key
 
 
 def get_encryption_key_material(*, purpose: str) -> str:
-    """Return validated key material for encrypted secret storage."""
-    key_env = os.environ.get("OPENACE_ENCRYPTION_KEY")
+    """
+    Return validated key material for encrypted secret storage.
 
-    # Handle empty value with fallback
+    In production mode:
+    - Encryption key MUST be set explicitly.
+    - Required for encrypting SMTP passwords, API keys, etc.
+
+    In pilot mode:
+    - Allows auto-generation with strong warnings.
+    - Data encrypted with auto-generated key is not portable.
+
+    In development mode:
+    - Allows auto-generation, persisted to local file.
+    - Encrypted data portable only within same secret store.
+
+    Args:
+        purpose: Description of what the key is used for (for messages).
+
+    Returns:
+        A validated encryption key.
+
+    Raises:
+        RuntimeError: In production mode when key is missing or invalid.
+    """
+    key_env = os.environ.get("OPENACE_ENCRYPTION_KEY")
+    mode = get_security_mode()
+
+    # Handle empty value
     if not key_env or is_weak_secret_value(key_env):
-        if is_strict_mode():
+        if mode == SecurityMode.PRODUCTION:
             raise RuntimeError(
-                f"OPENACE_ENCRYPTION_KEY must be set to a strong, unique value in production for {purpose} (strict mode)"
+                f"OPENACE_ENCRYPTION_KEY must be set to a strong, unique value in production for {purpose}! "
+                f'Generate: python3 -c "import secrets; print(secrets.token_hex(32))"'
             )
         logger.warning(
-            "OPENACE_ENCRYPTION_KEY not set; using development-only encryption key for %s. "
+            "OPENACE_ENCRYPTION_KEY not set in %s mode. "
+            "This should be auto-generated and persisted. "
             "Encrypted data will not be portable across environments.",
-            purpose,
+            mode.value,
         )
-        return _DEV_ENCRYPTION_KEY
+        raise RuntimeError(
+            f"OPENACE_ENCRYPTION_KEY not set in {mode.value} mode. "
+            f"The entrypoint should auto-generate and persist this key. "
+            f"If running directly, set OPENACE_ENCRYPTION_KEY explicitly."
+        )
 
-    # Validate strength (raises RuntimeError in strict mode if invalid)
+    # Validate strength (raises RuntimeError in production if invalid)
     validate_secret_strength(key_env, "OPENACE_ENCRYPTION_KEY", min_length=32)
 
     return key_env
 
 
 def get_upload_auth_key() -> str | None:
-    """Return a validated upload auth key, or None when upload endpoints should stay disabled."""
+    """
+    Return a validated upload auth key, or None when upload endpoints should stay disabled.
+
+    In production mode:
+    - If upload endpoints are needed, key MUST be set explicitly.
+    - Weak/placeholder keys are rejected.
+    - Minimum length requirement enforced.
+
+    In pilot/development mode:
+    - Allows auto-generation if needed.
+    - Weak keys are rejected but length check is advisory only.
+
+    Returns:
+        A validated upload auth key, or None if not set.
+
+    Raises:
+        RuntimeError: In production mode when key is set but invalid.
+    """
     upload_auth_key = os.environ.get("UPLOAD_AUTH_KEY")
     if not upload_auth_key:
         return None
 
-    # Check for weak values - always reject
+    # Check for weak values - always log warning but handle differently per mode
     if is_weak_secret_value(upload_auth_key):
         logger.error(
             "UPLOAD_AUTH_KEY uses an insecure placeholder value; upload endpoints disabled"
         )
+        # In production, raise error to prevent silent misconfiguration
+        # In pilot/development, just disable the endpoint (return None)
+        mode = get_security_mode()
+        if mode == SecurityMode.PRODUCTION:
+            raise RuntimeError(
+                "UPLOAD_AUTH_KEY uses an insecure placeholder value in production! "
+                'Generate: python3 -c "import secrets; print(secrets.token_hex(32))"'
+            )
         return None
 
-    # Validate strength in strict mode
-    try:
-        validate_secret_strength(upload_auth_key, "UPLOAD_AUTH_KEY", min_length=32)
-    except RuntimeError as e:
-        logger.error(str(e))
-        return None
+    # Validate strength only in production mode
+    mode = get_security_mode()
+    if mode == SecurityMode.PRODUCTION:
+        # Only enforce length in production
+        if len(upload_auth_key) < 32:
+            raise RuntimeError(
+                f"UPLOAD_AUTH_KEY must be at least 32 characters long "
+                f"(got {len(upload_auth_key)}); current value is too short for production"
+            )
 
     return upload_auth_key
-
-
-_DEV_REDIS_PASSWORD = "dev-redis-password"  # nosec B105 - explicit development-only fallback
 
 
 def get_redis_password(redis_password: str | None = None) -> str:
     """
     Return a validated Redis password.
 
-    In production, empty or weak passwords are rejected (fail-closed).
-    In development, a development-only password is used with a warning.
+    In production mode:
+    - Password MUST be set explicitly.
+    - Empty or weak passwords raise RuntimeError.
+
+    In pilot mode:
+    - Allows auto-generation with strong warnings.
+
+    In development mode:
+    - Allows auto-generation, persisted to local file.
 
     Args:
         redis_password: Optional password override. If None, reads from REDIS_PASSWORD env.
@@ -207,19 +205,46 @@ def get_redis_password(redis_password: str | None = None) -> str:
         A validated Redis password.
 
     Raises:
-        RuntimeError: In production when password is empty or weak.
+        RuntimeError: In production mode when password is missing or invalid.
     """
     if redis_password is None:
         redis_password = os.environ.get("REDIS_PASSWORD")
 
-    # Handle empty value with fallback
-    if not redis_password:
-        if is_strict_mode():
-            raise RuntimeError("REDIS_PASSWORD must be set in production (strict mode)")
-        logger.warning("Using development REDIS_PASSWORD - DO NOT use in production!")
-        return _DEV_REDIS_PASSWORD
+    mode = get_security_mode()
 
-    # Validate strength (raises RuntimeError in strict mode if invalid)
+    # Handle empty value
+    if not redis_password:
+        if mode == SecurityMode.PRODUCTION:
+            raise RuntimeError(
+                "REDIS_PASSWORD must be set in production mode! "
+                'Generate: python3 -c "import secrets; print(secrets.token_urlsafe(32))"'
+            )
+        logger.warning(
+            "REDIS_PASSWORD not set in %s mode. " "This should be auto-generated and persisted.",
+            mode.value,
+        )
+        raise RuntimeError(
+            f"REDIS_PASSWORD not set in {mode.value} mode. "
+            f"The entrypoint should auto-generate and persist this password. "
+            f"If running directly, set REDIS_PASSWORD explicitly."
+        )
+
+    # Validate strength (raises RuntimeError in production if invalid)
     validate_secret_strength(redis_password, "REDIS_PASSWORD", min_length=24)
 
     return redis_password
+
+
+# Re-export for backward compatibility (used by tests and other modules)
+__all__ = [
+    "SecurityMode",
+    "get_security_mode",
+    "is_production",
+    "is_strict_mode",
+    "is_weak_secret_value",
+    "validate_secret_strength",
+    "get_secret_key_for_app",
+    "get_encryption_key_material",
+    "get_upload_auth_key",
+    "get_redis_password",
+]

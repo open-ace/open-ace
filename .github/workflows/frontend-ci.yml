@@ -22,6 +22,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          submodules: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -44,6 +46,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          submodules: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -63,6 +67,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          submodules: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -94,6 +100,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          submodules: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -151,6 +159,8 @@ jobs:
     needs: [lint, typecheck, test]
     steps:
       - uses: actions/checkout@v6
+        with:
+          submodules: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -178,6 +188,8 @@ jobs:
     needs: [build]
     steps:
       - uses: actions/checkout@v6
+        with:
+          submodules: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
