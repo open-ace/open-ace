@@ -235,6 +235,36 @@ class TestIpPinning:
         assert not is_valid
         assert "rebinding" in error.lower() or "changed" in error.lower()
 
+    def test_validate_ip_against_stored_cdn_rotation_all_public(self):
+        """CDN round-robin: disjoint *public* IP sets should pass.
+
+        Providers like Alibaba dashscope use DNS round-robin, so the
+        current resolution can return IPs not seen at config time. As long
+        as every current IP is public, it is legitimate rotation, not a
+        rebinding attack.
+        """
+        is_valid, error = validate_ip_against_stored(
+            "https://coding.dashscope.aliyuncs.com/v1",
+            "47.93.100.126,47.94.106.9",  # stored at config time
+            resolver=_resolver("47.93.100.200", "47.94.106.50"),  # disjoint, all public
+        )
+        assert is_valid
+        assert error is None
+
+    def test_validate_ip_against_stored_mixed_public_private_blocked(self):
+        """Even one private IP among current IPs must be blocked.
+
+        The all-public relaxation must not mask a genuine rebinding attack
+        where one resolved IP is private (the actual SSRF vector).
+        """
+        is_valid, error = validate_ip_against_stored(
+            "https://api.custom.com/v1",
+            "93.184.216.34",
+            resolver=_resolver("47.93.100.200", "169.254.169.254"),  # one metadata IP
+        )
+        assert not is_valid
+        assert "rebinding" in error.lower() or "changed" in error.lower()
+
 
 class TestDnsCache:
     """Tests for DNS cache functionality."""
