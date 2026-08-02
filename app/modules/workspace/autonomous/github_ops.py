@@ -1808,8 +1808,22 @@ class GitHubOps:
         return [line.strip() for line in result.stdout.splitlines() if line.strip()]
 
     def git_add_all(self) -> None:
-        """Stage all changes."""
+        """Stage all changes.
+
+        After staging, remove any ``.worktrees/`` gitlinks that ``git add -A``
+        may have picked up from nested worktree directories. These appear as
+        160000-mode submodule references but have no ``.gitmodules`` entry,
+        which breaks CI (``git submodule foreach`` fails with "No url found
+        for submodule path") and pollutes schema-sync diffs.
+        """
         self._run_git(["add", "-A"])
+        try:
+            self._run_git(
+                ["rm", "-r", "--cached", "--ignore-unmatch", ".worktrees"],
+                check=False,
+            )
+        except Exception:
+            pass
 
     def git_commit(self, message: str, no_verify: bool = False) -> dict:
         """Create a git commit.
