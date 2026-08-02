@@ -671,10 +671,11 @@ class RemoteWSHandler(WSGIHandler):
             or not stored_token
             or not hmac.compare_digest(decoded_token, stored_token)
         ):
+            # Issue #2183: Do not log token prefix - only log length
             logger.warning(
-                "VSCode WS handler: invalid token for vscode %s (prefix: %s)",
+                "VSCode WS handler: invalid token for vscode %s (token length: %d)",
                 vscode_id[:8],
-                token[:8] if len(token) > 8 else "short",
+                len(token),
             )
             ws_frame.send_close(self.socket, 4001, "Invalid token")
             self.close_connection = True

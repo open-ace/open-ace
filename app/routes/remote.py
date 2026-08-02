@@ -1850,15 +1850,17 @@ def agent_message():
                     machine_id_for_vs[:8],
                     e,
                 )
-                # Continue with default values for backward compatibility
 
-            # Use default tenant_id if not found (backward compatibility)
+            # Issue #2183: Do not use default tenant_id - reject if unable to determine
             if tenant_id is None:
-                tenant_id = 1
-                logger.warning(
-                    "VSCode session %s created with default tenant_id",
+                logger.error(
+                    "Cannot create VSCode session %s: unable to determine tenant_id",
                     vscode_id[:8],
                 )
+                return jsonify({
+                    "success": False,
+                    "error": "Cannot determine tenant for machine"
+                }), 500
 
             # Calculate expiration time
             now = time.time()
@@ -3629,8 +3631,7 @@ def remote_vscode_proxy(vscode_id, path=""):
 
     No fallback to stored token - caller must provide valid credentials.
     """
-    import hmac as _hmac
-    import time as _time
+    import hmac as _hmc
 
     from app.modules.workspace.vscode_proxy import build_target_url, proxy_request_streaming
     from app.modules.workspace.vscode_store import vscode_info_store
@@ -3647,7 +3648,7 @@ def remote_vscode_proxy(vscode_id, path=""):
 
     # Issue #2183: Check if session is expired
     expires_at = info.get("expires_at")
-    if expires_at and _time.time() > expires_at:
+    if expires_at and time.time() > expires_at:
         logger.warning("Attempt to access expired VSCode session %s", vscode_id[:8])
         return jsonify({"error": "VSCode session expired"}), 403
 
@@ -3742,11 +3743,12 @@ def remote_vscode_proxy(vscode_id, path=""):
         return jsonify({"error": "Authentication required"}), 401
 
     # Validate token if provided
-    if token and not _hmac.compare_digest(token, stored_token):
+    if token and not _hmc.compare_digest(token, stored_token):
+        # Issue #2183: Do not log token prefix - only log length
         logger.warning(
-            "Invalid token for VSCode session %s (token prefix: %s)",
+            "Invalid token for VSCode session %s (token length: %d)",
             vscode_id[:8],
-            token[:8] if len(token) > 8 else "short",
+            len(token),
         )
         return jsonify({"error": "Invalid token"}), 403
 
