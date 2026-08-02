@@ -7158,6 +7158,12 @@ class AutonomousOrchestrator:
                             ["log", "--oneline", "origin/main..HEAD"], check=False
                         )
                         commits_log = log_result.stdout or ""
+                        if log_result.returncode != 0 and not commits_log:
+                            logger.debug(
+                                "git log origin/main..HEAD failed (rc=%s); "
+                                "treating as no agent commits",
+                                log_result.returncode,
+                            )
                         # Agent-authored auto-dev commits indicate prior work
                         branch_has_agent_commits = any(
                             "auto:" in line.lower() or "dev round" in line.lower()
