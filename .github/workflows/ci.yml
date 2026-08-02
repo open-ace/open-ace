@@ -81,6 +81,30 @@ jobs:
           pip install playwright
           playwright install chromium --with-deps
 
+      # Issue #2189: Test collection verification
+      - name: Verify test collection
+        run: |
+          echo "=== Verifying test collection ==="
+          COLLECT_OUTPUT=$(pytest --collect-only tests/ -q 2>&1)
+          echo "$COLLECT_OUTPUT"
+
+          # Check if 0 tests collected
+          if echo "$COLLECT_OUTPUT" | grep -q "0 tests collected"; then
+            echo "::error::Default tests collected 0 tests"
+            exit 1
+          fi
+
+          # Extract test count
+          TEST_COUNT=$(echo "$COLLECT_OUTPUT" | grep -oP '\d+(?= test)' | head -1 || echo "0")
+          echo "Collected tests: $TEST_COUNT"
+          echo "TEST_COUNT=$TEST_COUNT" >> $GITHUB_ENV
+
+      # Issue #2189: Baseline verification
+      - name: Check test baseline
+        run: |
+          echo "=== Checking test baseline ==="
+          python scripts/check_test_baseline.py --category default_tests --actual-count ${{ env.TEST_COUNT }}
+
       - name: Run tests
         run: |
           # E2E/Playwright/HTTP tests live under tests/e2e/ and are excluded via

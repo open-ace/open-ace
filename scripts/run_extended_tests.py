@@ -314,14 +314,14 @@ def verify_shard_consistency(args: argparse.Namespace) -> bool:
 
     targets = select_targets(args)
 
-    # 不分片
+    # 不分片：发现所有测试文件
     all_files = discover_test_files(targets)
     print(f"\n不分片: {len(all_files)} files")
 
-    # 所有分片
+    # 所有分片：基于已发现的文件列表进行分片
     shards = []
     for i in range(args.split_total):
-        shard = apply_split(targets, args.split_total, i + 1)
+        shard = apply_split(all_files, args.split_total, i + 1)
         shards.extend(shard)
 
     # 去重后比较

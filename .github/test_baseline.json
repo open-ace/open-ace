@@ -1,31 +1,35 @@
 {
   "default_tests": {
     "hard_minimum": 500,
-    "baseline": 7254,
-    "warning_threshold": 6500,
+    "baseline": 3956,
+    "warning_threshold": 3500,
     "last_updated": "2026-08-03",
     "update_mode": "auto",
-    "auto_update_limit": 10
+    "auto_update_limit": 10,
+    "note": "Based on actual test collection on 2026-08-03 (excluding tests/e2e and tests/issues)"
   },
   "critical_e2e": {
     "hard_minimum": 3,
     "baseline": 5,
     "warning_threshold": 4,
     "last_updated": "2026-08-03",
-    "update_mode": "manual"
+    "update_mode": "manual",
+    "note": "Based on CATEGORY_TARGETS definition in run_extended_tests.py"
   },
   "full_e2e": {
     "hard_minimum": 50,
     "baseline": 74,
     "warning_threshold": 66,
     "last_updated": "2026-08-03",
-    "update_mode": "manual"
+    "update_mode": "manual",
+    "note": "Based on e2e_*.py file count in tests/e2e"
   },
   "issue_tests": {
     "hard_minimum": 20,
     "baseline": 27,
     "warning_threshold": 24,
     "last_updated": "2026-08-03",
-    "update_mode": "manual"
+    "update_mode": "manual",
+    "note": "Based on e2e_*.py file count in tests/issues"
   }
 }
