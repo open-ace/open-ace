@@ -89,6 +89,23 @@ class RetentionExecutionRepository:
             (execution_id,),
         )
 
+    # Allowed update fields (whitelist for SQL injection protection)
+    ALLOWED_UPDATE_FIELDS = {
+        "status",
+        "records_scanned",
+        "records_affected",
+        "records_skipped",
+        "records_archived",
+        "records_anonymized",
+        "records_in_recycle_bin",
+        "error_message",
+        "error_details",
+        "last_batch_id",
+        "total_batches",
+        "last_batch_status",
+        "completed_at",
+    }
+
     def update_execution(
         self,
         execution_id: str,
@@ -174,6 +191,13 @@ class RetentionExecutionRepository:
             return self.get_execution_by_id(execution_id)
 
         params.append(execution_id)
+
+        # Validate field names against whitelist for SQL injection protection
+        # Extract field names from updates list (e.g., "status = ?" -> "status")
+        for update in updates:
+            field_name = update.split(" = ")[0]
+            if field_name not in self.ALLOWED_UPDATE_FIELDS:
+                raise ValueError(f"Invalid field name: {field_name}")
 
         with self.db.connection() as conn:
             cursor = conn.cursor()
