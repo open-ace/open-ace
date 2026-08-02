@@ -217,8 +217,8 @@ class TestSmtpEncryption:
     """SECURITY.md §2 — SMTP passwords use the same Fernet path."""
 
     def test_smtp_password_round_trip_and_mask(self, monkeypatch):
-        from app.utils.smtp_crypto import SMTPPasswordManager
         from app.utils.security_mode import reset_security_mode_cache
+        from app.utils.smtp_crypto import SMTPPasswordManager
 
         # Issue #2185: Security mode must be explicitly set
         monkeypatch.setenv("OPENACE_SECURITY_MODE", "development")
@@ -318,7 +318,8 @@ class TestProxyTokens:
         payload = proxy_service.validate_proxy_token(token)
         assert payload is not None
         exp = datetime.fromisoformat(payload["exp"])
-        remaining = exp - datetime.now(timezone.utc).replace(tzinfo=None)
+        # Use local time to match database TIMESTAMP WITHOUT TIME ZONE behavior
+        remaining = exp - datetime.now()
         assert remaining <= timedelta(minutes=31)
         assert proxy_service.DEFAULT_PROXY_TOKEN_TTL_MINUTES < 1440
 

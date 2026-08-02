@@ -153,7 +153,9 @@ class TestGetSecretKeyForApp:
     def test_raises_when_not_set_in_development(self):
         """Test that development mode raises without key (requires explicit or auto-generated)."""
         reset_security_mode_cache()
-        with patch.dict(os.environ, {"OPENACE_SECURITY_MODE": "development", "SECRET_KEY": ""}, clear=False):
+        # Clear SECRET_KEY to test "not set" scenario
+        env = {"OPENACE_SECURITY_MODE": "development", "SECRET_KEY": ""}
+        with patch.dict(os.environ, env, clear=False):
             with pytest.raises(RuntimeError, match="SECRET_KEY not set"):
                 get_secret_key_for_app()
 
@@ -196,7 +198,9 @@ class TestGetEncryptionKeyMaterial:
     def test_raises_when_not_set_in_development(self):
         """Test that development mode raises without key (requires explicit or auto-generated)."""
         reset_security_mode_cache()
-        with patch.dict(os.environ, {"OPENACE_SECURITY_MODE": "development"}, clear=False):
+        # Clear OPENACE_ENCRYPTION_KEY to test "not set" scenario
+        env = {"OPENACE_SECURITY_MODE": "development", "OPENACE_ENCRYPTION_KEY": ""}
+        with patch.dict(os.environ, env, clear=False):
             with pytest.raises(RuntimeError, match="OPENACE_ENCRYPTION_KEY not set"):
                 get_encryption_key_material(purpose="test")
 
@@ -232,7 +236,9 @@ class TestGetUploadAuthKey:
     def test_returns_none_when_not_set(self):
         """Test that None is returned when key is not set."""
         reset_security_mode_cache()
-        with patch.dict(os.environ, {"OPENACE_SECURITY_MODE": "development", "UPLOAD_AUTH_KEY": ""}, clear=False):
+        with patch.dict(
+            os.environ, {"OPENACE_SECURITY_MODE": "development", "UPLOAD_AUTH_KEY": ""}, clear=False
+        ):
             key = get_upload_auth_key()
             assert key is None
 
@@ -241,7 +247,10 @@ class TestGetUploadAuthKey:
         reset_security_mode_cache()
         with patch.dict(
             os.environ,
-            {"OPENACE_SECURITY_MODE": "development", "UPLOAD_AUTH_KEY": "my-upload-key-32-chars-long"},
+            {
+                "OPENACE_SECURITY_MODE": "development",
+                "UPLOAD_AUTH_KEY": "my-upload-key-32-chars-long",
+            },
             clear=False,
         ):
             key = get_upload_auth_key()
@@ -265,7 +274,9 @@ class TestGetRedisPassword:
     def test_raises_when_not_set_in_development(self):
         """Test that development mode raises without password (requires explicit or auto-generated)."""
         reset_security_mode_cache()
-        with patch.dict(os.environ, {"OPENACE_SECURITY_MODE": "development"}, clear=False):
+        # Clear REDIS_PASSWORD to test "not set" scenario
+        env = {"OPENACE_SECURITY_MODE": "development", "REDIS_PASSWORD": ""}
+        with patch.dict(os.environ, env, clear=False):
             with pytest.raises(RuntimeError, match="REDIS_PASSWORD not set"):
                 get_redis_password()
 

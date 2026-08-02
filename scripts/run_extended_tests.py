@@ -332,6 +332,8 @@ def start_server_if_needed(
             f"Port {port_text} is in use, but {health_url(args.base_url)} is not healthy"
         )
 
+    # Issue #2185: Set security mode for test server
+    env.setdefault("OPENACE_SECURITY_MODE", "development")
     env.setdefault("FLASK_ENV", "testing")
     env.setdefault("SCHEDULER_HEALTH_MONITOR_ENABLED", "false")
     env.setdefault("DATA_FETCH_ENABLED", "false")

@@ -1650,7 +1650,9 @@ CREATE INDEX idx_team_members_user ON team_members (user_id);
 
 CREATE INDEX idx_teams_owner ON teams (owner_id);
 
-CREATE INDEX idx_teams_sync_source ON teams ((((settings) ->> 'sync_source')));
+-- Issue #2174: SQLite does not support JSON expression indexes before 3.38.0
+-- Applications needing this index should use PostgreSQL or upgrade SQLite.
+-- CREATE INDEX idx_teams_sync_source ON teams ((((settings) ->> 'sync_source')));
 
 CREATE INDEX idx_tenant_migrations_status ON tenant_migrations (status);
 

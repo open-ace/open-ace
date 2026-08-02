@@ -60,7 +60,7 @@ def get_secret_key_for_app(secret_key: str | None = None) -> str:
         if mode == SecurityMode.PRODUCTION:
             raise RuntimeError(
                 "SECRET_KEY environment variable must be set in production mode! "
-                "Generate: python3 -c \"import secrets; print(secrets.token_hex(32))\""
+                'Generate: python3 -c "import secrets; print(secrets.token_hex(32))"'
             )
         # For pilot/development, caller should handle auto-generation
         # (typically done in docker-entrypoint.sh)
@@ -113,7 +113,7 @@ def get_encryption_key_material(*, purpose: str) -> str:
         if mode == SecurityMode.PRODUCTION:
             raise RuntimeError(
                 f"OPENACE_ENCRYPTION_KEY must be set to a strong, unique value in production for {purpose}! "
-                f"Generate: python3 -c \"import secrets; print(secrets.token_hex(32))\""
+                f'Generate: python3 -c "import secrets; print(secrets.token_hex(32))"'
             )
         logger.warning(
             "OPENACE_ENCRYPTION_KEY not set in %s mode. "
@@ -164,7 +164,7 @@ def get_upload_auth_key() -> str | None:
         if mode == SecurityMode.PRODUCTION:
             raise RuntimeError(
                 "UPLOAD_AUTH_KEY uses an insecure placeholder value in production! "
-                "Generate: python3 -c \"import secrets; print(secrets.token_hex(32))\""
+                'Generate: python3 -c "import secrets; print(secrets.token_hex(32))"'
             )
         return None
 
@@ -207,11 +207,10 @@ def get_redis_password(redis_password: str | None = None) -> str:
         if mode == SecurityMode.PRODUCTION:
             raise RuntimeError(
                 "REDIS_PASSWORD must be set in production mode! "
-                "Generate: python3 -c \"import secrets; print(secrets.token_urlsafe(32))\""
+                'Generate: python3 -c "import secrets; print(secrets.token_urlsafe(32))"'
             )
         logger.warning(
-            "REDIS_PASSWORD not set in %s mode. "
-            "This should be auto-generated and persisted.",
+            "REDIS_PASSWORD not set in %s mode. " "This should be auto-generated and persisted.",
             mode.value,
         )
         raise RuntimeError(

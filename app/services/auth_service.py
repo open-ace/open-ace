@@ -7,7 +7,7 @@ Business logic for authentication and authorization.
 import logging
 import secrets
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from enum import Enum
 from typing import cast
 
@@ -89,16 +89,8 @@ def _check_login_lockout(username: str) -> tuple[bool, str | None]:
         if locked_until:
             if isinstance(locked_until, str):
                 locked_until = datetime.fromisoformat(locked_until)
-            if locked_until > datetime.now(timezone.utc).replace(tzinfo=None):
-                remaining = (
-                    int(
-                        (
-                            locked_until - datetime.now(timezone.utc).replace(tzinfo=None)
-                        ).total_seconds()
-                        / 60
-                    )
-                    + 1
-                )
+            if locked_until > datetime.now():
+                remaining = int((locked_until - datetime.now()).total_seconds() / 60) + 1
                 return True, f"Account temporarily locked. Try again in {remaining} minutes."
             else:
                 # Lockout expired — reset
@@ -149,9 +141,7 @@ def _record_failed_login(username: str) -> None:
             )
 
         if new_count >= max_attempts:
-            locked_until = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(
-                minutes=lockout_minutes
-            )
+            locked_until = datetime.now() + timedelta(minutes=lockout_minutes)
             db.execute(
                 f"UPDATE login_attempts SET locked_until = {p} WHERE username = {p}",
                 (locked_until, username),
@@ -233,16 +223,8 @@ def _check_change_password_lockout(user_id: int) -> tuple[bool, str | None, int 
         if locked_until:
             if isinstance(locked_until, str):
                 locked_until = datetime.fromisoformat(locked_until)
-            if locked_until > datetime.now(timezone.utc).replace(tzinfo=None):
-                remaining = (
-                    int(
-                        (
-                            locked_until - datetime.now(timezone.utc).replace(tzinfo=None)
-                        ).total_seconds()
-                        / 60
-                    )
-                    + 1
-                )
+            if locked_until > datetime.now():
+                remaining = int((locked_until - datetime.now()).total_seconds() / 60) + 1
                 return (
                     True,
                     f"Account temporarily locked. Try again in {remaining} minutes.",
@@ -316,9 +298,7 @@ def _record_change_password_failure(user_id: int) -> tuple[int, bool]:
 
                 is_now_locked = False
                 if new_count >= max_attempts:
-                    locked_until = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(
-                        minutes=lockout_minutes
-                    )
+                    locked_until = datetime.now() + timedelta(minutes=lockout_minutes)
                     cursor.execute(
                         f"UPDATE login_attempts SET locked_until = {p} WHERE username = {p}",
                         (locked_until, key),

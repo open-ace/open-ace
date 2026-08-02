@@ -200,7 +200,7 @@ def validate_secret_strength(value: str | None, purpose: str, *, min_length: int
         if mode == SecurityMode.PRODUCTION:
             raise RuntimeError(
                 f"{purpose} environment variable must be set in production mode! "
-                f"Generate: python3 -c \"import secrets; print(secrets.token_hex(32))\""
+                f'Generate: python3 -c "import secrets; print(secrets.token_hex(32))"'
             )
         logger.warning("%s is empty; this is insecure for production use", purpose)
         return
@@ -211,7 +211,7 @@ def validate_secret_strength(value: str | None, purpose: str, *, min_length: int
             raise RuntimeError(
                 f"{purpose} must be set to a strong, unique value in production! "
                 f"Detected weak/placeholder value. "
-                f"Generate: python3 -c \"import secrets; print(secrets.token_hex(32))\""
+                f'Generate: python3 -c "import secrets; print(secrets.token_hex(32))"'
             )
         logger.warning(
             "%s uses a weak development value - DO NOT use in production!",
