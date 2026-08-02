@@ -80,6 +80,37 @@ function formatSeconds(seconds: number | undefined): string {
   return `${seconds}s`;
 }
 
+/**
+ * Format a cgroup CPU quota into a human-readable core count.
+ *
+ * `cpu_max` is operator-typed in agent-launcher.conf and stored verbatim. It
+ * follows the cgroup v2 `cpu.max` format: `"quota period"` (microseconds),
+ * but some configs use a slash separator (`"quota/period"`). Examples:
+ *   - "200000 100000" or "200000/100000" → "2 CPU"
+ *   - "100000 100000" → "1 CPU"
+ *   - "max 100000" → "—" (no limit)
+ * A bare number is treated as the core count directly.
+ */
+function formatCpuCores(cpuMax: string | undefined): string {
+  if (!cpuMax) return '—';
+  const parts = cpuMax.trim().split(/[\s/]+/);
+  if (parts.length >= 2) {
+    const quota = Number(parts[0]);
+    const period = Number(parts[1]);
+    if (parts[0] === 'max' || Number.isNaN(quota) || Number.isNaN(period) || period === 0) {
+      return '—';
+    }
+    const cores = quota / period;
+    return `${cores % 1 === 0 ? cores : cores.toFixed(1)} CPU`;
+  }
+  // Bare number: treat as core count directly.
+  const n = Number(parts[0]);
+  if (!Number.isNaN(n) && n > 0) {
+    return `${n} CPU`;
+  }
+  return '—';
+}
+
 interface LimitRow {
   labelKey: string;
   value: string;
@@ -87,10 +118,10 @@ interface LimitRow {
 }
 
 const SUMMARY_LIMIT_KEYS = [
-  'autoPolicyMemory',
-  'autoPolicyPids',
   'autoPolicyCpu',
+  'autoPolicyMemory',
   'autoPolicyWallClock',
+  'autoPolicyPids',
   'autoPolicyStorage',
 ] as const;
 
@@ -110,27 +141,25 @@ export function RuntimeIsolationPanel({ workflow }: RuntimeIsolationPanelProps) 
   const enforced = snapshot.enforced ?? {};
   const rows: LimitRow[] = [
     {
+      labelKey: 'autoPolicyCpu',
+      // cpu_max uses '' as the unset sentinel (build_effective_policy).
+      value: formatCpuCores(limits.cpu_max),
+      enforced: enforced.cpu,
+    },
+    {
       labelKey: 'autoPolicyMemory',
       value: limits.memory_max_bytes ? formatBytes(limits.memory_max_bytes) : '—',
       enforced: enforced.memory,
     },
     {
-      labelKey: 'autoPolicyPids',
-      value: limits.pids_max ? String(limits.pids_max) : '—',
-      enforced: enforced.pids,
-    },
-    {
-      labelKey: 'autoPolicyCpu',
-      // cpu_max uses '' as the unset sentinel (build_effective_policy), so an
-      // empty string must render as '—'; nullish coalescing (??) would show ''.
-      // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing
-      value: limits.cpu_max || '—',
-      enforced: enforced.cpu,
-    },
-    {
       labelKey: 'autoPolicyWallClock',
       value: formatSeconds(limits.wall_clock_limit),
       enforced: enforced.wall_clock,
+    },
+    {
+      labelKey: 'autoPolicyPids',
+      value: limits.pids_max ? String(limits.pids_max) : '—',
+      enforced: enforced.pids,
     },
     {
       labelKey: 'autoPolicyStorage',
