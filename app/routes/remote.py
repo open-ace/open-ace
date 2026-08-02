@@ -3631,8 +3631,6 @@ def remote_vscode_proxy(vscode_id, path=""):
 
     No fallback to stored token - caller must provide valid credentials.
     """
-    import hmac as _hmc
-
     from app.modules.workspace.vscode_proxy import build_target_url, proxy_request_streaming
     from app.modules.workspace.vscode_store import vscode_info_store
 
@@ -3743,7 +3741,7 @@ def remote_vscode_proxy(vscode_id, path=""):
         return jsonify({"error": "Authentication required"}), 401
 
     # Validate token if provided
-    if token and not _hmc.compare_digest(token, stored_token):
+    if token and not hmac.compare_digest(token, stored_token):
         # Issue #2183: Do not log token prefix - only log length
         logger.warning(
             "Invalid token for VSCode session %s (token length: %d)",
