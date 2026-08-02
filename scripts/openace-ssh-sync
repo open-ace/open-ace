@@ -86,6 +86,12 @@ SECURITY_REVIEW_VALIDITY_DAYS = 365
 # 内容指纹缓存
 _fingerprint_cache = {}
 
+# 配置缓存
+_config_cache = {}
+
+# 授权评审人员缓存
+_authorized_reviewers_cache = None
+
 
 # ============================================================================
 # 数据类
@@ -226,6 +232,239 @@ def sha256_file_cached(filepath: str) -> str:
 
 
 # ============================================================================
+# 配置文件加载和安全评审验证
+# ============================================================================
+
+def load_config(config_path: str) -> dict:
+    """
+    加载配置文件
+
+    Args:
+        config_path: 配置文件路径
+
+    Returns:
+        配置字典，加载失败返回空字典
+    """
+    global _config_cache
+
+    # 检查缓存
+    if config_path in _config_cache:
+        return _config_cache[config_path]
+
+    if not os.path.isfile(config_path):
+        log_audit(f"CONFIG_NOT_FOUND path={config_path}", level="INFO")
+        return {}
+
+    try:
+        import yaml
+        with open(config_path, 'r') as f:
+            config = yaml.safe_load(f)
+
+        if config is None:
+            config = {}
+
+        # 验证配置格式
+        validate_config(config)
+
+        # 缓存配置
+        _config_cache[config_path] = config
+
+        log_audit(f"CONFIG_LOADED path={config_path}", level="INFO")
+        return config
+
+    except ImportError:
+        log_audit("CONFIG_ERROR error=PyYAML not installed", level="ERROR")
+        print("ERROR: PyYAML package required for config file loading", file=sys.stderr)
+        return {}
+    except Exception as e:
+        log_audit(f"CONFIG_LOAD_ERROR path={config_path} error={e}", level="ERROR")
+        print(f"ERROR: Failed to load config file {config_path}: {e}", file=sys.stderr)
+        return {}
+
+
+def validate_config(config: dict) -> bool:
+    """
+    验证配置文件格式
+
+    Args:
+        config: 配置字典
+
+    Returns:
+        是否有效
+    """
+    if not isinstance(config, dict):
+        return False
+
+    # 验证 allowlist 格式
+    if 'allowlist' in config:
+        if not isinstance(config['allowlist'], list):
+            log_audit("CONFIG_INVALID allowlist must be a list", level="ERROR")
+            return False
+
+        for entry in config['allowlist']:
+            if not isinstance(entry, dict):
+                log_audit("CONFIG_INVALID allowlist entry must be a dict", level="ERROR")
+                return False
+            if 'name' not in entry:
+                log_audit("CONFIG_INVALID allowlist entry missing 'name'", level="ERROR")
+                return False
+
+    return True
+
+
+def load_authorized_reviewers(config_path: Optional[str] = None) -> set:
+    """
+    加载授权评审人员列表
+
+    Args:
+        config_path: 授权评审人员配置文件路径（可选）
+
+    Returns:
+        授权评审人员名称集合
+    """
+    global _authorized_reviewers_cache
+
+    if _authorized_reviewers_cache is not None:
+        return _authorized_reviewers_cache
+
+    authorized = set()
+
+    # 默认配置文件路径
+    if config_path is None:
+        config_path = "/etc/openace/authorized_reviewers.yaml"
+
+    if not os.path.isfile(config_path):
+        log_audit(f"AUTHORIZED_REVIEWERS_NOT_FOUND path={config_path}", level="INFO")
+        return authorized
+
+    try:
+        import yaml
+        with open(config_path, 'r') as f:
+            data = yaml.safe_load(f)
+
+        if data and 'authorized_reviewers' in data:
+            for reviewer in data['authorized_reviewers']:
+                if isinstance(reviewer, dict) and 'name' in reviewer:
+                    authorized.add(reviewer['name'])
+
+        _authorized_reviewers_cache = authorized
+        log_audit(f"AUTHORIZED_REVIEWERS_LOADED count={len(authorized)}", level="INFO")
+
+    except Exception as e:
+        log_audit(f"AUTHORIZED_REVIEWERS_LOAD_ERROR error={e}", level="ERROR")
+
+    return authorized
+
+
+def validate_security_review(config_entry: dict, authorized_reviewers: set) -> tuple[bool, str]:
+    """
+    验证安全评审的有效性
+
+    Args:
+        config_entry: 配置项
+        authorized_reviewers: 授权评审人员集合
+
+    Returns:
+        (是否有效, 原因)
+    """
+    # 检查是否需要安全评审
+    if not config_entry.get('approval_required', False):
+        return True, "No approval required"
+
+    # 检查是否有安全评审记录
+    if 'security_review' not in config_entry:
+        return False, "Missing security_review"
+
+    review = config_entry['security_review']
+
+    if not isinstance(review, dict):
+        return False, "Invalid security_review format"
+
+    # 1. 验证评审人员
+    reviewed_by = review.get('reviewed_by')
+    if not reviewed_by:
+        return False, "Missing reviewed_by"
+
+    if reviewed_by not in authorized_reviewers:
+        log_audit(
+            f"SECURITY_REVIEW_INVALID reviewer={reviewed_by} reason=not_authorized",
+            level="ERROR"
+        )
+        return False, f"Reviewer '{reviewed_by}' not authorized"
+
+    # 2. 验证评审时间
+    reviewed_at_str = review.get('reviewed_at')
+    if not reviewed_at_str:
+        return False, "Missing reviewed_at"
+
+    try:
+        reviewed_at = datetime.fromisoformat(reviewed_at_str)
+    except Exception:
+        return False, f"Invalid reviewed_at format: {reviewed_at_str}"
+
+    # 检查是否在有效期内
+    days_since_review = (datetime.now() - reviewed_at).days
+    validity_days = SECURITY_REVIEW_VALIDITY_DAYS
+
+    if days_since_review > validity_days:
+        log_audit(
+            f"SECURITY_REVIEW_EXPIRED reviewer={reviewed_by} days={days_since_review}",
+            level="ERROR"
+        )
+        return False, f"Review expired ({days_since_review} days old)"
+
+    return True, "Valid"
+
+
+def is_in_custom_allowlist(filename: str, config: dict, username: str) -> tuple[bool, str]:
+    """
+    检查文件是否在自定义白名单中
+
+    Args:
+        filename: 文件名
+        config: 配置字典
+        username: 用户名
+
+    Returns:
+        (是否在白名单, 原因)
+    """
+    if not config or 'allowlist' not in config:
+        return False, "No custom allowlist"
+
+    authorized_reviewers = load_authorized_reviewers()
+
+    for entry in config['allowlist']:
+        if not isinstance(entry, dict):
+            continue
+
+        entry_name = entry.get('name', '')
+
+        # 检查文件名是否匹配
+        import fnmatch
+        if not fnmatch.fnmatch(filename, entry_name):
+            continue
+
+        # 文件名匹配，现在验证安全评审
+        valid, reason = validate_security_review(entry, authorized_reviewers)
+
+        if valid:
+            log_audit(
+                f"CUSTOM_ALLOWLIST_MATCH user={username} file={filename} entry={entry_name}",
+                level="INFO"
+            )
+            return True, f"Matched custom allowlist entry '{entry_name}'"
+        else:
+            # 安全评审无效，拒绝
+            log_audit(
+                f"CUSTOM_ALLOWLIST_REJECTED user={username} file={filename} reason={reason}",
+                level="WARN"
+            )
+            return False, f"Security review failed: {reason}"
+
+    return False, "Not in custom allowlist"
+
+
+# ============================================================================
 # SSH 文件同步安全上下文（防 TOCTOU）
 # ============================================================================
 
@@ -235,12 +474,13 @@ class SSHFileSyncContext:
     使用文件描述符操作防止 TOCTOU 漏洞
     """
 
-    def __init__(self, src_path: str, username: str):
+    def __init__(self, src_path: str, username: str, config: Optional[dict] = None):
         self.src_path = src_path
         self.username = username
         self.dst_path = f"/home/{username}/.ssh/{os.path.basename(src_path)}"
         self._src_fd = None
         self._src_st = None
+        self.config = config or {}
 
     def __enter__(self):
         try:
@@ -334,7 +574,14 @@ class SSHFileSyncContext:
                 return ValidationResult(True, "In default allowlist")
 
         # 7.2 检查自定义白名单（如果配置文件存在）
-        # TODO: 实现配置文件解析
+        if self.config:
+            allowed, reason = is_in_custom_allowlist(filename, self.config, self.username)
+            if allowed:
+                return ValidationResult(True, reason)
+            elif "Security review failed" in reason or "Reviewer" in reason:
+                # 安全评审失败，拒绝
+                return ValidationResult(False, reason)
+            # 不在自定义白名单中，继续检查
 
         return ValidationResult(False, "Not in allowlist")
 
@@ -452,6 +699,11 @@ def sync_ssh_keys(username: str, config_path: Optional[str] = None, dry_run: boo
         log_audit(f"SYNC_SKIP user={username} reason=root_ssh_not_found", level="INFO")
         return results
 
+    # 加载配置文件（如果提供）
+    config = {}
+    if config_path:
+        config = load_config(config_path)
+
     # 统计
     synced_count = 0
     denied_count = 0
@@ -461,8 +713,8 @@ def sync_ssh_keys(username: str, config_path: Optional[str] = None, dry_run: boo
         for filename in os.listdir(root_ssh):
             src_path = os.path.join(root_ssh, filename)
 
-            # 使用安全上下文验证
-            with SSHFileSyncContext(src_path, username) as ctx:
+            # 使用安全上下文验证，传入配置
+            with SSHFileSyncContext(src_path, username, config) as ctx:
                 if ctx is None:
                     # 文件打开失败（可能是 symlink）
                     denied_count += 1
