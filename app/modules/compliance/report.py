@@ -1221,7 +1221,9 @@ class ReportGenerator:
                 # 合规
                 status = "pass"
                 days_since = retention_status.get("days_since_cleanup", 0)
-                message = f"Data retention policy is being followed. Last cleanup: {days_since} days ago."
+                message = (
+                    f"Data retention policy is being followed. Last cleanup: {days_since} days ago."
+                )
 
             checks.append(
                 {

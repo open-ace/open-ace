@@ -65,12 +65,14 @@ class LegalHoldRepository:
         with self.db.connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                adapt_sql("""
+                adapt_sql(
+                    """
                     INSERT INTO legal_holds (
                         tenant_id, hold_type, data_type, record_id,
                         reason, case_reference, created_by, created_at, expires_at
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """),
+                """
+                ),
                 (
                     tenant_id,
                     hold_type,
@@ -97,9 +99,7 @@ class LegalHoldRepository:
         Returns:
             Hold dict or None.
         """
-        return self.db.fetch_one(
-            "SELECT * FROM legal_holds WHERE id = ?", (hold_id,)
-        )
+        return self.db.fetch_one("SELECT * FROM legal_holds WHERE id = ?", (hold_id,))
 
     def get_active_holds(self, tenant_id: int) -> list[dict[str, Any]]:
         """Get all active holds for a tenant.
@@ -116,13 +116,15 @@ class LegalHoldRepository:
         """
         now = datetime.now(timezone.utc).replace(tzinfo=None)
         return self.db.fetch_all(
-            adapt_sql("""
+            adapt_sql(
+                """
                 SELECT * FROM legal_holds
                 WHERE tenant_id = ?
                 AND lifted_at IS NULL
                 AND (expires_at IS NULL OR expires_at > ?)
                 ORDER BY created_at DESC
-            """),
+            """
+            ),
             (tenant_id, now),
         )
 
@@ -150,18 +152,13 @@ class LegalHoldRepository:
 
         # Check data_type hold
         if data_type:
-            if any(
-                h["hold_type"] == "data_type" and h["data_type"] == data_type
-                for h in holds
-            ):
+            if any(h["hold_type"] == "data_type" and h["data_type"] == data_type for h in holds):
                 return True, f"Legal hold on {data_type}"
 
         # Check record-level hold
         if record_ids:
             held_records = {
-                h["record_id"]
-                for h in holds
-                if h["hold_type"] == "record" and h.get("record_id")
+                h["record_id"] for h in holds if h["hold_type"] == "record" and h.get("record_id")
             }
             blocked = set(record_ids) & held_records
             if blocked:
@@ -189,20 +186,20 @@ class LegalHoldRepository:
         with self.db.connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                adapt_sql("""
+                adapt_sql(
+                    """
                     UPDATE legal_holds
                     SET lifted_at = ?, lifted_by = ?, lift_reason = ?
                     WHERE id = ?
-                """),
+                """
+                ),
                 (now, lifted_by, lift_reason, hold_id),
             )
             conn.commit()
 
         return self.get_hold_by_id(hold_id)
 
-    def get_holds_for_data_type(
-        self, tenant_id: int, data_type: str
-    ) -> list[dict[str, Any]]:
+    def get_holds_for_data_type(self, tenant_id: int, data_type: str) -> list[dict[str, Any]]:
         """Get all holds affecting a data type.
 
         Args:
@@ -214,13 +211,15 @@ class LegalHoldRepository:
         """
         now = datetime.now(timezone.utc).replace(tzinfo=None)
         return self.db.fetch_all(
-            adapt_sql("""
+            adapt_sql(
+                """
                 SELECT * FROM legal_holds
                 WHERE tenant_id = ?
                 AND lifted_at IS NULL
                 AND (expires_at IS NULL OR expires_at > ?)
                 AND (hold_type = 'global' OR data_type = ?)
                 ORDER BY created_at DESC
-            """),
+            """
+            ),
             (tenant_id, now, data_type),
         )

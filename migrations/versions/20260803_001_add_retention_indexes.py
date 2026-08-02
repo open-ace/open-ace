@@ -33,22 +33,13 @@ def upgrade() -> None:
     tenant_id and timestamp. The composite index (tenant_id, timestamp)
     is particularly important for the cleanup queries.
     """
+    # Use IF NOT EXISTS to handle cases where schema.sql already created these indexes
     # Single column indexes
-    op.create_index(
-        "idx_audit_logs_tenant_id",
-        "audit_logs",
-        ["tenant_id"],
-    )
-    op.create_index(
-        "idx_audit_logs_timestamp",
-        "audit_logs",
-        ["timestamp"],
-    )
+    op.execute("CREATE INDEX IF NOT EXISTS idx_audit_logs_tenant_id ON audit_logs (tenant_id)")
+    op.execute("CREATE INDEX IF NOT EXISTS idx_audit_logs_timestamp ON audit_logs (timestamp)")
     # Composite index for tenant-scoped retention queries
-    op.create_index(
-        "idx_audit_logs_tenant_timestamp",
-        "audit_logs",
-        ["tenant_id", "timestamp"],
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS idx_audit_logs_tenant_timestamp ON audit_logs (tenant_id, timestamp)"
     )
 
 

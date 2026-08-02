@@ -22,7 +22,8 @@ class TestRetentionExecutionRepository:
         # Create retention_executions table directly for testing
         with db.connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("""
+            cursor.execute(
+                """
                 CREATE TABLE IF NOT EXISTS retention_executions (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     execution_id TEXT UNIQUE NOT NULL,
@@ -49,7 +50,8 @@ class TestRetentionExecutionRepository:
                     max_records_override INTEGER,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
-            """)
+            """
+            )
             # Clean table before test
             cursor.execute("DELETE FROM retention_executions")
             conn.commit()
@@ -86,7 +88,7 @@ class TestRetentionExecutionRepository:
     def test_get_execution_by_id(self, repo):
         """Test getting execution by ID."""
         # Create execution
-        created = repo.create_execution(
+        repo.create_execution(
             execution_id="exec_456",
             tenant_id=1,
             dry_run=True,
@@ -101,7 +103,7 @@ class TestRetentionExecutionRepository:
     def test_update_execution_status(self, repo):
         """Test updating execution status."""
         # Create execution
-        execution = repo.create_execution(
+        repo.create_execution(
             execution_id="exec_789",
             tenant_id=1,
         )
@@ -118,7 +120,7 @@ class TestRetentionExecutionRepository:
     def test_update_execution_counters(self, repo):
         """Test updating execution counters."""
         # Create execution
-        execution = repo.create_execution(
+        repo.create_execution(
             execution_id="exec_counter",
             tenant_id=1,
         )
@@ -145,7 +147,7 @@ class TestRetentionExecutionRepository:
     def test_update_execution_error(self, repo):
         """Test updating execution with error."""
         # Create execution
-        execution = repo.create_execution(
+        repo.create_execution(
             execution_id="exec_error",
             tenant_id=1,
         )
@@ -167,7 +169,7 @@ class TestRetentionExecutionRepository:
     def test_update_execution_batch_info(self, repo):
         """Test updating batch information."""
         # Create execution
-        execution = repo.create_execution(
+        repo.create_execution(
             execution_id="exec_batch",
             tenant_id=1,
         )
@@ -203,8 +205,8 @@ class TestRetentionExecutionRepository:
     def test_get_executions_for_tenant_with_status_filter(self, repo):
         """Test getting executions filtered by status."""
         # Create executions with different statuses
-        execution1 = repo.create_execution(execution_id="exec_s1", tenant_id=1)
-        execution2 = repo.create_execution(execution_id="exec_s2", tenant_id=1)
+        repo.create_execution(execution_id="exec_s1", tenant_id=1)
+        repo.create_execution(execution_id="exec_s2", tenant_id=1)
 
         repo.update_execution("exec_s1", status="completed")
         repo.update_execution("exec_s2", status="failed")
@@ -217,7 +219,7 @@ class TestRetentionExecutionRepository:
     def test_acquire_lock(self, repo):
         """Test acquiring execution lock."""
         # Create execution
-        execution = repo.create_execution(
+        repo.create_execution(
             execution_id="exec_lock",
             tenant_id=1,
         )
@@ -234,7 +236,7 @@ class TestRetentionExecutionRepository:
     def test_acquire_lock_already_locked(self, repo):
         """Test that lock cannot be acquired if already locked."""
         # Create execution
-        execution = repo.create_execution(
+        repo.create_execution(
             execution_id="exec_locked",
             tenant_id=1,
         )
@@ -250,7 +252,7 @@ class TestRetentionExecutionRepository:
     def test_release_lock(self, repo):
         """Test releasing execution lock."""
         # Create execution and acquire lock
-        execution = repo.create_execution(
+        repo.create_execution(
             execution_id="exec_release",
             tenant_id=1,
         )
@@ -272,7 +274,7 @@ class TestRetentionExecutionRepository:
         assert exists is False
 
         # Create execution
-        execution = repo.create_execution(
+        repo.create_execution(
             execution_id="exec_exists",
             tenant_id=1,
         )
@@ -284,7 +286,7 @@ class TestRetentionExecutionRepository:
     def test_sql_injection_protection(self, repo):
         """Test that invalid field names are rejected."""
         # Create execution
-        execution = repo.create_execution(
+        repo.create_execution(
             execution_id="exec_sql",
             tenant_id=1,
         )
@@ -323,7 +325,7 @@ class TestRetentionExecutionRepository:
     def test_completion_timestamp(self, repo):
         """Test setting completion timestamp."""
         # Create execution
-        execution = repo.create_execution(
+        repo.create_execution(
             execution_id="exec_complete",
             tenant_id=1,
         )

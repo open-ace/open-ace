@@ -28,9 +28,7 @@ class RetentionPolicyRepository:
         """
         self.db = db or Database()
 
-    def get_policy(
-        self, tenant_id: int | None, data_type: str
-    ) -> dict[str, Any] | None:
+    def get_policy(self, tenant_id: int | None, data_type: str) -> dict[str, Any] | None:
         """Get effective policy for a data type (with inheritance).
 
         Issue #2188: Policy inheritance semantics
@@ -48,11 +46,13 @@ class RetentionPolicyRepository:
         # Try tenant-level policy first
         if tenant_id is not None:
             row = self.db.fetch_one(
-                adapt_sql("""
+                adapt_sql(
+                    """
                     SELECT * FROM retention_policies
                     WHERE tenant_id = ? AND data_type = ? AND enabled = 1
                     ORDER BY version DESC LIMIT 1
-                """),
+                """
+                ),
                 (tenant_id, data_type),
             )
             if row:
@@ -60,11 +60,13 @@ class RetentionPolicyRepository:
 
         # Fallback to global default
         row = self.db.fetch_one(
-            adapt_sql("""
+            adapt_sql(
+                """
                 SELECT * FROM retention_policies
                 WHERE tenant_id IS NULL AND data_type = ? AND enabled = 1
                 ORDER BY version DESC LIMIT 1
-            """),
+            """
+            ),
             (data_type,),
         )
         if row:
@@ -89,20 +91,24 @@ class RetentionPolicyRepository:
         if tenant_id is not None:
             if include_disabled:
                 rows = self.db.fetch_all(
-                    adapt_sql("""
+                    adapt_sql(
+                        """
                         SELECT * FROM retention_policies
                         WHERE tenant_id = ?
                         ORDER BY data_type, version DESC
-                    """),
+                    """
+                    ),
                     (tenant_id,),
                 )
             else:
                 rows = self.db.fetch_all(
-                    adapt_sql("""
+                    adapt_sql(
+                        """
                         SELECT * FROM retention_policies
                         WHERE tenant_id = ? AND enabled = 1
                         ORDER BY data_type, version DESC
-                    """),
+                    """
+                    ),
                     (tenant_id,),
                 )
         else:
@@ -165,13 +171,15 @@ class RetentionPolicyRepository:
         with self.db.connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                adapt_sql("""
+                adapt_sql(
+                    """
                     INSERT INTO retention_policies (
                         tenant_id, data_type, retention_days, action, version,
                         archive_target, archive_config, anonymize_fields,
                         backup_before_anonymize, created_by, created_at, updated_at
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """),
+                """
+                ),
                 (
                     tenant_id,
                     data_type,
@@ -260,11 +268,13 @@ class RetentionPolicyRepository:
         with self.db.connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                adapt_sql(f"""
+                adapt_sql(
+                    f"""
                     UPDATE retention_policies
                     SET {', '.join(updates)}
                     WHERE id = ?
-                """),
+                """
+                ),
                 params,
             )
             conn.commit()
@@ -280,9 +290,7 @@ class RetentionPolicyRepository:
         Returns:
             Policy dict or None.
         """
-        row = self.db.fetch_one(
-            "SELECT * FROM retention_policies WHERE id = ?", (policy_id,)
-        )
+        row = self.db.fetch_one("SELECT * FROM retention_policies WHERE id = ?", (policy_id,))
         return self._row_to_dict(row) if row else None
 
     def delete_policy(self, policy_id: int) -> bool:
@@ -296,9 +304,7 @@ class RetentionPolicyRepository:
         """
         with self.db.connection() as conn:
             cursor = conn.cursor()
-            cursor.execute(
-                "DELETE FROM retention_policies WHERE id = ?", (policy_id,)
-            )
+            cursor.execute("DELETE FROM retention_policies WHERE id = ?", (policy_id,))
             conn.commit()
             return cursor.rowcount > 0
 
@@ -314,10 +320,12 @@ class RetentionPolicyRepository:
         """
         if tenant_id is not None:
             row = self.db.fetch_one(
-                adapt_sql("""
+                adapt_sql(
+                    """
                     SELECT MAX(version) as max_version FROM retention_policies
                     WHERE tenant_id = ? AND data_type = ?
-                """),
+                """
+                ),
                 (tenant_id, data_type),
             )
         else:

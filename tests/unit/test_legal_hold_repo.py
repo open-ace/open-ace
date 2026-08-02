@@ -22,7 +22,8 @@ class TestLegalHoldRepository:
         # Create legal_holds table directly for testing
         with db.connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("""
+            cursor.execute(
+                """
                 CREATE TABLE IF NOT EXISTS legal_holds (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     tenant_id INTEGER NOT NULL,
@@ -38,7 +39,8 @@ class TestLegalHoldRepository:
                     lifted_at TIMESTAMP,
                     lift_reason TEXT
                 )
-            """)
+            """
+            )
             # Clean table before test
             cursor.execute("DELETE FROM legal_holds")
             conn.commit()
@@ -163,9 +165,7 @@ class TestLegalHoldRepository:
         )
 
         # Check hold for blocked record
-        is_held, reason = repo.check_hold(
-            tenant_id=1, record_ids=["record_123", "record_456"]
-        )
+        is_held, reason = repo.check_hold(tenant_id=1, record_ids=["record_123", "record_456"])
         assert is_held is True
         assert "record_123" in reason
 
@@ -202,9 +202,7 @@ class TestLegalHoldRepository:
     def test_hold_expiry(self, repo):
         """Test that expired holds are not active."""
         # Create hold that expires in 1 second
-        expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(
-            seconds=1
-        )
+        expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(seconds=1)
         repo.create_hold(
             tenant_id=1,
             hold_type="global",
