@@ -916,11 +916,83 @@ def create_system_user(username):
             print(f'  Home directory ownership correct: {user_home}')
 
     # Sync SSH keys if mounted (Issue #1122)
-    sync_ssh_keys(username)
+    # 【安全加固 Issue #2182】使用独立的 Python 脚本实现安全同步
+    sync_ssh_keys_safe(username)
 
 
-def sync_ssh_keys(username):
-    \"\"\"Sync SSH keys from /root/.ssh to user's home directory.\"\"\"
+def sync_ssh_keys_safe(username):
+    \"\"\"
+    安全同步 SSH 密钥（Issue #2182）
+
+    使用独立的 Python 脚本 /usr/local/bin/openace-ssh-sync 实现：
+    - 白名单机制：默认只允许 known_hosts 等安全文件
+    - 禁止清单：明确禁止私钥、证书、socket、token 等危险文件
+    - TOCTOU 防护：使用文件描述符操作防止竞态条件
+    - 硬链接检测：防止通过硬链接绕过 symlink 检测
+    - Owner/Group 验证：确保同步文件的 owner 正确
+    - 审计日志：记录所有同步操作
+    - 升级检测：检测并处理旧版本复制的私钥
+    \"\"\"
+    root_ssh = '/root/.ssh'
+    user_ssh = f'/home/{username}/.ssh'
+
+    # Skip if SSH keys not mounted
+    if not os.path.isdir(root_ssh):
+        return
+
+    # 检查是否有新的安全同步脚本
+    ssh_sync_script = '/usr/local/bin/openace-ssh-sync'
+
+    if os.path.isfile(ssh_sync_script) and os.access(ssh_sync_script, os.X_OK):
+        # 使用新的安全同步脚本
+        print(f'  Using secure SSH key sync for {username}')
+
+        try:
+            # 检测 legacy 私钥（如果配置）
+            upgrade_action = os.environ.get('OPENACE_SSH_UPGRADE_ACTION', 'backup')
+
+            # 调用 Python 脚本进行安全同步
+            result = subprocess.run(
+                [
+                    ssh_sync_script,
+                    '--user', username,
+                    '--upgrade-action', upgrade_action,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+
+            if result.returncode == 0:
+                print(f'  SSH keys securely synced to {user_ssh}')
+                if result.stdout:
+                    print(f'    {result.stdout.strip()}')
+            else:
+                print(f'  WARNING: SSH key sync failed: {result.stderr.strip()}')
+                # 回退到旧的同步逻辑（保持兼容性）
+                _sync_ssh_keys_legacy(username)
+
+        except subprocess.TimeoutExpired:
+            print(f'  WARNING: SSH key sync timed out')
+            # 回退到旧的同步逻辑（保持兼容性）
+            _sync_ssh_keys_legacy(username)
+        except Exception as e:
+            print(f'  WARNING: SSH key sync error: {e}')
+            # 回退到旧的同步逻辑（保持兼容性）
+            _sync_ssh_keys_legacy(username)
+    else:
+        # 脚本不存在，使用旧的同步逻辑（向后兼容）
+        print(f'  WARNING: Secure SSH sync script not found, using legacy sync')
+        _sync_ssh_keys_legacy(username)
+
+
+def _sync_ssh_keys_legacy(username):
+    \"\"\"
+    旧的 SSH 密钥同步逻辑（向后兼容）
+
+    注意：这个函数存在安全问题，仅在新脚本不可用时使用
+    Issue #2182 标记为待移除
+    \"\"\"
     import shutil
     import stat
 
@@ -939,6 +1011,10 @@ def sync_ssh_keys(username):
     except OSError:
         return
 
+    # 【安全加固 Issue #2182】警告：以下逻辑存在安全风险
+    # 仅在新脚本不可用时使用，应该在后续版本移除
+    print(f'  WARNING: Using legacy SSH key sync (insecure)')
+
     # Create user's .ssh directory
     os.makedirs(user_ssh, exist_ok=True)
 
@@ -949,7 +1025,7 @@ def sync_ssh_keys(username):
 
         if os.path.isfile(src):
             shutil.copy2(src, dst)
-            # Private keys: 600, others: 644
+            # 私钥文件：600，其他：644
             if filename.startswith('id_') and not filename.endswith('.pub'):
                 os.chmod(dst, stat.S_IRUSR)
             else:
@@ -957,7 +1033,7 @@ def sync_ssh_keys(username):
 
     # Set ownership
     subprocess.run(['chown', '-R', f'{username}:{username}', user_ssh], capture_output=True)
-    print(f'  SSH keys synced to {user_ssh}')
+    print(f'  SSH keys synced to {user_ssh} (legacy mode)')
 
 try:
     conn = psycopg2.connect(os.environ['DATABASE_URL'])
