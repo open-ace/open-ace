@@ -297,10 +297,17 @@ class CommandEvidenceRecorder:
                     results[command_id] = event
                     if command_id not in order:
                         order.append(command_id)
+                    exit_code = event.get("exit_code")
+                    if exit_code is None:
+                        # Claude tool_results carry is_error but not the shell
+                        # exit code; synthesize so the row is COMPLETED (not
+                        # CRASH) and parse_test_evidence's exit_code fallback
+                        # yields PASSED/FAILED instead of INCONCLUSIVE.
+                        exit_code = 1 if event.get("is_error") else 0
                     self.record_tool_result(
                         command_id=command_id,
                         session_id=session_id,
-                        exit_code=event.get("exit_code"),
+                        exit_code=exit_code,
                         output_excerpt=event.get("text"),
                         sandbox_id=sandbox_id,
                         sandbox_generation=sandbox_generation,
