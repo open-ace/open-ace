@@ -34,7 +34,7 @@ class TestFailClosedBehavior:
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = os.path.join(tmpdir, "test.db")
             with patch.dict(
-                os.environ, {"OPENACE_ENCRYPTION_KEY": "test-key-12345678901234567890"}
+                os.environ, {"OPENACE_ENCRYPTION_KEY": "test-key-12345678901234567890123"}
             ):
                 service = APIKeyProxyService(db_path=db_path)
                 yield service
@@ -126,7 +126,7 @@ class TestConnectionPool:
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = os.path.join(tmpdir, "test.db")
             with patch.dict(
-                os.environ, {"OPENACE_ENCRYPTION_KEY": "test-key-12345678901234567890"}
+                os.environ, {"OPENACE_ENCRYPTION_KEY": "test-key-12345678901234567890123"}
             ):
                 service = APIKeyProxyService(db_path=db_path)
                 yield service
@@ -174,7 +174,7 @@ class TestProxyTokenCleanup:
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = os.path.join(tmpdir, "test.db")
             with patch.dict(
-                os.environ, {"OPENACE_ENCRYPTION_KEY": "test-key-12345678901234567890"}
+                os.environ, {"OPENACE_ENCRYPTION_KEY": "test-key-12345678901234567890123"}
             ):
                 service = APIKeyProxyService(db_path=db_path)
                 yield service
@@ -392,7 +392,7 @@ class TestTTLConfiguration:
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = os.path.join(tmpdir, "test.db")
             with patch.dict(
-                os.environ, {"OPENACE_ENCRYPTION_KEY": "test-key-12345678901234567890"}
+                os.environ, {"OPENACE_ENCRYPTION_KEY": "test-key-12345678901234567890123"}
             ):
                 service = APIKeyProxyService(db_path=db_path)
                 yield service

@@ -14,11 +14,7 @@ from unittest.mock import patch
 
 import pytest
 
-from app.utils.security_mode import (
-    SecurityMode,
-    get_security_mode,
-    reset_security_mode_cache,
-)
+from app.utils.security_mode import SecurityMode, get_security_mode, reset_security_mode_cache
 
 
 class TestKeyFilePersistence:
@@ -31,9 +27,11 @@ class TestKeyFilePersistence:
 
             # Simulate entrypoint generating secrets
             import subprocess
+
             result = subprocess.run(
                 [
-                    "python3", "-c",
+                    "python3",
+                    "-c",
                     f"""
 import os
 import secrets
@@ -47,7 +45,7 @@ with open(secrets_file, 'w') as f:
     f.write(f"SECRET_KEY='{{secret_key}}'\\n")
     f.write(f"OPENACE_ENCRYPTION_KEY='{{enc_key}}'\\n")
     f.write(f"UPLOAD_AUTH_KEY='{{upload_key}}'\\n")
-"""
+""",
                 ],
                 capture_output=True,
                 text=True,
@@ -63,16 +61,18 @@ with open(secrets_file, 'w') as f:
             assert "UPLOAD_AUTH_KEY=" in content
 
             # Verify format (hex values)
-            for line in content.strip().split('\n'):
-                if '=' in line:
-                    key, value = line.split('=', 1)
+            for line in content.strip().split("\n"):
+                if "=" in line:
+                    key, value = line.split("=", 1)
                     # Should be in format 'hex_value'
-                    assert value.startswith("'") and value.endswith("'"), \
-                        f"Value should be quoted: {line}"
+                    assert value.startswith("'") and value.endswith(
+                        "'"
+                    ), f"Value should be quoted: {line}"
                     hex_val = value[1:-1]
                     assert len(hex_val) >= 16, f"Key too short: {key}"
-                    assert all(c in '0123456789abcdef' for c in hex_val), \
-                        f"Value should be hex: {hex_val}"
+                    assert all(
+                        c in "0123456789abcdef" for c in hex_val
+                    ), f"Value should be hex: {hex_val}"
 
     def test_persisted_secrets_survive_restart(self):
         """Persisted secrets should be reloaded on restart."""
@@ -81,11 +81,15 @@ with open(secrets_file, 'w') as f:
 
             # First run: generate and persist
             first_key = None
-            with patch.dict(os.environ, {
-                "OPENACE_CONFIG_DIR": tmpdir,
-                "OPENACE_SECURITY_MODE": "development",
-            }):
+            with patch.dict(
+                os.environ,
+                {
+                    "OPENACE_CONFIG_DIR": tmpdir,
+                    "OPENACE_SECURITY_MODE": "development",
+                },
+            ):
                 import secrets as pysecrets
+
                 first_key = pysecrets.token_hex(32)
 
                 # Write to file
@@ -93,9 +97,9 @@ with open(secrets_file, 'w') as f:
 
                 # Simulate restart: reload from file
                 reloaded_key = None
-                for line in secrets_file.read_text().strip().split('\n'):
+                for line in secrets_file.read_text().strip().split("\n"):
                     if line.startswith("SECRET_KEY="):
-                        reloaded_key = line.split('=', 1)[1].strip("'")
+                        reloaded_key = line.split("=", 1)[1].strip("'")
 
                 assert reloaded_key == first_key, "Key should persist across restart"
 
@@ -112,18 +116,23 @@ with open(secrets_file, 'w') as f:
             explicit_key = "explicit-key-32-characters-long-!!"
 
             # Env var should override
-            with patch.dict(os.environ, {
-                "SECRET_KEY": explicit_key,
-                "OPENACE_CONFIG_DIR": tmpdir,
-                "OPENACE_SECURITY_MODE": "development",
-            }):
+            with patch.dict(
+                os.environ,
+                {
+                    "SECRET_KEY": explicit_key,
+                    "OPENACE_CONFIG_DIR": tmpdir,
+                    "OPENACE_SECURITY_MODE": "development",
+                },
+            ):
                 # In real implementation, entrypoint respects explicit env vars
                 # Here we just verify the precedence logic
                 current_key = os.environ.get("SECRET_KEY")
-                assert current_key == explicit_key, \
-                    "Explicit env var should override persisted value"
-                assert current_key != persisted_key, \
-                    "Should not use persisted value when explicit set"
+                assert (
+                    current_key == explicit_key
+                ), "Explicit env var should override persisted value"
+                assert (
+                    current_key != persisted_key
+                ), "Should not use persisted value when explicit set"
 
 
 class TestMultiWorkerKeyConsistency:
@@ -137,6 +146,7 @@ class TestMultiWorkerKeyConsistency:
             # Master process generates and persists key
             shared_key = None
             import secrets as pysecrets
+
             shared_key = pysecrets.token_hex(32)
             secrets_file.write_text(f"SECRET_KEY='{shared_key}'\n")
 
@@ -144,17 +154,15 @@ class TestMultiWorkerKeyConsistency:
             worker_keys = []
             for worker_id in range(4):  # Typical Gunicorn config: 4 workers
                 # Each worker reads from the same file
-                for line in secrets_file.read_text().strip().split('\n'):
+                for line in secrets_file.read_text().strip().split("\n"):
                     if line.startswith("SECRET_KEY="):
-                        key = line.split('=', 1)[1].strip("'")
+                        key = line.split("=", 1)[1].strip("'")
                         worker_keys.append(key)
 
             # All workers should see the same key
             assert len(worker_keys) == 4, "All 4 workers should read the key"
-            assert all(k == shared_key for k in worker_keys), \
-                "All workers should see the same key"
-            assert len(set(worker_keys)) == 1, \
-                "No worker should see a different key"
+            assert all(k == shared_key for k in worker_keys), "All workers should see the same key"
+            assert len(set(worker_keys)) == 1, "No worker should see a different key"
 
 
 class TestKeyRotation:
@@ -216,6 +224,7 @@ class TestSecretFilePermissions:
 
             # Check permissions
             import stat
+
             file_stat = secrets_file.stat()
             mode = file_stat.st_mode & 0o777
 

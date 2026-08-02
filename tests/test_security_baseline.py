@@ -14,13 +14,6 @@ import os
 
 import pytest
 
-# Import from security_mode.py for unified mode detection (Issue #2185)
-from app.utils.security_mode import (
-    SecurityMode,
-    detect_security_mode,
-    reset_security_mode_cache,
-)
-
 # Import from security_baseline.py for baseline checking
 from app.utils.security_baseline import (
     CheckResult,
@@ -32,6 +25,9 @@ from app.utils.security_baseline import (
     is_forbidden_password,
     is_placeholder_password,
 )
+
+# Import from security_mode.py for unified mode detection (Issue #2185)
+from app.utils.security_mode import SecurityMode, detect_security_mode, reset_security_mode_cache
 
 
 class TestDetectSecurityMode:

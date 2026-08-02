@@ -12,11 +12,7 @@ from unittest.mock import patch
 
 import pytest
 
-from app.utils.security_mode import (
-    SecurityMode,
-    detect_security_mode,
-    reset_security_mode_cache,
-)
+from app.utils.security_mode import SecurityMode, detect_security_mode, reset_security_mode_cache
 
 
 class TestShellPythonConsistency:
@@ -188,8 +184,9 @@ class TestEntrypointSecurityBaseline:
 
         # Should have production-specific checks
         assert "production)" in content, "Should have production case"
-        assert "required in production" in content or "required in production mode" in content, \
-            "Should enforce production requirements"
+        assert (
+            "required in production" in content or "required in production mode" in content
+        ), "Should enforce production requirements"
 
 
 class TestSecretPersistenceMechanism:
@@ -210,7 +207,9 @@ class TestSecretPersistenceMechanism:
         content = entrypoint.read_text()
 
         # Check for logic that preserves existing secrets
-        assert "not os.environ.get" in content or "not set" in content, \
-            "Should check if secret is already set"
-        assert "operator set explicitly" in content or "env to override" in content, \
-            "Should mention that explicit env vars take precedence"
+        assert (
+            "not os.environ.get" in content or "not set" in content
+        ), "Should check if secret is already set"
+        assert (
+            "operator set explicitly" in content or "env to override" in content
+        ), "Should mention that explicit env vars take precedence"

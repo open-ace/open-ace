@@ -41,6 +41,7 @@ class TestUploadAuthConfig:
 
         # Reset security mode cache to pick up the new environment
         from app.utils.security_mode import reset_security_mode_cache
+
         reset_security_mode_cache()
 
         resp = client.post(
@@ -59,6 +60,7 @@ class TestUploadAuthConfig:
 
         # Reset security mode cache to pick up the new environment
         from app.utils.security_mode import reset_security_mode_cache
+
         reset_security_mode_cache()
 
         with patch("app.routes.upload.usage_service.save_usage", return_value=True) as save_usage:

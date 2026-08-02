@@ -17,11 +17,7 @@ from unittest.mock import patch
 
 import pytest
 
-from app.utils.security_mode import (
-    SecurityMode,
-    get_security_mode,
-    reset_security_mode_cache,
-)
+from app.utils.security_mode import SecurityMode, get_security_mode, reset_security_mode_cache
 
 
 class TestMultiWorkerKeyConsistency:
@@ -51,7 +47,9 @@ class TestMultiWorkerKeyConsistency:
 
         assert not errors, f"Errors during concurrent detection: {errors}"
         assert len(results) == 20, "All threads should complete"
-        assert all(m == SecurityMode.PRODUCTION for m in results), "All threads should see the same mode"
+        assert all(
+            m == SecurityMode.PRODUCTION for m in results
+        ), "All threads should see the same mode"
 
     def test_cached_security_mode_is_thread_safe(self):
         """Cached mode should be safe for concurrent access."""
@@ -111,7 +109,7 @@ class TestFileBasedSecretStorage:
     def test_concurrent_file_reads_are_safe(self):
         """Multiple workers reading the same secret file should be safe."""
         # Create a temporary secret file
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
             secret_file = Path(f.name)
             f.write("test-secret-key-for-multi-worker-test-32ch\n")
 
@@ -134,8 +132,9 @@ class TestFileBasedSecretStorage:
 
             assert not errors, f"Errors during concurrent reads: {errors}"
             assert len(results) == 20, "All reads should complete"
-            assert all(s == "test-secret-key-for-multi-worker-test-32ch" for s in results), \
-                "All workers should read the same secret"
+            assert all(
+                s == "test-secret-key-for-multi-worker-test-32ch" for s in results
+            ), "All workers should read the same secret"
         finally:
             secret_file.unlink(missing_ok=True)
 
@@ -155,7 +154,7 @@ class TestFileBasedSecretStorage:
                     # Content should always be either initial or final, never partial
                     assert content in [
                         "initial-secret-key-32-characters-long",
-                        "final-secret-key-32-characters-long"
+                        "final-secret-key-32-characters-long",
                     ], f"Read partial or corrupted content: {content}"
                 except Exception as e:
                     errors.append(e)
@@ -226,11 +225,13 @@ class TestGunicornWorkerConsistency:
                 # Each worker reads the same environment
                 mode = get_security_mode()
                 secret_key = os.environ.get("SECRET_KEY")
-                worker_configs.append({
-                    "worker_id": worker_id,
-                    "mode": mode,
-                    "secret_key": secret_key,
-                })
+                worker_configs.append(
+                    {
+                        "worker_id": worker_id,
+                        "mode": mode,
+                        "secret_key": secret_key,
+                    }
+                )
             except Exception as e:
                 errors.append((worker_id, e))
 
@@ -247,6 +248,9 @@ class TestGunicornWorkerConsistency:
         modes = [w["mode"] for w in worker_configs]
         keys = [w["secret_key"] for w in worker_configs]
 
-        assert all(m == SecurityMode.PRODUCTION for m in modes), "All workers should be in production mode"
-        assert all(k == "shared-secret-key-for-all-workers-32ch" for k in keys), \
-            "All workers should have the same SECRET_KEY"
+        assert all(
+            m == SecurityMode.PRODUCTION for m in modes
+        ), "All workers should be in production mode"
+        assert all(
+            k == "shared-secret-key-for-all-workers-32ch" for k in keys
+        ), "All workers should have the same SECRET_KEY"
