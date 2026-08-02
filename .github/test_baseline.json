@@ -1,0 +1,31 @@
+{
+  "default_tests": {
+    "hard_minimum": 500,
+    "baseline": 7254,
+    "warning_threshold": 6500,
+    "last_updated": "2026-08-03",
+    "update_mode": "auto",
+    "auto_update_limit": 10
+  },
+  "critical_e2e": {
+    "hard_minimum": 3,
+    "baseline": 5,
+    "warning_threshold": 4,
+    "last_updated": "2026-08-03",
+    "update_mode": "manual"
+  },
+  "full_e2e": {
+    "hard_minimum": 50,
+    "baseline": 74,
+    "warning_threshold": 66,
+    "last_updated": "2026-08-03",
+    "update_mode": "manual"
+  },
+  "issue_tests": {
+    "hard_minimum": 20,
+    "baseline": 27,
+    "warning_threshold": 24,
+    "last_updated": "2026-08-03",
+    "update_mode": "manual"
+  }
+}

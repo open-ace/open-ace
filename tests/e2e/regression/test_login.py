@@ -130,7 +130,14 @@ def test_login_failure():
 
 
 def test_logout():
-    """测试登出功能"""
+    """测试登出功能
+
+    Issue #2189: 修复假阳性问题
+    - 移除 except Exception: pass
+    - 找不到 logout 按钮必须失败
+    - 使用多重 selector 策略增加稳定性
+    - 明确的失败消息包含上下文信息
+    """
     with sync_playwright() as p:
         browser, context = create_browser_context(p)
         page = context.new_page()
@@ -146,6 +153,8 @@ def test_logout():
             page.fill("#username", "admin")
             page.fill("#password", "admin123")
             page.click('button[type="submit"]')
+
+            # 等待登录成功
             try:
                 page.wait_for_url(lambda url: "/login" not in url, timeout=120000)
             except Exception as e:
@@ -154,24 +163,54 @@ def test_logout():
                         f"Login did not redirect after 120s during logout test. Error: {e}"
                     ) from e
 
-            # 查找并点击登出按钮
+            # 等待页面加载完成
+            page.wait_for_load_state("networkidle", timeout=10000)
+
+            # 查找登出按钮 - 使用多重 selector 策略
             logout_selectors = [
                 'a[href="/logout"]',
                 'button:has-text("Logout")',
                 '.user-menu a:has-text("Logout")',
+                'a:has-text("Sign out")',
+                '[data-testid="logout-button"]',
             ]
-            if check_element_exists(page, logout_selectors):
+
+            logout_clicked = False
+            last_error = None
+
+            for selector in logout_selectors:
                 try:
-                    logout_btn = page.locator(
-                        logout_selectors[0] + ", " + logout_selectors[1]
-                    ).first
-                    if logout_btn.is_visible():
-                        logout_btn.click()
-                        page.wait_for_timeout(1000)
-                        # 验证重定向到登录页面
-                        assert "/login" in page.url, "登出后应重定向到登录页面"
-                except Exception:
-                    pass
+                    btn = page.wait_for_selector(selector, timeout=5000, state="visible")
+                    if btn and btn.is_visible():
+                        btn.click()
+                        logout_clicked = True
+                        break
+                except Exception as e:
+                    last_error = e
+                    continue
+
+            # 验证登出按钮被找到并点击
+            if not logout_clicked:
+                pytest.fail(
+                    f"Logout button not found with any selector. "
+                    f"Last error: {last_error}. "
+                    f"Current URL: {page.url}. "
+                    f"Tried selectors: {logout_selectors}"
+                )
+
+            # 等待重定向到登录页面
+            try:
+                page.wait_for_url(lambda url: "/login" in url or url.endswith("/"), timeout=10000)
+            except Exception:
+                pytest.fail(
+                    f"Logout did not redirect to login page. "
+                    f"Current URL: {page.url}"
+                )
+
+            # 验证重定向到登录页面
+            assert "/login" in page.url or page.url.endswith("/"), (
+                f"登出后应重定向到登录页面或首页，当前URL: {page.url}"
+            )
 
             save_screenshot(page, MODULE_NAME, "04_logout")
             return True

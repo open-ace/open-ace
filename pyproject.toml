@@ -195,9 +195,13 @@ disable_error_code = ["no-any-return", "arg-type", "union-attr", "operator", "in
 # =============================================================================
 # Pytest Configuration
 # =============================================================================
+# Issue #2189: 扩展 python_files pattern 包含 e2e_*.py
+# e2e_*.py pattern is for runner compatibility
+# Default tests still exclude tests/e2e via norecursedirs (pytest.ini)
+# Extended tests bypass norecursedirs via explicit file list
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-python_files = ["test_*.py", "*_test.py"]
+python_files = ["test_*.py", "*test.py", "e2e_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 # addopts moved to pytest.ini to avoid duplicate key error
@@ -208,6 +212,10 @@ filterwarnings = [
 # =============================================================================
 # Coverage Configuration
 # =============================================================================
+# Issue #2189: Coverage threshold enforcement
+# Phase 1: Maintain 50% (current baseline)
+# Phase 2: Increase to 60% (1 month after implementation)
+# Phase 3: Increase to 80% (3 months after implementation)
 [tool.coverage.run]
 # Phase 1: Include P0 security modules (Issue #1856)
 # Gradually expand: P0 → P1 → P2
@@ -227,6 +235,7 @@ omit = [
 ]
 
 [tool.coverage.report]
+fail_under = 50
 exclude_lines = [
     "pragma: no cover",
     "def __repr__",

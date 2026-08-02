@@ -5,11 +5,17 @@ Run the server-dependent Open ACE test suites from CI or a local checkout.
 The default CI suite intentionally excludes tests/e2e and tests/issues because
 they need a live web server and can be slow. This runner is the shared entry
 point for scheduled, release, PR critical, and manual extended-test runs.
+
+Issue #2189: Runner improvements
+- Explicit file discovery (bypass norecursedirs)
+- Collection verification and manifest
+- Shard consistency validation
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import signal
 import socket
@@ -20,6 +26,7 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
+from datetime import datetime
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -108,6 +115,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Print the pytest command without running it.",
     )
+    # Issue #2189: 新增参数
+    parser.add_argument(
+        "--verify-shard",
+        action="store_true",
+        help="Verify shard consistency (all shards equal to no-shard collection).",
+    )
+    parser.add_argument(
+        "--manifest-dir",
+        default="test-results",
+        help="Directory to write collection manifest (default: test-results).",
+    )
     return parser.parse_args(argv)
 
 
@@ -161,6 +179,14 @@ def select_targets(args: argparse.Namespace) -> list[str]:
 
 
 def discover_test_files(targets: list[str]) -> list[str]:
+    """
+    显式发现测试文件，不依赖 pytest pattern
+
+    Issue #2189: 改进
+    - 显式搜索 test_*.py 和 e2e_*.py 文件
+    - 验证非空（否则抛出异常）
+    - 输出收集数量和文件列表到日志
+    """
     files: list[Path] = []
     for target in targets:
         path = PROJECT_ROOT / target_path(target)
@@ -170,10 +196,30 @@ def discover_test_files(targets: list[str]) -> list[str]:
         files.extend(path.rglob("test_*.py"))
         files.extend(path.rglob("e2e_*.py"))
     unique = sorted({file.relative_to(PROJECT_ROOT).as_posix() for file in files})
+
+    # Issue #2189: 验证非空
+    if not unique:
+        raise ValueError(
+            f"No test files found for targets: {targets}\n"
+            f"Searched patterns: test_*.py, e2e_*.py"
+        )
+
+    # Issue #2189: 输出收集信息
+    print(f"Discovered {len(unique)} test files:")
+    for f in unique:
+        print(f"  - {f}")
+
     return unique
 
 
 def apply_split(targets: list[str], split_total: int, split_group: int) -> list[str]:
+    """
+    应用分片逻辑
+
+    Issue #2189: 改进
+    - 输出分片信息
+    - 确保分片一致性
+    """
     if split_total < 1:
         raise ValueError("--split-total must be >= 1")
     if split_group < 1 or split_group > split_total:
@@ -187,14 +233,32 @@ def apply_split(targets: list[str], split_total: int, split_group: int) -> list[
     ]
     if not selected:
         raise ValueError(f"Shard {split_group}/{split_total} selected no test files")
+
+    # Issue #2189: 输出分片信息
     print(f"Selected {len(selected)} files for shard {split_group}/{split_total}")
     return selected
 
 
 def build_pytest_command(args: argparse.Namespace) -> list[str]:
+    """
+    构建 pytest 命令，传递显式文件列表
+
+    Issue #2189: 改进
+    - 传递显式文件列表（绕过 norecursedirs）
+    - 使用绝对路径
+    - 不传递目录路径
+    """
     targets = select_targets(args)
-    targets = apply_split(targets, args.split_total, args.split_group)
-    cmd = [sys.executable, "-m", "pytest", *targets, "-m", "not postgres"]
+
+    # Issue #2189: 使用显式文件列表
+    test_files = discover_test_files(targets)
+    test_files = apply_split(test_files, args.split_total, args.split_group)
+
+    # 转换为绝对路径
+    absolute_files = [str(PROJECT_ROOT / f) for f in test_files]
+
+    # 构建命令
+    cmd = [sys.executable, "-m", "pytest", *absolute_files, "-m", "not postgres"]
     if args.parallel > 0:
         cmd.extend(["-n", str(args.parallel)])
     if args.reruns > 0:
@@ -207,6 +271,71 @@ def build_pytest_command(args: argparse.Namespace) -> list[str]:
         cmd.append(f"--junitxml={args.junitxml}")
     cmd.extend(args.extra_pytest_arg)
     return cmd
+
+
+def write_collection_manifest(
+    test_files: list[str],
+    category: str,
+    split_group: int,
+    split_total: int,
+    manifest_dir: str,
+) -> None:
+    """
+    Issue #2189: 写入 collection manifest
+
+    用于 CI 验证和调试
+    """
+    manifest_path = PROJECT_ROOT / manifest_dir
+    manifest_path.mkdir(parents=True, exist_ok=True)
+
+    manifest = {
+        "category": category,
+        "split_group": split_group,
+        "split_total": split_total,
+        "test_files": test_files,
+        "test_count": len(test_files),
+        "timestamp": datetime.now().isoformat(),
+    }
+
+    manifest_file = manifest_path / "collection_manifest.json"
+    manifest_file.write_text(json.dumps(manifest, indent=2))
+    print(f"Collection manifest written to {manifest_file}")
+
+
+def verify_shard_consistency(args: argparse.Namespace) -> bool:
+    """
+    Issue #2189: 验证分片一致性
+
+    验证所有分片全集等于不分片集合
+    """
+    print("\n" + "=" * 70)
+    print("验证分片一致性")
+    print("=" * 70)
+
+    targets = select_targets(args)
+
+    # 不分片
+    all_files = discover_test_files(targets)
+    print(f"\n不分片: {len(all_files)} files")
+
+    # 所有分片
+    shards = []
+    for i in range(args.split_total):
+        shard = apply_split(targets, args.split_total, i + 1)
+        shards.extend(shard)
+
+    # 去重后比较
+    unique_shards = sorted(set(shards))
+    print(f"分片全集: {len(unique_shards)} unique files")
+
+    if sorted(all_files) != unique_shards:
+        print("\n✗ 分片一致性检查失败")
+        print(f"  Expected: {len(all_files)} files")
+        print(f"  Got: {len(unique_shards)} unique files")
+        return False
+
+    print("\n✓ 分片一致性检查通过")
+    return True
 
 
 def frontend_dist_index() -> Path:
@@ -388,9 +517,24 @@ def main(argv: list[str] | None = None) -> int:
     server_proc: subprocess.Popen | None = None
 
     try:
+        # Issue #2189: 分片一致性验证
+        if args.verify_shard:
+            if not verify_shard_consistency(args):
+                return 1
+            return 0
+
         cmd = build_pytest_command(args)
         print("Pytest command:")
         print(" ".join(cmd))
+
+        # Issue #2189: 写入 collection manifest
+        targets = select_targets(args)
+        test_files = discover_test_files(targets)
+        test_files = apply_split(test_files, args.split_total, args.split_group)
+        write_collection_manifest(
+            test_files, args.category, args.split_group, args.split_total, args.manifest_dir
+        )
+
         if args.dry_run:
             return 0
         server_proc = start_server_if_needed(args, env)
