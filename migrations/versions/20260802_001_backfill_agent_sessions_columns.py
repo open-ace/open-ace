@@ -73,7 +73,7 @@ def upgrade() -> None:
     if "workspace_type" not in existing_columns:
         op.add_column(
             "agent_sessions",
-            sa.Column("workspace_type", sa.Text(), nullable=False, server_default="'local'"),
+            sa.Column("workspace_type", sa.Text(), nullable=False, server_default="local"),
         )
 
     # Add remote_machine_id if missing

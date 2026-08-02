@@ -50,7 +50,7 @@ def upgrade() -> None:
     if "source" not in existing_columns:
         op.add_column(
             "session_messages",
-            sa.Column("source", sa.Text(), nullable=False, server_default="''"),
+            sa.Column("source", sa.Text(), nullable=False, server_default=""),
         )
 
     # Add source_timestamp if missing
@@ -64,7 +64,7 @@ def upgrade() -> None:
     if "external_message_id" not in existing_columns:
         op.add_column(
             "session_messages",
-            sa.Column("external_message_id", sa.Text(), nullable=False, server_default="''"),
+            sa.Column("external_message_id", sa.Text(), nullable=False, server_default=""),
         )
 
     # Add content_blocks if missing
@@ -78,7 +78,7 @@ def upgrade() -> None:
     if "milestone_id" not in existing_columns:
         op.add_column(
             "session_messages",
-            sa.Column("milestone_id", sa.Text(), nullable=False, server_default="''"),
+            sa.Column("milestone_id", sa.Text(), nullable=False, server_default=""),
         )
 
 
