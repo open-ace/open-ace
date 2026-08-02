@@ -301,7 +301,7 @@ class TestRedisPasswordFailClosed:
         from app.utils.security_env import get_redis_password
 
         # Set production environment
-        monkeypatch.setenv("FLASK_ENV", "production")
+        monkeypatch.setenv("OPENACE_SECURITY_MODE", "production")
         # Set empty password
         monkeypatch.setenv("REDIS_PASSWORD", "")
 
@@ -313,7 +313,7 @@ class TestRedisPasswordFailClosed:
         from app.utils.security_env import get_redis_password
 
         # Set production environment
-        monkeypatch.setenv("FLASK_ENV", "production")
+        monkeypatch.setenv("OPENACE_SECURITY_MODE", "production")
         # Set placeholder password
         monkeypatch.setenv("REDIS_PASSWORD", "replace-with-random-redis-password")
 
@@ -325,7 +325,7 @@ class TestRedisPasswordFailClosed:
         from app.utils.security_env import get_redis_password
 
         # Set development environment (default)
-        monkeypatch.setenv("FLASK_ENV", "development")
+        monkeypatch.setenv("OPENACE_SECURITY_MODE", "development")
         # Unset password
         monkeypatch.delenv("REDIS_PASSWORD", raising=False)
 
@@ -337,7 +337,7 @@ class TestRedisPasswordFailClosed:
         """Strong password should be accepted in development."""
         from app.utils.security_env import get_redis_password
 
-        monkeypatch.setenv("FLASK_ENV", "development")
+        monkeypatch.setenv("OPENACE_SECURITY_MODE", "development")
         monkeypatch.setenv(
             "REDIS_PASSWORD", "a-strong-64-char-random-password-12345678901234567890"
         )
@@ -349,7 +349,7 @@ class TestRedisPasswordFailClosed:
         """Strong password should be accepted in production."""
         from app.utils.security_env import get_redis_password
 
-        monkeypatch.setenv("FLASK_ENV", "production")
+        monkeypatch.setenv("OPENACE_SECURITY_MODE", "production")
         monkeypatch.setenv(
             "REDIS_PASSWORD", "a-strong-64-char-random-password-12345678901234567890"
         )
@@ -365,7 +365,7 @@ class TestRedisPasswordSpecialCharacters:
         """Password containing $ should be accepted."""
         from app.utils.security_env import get_redis_password
 
-        monkeypatch.setenv("FLASK_ENV", "production")
+        monkeypatch.setenv("OPENACE_SECURITY_MODE", "production")
         monkeypatch.setenv("REDIS_PASSWORD", "pass$word$123")
 
         password = get_redis_password()
@@ -375,7 +375,7 @@ class TestRedisPasswordSpecialCharacters:
         """Password containing ! should be accepted."""
         from app.utils.security_env import get_redis_password
 
-        monkeypatch.setenv("FLASK_ENV", "production")
+        monkeypatch.setenv("OPENACE_SECURITY_MODE", "production")
         monkeypatch.setenv("REDIS_PASSWORD", "pass!word!123")
 
         password = get_redis_password()
@@ -385,7 +385,7 @@ class TestRedisPasswordSpecialCharacters:
         """Password containing backtick should be accepted."""
         from app.utils.security_env import get_redis_password
 
-        monkeypatch.setenv("FLASK_ENV", "production")
+        monkeypatch.setenv("OPENACE_SECURITY_MODE", "production")
         monkeypatch.setenv("REDIS_PASSWORD", "pass`word`123")
 
         password = get_redis_password()
@@ -395,7 +395,7 @@ class TestRedisPasswordSpecialCharacters:
         """Password containing multiple special characters should be accepted."""
         from app.utils.security_env import get_redis_password
 
-        monkeypatch.setenv("FLASK_ENV", "production")
+        monkeypatch.setenv("OPENACE_SECURITY_MODE", "production")
         # Mix of special characters
         monkeypatch.setenv("REDIS_PASSWORD", "P@$$w0rd!#$%^&*()_+-=[]{}|;':\",./<>?")
 
