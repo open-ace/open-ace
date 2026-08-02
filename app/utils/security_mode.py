@@ -54,13 +54,13 @@ def detect_security_mode() -> SecurityMode:
     Priority:
     1. OPENACE_SECURITY_MODE (explicit setting)
     2. FLASK_ENV=production (backward compatibility)
-    3. Unknown/missing -> RuntimeError (fail closed)
+    3. Default: development (backward compatibility with docker-entrypoint.sh)
 
     Returns:
         SecurityMode: The detected security mode.
 
     Raises:
-        RuntimeError: When mode is missing or unknown (fail closed).
+        RuntimeError: When mode is unknown (invalid value).
     """
     # Priority 1: Explicit OPENACE_SECURITY_MODE
     mode_env = os.environ.get("OPENACE_SECURITY_MODE", "").strip().lower()
@@ -89,17 +89,18 @@ def detect_security_mode() -> SecurityMode:
         )
         return SecurityMode.PRODUCTION
 
-    # No mode configured - fail closed (Issue #2185)
-    # Explicit opt-in required; no silent fallback to development
-    raise RuntimeError(
-        "Security mode not configured. "
-        "Set OPENACE_SECURITY_MODE to one of: production, pilot, development. "
+    # Default: development mode (backward compatibility with docker-entrypoint.sh)
+    # Matches Shell behavior: "Default: development mode"
+    logger.warning(
+        "Security mode not configured. Defaulting to development mode. "
+        "Set OPENACE_SECURITY_MODE explicitly for production deployments. "
         "Examples:\n"
         "  - Production: OPENACE_SECURITY_MODE=production\n"
         "  - Pilot/Trial: OPENACE_SECURITY_MODE=pilot\n"
         "  - Development: OPENACE_SECURITY_MODE=development\n"
         "For Docker Compose, add to .env or docker-compose.yml environment section."
     )
+    return SecurityMode.DEVELOPMENT
 
 
 def get_security_mode() -> SecurityMode:

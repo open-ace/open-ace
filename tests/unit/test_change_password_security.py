@@ -100,7 +100,8 @@ class TestCheckChangePasswordLockout:
     def test_expired_lockout_cleared(self, mock_db_cls, mock_placeholder):
         """Expired lockout should be cleared."""
         mock_db = MagicMock()
-        past = datetime.now() - timedelta(minutes=10)
+        # Use UTC time to match database TIMESTAMP WITHOUT TIME ZONE behavior
+        past = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=10)
         mock_db.fetch_one.return_value = {
             "attempt_count": 5,
             "locked_until": past,

@@ -141,7 +141,8 @@ class TestLoginLockout:
     @patch("app.repositories.database.Database")
     def test_expired_lockout_cleared(self, mock_db_cls, mock_placeholder):
         mock_db = MagicMock()
-        past = datetime.now() - timedelta(minutes=10)
+        # Use UTC time to match database TIMESTAMP WITHOUT TIME ZONE behavior
+        past = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=10)
         mock_db.fetch_one.return_value = {
             "attempt_count": 5,
             "locked_until": past,
@@ -558,7 +559,8 @@ class TestAuthService:
 
     def test_validate_session_expired(self):
         svc, mock_repo = self._make_service()
-        past = datetime.now() - timedelta(hours=1)
+        # Use UTC time to match database TIMESTAMP WITHOUT TIME ZONE behavior
+        past = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=1)
         mock_repo.get_session_by_token.return_value = {
             "token": "abc",
             "expires_at": past,
@@ -570,7 +572,8 @@ class TestAuthService:
 
     def test_validate_session_expired_string(self):
         svc, mock_repo = self._make_service()
-        past = (datetime.now() - timedelta(hours=1)).isoformat()
+        # Use UTC time to match database TIMESTAMP WITHOUT TIME ZONE behavior
+        past = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=1)).isoformat()
         mock_repo.get_session_by_token.return_value = {
             "token": "abc",
             "expires_at": past,
@@ -586,18 +589,21 @@ class TestAuthService:
         assert AuthService._is_session_expired({"expires_at": None}) is False
 
     def test_is_session_expired_future(self):
-        # Use local time to match database TIMESTAMP WITHOUT TIME ZONE behavior
-        future = datetime.now() + timedelta(hours=1)
+        # Use UTC time to match database TIMESTAMP WITHOUT TIME ZONE behavior
+        # Database stores UTC time without timezone info
+        future = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=1)
         assert AuthService._is_session_expired({"expires_at": future}) is False
 
     def test_is_session_expired_past(self):
-        # Use local time to match database TIMESTAMP WITHOUT TIME ZONE behavior
-        past = datetime.now() - timedelta(hours=1)
+        # Use UTC time to match database TIMESTAMP WITHOUT TIME ZONE behavior
+        # Database stores UTC time without timezone info
+        past = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=1)
         assert AuthService._is_session_expired({"expires_at": past}) is True
 
     def test_is_session_expired_string_past(self):
-        # Use local time to match database TIMESTAMP WITHOUT TIME ZONE behavior
-        past = (datetime.now() - timedelta(hours=1)).isoformat()
+        # Use UTC time to match database TIMESTAMP WITHOUT TIME ZONE behavior
+        # Database stores UTC time without timezone info
+        past = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=1)).isoformat()
         assert AuthService._is_session_expired({"expires_at": past}) is True
 
     def test_get_user_profile(self):

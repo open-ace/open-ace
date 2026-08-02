@@ -69,13 +69,12 @@ class TestDetectSecurityMode:
         monkeypatch.setenv("FLASK_ENV", "production")
         assert detect_security_mode() == SecurityMode.DEVELOPMENT
 
-    def test_default_mode_raises_without_explicit_config(self, monkeypatch):
-        """Test that missing mode raises RuntimeError (Issue #2185: fail closed)."""
+    def test_default_mode_returns_development(self, monkeypatch):
+        """Test default returns development mode when not configured (Issue #2185 backward compat)."""
         reset_security_mode_cache()
         monkeypatch.delenv("OPENACE_SECURITY_MODE", raising=False)
         monkeypatch.delenv("FLASK_ENV", raising=False)
-        with pytest.raises(RuntimeError, match="Security mode not configured"):
-            detect_security_mode()
+        assert detect_security_mode() == SecurityMode.DEVELOPMENT
 
     def test_case_insensitive_mode_detection(self, monkeypatch):
         """Test case-insensitive mode detection."""
