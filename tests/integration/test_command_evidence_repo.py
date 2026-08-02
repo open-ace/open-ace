@@ -285,3 +285,64 @@ def test_record_tool_use_persists_with_boolean_columns_on_postgres(pg_repo):
     assert len(rows) == 1, "row did not persist — boolean INSERT failed on Postgres"
     assert rows[0].timed_out is False
     assert rows[0].cancelled is False
+
+
+def test_emit_synthesizes_exit_code_from_is_error_for_claude_results(recorder, repo):
+    """Claude tool_results carry is_error but no shell exit_code; emit should
+    synthesize exit_code so the row is COMPLETED (not CRASH) and
+    parse_test_evidence's exit_code fallback yields PASSED/FAILED instead of
+    INCONCLUSIVE."""
+    recorder.emit_from_event_log(
+        session_id="syn-sess",
+        workflow_id="w",
+        milestone_id="m",
+        event_log=[
+            {
+                "type": "tool_use",
+                "tool_use_id": "syn1",
+                "tool_name": "Bash",
+                "tool_input": {"command": "pytest"},
+            },
+            {
+                "type": "tool_result",
+                "tool_use_id": "syn1",
+                "exit_code": None,
+                "is_error": False,
+                "text": "3 passed",
+            },
+        ],
+    )
+    rows = repo.query_by_session("syn-sess")
+    assert len(rows) == 1
+    assert rows[0].exit_code == 0, f"expected synthesized 0, got {rows[0].exit_code}"
+    assert (
+        rows[0].terminal_reason == "completed"
+    ), f"expected completed, got {rows[0].terminal_reason}"
+
+
+def test_emit_synthesizes_nonzero_exit_code_when_is_error(recorder, repo):
+    """is_error=True -> nonzero exit_code -> COMPLETED+FAILED (not CRASH)."""
+    recorder.emit_from_event_log(
+        session_id="syn-err-sess",
+        workflow_id="w",
+        milestone_id="m",
+        event_log=[
+            {
+                "type": "tool_use",
+                "tool_use_id": "syn2",
+                "tool_name": "Bash",
+                "tool_input": {"command": "pytest"},
+            },
+            {
+                "type": "tool_result",
+                "tool_use_id": "syn2",
+                "exit_code": None,
+                "is_error": True,
+                "text": "boom",
+            },
+        ],
+    )
+    rows = repo.query_by_session("syn-err-sess")
+    assert len(rows) == 1
+    assert rows[0].exit_code == 1
+    assert rows[0].terminal_reason == "completed"
