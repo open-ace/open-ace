@@ -1495,7 +1495,7 @@ class GitHubOps:
             return ""
 
         view_result = self._run_gh(
-            ["run", "view", run_id, "--log-failed"],
+            ["run", "view", run_id, "--log-failed", "--allow-escape-sequences"],
             check=False,
         )
         if view_result.returncode != 0:
@@ -1550,6 +1550,12 @@ class GitHubOps:
                 if self._repo_host and self._repo_host != "github.com":
                     api_args += ["--hostname", self._repo_host]
                 api_args.append(f"repos/{self._repo_slug}/actions/jobs/{job_id}/logs")
+                # gh >= 2.92 refuses to emit log text containing ANSI escape
+                # sequences unless this flag is passed; without it the job-log
+                # REST endpoint always fails and CI repair can never read
+                # failure logs. The sequences are stripped afterward by
+                # _clean_log_to_excerpt / _strip_ansi.
+                api_args.append("--allow-escape-sequences")
                 api_result = self._run_gh(api_args, check=False, repo_scoped=False)
                 if api_result.returncode == 0 and (api_result.stdout or "").strip():
                     return self._clean_log_to_excerpt(api_result.stdout or "", max_lines, max_chars)
@@ -1563,7 +1569,15 @@ class GitHubOps:
                 )
 
             result = self._run_gh(
-                ["run", "view", run_id, "--job", job_id, "--log-failed"],
+                [
+                    "run",
+                    "view",
+                    run_id,
+                    "--job",
+                    job_id,
+                    "--log-failed",
+                    "--allow-escape-sequences",
+                ],
                 check=False,
             )
             if result.returncode != 0:
