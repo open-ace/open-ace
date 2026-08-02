@@ -94,8 +94,8 @@ jobs:
             exit 1
           fi
 
-          # Extract test count
-          TEST_COUNT=$(echo "$COLLECT_OUTPUT" | grep -oP '\d+(?= test)' | head -1 || echo "0")
+          # Extract test count from "collected N items" or "N items selected"
+          TEST_COUNT=$(echo "$COLLECT_OUTPUT" | grep -oP 'collected \K\d+|\d+(?= items)' | head -1 || echo "0")
           echo "Collected tests: $TEST_COUNT"
           echo "TEST_COUNT=$TEST_COUNT" >> $GITHUB_ENV
 

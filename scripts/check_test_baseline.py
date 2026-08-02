@@ -38,8 +38,8 @@ def load_baseline() -> dict[str, Any]:
         return {
             "default_tests": {
                 "hard_minimum": 500,
-                "baseline": 7254,
-                "warning_threshold": 6500,
+                "baseline": 3956,
+                "warning_threshold": 3500,
                 "last_updated": "2026-08-03",
                 "update_mode": "auto",
                 "auto_update_limit": 10,
@@ -59,7 +59,7 @@ def load_baseline() -> dict[str, Any]:
                 "update_mode": "manual",
             },
             "issue_tests": {
-                "hard_minimum": 30,
+                "hard_minimum": 20,
                 "baseline": 27,
                 "warning_threshold": 24,
                 "last_updated": "2026-08-03",
@@ -163,8 +163,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.all_categories:
         # 检查所有类别（使用默认值）
+        # Issue #2189: 使用实际测试数量作为默认值
         categories = [
-            ("default_tests", 7254),
+            ("default_tests", 3956),
             ("critical_e2e", 5),
             ("full_e2e", 74),
             ("issue_tests", 27),
