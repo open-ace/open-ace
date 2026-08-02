@@ -1109,6 +1109,62 @@ class SessionManager:
         conn.close()
         return success
 
+    def increment_from_evidence(
+        self,
+        session_id: str,
+        evidence: Any,
+        message_delta: int = 0,
+        tenant_id: int | None = None,
+        require_tenant: bool = True,
+    ) -> bool:
+        """
+        Increment session usage from UsageEvidence.
+
+        New API for Issue #2184: Uses unified UsageEvidence structure
+        to ensure consistent token counting across all providers.
+
+        Args:
+            session_id: Session ID.
+            evidence: UsageEvidence instance with parsed usage data.
+            message_delta: Message count delta.
+            tenant_id: Optional tenant ID for tenant-scoped update.
+            require_tenant: Fail if tenant_id is None when require_tenant=True.
+
+        Returns:
+            bool: True if successful.
+        """
+        # Import here to avoid circular dependency
+        from app.modules.workspace.usage_evidence import UsageEvidence
+
+        if not isinstance(evidence, UsageEvidence):
+            logger.error(f"Expected UsageEvidence, got {type(evidence)}")
+            return False
+
+        # Skip if usage is indeterminate (missing/malformed)
+        if evidence.is_indeterminate:
+            logger.warning(
+                f"Skipping session usage increment for indeterminate evidence",
+                extra={"parse_status": evidence.parse_status, "session_id": session_id}
+            )
+            return False
+
+        # Calculate token deltas per Issue #2184 spec
+        # total_tokens includes cache tokens
+        total_tokens_delta = evidence.total_tokens
+        total_input_delta = evidence.input_tokens
+        total_output_delta = evidence.output_tokens
+
+        return self.increment_session_usage(
+            session_id=session_id,
+            request_delta=1,
+            total_tokens_delta=total_tokens_delta,
+            total_input_delta=total_input_delta,
+            total_output_delta=total_output_delta,
+            message_delta=message_delta,
+            tenant_id=tenant_id,
+            require_tenant=require_tenant,
+        )
+
     def get_messages(
         self,
         session_id: str,

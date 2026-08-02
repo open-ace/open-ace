@@ -212,6 +212,48 @@ class QuotaManager:
             logger.error(f"Failed to record usage: {e}")
             return False
 
+    def record_usage_from_evidence(
+        self,
+        user_id: int,
+        evidence: Any,
+        requests: int = 1,
+        date: str | None = None
+    ) -> bool:
+        """
+        Record usage from UsageEvidence.
+
+        New API for Issue #2184: Uses unified UsageEvidence structure
+        to ensure consistent token counting across all providers.
+
+        Args:
+            user_id: User ID.
+            evidence: UsageEvidence instance with parsed usage data.
+            requests: Number of requests made.
+            date: Date string (YYYY-MM-DD), defaults to today.
+
+        Returns:
+            bool: True if successful.
+        """
+        # Import here to avoid circular dependency
+        from app.modules.workspace.usage_evidence import UsageEvidence
+
+        if not isinstance(evidence, UsageEvidence):
+            logger.error(f"Expected UsageEvidence, got {type(evidence)}")
+            return False
+
+        # Skip if usage is indeterminate (missing/malformed)
+        if evidence.is_indeterminate:
+            logger.warning(
+                f"Skipping usage recording for indeterminate evidence",
+                extra={"parse_status": evidence.parse_status, "user_id": user_id}
+            )
+            return False
+
+        # Use total_tokens (includes cache tokens per Issue #2184 spec)
+        tokens = evidence.total_tokens
+
+        return self.record_usage(user_id=user_id, tokens=tokens, requests=requests, date=date)
+
     def get_user_quota_status(self, user_id: int, period: str = "daily") -> QuotaStatus:
         """
         Get quota status for a user.

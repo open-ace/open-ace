@@ -330,50 +330,92 @@ def _record_llm_usage(
     provider: str,
     content_type: str,
     request_body: bytes | None = None,
+    request_id: str | None = None,
 ) -> None:
-    """Extract and record token usage and messages from LLM responses."""
+    """Extract and record token usage and messages from LLM responses.
+
+    Refactored for Issue #2184: Uses unified UsageEvidence structure
+    to support OpenAI and Anthropic protocols with proper streaming
+    handling and cache token recording.
+    """
     try:
-        if b"usage" not in content:
-            return
+        # Import new modules
+        from app.modules.workspace.usage_accumulator import UsageAccumulator
+        from app.modules.workspace.usage_diagnostics import (
+            create_malformed_usage_diagnostic,
+            create_missing_usage_diagnostic,
+            record_parse_diagnostic,
+        )
+        from app.modules.workspace.usage_evidence import UsageEvidence
+        from app.modules.workspace.usage_parser import UsageParserFactory
 
-        usage = None
-        response_model = None
-        try:
-            data = json.loads(content)
-            usage = data.get("usage", {})
-            response_model = data.get("model")
-        except json.JSONDecodeError:
+        # Detect protocol
+        protocol_type = UsageParserFactory.detect_protocol(content, content_type, provider)
+
+        # Get appropriate parser
+        parser = UsageParserFactory.get_parser(protocol_type, provider)
+
+        # Determine if streaming
+        is_streaming = "text/event-stream" in content_type.lower() or protocol_type.endswith("_stream")
+
+        if is_streaming:
+            # Create accumulator for streaming
+            from datetime import datetime, timezone
+
+            accumulator = UsageAccumulator(
+                session_id=session_id,
+                provider=provider,
+                request_start_time=datetime.now(timezone.utc)
+            )
+
+            # Parse all chunks
             for line in content.split(b"\n"):
-                line = line.strip()
-                if not line or not line.startswith(b"data:"):
+                chunk = line.strip()
+                if not chunk:
                     continue
-                payload = line[len(b"data:") :].strip()
-                if payload == b"[DONE]":
-                    continue
-                try:
-                    chunk = json.loads(payload)
-                except (json.JSONDecodeError, ValueError):
-                    continue
-                if "usage" in chunk:
-                    usage = chunk["usage"]
-                    response_model = chunk.get("model")
-                    break
+                parser.parse_stream_chunk(chunk + b"\n", accumulator)
 
-        if not usage or not isinstance(usage, dict):
+            # Finalize
+            evidence = parser.finalize_stream(accumulator)
+        else:
+            # Parse regular response
+            evidence = parser.parse_regular(content)
+
+        # Check if we have valid usage
+        if not evidence or evidence.is_indeterminate:
+            # Record diagnostic
+            diagnostic = create_missing_usage_diagnostic(
+                provider=provider,
+                protocol_type=protocol_type,
+                session_id=session_id,
+                request_id=request_id,
+                raw_content=content[:500] if content else None
+            )
+            record_parse_diagnostic(diagnostic)
             return
 
-        input_tokens = usage.get("prompt_tokens", 0)
-        output_tokens = usage.get("completion_tokens", 0)
+        # Update evidence with correlation info
+        if request_id and not evidence.request_id:
+            evidence.request_id = request_id
+        evidence.session_id = session_id
+
+        # Record usage
+        input_tokens = evidence.input_tokens
+        output_tokens = evidence.output_tokens
+        response_model = evidence.model
+
+        # Skip if no tokens
         if not input_tokens and not output_tokens:
             return
 
         from app.modules.governance.quota_manager import QuotaManager
         from app.modules.workspace.session_manager import get_session_manager
 
+        # Record to quota (using new API)
         quota_mgr = QuotaManager()
-        quota_mgr.record_usage(
+        quota_mgr.record_usage_from_evidence(
             user_id=user_id,
-            tokens=input_tokens + output_tokens,
+            evidence=evidence,
             requests=1,
         )
 
@@ -409,13 +451,12 @@ def _record_llm_usage(
             output_tokens=output_tokens,
             model=response_model,
         )
-        sm.increment_session_usage(
+
+        # Increment session usage (using new API)
+        sm.increment_from_evidence(
             session_id,
+            evidence=evidence,
             message_delta=message_delta,
-            request_delta=1,
-            total_tokens_delta=input_tokens + output_tokens,
-            total_input_delta=input_tokens,
-            total_output_delta=output_tokens,
         )
 
         try:
@@ -562,11 +603,22 @@ def _finalize_upstream_response(
     handling + usage recording lives in exactly one place (this is the shared tail
     that lets the gateway seam stay small and removable). For ``text/event-stream``
     the usage is recorded after the stream drains; otherwise immediately.
+
+    Issue #2184: Extracts request_id from response headers for correlation.
     """
     if content_type is None:
         content_type = resp.headers.get("Content-Type", "")
 
-    def generate(_resp=resp, _content_type=content_type, _body=body):
+    # Extract request_id from response headers
+    request_id = None
+    if provider == "anthropic":
+        # Anthropic uses "request-id" header
+        request_id = resp.headers.get("request-id")
+    else:
+        # OpenAI uses "x-request-id" header
+        request_id = resp.headers.get("x-request-id")
+
+    def generate(_resp=resp, _content_type=content_type, _body=body, _request_id=request_id):
         total_content = b""
         for chunk in _resp.iter_content(chunk_size=4096):
             total_content += chunk
@@ -579,13 +631,14 @@ def _finalize_upstream_response(
                 provider,
                 _content_type,
                 request_body=_body,
+                request_id=_request_id,
             )
         except Exception as exc:
             logger.error("Failed to record LLM usage: %s", exc)
 
     response_headers = {}
     for key, value in resp.headers.items():
-        if key.lower() in ("content-type", "x-request-id", "openai-organization"):
+        if key.lower() in ("content-type", "x-request-id", "openai-organization", "request-id"):
             response_headers[key] = value
 
     if "text/event-stream" in content_type:
@@ -598,7 +651,15 @@ def _finalize_upstream_response(
 
     content = resp.content
     try:
-        _record_llm_usage(content, session_id, user_id, provider, content_type, request_body=body)
+        _record_llm_usage(
+            content,
+            session_id,
+            user_id,
+            provider,
+            content_type,
+            request_body=body,
+            request_id=request_id
+        )
     except Exception as exc:
         logger.error("Failed to record LLM usage: %s", exc)
     return Response(
