@@ -37,6 +37,14 @@ def _clear_cache():
     except ImportError:
         pass
 
+    # Issue #2185: Reset security mode cache to prevent cross-test pollution
+    try:
+        from app.utils.security_mode import reset_security_mode_cache
+
+        reset_security_mode_cache()
+    except ImportError:
+        pass
+
     # Issue #1820: Reset EncryptionKeyRegistry to prevent cross-test key pollution
     # The singleton caches the encryption key at first use; tests that set
     # OPENACE_ENCRYPTION_KEY need a fresh instance to pick up the test-specific key.

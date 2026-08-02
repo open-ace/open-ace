@@ -232,7 +232,7 @@ class TestGetUploadAuthKey:
     def test_returns_none_when_not_set(self):
         """Test that None is returned when key is not set."""
         reset_security_mode_cache()
-        with patch.dict(os.environ, {"UPLOAD_AUTH_KEY": ""}, clear=False):
+        with patch.dict(os.environ, {"OPENACE_SECURITY_MODE": "development", "UPLOAD_AUTH_KEY": ""}, clear=False):
             key = get_upload_auth_key()
             assert key is None
 

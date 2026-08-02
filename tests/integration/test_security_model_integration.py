@@ -64,6 +64,7 @@ def _patch_db_compat():
 @pytest.fixture
 def isolated_stack(tmp_path, monkeypatch):
     """Spin up a proxy service + agent manager sharing one temp DB."""
+    monkeypatch.setenv("OPENACE_SECURITY_MODE", "development")
     monkeypatch.setenv("OPENACE_ENCRYPTION_KEY", "integration-test-encryption-key")
 
     db_path = str(tmp_path / "stack.db")
