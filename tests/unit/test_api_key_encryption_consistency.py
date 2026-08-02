@@ -26,7 +26,7 @@ class TestAPIKeyEncryptionConsistency:
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = os.path.join(tmpdir, "test.db")
             with patch.dict(
-                os.environ, {"OPENACE_ENCRYPTION_KEY": "test-key-12345678901234567890"}
+                os.environ, {"OPENACE_ENCRYPTION_KEY": "test-key-12345678901234567890123"}
             ):
                 service = APIKeyProxyService(db_path=db_path)
                 encrypted = service._encrypt_key("test-api-key")
@@ -55,7 +55,7 @@ class TestAPIKeyEncryptionConsistency:
 
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = os.path.join(tmpdir, "test.db")
-            test_key = "test-key-12345678901234567890"
+            test_key = "test-key-12345678901234567890123"
             with patch.dict(os.environ, {"OPENACE_ENCRYPTION_KEY": test_key}):
                 service = APIKeyProxyService(db_path=db_path)
 
@@ -152,7 +152,7 @@ class TestProxyTokenSignature:
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = os.path.join(tmpdir, "test.db")
             with patch.dict(
-                os.environ, {"OPENACE_ENCRYPTION_KEY": "test-key-12345678901234567890"}
+                os.environ, {"OPENACE_ENCRYPTION_KEY": "test-key-12345678901234567890123"}
             ):
                 service = APIKeyProxyService(db_path=db_path)
                 token = service.generate_proxy_token(
@@ -184,7 +184,7 @@ class TestProxyTokenSignature:
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = os.path.join(tmpdir, "test.db")
             with patch.dict(
-                os.environ, {"OPENACE_ENCRYPTION_KEY": "test-key-12345678901234567890"}
+                os.environ, {"OPENACE_ENCRYPTION_KEY": "test-key-12345678901234567890123"}
             ):
                 service = APIKeyProxyService(db_path=db_path)
                 token = service.generate_proxy_token(
@@ -210,7 +210,7 @@ class TestProxyTokenSignature:
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = os.path.join(tmpdir, "test.db")
             with patch.dict(
-                os.environ, {"OPENACE_ENCRYPTION_KEY": "test-key-12345678901234567890"}
+                os.environ, {"OPENACE_ENCRYPTION_KEY": "test-key-12345678901234567890123"}
             ):
                 service = APIKeyProxyService(db_path=db_path)
                 token = service.generate_proxy_token(

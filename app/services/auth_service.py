@@ -17,6 +17,19 @@ from app.utils.validators import validate_password
 logger = logging.getLogger(__name__)
 
 
+def _utcnow() -> datetime:
+    """Get current UTC time as naive datetime for database compatibility.
+
+    Database stores naive datetime (no timezone). Using local time causes
+    issues when server is not in UTC timezone. This function ensures
+    consistent UTC-based naive datetime across all time-related operations.
+
+    Returns:
+        datetime: Current UTC time as naive datetime (tzinfo=None)
+    """
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
 class ChangePasswordError(Enum):
     """Enumeration of change-password error types.
 
@@ -89,16 +102,8 @@ def _check_login_lockout(username: str) -> tuple[bool, str | None]:
         if locked_until:
             if isinstance(locked_until, str):
                 locked_until = datetime.fromisoformat(locked_until)
-            if locked_until > datetime.now(timezone.utc).replace(tzinfo=None):
-                remaining = (
-                    int(
-                        (
-                            locked_until - datetime.now(timezone.utc).replace(tzinfo=None)
-                        ).total_seconds()
-                        / 60
-                    )
-                    + 1
-                )
+            if locked_until > _utcnow():
+                remaining = int((locked_until - _utcnow()).total_seconds() / 60) + 1
                 return True, f"Account temporarily locked. Try again in {remaining} minutes."
             else:
                 # Lockout expired — reset
@@ -149,9 +154,7 @@ def _record_failed_login(username: str) -> None:
             )
 
         if new_count >= max_attempts:
-            locked_until = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(
-                minutes=lockout_minutes
-            )
+            locked_until = _utcnow() + timedelta(minutes=lockout_minutes)
             db.execute(
                 f"UPDATE login_attempts SET locked_until = {p} WHERE username = {p}",
                 (locked_until, username),
@@ -233,16 +236,8 @@ def _check_change_password_lockout(user_id: int) -> tuple[bool, str | None, int 
         if locked_until:
             if isinstance(locked_until, str):
                 locked_until = datetime.fromisoformat(locked_until)
-            if locked_until > datetime.now(timezone.utc).replace(tzinfo=None):
-                remaining = (
-                    int(
-                        (
-                            locked_until - datetime.now(timezone.utc).replace(tzinfo=None)
-                        ).total_seconds()
-                        / 60
-                    )
-                    + 1
-                )
+            if locked_until > _utcnow():
+                remaining = int((locked_until - _utcnow()).total_seconds() / 60) + 1
                 return (
                     True,
                     f"Account temporarily locked. Try again in {remaining} minutes.",
@@ -316,9 +311,7 @@ def _record_change_password_failure(user_id: int) -> tuple[int, bool]:
 
                 is_now_locked = False
                 if new_count >= max_attempts:
-                    locked_until = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(
-                        minutes=lockout_minutes
-                    )
+                    locked_until = _utcnow() + timedelta(minutes=lockout_minutes)
                     cursor.execute(
                         f"UPDATE login_attempts SET locked_until = {p} WHERE username = {p}",
                         (locked_until, key),
@@ -434,8 +427,8 @@ class AuthService:
         # Create session token
         token = secrets.token_hex(32)
         timeout_hours = _get_session_timeout_hours()
-        # Use local time to match database TIMESTAMP WITHOUT TIME ZONE behavior
-        expires_at = datetime.now() + timedelta(hours=timeout_hours)
+        # Use UTC time for consistency across timezones
+        expires_at = _utcnow() + timedelta(hours=timeout_hours)
 
         if not self.user_repo.create_session(user["id"], token, expires_at):
             logger.error(f"Failed to create session for user - {username}")
@@ -576,9 +569,9 @@ class AuthService:
             return False
         if isinstance(expires_at, str):
             expires_at = datetime.fromisoformat(expires_at)
-        # Use local time to match database TIMESTAMP WITHOUT TIME ZONE behavior
-        # Database stores times as local time without timezone info
-        return bool(expires_at < datetime.now())
+        # Use UTC time for consistency across timezones
+        # Database stores times as UTC without timezone info
+        return bool(expires_at < _utcnow())
 
     def get_user_profile(self, user_id: int) -> dict | None:
         """

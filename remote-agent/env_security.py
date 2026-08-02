@@ -64,7 +64,11 @@ def build_secure_agent_env(
             # Restore path: scrub all credentials and mint no token here (a
             # fresh token is provided before the agent uses it). Never raise —
             # this is crash recovery.
-            env = {key: value for key, value in base_env.items() if key not in sensitive_keys}
+            # Also scrub any proxy-related vars inherited from the parent env
+            # (e.g., OPENACE_PROXY_TOKEN from the service process).
+            proxy_related_keys = {"OPENACE_PROXY_TOKEN", "OPENACE_PROXY_URL"}
+            all_keys_to_scrub = sensitive_keys | proxy_related_keys
+            env = {key: value for key, value in base_env.items() if key not in all_keys_to_scrub}
             env.update(proxy_env_vars)
             return env
         if is_production or not raw_fallback_allowed:

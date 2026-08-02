@@ -332,7 +332,14 @@ def start_server_if_needed(
             f"Port {port_text} is in use, but {health_url(args.base_url)} is not healthy"
         )
 
+    # Issue #2185: Set security mode for test server
+    env.setdefault("OPENACE_SECURITY_MODE", "development")
     env.setdefault("FLASK_ENV", "testing")
+    # Issue #2185: Set test keys for development mode
+    # These are only for testing, never for production
+    env.setdefault("SECRET_KEY", "test-secret-key-for-extended-tests-32ch")
+    env.setdefault("OPENACE_ENCRYPTION_KEY", "test-encryption-key-for-extended-tests-32")
+    env.setdefault("UPLOAD_AUTH_KEY", "test-upload-auth-key-for-extended-tests-32")
     env.setdefault("SCHEDULER_HEALTH_MONITOR_ENABLED", "false")
     env.setdefault("DATA_FETCH_ENABLED", "false")
     env.setdefault("HEADLESS", "true")

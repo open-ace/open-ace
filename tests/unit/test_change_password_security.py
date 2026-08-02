@@ -67,7 +67,7 @@ class TestCheckChangePasswordLockout:
     def test_locked_account_datetime(self, mock_db_cls, mock_placeholder):
         """Locked account should return lockout message."""
         mock_db = MagicMock()
-        future = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(minutes=10)
+        future = datetime.now() + timedelta(minutes=10)
         mock_db.fetch_one.return_value = {
             "attempt_count": 5,
             "locked_until": future,
@@ -85,9 +85,7 @@ class TestCheckChangePasswordLockout:
     def test_locked_account_iso_string(self, mock_db_cls, mock_placeholder):
         """Lockout with ISO string format should work."""
         mock_db = MagicMock()
-        future = (
-            datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(minutes=10)
-        ).isoformat()
+        future = (datetime.now() + timedelta(minutes=10)).isoformat()
         mock_db.fetch_one.return_value = {
             "attempt_count": 5,
             "locked_until": future,
@@ -102,6 +100,7 @@ class TestCheckChangePasswordLockout:
     def test_expired_lockout_cleared(self, mock_db_cls, mock_placeholder):
         """Expired lockout should be cleared."""
         mock_db = MagicMock()
+        # Use UTC time to match database TIMESTAMP WITHOUT TIME ZONE behavior
         past = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=10)
         mock_db.fetch_one.return_value = {
             "attempt_count": 5,
