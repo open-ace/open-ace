@@ -1950,18 +1950,18 @@ install_run_as_wrapper() {
     install -o root -g root -m 755 "$validate_src" "$validate_dst" || return 1
 
     # Single source of truth for the account pin + workspace roots, shared by
-    # the wrapper and its sudoers provisioning. root:root 0640 so the openace
-    # service account cannot alter the constraints.
+    # the wrapper and its sudoers provisioning. root:root 0644 so the openace
+    # service account can read but not alter the constraints.
     local agent_account="${OPENACE_AUTONOMOUS_AGENT_ACCOUNT:-openace-agent}"
     install -d -o root -g root -m 755 /etc/openace || return 1
     cat > /etc/openace/agent-launcher.conf <<CONF_EOF
 # Issue #2018: constraints for openace-run-as --isolated.
-# root:root 0640 — the openace service account cannot edit this file.
+# root:root 0644 — the openace service account can read but not edit this file.
 OPENACE_AUTONOMOUS_AGENT_ACCOUNT="${agent_account}"
 ALLOWED_WORKSPACE_ROOTS="/home /workspace"
 CONF_EOF
     chown root:root /etc/openace/agent-launcher.conf 2>/dev/null || true
-    chmod 0640 /etc/openace/agent-launcher.conf
+    chmod 0644 /etc/openace/agent-launcher.conf
     print_success "Installed run-as wrapper to $dst"
     return 0
 }
@@ -2071,12 +2071,12 @@ agent_account="${OPENACE_AUTONOMOUS_AGENT_ACCOUNT:-openace-agent}"
 conf_tmp="$(mktemp)"
 cat > "$conf_tmp" <<CONF_EOF
 # Issue #2018: constraints for openace-run-as --isolated.
-# root:root 0640 — the openace service account cannot edit this file.
+# root:root 0644 — the openace service account can read but not edit this file.
 OPENACE_AUTONOMOUS_AGENT_ACCOUNT="${agent_account}"
 ALLOWED_WORKSPACE_ROOTS="/home /workspace"
 CONF_EOF
 as_root install -d -o root -g root -m 755 /etc/openace
-as_root install -o root -g root -m 640 "$conf_tmp" /etc/openace/.agent-launcher.conf.new
+as_root install -o root -g root -m 644 "$conf_tmp" /etc/openace/.agent-launcher.conf.new
 as_root mv /etc/openace/.agent-launcher.conf.new /etc/openace/agent-launcher.conf
 
 service_user="$(systemctl show open-ace.service -p User --value 2>/dev/null || true)"
