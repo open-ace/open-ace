@@ -53,9 +53,18 @@ jobs:
           --health-retries 5
 
     steps:
+      - name: Configure Git for checkout
+        run: |
+          # Configure Git to ignore submodule issues during checkout
+          # These settings help Git skip validation of submodule entries
+          git config --global submodule.ignore all
+          git config --global submodule.active false
+          git config --global checkout.checkStats false
+
       - uses: actions/checkout@v6
         with:
           submodules: false
+          fetch-depth: 1
 
       - name: Set up Python
         uses: actions/setup-python@v6
