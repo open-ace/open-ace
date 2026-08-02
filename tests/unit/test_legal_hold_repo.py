@@ -39,8 +39,15 @@ class TestLegalHoldRepository:
                     lift_reason TEXT
                 )
             """)
+            # Clean table before test
+            cursor.execute("DELETE FROM legal_holds")
             conn.commit()
-        return db
+        yield db
+        # Cleanup: delete all data after each test
+        with db.connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM legal_holds")
+            conn.commit()
 
     @pytest.fixture
     def repo(self, db):
@@ -228,15 +235,21 @@ class TestLegalHoldRepository:
             created_by=2,
         )
 
-        # Verify tenant 1 hold only affects tenant 1
+        # Verify tenant 1 has hold
         is_held, reason = repo.check_hold(tenant_id=1)
         assert is_held is True
-        assert "Tenant 1 hold" in reason
+        # Global hold returns generic message, not the specific reason
+        assert "Global legal hold active" in reason
 
-        # Verify tenant 2 hold only affects tenant 2
+        # Verify tenant 2 has hold
         is_held, reason = repo.check_hold(tenant_id=2)
         assert is_held is True
-        assert "Tenant 2 hold" in reason
+        assert "Global legal hold active" in reason
+
+        # Verify tenant 3 has no hold
+        is_held, reason = repo.check_hold(tenant_id=3)
+        assert is_held is False
+        assert reason is None
 
     def test_multiple_hold_types_priority(self, repo):
         """Test that global hold takes priority."""

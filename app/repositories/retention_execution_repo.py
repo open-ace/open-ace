@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from app.repositories.database import Database, adapt_sql
@@ -265,7 +265,7 @@ class RetentionExecutionRepository:
             True if lock acquired, False otherwise.
         """
         now = datetime.now(timezone.utc).replace(tzinfo=None)
-        expires_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        expires_at = now + timedelta(seconds=lock_timeout_seconds)
 
         with self.db.connection() as conn:
             cursor = conn.cursor()

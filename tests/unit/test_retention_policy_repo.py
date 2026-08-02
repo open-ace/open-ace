@@ -40,8 +40,15 @@ class TestRetentionPolicyRepository:
                     UNIQUE(tenant_id, data_type, version)
                 )
             """)
+            # Clean table before test
+            cursor.execute("DELETE FROM retention_policies")
             conn.commit()
-        return db
+        yield db
+        # Cleanup: delete all data after each test
+        with db.connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM retention_policies")
+            conn.commit()
 
     @pytest.fixture
     def repo(self, db):
@@ -64,7 +71,7 @@ class TestRetentionPolicyRepository:
         assert policy["retention_days"] == 90
         assert policy["action"] == "delete"
         assert policy["version"] == 1
-        assert policy["enabled"] is True
+        assert policy["enabled"] == 1  # SQLite returns 1/0, not True/False
 
     def test_create_archive_policy(self, repo):
         """Test creating an archive policy with required config."""
@@ -197,7 +204,7 @@ class TestRetentionPolicyRepository:
 
         # Disable policy
         updated = repo.update_policy(policy["id"], enabled=False, updated_by=1)
-        assert updated["enabled"] is False
+        assert updated["enabled"] == 0  # SQLite returns 1/0, not True/False
 
         # Policy should not be returned when getting active policy
         active_policy = repo.get_policy(tenant_id=1, data_type="audit_logs")
