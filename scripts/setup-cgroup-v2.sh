@@ -278,7 +278,7 @@ else
     # Write the new config: preserve account/roots, drop stale resource keys, append fresh
     {
         echo '# Issue #2018: constraints for openace-run-as --isolated.'
-        echo '# root:root 0640 — the openace service account cannot edit this file.'
+        echo '# root:root 0644 — the openace service account can read but not edit this file.'
         echo "OPENACE_AUTONOMOUS_AGENT_ACCOUNT=\"$existing_account\""
         echo "ALLOWED_WORKSPACE_ROOTS=\"$existing_roots\""
         echo ""
@@ -290,7 +290,7 @@ else
     } > "$CONF_PATH"
 
     chown root:root "$CONF_PATH"
-    chmod 640 "$CONF_PATH"
+    chmod 644 "$CONF_PATH"
     log "  $CONF_PATH updated (backup at ${CONF_PATH}.bak.*)"
 fi
 
