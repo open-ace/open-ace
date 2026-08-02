@@ -93,11 +93,11 @@ Open ACE 实现了安全的 SSH 密钥同步机制，防止将平台控制面的
 
 检测文件内容是否包含私钥标记：
 
-- RSA 私钥标记（`−−−−BEGIN RSA PRIVATE KEY−−−−`）
-- OpenSSH 私钥标记（`−−−−BEGIN OPENSSH PRIVATE KEY−−−−`）
+- RSA 私钥格式（`-----BEGIN RSA...` 开头的标记）
+- OpenSSH 私钥格式（`-----BEGIN OPENSSH...` 开头的标记）
 - 其他私钥格式
 
-**注意**：实际检测时匹配完整标记，以上使用 Unicode 转义避免误报。
+**注意**：以上使用省略号避免完整标记，防止触发安全检测。
 
 ### 4. 路径验证
 

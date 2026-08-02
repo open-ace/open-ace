@@ -1025,7 +1025,7 @@ def _sync_ssh_keys_legacy(username):
 
         if os.path.isfile(src):
             shutil.copy2(src, dst)
-            # Private keys: 600, others: 644
+            # 私钥文件：600，其他：644
             if filename.startswith('id_') and not filename.endswith('.pub'):
                 os.chmod(dst, stat.S_IRUSR)
             else:
