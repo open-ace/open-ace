@@ -45,7 +45,7 @@ def _is_sqlite(connection: Any) -> bool:
     """Detect if a connection is SQLite, supporting both SQLAlchemy and raw connections."""
     # SQLAlchemy Connection: check dialect
     if hasattr(connection, "dialect"):
-        return connection.dialect.name == "sqlite"
+        return bool(connection.dialect.name == "sqlite")
     # sqlite3 raw connection
     return hasattr(connection, "execute") and not hasattr(connection, "_conn")
 
