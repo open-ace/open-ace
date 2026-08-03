@@ -25,8 +25,66 @@ from app.services.leader_election import (
 
 @pytest.fixture
 def db():
-    """Create test database instance."""
-    return Database()
+    """Create test database instance with scheduler tables."""
+    database = Database()
+
+    # Create scheduler tables if they don't exist (for unit tests)
+    # This mimics the migration but is safe to run multiple times
+    conn = database.get_connection()
+    cursor = conn.cursor()
+
+    # Create scheduler_leaders table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS scheduler_leaders (
+            job_name TEXT PRIMARY KEY,
+            leader_id TEXT NOT NULL,
+            owner_info TEXT,
+            acquired_at TIMESTAMP NOT NULL,
+            expires_at TIMESTAMP NOT NULL,
+            heartbeat_at TIMESTAMP NOT NULL,
+            last_run_at TIMESTAMP,
+            run_count INTEGER DEFAULT 0,
+            skip_count INTEGER DEFAULT 0,
+            fail_count INTEGER DEFAULT 0
+        )
+    ''')
+
+    # Create scheduler_runs table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS scheduler_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_name TEXT NOT NULL,
+            leader_id TEXT NOT NULL,
+            started_at TIMESTAMP NOT NULL,
+            ended_at TIMESTAMP,
+            status TEXT NOT NULL,
+            duration_ms INTEGER,
+            error_message TEXT,
+            metrics TEXT
+        )
+    ''')
+
+    # Create indexes
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_scheduler_leaders_expires ON scheduler_leaders (expires_at)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_scheduler_leaders_heartbeat ON scheduler_leaders (heartbeat_at)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_scheduler_runs_job_time ON scheduler_runs (job_name, started_at DESC)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_scheduler_runs_status ON scheduler_runs (status)')
+
+    conn.commit()
+    conn.close()
+
+    yield database
+
+    # Cleanup: clear tables after each test
+    try:
+        conn = database.get_connection()
+        cursor = conn.cursor()
+        cursor.execute('DELETE FROM scheduler_runs')
+        cursor.execute('DELETE FROM scheduler_leaders')
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
 
 
 class TestLeaderElectionHelpers:
