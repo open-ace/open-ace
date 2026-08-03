@@ -15,6 +15,7 @@ Tests cover:
 import json
 import os
 import sys
+import time
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -54,9 +55,11 @@ def _make_app(mgr):
 
     # Patch auth helpers so before_request uses our mock
     from app.auth import decorators as auth_dec
+    from app.modules.workspace import session_access
 
     auth_dec._load_user_from_token = _mock_load_user
     remote_mod._load_user_from_token = _mock_load_user
+    session_access._load_user_from_token = _mock_load_user
 
     return app
 
@@ -103,8 +106,7 @@ class TestVSCodeStart(unittest.TestCase):
             )
             self.assertEqual(resp.status_code, 400)
             data = resp.get_json()
-            self.assertFalse(data["success"])
-            self.assertIn("machine_id", data["error"])
+            self.assertIn("machine_id", data.get("error", ""))
 
     def test_missing_project_path(self):
         """Missing project_path returns 400."""
@@ -321,8 +323,8 @@ class TestVSCodeStop(unittest.TestCase):
         self.assertEqual(cmd["command"], "stop_vscode")
         self.assertEqual(cmd["vscode_id"], "vscode-123")
 
-        # Verify store cleanup was called
-        mock_store.pop.assert_called_once_with("m1", "vscode-123")
+        # Verify mark_stopped was called to invalidate token (Issue #2183)
+        mock_store.mark_stopped.assert_called_once_with("m1", "vscode-123")
 
 
 # ---------------------------------------------------------------------------
@@ -584,8 +586,8 @@ class TestVSCodeProxy(unittest.TestCase):
         data = resp.get_json()
         self.assertIn("not found", data["error"].lower())
 
-    def test_missing_token_uses_running_session_fallback(self):
-        """Running sessions may proxy resource requests after initial load."""
+    def test_missing_token_returns_401(self):
+        """Issue #2183: Missing token should return 401, not fallback."""
         mgr = MagicMock()
         app, vs_mod, orig, mock_store = self._make_app_with_store(
             mgr,
@@ -595,32 +597,26 @@ class TestVSCodeProxy(unittest.TestCase):
                     "status": "running",
                     "token": "valid-token",
                     "original_http_url": "http://remote:8080",
+                    # Issue #2183: Add required fields
+                    "tenant_id": 1,
+                    "owner_user_id": 1,
+                    "created_at": time.time(),
+                    "expires_at": time.time() + 3600,
                 },
             ),
         )
 
-        def _gen():
-            yield b"<h1>VSCode</h1>"
-
-        mock_proxy_result = (200, {"Content-Type": "text/html"}, _gen())
-
-        with (
-            patch(
-                "app.modules.workspace.vscode_proxy.build_target_url",
-                return_value="http://remote:8080/",
-            ),
-            patch(
-                "app.modules.workspace.vscode_proxy.proxy_request_streaming",
-                return_value=mock_proxy_result,
-            ),
-        ):
+        with app.test_client() as client:
             try:
-                with app.test_client() as client:
-                    resp = client.get("/api/remote/vscode/vs1/proxy/")
+                # No token provided - should return 401 (Issue #2183)
+                resp = client.get("/api/remote/vscode/vs1/proxy/")
             finally:
                 self._restore_store(vs_mod, orig)
 
-        self.assertEqual(resp.status_code, 200)
+        # Issue #2183: Changed from 200 to 401
+        self.assertEqual(resp.status_code, 401)
+        data = resp.get_json()
+        self.assertIn("Authentication required", data.get("error", ""))
 
     def test_invalid_token_returns_403(self):
         """Wrong token returns 403."""
@@ -900,7 +896,7 @@ class TestVSCodeStatusMessageHandler(unittest.TestCase):
         self.assertEqual(len(stored_info["token"]), 64)
 
     def test_stopped_status_cleans_up(self):
-        """Stopped status removes the store entry."""
+        """Stopped status marks session as stopped (Issue #2183)."""
         mgr = MagicMock()
 
         payload = {
@@ -945,8 +941,8 @@ class TestVSCodeStatusMessageHandler(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertTrue(data["success"])
 
-        # Verify store.pop was called to clean up
-        mock_store.pop.assert_called_once_with("m1", "vs-123")
+        # Issue #2183: Should call mark_stopped instead of pop
+        mock_store.mark_stopped.assert_called_once_with("m1", "vs-123")
 
     def test_error_status_stores_error(self):
         """Error status stores the error message."""

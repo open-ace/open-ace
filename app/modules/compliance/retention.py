@@ -512,6 +512,9 @@ class DataRetentionManager:
         Returns:
             Dict with compliance status.
         """
+        # Ensure table exists before querying
+        self._ensure_tables()
+
         # Check if cleanup has been run recently
         last_cleanup = self.db.fetch_one(
             """
