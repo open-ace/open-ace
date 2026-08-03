@@ -65,8 +65,8 @@ class TestGenerateDefaultRulesPerformance:
 
         Performance target: P95 < 500ms
         """
-        from app.services.tool_account_auto_mapping_service import GenerateDefaultRulesResult
         from app.models.tool_account_mapping_rule import ToolAccountMappingRule
+        from app.services.tool_account_auto_mapping_service import GenerateDefaultRulesResult
 
         # Mock service to return result
         mock_service = MagicMock()
@@ -145,8 +145,8 @@ class TestGenerateDefaultRulesPerformance:
 
         Performance target: P99 < 1000ms under moderate load
         """
-        from app.services.tool_account_auto_mapping_service import GenerateDefaultRulesResult
         from app.models.tool_account_mapping_rule import ToolAccountMappingRule
+        from app.services.tool_account_auto_mapping_service import GenerateDefaultRulesResult
 
         response_times = []
 
@@ -185,7 +185,7 @@ class TestGenerateDefaultRulesPerformance:
         min_time = min(response_times)
 
         # Log statistics
-        print(f"Performance under load:")
+        print("Performance under load:")
         print(f"  Average: {avg_time:.3f}s")
         print(f"  Min: {min_time:.3f}s")
         print(f"  Max: {max_time:.3f}s")
@@ -205,8 +205,8 @@ class TestGenerateDefaultRulesPerformance:
         This test verifies that database connections are properly released
         after each request.
         """
-        from app.services.tool_account_auto_mapping_service import GenerateDefaultRulesResult
         from app.models.tool_account_mapping_rule import ToolAccountMappingRule
+        from app.services.tool_account_auto_mapping_service import GenerateDefaultRulesResult
 
         # Mock service
         mock_service = MagicMock()
@@ -247,8 +247,8 @@ class TestGenerateDefaultRulesPerformance:
 
         This test establishes a performance baseline and checks for regression.
         """
-        from app.services.tool_account_auto_mapping_service import GenerateDefaultRulesResult
         from app.models.tool_account_mapping_rule import ToolAccountMappingRule
+        from app.services.tool_account_auto_mapping_service import GenerateDefaultRulesResult
 
         # Baseline P95 response time (in seconds)
         # This should be updated when actual measurements are available

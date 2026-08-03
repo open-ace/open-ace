@@ -7,8 +7,8 @@ Issue #2131: Verify UPSERT behavior under concurrent requests.
 import json
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -45,8 +45,8 @@ class TestConcurrentGenerateDefaultRules:
 
         Expected: All requests succeed, no duplicate rules created.
         """
-        from app.services.tool_account_auto_mapping_service import GenerateDefaultRulesResult
         from app.models.tool_account_mapping_rule import ToolAccountMappingRule
+        from app.services.tool_account_auto_mapping_service import GenerateDefaultRulesResult
 
         results = []
         errors = []
@@ -133,7 +133,7 @@ class TestConcurrentGenerateDefaultRules:
         # Verify no errors occurred
         assert len(errors) == 0, f"Errors during concurrent execution: {errors}"
 
-        print(f"Concurrent test results:")
+        print("Concurrent test results:")
         print(f"  Total requests: {num_requests}")
         print(f"  Successful: {len(results)}")
         print(f"  Created (201): {sum(1 for r in results if r['status'] == 201)}")
@@ -148,8 +148,8 @@ class TestConcurrentGenerateDefaultRules:
 
         Expected: All requests succeed independently.
         """
-        from app.services.tool_account_auto_mapping_service import GenerateDefaultRulesResult
         from app.models.tool_account_mapping_rule import ToolAccountMappingRule
+        from app.services.tool_account_auto_mapping_service import GenerateDefaultRulesResult
 
         results = defaultdict(list)
         errors = []
@@ -225,7 +225,7 @@ class TestConcurrentGenerateDefaultRules:
         # Verify no errors
         assert len(errors) == 0, f"Errors during concurrent execution: {errors}"
 
-        print(f"Concurrent different users test:")
+        print("Concurrent different users test:")
         print(f"  Total users: {num_users}")
         print(f"  All succeeded: {len(results['success'])}")
 
@@ -237,8 +237,8 @@ class TestConcurrentGenerateDefaultRules:
         prevents race conditions when multiple threads attempt
         to create the same rule simultaneously.
         """
-        from app.services.tool_account_auto_mapping_service import GenerateDefaultRulesResult
         from app.models.tool_account_mapping_rule import ToolAccountMappingRule
+        from app.services.tool_account_auto_mapping_service import GenerateDefaultRulesResult
 
         # Track the number of times the service is called
         call_count = 0
@@ -343,7 +343,7 @@ class TestConcurrentGenerateDefaultRules:
             f"Expected {num_threads - 1} skipped results, got {skipped_count}"
         )
 
-        print(f"Race condition test:")
+        print("Race condition test:")
         print(f"  Threads: {num_threads}")
         print(f"  Created: {created_count}")
         print(f"  Skipped: {skipped_count}")
@@ -365,8 +365,8 @@ class TestConcurrentDatabaseBehavior:
         create the same rule simultaneously, verifying that the database
         constraint prevents duplicates.
         """
-        from app.services.tool_account_auto_mapping_service import GenerateDefaultRulesResult
         from app.models.tool_account_mapping_rule import ToolAccountMappingRule
+        from app.services.tool_account_auto_mapping_service import GenerateDefaultRulesResult
 
         # Simulate database state
         created_rules = []
@@ -431,13 +431,13 @@ class TestConcurrentDatabaseBehavior:
 
         # Verify no duplicate rules were created
         # (Due to UPSERT behavior, only one rule should exist)
-        unique_rules = set((r.user_id, r.pattern) for r in created_rules)
+        unique_rules = {(r.user_id, r.pattern) for r in created_rules}
         assert len(unique_rules) == len(created_rules), (
             f"Duplicate rules detected: {len(created_rules)} rules for "
             f"{len(unique_rules)} unique keys"
         )
 
-        print(f"UPSERT test:")
+        print("UPSERT test:")
         print(f"  Threads: {num_threads}")
         print(f"  Unique rules created: {len(created_rules)}")
-        print(f"  No duplicates: True")
+        print("  No duplicates: True")

@@ -289,6 +289,18 @@ class ToolAccountAutoMappingService:
 
         Returns:
             GenerateDefaultRulesResult with created and skipped rule counts.
+
+        Note:
+            **Exception Handling Strategy:**
+            Each rule is created independently. If one rule creation fails due to database
+            errors (not unique constraint), the error is logged but does NOT interrupt the
+            creation of other rules. Check the returned created/skipped lists to determine
+            actual state.
+
+            **Transaction Boundary:**
+            Each rule is created in its own transaction. Partial success may occur if some
+            rules fail. The API returns detailed results showing which rules were created
+            and which were skipped.
         """
         query = "SELECT username, email FROM users WHERE id = ?"
         row = self.db.fetch_one(query, (user_id,))

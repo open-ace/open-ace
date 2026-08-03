@@ -4,8 +4,8 @@ SQLite compatibility tests for generate default rules functionality.
 Issue #2131: Verify SQLite INSERT OR IGNORE behavior.
 """
 
-import tempfile
 import os
+import tempfile
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -24,8 +24,8 @@ class TestSQLiteCreateOrIgnore:
 
         Expected: Rule is created successfully.
         """
-        from app.repositories.tool_account_mapping_rule_repo import ToolAccountMappingRuleRepository
         from app.repositories.database import Database
+        from app.repositories.tool_account_mapping_rule_repo import ToolAccountMappingRuleRepository
 
         # Create temporary SQLite database
         db_fd, db_path = tempfile.mkstemp(suffix=".db")
@@ -81,8 +81,8 @@ class TestSQLiteCreateOrIgnore:
 
         Expected: Duplicate is ignored, no exception raised.
         """
-        import uuid
         import sqlite3
+        import uuid
 
         # Create temporary SQLite database with unique name
         db_fd, db_path = tempfile.mkstemp(suffix=f"_{uuid.uuid4()}.db")
@@ -151,8 +151,8 @@ class TestSQLiteCreateOrIgnore:
 
         Expected: Existing rules are skipped, new rules are created.
         """
-        import uuid
         import sqlite3
+        import uuid
 
         # Create temporary SQLite database with unique name
         db_fd, db_path = tempfile.mkstemp(suffix=f"_{uuid.uuid4()}.db")
@@ -237,8 +237,8 @@ class TestSQLiteEdgeCases:
         """
         Test Unicode characters in pattern for SQLite.
         """
-        from app.repositories.tool_account_mapping_rule_repo import ToolAccountMappingRuleRepository
         from app.repositories.database import Database
+        from app.repositories.tool_account_mapping_rule_repo import ToolAccountMappingRuleRepository
 
         # Create temporary SQLite database
         db_fd, db_path = tempfile.mkstemp(suffix=".db")
@@ -294,8 +294,8 @@ class TestSQLiteEdgeCases:
 
         SQL injection protection should work correctly.
         """
-        from app.repositories.tool_account_mapping_rule_repo import ToolAccountMappingRuleRepository
         from app.repositories.database import Database
+        from app.repositories.tool_account_mapping_rule_repo import ToolAccountMappingRuleRepository
 
         # Create temporary SQLite database
         db_fd, db_path = tempfile.mkstemp(suffix=".db")
@@ -367,9 +367,10 @@ class TestSQLiteAPICalls:
         correctly (returns existing rules on conflict instead of None).
         """
         from flask import Flask
+
+        from app.models.tool_account_mapping_rule import ToolAccountMappingRule
         from app.routes.mapping_rules import mapping_rules_bp
         from app.services.tool_account_auto_mapping_service import GenerateDefaultRulesResult
-        from app.models.tool_account_mapping_rule import ToolAccountMappingRule
 
         app = Flask(__name__)
         app.register_blueprint(mapping_rules_bp)

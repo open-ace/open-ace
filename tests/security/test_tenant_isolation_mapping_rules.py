@@ -135,8 +135,8 @@ class TestTenantIsolationForGenerateDefaultRules:
 
         Expected: 201 Created or 200 OK
         """
-        from app.services.tool_account_auto_mapping_service import GenerateDefaultRulesResult
         from app.models.tool_account_mapping_rule import ToolAccountMappingRule
+        from app.services.tool_account_auto_mapping_service import GenerateDefaultRulesResult
 
         # Mock target user belongs to same tenant (tenant_id=1)
         mock_user_repo.get_user_by_id.return_value = {
@@ -184,8 +184,8 @@ class TestTenantIsolationForGenerateDefaultRules:
 
         Expected: 201 Created or 200 OK
         """
-        from app.services.tool_account_auto_mapping_service import GenerateDefaultRulesResult
         from app.models.tool_account_mapping_rule import ToolAccountMappingRule
+        from app.services.tool_account_auto_mapping_service import GenerateDefaultRulesResult
 
         # Mock service to return successful result
         mock_service = MagicMock()
@@ -257,8 +257,8 @@ class TestTenantIsolationForGenerateDefaultRules:
         import time
         from collections import defaultdict
 
-        from app.services.tool_account_auto_mapping_service import GenerateDefaultRulesResult
         from app.models.tool_account_mapping_rule import ToolAccountMappingRule
+        from app.services.tool_account_auto_mapping_service import GenerateDefaultRulesResult
 
         results = defaultdict(list)
         errors = []

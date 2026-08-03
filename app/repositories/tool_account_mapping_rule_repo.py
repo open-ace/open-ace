@@ -139,6 +139,11 @@ class ToolAccountMappingRuleRepository:
 
         Note:
             Database errors (other than unique constraint violations) are raised as exceptions.
+
+            **Database-specific behavior:**
+            - PostgreSQL: Returns None when ON CONFLICT DO NOTHING is triggered
+            - SQLite: Returns the existing rule (with full data) due to extra SELECT query
+              This difference exists because older SQLite versions don't support RETURNING.
         """
         from app.repositories.database import is_postgresql
 
