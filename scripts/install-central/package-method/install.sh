@@ -4508,35 +4508,7 @@ with open('$config_dir/config.json', 'w') as f:
         rm -f "$TEMP_REQ"
     fi
 
-    # Create default admin user (if not exists)
-    print_info "Ensuring default admin user exists..."
-    if [ -f "$target_path/scripts/init_db.py" ]; then
-        # Run init_db.py as the install user to ensure it can access installed packages
-        # Pass install_user as system_account for multi-user workspace mode
-        if [ "$EUID" -eq 0 ] && [ -n "$install_user" ] && [ "$install_user" != "root" ]; then
-            # Running as root, but need to run as install_user to access their pip packages
-            cd "$target_path"
-            if su - "$install_user" -c "cd '$target_path' && OPENACE_SYSTEM_ACCOUNT='$install_user' python3 scripts/init_db.py"; then
-                print_success "Default admin user ready (system_account=$install_user)"
-            else
-                print_warning "Failed to create default admin user. You may need to run scripts/init_db.py manually."
-            fi
-            cd - > /dev/null
-        else
-            # Running as the target user already
-            cd "$target_path"
-            if OPENACE_SYSTEM_ACCOUNT="$install_user" python3 scripts/init_db.py; then
-                print_success "Default admin user ready (system_account=$install_user)"
-            else
-                print_warning "Failed to create default admin user. You may need to run scripts/init_db.py manually."
-            fi
-            cd - > /dev/null
-        fi
-    else
-        print_warning "init_db.py not found, skipping default user creation"
-    fi
-
-    # Run database migrations (alembic upgrade head)
+    # Run database migrations FIRST (init_db.py depends on tables created by migrations)
     print_info "Running database migrations..."
     if [ "$EUID" -eq 0 ] && [ -n "$install_user" ] && [ "$install_user" != "root" ]; then
         su - "$install_user" -c "cd '$target_path' && python3 scripts/check_min_revision.py" || {
@@ -4572,6 +4544,34 @@ with open('$config_dir/config.json', 'w') as f:
         fi
     else
         print_warning "Alembic not found, skipping database migrations"
+    fi
+
+    # Create default admin user AFTER migrations (init_db.py queries tables created by migrations)
+    print_info "Ensuring default admin user exists..."
+    if [ -f "$target_path/scripts/init_db.py" ]; then
+        # Run init_db.py as the install user to ensure it can access installed packages
+        # Pass install_user as system_account for multi-user workspace mode
+        if [ "$EUID" -eq 0 ] && [ -n "$install_user" ] && [ "$install_user" != "root" ]; then
+            # Running as root, but need to run as install_user to access their pip packages
+            cd "$target_path"
+            if su - "$install_user" -c "cd '$target_path' && OPENACE_SYSTEM_ACCOUNT='$install_user' python3 scripts/init_db.py"; then
+                print_success "Default admin user ready (system_account=$install_user)"
+            else
+                print_warning "Failed to create default admin user. You may need to run scripts/init_db.py manually."
+            fi
+            cd - > /dev/null
+        else
+            # Running as the target user already
+            cd "$target_path"
+            if OPENACE_SYSTEM_ACCOUNT="$install_user" python3 scripts/init_db.py; then
+                print_success "Default admin user ready (system_account=$install_user)"
+            else
+                print_warning "Failed to create default admin user. You may need to run scripts/init_db.py manually."
+            fi
+            cd - > /dev/null
+        fi
+    else
+        print_warning "init_db.py not found, skipping default user creation"
     fi
 
     print_success "Upgrade completed"
@@ -4953,22 +4953,7 @@ do_upgrade_remote() {
         exit 1
     }
 
-    # Create default admin user (if not exists)
-    print_info "Ensuring default admin user exists on remote..."
-    ssh "$remote" "
-        cd '$target_path'
-        if [ -f 'scripts/init_db.py' ]; then
-            if OPENACE_SYSTEM_ACCOUNT='$DEPLOY_USER' python3 scripts/init_db.py; then
-                echo 'Default admin user ready (system_account=$DEPLOY_USER)'
-            else
-                echo 'Warning: Failed to create default admin user. You may need to run scripts/init_db.py manually.'
-            fi
-        else
-            echo 'Warning: init_db.py not found, skipping default user creation'
-        fi
-    "
-
-    # Run database migrations (alembic upgrade head)
+    # Run database migrations FIRST (init_db.py depends on tables created by migrations)
     print_info "Running database migrations on remote..."
     ssh "$remote" "
         cd '$target_path'
@@ -4985,6 +4970,21 @@ do_upgrade_remote() {
             fi
         else
             echo 'Warning: Alembic not found, skipping database migrations'
+        fi
+    "
+
+    # Create default admin user AFTER migrations (init_db.py queries tables created by migrations)
+    print_info "Ensuring default admin user exists on remote..."
+    ssh "$remote" "
+        cd '$target_path'
+        if [ -f 'scripts/init_db.py' ]; then
+            if OPENACE_SYSTEM_ACCOUNT='$DEPLOY_USER' python3 scripts/init_db.py; then
+                echo 'Default admin user ready (system_account=$DEPLOY_USER)'
+            else
+                echo 'Warning: Failed to create default admin user. You may need to run scripts/init_db.py manually.'
+            fi
+        else
+            echo 'Warning: init_db.py not found, skipping default user creation'
         fi
     "
 
