@@ -65,7 +65,8 @@ class ToolAccountAutoMappingService:
             SELECT id, username, email, role, is_active, auto_mapping_enabled
             FROM users
             WHERE {adapt_boolean_condition('is_active', True)}
-              AND (auto_mapping_enabled IS NULL OR {adapt_boolean_condition('auto_mapping_enabled', True)})
+              AND (auto_mapping_enabled IS NULL
+                   OR {adapt_boolean_condition('auto_mapping_enabled', True)})
         """
         rows = self.db.fetch_all(query)
         return [
@@ -332,11 +333,13 @@ class ToolAccountAutoMappingService:
                     created_rules.append(rule)
                 else:
                     # Rule already exists (conflict), add to skipped
-                    skipped_rules.append({
-                        "pattern": rule_pattern,
-                        "match_type": "prefix",
-                        "priority": rule_priority,
-                    })
+                    skipped_rules.append(
+                        {
+                            "pattern": rule_pattern,
+                            "match_type": "prefix",
+                            "priority": rule_priority,
+                        }
+                    )
             except Exception as e:
                 logger.error(f"Failed to create username prefix rule for user {user_id}: {e}")
 
@@ -356,11 +359,13 @@ class ToolAccountAutoMappingService:
                 if rule:
                     created_rules.append(rule)
                 else:
-                    skipped_rules.append({
-                        "pattern": rule_pattern,
-                        "match_type": "prefix",
-                        "priority": rule_priority,
-                    })
+                    skipped_rules.append(
+                        {
+                            "pattern": rule_pattern,
+                            "match_type": "prefix",
+                            "priority": rule_priority,
+                        }
+                    )
             except Exception as e:
                 logger.error(f"Failed to create email prefix rule for user {user_id}: {e}")
 
@@ -380,11 +385,13 @@ class ToolAccountAutoMappingService:
                 if rule:
                     created_rules.append(rule)
                 else:
-                    skipped_rules.append({
-                        "pattern": rule_pattern,
-                        "match_type": "contains",
-                        "priority": rule_priority,
-                    })
+                    skipped_rules.append(
+                        {
+                            "pattern": rule_pattern,
+                            "match_type": "contains",
+                            "priority": rule_priority,
+                        }
+                    )
             except Exception as e:
                 logger.error(f"Failed to create username contains rule for user {user_id}: {e}")
 

@@ -73,12 +73,22 @@ class TestGenerateDefaultRulesPerformance:
         result = GenerateDefaultRulesResult(
             created=[
                 ToolAccountMappingRule(
-                    id=1, user_id=5, pattern="alice-*", match_type="prefix", priority=10,
-                    is_auto=True, is_active=True
+                    id=1,
+                    user_id=5,
+                    pattern="alice-*",
+                    match_type="prefix",
+                    priority=10,
+                    is_auto=True,
+                    is_active=True,
                 ),
                 ToolAccountMappingRule(
-                    id=2, user_id=5, pattern="*alice*", match_type="contains", priority=5,
-                    is_auto=True, is_active=True
+                    id=2,
+                    user_id=5,
+                    pattern="*alice*",
+                    match_type="contains",
+                    priority=5,
+                    is_auto=True,
+                    is_active=True,
                 ),
             ],
             skipped=[],
@@ -152,14 +162,21 @@ class TestGenerateDefaultRulesPerformance:
 
         # Simulate 10 sequential requests
         for i in range(10):
-            with patch("app.routes.mapping_rules.ToolAccountAutoMappingService") as mock_service_class:
+            with patch(
+                "app.routes.mapping_rules.ToolAccountAutoMappingService"
+            ) as mock_service_class:
                 # Mock service
                 mock_service = MagicMock()
                 result = GenerateDefaultRulesResult(
                     created=[
                         ToolAccountMappingRule(
-                            id=i, user_id=i, pattern=f"user{i}-*", match_type="prefix",
-                            priority=10, is_auto=True, is_active=True
+                            id=i,
+                            user_id=i,
+                            pattern=f"user{i}-*",
+                            match_type="prefix",
+                            priority=10,
+                            is_auto=True,
+                            is_active=True,
                         )
                     ],
                     skipped=[],
@@ -213,8 +230,13 @@ class TestGenerateDefaultRulesPerformance:
         result = GenerateDefaultRulesResult(
             created=[
                 ToolAccountMappingRule(
-                    id=1, user_id=5, pattern="user-*", match_type="prefix",
-                    priority=10, is_auto=True, is_active=True
+                    id=1,
+                    user_id=5,
+                    pattern="user-*",
+                    match_type="prefix",
+                    priority=10,
+                    is_auto=True,
+                    is_active=True,
                 )
             ],
             skipped=[],
@@ -258,13 +280,20 @@ class TestGenerateDefaultRulesPerformance:
 
         # Collect performance samples
         for i in range(20):
-            with patch("app.routes.mapping_rules.ToolAccountAutoMappingService") as mock_service_class:
+            with patch(
+                "app.routes.mapping_rules.ToolAccountAutoMappingService"
+            ) as mock_service_class:
                 mock_service = MagicMock()
                 result = GenerateDefaultRulesResult(
                     created=[
                         ToolAccountMappingRule(
-                            id=i, user_id=i, pattern=f"user{i}-*", match_type="prefix",
-                            priority=10, is_auto=True, is_active=True
+                            id=i,
+                            user_id=i,
+                            pattern=f"user{i}-*",
+                            match_type="prefix",
+                            priority=10,
+                            is_auto=True,
+                            is_active=True,
                         )
                     ],
                     skipped=[],

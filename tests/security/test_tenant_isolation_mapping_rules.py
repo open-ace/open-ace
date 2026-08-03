@@ -150,8 +150,13 @@ class TestTenantIsolationForGenerateDefaultRules:
         result = GenerateDefaultRulesResult(
             created=[
                 ToolAccountMappingRule(
-                    id=1, user_id=5, pattern="user-*", match_type="prefix", priority=10,
-                    is_auto=True, is_active=True
+                    id=1,
+                    user_id=5,
+                    pattern="user-*",
+                    match_type="prefix",
+                    priority=10,
+                    is_auto=True,
+                    is_active=True,
                 )
             ],
             skipped=[],
@@ -192,8 +197,13 @@ class TestTenantIsolationForGenerateDefaultRules:
         result = GenerateDefaultRulesResult(
             created=[
                 ToolAccountMappingRule(
-                    id=1, user_id=5, pattern="user-*", match_type="prefix", priority=10,
-                    is_auto=True, is_active=True
+                    id=1,
+                    user_id=5,
+                    pattern="user-*",
+                    match_type="prefix",
+                    priority=10,
+                    is_auto=True,
+                    is_active=True,
                 )
             ],
             skipped=[],
@@ -216,9 +226,7 @@ class TestTenantIsolationForGenerateDefaultRules:
 
     @patch("app.routes.mapping_rules.user_repo")
     @patch("app.routes.mapping_rules.ToolAccountAutoMappingService")
-    def test_tenant_admin_with_no_tenant_id_rejected(
-        self, mock_service_class, mock_user_repo, app
-    ):
+    def test_tenant_admin_with_no_tenant_id_rejected(self, mock_service_class, mock_user_repo, app):
         """
         Tenant admin without tenant_id should be rejected.
 
@@ -278,7 +286,9 @@ class TestTenantIsolationForGenerateDefaultRules:
                             "tenant_id": tenant_id,
                         },
                     ):
-                        with patch("app.routes.mapping_rules.ToolAccountAutoMappingService") as mock_service:
+                        with patch(
+                            "app.routes.mapping_rules.ToolAccountAutoMappingService"
+                        ) as mock_service:
                             # Mock service to track calls
                             mock_service_instance = MagicMock()
                             result = GenerateDefaultRulesResult(
@@ -297,7 +307,9 @@ class TestTenantIsolationForGenerateDefaultRules:
                                 created_count=1,
                                 skipped_count=0,
                             )
-                            mock_service_instance.create_default_rules_for_user.return_value = result
+                            mock_service_instance.create_default_rules_for_user.return_value = (
+                                result
+                            )
                             mock_service.return_value = mock_service_instance
 
                             # Mock user belongs to correct tenant
@@ -311,10 +323,12 @@ class TestTenantIsolationForGenerateDefaultRules:
                                 content_type="application/json",
                             )
 
-                            results[tenant_id].append({
-                                "user_id": user_id,
-                                "status": response.status_code,
-                            })
+                            results[tenant_id].append(
+                                {
+                                    "user_id": user_id,
+                                    "status": response.status_code,
+                                }
+                            )
             except Exception as e:
                 errors.append(str(e))
 
@@ -323,8 +337,7 @@ class TestTenantIsolationForGenerateDefaultRules:
         for tenant_id in [1, 2]:
             for user_id in range(1, 3):
                 t = threading.Thread(
-                    target=generate_rules_for_tenant,
-                    args=(tenant_id, tenant_id * 10 + user_id)
+                    target=generate_rules_for_tenant, args=(tenant_id, tenant_id * 10 + user_id)
                 )
                 threads.append(t)
 
@@ -368,11 +381,13 @@ class TestTenantIsolationForOtherOperations:
 
         response = tenant_admin_client.post(
             "/api/mapping-rules",
-            data=json.dumps({
-                "user_id": 5,
-                "pattern": "test-*",
-                "match_type": "prefix",
-            }),
+            data=json.dumps(
+                {
+                    "user_id": 5,
+                    "pattern": "test-*",
+                    "match_type": "prefix",
+                }
+            ),
             content_type="application/json",
         )
 

@@ -114,22 +114,28 @@ class TestSQLiteCreateOrIgnore:
             conn.commit()
 
             # First insert using INSERT OR IGNORE
-            cursor.execute("""
+            cursor.execute(
+                """
                 INSERT OR IGNORE INTO tool_account_mapping_rules
                 (user_id, pattern, match_type, priority, is_auto, is_active)
                 VALUES (?, ?, ?, ?, ?, ?)
-            """, (999, "test-duplicate-*", "prefix", 10, 1, 1))
+            """,
+                (999, "test-duplicate-*", "prefix", 10, 1, 1),
+            )
             conn.commit()
 
             # Check if first insert succeeded
             assert cursor.rowcount > 0, "First insert should succeed"
 
             # Second insert with same key (should be ignored)
-            cursor.execute("""
+            cursor.execute(
+                """
                 INSERT OR IGNORE INTO tool_account_mapping_rules
                 (user_id, pattern, match_type, priority, is_auto, is_active)
                 VALUES (?, ?, ?, ?, ?, ?)
-            """, (999, "test-duplicate-*", "prefix", 10, 1, 1))
+            """,
+                (999, "test-duplicate-*", "prefix", 10, 1, 1),
+            )
             conn.commit()
 
             # Verify no exception was raised (we reached this point)
@@ -184,17 +190,23 @@ class TestSQLiteCreateOrIgnore:
             conn.commit()
 
             # First batch insert
-            cursor.execute("""
+            cursor.execute(
+                """
                 INSERT OR IGNORE INTO tool_account_mapping_rules
                 (user_id, pattern, match_type, priority, is_auto, is_active)
                 VALUES (?, ?, ?, ?, ?, ?)
-            """, (888, "batch-user-*", "prefix", 10, 1, 1))
+            """,
+                (888, "batch-user-*", "prefix", 10, 1, 1),
+            )
 
-            cursor.execute("""
+            cursor.execute(
+                """
                 INSERT OR IGNORE INTO tool_account_mapping_rules
                 (user_id, pattern, match_type, priority, is_auto, is_active)
                 VALUES (?, ?, ?, ?, ?, ?)
-            """, (888, "*batch-user*", "contains", 5, 1, 1))
+            """,
+                (888, "*batch-user*", "contains", 5, 1, 1),
+            )
             conn.commit()
 
             # Verify first batch succeeded
@@ -203,17 +215,23 @@ class TestSQLiteCreateOrIgnore:
             assert len(rows1) == 2, f"Expected 2 rules after first batch, got {len(rows1)}"
 
             # Second batch insert with same rules (should be ignored)
-            cursor.execute("""
+            cursor.execute(
+                """
                 INSERT OR IGNORE INTO tool_account_mapping_rules
                 (user_id, pattern, match_type, priority, is_auto, is_active)
                 VALUES (?, ?, ?, ?, ?, ?)
-            """, (888, "batch-user-*", "prefix", 10, 1, 1))
+            """,
+                (888, "batch-user-*", "prefix", 10, 1, 1),
+            )
 
-            cursor.execute("""
+            cursor.execute(
+                """
                 INSERT OR IGNORE INTO tool_account_mapping_rules
                 (user_id, pattern, match_type, priority, is_auto, is_active)
                 VALUES (?, ?, ?, ?, ?, ?)
-            """, (888, "*batch-user*", "contains", 5, 1, 1))
+            """,
+                (888, "*batch-user*", "contains", 5, 1, 1),
+            )
             conn.commit()
 
             # Verify still only 2 rules exist (no duplicates)
@@ -338,9 +356,7 @@ class TestSQLiteEdgeCases:
             )
 
             # Verify rule was created (no SQL injection)
-            assert rule is not None or rule is None, (
-                "Special characters should be safely handled"
-            )
+            assert rule is not None or rule is None, "Special characters should be safely handled"
 
             # Verify pattern is stored correctly
             if rule is not None:
@@ -385,16 +401,22 @@ class TestSQLiteAPICalls:
                 "app.auth.decorators._load_user_from_token",
                 return_value={"id": 1, "role": "admin", "username": "test_admin"},
             ):
-                with patch("app.routes.mapping_rules.ToolAccountAutoMappingService") as mock_service_class:
+                with patch(
+                    "app.routes.mapping_rules.ToolAccountAutoMappingService"
+                ) as mock_service_class:
                     mock_service = MagicMock()
 
                     # Simulate SQLite behavior: returns existing rules on repeat
                     result = GenerateDefaultRulesResult(
                         created=[
                             ToolAccountMappingRule(
-                                id=1, user_id=5, pattern="user-*",
-                                match_type="prefix", priority=10,
-                                is_auto=True, is_active=True
+                                id=1,
+                                user_id=5,
+                                pattern="user-*",
+                                match_type="prefix",
+                                priority=10,
+                                is_auto=True,
+                                is_active=True,
                             )
                         ],
                         skipped=[],
@@ -412,6 +434,7 @@ class TestSQLiteAPICalls:
                     # Verify response
                     assert response.status_code in (200, 201)
                     import json
+
                     data = json.loads(response.data)
                     assert "created" in data
                     assert "skipped" in data

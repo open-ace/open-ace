@@ -62,31 +62,41 @@ class TestConcurrentGenerateDefaultRules:
                         "app.auth.decorators._load_user_from_token",
                         return_value={"id": 1, "role": "admin", "username": "test_admin"},
                     ):
-                        with patch("app.routes.mapping_rules.ToolAccountAutoMappingService") as mock_service:
+                        with patch(
+                            "app.routes.mapping_rules.ToolAccountAutoMappingService"
+                        ) as mock_service:
                             # Mock service - simulate real UPSERT behavior
                             mock_service_instance = MagicMock()
 
                             # First request creates rules, subsequent requests skip
                             # (This simulates the UPSERT ON CONFLICT DO NOTHING behavior)
                             result = GenerateDefaultRulesResult(
-                                created=[
-                                    ToolAccountMappingRule(
-                                        id=1,
-                                        user_id=5,
-                                        pattern="user-*",
-                                        match_type="prefix",
-                                        priority=10,
-                                        is_auto=True,
-                                        is_active=True,
-                                    )
-                                ] if request_id == 0 else [],  # Only first request creates
-                                skipped=[
-                                    {"pattern": "user-*", "match_type": "prefix", "priority": 10}
-                                ] if request_id > 0 else [],  # Subsequent requests skip
+                                created=(
+                                    [
+                                        ToolAccountMappingRule(
+                                            id=1,
+                                            user_id=5,
+                                            pattern="user-*",
+                                            match_type="prefix",
+                                            priority=10,
+                                            is_auto=True,
+                                            is_active=True,
+                                        )
+                                    ]
+                                    if request_id == 0
+                                    else []
+                                ),  # Only first request creates
+                                skipped=(
+                                    [{"pattern": "user-*", "match_type": "prefix", "priority": 10}]
+                                    if request_id > 0
+                                    else []
+                                ),  # Subsequent requests skip
                                 created_count=1 if request_id == 0 else 0,
                                 skipped_count=0 if request_id == 0 else 1,
                             )
-                            mock_service_instance.create_default_rules_for_user.return_value = result
+                            mock_service_instance.create_default_rules_for_user.return_value = (
+                                result
+                            )
                             mock_service.return_value = mock_service_instance
 
                             response = test_client.post(
@@ -95,17 +105,21 @@ class TestConcurrentGenerateDefaultRules:
                             )
 
                             with lock:
-                                results.append({
-                                    "request_id": request_id,
-                                    "status": response.status_code,
-                                    "data": json.loads(response.data),
-                                })
+                                results.append(
+                                    {
+                                        "request_id": request_id,
+                                        "status": response.status_code,
+                                        "data": json.loads(response.data),
+                                    }
+                                )
             except Exception as e:
                 with lock:
-                    errors.append({
-                        "request_id": request_id,
-                        "error": str(e),
-                    })
+                    errors.append(
+                        {
+                            "request_id": request_id,
+                            "error": str(e),
+                        }
+                    )
 
         # Run 10 concurrent requests
         num_requests = 10
@@ -116,15 +130,15 @@ class TestConcurrentGenerateDefaultRules:
 
         # Verify all requests completed
         assert len(results) == num_requests, (
-            f"Expected {num_requests} results, got {len(results)}. "
-            f"Errors: {errors}"
+            f"Expected {num_requests} results, got {len(results)}. " f"Errors: {errors}"
         )
 
         # Verify all requests succeeded (status 200 or 201)
         for result in results:
-            assert result["status"] in (200, 201), (
-                f"Request {result['request_id']} failed with status {result['status']}"
-            )
+            assert result["status"] in (
+                200,
+                201,
+            ), f"Request {result['request_id']} failed with status {result['status']}"
 
         # Verify at least one request created rules (201)
         created_count = sum(1 for r in results if r["status"] == 201)
@@ -165,7 +179,9 @@ class TestConcurrentGenerateDefaultRules:
                         "app.auth.decorators._load_user_from_token",
                         return_value={"id": 1, "role": "admin", "username": "test_admin"},
                     ):
-                        with patch("app.routes.mapping_rules.ToolAccountAutoMappingService") as mock_service:
+                        with patch(
+                            "app.routes.mapping_rules.ToolAccountAutoMappingService"
+                        ) as mock_service:
                             mock_service_instance = MagicMock()
                             result = GenerateDefaultRulesResult(
                                 created=[
@@ -183,7 +199,9 @@ class TestConcurrentGenerateDefaultRules:
                                 created_count=1,
                                 skipped_count=0,
                             )
-                            mock_service_instance.create_default_rules_for_user.return_value = result
+                            mock_service_instance.create_default_rules_for_user.return_value = (
+                                result
+                            )
                             mock_service.return_value = mock_service_instance
 
                             response = test_client.post(
@@ -192,16 +210,20 @@ class TestConcurrentGenerateDefaultRules:
                             )
 
                             with lock:
-                                results["success"].append({
-                                    "user_id": user_id,
-                                    "status": response.status_code,
-                                })
+                                results["success"].append(
+                                    {
+                                        "user_id": user_id,
+                                        "status": response.status_code,
+                                    }
+                                )
             except Exception as e:
                 with lock:
-                    errors.append({
-                        "user_id": user_id,
-                        "error": str(e),
-                    })
+                    errors.append(
+                        {
+                            "user_id": user_id,
+                            "error": str(e),
+                        }
+                    )
 
         # Run concurrent requests for different users
         num_users = 10
@@ -218,9 +240,9 @@ class TestConcurrentGenerateDefaultRules:
 
         # Verify all returned 201 (created)
         for result in results["success"]:
-            assert result["status"] == 201, (
-                f"User {result['user_id']} got status {result['status']} instead of 201"
-            )
+            assert (
+                result["status"] == 201
+            ), f"User {result['user_id']} got status {result['status']} instead of 201"
 
         # Verify no errors
         assert len(errors) == 0, f"Errors during concurrent execution: {errors}"
@@ -262,8 +284,13 @@ class TestConcurrentGenerateDefaultRules:
                 return GenerateDefaultRulesResult(
                     created=[
                         ToolAccountMappingRule(
-                            id=1, user_id=user_id, pattern="user-*",
-                            match_type="prefix", priority=10, is_auto=True, is_active=True
+                            id=1,
+                            user_id=user_id,
+                            pattern="user-*",
+                            match_type="prefix",
+                            priority=10,
+                            is_auto=True,
+                            is_active=True,
                         )
                     ],
                     skipped=[],
@@ -273,9 +300,7 @@ class TestConcurrentGenerateDefaultRules:
             else:
                 return GenerateDefaultRulesResult(
                     created=[],
-                    skipped=[
-                        {"pattern": "user-*", "match_type": "prefix", "priority": 10}
-                    ],
+                    skipped=[{"pattern": "user-*", "match_type": "prefix", "priority": 10}],
                     created_count=0,
                     skipped_count=1,
                 )
@@ -290,7 +315,9 @@ class TestConcurrentGenerateDefaultRules:
                         "app.auth.decorators._load_user_from_token",
                         return_value={"id": 1, "role": "admin", "username": "test_admin"},
                     ):
-                        with patch("app.routes.mapping_rules.ToolAccountAutoMappingService") as mock_service:
+                        with patch(
+                            "app.routes.mapping_rules.ToolAccountAutoMappingService"
+                        ) as mock_service:
                             mock_service_instance = MagicMock()
                             mock_service_instance.create_default_rules_for_user.side_effect = (
                                 mock_create_default_rules
@@ -302,10 +329,12 @@ class TestConcurrentGenerateDefaultRules:
                                 content_type="application/json",
                             )
 
-                            results.append({
-                                "status": response.status_code,
-                                "data": json.loads(response.data),
-                            })
+                            results.append(
+                                {
+                                    "status": response.status_code,
+                                    "data": json.loads(response.data),
+                                }
+                            )
             except Exception as e:
                 errors.append(str(e))
 
@@ -323,14 +352,10 @@ class TestConcurrentGenerateDefaultRules:
         assert len(errors) == 0, f"Errors during execution: {errors}"
 
         # Verify all threads completed
-        assert len(results) == num_threads, (
-            f"Expected {num_threads} results, got {len(results)}"
-        )
+        assert len(results) == num_threads, f"Expected {num_threads} results, got {len(results)}"
 
         # Verify service was called the expected number of times
-        assert call_count == num_threads, (
-            f"Expected {num_threads} service calls, got {call_count}"
-        )
+        assert call_count == num_threads, f"Expected {num_threads} service calls, got {call_count}"
 
         # Verify results are consistent:
         # - Exactly one request should have created rules (status 201)
@@ -339,9 +364,9 @@ class TestConcurrentGenerateDefaultRules:
         skipped_count = sum(1 for r in results if r["status"] == 200)
 
         assert created_count == 1, f"Expected 1 created result, got {created_count}"
-        assert skipped_count == num_threads - 1, (
-            f"Expected {num_threads - 1} skipped results, got {skipped_count}"
-        )
+        assert (
+            skipped_count == num_threads - 1
+        ), f"Expected {num_threads - 1} skipped results, got {skipped_count}"
 
         print("Race condition test:")
         print(f"  Threads: {num_threads}")
@@ -407,7 +432,9 @@ class TestConcurrentDatabaseBehavior:
                     "app.auth.decorators._load_user_from_token",
                     return_value={"id": 1, "role": "admin", "username": "test_admin"},
                 ):
-                    with patch("app.repositories.tool_account_mapping_rule_repo.ToolAccountMappingRuleRepository") as mock_repo:
+                    with patch(
+                        "app.repositories.tool_account_mapping_rule_repo.ToolAccountMappingRuleRepository"
+                    ) as mock_repo:
                         mock_repo_instance = MagicMock()
                         mock_repo_instance.create_or_ignore.side_effect = mock_create_or_ignore
                         mock_repo.return_value = mock_repo_instance
