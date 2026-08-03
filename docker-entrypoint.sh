@@ -764,9 +764,32 @@ except Exception:
     fi
 
     echo "Running database migrations..."
-    alembic upgrade head
-    if [ $? -ne 0 ]; then
+    if ! alembic upgrade head; then
+        echo ""
         echo "ERROR: alembic upgrade head failed"
+        echo ""
+        echo "Database schema migration failed. This could indicate:"
+        echo "  - Database schema is incompatible or corrupted"
+        echo "  - Network connectivity issues"
+        echo "  - Insufficient database permissions"
+        echo ""
+        echo "Recovery steps:"
+        echo "  1. Verify database connection:"
+        echo "     pg_isready -h <host> -p <port>"
+        echo ""
+        echo "  2. Check current schema version:"
+        echo "     alembic current"
+        echo ""
+        echo "  3. Review migration history:"
+        echo "     alembic history"
+        echo ""
+        echo "  4. For fresh databases, ensure schema is initialized:"
+        echo "     alembic upgrade head"
+        echo ""
+        echo "  5. If migration is blocked, restore from backup:"
+        echo "     pg_restore -d <database> <backup_file>"
+        echo ""
+        echo "Issue #2190: Schema authority model enforcement"
         exit 1
     fi
 
