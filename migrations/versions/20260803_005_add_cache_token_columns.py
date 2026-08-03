@@ -54,21 +54,19 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """Remove cache token columns from agent_sessions table."""
+    """Remove cache token columns from agent_sessions table.
+
+    Note: SQLite does not support DROP COLUMN before version 3.35.5.
+    For SQLite, we skip the downgrade (columns remain but are harmless).
+    """
     # Get database type
     bind = op.get_bind()
     dialect = bind.dialect.name
 
     if dialect == 'sqlite':
-        # SQLite: Check if columns exist before dropping
-        inspector = sa.inspect(bind)
-        columns = [col['name'] for col in inspector.get_columns('agent_sessions')]
-
-        if 'total_cache_write_tokens' in columns:
-            op.drop_column('agent_sessions', 'total_cache_write_tokens')
-
-        if 'total_cache_read_tokens' in columns:
-            op.drop_column('agent_sessions', 'total_cache_read_tokens')
+        # SQLite: Skip downgrade (DROP COLUMN not supported)
+        # Columns will remain but are harmless (DEFAULT 0, NOT NULL)
+        pass
     else:
         # PostgreSQL and others
         op.drop_column('agent_sessions', 'total_cache_write_tokens')

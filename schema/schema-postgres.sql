@@ -135,8 +135,8 @@ CREATE TABLE agent_sessions (
     cli_session_id text DEFAULT ''::text,
     tenant_id integer DEFAULT 1 NOT NULL,
     tenant_version integer DEFAULT 1 NOT NULL,
-    total_cache_read_tokens integer DEFAULT 0,
-    total_cache_write_tokens integer DEFAULT 0
+    total_cache_read_tokens integer DEFAULT 0 NOT NULL,
+    total_cache_write_tokens integer DEFAULT 0 NOT NULL
 );
 
 CREATE SEQUENCE agent_sessions_id_seq

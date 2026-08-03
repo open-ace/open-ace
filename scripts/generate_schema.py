@@ -615,8 +615,20 @@ def convert_to_sqlite(postgres_sql):
             full_idx = re.sub(r"\((\w+)\)::text\s*=\s*'([^']*)'::text", r"\1 = '\2'", full_idx)
             # Convert (user_id IS NOT NULL) AND ... in WHERE
             full_idx = re.sub(r"\((\w+)\)::text\s*=\s*'([^']*)'", r"\1 = '\2'", full_idx)
-            # Note: We preserve ->> and -> operators for SQLite 3.38+ compatibility
-            # SQLite 3.38+ natively supports these JSON operators
+            # Convert PostgreSQL JSON operators to SQLite json_extract
+            # ->> extracts text: column->>'key' -> json_extract(column, '$.key')
+            # -> extracts JSON: column->'key' -> json_extract(column, '$.key')
+            # Pattern: (column) ->> 'key' or column ->> 'key'
+            full_idx = re.sub(
+                r"\(?(\w+)\)?\s*->>\s*'([^']+)'",
+                r"json_extract(\1, '$.\2')",
+                full_idx,
+            )
+            full_idx = re.sub(
+                r"\(?(\w+)\)?\s*->\s*'([^']+)'",
+                r"json_extract(\1, '$.\2')",
+                full_idx,
+            )
 
             # Skip indexes on materialized views (not supported in SQLite)
             if re.match(r"CREATE(?: UNIQUE)? INDEX\s+\w+\s+ON\s+session_stats\b", full_idx):

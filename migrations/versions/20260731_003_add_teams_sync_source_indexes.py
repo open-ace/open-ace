@@ -32,6 +32,24 @@ def _is_postgresql() -> bool:
     return bind.dialect.name == "postgresql"
 
 
+def _index_exists(table_name: str, index_name: str) -> bool:
+    """Check if an index already exists (for idempotency)."""
+    bind = op.get_bind()
+    if bind.dialect.name == "sqlite":
+        result = bind.execute(
+            sa.text("SELECT 1 FROM sqlite_master WHERE type='index' AND name=:name"),
+            {"name": index_name},
+        )
+        return result.fetchone() is not None
+    else:
+        # PostgreSQL
+        result = bind.execute(
+            sa.text("SELECT 1 FROM pg_indexes WHERE indexname = :name"),
+            {"name": index_name},
+        )
+        return result.fetchone() is not None
+
+
 def upgrade() -> None:
     """Add index for organization sync performance.
 
@@ -43,6 +61,10 @@ def upgrade() -> None:
     because partial indexes with JSON expressions have compatibility issues
     between PostgreSQL and SQLite schema snapshots.
     """
+    # Check if index already exists (idempotency for schema.sql bootstrap)
+    if _index_exists("teams", "idx_teams_sync_source"):
+        return
+
     # Create simple index on sync_source for both PostgreSQL and SQLite
     if _is_postgresql():
         # PostgreSQL: Cast settings to jsonb before extracting sync_source
@@ -52,24 +74,15 @@ def upgrade() -> None:
             [sa.text("(settings::jsonb->>'sync_source')")],
         )
     else:
-        # SQLite: Use ->> operator directly (no cast needed)
-        try:
-            op.create_index(
-                "idx_teams_sync_source",
-                "teams",
-                [sa.text("(settings->>'sync_source')")],
-            )
-        except Exception:
-            # SQLite may not support JSON expression indexes
-            pass
+        # SQLite: Use json_extract for compatibility with SQLite < 3.38
+        # (->> operator is only available in SQLite 3.38+)
+        op.create_index(
+            "idx_teams_sync_source",
+            "teams",
+            [sa.text("(json_extract(settings, '$.sync_source'))")],
+        )
 
 
 def downgrade() -> None:
     """Remove organization sync performance index."""
-    if _is_postgresql():
-        op.execute("DROP INDEX IF EXISTS idx_teams_sync_source")
-    else:
-        try:
-            op.drop_index("idx_teams_sync_source", table_name="teams")
-        except Exception:
-            pass
+    op.execute("DROP INDEX IF EXISTS idx_teams_sync_source")

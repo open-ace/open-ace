@@ -96,8 +96,8 @@ CREATE TABLE agent_sessions (
  cli_session_id text DEFAULT '',
  tenant_id integer DEFAULT 1 NOT NULL,
  tenant_version integer DEFAULT 1 NOT NULL,
- total_cache_read_tokens integer DEFAULT 0,
- total_cache_write_tokens integer DEFAULT 0
+ total_cache_read_tokens integer DEFAULT 0 NOT NULL,
+ total_cache_write_tokens integer DEFAULT 0 NOT NULL
 );
 
 CREATE TABLE agent_tokens (
@@ -1815,7 +1815,7 @@ CREATE INDEX idx_team_members_user ON team_members (user_id);
 
 CREATE INDEX idx_teams_owner ON teams (owner_id);
 
-CREATE INDEX idx_teams_sync_source ON teams ((((settings) ->> 'sync_source')));
+CREATE INDEX idx_teams_sync_source ON teams ((json_extract(settings, '$.sync_source')));
 
 CREATE INDEX idx_tenant_migrations_status ON tenant_migrations (status);
 
