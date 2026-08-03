@@ -11,7 +11,12 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+import sqlalchemy as sa
+
+if TYPE_CHECKING:
+    from sqlalchemy.engine import Connection
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +41,78 @@ class SchemaCompatibilityError(Exception):
         self.min_revision = min_revision
 
 
+def _is_sqlite(connection: Any) -> bool:
+    """Detect if a connection is SQLite, supporting both SQLAlchemy and raw connections."""
+    # SQLAlchemy Connection: check dialect
+    if hasattr(connection, "dialect"):
+        return connection.dialect.name == "sqlite"
+    # sqlite3 raw connection
+    return hasattr(connection, "execute") and not hasattr(connection, "_conn")
+
+
+def _execute_scalar(connection: Any, query: str) -> Any:
+    """Execute a scalar query, compatible with both SQLAlchemy and raw connections.
+
+    Supports:
+    - SQLAlchemy ``Connection`` (has ``.execute()``, no ``.cursor()``)
+    - ``PgConnectionWrapper`` / psycopg2 (has ``.cursor()``)
+    - ``sqlite3.Connection`` (has both ``.cursor()`` and ``.execute()``)
+
+    Args:
+        connection: Database connection object.
+        query: SQL query to execute.
+
+    Returns:
+        The first column of the first row, or None.
+    """
+    if hasattr(connection, "cursor") and not hasattr(connection, "execute"):
+        # Raw psycopg2 / PgConnectionWrapper (has .cursor(), no .execute())
+        cursor = connection.cursor()
+        try:
+            cursor.execute(query)
+            row = cursor.fetchone()
+        finally:
+            cursor.close()
+        if row is None:
+            return None
+        # psycopg2 RealDictCursor returns dict-like rows; plain cursor returns tuples
+        if isinstance(row, dict):
+            return next(iter(row.values()))
+        return row[0]
+    elif hasattr(connection, "cursor") and hasattr(connection, "execute"):
+        # sqlite3 raw connection (has both .cursor() and .execute())
+        # Use .execute() directly for consistency with SQLAlchemy path
+        pass  # fall through to the SQLAlchemy-like path below
+
+    # SQLAlchemy Connection (or sqlite3 via .execute())
+    result = connection.execute(sa.text(query))
+    return result.scalar()
+
+
+def _table_exists(connection: Any, table_name: str) -> bool:
+    """Check if a table exists, compatible with both SQLAlchemy and raw connections.
+
+    Uses dialect-appropriate SQL:
+    - PostgreSQL: information_schema.tables
+    - SQLite: sqlite_master
+    """
+    if _is_sqlite(connection):
+        query = (
+            f"SELECT EXISTS ("
+            f"  SELECT 1 FROM sqlite_master"
+            f"  WHERE type='table' AND name='{table_name}'"
+            f")"
+        )
+    else:
+        query = (
+            f"SELECT EXISTS ("
+            f"  SELECT FROM information_schema.tables"
+            f"  WHERE table_name = '{table_name}'"
+            f")"
+        )
+    return bool(_execute_scalar(connection, query))
+
+
 def get_database_revision(connection: Connection) -> str | None:
     """Get the current Alembic revision from the database.
 
@@ -46,49 +123,25 @@ def get_database_revision(connection: Connection) -> str | None:
         Current revision string, or None if alembic_version table doesn't exist
         (fresh database) or has no rows.
     """
-    # Helper: extract the first column value from a row regardless of cursor type.
-    # psycopg2 RealDictCursor returns dict-like rows; plain cursor returns tuples.
-    def _first_col(row: Any) -> Any:
-        if row is None:
-            return None
-        if isinstance(row, dict):
-            return next(iter(row.values()))
-        return row[0]
-
     # Check if alembic_version table exists.
     # We cannot use sa.inspect() here because the caller may pass a raw
     # psycopg2 connection wrapped in PgConnectionWrapper, which is not
     # recognised by SQLAlchemy's inspection system.  Use portable SQL instead.
     try:
-        cursor = connection.cursor()
-        try:
-            cursor.execute(
-                "SELECT EXISTS ("
-                "  SELECT FROM information_schema.tables"
-                "  WHERE table_name = 'alembic_version'"
-                ")"
-            )
-            row = cursor.fetchone()
-            table_exists = _first_col(row)
-            if not table_exists:
-                logger.debug("alembic_version table does not exist - fresh database")
-                return None
-        finally:
-            cursor.close()
+        if not _table_exists(connection, "alembic_version"):
+            logger.debug("alembic_version table does not exist - fresh database")
+            return None
     except Exception as e:
         logger.error(f"Error checking alembic_version table existence: {e}")
         raise
 
     # Query current revision
     try:
-        cursor = connection.cursor()
-        try:
-            cursor.execute("SELECT version_num FROM alembic_version ORDER BY version_num LIMIT 1")
-            row = cursor.fetchone()
-        finally:
-            cursor.close()
+        result = _execute_scalar(
+            connection,
+            "SELECT version_num FROM alembic_version ORDER BY version_num LIMIT 1",
+        )
 
-        result = _first_col(row)
         if result:
             logger.debug(f"Current database revision: {result}")
             return str(result)
