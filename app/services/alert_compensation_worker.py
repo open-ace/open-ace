@@ -137,7 +137,24 @@ class AlertCompensationWorker:
             self._stop_event.wait(timeout=self._interval)
 
     def _process_failures(self):
-        """Process failed alert creations."""
+        """Process failed alert creations with distributed lock (Issue #2187)."""
+        import time
+        from app.repositories.database import Database
+        from app.services.leader_election import LeaderElectionClient
+
+        # Acquire distributed lock
+        db_local = Database()
+        lock_client = LeaderElectionClient("alert_compensation", db_local, strategy="heartbeat", lock_timeout=1800)
+
+        if not lock_client.try_acquire_leadership():
+            logger.debug("Alert compensation skipped - not leader")
+            lock_client.record_run("skipped")
+            return
+
+        start_time = time.time()
+        process_status = "completed"
+        process_error = None
+
         self._last_run = datetime.now(timezone.utc).replace(tzinfo=None)
 
         try:
@@ -169,7 +186,14 @@ class AlertCompensationWorker:
                     logger.error(f"Error retrying alert failure {failure.id}: {e}")
 
         except Exception as e:
+            process_status = "failed"
+            process_error = str(e)
             logger.error(f"Error processing alert failures: {e}")
+
+        # Record execution and release lock
+        duration_ms = int((time.time() - start_time) * 1000)
+        lock_client.record_run(process_status, duration_ms, process_error)
+        lock_client.release_leadership()
 
     def _process_due_deliveries(self) -> int:
         """Retry due webhook deliveries via the alert notifier reaper (Issue #1831).

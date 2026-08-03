@@ -1022,22 +1022,42 @@ def _release_cleanup_lock() -> None:
 
 
 def _cleanup_tick() -> None:
-    """Single cleanup tick executed by timer."""
+    """Single cleanup tick executed by timer with distributed lock (Issue #2187)."""
+    import time
     global _shutdown_requested
 
     if _shutdown_requested:
         return
 
     try:
-        # Try to acquire lock (single-process guarantee)
-        if _acquire_cleanup_lock():
+        # Use database distributed lock instead of file lock (Issue #2187)
+        from app.repositories.database import Database
+        from app.services.leader_election import LeaderElectionClient
+
+        db = Database()
+        lock_client = LeaderElectionClient("sso_cleanup", db, strategy="heartbeat", lock_timeout=1800)
+
+        if not lock_client.try_acquire_leadership():
+            logger.debug("SSO cleanup skipped - not leader")
+            lock_client.record_run("skipped")
+        else:
+            start_time = time.time()
+            status = "completed"
+            error_msg = None
+
             try:
                 manager = SSOManager()
                 manager.cleanup_expired_auth_states()
+            except Exception as e:
+                status = "failed"
+                error_msg = str(e)
+                logger.error(f"SSO auth state cleanup error: {e}")
             finally:
-                _release_cleanup_lock()
+                duration_ms = int((time.time() - start_time) * 1000)
+                lock_client.record_run(status, duration_ms, error_msg)
+                lock_client.release_leadership()
     except Exception as e:
-        logger.error(f"SSO auth state cleanup error: {e}")
+        logger.error(f"SSO cleanup distributed lock error: {e}")
 
     # Reschedule if not shutting down
     if not _shutdown_requested:

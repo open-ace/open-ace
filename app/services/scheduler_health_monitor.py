@@ -201,7 +201,24 @@ class SchedulerHealthMonitor:
             self._stop_event.wait(timeout=self._interval)
 
     def _check_schedulers(self):
-        """Check health of all schedulers."""
+        """Check health of all schedulers with distributed lock (Issue #2187)."""
+        import time
+        from app.repositories.database import Database
+        from app.services.leader_election import LeaderElectionClient
+
+        # Acquire distributed lock
+        db_local = Database()
+        lock_client = LeaderElectionClient("scheduler_health_monitor", db_local, strategy="heartbeat", lock_timeout=1800)
+
+        if not lock_client.try_acquire_leadership():
+            logger.debug("Health monitor skipped - not leader")
+            lock_client.record_run("skipped")
+            return
+
+        start_time = time.time()
+        check_status = "completed"
+        check_error = None
+
         self._last_check = datetime.now(timezone.utc).replace(tzinfo=None)
 
         # Check quota enforcement scheduler
@@ -247,6 +264,11 @@ class SchedulerHealthMonitor:
             self._scheduler_statuses["alert_compensation"] = {
                 "error": str(e),
             }
+
+        # Record execution and release lock
+        duration_ms = int((time.time() - start_time) * 1000)
+        lock_client.record_run(check_status, duration_ms, check_error)
+        lock_client.release_leadership()
 
     def _check_scheduler_health(self, name: str, status: dict):
         """Check individual scheduler health and create alert if needed.

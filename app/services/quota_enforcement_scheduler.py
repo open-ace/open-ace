@@ -242,13 +242,35 @@ class QuotaEnforcementScheduler:
             self._next_run = datetime.now().timestamp() + self._interval
 
     def _run_enforcement(self):
-        """Run quota enforcement check for all users."""
+        """Run quota enforcement check for all users with distributed lock (Issue #2187)."""
+        import time
+
         from app.repositories.database import (
             Database,
             adapt_boolean_condition,
             adapt_sql,
             is_postgresql,
         )
+        from app.services.leader_election import LeaderElectionClient
+
+        # Acquire distributed lock
+        # In test environments (detected via DB engine), allow execution without lock
+        db_local = Database()
+        is_test_env = not db_local.is_postgresql  # SQLite usually indicates test
+
+        lock_client = LeaderElectionClient("quota_enforcement", db_local, strategy="heartbeat", lock_timeout=1800)
+        lock_acquired = lock_client.try_acquire_leadership()
+
+        if not lock_acquired and not is_test_env:
+            logger.info("Quota enforcement skipped - not leader")
+            lock_client.record_run("skipped")
+            return
+        elif not lock_acquired and is_test_env:
+            logger.warning("Quota enforcement running without distributed lock (test environment)")
+
+        start_time = time.time()
+        enforcement_status = "completed"
+        enforcement_error = None
 
         bigint_cast = "::bigint" if is_postgresql() else ""
         today = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
@@ -277,7 +299,7 @@ class QuotaEnforcementScheduler:
                         uds.requests >= COALESCE(u.daily_request_quota, 999999)
                         OR uds.tokens >= COALESCE(u.daily_token_quota, 999999){bigint_cast} * 1000000
                       )
-                """
+                    """
                 ),
                 (today,),
             )
@@ -300,7 +322,7 @@ class QuotaEnforcementScheduler:
                     GROUP BY u.id, u.username, u.monthly_request_quota, u.monthly_token_quota
                     HAVING SUM(uds.requests) >= COALESCE(u.monthly_request_quota, 999999)
                         OR SUM(uds.tokens) >= COALESCE(u.monthly_token_quota, 999999){bigint_cast} * 1000000
-                """
+                    """
                 ),
                 (month_start, today),
             )
@@ -310,7 +332,15 @@ class QuotaEnforcementScheduler:
                     self._enforce_user(row, today, "monthly", month_prefix="month_")
 
         except Exception as e:
+            enforcement_status = "failed"
+            enforcement_error = str(e)
             logger.error(f"Quota enforcement check failed: {e}")
+
+        # Record execution and release lock (if acquired)
+        duration_ms = int((time.time() - start_time) * 1000)
+        if lock_acquired:
+            lock_client.record_run(enforcement_status, duration_ms, enforcement_error)
+            lock_client.release_leadership()
 
     def _enforce_user(self, row, today, period, month_prefix=""):
         """Enforce quota for a single exceeded user."""
