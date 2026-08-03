@@ -236,7 +236,6 @@ class AnthropicMessagesParser(UsageParser):
             )
 
         if event_type == "message_delta":
-            delta = chunk_data.get("delta", {})
             usage = chunk_data.get("usage", {})
             if not usage:
                 return None
@@ -510,7 +509,7 @@ def parse_sse_line(line: bytes) -> dict[str, Any] | None:
         return {"_done": True}
 
     try:
-        return json.loads(payload)
+        return dict(json.loads(payload))  # type: ignore[no-any-return]
     except json.JSONDecodeError:
         return None
 
@@ -538,6 +537,6 @@ def parse_anthropic_sse_event(line: bytes) -> dict[str, Any] | None:
 
     payload = line[5:].strip()
     try:
-        return json.loads(payload)
+        return dict(json.loads(payload))  # type: ignore[no-any-return]
     except json.JSONDecodeError:
         return None

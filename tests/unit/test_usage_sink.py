@@ -4,11 +4,7 @@ import pytest
 
 from app.modules.workspace.usage_dedup import reset_dedup_cache_for_tests
 from app.modules.workspace.usage_evidence import UsageEvidence
-from app.modules.workspace.usage_sink import (
-    CompositeSink,
-    DiagnosticsSink,
-    StatsSink,
-)
+from app.modules.workspace.usage_sink import CompositeSink, DiagnosticsSink, StatsSink
 
 
 class TestDiagnosticsSink:
@@ -109,6 +105,7 @@ class TestCompositeSink:
 
     def test_partial_failure(self):
         """Test handling partial failures."""
+
         # Create a failing sink
         class FailingSink:
             def consume(self, evidence):
@@ -129,6 +126,7 @@ class TestCompositeSink:
 
     def test_exception_in_sink(self):
         """Test handling exceptions in sinks."""
+
         # Create a sink that throws
         class ThrowingSink:
             def consume(self, evidence):

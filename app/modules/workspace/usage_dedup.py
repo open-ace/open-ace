@@ -109,7 +109,7 @@ class UsageDedupCache:
                         evidence.request_id,
                         evidence.session_id,
                     )
-                    return self._request_id_cache[request_id_key]
+                    return self._request_id_cache[request_id_key]  # type: ignore[no-any-return]
 
                 # Record new entry
                 self._request_id_cache[request_id_key] = evidence
@@ -123,7 +123,7 @@ class UsageDedupCache:
                     evidence.session_id,
                     evidence.provider,
                 )
-                return self._composite_cache[composite_key]
+                return self._composite_cache[composite_key]  # type: ignore[no-any-return]
 
             # Record new entry
             self._composite_cache[composite_key] = evidence
@@ -155,8 +155,8 @@ class UsageDedupCache:
         """Clear all entries from cache."""
         with self._lock:
             if HAS_CACHETOOLS:
-                self._request_id_cache.clear()
-                self._composite_cache.clear()
+                self._request_id_cache.clear()  # type: ignore[union-attr]
+                self._composite_cache.clear()  # type: ignore[union-attr]
             else:
                 self._request_id_cache._cache.clear()
                 self._composite_cache._cache.clear()
@@ -170,8 +170,8 @@ class UsageDedupCache:
         with self._lock:
             if HAS_CACHETOOLS:
                 return {
-                    "request_id_cache_size": len(self._request_id_cache),
-                    "composite_cache_size": len(self._composite_cache),
+                    "request_id_cache_size": len(self._request_id_cache),  # type: ignore[arg-type]
+                    "composite_cache_size": len(self._composite_cache),  # type: ignore[arg-type]
                 }
             else:
                 return {

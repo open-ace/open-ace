@@ -35,7 +35,9 @@ class UsageEvidence:
     # ── Metadata ────────────────────────────────────────────────────────
     provider: str = ""  # "openai" | "anthropic" | "gateway"
     model: str | None = None
-    protocol: str = ""  # "openai_chat" | "openai_responses" | "anthropic_messages" | "gateway_openai"
+    protocol: str = (
+        ""  # "openai_chat" | "openai_responses" | "anthropic_messages" | "gateway_openai"
+    )
     api_version: str | None = None  # Anthropic API version
 
     # ── State flags ──────────────────────────────────────────────────────
@@ -99,14 +101,16 @@ class UsageEvidence:
         merged_output = self.output_tokens + other.output_tokens
 
         # Accumulate cache tokens
-        merged_cache_read = (self.cache_read_tokens or 0) + (other.cache_read_tokens or 0)
-        merged_cache_read = merged_cache_read if merged_cache_read > 0 else None
+        merged_cache_read_int = (self.cache_read_tokens or 0) + (other.cache_read_tokens or 0)
+        merged_cache_read: int | None = merged_cache_read_int if merged_cache_read_int > 0 else None
 
-        merged_cache_write = (self.cache_write_tokens or 0) + (other.cache_write_tokens or 0)
-        merged_cache_write = merged_cache_write if merged_cache_write > 0 else None
+        merged_cache_write_int = (self.cache_write_tokens or 0) + (other.cache_write_tokens or 0)
+        merged_cache_write: int | None = (
+            merged_cache_write_int if merged_cache_write_int > 0 else None
+        )
 
-        merged_reasoning = (self.reasoning_tokens or 0) + (other.reasoning_tokens or 0)
-        merged_reasoning = merged_reasoning if merged_reasoning > 0 else None
+        merged_reasoning_int = (self.reasoning_tokens or 0) + (other.reasoning_tokens or 0)
+        merged_reasoning: int | None = merged_reasoning_int if merged_reasoning_int > 0 else None
 
         # Merge raw_usage
         merged_raw = dict(self.raw_usage)
@@ -126,7 +130,11 @@ class UsageEvidence:
             is_indeterminate=self.is_indeterminate or other.is_indeterminate,
             is_merged=True,
             raw_usage=merged_raw,
-            parse_status="success" if self.parse_status == "success" and other.parse_status == "success" else "partial",
+            parse_status=(
+                "success"
+                if self.parse_status == "success" and other.parse_status == "success"
+                else "partial"
+            ),
             parse_diagnostics=self.parse_diagnostics or other.parse_diagnostics,
             request_id=other.request_id or self.request_id,
             session_id=other.session_id or self.session_id,

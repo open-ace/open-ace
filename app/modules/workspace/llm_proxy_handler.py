@@ -341,15 +341,9 @@ def _record_llm_usage(
     unified handling of OpenAI, Anthropic, and Gateway responses.
     """
     from app.modules.workspace.usage_dedup import get_dedup_cache
-    from app.modules.workspace.usage_diagnostics import (
-        increment_metric,
-        log_usage_missing,
-    )
+    from app.modules.workspace.usage_diagnostics import increment_metric, log_usage_missing
     from app.modules.workspace.usage_evidence import UsageEvidence
-    from app.modules.workspace.usage_parser import (
-        UsageParserFactory,
-        parse_sse_line,
-    )
+    from app.modules.workspace.usage_parser import UsageParserFactory, parse_sse_line
     from app.modules.workspace.usage_sink import create_default_sink
 
     try:
@@ -474,7 +468,10 @@ def _record_llm_usage(
             )
             increment_metric(
                 "llm_proxy_usage_dedup_hits_total",
-                {"provider": provider, "match_type": "request_id" if evidence.request_id else "composite"},
+                {
+                    "provider": provider,
+                    "match_type": "request_id" if evidence.request_id else "composite",
+                },
             )
             return
 
@@ -931,7 +928,13 @@ def _forward_via_gateway(
                 return sse_response
 
         return _finalize_upstream_response(
-            resp, body, session_id, user_id, provider, request_path=plan.path, requested_model=requested_model
+            resp,
+            body,
+            session_id,
+            user_id,
+            provider,
+            request_path=plan.path,
+            requested_model=requested_model,
         )
     except Exception as exc:
         logger.error("LLM proxy gateway error: %s", exc)
@@ -1086,7 +1089,11 @@ def handle_llm_proxy_request(
                 503,
             )
         return _forward_via_gateway(
-            _gateway_plan, session_id=session_id, user_id=user_id, provider=provider, requested_model=requested_model
+            _gateway_plan,
+            session_id=session_id,
+            user_id=user_id,
+            provider=provider,
+            requested_model=requested_model,
         )
     # ── end model-gateway seam ───────────────────────────────────────────
 
@@ -1435,7 +1442,13 @@ def handle_llm_proxy_request(
                     return sse_response
 
             return _finalize_upstream_response(
-                resp, body, session_id, user_id, provider, request_path=path, requested_model=requested_model
+                resp,
+                body,
+                session_id,
+                user_id,
+                provider,
+                request_path=path,
+                requested_model=requested_model,
             )
 
         except Exception as exc:

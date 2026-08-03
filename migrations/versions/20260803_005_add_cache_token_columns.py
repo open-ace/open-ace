@@ -25,31 +25,35 @@ def upgrade() -> None:
     dialect = bind.dialect.name
 
     # Check if columns already exist (SQLite doesn't support IF NOT EXISTS for ALTER TABLE)
-    if dialect == 'sqlite':
+    if dialect == "sqlite":
         # SQLite: Check and add columns individually
         inspector = sa.inspect(bind)
-        columns = [col['name'] for col in inspector.get_columns('agent_sessions')]
+        columns = [col["name"] for col in inspector.get_columns("agent_sessions")]
 
-        if 'total_cache_read_tokens' not in columns:
+        if "total_cache_read_tokens" not in columns:
             op.add_column(
-                'agent_sessions',
-                sa.Column('total_cache_read_tokens', sa.Integer(), nullable=False, server_default='0'),
+                "agent_sessions",
+                sa.Column(
+                    "total_cache_read_tokens", sa.Integer(), nullable=False, server_default="0"
+                ),
             )
 
-        if 'total_cache_write_tokens' not in columns:
+        if "total_cache_write_tokens" not in columns:
             op.add_column(
-                'agent_sessions',
-                sa.Column('total_cache_write_tokens', sa.Integer(), nullable=False, server_default='0'),
+                "agent_sessions",
+                sa.Column(
+                    "total_cache_write_tokens", sa.Integer(), nullable=False, server_default="0"
+                ),
             )
     else:
         # PostgreSQL and others: Use IF NOT EXISTS equivalent
         op.add_column(
-            'agent_sessions',
-            sa.Column('total_cache_read_tokens', sa.Integer(), nullable=False, server_default='0'),
+            "agent_sessions",
+            sa.Column("total_cache_read_tokens", sa.Integer(), nullable=False, server_default="0"),
         )
         op.add_column(
-            'agent_sessions',
-            sa.Column('total_cache_write_tokens', sa.Integer(), nullable=False, server_default='0'),
+            "agent_sessions",
+            sa.Column("total_cache_write_tokens", sa.Integer(), nullable=False, server_default="0"),
         )
 
 
@@ -63,11 +67,11 @@ def downgrade() -> None:
     bind = op.get_bind()
     dialect = bind.dialect.name
 
-    if dialect == 'sqlite':
+    if dialect == "sqlite":
         # SQLite: Skip downgrade (DROP COLUMN not supported)
         # Columns will remain but are harmless (DEFAULT 0, NOT NULL)
         pass
     else:
         # PostgreSQL and others
-        op.drop_column('agent_sessions', 'total_cache_write_tokens')
-        op.drop_column('agent_sessions', 'total_cache_read_tokens')
+        op.drop_column("agent_sessions", "total_cache_write_tokens")
+        op.drop_column("agent_sessions", "total_cache_read_tokens")
