@@ -186,25 +186,43 @@ class TestDataFetchSchedulerRunFetch:
     def setup_method(self):
         DataFetchScheduler._instance = None
 
+    @patch("app.services.leader_election.LeaderElectionClient")
     @patch("app.services.data_fetch_scheduler.DataFetchScheduler._check_quotas")
     @patch("app.services.data_fetch_scheduler.DataFetchScheduler._refresh_usage_summary")
     @patch("app.services.data_fetch_scheduler.DataFetchScheduler._aggregate_user_stats")
     @patch("app.services.data_fetch_scheduler.DataFetchScheduler._refresh_materialized_views")
     @patch("app.routes.fetch.run_fetch_scripts")
-    def test_run_fetch_success(self, mock_fetch, mock_mv, mock_agg, mock_summary, mock_quotas):
+    def test_run_fetch_success(
+        self, mock_fetch, mock_mv, mock_agg, mock_summary, mock_quotas, mock_leader_client
+    ):
+        # Mock leader election to always succeed
+        mock_client_instance = mock_leader_client.return_value
+        mock_client_instance.try_acquire_leadership.return_value = True
+
         s = DataFetchScheduler()
         s._run_fetch()
         mock_fetch.assert_called_once()
         assert s._last_run is not None
 
+    @patch("app.services.leader_election.LeaderElectionClient")
     @patch("app.services.data_fetch_scheduler.DataFetchScheduler._check_quotas")
     @patch("app.services.data_fetch_scheduler.DataFetchScheduler._refresh_usage_summary")
     @patch("app.services.data_fetch_scheduler.DataFetchScheduler._aggregate_user_stats")
     @patch("app.services.data_fetch_scheduler.DataFetchScheduler._refresh_materialized_views")
     @patch("app.routes.fetch.run_fetch_scripts")
     def test_run_fetch_error_continues(
-        self, mock_fetch, mock_mv, mock_agg, mock_summary, mock_quotas
+        self,
+        mock_fetch,
+        mock_mv,
+        mock_agg,
+        mock_summary,
+        mock_quotas,
+        mock_leader_client,
     ):
+        # Mock leader election to always succeed
+        mock_client_instance = mock_leader_client.return_value
+        mock_client_instance.try_acquire_leadership.return_value = True
+
         mock_fetch.side_effect = Exception("Fetch error")
         s = DataFetchScheduler()
         s._run_fetch()

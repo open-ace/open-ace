@@ -1347,6 +1347,40 @@ CREATE SEQUENCE role_permissions_id_seq
     CACHE 1;
 
 ALTER SEQUENCE role_permissions_id_seq OWNED BY role_permissions.id;
+CREATE TABLE scheduler_leaders (
+    job_name character varying(100) NOT NULL,
+    leader_id character varying(255) NOT NULL,
+    owner_info text,
+    acquired_at timestamp without time zone NOT NULL,
+    expires_at timestamp without time zone NOT NULL,
+    heartbeat_at timestamp without time zone NOT NULL,
+    last_run_at timestamp without time zone,
+    run_count integer DEFAULT 0 NOT NULL,
+    skip_count integer DEFAULT 0 NOT NULL,
+    fail_count integer DEFAULT 0 NOT NULL
+);
+
+CREATE TABLE scheduler_runs (
+    id integer NOT NULL,
+    job_name character varying(100) NOT NULL,
+    leader_id character varying(255) NOT NULL,
+    started_at timestamp without time zone NOT NULL,
+    ended_at timestamp without time zone,
+    status character varying(20) NOT NULL,
+    duration_ms integer,
+    error_message text,
+    metrics text
+);
+
+CREATE SEQUENCE scheduler_runs_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE scheduler_runs_id_seq OWNED BY scheduler_runs.id;
 CREATE TABLE security_settings (
     id integer NOT NULL,
     setting_key character varying(100) NOT NULL,
@@ -2210,6 +2244,8 @@ ALTER TABLE ONLY retention_policies ALTER COLUMN id SET DEFAULT nextval('retenti
 
 ALTER TABLE ONLY role_permissions ALTER COLUMN id SET DEFAULT nextval('role_permissions_id_seq'::regclass);
 
+ALTER TABLE ONLY scheduler_runs ALTER COLUMN id SET DEFAULT nextval('scheduler_runs_id_seq'::regclass);
+
 ALTER TABLE ONLY security_settings ALTER COLUMN id SET DEFAULT nextval('security_settings_id_seq'::regclass);
 
 ALTER TABLE ONLY session_messages ALTER COLUMN id SET DEFAULT nextval('session_messages_id_seq'::regclass);
@@ -2471,6 +2507,12 @@ ALTER TABLE ONLY role_permissions
 
 ALTER TABLE ONLY role_permissions
     ADD CONSTRAINT role_permissions_role_permission_key UNIQUE (role, permission);
+
+ALTER TABLE ONLY scheduler_leaders
+    ADD CONSTRAINT scheduler_leaders_pkey PRIMARY KEY (job_name);
+
+ALTER TABLE ONLY scheduler_runs
+    ADD CONSTRAINT scheduler_runs_pkey PRIMARY KEY (id);
 
 ALTER TABLE ONLY security_settings
     ADD CONSTRAINT security_settings_pkey PRIMARY KEY (id);
@@ -3246,6 +3288,30 @@ CREATE INDEX idx_run_events_event_type ON agent_run_events USING btree (event_ty
 CREATE INDEX idx_run_events_run_id ON agent_run_events USING btree (run_id);
 
 CREATE INDEX idx_run_events_session_id ON agent_run_events USING btree (session_id, id);
+
+
+--
+--
+
+CREATE INDEX idx_scheduler_leaders_expires ON scheduler_leaders USING btree (expires_at);
+
+
+--
+--
+
+CREATE INDEX idx_scheduler_leaders_heartbeat ON scheduler_leaders USING btree (heartbeat_at);
+
+
+--
+--
+
+CREATE INDEX idx_scheduler_runs_job_time ON scheduler_runs USING btree (job_name, started_at DESC);
+
+
+--
+--
+
+CREATE INDEX idx_scheduler_runs_status ON scheduler_runs USING btree (status);
 
 
 --
