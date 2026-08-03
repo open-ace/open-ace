@@ -174,23 +174,31 @@ class TestQuotaEnforcementSchedulerEnforcement:
     def setup_method(self):
         QuotaEnforcementScheduler._instance = None
 
+    @patch("app.services.leader_election.LeaderElectionClient")
     @patch("app.repositories.database.adapt_sql", side_effect=lambda x: x)
     @patch("app.repositories.database.adapt_boolean_condition", return_value="u.is_active = 1")
     @patch("app.repositories.database.Database")
-    def test_run_enforcement_no_exceeded_users(self, mock_db_cls, mock_adapt_bool, mock_adapt_sql):
+    def test_run_enforcement_no_exceeded_users(self, mock_db_cls, mock_adapt_bool, mock_adapt_sql, mock_lock_client_cls):
         mock_db = MagicMock()
         mock_db.fetch_all.return_value = []
+        mock_db.is_postgresql = False  # SQLite test environment
         mock_db_cls.return_value = mock_db
+
+        # Mock leader election client to acquire lock
+        mock_lock_client = MagicMock()
+        mock_lock_client.try_acquire_leadership.return_value = True
+        mock_lock_client_cls.return_value = mock_lock_client
 
         scheduler = QuotaEnforcementScheduler()
         scheduler._run_enforcement()
 
         assert scheduler._last_run is not None
 
+    @patch("app.services.leader_election.LeaderElectionClient")
     @patch("app.repositories.database.adapt_sql", side_effect=lambda x: x)
     @patch("app.repositories.database.adapt_boolean_condition", return_value="u.is_active = 1")
     @patch("app.repositories.database.Database")
-    def test_run_enforcement_daily_exceeded(self, mock_db_cls, mock_adapt_bool, mock_adapt_sql):
+    def test_run_enforcement_daily_exceeded(self, mock_db_cls, mock_adapt_bool, mock_adapt_sql, mock_lock_client_cls):
         today = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
         mock_db = MagicMock()
         daily_row = {
@@ -205,17 +213,24 @@ class TestQuotaEnforcementSchedulerEnforcement:
             [daily_row],  # daily rows
             [],  # monthly rows
         ]
+        mock_db.is_postgresql = False  # SQLite test environment
         mock_db_cls.return_value = mock_db
+
+        # Mock leader election client to acquire lock
+        mock_lock_client = MagicMock()
+        mock_lock_client.try_acquire_leadership.return_value = True
+        mock_lock_client_cls.return_value = mock_lock_client
 
         scheduler = QuotaEnforcementScheduler()
         with patch.object(scheduler, "_enforce_user") as mock_enforce:
             scheduler._run_enforcement()
             mock_enforce.assert_called_once_with(daily_row, today, "daily")
 
+    @patch("app.services.leader_election.LeaderElectionClient")
     @patch("app.repositories.database.adapt_sql", side_effect=lambda x: x)
     @patch("app.repositories.database.adapt_boolean_condition", return_value="u.is_active = 1")
     @patch("app.repositories.database.Database")
-    def test_run_enforcement_monthly_exceeded(self, mock_db_cls, mock_adapt_bool, mock_adapt_sql):
+    def test_run_enforcement_monthly_exceeded(self, mock_db_cls, mock_adapt_bool, mock_adapt_sql, mock_lock_client_cls):
         today = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
         mock_db = MagicMock()
         monthly_row = {
@@ -230,7 +245,13 @@ class TestQuotaEnforcementSchedulerEnforcement:
             [],  # daily rows
             [monthly_row],  # monthly rows
         ]
+        mock_db.is_postgresql = False  # SQLite test environment
         mock_db_cls.return_value = mock_db
+
+        # Mock leader election client to acquire lock
+        mock_lock_client = MagicMock()
+        mock_lock_client.try_acquire_leadership.return_value = True
+        mock_lock_client_cls.return_value = mock_lock_client
 
         scheduler = QuotaEnforcementScheduler()
         with patch.object(scheduler, "_enforce_user") as mock_enforce:
@@ -239,11 +260,12 @@ class TestQuotaEnforcementSchedulerEnforcement:
                 monthly_row, today, "monthly", month_prefix="month_"
             )
 
+    @patch("app.services.leader_election.LeaderElectionClient")
     @patch("app.repositories.database.adapt_sql", side_effect=lambda x: x)
     @patch("app.repositories.database.adapt_boolean_condition", return_value="u.is_active = 1")
     @patch("app.repositories.database.Database")
     def test_run_enforcement_deduplicates_monthly(
-        self, mock_db_cls, mock_adapt_bool, mock_adapt_sql
+        self, mock_db_cls, mock_adapt_bool, mock_adapt_sql, mock_lock_client_cls
     ):
         today = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
         mock_db = MagicMock()
@@ -267,7 +289,13 @@ class TestQuotaEnforcementSchedulerEnforcement:
             [daily_row],  # daily rows
             [monthly_row_same_user],  # monthly rows - same user, should be skipped
         ]
+        mock_db.is_postgresql = False  # SQLite test environment
         mock_db_cls.return_value = mock_db
+
+        # Mock leader election client to acquire lock
+        mock_lock_client = MagicMock()
+        mock_lock_client.try_acquire_leadership.return_value = True
+        mock_lock_client_cls.return_value = mock_lock_client
 
         scheduler = QuotaEnforcementScheduler()
         with patch.object(scheduler, "_enforce_user") as mock_enforce:
@@ -275,9 +303,19 @@ class TestQuotaEnforcementSchedulerEnforcement:
             # Monthly enforcement should NOT be called for user already in daily
             mock_enforce.assert_called_once_with(daily_row, today, "daily")
 
+    @patch("app.services.leader_election.LeaderElectionClient")
     @patch("app.repositories.database.Database")
-    def test_run_enforcement_db_exception(self, mock_db_cls):
-        mock_db_cls.return_value.fetch_all.side_effect = Exception("DB error")
+    def test_run_enforcement_db_exception(self, mock_db_cls, mock_lock_client_cls):
+        mock_db = MagicMock()
+        mock_db.fetch_all.side_effect = Exception("DB error")
+        mock_db.is_postgresql = False  # SQLite test environment
+        mock_db_cls.return_value = mock_db
+
+        # Mock leader election client to acquire lock
+        mock_lock_client = MagicMock()
+        mock_lock_client.try_acquire_leadership.return_value = True
+        mock_lock_client_cls.return_value = mock_lock_client
+
         scheduler = QuotaEnforcementScheduler()
         scheduler._run_enforcement()  # Should not raise
         assert scheduler._last_run is not None
