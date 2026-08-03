@@ -94,6 +94,32 @@ check_python_version() {
     print_success "Python version: $actual_version (OK)"
 }
 
+# Check Python version compatibility for offline installation
+# Warns if current Python version may not be in vendor wheels
+check_python_version_for_offline() {
+    # Only check when vendor directory exists (offline installation scenario)
+    if [ ! -d "$SOURCE_DIR/vendor" ] || [ ! "$(ls -A "$SOURCE_DIR/vendor" 2>/dev/null)" ]; then
+        return 0
+    fi
+
+    local current_minor=$(python3 -c "import sys; print(sys.version_info.minor)" 2>/dev/null)
+
+    # Infer supported versions from vendor directory
+    # Note: tr '\n' ' ' converts newlines to spaces for exact grep match
+    local supported_versions=$(ls "$SOURCE_DIR/vendor"/*.whl 2>/dev/null \
+        | grep -o 'cp3[0-9][0-9]*' \
+        | sort -u \
+        | sed 's/cp3/3./' \
+        | tr '\n' ' ')
+
+    # Exact match: add spaces around version string to avoid partial matches
+    if [ -n "$supported_versions" ] && ! echo " $supported_versions " | grep -q " 3\.$current_minor "; then
+        print_warning "当前 Python 版本 3.$current_minor 可能不在离线包支持范围内"
+        print_info "离线包支持的版本: $supported_versions"
+        print_info "安装时将从 PyPI 在线下载缺失的依赖包"
+    fi
+}
+
 # Check Python version on remote system
 check_python_version_remote() {
     local remote="$1"
@@ -3472,6 +3498,7 @@ install_local() {
 
     # Check Python version first (Open ACE requires Python >= 3.10)
     check_python_version
+    check_python_version_for_offline
 
     # Validate source directory first
     validate_source_dir
@@ -3957,6 +3984,17 @@ do_fresh_install() {
 
         if [ -d "$target_path/vendor" ] && [ "$(ls -A "$target_path/vendor" 2>/dev/null)" ]; then
             print_info "Installing from vendor directory (offline mode)..."
+            # VERSION-CHECK-BEGIN: Check version compatibility before offline install
+            if [ -d "$target_path/vendor" ] && [ "$(ls -A "$target_path/vendor" 2>/dev/null)" ]; then
+                local current_minor=$(python3 -c "import sys; print(sys.version_info.minor)" 2>/dev/null)
+                local supported_versions=$(ls "$target_path/vendor"/*.whl 2>/dev/null | grep -o "cp3[0-9][0-9]*" | sort -u | sed "s/cp3/3./" | tr "\n" " ")
+                if [ -n "$supported_versions" ] && ! echo " $supported_versions " | grep -q " 3\.$current_minor "; then
+                    print_warning "当前 Python 版本 3.$current_minor 可能不在离线包支持范围内"
+                    print_info "离线包支持的版本: $supported_versions"
+                    print_info "安装时将从 PyPI 在线下载缺失的依赖包"
+                fi
+            fi
+            # VERSION-CHECK-END
             # Pre-install setuptools + wheel for building source distributions
             if ls "$target_path/vendor"/setuptools*.whl 1>/dev/null 2>&1 || ls "$target_path/vendor"/wheel*.whl 1>/dev/null 2>&1; then
                 print_info "Installing build tools (setuptools, wheel)..."
@@ -4583,6 +4621,17 @@ do_fresh_install_remote() {
         offline_install_failed=false
         if [ -d 'vendor' ] && [ \"\$(ls -A vendor 2>/dev/null)\" ]; then
             echo 'Installing from vendor directory (offline mode)...'
+            # VERSION-CHECK-BEGIN: Check version compatibility before offline install
+            if [ -d 'vendor' ] && [ \"\$(ls -A vendor 2>/dev/null)\" ]; then
+                current_minor=\$(python3 -c 'import sys; print(sys.version_info.minor)' 2>/dev/null)
+                supported_versions=\$(ls vendor/*.whl 2>/dev/null | grep -o 'cp3[0-9][0-9]*' | sort -u | sed 's/cp3/3./' | tr '\\n' ' ')
+                if [ -n \"\$supported_versions\" ] && ! echo \" \$supported_versions \" | grep -q \" 3.\$current_minor \"; then
+                    echo -e \"\\033[1;33mWarning: Current Python 3.\$current_minor may not be in offline package support list\\033[0m\"
+                    echo -e \"\\033[0;34mSupported versions: \${supported_versions}\\033[0m\"
+                    echo -e \"\\033[0;34mAttempting online download from PyPI...\\033[0m\"
+                fi
+            fi
+            # VERSION-CHECK-END
             # Pre-install setuptools + wheel for building source distributions
             if ls vendor/setuptools*.whl 1>/dev/null 2>&1 || ls vendor/wheel*.whl 1>/dev/null 2>&1; then
                 echo 'Installing build tools (setuptools, wheel)...'
@@ -4828,6 +4877,17 @@ do_upgrade_remote() {
         offline_install_failed=false
         if [ -d 'vendor' ] && [ \"\$(ls -A vendor 2>/dev/null)\" ]; then
             echo 'Installing from vendor directory (offline mode)...'
+            # VERSION-CHECK-BEGIN: Check version compatibility before offline install
+            if [ -d 'vendor' ] && [ \"\$(ls -A vendor 2>/dev/null)\" ]; then
+                current_minor=\$(python3 -c 'import sys; print(sys.version_info.minor)' 2>/dev/null)
+                supported_versions=\$(ls vendor/*.whl 2>/dev/null | grep -o 'cp3[0-9][0-9]*' | sort -u | sed 's/cp3/3./' | tr '\\n' ' ')
+                if [ -n \"\$supported_versions\" ] && ! echo \" \$supported_versions \" | grep -q \" 3.\$current_minor \"; then
+                    echo -e \"\\033[1;33mWarning: Current Python 3.\$current_minor may not be in offline package support list\\033[0m\"
+                    echo -e \"\\033[0;34mSupported versions: \${supported_versions}\\033[0m\"
+                    echo -e \"\\033[0;34mAttempting online download from PyPI...\\033[0m\"
+                fi
+            fi
+            # VERSION-CHECK-END
             # Pre-install setuptools + wheel for building source distributions
             if ls vendor/setuptools*.whl 1>/dev/null 2>&1 || ls vendor/wheel*.whl 1>/dev/null 2>&1; then
                 echo 'Installing build tools (setuptools, wheel)...'

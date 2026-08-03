@@ -465,14 +465,23 @@ if [ "$SKIP_DOWNLOAD" = false ] && [ -f "$PROJECT_DIR/requirements.txt" ]; then
     fi
 
     if [ -n "$PIP_CMD" ]; then
-        # Download wheels for Python 3.10/3.11/3.12 to support all target versions.
+        # Download wheels for multiple Python versions to support all target versions.
         # pip install will automatically select the matching wheel during installation.
         # Note: This increases vendor directory size but ensures offline compatibility.
-        echo -e "${YELLOW}Downloading packages for Python 3.10/3.11/3.12...${NC}"
 
         # Supported Python versions (ABI tags)
-        PYTHON_VERSIONS=("3.10" "3.11" "3.12")
-        ABI_TAGS=("cp310" "cp311" "cp312")
+        # Default covers all known stable versions; CI/CD can control via OPENACE_PYTHON_VERSIONS
+        : "${OPENACE_PYTHON_VERSIONS:=3.10 3.11 3.12 3.13}"
+
+        PYTHON_VERSIONS=($OPENACE_PYTHON_VERSIONS)
+
+        ABI_TAGS=()
+        for ver in "${PYTHON_VERSIONS[@]}"; do
+            minor=$(echo "$ver" | cut -d. -f2)
+            ABI_TAGS+=("cp3$minor")
+        done
+
+        echo -e "${GREEN}Building wheels for Python versions: ${PYTHON_VERSIONS[*]}${NC}"
 
         for i in "${!PYTHON_VERSIONS[@]}"; do
             py_ver="${PYTHON_VERSIONS[$i]}"
