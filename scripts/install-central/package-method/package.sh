@@ -471,7 +471,7 @@ if [ "$SKIP_DOWNLOAD" = false ] && [ -f "$PROJECT_DIR/requirements.txt" ]; then
 
         # Supported Python versions (ABI tags)
         # Default covers all known stable versions; CI/CD can control via OPENACE_PYTHON_VERSIONS
-        : "${OPENACE_PYTHON_VERSIONS:=3.10 3.11 3.12 3.13}"
+        : "${OPENACE_PYTHON_VERSIONS:=3.10 3.11 3.12 3.13 3.14}"
 
         PYTHON_VERSIONS=($OPENACE_PYTHON_VERSIONS)
 
