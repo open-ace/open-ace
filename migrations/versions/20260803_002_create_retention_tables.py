@@ -179,24 +179,13 @@ def upgrade() -> None:
         )
 
     # Create indexes for legal_holds (using IF NOT EXISTS)
-    # Note: idx_legal_holds_active is a partial index on active (non-lifted) holds.
-    # PostgreSQL requires partial index syntax: ON table (columns) WHERE condition
-    # SQLite supports expression index directly: ON table (expression)
+    # idx_legal_holds_active is a partial index on active (non-lifted) holds.
+    # Both PostgreSQL and SQLite support partial index syntax: ON table (columns) WHERE condition
     op.execute("CREATE INDEX IF NOT EXISTS idx_legal_holds_tenant ON legal_holds (tenant_id)")
-
-    connection = op.get_bind()
-    if connection.dialect.name == "postgresql":
-        # PostgreSQL: partial index — column list (id) is required before WHERE clause
-        op.execute(
-            "CREATE INDEX IF NOT EXISTS idx_legal_holds_active "
-            "ON legal_holds (id) WHERE lifted_at IS NULL"
-        )
-    else:
-        # SQLite: expression index
-        op.execute(
-            "CREATE INDEX IF NOT EXISTS idx_legal_holds_active "
-            "ON legal_holds (lifted_at IS NULL)"
-        )
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS idx_legal_holds_active "
+        "ON legal_holds (id) WHERE lifted_at IS NULL"
+    )
 
     op.execute("CREATE INDEX IF NOT EXISTS idx_legal_holds_data_type ON legal_holds (data_type)")
 
