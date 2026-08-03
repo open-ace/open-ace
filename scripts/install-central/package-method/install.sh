@@ -94,6 +94,32 @@ check_python_version() {
     print_success "Python version: $actual_version (OK)"
 }
 
+# Check Python version compatibility for offline installation
+# Warns if current Python version may not be in vendor wheels
+check_python_version_for_offline() {
+    # Only check when vendor directory exists (offline installation scenario)
+    if [ ! -d "$SOURCE_DIR/vendor" ] || [ ! "$(ls -A "$SOURCE_DIR/vendor" 2>/dev/null)" ]; then
+        return 0
+    fi
+
+    local current_minor=$(python3 -c "import sys; print(sys.version_info.minor)" 2>/dev/null)
+
+    # Infer supported versions from vendor directory
+    # Note: tr '\n' ' ' converts newlines to spaces for exact grep match
+    local supported_versions=$(ls "$SOURCE_DIR/vendor"/*.whl 2>/dev/null \
+        | grep -o 'cp3[0-9][0-9]*' \
+        | sort -u \
+        | sed 's/cp3/3./' \
+        | tr '\n' ' ')
+
+    # Exact match: add spaces around version string to avoid partial matches
+    if [ -n "$supported_versions" ] && ! echo " $supported_versions " | grep -q " 3\.$current_minor "; then
+        print_warning "当前 Python 版本 3.$current_minor 可能不在离线包支持范围内"
+        print_info "离线包支持的版本: $supported_versions"
+        print_info "安装时将从 PyPI 在线下载缺失的依赖包"
+    fi
+}
+
 # Check Python version on remote system
 check_python_version_remote() {
     local remote="$1"
@@ -3472,6 +3498,7 @@ install_local() {
 
     # Check Python version first (Open ACE requires Python >= 3.10)
     check_python_version
+    check_python_version_for_offline
 
     # Validate source directory first
     validate_source_dir
@@ -3957,6 +3984,15 @@ do_fresh_install() {
 
         if [ -d "$target_path/vendor" ] && [ "$(ls -A "$target_path/vendor" 2>/dev/null)" ]; then
             print_info "Installing from vendor directory (offline mode)..."
+            # VERSION-CHECK-BEGIN: Check version compatibility before offline install
+            local current_minor=$(python3 -c "import sys; print(sys.version_info.minor)" 2>/dev/null)
+            local supported_versions=$(ls "$target_path/vendor"/*.whl 2>/dev/null | grep -o "cp3[0-9][0-9]*" | sort -u | sed "s/cp3/3./" | tr "\n" " ")
+            if [ -n "$supported_versions" ] && ! echo " $supported_versions " | grep -q " 3\.$current_minor "; then
+                print_warning "当前 Python 版本 3.$current_minor 可能不在离线包支持范围内"
+                print_info "离线包支持的版本: $supported_versions"
+                print_info "安装时将从 PyPI 在线下载缺失的依赖包"
+            fi
+            # VERSION-CHECK-END
             # Pre-install setuptools + wheel for building source distributions
             if ls "$target_path/vendor"/setuptools*.whl 1>/dev/null 2>&1 || ls "$target_path/vendor"/wheel*.whl 1>/dev/null 2>&1; then
                 print_info "Installing build tools (setuptools, wheel)..."
@@ -4411,6 +4447,15 @@ with open('$config_dir/config.json', 'w') as f:
 
         if [ -d "$target_path/vendor" ] && [ "$(ls -A "$target_path/vendor" 2>/dev/null)" ]; then
             print_info "Installing from vendor directory (offline mode)..."
+            # VERSION-CHECK-BEGIN: Check version compatibility before offline install
+            local current_minor=$(python3 -c "import sys; print(sys.version_info.minor)" 2>/dev/null)
+            local supported_versions=$(ls "$target_path/vendor"/*.whl 2>/dev/null | grep -o "cp3[0-9][0-9]*" | sort -u | sed "s/cp3/3./" | tr "\n" " ")
+            if [ -n "$supported_versions" ] && ! echo " $supported_versions " | grep -q " 3\.$current_minor "; then
+                print_warning "当前 Python 版本 3.$current_minor 可能不在离线包支持范围内"
+                print_info "离线包支持的版本: $supported_versions"
+                print_info "安装时将从 PyPI 在线下载缺失的依赖包"
+            fi
+            # VERSION-CHECK-END
             # Pre-install setuptools + wheel for building source distributions
             if ls "$target_path/vendor"/setuptools*.whl 1>/dev/null 2>&1 || ls "$target_path/vendor"/wheel*.whl 1>/dev/null 2>&1; then
                 print_info "Installing build tools (setuptools, wheel)..."
@@ -4463,35 +4508,7 @@ with open('$config_dir/config.json', 'w') as f:
         rm -f "$TEMP_REQ"
     fi
 
-    # Create default admin user (if not exists)
-    print_info "Ensuring default admin user exists..."
-    if [ -f "$target_path/scripts/init_db.py" ]; then
-        # Run init_db.py as the install user to ensure it can access installed packages
-        # Pass install_user as system_account for multi-user workspace mode
-        if [ "$EUID" -eq 0 ] && [ -n "$install_user" ] && [ "$install_user" != "root" ]; then
-            # Running as root, but need to run as install_user to access their pip packages
-            cd "$target_path"
-            if su - "$install_user" -c "cd '$target_path' && OPENACE_SYSTEM_ACCOUNT='$install_user' python3 scripts/init_db.py"; then
-                print_success "Default admin user ready (system_account=$install_user)"
-            else
-                print_warning "Failed to create default admin user. You may need to run scripts/init_db.py manually."
-            fi
-            cd - > /dev/null
-        else
-            # Running as the target user already
-            cd "$target_path"
-            if OPENACE_SYSTEM_ACCOUNT="$install_user" python3 scripts/init_db.py; then
-                print_success "Default admin user ready (system_account=$install_user)"
-            else
-                print_warning "Failed to create default admin user. You may need to run scripts/init_db.py manually."
-            fi
-            cd - > /dev/null
-        fi
-    else
-        print_warning "init_db.py not found, skipping default user creation"
-    fi
-
-    # Run database migrations (alembic upgrade head)
+    # Run database migrations FIRST (init_db.py depends on tables created by migrations)
     print_info "Running database migrations..."
     if [ "$EUID" -eq 0 ] && [ -n "$install_user" ] && [ "$install_user" != "root" ]; then
         su - "$install_user" -c "cd '$target_path' && python3 scripts/check_min_revision.py" || {
@@ -4527,6 +4544,34 @@ with open('$config_dir/config.json', 'w') as f:
         fi
     else
         print_warning "Alembic not found, skipping database migrations"
+    fi
+
+    # Create default admin user AFTER migrations (init_db.py queries tables created by migrations)
+    print_info "Ensuring default admin user exists..."
+    if [ -f "$target_path/scripts/init_db.py" ]; then
+        # Run init_db.py as the install user to ensure it can access installed packages
+        # Pass install_user as system_account for multi-user workspace mode
+        if [ "$EUID" -eq 0 ] && [ -n "$install_user" ] && [ "$install_user" != "root" ]; then
+            # Running as root, but need to run as install_user to access their pip packages
+            cd "$target_path"
+            if su - "$install_user" -c "cd '$target_path' && OPENACE_SYSTEM_ACCOUNT='$install_user' python3 scripts/init_db.py"; then
+                print_success "Default admin user ready (system_account=$install_user)"
+            else
+                print_warning "Failed to create default admin user. You may need to run scripts/init_db.py manually."
+            fi
+            cd - > /dev/null
+        else
+            # Running as the target user already
+            cd "$target_path"
+            if OPENACE_SYSTEM_ACCOUNT="$install_user" python3 scripts/init_db.py; then
+                print_success "Default admin user ready (system_account=$install_user)"
+            else
+                print_warning "Failed to create default admin user. You may need to run scripts/init_db.py manually."
+            fi
+            cd - > /dev/null
+        fi
+    else
+        print_warning "init_db.py not found, skipping default user creation"
     fi
 
     print_success "Upgrade completed"
@@ -4583,6 +4628,15 @@ do_fresh_install_remote() {
         offline_install_failed=false
         if [ -d 'vendor' ] && [ \"\$(ls -A vendor 2>/dev/null)\" ]; then
             echo 'Installing from vendor directory (offline mode)...'
+            # VERSION-CHECK-BEGIN: Check version compatibility before offline install
+            current_minor=\$(python3 -c 'import sys; print(sys.version_info.minor)' 2>/dev/null)
+            supported_versions=\$(ls vendor/*.whl 2>/dev/null | grep -o 'cp3[0-9][0-9]*' | sort -u | sed 's/cp3/3./' | tr '\\n' ' ')
+            if [ -n \"\$supported_versions\" ] && ! echo \" \$supported_versions \" | grep -q \" 3.\$current_minor \"; then
+                echo -e \"\\033[1;33mWarning: Current Python 3.\$current_minor may not be in offline package support list\\033[0m\"
+                echo -e \"\\033[0;34mSupported versions: \${supported_versions}\\033[0m\"
+                echo -e \"\\033[0;34mAttempting online download from PyPI...\\033[0m\"
+            fi
+            # VERSION-CHECK-END
             # Pre-install setuptools + wheel for building source distributions
             if ls vendor/setuptools*.whl 1>/dev/null 2>&1 || ls vendor/wheel*.whl 1>/dev/null 2>&1; then
                 echo 'Installing build tools (setuptools, wheel)...'
@@ -4828,6 +4882,15 @@ do_upgrade_remote() {
         offline_install_failed=false
         if [ -d 'vendor' ] && [ \"\$(ls -A vendor 2>/dev/null)\" ]; then
             echo 'Installing from vendor directory (offline mode)...'
+            # VERSION-CHECK-BEGIN: Check version compatibility before offline install
+            current_minor=\$(python3 -c 'import sys; print(sys.version_info.minor)' 2>/dev/null)
+            supported_versions=\$(ls vendor/*.whl 2>/dev/null | grep -o 'cp3[0-9][0-9]*' | sort -u | sed 's/cp3/3./' | tr '\\n' ' ')
+            if [ -n \"\$supported_versions\" ] && ! echo \" \$supported_versions \" | grep -q \" 3.\$current_minor \"; then
+                echo -e \"\\033[1;33mWarning: Current Python 3.\$current_minor may not be in offline package support list\\033[0m\"
+                echo -e \"\\033[0;34mSupported versions: \${supported_versions}\\033[0m\"
+                echo -e \"\\033[0;34mAttempting online download from PyPI...\\033[0m\"
+            fi
+            # VERSION-CHECK-END
             # Pre-install setuptools + wheel for building source distributions
             if ls vendor/setuptools*.whl 1>/dev/null 2>&1 || ls vendor/wheel*.whl 1>/dev/null 2>&1; then
                 echo 'Installing build tools (setuptools, wheel)...'
@@ -4890,22 +4953,7 @@ do_upgrade_remote() {
         exit 1
     }
 
-    # Create default admin user (if not exists)
-    print_info "Ensuring default admin user exists on remote..."
-    ssh "$remote" "
-        cd '$target_path'
-        if [ -f 'scripts/init_db.py' ]; then
-            if OPENACE_SYSTEM_ACCOUNT='$DEPLOY_USER' python3 scripts/init_db.py; then
-                echo 'Default admin user ready (system_account=$DEPLOY_USER)'
-            else
-                echo 'Warning: Failed to create default admin user. You may need to run scripts/init_db.py manually.'
-            fi
-        else
-            echo 'Warning: init_db.py not found, skipping default user creation'
-        fi
-    "
-
-    # Run database migrations (alembic upgrade head)
+    # Run database migrations FIRST (init_db.py depends on tables created by migrations)
     print_info "Running database migrations on remote..."
     ssh "$remote" "
         cd '$target_path'
@@ -4922,6 +4970,21 @@ do_upgrade_remote() {
             fi
         else
             echo 'Warning: Alembic not found, skipping database migrations'
+        fi
+    "
+
+    # Create default admin user AFTER migrations (init_db.py queries tables created by migrations)
+    print_info "Ensuring default admin user exists on remote..."
+    ssh "$remote" "
+        cd '$target_path'
+        if [ -f 'scripts/init_db.py' ]; then
+            if OPENACE_SYSTEM_ACCOUNT='$DEPLOY_USER' python3 scripts/init_db.py; then
+                echo 'Default admin user ready (system_account=$DEPLOY_USER)'
+            else
+                echo 'Warning: Failed to create default admin user. You may need to run scripts/init_db.py manually.'
+            fi
+        else
+            echo 'Warning: init_db.py not found, skipping default user creation'
         fi
     "
 

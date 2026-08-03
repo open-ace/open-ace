@@ -1,32 +1,43 @@
-# Open ACE - Deployment
+# Open ACE - Scheduler Deployment
+# Issue #2187: Independent scheduler deployment with leader election
+#
+# This deployment runs the background schedulers (data fetch, quota enforcement,
+# autonomous, alert compensation, health monitor, SSO cleanup) in a separate pod.
+#
+# Key features:
+# - Leader election via database (scheduler_leaders table)
+# - 2 replicas for high availability (only one is active leader)
+# - Independent from web deployment (can scale separately)
+# - Metrics exposed on port 9090
+
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: open-ace
+  name: open-ace-scheduler
   namespace: open-ace
   labels:
     app.kubernetes.io/name: open-ace
-    app.kubernetes.io/component: web
+    app.kubernetes.io/component: scheduler
 spec:
-  replicas: 3
+  replicas: 2  # Main + backup, leader election ensures only one is active
   selector:
     matchLabels:
       app.kubernetes.io/name: open-ace
-      app.kubernetes.io/component: web
+      app.kubernetes.io/component: scheduler
   strategy:
     type: RollingUpdate
     rollingUpdate:
-      maxSurge: 1
-      maxUnavailable: 0
+      maxSurge: 0
+      maxUnavailable: 1  # Only one pod can be down during update
   template:
     metadata:
       annotations:
         prometheus.io/scrape: "true"
-        prometheus.io/port: "19888"
-        prometheus.io/path: "/health"
+        prometheus.io/port: "9090"
+        prometheus.io/path: "/metrics"
       labels:
         app.kubernetes.io/name: open-ace
-        app.kubernetes.io/component: web
+        app.kubernetes.io/component: scheduler
     spec:
       serviceAccountName: open-ace
       securityContext:
@@ -35,15 +46,22 @@ spec:
         runAsGroup: 1000
         fsGroup: 1000
         fsGroupChangePolicy: OnRootMismatch
+      # Prevent multiple schedulers from running on same node
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: open-ace
+                    app.kubernetes.io/component: scheduler
+                topologyKey: kubernetes.io/hostname
       containers:
-        - name: open-ace
-          image: open-ace:latest
+        - name: scheduler
+          image: openace/open-ace:latest
           imagePullPolicy: Always
-          # HA Support (Issue #1851): preStop hook for graceful terminal relay handoff
-          lifecycle:
-            preStop:
-              exec:
-                command: ["sh", "-c", "sleep 30"]
+          command: ["python", "-m", "app.scheduler_worker"]
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -53,8 +71,8 @@ spec:
             seccompProfile:
               type: RuntimeDefault
           ports:
-            - name: http
-              containerPort: 19888
+            - name: metrics
+              containerPort: 9090
               protocol: TCP
           envFrom:
             - configMapRef:
@@ -63,7 +81,7 @@ spec:
                 name: open-ace-secrets
           env:
             - name: SCHEDULER_MODE
-              value: "web"
+              value: "scheduler"
             - name: POD_NAME
               valueFrom:
                 fieldRef:
@@ -76,9 +94,18 @@ spec:
               value: /home/open-ace
             - name: OPENACE_CONFIG_DIR
               value: /home/open-ace/.open-ace
+            # Scheduler-specific configuration
+            - name: SCHEDULER_HEARTBEAT_INTERVAL
+              value: "10"
+            - name: SCHEDULER_HEARTBEAT_TIMEOUT
+              value: "60"
+            - name: SCHEDULER_LOCK_TIMEOUT
+              value: "1800"
+            - name: SCHEDULER_METRICS_PORT
+              value: "9090"
           resources:
             requests:
-              cpu: "100m"
+              cpu: "200m"
               memory: "256Mi"
             limits:
               cpu: "500m"
@@ -86,7 +113,7 @@ spec:
           livenessProbe:
             httpGet:
               path: /health
-              port: http
+              port: metrics
             initialDelaySeconds: 10
             periodSeconds: 10
             timeoutSeconds: 5
@@ -94,7 +121,7 @@ spec:
           readinessProbe:
             httpGet:
               path: /health
-              port: http
+              port: metrics
             initialDelaySeconds: 5
             periodSeconds: 5
             timeoutSeconds: 3
@@ -127,47 +154,34 @@ spec:
         - name: config
           persistentVolumeClaim:
             claimName: open-ace-data
-      affinity:
-        podAntiAffinity:
-          preferredDuringSchedulingIgnoredDuringExecution:
-            - weight: 100
-              podAffinityTerm:
-                labelSelector:
-                  matchLabels:
-                    app.kubernetes.io/name: open-ace
-                topologyKey: kubernetes.io/hostname
+      # Priority class to prevent eviction
+      priorityClassName: open-ace-scheduler
       tolerations:
         - key: "node-role.kubernetes.io/master"
           operator: "Exists"
           effect: "NoSchedule"
 
 ---
-# Open ACE - HorizontalPodAutoscaler
-apiVersion: autoscaling/v2
-kind: HorizontalPodAutoscaler
+# PriorityClass for scheduler (prevents eviction)
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
 metadata:
-  name: open-ace
+  name: open-ace-scheduler
   namespace: open-ace
-  labels:
-    app.kubernetes.io/name: open-ace
-    app.kubernetes.io/component: web
+value: 1000000
+globalDefault: false
+description: "High priority for scheduler pods to prevent eviction"
+
+---
+# PodDisruptionBudget for scheduler (ensures availability during node maintenance)
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: open-ace-scheduler
+  namespace: open-ace
 spec:
-  scaleTargetRef:
-    apiVersion: apps/v1
-    kind: Deployment
-    name: open-ace
-  minReplicas: 3
-  maxReplicas: 10
-  metrics:
-    - type: Resource
-      resource:
-        name: cpu
-        target:
-          type: Utilization
-          averageUtilization: 70
-    - type: Resource
-      resource:
-        name: memory
-        target:
-          type: Utilization
-          averageUtilization: 80
+  minAvailable: 1  # At least one scheduler must be running
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: open-ace
+      app.kubernetes.io/component: scheduler

@@ -1,0 +1,23 @@
+# Open ACE - Scheduler Metrics Service
+# Issue #2187: Exposes scheduler metrics for Prometheus monitoring
+#
+# This service exposes the metrics port for the scheduler deployment.
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: open-ace-scheduler
+  namespace: open-ace
+  labels:
+    app.kubernetes.io/name: open-ace
+    app.kubernetes.io/component: scheduler
+spec:
+  type: ClusterIP
+  ports:
+    - name: metrics
+      port: 9090
+      targetPort: metrics
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: open-ace
+    app.kubernetes.io/component: scheduler

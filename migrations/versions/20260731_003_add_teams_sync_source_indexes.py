@@ -12,7 +12,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import sqlalchemy as sa
 from alembic import op
 
 if TYPE_CHECKING:
@@ -32,24 +31,6 @@ def _is_postgresql() -> bool:
     return bind.dialect.name == "postgresql"
 
 
-def _index_exists(table_name: str, index_name: str) -> bool:
-    """Check if an index already exists (for idempotency)."""
-    bind = op.get_bind()
-    if bind.dialect.name == "sqlite":
-        result = bind.execute(
-            sa.text("SELECT 1 FROM sqlite_master WHERE type='index' AND name=:name"),
-            {"name": index_name},
-        )
-        return result.fetchone() is not None
-    else:
-        # PostgreSQL
-        result = bind.execute(
-            sa.text("SELECT 1 FROM pg_indexes WHERE indexname = :name"),
-            {"name": index_name},
-        )
-        return result.fetchone() is not None
-
-
 def upgrade() -> None:
     """Add index for organization sync performance.
 
@@ -61,28 +42,32 @@ def upgrade() -> None:
     because partial indexes with JSON expressions have compatibility issues
     between PostgreSQL and SQLite schema snapshots.
     """
-    # Check if index already exists (idempotency for schema.sql bootstrap)
-    if _index_exists("teams", "idx_teams_sync_source"):
-        return
-
     # Create simple index on sync_source for both PostgreSQL and SQLite
+    # Use IF NOT EXISTS for idempotency — the index may already exist from
+    # a previous partial migration run or manual creation.
     if _is_postgresql():
         # PostgreSQL: Cast settings to jsonb before extracting sync_source
-        op.create_index(
-            "idx_teams_sync_source",
-            "teams",
-            [sa.text("(settings::jsonb->>'sync_source')")],
+        op.execute(
+            "CREATE INDEX IF NOT EXISTS idx_teams_sync_source "
+            "ON teams ((settings::jsonb->>'sync_source'))"
         )
     else:
-        # SQLite: Use json_extract for compatibility with SQLite < 3.38
-        # (->> operator is only available in SQLite 3.38+)
-        op.create_index(
-            "idx_teams_sync_source",
-            "teams",
-            [sa.text("(json_extract(settings, '$.sync_source'))")],
-        )
+        # SQLite: Use json_extract function (->> operator is PostgreSQL-specific)
+        try:
+            op.execute(
+                "CREATE INDEX IF NOT EXISTS idx_teams_sync_source "
+                "ON teams ((json_extract(settings, '$.sync_source')))"
+            )
+        except Exception:  # nosec: B110 - SQLite may lack JSON index support
+            pass
 
 
 def downgrade() -> None:
     """Remove organization sync performance index."""
-    op.execute("DROP INDEX IF EXISTS idx_teams_sync_source")
+    if _is_postgresql():
+        op.execute("DROP INDEX IF EXISTS idx_teams_sync_source")
+    else:
+        try:
+            op.drop_index("idx_teams_sync_source", table_name="teams")
+        except Exception:  # nosec: B110 - best-effort downgrade
+            pass

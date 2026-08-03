@@ -2,8 +2,8 @@
 
 Issue #2184: Multi-provider usage recording with cache token support.
 
-Revision ID: 20260803_005
-Revises: 20260803_004_backfill_session_messages_columns
+Revision ID: 20260803_007
+Revises: 20260803_006_add_scheduler_leaders_table
 Create Date: 2026-08-03
 
 """
@@ -12,8 +12,8 @@ import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision = "20260803_005"
-down_revision = "20260803_004_backfill_session_messages_columns"
+revision = "20260803_007"
+down_revision = "20260803_006_add_scheduler_leaders_table"
 branch_labels = None
 depends_on = None
 
