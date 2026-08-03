@@ -36,7 +36,8 @@ class TestSQLiteCreateOrIgnore:
             db._connection_pool = {}
 
             # Create table
-            db.execute("""
+            db.execute(
+                """
                 CREATE TABLE IF NOT EXISTS tool_account_mapping_rules (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     user_id INTEGER NOT NULL,
@@ -51,7 +52,8 @@ class TestSQLiteCreateOrIgnore:
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     UNIQUE(user_id, pattern, match_type)
                 )
-            """)
+            """
+            )
 
             # Create repository
             repo = ToolAccountMappingRuleRepository(db)
@@ -95,7 +97,8 @@ class TestSQLiteCreateOrIgnore:
             cursor = conn.cursor()
 
             # Create table
-            cursor.execute("""
+            cursor.execute(
+                """
                 CREATE TABLE IF NOT EXISTS tool_account_mapping_rules (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     user_id INTEGER NOT NULL,
@@ -110,7 +113,8 @@ class TestSQLiteCreateOrIgnore:
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     UNIQUE(user_id, pattern, match_type)
                 )
-            """)
+            """
+            )
             conn.commit()
 
             # First insert using INSERT OR IGNORE
@@ -171,7 +175,8 @@ class TestSQLiteCreateOrIgnore:
             cursor = conn.cursor()
 
             # Create table
-            cursor.execute("""
+            cursor.execute(
+                """
                 CREATE TABLE IF NOT EXISTS tool_account_mapping_rules (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     user_id INTEGER NOT NULL,
@@ -186,7 +191,8 @@ class TestSQLiteCreateOrIgnore:
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     UNIQUE(user_id, pattern, match_type)
                 )
-            """)
+            """
+            )
             conn.commit()
 
             # First batch insert
@@ -267,7 +273,8 @@ class TestSQLiteEdgeCases:
             db._connection_pool = {}
 
             # Create table
-            db.execute("""
+            db.execute(
+                """
                 CREATE TABLE IF NOT EXISTS tool_account_mapping_rules (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     user_id INTEGER NOT NULL,
@@ -282,7 +289,8 @@ class TestSQLiteEdgeCases:
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     UNIQUE(user_id, pattern, match_type)
                 )
-            """)
+            """
+            )
 
             # Create repository
             repo = ToolAccountMappingRuleRepository(db)
@@ -324,7 +332,8 @@ class TestSQLiteEdgeCases:
             db._connection_pool = {}
 
             # Create table
-            db.execute("""
+            db.execute(
+                """
                 CREATE TABLE IF NOT EXISTS tool_account_mapping_rules (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     user_id INTEGER NOT NULL,
@@ -339,7 +348,8 @@ class TestSQLiteEdgeCases:
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     UNIQUE(user_id, pattern, match_type)
                 )
-            """)
+            """
+            )
 
             # Create repository
             repo = ToolAccountMappingRuleRepository(db)

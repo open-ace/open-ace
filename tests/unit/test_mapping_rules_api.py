@@ -454,14 +454,30 @@ class TestGenerateDefaultRules:
     @patch("app.routes.mapping_rules.ToolAccountAutoMappingService")
     def test_generate_default_rules_first_time(self, mock_service_class, admin_client):
         """POST /api/mapping-rules/user/<id>/generate-default should return 201 when rules created."""
-        from app.services.tool_account_auto_mapping_service import GenerateDefaultRulesResult
         from app.models.tool_account_mapping_rule import ToolAccountMappingRule
+        from app.services.tool_account_auto_mapping_service import GenerateDefaultRulesResult
 
         mock_service = MagicMock()
         result = GenerateDefaultRulesResult(
             created=[
-                ToolAccountMappingRule(id=1, user_id=5, pattern="alice-*", match_type="prefix", priority=10, is_auto=True, is_active=True),
-                ToolAccountMappingRule(id=2, user_id=5, pattern="*alice*", match_type="contains", priority=5, is_auto=True, is_active=True),
+                ToolAccountMappingRule(
+                    id=1,
+                    user_id=5,
+                    pattern="alice-*",
+                    match_type="prefix",
+                    priority=10,
+                    is_auto=True,
+                    is_active=True,
+                ),
+                ToolAccountMappingRule(
+                    id=2,
+                    user_id=5,
+                    pattern="*alice*",
+                    match_type="contains",
+                    priority=5,
+                    is_auto=True,
+                    is_active=True,
+                ),
             ],
             skipped=[],
             created_count=2,
@@ -505,13 +521,21 @@ class TestGenerateDefaultRules:
     @patch("app.routes.mapping_rules.ToolAccountAutoMappingService")
     def test_generate_default_rules_partial(self, mock_service_class, admin_client):
         """POST /api/mapping-rules/user/<id>/generate-default should handle partial success."""
-        from app.services.tool_account_auto_mapping_service import GenerateDefaultRulesResult
         from app.models.tool_account_mapping_rule import ToolAccountMappingRule
+        from app.services.tool_account_auto_mapping_service import GenerateDefaultRulesResult
 
         mock_service = MagicMock()
         result = GenerateDefaultRulesResult(
             created=[
-                ToolAccountMappingRule(id=1, user_id=5, pattern="alice-*", match_type="prefix", priority=10, is_auto=True, is_active=True),
+                ToolAccountMappingRule(
+                    id=1,
+                    user_id=5,
+                    pattern="alice-*",
+                    match_type="prefix",
+                    priority=10,
+                    is_auto=True,
+                    is_active=True,
+                ),
             ],
             skipped=[
                 {"pattern": "*alice*", "match_type": "contains", "priority": 5},
