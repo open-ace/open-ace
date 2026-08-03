@@ -11,12 +11,7 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import TYPE_CHECKING
-
-import sqlalchemy as sa
-
-if TYPE_CHECKING:
-    from sqlalchemy.engine import Connection
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -45,25 +40,55 @@ def get_database_revision(connection: Connection) -> str | None:
     """Get the current Alembic revision from the database.
 
     Args:
-        connection: SQLAlchemy database connection
+        connection: Database connection (SQLAlchemy Connection or PgConnectionWrapper)
 
     Returns:
         Current revision string, or None if alembic_version table doesn't exist
         (fresh database) or has no rows.
     """
-    inspector = sa.inspect(connection)
+    # Helper: extract the first column value from a row regardless of cursor type.
+    # psycopg2 RealDictCursor returns dict-like rows; plain cursor returns tuples.
+    def _first_col(row: Any) -> Any:
+        if row is None:
+            return None
+        if isinstance(row, dict):
+            return next(iter(row.values()))
+        return row[0]
 
-    # Check if alembic_version table exists
-    if "alembic_version" not in inspector.get_table_names():
-        logger.debug("alembic_version table does not exist - fresh database")
-        return None
+    # Check if alembic_version table exists.
+    # We cannot use sa.inspect() here because the caller may pass a raw
+    # psycopg2 connection wrapped in PgConnectionWrapper, which is not
+    # recognised by SQLAlchemy's inspection system.  Use portable SQL instead.
+    try:
+        cursor = connection.cursor()
+        try:
+            cursor.execute(
+                "SELECT EXISTS ("
+                "  SELECT FROM information_schema.tables"
+                "  WHERE table_name = 'alembic_version'"
+                ")"
+            )
+            row = cursor.fetchone()
+            table_exists = _first_col(row)
+            if not table_exists:
+                logger.debug("alembic_version table does not exist - fresh database")
+                return None
+        finally:
+            cursor.close()
+    except Exception as e:
+        logger.error(f"Error checking alembic_version table existence: {e}")
+        raise
 
     # Query current revision
     try:
-        result = connection.execute(
-            sa.text("SELECT version_num FROM alembic_version ORDER BY version_num LIMIT 1")
-        ).scalar()
+        cursor = connection.cursor()
+        try:
+            cursor.execute("SELECT version_num FROM alembic_version ORDER BY version_num LIMIT 1")
+            row = cursor.fetchone()
+        finally:
+            cursor.close()
 
+        result = _first_col(row)
         if result:
             logger.debug(f"Current database revision: {result}")
             return str(result)
