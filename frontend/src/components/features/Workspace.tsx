@@ -378,6 +378,15 @@ export const Workspace: React.FC = () => {
           if (result.success && result.token) {
             console.log('[Workspace] Token refreshed successfully');
             setUserWebUI(result);
+            // Notify all iframes about the new token
+            iframeRefs.current.forEach((iframe) => {
+              if (iframe.contentWindow) {
+                iframe.contentWindow.postMessage(
+                  { type: 'openace-token-refreshed', token: result.token },
+                  '*'
+                );
+              }
+            });
           } else {
             console.error('[Workspace] Token refresh failed:', result.error);
           }
@@ -424,6 +433,15 @@ export const Workspace: React.FC = () => {
           if (result.success && result.token) {
             console.log('[Workspace] Token refreshed on visibility change');
             setUserWebUI(result);
+            // Notify all iframes about the new token
+            iframeRefs.current.forEach((iframe) => {
+              if (iframe.contentWindow) {
+                iframe.contentWindow.postMessage(
+                  { type: 'openace-token-refreshed', token: result.token },
+                  '*'
+                );
+              }
+            });
           }
         } catch (err) {
           console.error('[Workspace] Token refresh error on visibility change:', err);
