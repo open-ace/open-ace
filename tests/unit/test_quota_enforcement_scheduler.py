@@ -178,7 +178,9 @@ class TestQuotaEnforcementSchedulerEnforcement:
     @patch("app.repositories.database.adapt_sql", side_effect=lambda x: x)
     @patch("app.repositories.database.adapt_boolean_condition", return_value="u.is_active = 1")
     @patch("app.repositories.database.Database")
-    def test_run_enforcement_no_exceeded_users(self, mock_db_cls, mock_adapt_bool, mock_adapt_sql, mock_lock_client_cls):
+    def test_run_enforcement_no_exceeded_users(
+        self, mock_db_cls, mock_adapt_bool, mock_adapt_sql, mock_lock_client_cls
+    ):
         mock_db = MagicMock()
         mock_db.fetch_all.return_value = []
         mock_db.is_postgresql = False  # SQLite test environment
@@ -198,7 +200,9 @@ class TestQuotaEnforcementSchedulerEnforcement:
     @patch("app.repositories.database.adapt_sql", side_effect=lambda x: x)
     @patch("app.repositories.database.adapt_boolean_condition", return_value="u.is_active = 1")
     @patch("app.repositories.database.Database")
-    def test_run_enforcement_daily_exceeded(self, mock_db_cls, mock_adapt_bool, mock_adapt_sql, mock_lock_client_cls):
+    def test_run_enforcement_daily_exceeded(
+        self, mock_db_cls, mock_adapt_bool, mock_adapt_sql, mock_lock_client_cls
+    ):
         today = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
         mock_db = MagicMock()
         daily_row = {
@@ -230,7 +234,9 @@ class TestQuotaEnforcementSchedulerEnforcement:
     @patch("app.repositories.database.adapt_sql", side_effect=lambda x: x)
     @patch("app.repositories.database.adapt_boolean_condition", return_value="u.is_active = 1")
     @patch("app.repositories.database.Database")
-    def test_run_enforcement_monthly_exceeded(self, mock_db_cls, mock_adapt_bool, mock_adapt_sql, mock_lock_client_cls):
+    def test_run_enforcement_monthly_exceeded(
+        self, mock_db_cls, mock_adapt_bool, mock_adapt_sql, mock_lock_client_cls
+    ):
         today = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
         mock_db = MagicMock()
         monthly_row = {

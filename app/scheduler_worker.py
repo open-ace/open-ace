@@ -26,11 +26,6 @@ import signal
 import socket
 import sys
 import threading
-import time
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    pass
 
 # Configure logging
 logging.basicConfig(
@@ -191,9 +186,7 @@ class SchedulerWorker:
 
         # 2. Quota Enforcement Scheduler
         try:
-            from app.services.quota_enforcement_scheduler import (
-                init_quota_enforcement,
-            )
+            from app.services.quota_enforcement_scheduler import init_quota_enforcement
 
             init_quota_enforcement()
             logger.info("Quota enforcement scheduler initialized")
@@ -205,9 +198,7 @@ class SchedulerWorker:
             from app.utils.config import is_autonomous_enabled
 
             if is_autonomous_enabled():
-                from app.services.autonomous_scheduler import (
-                    init_autonomous_scheduler,
-                )
+                from app.services.autonomous_scheduler import init_autonomous_scheduler
 
                 init_autonomous_scheduler()
                 logger.info("Autonomous scheduler initialized")
@@ -227,9 +218,7 @@ class SchedulerWorker:
 
         # 5. Scheduler Health Monitor
         try:
-            from app.services.scheduler_health_monitor import (
-                init_scheduler_health_monitor,
-            )
+            from app.services.scheduler_health_monitor import init_scheduler_health_monitor
 
             init_scheduler_health_monitor()
             logger.info("Scheduler health monitor initialized")
@@ -268,7 +257,9 @@ class SchedulerWorker:
             from app.services.data_fetch_scheduler import scheduler
 
             status = scheduler.get_status()
-            logger.info(f"  Data Fetch: running={status.get('running')}, interval={status.get('interval')}s")
+            logger.info(
+                f"  Data Fetch: running={status.get('running')}, interval={status.get('interval')}s"
+            )
         except Exception:
             logger.warning("  Data Fetch: status unavailable")
 
@@ -277,7 +268,9 @@ class SchedulerWorker:
             from app.services.quota_enforcement_scheduler import enforcement_scheduler
 
             status = enforcement_scheduler.get_status()
-            logger.info(f"  Quota Enforcement: running={status.get('running')}, interval={status.get('interval')}s")
+            logger.info(
+                f"  Quota Enforcement: running={status.get('running')}, interval={status.get('interval')}s"
+            )
         except Exception:
             logger.warning("  Quota Enforcement: status unavailable")
 
@@ -286,7 +279,9 @@ class SchedulerWorker:
             from app.services.autonomous_scheduler import AutonomousScheduler
 
             inst = AutonomousScheduler.instance()
-            logger.info(f"  Autonomous: running={inst._thread.is_alive() if inst._thread else False}")
+            logger.info(
+                f"  Autonomous: running={inst._thread.is_alive() if inst._thread else False}"
+            )
         except Exception:
             logger.warning("  Autonomous: status unavailable")
 
@@ -335,8 +330,6 @@ class SchedulerWorker:
         logger.info("=" * 60)
         logger.info("Initiating graceful shutdown...")
         logger.info("=" * 60)
-
-        shutdown_timeout = 30  # seconds
 
         # Stop autonomous scheduler first (it may have active workflows)
         try:

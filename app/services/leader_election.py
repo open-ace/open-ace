@@ -24,11 +24,10 @@ import logging
 import os
 import socket
 import threading
-import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from app.repositories.database import Database
@@ -48,11 +47,11 @@ class LeaderInfo:
 
     job_name: str
     leader_id: str
-    owner_info: Optional[str]
+    owner_info: str | None
     acquired_at: datetime
     expires_at: datetime
     heartbeat_at: datetime
-    last_run_at: Optional[datetime]
+    last_run_at: datetime | None
     run_count: int
     skip_count: int
     fail_count: int
@@ -129,7 +128,7 @@ class LeaderElectionClient:
         # State tracking
         self._is_leader = False
         self._lock_key = job_name_to_lock_key(job_name)
-        self._heartbeat_thread: Optional[threading.Thread] = None
+        self._heartbeat_thread: threading.Thread | None = None
         self._stop_heartbeat = threading.Event()
         self._lock = threading.Lock()
 
@@ -143,7 +142,7 @@ class LeaderElectionClient:
             f"leader_id={self.leader_id}, strategy={self.strategy}"
         )
 
-    def try_acquire_leadership(self, timeout: Optional[int] = None) -> bool:
+    def try_acquire_leadership(self, timeout: int | None = None) -> bool:
         """Attempt to acquire leadership.
 
         Args:
@@ -186,9 +185,7 @@ class LeaderElectionClient:
                 return True
             else:
                 self._skip_count += 1
-                logger.debug(
-                    f"Advisory lock not acquired (held by another): job={self.job_name}"
-                )
+                logger.debug(f"Advisory lock not acquired (held by another): job={self.job_name}")
                 return False
 
         except Exception as e:
@@ -248,9 +245,7 @@ class LeaderElectionClient:
                 return True
             else:
                 self._skip_count += 1
-                logger.debug(
-                    f"Heartbeat lock not acquired (held by another): job={self.job_name}"
-                )
+                logger.debug(f"Heartbeat lock not acquired (held by another): job={self.job_name}")
                 return False
 
         except Exception as e:
@@ -316,7 +311,9 @@ class LeaderElectionClient:
                     logger.error(f"Failed to release leadership: {e}")
             else:
                 # Advisory lock is released automatically on transaction commit
-                logger.info(f"Advisory lock will be released on transaction commit: job={self.job_name}")
+                logger.info(
+                    f"Advisory lock will be released on transaction commit: job={self.job_name}"
+                )
 
             self._is_leader = False
 
@@ -324,7 +321,7 @@ class LeaderElectionClient:
         """Check if currently the leader."""
         return self._is_leader
 
-    def get_leader_info(self) -> Optional[LeaderInfo]:
+    def get_leader_info(self) -> LeaderInfo | None:
         """Get current leader information.
 
         Returns:
@@ -361,8 +358,9 @@ class LeaderElectionClient:
             logger.error(f"Failed to get leader info: {e}")
             return None
 
-    def record_run(self, status: str, duration_ms: Optional[int] = None,
-                    error_message: Optional[str] = None) -> None:
+    def record_run(
+        self, status: str, duration_ms: int | None = None, error_message: str | None = None
+    ) -> None:
         """Record a run execution.
 
         Args:
@@ -483,7 +481,7 @@ def check_scheduler_tables_exist(db: Database) -> bool:
                 WHERE table_name IN ('scheduler_leaders', 'scheduler_runs')
                 """
             )
-            return result and result.get("count", 0) == 2
+            return result is not None and result.get("count", 0) == 2
         else:
             # SQLite
             result = db.fetch_one(
@@ -493,7 +491,7 @@ def check_scheduler_tables_exist(db: Database) -> bool:
                 WHERE type='table' AND name IN ('scheduler_leaders', 'scheduler_runs')
                 """
             )
-            return result and result.get("count", 0) == 2
+            return result is not None and result.get("count", 0) == 2
     except Exception as e:
         logger.error(f"Failed to check scheduler tables: {e}")
         return False

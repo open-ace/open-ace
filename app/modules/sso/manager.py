@@ -1024,6 +1024,7 @@ def _release_cleanup_lock() -> None:
 def _cleanup_tick() -> None:
     """Single cleanup tick executed by timer with distributed lock (Issue #2187)."""
     import time
+
     global _shutdown_requested
 
     if _shutdown_requested:
@@ -1035,7 +1036,9 @@ def _cleanup_tick() -> None:
         from app.services.leader_election import LeaderElectionClient
 
         db = Database()
-        lock_client = LeaderElectionClient("sso_cleanup", db, strategy="heartbeat", lock_timeout=1800)
+        lock_client = LeaderElectionClient(
+            "sso_cleanup", db, strategy="heartbeat", lock_timeout=1800
+        )
 
         if not lock_client.try_acquire_leadership():
             logger.debug("SSO cleanup skipped - not leader")

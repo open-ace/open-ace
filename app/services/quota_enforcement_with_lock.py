@@ -4,9 +4,8 @@ Wrapper for quota enforcement scheduler with distributed lock (Issue #2187).
 This module provides a distributed lock wrapper for quota enforcement.
 """
 
-import time
 import logging
-from datetime import datetime, timezone
+import time
 
 logger = logging.getLogger(__name__)
 

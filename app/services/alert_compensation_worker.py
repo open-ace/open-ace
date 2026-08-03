@@ -139,12 +139,15 @@ class AlertCompensationWorker:
     def _process_failures(self):
         """Process failed alert creations with distributed lock (Issue #2187)."""
         import time
+
         from app.repositories.database import Database
         from app.services.leader_election import LeaderElectionClient
 
         # Acquire distributed lock
         db_local = Database()
-        lock_client = LeaderElectionClient("alert_compensation", db_local, strategy="heartbeat", lock_timeout=1800)
+        lock_client = LeaderElectionClient(
+            "alert_compensation", db_local, strategy="heartbeat", lock_timeout=1800
+        )
 
         if not lock_client.try_acquire_leadership():
             logger.debug("Alert compensation skipped - not leader")

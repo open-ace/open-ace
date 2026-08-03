@@ -414,7 +414,7 @@ def create_app(config=None):
 
         return jsonify(results), status_code
 
-# Readiness check endpoint (Issue #2186, #2190)
+    # Readiness check endpoint (Issue #2186, #2190)
     @app.route("/readyz")
     def readiness_check():
         """Readiness check endpoint for Kubernetes and load balancers.

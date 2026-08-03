@@ -10,10 +10,9 @@ Issue #2187
 from __future__ import annotations
 
 import logging
-import os
 import time
-from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, Callable, Optional
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from app.repositories.database import Database
@@ -69,16 +68,14 @@ class DistributedScheduler:
         self.heartbeat_interval = heartbeat_interval
         self.heartbeat_timeout = heartbeat_timeout
 
-        self._leader_client: Optional[LeaderElectionClient] = None
+        self._leader_client: LeaderElectionClient | None = None
         self._metrics: dict[str, int] = {
             "run_count": 0,
             "skip_count": 0,
             "fail_count": 0,
         }
 
-        logger.info(
-            f"DistributedScheduler initialized: job={job_name}, strategy={strategy}"
-        )
+        logger.info(f"DistributedScheduler initialized: job={job_name}, strategy={strategy}")
 
     def _get_leader_client(self) -> LeaderElectionClient:
         """Get or create leader election client."""
@@ -171,7 +168,7 @@ def run_job_with_metrics(job_name: str, db: Database, job_func: Callable[[], Non
         True if job executed, False if skipped
     """
     start_time = time.time()
-    from app.services.leader_election import LeaderElectionClient, job_name_to_lock_key
+    from app.services.leader_election import LeaderElectionClient
 
     client = LeaderElectionClient(job_name, db, strategy="auto")
 

@@ -258,7 +258,9 @@ class QuotaEnforcementScheduler:
         db_local = Database()
         is_test_env = not db_local.is_postgresql  # SQLite usually indicates test
 
-        lock_client = LeaderElectionClient("quota_enforcement", db_local, strategy="heartbeat", lock_timeout=1800)
+        lock_client = LeaderElectionClient(
+            "quota_enforcement", db_local, strategy="heartbeat", lock_timeout=1800
+        )
         lock_acquired = lock_client.try_acquire_leadership()
 
         if not lock_acquired and not is_test_env:

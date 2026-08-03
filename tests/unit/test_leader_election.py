@@ -34,7 +34,8 @@ def db():
     cursor = conn.cursor()
 
     # Create scheduler_leaders table
-    cursor.execute('''
+    cursor.execute(
+        """
         CREATE TABLE IF NOT EXISTS scheduler_leaders (
             job_name TEXT PRIMARY KEY,
             leader_id TEXT NOT NULL,
@@ -47,10 +48,12 @@ def db():
             skip_count INTEGER DEFAULT 0,
             fail_count INTEGER DEFAULT 0
         )
-    ''')
+    """
+    )
 
     # Create scheduler_runs table
-    cursor.execute('''
+    cursor.execute(
+        """
         CREATE TABLE IF NOT EXISTS scheduler_runs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             job_name TEXT NOT NULL,
@@ -62,13 +65,22 @@ def db():
             error_message TEXT,
             metrics TEXT
         )
-    ''')
+    """
+    )
 
     # Create indexes
-    cursor.execute('CREATE INDEX IF NOT EXISTS idx_scheduler_leaders_expires ON scheduler_leaders (expires_at)')
-    cursor.execute('CREATE INDEX IF NOT EXISTS idx_scheduler_leaders_heartbeat ON scheduler_leaders (heartbeat_at)')
-    cursor.execute('CREATE INDEX IF NOT EXISTS idx_scheduler_runs_job_time ON scheduler_runs (job_name, started_at DESC)')
-    cursor.execute('CREATE INDEX IF NOT EXISTS idx_scheduler_runs_status ON scheduler_runs (status)')
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_scheduler_leaders_expires ON scheduler_leaders (expires_at)"
+    )
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_scheduler_leaders_heartbeat ON scheduler_leaders (heartbeat_at)"
+    )
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_scheduler_runs_job_time ON scheduler_runs (job_name, started_at DESC)"
+    )
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_scheduler_runs_status ON scheduler_runs (status)"
+    )
 
     conn.commit()
     conn.close()
@@ -79,8 +91,8 @@ def db():
     try:
         conn = database.get_connection()
         cursor = conn.cursor()
-        cursor.execute('DELETE FROM scheduler_runs')
-        cursor.execute('DELETE FROM scheduler_leaders')
+        cursor.execute("DELETE FROM scheduler_runs")
+        cursor.execute("DELETE FROM scheduler_leaders")
         conn.commit()
         conn.close()
     except Exception:
@@ -284,9 +296,7 @@ class TestLeaderElectionConcurrency:
                 client.release_leadership()
 
         # Start multiple threads
-        threads = [
-            threading.Thread(target=try_acquire) for _ in range(5)
-        ]
+        threads = [threading.Thread(target=try_acquire) for _ in range(5)]
 
         for t in threads:
             t.start()
@@ -303,7 +313,7 @@ class TestLeaderElectionConcurrency:
 # Skip advisory lock tests on SQLite (not supported)
 @pytest.mark.skipif(
     not pytest.importorskip("app.repositories.database").Database().is_postgresql,
-    reason="Advisory locks require PostgreSQL"
+    reason="Advisory locks require PostgreSQL",
 )
 class TestAdvisoryLock:
     """Tests for PostgreSQL advisory locks."""

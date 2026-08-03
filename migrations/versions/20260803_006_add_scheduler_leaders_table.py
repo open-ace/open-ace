@@ -1,4 +1,4 @@
-"""add_scheduler_leaders_table
+"""Add scheduler_leaders and scheduler_runs tables.
 
 Issue #2187: Create tables for distributed scheduler leader election.
 
@@ -6,9 +6,9 @@ Tables created:
 - scheduler_leaders: Leader election state for each job
 - scheduler_runs: Execution history for metrics and troubleshooting
 
-Revision ID: 9508dfc8c62a
-Revises: 0ae05f5e2247
-Create Date: 2026-08-03 13:34:08.308282
+Revision ID: 20260803_006_add_scheduler_leaders_table
+Revises: 20260803_005_add_ci_repair_no_change_retries
+Create Date: 2026-08-03
 
 """
 
@@ -24,8 +24,8 @@ if TYPE_CHECKING:
 
 
 # revision identifiers, used by Alembic.
-revision: str = "20260803_003_add_scheduler_leaders_table"
-down_revision: str | None = "20260803_002_create_retention_tables"
+revision: str = "20260803_006_add_scheduler_leaders_table"
+down_revision: str | None = "20260803_005_add_ci_repair_no_change_retries"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -95,10 +95,7 @@ def upgrade() -> None:
         "CREATE INDEX IF NOT EXISTS idx_scheduler_runs_job_time "
         "ON scheduler_runs (job_name, started_at DESC)"
     )
-    op.execute(
-        "CREATE INDEX IF NOT EXISTS idx_scheduler_runs_status "
-        "ON scheduler_runs (status)"
-    )
+    op.execute("CREATE INDEX IF NOT EXISTS idx_scheduler_runs_status " "ON scheduler_runs (status)")
 
 
 def downgrade() -> None:
