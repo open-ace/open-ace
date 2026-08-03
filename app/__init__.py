@@ -382,8 +382,18 @@ def create_app(config=None):
 
         return jsonify(results), status_code
 
-    # Start background services
-    start_background_services()
+    # Start background services (Issue #2187)
+    # Web workers should NOT start schedulers - only scheduler worker should
+    # Environment variable SCHEDULER_MODE controls behavior:
+    # - "scheduler": Start all schedulers (scheduler worker)
+    # - "web" or unset: Do NOT start schedulers (web worker)
+    # Development mode (server.py) starts both web and scheduler
+    scheduler_mode = os.environ.get("SCHEDULER_MODE", "web")
+    if scheduler_mode == "scheduler":
+        start_background_services()
+        logger.info("Background services started (SCHEDULER_MODE=scheduler)")
+    else:
+        logger.info("Background services NOT started (SCHEDULER_MODE=%s)", scheduler_mode)
 
     logger.info("Open ACE application initialized")
     return app
