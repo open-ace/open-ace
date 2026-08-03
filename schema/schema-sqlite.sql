@@ -1615,7 +1615,7 @@ CREATE INDEX idx_insights_reports_user_date ON insights_reports (user_id, start_
 
 CREATE INDEX idx_knowledge_team ON knowledge_base (team_id);
 
-CREATE INDEX idx_legal_holds_active ON legal_holds (lifted_at) WHERE (lifted_at IS NULL);
+CREATE INDEX idx_legal_holds_active ON legal_holds (id) WHERE (lifted_at IS NULL);
 
 CREATE INDEX idx_legal_holds_data_type ON legal_holds (data_type);
 

@@ -2954,7 +2954,7 @@ CREATE INDEX idx_knowledge_team ON knowledge_base USING btree (team_id);
 --
 --
 
-CREATE INDEX idx_legal_holds_active ON legal_holds USING btree (lifted_at) WHERE (lifted_at IS NULL);
+CREATE INDEX idx_legal_holds_active ON legal_holds USING btree (id) WHERE (lifted_at IS NULL);
 
 CREATE INDEX idx_legal_holds_data_type ON legal_holds USING btree (data_type);
 
