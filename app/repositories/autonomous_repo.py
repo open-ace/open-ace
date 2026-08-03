@@ -186,8 +186,11 @@ class AutonomousWorkflowRepository:
                 ),
                 list(active_statuses),
             )
-            cols = [d[0] for d in cursor.description]
-            return [dict(zip(cols, row)) for row in cursor.fetchall()]
+            # RealDictRow (PG) and sqlite3.Row both convert via dict(row).
+            # Do NOT use dict(zip(cols, row)): a RealDictRow iterates as its
+            # KEYS (column names), so zip yields {column_name: column_name}
+            # and every value becomes a string — see #2259.
+            return [dict(row) for row in cursor.fetchall()]
         finally:
             conn.close()
 
@@ -210,8 +213,11 @@ class AutonomousWorkflowRepository:
                     """
                 )
             )
-            cols = [d[0] for d in cursor.description]
-            return [dict(zip(cols, row)) for row in cursor.fetchall()]
+            # RealDictRow (PG) and sqlite3.Row both convert via dict(row).
+            # Do NOT use dict(zip(cols, row)): a RealDictRow iterates as its
+            # KEYS (column names), so zip yields {column_name: column_name}
+            # and every value becomes a string — see #2259.
+            return [dict(row) for row in cursor.fetchall()]
         finally:
             conn.close()
 
@@ -237,8 +243,11 @@ class AutonomousWorkflowRepository:
                     """
                 )
             )
-            cols = [d[0] for d in cursor.description]
-            return [dict(zip(cols, row)) for row in cursor.fetchall()]
+            # RealDictRow (PG) and sqlite3.Row both convert via dict(row).
+            # Do NOT use dict(zip(cols, row)): a RealDictRow iterates as its
+            # KEYS (column names), so zip yields {column_name: column_name}
+            # and every value becomes a string — see #2259.
+            return [dict(row) for row in cursor.fetchall()]
         finally:
             conn.close()
 
