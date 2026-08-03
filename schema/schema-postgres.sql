@@ -357,6 +357,33 @@ CREATE SEQUENCE api_key_store_id_seq
     CACHE 1;
 
 ALTER SEQUENCE api_key_store_id_seq OWNED BY api_key_store.id;
+CREATE TABLE archive_files (
+    id integer NOT NULL,
+    tenant_id integer NOT NULL,
+    execution_id character varying(64) NOT NULL,
+    data_type character varying(50) NOT NULL,
+    batch_id integer NOT NULL,
+    file_path text NOT NULL,
+    file_size bigint,
+    checksum character varying(64) NOT NULL,
+    record_count integer NOT NULL,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    expires_at timestamp without time zone,
+    deleted_at timestamp without time zone,
+    verified_at timestamp without time zone,
+    verification_status character varying(20),
+    source_deleted boolean DEFAULT false NOT NULL
+);
+
+CREATE SEQUENCE archive_files_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE archive_files_id_seq OWNED BY archive_files.id;
 CREATE TABLE audit_logs (
     id integer NOT NULL,
     "timestamp" timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
@@ -771,6 +798,31 @@ CREATE SEQUENCE knowledge_base_id_seq
     CACHE 1;
 
 ALTER SEQUENCE knowledge_base_id_seq OWNED BY knowledge_base.id;
+CREATE TABLE legal_holds (
+    id integer NOT NULL,
+    tenant_id integer NOT NULL,
+    hold_type character varying(20) NOT NULL,
+    data_type character varying(50),
+    record_id text,
+    reason text NOT NULL,
+    case_reference character varying(200),
+    created_by integer NOT NULL,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    expires_at timestamp without time zone,
+    lifted_by integer,
+    lifted_at timestamp without time zone,
+    lift_reason text
+);
+
+CREATE SEQUENCE legal_holds_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE legal_holds_id_seq OWNED BY legal_holds.id;
 CREATE TABLE login_attempts (
     username character varying(255) NOT NULL,
     attempt_count integer DEFAULT 0 NOT NULL,
@@ -1056,6 +1108,29 @@ CREATE SEQUENCE quota_usage_new_id_seq
     CACHE 1;
 
 ALTER SEQUENCE quota_usage_new_id_seq OWNED BY quota_usage.id;
+CREATE TABLE recycle_bin (
+    id integer NOT NULL,
+    tenant_id integer NOT NULL,
+    execution_id character varying(64) NOT NULL,
+    data_type character varying(50) NOT NULL,
+    original_id integer NOT NULL,
+    record_data text NOT NULL,
+    deleted_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    expires_at timestamp without time zone NOT NULL,
+    restored_at timestamp without time zone,
+    restored_by integer,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+CREATE SEQUENCE recycle_bin_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE recycle_bin_id_seq OWNED BY recycle_bin.id;
 CREATE TABLE registration_tokens (
     id integer NOT NULL,
     token_hash character varying NOT NULL,
@@ -1149,6 +1224,71 @@ CREATE SEQUENCE remote_runtime_outputs_id_seq
     CACHE 1;
 
 ALTER SEQUENCE remote_runtime_outputs_id_seq OWNED BY remote_runtime_outputs.id;
+CREATE TABLE retention_evidence (
+    id integer NOT NULL,
+    execution_id character varying(64) NOT NULL,
+    tenant_id integer NOT NULL,
+    data_type character varying(50) NOT NULL,
+    action character varying(20) NOT NULL,
+    before_count integer,
+    after_count integer,
+    records_affected integer,
+    cutoff_date timestamp without time zone NOT NULL,
+    archive_location text,
+    archive_checksum character varying(64),
+    error_count integer DEFAULT 0 NOT NULL,
+    error_sample text,
+    policy_version integer,
+    policy_config text,
+    policy_source character varying(20),
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+CREATE SEQUENCE retention_evidence_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE retention_evidence_id_seq OWNED BY retention_evidence.id;
+CREATE TABLE retention_executions (
+    id integer NOT NULL,
+    execution_id character varying(64) NOT NULL,
+    tenant_id integer NOT NULL,
+    policy_id integer,
+    status character varying(20) NOT NULL,
+    dry_run boolean DEFAULT false NOT NULL,
+    started_at timestamp without time zone,
+    completed_at timestamp without time zone,
+    lock_acquired_at timestamp without time zone,
+    lock_expires_at timestamp without time zone,
+    records_scanned integer DEFAULT 0 NOT NULL,
+    records_affected integer DEFAULT 0 NOT NULL,
+    records_skipped integer DEFAULT 0 NOT NULL,
+    records_archived integer DEFAULT 0 NOT NULL,
+    records_anonymized integer DEFAULT 0 NOT NULL,
+    records_in_recycle_bin integer DEFAULT 0 NOT NULL,
+    error_message text,
+    error_details text,
+    batch_size integer DEFAULT 1000 NOT NULL,
+    last_batch_id integer,
+    total_batches integer,
+    last_batch_status character varying(20),
+    max_records_override integer,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+CREATE SEQUENCE retention_executions_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE retention_executions_id_seq OWNED BY retention_executions.id;
 CREATE TABLE retention_history (
     id integer NOT NULL,
     "timestamp" timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
@@ -1164,6 +1304,33 @@ CREATE SEQUENCE retention_history_id_seq
     CACHE 1;
 
 ALTER SEQUENCE retention_history_id_seq OWNED BY retention_history.id;
+CREATE TABLE retention_policies (
+    id integer NOT NULL,
+    tenant_id integer,
+    data_type character varying(50) NOT NULL,
+    retention_days integer NOT NULL,
+    action character varying(20) NOT NULL,
+    enabled boolean DEFAULT true NOT NULL,
+    version integer DEFAULT 1 NOT NULL,
+    archive_target character varying(50),
+    archive_config text,
+    anonymize_fields text,
+    backup_before_anonymize boolean DEFAULT false NOT NULL,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    created_by integer,
+    updated_by integer
+);
+
+CREATE SEQUENCE retention_policies_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE retention_policies_id_seq OWNED BY retention_policies.id;
 CREATE TABLE role_permissions (
     id integer NOT NULL,
     role text NOT NULL,
@@ -1976,6 +2143,8 @@ ALTER TABLE ONLY anomaly_status ALTER COLUMN id SET DEFAULT nextval('anomaly_sta
 
 ALTER TABLE ONLY api_key_store ALTER COLUMN id SET DEFAULT nextval('api_key_store_id_seq'::regclass);
 
+ALTER TABLE ONLY archive_files ALTER COLUMN id SET DEFAULT nextval('archive_files_id_seq'::regclass);
+
 ALTER TABLE ONLY audit_logs ALTER COLUMN id SET DEFAULT nextval('audit_logs_id_seq'::regclass);
 
 ALTER TABLE ONLY autonomous_workflows ALTER COLUMN id SET DEFAULT nextval('autonomous_workflows_id_seq'::regclass);
@@ -1998,6 +2167,8 @@ ALTER TABLE ONLY insights_reports ALTER COLUMN id SET DEFAULT nextval('insights_
 
 ALTER TABLE ONLY knowledge_base ALTER COLUMN id SET DEFAULT nextval('knowledge_base_id_seq'::regclass);
 
+ALTER TABLE ONLY legal_holds ALTER COLUMN id SET DEFAULT nextval('legal_holds_id_seq'::regclass);
+
 ALTER TABLE ONLY machine_assignments ALTER COLUMN id SET DEFAULT nextval('machine_assignments_id_seq'::regclass);
 
 ALTER TABLE ONLY model_gateway_config ALTER COLUMN id SET DEFAULT nextval('model_gateway_config_id_seq'::regclass);
@@ -2018,6 +2189,8 @@ ALTER TABLE ONLY quota_alerts ALTER COLUMN id SET DEFAULT nextval('quota_alerts_
 
 ALTER TABLE ONLY quota_usage ALTER COLUMN id SET DEFAULT nextval('quota_usage_new_id_seq'::regclass);
 
+ALTER TABLE ONLY recycle_bin ALTER COLUMN id SET DEFAULT nextval('recycle_bin_id_seq'::regclass);
+
 ALTER TABLE ONLY registration_tokens ALTER COLUMN id SET DEFAULT nextval('registration_tokens_id_seq'::regclass);
 
 ALTER TABLE ONLY remote_machines ALTER COLUMN id SET DEFAULT nextval('remote_machines_id_seq'::regclass);
@@ -2026,7 +2199,13 @@ ALTER TABLE ONLY remote_runtime_commands ALTER COLUMN id SET DEFAULT nextval('re
 
 ALTER TABLE ONLY remote_runtime_outputs ALTER COLUMN id SET DEFAULT nextval('remote_runtime_outputs_id_seq'::regclass);
 
+ALTER TABLE ONLY retention_evidence ALTER COLUMN id SET DEFAULT nextval('retention_evidence_id_seq'::regclass);
+
+ALTER TABLE ONLY retention_executions ALTER COLUMN id SET DEFAULT nextval('retention_executions_id_seq'::regclass);
+
 ALTER TABLE ONLY retention_history ALTER COLUMN id SET DEFAULT nextval('retention_history_id_seq'::regclass);
+
+ALTER TABLE ONLY retention_policies ALTER COLUMN id SET DEFAULT nextval('retention_policies_id_seq'::regclass);
 
 ALTER TABLE ONLY role_permissions ALTER COLUMN id SET DEFAULT nextval('role_permissions_id_seq'::regclass);
 
@@ -2151,6 +2330,9 @@ ALTER TABLE ONLY api_key_store
 ALTER TABLE ONLY api_key_store
     ADD CONSTRAINT api_key_store_tenant_id_provider_key_name_key UNIQUE (tenant_id, provider, key_name);
 
+ALTER TABLE ONLY archive_files
+    ADD CONSTRAINT archive_files_pkey PRIMARY KEY (id);
+
 ALTER TABLE ONLY audit_logs
     ADD CONSTRAINT audit_logs_pkey PRIMARY KEY (id);
 
@@ -2192,6 +2374,9 @@ ALTER TABLE ONLY knowledge_base
 
 ALTER TABLE ONLY knowledge_base
     ADD CONSTRAINT knowledge_base_pkey PRIMARY KEY (id);
+
+ALTER TABLE ONLY legal_holds
+    ADD CONSTRAINT legal_holds_pkey PRIMARY KEY (id);
 
 ALTER TABLE ONLY login_attempts
     ADD CONSTRAINT login_attempts_pkey PRIMARY KEY (username);
@@ -2238,6 +2423,9 @@ ALTER TABLE ONLY quota_alerts
 ALTER TABLE ONLY quota_usage
     ADD CONSTRAINT quota_usage_new_pkey PRIMARY KEY (id);
 
+ALTER TABLE ONLY recycle_bin
+    ADD CONSTRAINT recycle_bin_pkey PRIMARY KEY (id);
+
 ALTER TABLE ONLY registration_tokens
     ADD CONSTRAINT registration_tokens_pkey PRIMARY KEY (id);
 
@@ -2259,8 +2447,23 @@ ALTER TABLE ONLY remote_runtime_commands
 ALTER TABLE ONLY remote_runtime_outputs
     ADD CONSTRAINT remote_runtime_outputs_pkey PRIMARY KEY (id);
 
+ALTER TABLE ONLY retention_evidence
+    ADD CONSTRAINT retention_evidence_pkey PRIMARY KEY (id);
+
+ALTER TABLE ONLY retention_executions
+    ADD CONSTRAINT retention_executions_execution_id_key UNIQUE (execution_id);
+
+ALTER TABLE ONLY retention_executions
+    ADD CONSTRAINT retention_executions_pkey PRIMARY KEY (id);
+
 ALTER TABLE ONLY retention_history
     ADD CONSTRAINT retention_history_pkey PRIMARY KEY (id);
+
+ALTER TABLE ONLY retention_policies
+    ADD CONSTRAINT retention_policies_pkey PRIMARY KEY (id);
+
+ALTER TABLE ONLY retention_policies
+    ADD CONSTRAINT retention_policies_tenant_id_data_type_version_key UNIQUE (tenant_id, data_type, version);
 
 ALTER TABLE ONLY role_permissions
     ADD CONSTRAINT role_permissions_pkey PRIMARY KEY (id);
@@ -2575,151 +2778,191 @@ CREATE INDEX idx_api_key_store_tenant_provider ON api_key_store USING btree (ten
 --
 --
 
+CREATE INDEX idx_archive_files_batch ON archive_files USING btree (execution_id, batch_id);
+
+CREATE INDEX idx_archive_files_checksum ON archive_files USING btree (checksum);
+
+
+--
+--
+
+CREATE INDEX idx_archive_files_expires ON archive_files USING btree (expires_at);
+
+CREATE INDEX idx_archive_files_tenant ON archive_files USING btree (tenant_id);
+
+
+--
+--
+
 CREATE INDEX idx_audit_action ON audit_logs USING btree (action);
+
+CREATE INDEX idx_audit_logs_tenant_id ON audit_logs USING btree (tenant_id);
+
+
+--
+--
+
+CREATE INDEX idx_audit_logs_tenant_timestamp ON audit_logs USING btree (tenant_id, "timestamp");
+
+CREATE INDEX idx_audit_logs_timestamp ON audit_logs USING btree ("timestamp");
+
+
+--
+--
 
 CREATE INDEX idx_audit_resource ON audit_logs USING btree (resource_type, resource_id);
 
-
---
---
-
 CREATE INDEX idx_audit_severity ON audit_logs USING btree (severity);
+
+
+--
+--
 
 CREATE INDEX idx_audit_tenant_id ON audit_logs USING btree (tenant_id);
 
-
---
---
-
 CREATE INDEX idx_audit_timestamp ON audit_logs USING btree ("timestamp");
+
+
+--
+--
 
 CREATE INDEX idx_audit_user_id ON audit_logs USING btree (user_id);
 
-
---
---
-
 CREATE INDEX idx_command_evidence_session_command ON command_execution_evidence USING btree (session_id, command_id);
+
+
+--
+--
 
 CREATE INDEX idx_command_evidence_workflow_milestone ON command_execution_evidence USING btree (workflow_id, milestone_id);
 
-
---
---
-
 CREATE INDEX idx_consistency_violations_detected ON consistency_violations USING btree (detected_at);
+
+
+--
+--
 
 CREATE INDEX idx_consistency_violations_status ON consistency_violations USING btree (status);
 
-
---
---
-
 CREATE INDEX idx_consistency_violations_tenant ON consistency_violations USING btree (tenant_id);
+
+
+--
+--
 
 CREATE INDEX idx_daily_messages_orphan ON daily_messages USING btree (date) WHERE (tenant_id IS NULL);
 
-
---
---
-
 CREATE INDEX idx_daily_messages_tenant_date ON daily_messages USING btree (tenant_id, date);
+
+
+--
+--
 
 CREATE INDEX idx_daily_stats_date ON daily_stats USING btree (date);
 
-
---
---
-
 CREATE INDEX idx_daily_stats_date_tool ON daily_stats USING btree (date, tool_name);
+
+
+--
+--
 
 CREATE INDEX idx_daily_stats_date_tool_host ON daily_stats USING btree (date, tool_name, host_name);
 
-
---
---
-
 CREATE INDEX idx_daily_stats_host ON daily_stats USING btree (host_name);
+
+
+--
+--
 
 CREATE INDEX idx_daily_stats_orphan ON daily_stats USING btree (date) WHERE (tenant_id IS NULL);
 
-
---
---
-
 CREATE INDEX idx_daily_stats_project ON daily_stats USING btree (project_id);
+
+
+--
+--
 
 CREATE INDEX idx_daily_stats_sender ON daily_stats USING btree (sender_name);
 
-
---
---
-
 CREATE INDEX idx_daily_stats_tenant_date ON daily_stats USING btree (tenant_id, date);
+
+
+--
+--
 
 CREATE INDEX idx_daily_stats_tool ON daily_stats USING btree (tool_name);
 
-
---
---
-
 CREATE INDEX idx_daily_stats_user_id ON daily_stats USING btree (user_id);
+
+
+--
+--
 
 CREATE INDEX idx_email_logs_sent_at ON email_notification_logs USING btree (sent_at);
 
-
---
---
-
 CREATE INDEX idx_email_logs_status ON email_notification_logs USING btree (status);
+
+
+--
+--
 
 CREATE INDEX idx_email_logs_user_id ON email_notification_logs USING btree (user_id);
 
-
---
---
-
 CREATE INDEX idx_email_logs_user_sent ON email_notification_logs USING btree (user_id, sent_at);
+
+
+--
+--
 
 CREATE INDEX idx_events_workflow_created ON workflow_events USING btree (workflow_id, created_at);
 
-
---
---
-
 CREATE INDEX idx_filter_rules_enabled ON content_filter_rules USING btree (is_enabled);
+
+
+--
+--
 
 CREATE INDEX idx_filter_rules_type ON content_filter_rules USING btree (type);
 
-
---
---
-
 CREATE INDEX idx_hourly_stats_date ON hourly_stats USING btree (date);
+
+
+--
+--
 
 CREATE INDEX idx_hourly_stats_date_hour ON hourly_stats USING btree (date, hour);
 
-
---
---
-
 CREATE INDEX idx_hourly_stats_hour ON hourly_stats USING btree (hour);
+
+
+--
+--
 
 CREATE INDEX idx_hourly_stats_orphan ON hourly_stats USING btree (date) WHERE (tenant_id IS NULL);
 
-
---
---
-
 CREATE INDEX idx_hourly_stats_tenant_date ON hourly_stats USING btree (tenant_id, date);
+
+
+--
+--
 
 CREATE INDEX idx_insights_reports_user_date ON insights_reports USING btree (user_id, start_date, end_date);
 
-
---
---
-
 CREATE INDEX idx_knowledge_team ON knowledge_base USING btree (team_id);
+
+
+--
+--
+
+CREATE INDEX idx_legal_holds_active ON legal_holds USING btree (id) WHERE (lifted_at IS NULL);
+
+CREATE INDEX idx_legal_holds_data_type ON legal_holds USING btree (data_type);
+
+
+--
+--
+
+CREATE INDEX idx_legal_holds_tenant ON legal_holds USING btree (tenant_id);
 
 CREATE INDEX idx_login_attempts_locked_until ON login_attempts USING btree (locked_until);
 
@@ -2905,373 +3148,427 @@ CREATE INDEX idx_quota_usage_date ON quota_usage USING btree (date);
 
 CREATE INDEX idx_quota_usage_user ON quota_usage USING btree (user_id);
 
+CREATE INDEX idx_recycle_bin_execution ON recycle_bin USING btree (execution_id);
+
+
+--
+--
+
+CREATE INDEX idx_recycle_bin_expires ON recycle_bin USING btree (expires_at);
+
+CREATE INDEX idx_recycle_bin_tenant ON recycle_bin USING btree (tenant_id);
+
+
+--
+--
+
 CREATE INDEX idx_registration_tokens_hash ON registration_tokens USING btree (token_hash);
-
-
---
---
 
 CREATE INDEX idx_remote_machines_hostname_tenant ON remote_machines USING btree (hostname, tenant_id);
 
+
+--
+--
+
 CREATE INDEX idx_remote_machines_machine_id ON remote_machines USING btree (machine_id);
-
-
---
---
 
 CREATE INDEX idx_remote_machines_status ON remote_machines USING btree (status);
 
+
+--
+--
+
 CREATE INDEX idx_remote_runtime_commands_expires ON remote_runtime_commands USING btree (expires_at);
-
-
---
---
 
 CREATE INDEX idx_remote_runtime_commands_machine_status ON remote_runtime_commands USING btree (machine_id, status, id);
 
+
+--
+--
+
 CREATE INDEX idx_remote_runtime_outputs_expires ON remote_runtime_outputs USING btree (expires_at);
-
-
---
---
 
 CREATE INDEX idx_remote_runtime_outputs_session_index ON remote_runtime_outputs USING btree (session_id, event_index);
 
+
+--
+--
+
+CREATE INDEX idx_retention_evidence_execution ON retention_evidence USING btree (execution_id);
+
+CREATE INDEX idx_retention_evidence_tenant ON retention_evidence USING btree (tenant_id);
+
+
+--
+--
+
+CREATE INDEX idx_retention_evidence_timestamp ON retention_evidence USING btree (created_at);
+
+CREATE INDEX idx_retention_executions_execution_id ON retention_executions USING btree (execution_id);
+
+
+--
+--
+
+CREATE INDEX idx_retention_executions_lock ON retention_executions USING btree (lock_acquired_at, lock_expires_at);
+
+CREATE INDEX idx_retention_executions_status ON retention_executions USING btree (status);
+
+
+--
+--
+
+CREATE INDEX idx_retention_executions_tenant ON retention_executions USING btree (tenant_id);
+
+CREATE INDEX idx_retention_policies_data_type ON retention_policies USING btree (data_type);
+
+
+--
+--
+
+CREATE INDEX idx_retention_policies_enabled ON retention_policies USING btree (enabled);
+
+CREATE INDEX idx_retention_policies_tenant ON retention_policies USING btree (tenant_id);
+
+
+--
+--
+
 CREATE INDEX idx_run_events_created_at ON agent_run_events USING btree (created_at);
-
-
---
---
 
 CREATE INDEX idx_run_events_event_type ON agent_run_events USING btree (event_type);
 
+
+--
+--
+
 CREATE INDEX idx_run_events_run_id ON agent_run_events USING btree (run_id);
-
-
---
---
 
 CREATE INDEX idx_run_events_session_id ON agent_run_events USING btree (session_id, id);
 
+
+--
+--
+
 CREATE INDEX idx_security_settings_key ON security_settings USING btree (setting_key);
-
-
---
---
 
 CREATE INDEX idx_session_messages_external_message_id ON session_messages USING btree (session_id, external_message_id);
 
+
+--
+--
+
 CREATE INDEX idx_session_messages_session_id ON session_messages USING btree (session_id);
-
-
---
---
 
 CREATE INDEX idx_session_messages_session_timestamp ON session_messages USING btree (session_id, "timestamp", id);
 
+
+--
+--
+
 CREATE INDEX idx_session_messages_source ON session_messages USING btree (session_id, source);
-
-
---
---
 
 CREATE INDEX idx_session_messages_tenant_session ON session_messages USING btree (tenant_id, session_id);
 
+
+--
+--
+
 CREATE INDEX idx_session_messages_tenant_session_timestamp ON session_messages USING btree (tenant_id, session_id, "timestamp", id);
-
-
---
---
 
 CREATE INDEX idx_session_stats_session_id ON session_stats USING btree (session_id);
 
+
+--
+--
+
 CREATE INDEX idx_session_stats_tool_host ON session_stats USING btree (tool_name, host_name);
-
-
---
---
 
 CREATE INDEX idx_session_stats_updated_at ON session_stats USING btree (updated_at DESC);
 
+
+--
+--
+
 CREATE INDEX idx_sessions_active ON sessions USING btree (is_active, expires_at);
-
-
---
---
 
 CREATE INDEX idx_sessions_expires ON sessions USING btree (expires_at);
 
+
+--
+--
+
 CREATE INDEX idx_sessions_token ON sessions USING btree (token);
-
-
---
---
 
 CREATE INDEX idx_sessions_user_id ON sessions USING btree (user_id);
 
+
+--
+--
+
 CREATE INDEX idx_shared_sessions_session ON shared_sessions USING btree (session_id);
-
-
---
---
 
 CREATE INDEX idx_shared_sessions_target ON shared_sessions USING btree (target_id);
 
+
+--
+--
+
 CREATE INDEX idx_sso_auth_states_expires ON sso_auth_states USING btree (expires_at);
-
-
---
---
 
 CREATE INDEX idx_sso_identities_provider ON sso_identities USING btree (provider_name, provider_user_id);
 
+
+--
+--
+
 CREATE INDEX idx_sso_identities_user ON sso_identities USING btree (user_id);
-
-
---
---
 
 CREATE INDEX idx_sso_providers_tenant ON sso_providers USING btree (tenant_id);
 
+
+--
+--
+
 CREATE INDEX idx_sso_sessions_token ON sso_sessions USING btree (session_token);
-
-
---
---
 
 CREATE INDEX idx_sso_sessions_user ON sso_sessions USING btree (user_id);
 
+
+--
+--
+
 CREATE INDEX idx_sync_events_session_id ON sync_events USING btree (session_id);
-
-
---
---
 
 CREATE INDEX idx_sync_events_timestamp ON sync_events USING btree ("timestamp");
 
+
+--
+--
+
 CREATE INDEX idx_sync_events_user_id ON sync_events USING btree (user_id);
-
-
---
---
 
 CREATE INDEX idx_team_members_team ON team_members USING btree (team_id);
 
+
+--
+--
+
 CREATE INDEX idx_team_members_user ON team_members USING btree (user_id);
-
-
---
---
 
 CREATE INDEX idx_teams_owner ON teams USING btree (owner_id);
 
+
+--
+--
+
 CREATE INDEX idx_teams_sync_source ON teams USING btree ((((settings)::jsonb ->> 'sync_source'::text)));
-
-
---
---
 
 CREATE INDEX idx_tenant_migrations_status ON tenant_migrations USING btree (status);
 
+
+--
+--
+
 CREATE INDEX idx_tenant_migrations_user ON tenant_migrations USING btree (user_id);
-
-
---
---
 
 CREATE INDEX idx_tenant_period_history_dates ON tenant_period_history USING btree (period_start, period_end);
 
+
+--
+--
+
 CREATE INDEX idx_tenant_period_history_tenant ON tenant_period_history USING btree (tenant_id);
-
-
---
---
 
 CREATE INDEX idx_tenant_plans_active ON tenant_plans USING btree (is_active);
 
+
+--
+--
+
 CREATE INDEX idx_tenant_plans_slug ON tenant_plans USING btree (slug);
-
-
---
---
 
 CREATE INDEX idx_tenant_quotas_tenant ON tenant_quotas USING btree (tenant_id);
 
+
+--
+--
+
 CREATE INDEX idx_tenant_settings_tenant ON tenant_settings USING btree (tenant_id);
-
-
---
---
 
 CREATE INDEX idx_tenant_usage_date ON tenant_usage USING btree (date);
 
+
+--
+--
+
 CREATE INDEX idx_tenant_usage_tenant ON tenant_usage USING btree (tenant_id);
-
-
---
---
 
 CREATE INDEX idx_tenants_billing_cycle ON tenants USING btree (billing_cycle_end);
 
+
+--
+--
+
 CREATE INDEX idx_tenants_deleted ON tenants USING btree (deleted_at);
-
-
---
---
 
 CREATE INDEX idx_tenants_slug ON tenants USING btree (slug);
 
+
+--
+--
+
 CREATE INDEX idx_tenants_status ON tenants USING btree (status);
-
-
---
---
 
 CREATE INDEX idx_test_evidence_session_command ON test_execution_evidence USING btree (session_id, command_id);
 
+
+--
+--
+
 CREATE INDEX idx_test_evidence_workflow_milestone ON test_execution_evidence USING btree (workflow_id, milestone_id);
-
-
---
---
 
 CREATE INDEX idx_tool_accounts_tool_account ON user_tool_accounts USING btree (tool_account);
 
+
+--
+--
+
 CREATE INDEX idx_tool_accounts_user_id ON user_tool_accounts USING btree (user_id);
-
-
---
---
 
 CREATE INDEX idx_usage_date ON daily_usage USING btree (date);
 
+
+--
+--
+
 CREATE INDEX idx_usage_date_tool_host ON daily_usage USING btree (tenant_id, date, tool_name, host_name);
-
-
---
---
 
 CREATE INDEX idx_usage_host_name ON daily_usage USING btree (host_name);
 
+
+--
+--
+
 CREATE INDEX idx_usage_report_rate_limits_updated ON usage_report_rate_limits USING btree (updated_at);
-
-
---
---
 
 CREATE INDEX idx_usage_report_receipts_session ON usage_report_receipts USING btree (session_id, created_at);
 
+
+--
+--
+
 CREATE INDEX idx_usage_summary_host ON usage_summary USING btree (host_name);
-
-
---
---
 
 CREATE INDEX idx_usage_summary_host_name_valid ON usage_summary USING btree (host_name) WHERE ((host_name IS NOT NULL) AND ((host_name)::text <> ''::text) AND ((host_name)::text !~~ '<%>'::text) AND ((length((host_name)::text) >= 1) AND (length((host_name)::text) <= 253)));
 
+
+--
+--
+
 CREATE INDEX idx_usage_summary_tool ON usage_summary USING btree (tool_name);
-
-
---
---
 
 CREATE INDEX idx_usage_tenant_date ON daily_usage USING btree (tenant_id, date);
 
+
+--
+--
+
 CREATE INDEX idx_usage_tool_name ON daily_usage USING btree (tool_name);
-
-
---
---
 
 CREATE INDEX idx_user_daily_stats_date ON user_daily_stats USING btree (date DESC);
 
+
+--
+--
+
 CREATE INDEX idx_user_daily_stats_user_date ON user_daily_stats USING btree (user_id, date DESC);
-
-
---
---
 
 CREATE INDEX idx_user_projects_project ON user_projects USING btree (project_id);
 
+
+--
+--
+
 CREATE INDEX idx_user_projects_user ON user_projects USING btree (user_id);
-
-
---
---
 
 CREATE INDEX idx_users_active ON users USING btree (is_active);
 
+
+--
+--
+
 CREATE INDEX idx_users_deleted ON users USING btree (deleted_at);
-
-
---
---
 
 CREATE INDEX idx_users_email ON users USING btree (email);
 
+
+--
+--
+
 CREATE INDEX idx_users_role ON users USING btree (role);
-
-
---
---
 
 CREATE INDEX idx_users_system_account ON users USING btree (system_account) WHERE ((deleted_at IS NULL) AND (is_active = true) AND (system_account IS NOT NULL));
 
+
+--
+--
+
 CREATE INDEX idx_users_tenant ON users USING btree (tenant_id);
-
-
---
---
 
 CREATE INDEX idx_users_username ON users USING btree (username) WHERE ((deleted_at IS NULL) AND (is_active = true));
 
+
+--
+--
+
 CREATE INDEX idx_webhook_deliveries_alert ON webhook_deliveries USING btree (alert_id);
-
-
---
---
 
 CREATE INDEX idx_webhook_deliveries_status_retry ON webhook_deliveries USING btree (status, next_retry_at);
 
+
+--
+--
+
 CREATE INDEX idx_webhook_deliveries_user ON webhook_deliveries USING btree (user_id);
-
-
---
---
 
 CREATE INDEX idx_workflows_batch_order ON autonomous_workflows USING btree (batch_id, batch_order);
 
+
+--
+--
+
 CREATE INDEX idx_workflows_parent ON autonomous_workflows USING btree (parent_workflow_id);
-
-
---
---
 
 CREATE INDEX idx_workflows_status_created ON autonomous_workflows USING btree (status, created_at);
 
+
+--
+--
+
 CREATE INDEX idx_workflows_user_status ON autonomous_workflows USING btree (user_id, status);
-
-
---
---
 
 CREATE UNIQUE INDEX ix_anomaly_status_type_hash ON anomaly_status USING btree (anomaly_type, affected_users_hash);
 
+
+--
+--
+
 CREATE UNIQUE INDEX policy_decisions_decision_id_key ON policy_decisions USING btree (decision_id);
-
-
---
---
 
 CREATE UNIQUE INDEX policy_rules_rule_key_version_key ON policy_rules USING btree (rule_key, version);
 
+
+--
+--
+
 CREATE UNIQUE INDEX uq_projects_path ON projects USING btree (tenant_id, path) WHERE (is_active IS TRUE);
 
-
---
---
-
 CREATE UNIQUE INDEX uq_user_projects_user_project ON user_projects USING btree (user_id, project_id);
+
+
+--
+--
 
 ALTER TABLE ONLY alerts_history
     ADD CONSTRAINT alerts_history_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE;
@@ -3284,6 +3581,9 @@ ALTER TABLE ONLY api_key_store
 
 ALTER TABLE ONLY api_key_store
     ADD CONSTRAINT api_key_store_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id);
+
+ALTER TABLE ONLY archive_files
+    ADD CONSTRAINT archive_files_execution_id_fkey FOREIGN KEY (execution_id) REFERENCES retention_executions(execution_id);
 
 ALTER TABLE ONLY autonomous_workflows
     ADD CONSTRAINT autonomous_workflows_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
@@ -3303,6 +3603,9 @@ ALTER TABLE ONLY users
 ALTER TABLE ONLY insights_reports
     ADD CONSTRAINT insights_reports_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id);
 
+ALTER TABLE ONLY legal_holds
+    ADD CONSTRAINT legal_holds_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id);
+
 ALTER TABLE ONLY machine_assignments
     ADD CONSTRAINT machine_assignments_granted_by_fkey FOREIGN KEY (granted_by) REFERENCES users(id);
 
@@ -3318,11 +3621,29 @@ ALTER TABLE ONLY quota_alerts
 ALTER TABLE ONLY quota_usage
     ADD CONSTRAINT quota_usage_new_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
 
+ALTER TABLE ONLY recycle_bin
+    ADD CONSTRAINT recycle_bin_execution_id_fkey FOREIGN KEY (execution_id) REFERENCES retention_executions(execution_id);
+
+ALTER TABLE ONLY recycle_bin
+    ADD CONSTRAINT recycle_bin_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id);
+
 ALTER TABLE ONLY remote_machines
     ADD CONSTRAINT remote_machines_created_by_fkey FOREIGN KEY (created_by) REFERENCES users(id);
 
 ALTER TABLE ONLY remote_machines
     ADD CONSTRAINT remote_machines_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id);
+
+ALTER TABLE ONLY retention_evidence
+    ADD CONSTRAINT retention_evidence_execution_id_fkey FOREIGN KEY (execution_id) REFERENCES retention_executions(execution_id);
+
+ALTER TABLE ONLY retention_executions
+    ADD CONSTRAINT retention_executions_policy_id_fkey FOREIGN KEY (policy_id) REFERENCES retention_policies(id);
+
+ALTER TABLE ONLY retention_executions
+    ADD CONSTRAINT retention_executions_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id);
+
+ALTER TABLE ONLY retention_policies
+    ADD CONSTRAINT retention_policies_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id);
 
 ALTER TABLE ONLY session_messages
     ADD CONSTRAINT session_messages_session_id_fkey FOREIGN KEY (session_id) REFERENCES agent_sessions(session_id);
@@ -3368,159 +3689,3 @@ ALTER TABLE ONLY web_user_auth_sessions
 
 ALTER TABLE ONLY workflow_milestones
     ADD CONSTRAINT workflow_milestones_workflow_id_fkey FOREIGN KEY (workflow_id) REFERENCES autonomous_workflows(workflow_id) ON DELETE CASCADE;
-
--- Issue #2188: Retention policy and execution tables
-
-CREATE TABLE retention_policies (
-    id SERIAL PRIMARY KEY,
-    tenant_id INTEGER,
-    data_type VARCHAR(50) NOT NULL,
-    retention_days INTEGER NOT NULL,
-    action VARCHAR(20) NOT NULL,
-    enabled BOOLEAN DEFAULT TRUE,
-    version INTEGER DEFAULT 1,
-    archive_target VARCHAR(50),
-    archive_config TEXT,
-    anonymize_fields TEXT,
-    backup_before_anonymize BOOLEAN DEFAULT FALSE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    created_by INTEGER,
-    updated_by INTEGER,
-    UNIQUE(tenant_id, data_type, version),
-    FOREIGN KEY (tenant_id) REFERENCES tenants(id)
-);
-
-CREATE INDEX idx_retention_policies_tenant ON retention_policies(tenant_id);
-CREATE INDEX idx_retention_policies_enabled ON retention_policies(enabled);
-CREATE INDEX idx_retention_policies_data_type ON retention_policies(data_type);
-
-CREATE TABLE retention_executions (
-    id SERIAL PRIMARY KEY,
-    execution_id VARCHAR(64) NOT NULL UNIQUE,
-    tenant_id INTEGER NOT NULL,
-    policy_id INTEGER,
-    status VARCHAR(20) NOT NULL,
-    dry_run BOOLEAN DEFAULT FALSE,
-    started_at TIMESTAMP,
-    completed_at TIMESTAMP,
-    lock_acquired_at TIMESTAMP,
-    lock_expires_at TIMESTAMP,
-    records_scanned INTEGER DEFAULT 0,
-    records_affected INTEGER DEFAULT 0,
-    records_skipped INTEGER DEFAULT 0,
-    records_archived INTEGER DEFAULT 0,
-    records_anonymized INTEGER DEFAULT 0,
-    records_in_recycle_bin INTEGER DEFAULT 0,
-    error_message TEXT,
-    error_details TEXT,
-    batch_size INTEGER DEFAULT 1000,
-    last_batch_id INTEGER,
-    total_batches INTEGER,
-    last_batch_status VARCHAR(20),
-    max_records_override INTEGER,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (tenant_id) REFERENCES tenants(id),
-    FOREIGN KEY (policy_id) REFERENCES retention_policies(id)
-);
-
-CREATE INDEX idx_retention_executions_tenant ON retention_executions(tenant_id);
-CREATE INDEX idx_retention_executions_status ON retention_executions(status);
-CREATE INDEX idx_retention_executions_execution_id ON retention_executions(execution_id);
-CREATE INDEX idx_retention_executions_lock ON retention_executions(lock_acquired_at, lock_expires_at);
-
-CREATE TABLE legal_holds (
-    id SERIAL PRIMARY KEY,
-    tenant_id INTEGER NOT NULL,
-    hold_type VARCHAR(20) NOT NULL,
-    data_type VARCHAR(50),
-    record_id TEXT,
-    reason TEXT NOT NULL,
-    case_reference VARCHAR(200),
-    created_by INTEGER NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    expires_at TIMESTAMP,
-    lifted_by INTEGER,
-    lifted_at TIMESTAMP,
-    lift_reason TEXT,
-    FOREIGN KEY (tenant_id) REFERENCES tenants(id)
-);
-
-CREATE INDEX idx_legal_holds_tenant ON legal_holds(tenant_id);
--- PostgreSQL: partial index for active (unlifted) holds
-CREATE INDEX idx_legal_holds_active ON legal_holds(id) WHERE lifted_at IS NULL;
-CREATE INDEX idx_legal_holds_data_type ON legal_holds(data_type);
-
-CREATE TABLE retention_evidence (
-    id SERIAL PRIMARY KEY,
-    execution_id VARCHAR(64) NOT NULL,
-    tenant_id INTEGER NOT NULL,
-    data_type VARCHAR(50) NOT NULL,
-    action VARCHAR(20) NOT NULL,
-    before_count INTEGER,
-    after_count INTEGER,
-    records_affected INTEGER,
-    cutoff_date TIMESTAMP NOT NULL,
-    archive_location TEXT,
-    archive_checksum VARCHAR(64),
-    error_count INTEGER DEFAULT 0,
-    error_sample TEXT,
-    policy_version INTEGER,
-    policy_config TEXT,
-    policy_source VARCHAR(20),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (execution_id) REFERENCES retention_executions(execution_id)
-);
-
-CREATE INDEX idx_retention_evidence_execution ON retention_evidence(execution_id);
-CREATE INDEX idx_retention_evidence_tenant ON retention_evidence(tenant_id);
-CREATE INDEX idx_retention_evidence_timestamp ON retention_evidence(created_at);
-
-CREATE TABLE archive_files (
-    id SERIAL PRIMARY KEY,
-    tenant_id INTEGER NOT NULL,
-    execution_id VARCHAR(64) NOT NULL,
-    data_type VARCHAR(50) NOT NULL,
-    batch_id INTEGER NOT NULL,
-    file_path TEXT NOT NULL,
-    file_size BIGINT,
-    checksum VARCHAR(64) NOT NULL,
-    record_count INTEGER NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    expires_at TIMESTAMP,
-    deleted_at TIMESTAMP,
-    verified_at TIMESTAMP,
-    verification_status VARCHAR(20),
-    source_deleted BOOLEAN DEFAULT FALSE,
-    FOREIGN KEY (execution_id) REFERENCES retention_executions(execution_id)
-);
-
-CREATE INDEX idx_archive_files_tenant ON archive_files(tenant_id);
-CREATE INDEX idx_archive_files_expires ON archive_files(expires_at);
-CREATE INDEX idx_archive_files_checksum ON archive_files(checksum);
-CREATE INDEX idx_archive_files_batch ON archive_files(execution_id, batch_id);
-
-CREATE TABLE recycle_bin (
-    id SERIAL PRIMARY KEY,
-    tenant_id INTEGER NOT NULL,
-    execution_id VARCHAR(64) NOT NULL,
-    data_type VARCHAR(50) NOT NULL,
-    original_id INTEGER NOT NULL,
-    record_data TEXT NOT NULL,
-    deleted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    expires_at TIMESTAMP NOT NULL,
-    restored_at TIMESTAMP,
-    restored_by INTEGER,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (tenant_id) REFERENCES tenants(id),
-    FOREIGN KEY (execution_id) REFERENCES retention_executions(execution_id)
-);
-
-CREATE INDEX idx_recycle_bin_tenant ON recycle_bin(tenant_id);
-CREATE INDEX idx_recycle_bin_expires ON recycle_bin(expires_at);
-CREATE INDEX idx_recycle_bin_execution ON recycle_bin(execution_id);
-
--- Issue #2188 Phase 0: Audit logs retention indexes
-CREATE INDEX idx_audit_logs_tenant_id ON audit_logs(tenant_id);
-CREATE INDEX idx_audit_logs_timestamp ON audit_logs(timestamp);
-CREATE INDEX idx_audit_logs_tenant_timestamp ON audit_logs(tenant_id, timestamp);
