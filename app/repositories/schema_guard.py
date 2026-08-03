@@ -95,21 +95,25 @@ def _table_exists(connection: Any, table_name: str) -> bool:
     Uses dialect-appropriate SQL:
     - PostgreSQL: information_schema.tables
     - SQLite: sqlite_master
+
+    Note: table_name is always a hardcoded constant (e.g. "alembic_version"),
+    so string interpolation is safe here and avoids parameterization complexity
+    across heterogeneous connection types.
     """
+    # table_name is always a hardcoded constant ("alembic_version"), so
+    # string interpolation is safe — no user input involved.
     if _is_sqlite(connection):
         query = (
-            f"SELECT EXISTS ("
-            f"  SELECT 1 FROM sqlite_master"
-            f"  WHERE type='table' AND name='{table_name}'"
-            f")"
-        )
+            "SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type='table' AND name='"
+            + table_name
+            + "')"
+        )  # nosec: B608
     else:
         query = (
-            f"SELECT EXISTS ("
-            f"  SELECT FROM information_schema.tables"
-            f"  WHERE table_name = '{table_name}'"
-            f")"
-        )
+            "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = '"
+            + table_name
+            + "')"
+        )  # nosec: B608
     return bool(_execute_scalar(connection, query))
 
 

@@ -12,7 +12,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import sqlalchemy as sa
 from alembic import op
 
 if TYPE_CHECKING:
@@ -59,8 +58,7 @@ def upgrade() -> None:
                 "CREATE INDEX IF NOT EXISTS idx_teams_sync_source "
                 "ON teams ((settings->>'sync_source'))"
             )
-        except Exception:
-            # SQLite may not support JSON expression indexes
+        except Exception:  # nosec: B110 - SQLite may lack JSON index support
             pass
 
 
@@ -71,5 +69,5 @@ def downgrade() -> None:
     else:
         try:
             op.drop_index("idx_teams_sync_source", table_name="teams")
-        except Exception:
+        except Exception:  # nosec: B110 - best-effort downgrade
             pass
