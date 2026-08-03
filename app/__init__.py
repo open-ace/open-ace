@@ -12,6 +12,7 @@ import re
 import uuid
 from urllib.parse import urlparse
 
+import sqlalchemy as sa
 from flask import Flask, g, has_request_context, jsonify, request
 from werkzeug.exceptions import HTTPException
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -327,10 +328,41 @@ def create_app(config=None):
     # Register blueprints
     register_blueprints(app)
 
-    # Ensure all tables exist (runs DDL once at startup, not per-request)
-    from app.repositories.schema_init import ensure_all_tables
+    # Schema initialization: distinguish production vs development paths (Issue #2190)
+    from app.repositories.database import is_postgresql
+    from app.repositories.schema_guard import (
+        SchemaCompatibilityError,
+        check_schema_compatibility,
+        get_environment_mode,
+    )
 
-    ensure_all_tables()
+    env_mode = get_environment_mode()
+
+    if is_postgresql() and env_mode == "production":
+        # PostgreSQL production path: check schema version, do NOT execute DDL
+        from app.repositories.database import Database
+
+        db = Database()
+        conn = db.get_connection()
+        try:
+            check_schema_compatibility(conn)
+        except SchemaCompatibilityError as e:
+            logger.error(f"Schema compatibility check failed: {e}")
+            raise RuntimeError(
+                f"Database schema is not compatible. {e}\n"
+                f"Current revision: {e.current_revision}\n"
+                f"Minimum required: {e.min_revision}\n"
+                "Run 'alembic upgrade head' to migrate database."
+            )
+        finally:
+            conn.close()
+        logger.info("Production schema version check passed")
+    else:
+        # SQLite development path: allow bootstrap
+        from app.repositories.schema_init import ensure_all_tables
+
+        ensure_all_tables()
+        logger.info(f"Development schema bootstrap completed (mode={env_mode})")
 
     # Pre-check encryption key registry (Issue #1820)
     _precheck_encryption_registry()
@@ -381,6 +413,103 @@ def create_app(config=None):
             status_code = 503
 
         return jsonify(results), status_code
+
+    # Readiness check endpoint (Issue #2186, #2190)
+    @app.route("/readyz")
+    def readiness_check():
+        """Readiness check endpoint for Kubernetes and load balancers.
+
+        Checks database connection and schema version compatibility.
+        Returns HTTP 503 if any check fails, with clear recovery instructions.
+        Does NOT automatically fix schema issues.
+        """
+        from app.repositories.database import Database, is_postgresql
+        from app.repositories.schema_guard import (
+            MIN_SUPPORTED_REVISION,
+            get_database_revision,
+            get_environment_mode,
+        )
+
+        checks: dict[str, dict[str, str | bool | None]] = {
+            "database": {"status": "unknown"},
+            "schema_version": {"status": "unknown", "compatible": False},
+            "background_services": {"status": "unknown"},
+        }
+
+        status_code = 200
+
+        # Check database connection
+        try:
+            db = Database()
+            conn = db.get_connection()
+            conn.execute(sa.text("SELECT 1"))
+            conn.close()
+            checks["database"]["status"] = "ok"
+        except Exception as e:
+            checks["database"]["status"] = "error"
+            checks["database"]["error"] = str(e)
+            status_code = 503
+
+        # Check schema version (PostgreSQL production only)
+        if is_postgresql() and get_environment_mode() == "production":
+            try:
+                db = Database()
+                conn = db.get_connection()
+                current_revision = get_database_revision(conn)
+                conn.close()
+
+                checks["schema_version"]["current"] = current_revision
+                checks["schema_version"]["required"] = MIN_SUPPORTED_REVISION
+
+                if current_revision is None:
+                    # Fresh database
+                    checks["schema_version"]["status"] = "fresh"
+                    checks["schema_version"]["compatible"] = True
+                elif current_revision < MIN_SUPPORTED_REVISION:
+                    # Version too old
+                    checks["schema_version"]["status"] = "incompatible"
+                    checks["schema_version"]["compatible"] = False
+                    status_code = 503
+                else:
+                    # Version OK
+                    checks["schema_version"]["status"] = "ok"
+                    checks["schema_version"]["compatible"] = True
+
+            except Exception as e:
+                checks["schema_version"]["status"] = "error"
+                checks["schema_version"]["error"] = str(e)
+                status_code = 503
+        else:
+            # SQLite development mode - skip schema version check
+            checks["schema_version"]["status"] = "skipped"
+            checks["schema_version"]["compatible"] = True
+
+        # Check background services (simplified)
+        try:
+            # Just check if they're importable
+            from app.services.data_fetch_scheduler import init_scheduler
+
+            checks["background_services"]["status"] = "ok"
+        except Exception as e:
+            checks["background_services"]["status"] = "error"
+            checks["background_services"]["error"] = str(e)
+            # Background services failure is not critical for readiness
+            # status_code remains unchanged
+
+        # Build response
+        if status_code == 503:
+            response = {
+                "status": "not_ready",
+                "checks": checks,
+                "action": "Run 'alembic upgrade head' to migrate database",
+            }
+        else:
+            response = {
+                "status": "ready",
+                "checks": checks,
+            }
+
+        return jsonify(response), status_code
 
     # Start background services
     start_background_services()
