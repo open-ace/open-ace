@@ -101,6 +101,9 @@ RUN echo "deb http://mirrors.aliyun.com/debian/ trixie main" > /etc/apt/sources.
     # === npm and CLI Setup ===
     && npm config set registry https://registry.npmmirror.com/ \
     && npm install -g qwen-code-webui @qwen-code/qwen-code \
+    # === code-server Installation (for local workspace VS Code button) ===
+    && curl -fsSL --connect-timeout 15 --max-time 300 https://code-server.dev/install.sh | sh \
+    && test -x /usr/bin/code-server \
     # === CLI Verification ===
     && test -f /usr/lib/node_modules/@qwen-code/qwen-code/cli.js \
     && test -x /usr/bin/qwen-code-webui \
