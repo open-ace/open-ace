@@ -65,6 +65,26 @@ def update_model_gateway_config():
 
         base_url = data.get("base_url")
         api_key = data.get("api_key")
+
+        # Issue #2170: Frontend omits api_key field to preserve existing key.
+        # Fall back to stored config when api_key is None (field not sent).
+        if api_key is None:
+            try:
+                stored = get_gateway_service().get_config_with_key()
+                if stored is not None:
+                    api_key = stored.api_key
+                    logger.info(
+                        "Using stored api_key for gateway config update (user omitted api_key field)"
+                    )
+                else:
+                    logger.warning("No stored gateway config found for api_key fallback")
+                    return jsonify(
+                        {"success": False, "error": "Gateway API key is required"}
+                    ), 400
+            except Exception as e:
+                logger.error("Failed to retrieve stored gateway config: %s", e)
+                return jsonify({"success": False, "error": "Internal server error"}), 500
+
         if not base_url:
             return jsonify({"success": False, "error": "Missing required field: base_url"}), 400
 
