@@ -147,11 +147,14 @@ export const mappingRulesApi = {
     toolType?: string,
     description?: string
   ): Promise<ToolAccount> {
-    return apiClient.post<ToolAccount>(`/api/unmapped-accounts/${encodeURIComponent(senderName)}/map`, {
-      user_id: userId,
-      tool_type: toolType,
-      description,
-    });
+    return apiClient.post<ToolAccount>(
+      `/api/unmapped-accounts/${encodeURIComponent(senderName)}/map`,
+      {
+        user_id: userId,
+        tool_type: toolType,
+        description,
+      }
+    );
   },
 };
 
