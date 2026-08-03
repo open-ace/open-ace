@@ -33,6 +33,16 @@ class AutoMappingResult:
     created_mapping_id: int | None = None
 
 
+@dataclass
+class GenerateDefaultRulesResult:
+    """Result of generating default mapping rules for a user."""
+
+    created: list[ToolAccountMappingRule]
+    skipped: list[dict]  # Contains pattern, match_type, priority
+    created_count: int
+    skipped_count: int
+
+
 class ToolAccountAutoMappingService:
     """Service for automatic tool account mapping."""
 
@@ -267,64 +277,117 @@ class ToolAccountAutoMappingService:
                 return tool
         return None
 
-    def create_default_rules_for_user(self, user_id: int) -> list[ToolAccountMappingRule]:
+    def create_default_rules_for_user(self, user_id: int) -> GenerateDefaultRulesResult:
         """
         Create default mapping rules for a user based on their username/email.
 
         Default rules:
         1. {username}-* (prefix match) - matches sender_name starting with username
         2. *-{username}* (contains match) - fallback for other patterns
+
+        Issue #2131: Use UPSERT to avoid unique constraint conflicts and return detailed results.
+
+        Returns:
+            GenerateDefaultRulesResult with created and skipped rule counts.
         """
         query = "SELECT username, email FROM users WHERE id = ?"
         row = self.db.fetch_one(query, (user_id,))
         if not row:
-            return []
+            return GenerateDefaultRulesResult(
+                created=[], skipped=[], created_count=0, skipped_count=0
+            )
 
         username = row.get("username", "")
         email_prefix = row.get("email", "").split("@")[0] if row.get("email") else ""
 
-        rules = []
+        created_rules: list[ToolAccountMappingRule] = []
+        skipped_rules: list[dict] = []
 
         # Rule 1: username prefix match (highest priority)
         if username:
-            rule = self.rule_repo.create(
-                user_id=user_id,
-                pattern=f"{username}-*",
-                match_type="prefix",
-                priority=10,
-                is_auto=True,
-                description=f"Auto-generated: username prefix match for {username}",
-            )
-            if rule:
-                rules.append(rule)
+            rule_pattern = f"{username}-*"
+            rule_priority = 10
+            try:
+                rule = self.rule_repo.create_or_ignore(
+                    user_id=user_id,
+                    pattern=rule_pattern,
+                    match_type="prefix",
+                    priority=rule_priority,
+                    is_auto=True,
+                    description=f"Auto-generated: username prefix match for {username}",
+                )
+                if rule:
+                    created_rules.append(rule)
+                else:
+                    # Rule already exists (conflict), add to skipped
+                    skipped_rules.append({
+                        "pattern": rule_pattern,
+                        "match_type": "prefix",
+                        "priority": rule_priority,
+                    })
+            except Exception as e:
+                logger.error(f"Failed to create username prefix rule for user {user_id}: {e}")
 
         # Rule 2: email prefix match
         if email_prefix and email_prefix != username:
-            rule = self.rule_repo.create(
-                user_id=user_id,
-                pattern=f"{email_prefix}-*",
-                match_type="prefix",
-                priority=9,
-                is_auto=True,
-                description=f"Auto-generated: email prefix match for {email_prefix}",
-            )
-            if rule:
-                rules.append(rule)
+            rule_pattern = f"{email_prefix}-*"
+            rule_priority = 9
+            try:
+                rule = self.rule_repo.create_or_ignore(
+                    user_id=user_id,
+                    pattern=rule_pattern,
+                    match_type="prefix",
+                    priority=rule_priority,
+                    is_auto=True,
+                    description=f"Auto-generated: email prefix match for {email_prefix}",
+                )
+                if rule:
+                    created_rules.append(rule)
+                else:
+                    skipped_rules.append({
+                        "pattern": rule_pattern,
+                        "match_type": "prefix",
+                        "priority": rule_priority,
+                    })
+            except Exception as e:
+                logger.error(f"Failed to create email prefix rule for user {user_id}: {e}")
 
         # Rule 3: username contains match (lower priority fallback)
         if username:
-            rule = self.rule_repo.create(
-                user_id=user_id,
-                pattern=f"*{username}*",
-                match_type="contains",
-                priority=5,
-                is_auto=True,
-                description=f"Auto-generated: username contains match for {username}",
-            )
-            if rule:
-                rules.append(rule)
+            rule_pattern = f"*{username}*"
+            rule_priority = 5
+            try:
+                rule = self.rule_repo.create_or_ignore(
+                    user_id=user_id,
+                    pattern=rule_pattern,
+                    match_type="contains",
+                    priority=rule_priority,
+                    is_auto=True,
+                    description=f"Auto-generated: username contains match for {username}",
+                )
+                if rule:
+                    created_rules.append(rule)
+                else:
+                    skipped_rules.append({
+                        "pattern": rule_pattern,
+                        "match_type": "contains",
+                        "priority": rule_priority,
+                    })
+            except Exception as e:
+                logger.error(f"Failed to create username contains rule for user {user_id}: {e}")
 
-        return rules
+        # Log the result
+        logger.info(
+            f"Generated default rules for user {user_id}: "
+            f"created={len(created_rules)}, skipped={len(skipped_rules)}"
+        )
+
+        return GenerateDefaultRulesResult(
+            created=created_rules,
+            skipped=skipped_rules,
+            created_count=len(created_rules),
+            skipped_count=len(skipped_rules),
+        )
 
     def get_mapping_stats(self, tenant_id: int | None = None) -> dict:
         """

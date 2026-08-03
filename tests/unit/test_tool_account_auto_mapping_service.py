@@ -9,6 +9,7 @@ from app.models.tool_account_mapping_rule import ToolAccountMappingRule
 from app.models.user import User
 from app.services.tool_account_auto_mapping_service import (
     AutoMappingResult,
+    GenerateDefaultRulesResult,
     ToolAccountAutoMappingService,
 )
 
@@ -208,44 +209,77 @@ class TestToolAccountAutoMappingService(unittest.TestCase):
         self.assertEqual(result.user_id, 5)
         self.assertEqual(result.matched_by, "rule")
 
-    # create_default_rules_for_user
-    def test_create_default_rules_creates_three_rules(self):
-        """Test create_default_rules creates username prefix, email prefix, and contains rules."""
+    # create_default_rules_for_user (Issue #2131)
+    def test_create_default_rules_first_time(self):
+        """Test create_default_rules creates rules and returns detailed result."""
         self.mock_db.fetch_one.return_value = {"username": "alice", "email": "alice@example.com"}
 
         mock_rule_repo = MagicMock()
-        mock_rule_repo.create.side_effect = [
+        # All rules created successfully
+        mock_rule_repo.create_or_ignore.side_effect = [
             ToolAccountMappingRule(id=1, user_id=5, pattern="alice-*", match_type="prefix"),
-            ToolAccountMappingRule(id=2, user_id=5, pattern="alice-*", match_type="prefix"),
-            ToolAccountMappingRule(id=3, user_id=5, pattern="*alice*", match_type="contains"),
+            ToolAccountMappingRule(id=2, user_id=5, pattern="*alice*", match_type="contains"),
         ]
         self.service.rule_repo = mock_rule_repo
 
         result = self.service.create_default_rules_for_user(5)
 
-        # Should create 2 rules (username prefix and contains, email prefix equals username)
-        self.assertEqual(len(result), 2)
-        self.assertEqual(result[0].pattern, "alice-*")
+        # Should return GenerateDefaultRulesResult
+        self.assertIsInstance(result, GenerateDefaultRulesResult)
+        self.assertEqual(result.created_count, 2)
+        self.assertEqual(result.skipped_count, 0)
+        self.assertEqual(len(result.created), 2)
+        self.assertEqual(result.created[0].pattern, "alice-*")
 
-    def test_create_default_rules_different_email_prefix(self):
-        """Test create_default_rules creates separate email rule when different."""
+    def test_create_default_rules_already_exists(self):
+        """Test create_default_rules returns skipped rules when they already exist."""
+        self.mock_db.fetch_one.return_value = {"username": "alice", "email": "alice@example.com"}
+
+        mock_rule_repo = MagicMock()
+        # All rules already exist (create_or_ignore returns None)
+        mock_rule_repo.create_or_ignore.return_value = None
+        self.service.rule_repo = mock_rule_repo
+
+        result = self.service.create_default_rules_for_user(5)
+
+        # Should return GenerateDefaultRulesResult with skipped rules
+        self.assertIsInstance(result, GenerateDefaultRulesResult)
+        self.assertEqual(result.created_count, 0)
+        self.assertEqual(result.skipped_count, 2)  # username prefix + username contains
+        self.assertEqual(len(result.skipped), 2)
+
+    def test_create_default_rules_partial(self):
+        """Test create_default_rules handles partial success."""
         self.mock_db.fetch_one.return_value = {
             "username": "alice.chen",
             "email": "alice@example.com",  # Different prefix
         }
 
         mock_rule_repo = MagicMock()
-        mock_rule_repo.create.side_effect = [
+        # First rule created, second skipped, third created
+        mock_rule_repo.create_or_ignore.side_effect = [
             ToolAccountMappingRule(id=1, user_id=5, pattern="alice.chen-*", match_type="prefix"),
-            ToolAccountMappingRule(id=2, user_id=5, pattern="alice-*", match_type="prefix"),
+            None,  # Skipped (email prefix rule)
             ToolAccountMappingRule(id=3, user_id=5, pattern="*alice.chen*", match_type="contains"),
         ]
         self.service.rule_repo = mock_rule_repo
 
         result = self.service.create_default_rules_for_user(5)
 
-        # Should create 3 rules (username, email, contains)
-        self.assertEqual(len(result), 3)
+        self.assertEqual(result.created_count, 2)
+        self.assertEqual(result.skipped_count, 1)
+
+    def test_create_default_rules_user_not_found(self):
+        """Test create_default_rules returns empty result for non-existent user."""
+        self.mock_db.fetch_one.return_value = None
+
+        result = self.service.create_default_rules_for_user(999)
+
+        self.assertIsInstance(result, GenerateDefaultRulesResult)
+        self.assertEqual(result.created_count, 0)
+        self.assertEqual(result.skipped_count, 0)
+        self.assertEqual(len(result.created), 0)
+        self.assertEqual(len(result.skipped), 0)
 
 
 class TestToolAccountMappingRule(unittest.TestCase):
