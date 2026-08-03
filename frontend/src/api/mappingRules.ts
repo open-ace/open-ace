@@ -3,6 +3,7 @@
  */
 
 import { apiClient } from './client';
+import type { ToolAccount } from './toolAccounts';
 
 // Types
 export interface MappingRule {
@@ -157,6 +158,3 @@ export const mappingRulesApi = {
     );
   },
 };
-
-// Import ToolAccount type from toolAccounts.ts
-import type { ToolAccount } from './toolAccounts';
