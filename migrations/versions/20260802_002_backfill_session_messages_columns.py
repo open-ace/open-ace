@@ -83,73 +83,19 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """Remove backfilled columns from session_messages table (idempotent)."""
-    conn = op.get_bind()
-    inspector = sa.inspect(conn)
+    """No-op downgrade.
 
-    # Only remove columns if session_messages table exists
-    if "session_messages" not in inspector.get_table_names():
-        return
+    All five columns (source, source_timestamp, external_message_id,
+    content_blocks, milestone_id) are defined by the baseline schema
+    (baseline_2026_06_23) and were therefore present on every database before
+    this migration existed. The upgrade only conditionally adds them to repair
+    databases that pre-date the baseline (idempotent backfill). Removing them on
+    downgrade would break symmetry with the baseline: these columns and the
+    indexes idx_session_messages_external_message_id /
+    idx_session_messages_source are baseline-owned, so dropping the columns
+    here would make a subsequent re-upgrade (or downstream index recreation)
+    fail.
 
-    existing_columns = _column_names(inspector, "session_messages")
-
-    # Drop indexes that depend on the columns we're about to remove
-    # These indexes are defined in schema.sql but created by baseline
-    if conn.dialect.name == "postgresql":
-        # PostgreSQL: drop indexes directly
-        try:
-            op.execute("DROP INDEX IF EXISTS idx_session_messages_external_message_id")
-        except Exception:
-            pass  # Index may not exist
-        try:
-            op.execute("DROP INDEX IF EXISTS idx_session_messages_source")
-        except Exception:
-            pass  # Index may not exist
-    else:
-        # SQLite: use batch_alter_table for safety
-        try:
-            with op.batch_alter_table("session_messages") as batch_op:
-                batch_op.drop_index("idx_session_messages_external_message_id")
-        except Exception:
-            pass  # Index may not exist
-        try:
-            with op.batch_alter_table("session_messages") as batch_op:
-                batch_op.drop_index("idx_session_messages_source")
-        except Exception:
-            pass  # Index may not exist
-
-    # Drop columns in reverse order
-    if "milestone_id" in existing_columns:
-        if conn.dialect.name == "postgresql":
-            op.drop_column("session_messages", "milestone_id")
-        else:
-            with op.batch_alter_table("session_messages") as batch_op:
-                batch_op.drop_column("milestone_id")
-
-    if "content_blocks" in existing_columns:
-        if conn.dialect.name == "postgresql":
-            op.drop_column("session_messages", "content_blocks")
-        else:
-            with op.batch_alter_table("session_messages") as batch_op:
-                batch_op.drop_column("content_blocks")
-
-    if "external_message_id" in existing_columns:
-        if conn.dialect.name == "postgresql":
-            op.drop_column("session_messages", "external_message_id")
-        else:
-            with op.batch_alter_table("session_messages") as batch_op:
-                batch_op.drop_column("external_message_id")
-
-    if "source_timestamp" in existing_columns:
-        if conn.dialect.name == "postgresql":
-            op.drop_column("session_messages", "source_timestamp")
-        else:
-            with op.batch_alter_table("session_messages") as batch_op:
-                batch_op.drop_column("source_timestamp")
-
-    if "source" in existing_columns:
-        if conn.dialect.name == "postgresql":
-            op.drop_column("session_messages", "source")
-        else:
-            with op.batch_alter_table("session_messages") as batch_op:
-                batch_op.drop_column("source")
+    Because the columns are baseline-owned, the downgrade leaves the schema
+    unchanged and only rewinds the alembic revision pointer.
+    """

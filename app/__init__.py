@@ -430,7 +430,7 @@ def create_app(config=None):
             get_environment_mode,
         )
 
-        checks = {
+        checks: dict[str, dict[str, str | bool | None]] = {
             "database": {"status": "unknown"},
             "schema_version": {"status": "unknown", "compatible": False},
             "background_services": {"status": "unknown"},
@@ -488,6 +488,7 @@ def create_app(config=None):
         try:
             # Just check if they're importable
             from app.services.data_fetch_scheduler import init_scheduler
+
             checks["background_services"]["status"] = "ok"
         except Exception as e:
             checks["background_services"]["status"] = "error"

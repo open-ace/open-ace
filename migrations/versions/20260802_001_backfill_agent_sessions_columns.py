@@ -92,80 +92,17 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """Remove backfilled columns from agent_sessions table (idempotent)."""
-    conn = op.get_bind()
-    inspector = sa.inspect(conn)
+    """No-op downgrade.
 
-    # Only remove columns if agent_sessions table exists
-    if "agent_sessions" not in inspector.get_table_names():
-        return
+    All six columns (project_id, project_path, request_count, workspace_type,
+    remote_machine_id, paused_at) are defined by the baseline schema
+    (baseline_2026_06_23) and were therefore present on every database before
+    this migration existed. The upgrade only conditionally adds them to repair
+    databases that pre-date the baseline (idempotent backfill). Removing them on
+    downgrade would break symmetry with the baseline: a downstream migration
+    (20260721_002) creates an index on remote_machine_id, so dropping the column
+    here makes a subsequent re-upgrade fail with "no such column: remote_machine_id".
 
-    existing_columns = _column_names(inspector, "agent_sessions")
-
-    # Drop indexes that depend on the columns we're about to remove
-    # These indexes are defined in schema.sql but created by baseline
-    if conn.dialect.name == "postgresql":
-        # PostgreSQL: drop indexes directly
-        try:
-            op.execute("DROP INDEX IF EXISTS idx_agent_sessions_project")
-        except Exception:
-            pass  # Index may not exist
-        try:
-            op.execute("DROP INDEX IF EXISTS idx_agent_sessions_remote_machine_id")
-        except Exception:
-            pass  # Index may not exist
-    else:
-        # SQLite: use batch_alter_table for safety
-        try:
-            with op.batch_alter_table("agent_sessions") as batch_op:
-                batch_op.drop_index("idx_agent_sessions_project")
-        except Exception:
-            pass  # Index may not exist
-        try:
-            with op.batch_alter_table("agent_sessions") as batch_op:
-                batch_op.drop_index("idx_agent_sessions_remote_machine_id")
-        except Exception:
-            pass  # Index may not exist
-
-    # Drop columns in reverse order
-    if "paused_at" in existing_columns:
-        if conn.dialect.name == "postgresql":
-            op.drop_column("agent_sessions", "paused_at")
-        else:
-            with op.batch_alter_table("agent_sessions") as batch_op:
-                batch_op.drop_column("paused_at")
-
-    if "remote_machine_id" in existing_columns:
-        if conn.dialect.name == "postgresql":
-            op.drop_column("agent_sessions", "remote_machine_id")
-        else:
-            with op.batch_alter_table("agent_sessions") as batch_op:
-                batch_op.drop_column("remote_machine_id")
-
-    if "workspace_type" in existing_columns:
-        if conn.dialect.name == "postgresql":
-            op.drop_column("agent_sessions", "workspace_type")
-        else:
-            with op.batch_alter_table("agent_sessions") as batch_op:
-                batch_op.drop_column("workspace_type")
-
-    if "request_count" in existing_columns:
-        if conn.dialect.name == "postgresql":
-            op.drop_column("agent_sessions", "request_count")
-        else:
-            with op.batch_alter_table("agent_sessions") as batch_op:
-                batch_op.drop_column("request_count")
-
-    if "project_path" in existing_columns:
-        if conn.dialect.name == "postgresql":
-            op.drop_column("agent_sessions", "project_path")
-        else:
-            with op.batch_alter_table("agent_sessions") as batch_op:
-                batch_op.drop_column("project_path")
-
-    if "project_id" in existing_columns:
-        if conn.dialect.name == "postgresql":
-            op.drop_column("agent_sessions", "project_id")
-        else:
-            with op.batch_alter_table("agent_sessions") as batch_op:
-                batch_op.drop_column("project_id")
+    Because the columns are baseline-owned, the downgrade leaves the schema
+    unchanged and only rewinds the alembic revision pointer.
+    """
