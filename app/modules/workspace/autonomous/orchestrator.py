@@ -8428,7 +8428,7 @@ class AutonomousOrchestrator:
         # changes the way dev does, else the fix never reaches the PR (#960
         # symptom). A no-op fix is genuinely empty, not a failed dev round.
         commit_sha = ""
-        diff_stats = {}
+        diff_stats: dict[str, int] = {}
         try:
             commit_sha = gh.get_current_commit()
         except Exception as exc:
