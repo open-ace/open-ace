@@ -1677,6 +1677,22 @@ class AutonomousOrchestrator:
                 lines.append(excerpt)
                 lines.append("```")
             lines.append("")
+        if self._ci_failure_uses_schema_sync(failed_checks):
+            lines.append("## schema-sync 专项规则")
+            lines.append(
+                "上面的 schema-sync 失败摘录包含完整 diff（若未见 diff，说明本轮未取到日志，请用 "
+                "`gh run view <run-id> --log-failed` 自行取）。schema/*.sql 由迁移重新生成（byte-exact），"
+                "**绝不要手编**。"
+            )
+            lines.append(
+                "- diff 的 `+` 行就是重新生成后的正确内容——照搬应用到提交的文件即可（无需本地起 Postgres）。"
+            )
+            lines.append(
+                "- 若本地有可用临时 Postgres：`python scripts/rebuild_schema_snapshots.py --postgres-url <一次性-pg-url>`，"
+                "然后提交生成的 schema/schema-postgres.sql 和 schema/schema-sqlite.sql。"
+            )
+            lines.append("- 手编（括号、缩进、列序、类型大小写）几乎必定与重新生成结果不一致。")
+            lines.append("")
         lines.extend(
             [
                 "调查要求：",
@@ -2075,6 +2091,21 @@ class AutonomousOrchestrator:
                 "files were modified by this hook",
             )
         )
+
+    @staticmethod
+    def _ci_failure_uses_schema_sync(failed_checks: list[dict]) -> bool:
+        """Whether collected CI evidence identifies a schema-sync failure.
+
+        The check name is the Actions JOB name ('schema-sync', per
+        .github/workflows/schema-sync.yml), so a name match is reliable; the
+        excerpt fallback covers log-text mentions.
+        """
+        evidence = "\n".join(
+            str(check.get("name") or "") + " " + str(check.get("failure_excerpt") or "")
+            for check in failed_checks
+            if check.get("bucket") == "fail"
+        ).lower()
+        return "schema-sync" in evidence or "schema sync" in evidence
 
     def _converge_pre_commit_fixes(
         self,
@@ -3570,7 +3601,16 @@ class AutonomousOrchestrator:
             }:
                 actionable_count += 1
                 try:
-                    check["failure_excerpt"] = gh.get_check_failure_excerpt(check)
+                    if self._ci_failure_uses_schema_sync([check]):
+                        # schema-sync's byte-exact git-diff body has no failure-marker
+                        # lines, so the default _extract_failure_lines filter strips it.
+                        # Fetch unfiltered so the diff reaches the agent context AND the
+                        # failure fingerprint (#2216; PR #2255 review B1).
+                        check["failure_excerpt"] = gh.get_check_failure_excerpt(
+                            check, filter_lines=False, max_chars=8000
+                        )
+                    else:
+                        check["failure_excerpt"] = gh.get_check_failure_excerpt(check)
                 except Exception as exc:
                     logger.warning(
                         "Failed to collect CI diagnostics for PR #%s check '%s': %s",
