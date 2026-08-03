@@ -512,12 +512,7 @@ export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
                   <Badge
                     variant={
                       statusCfg.variant as
-                        | 'secondary'
-                        | 'info'
-                        | 'primary'
-                        | 'warning'
-                        | 'success'
-                        | 'danger'
+                        'secondary' | 'info' | 'primary' | 'warning' | 'success' | 'danger'
                     }
                   >
                     <i className={`bi ${statusCfg.icon} me-1`}></i>
@@ -545,12 +540,7 @@ export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
                 <Badge
                   variant={
                     statusCfg.variant as
-                      | 'secondary'
-                      | 'info'
-                      | 'primary'
-                      | 'warning'
-                      | 'success'
-                      | 'danger'
+                      'secondary' | 'info' | 'primary' | 'warning' | 'success' | 'danger'
                   }
                 >
                   <i className={`bi ${statusCfg.icon} me-1`}></i>
@@ -685,12 +675,7 @@ export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
                       key={status}
                       variant={
                         cfg.variant as
-                          | 'secondary'
-                          | 'info'
-                          | 'primary'
-                          | 'warning'
-                          | 'success'
-                          | 'danger'
+                          'secondary' | 'info' | 'primary' | 'warning' | 'success' | 'danger'
                       }
                     >
                       {t(cfg.labelKey, language)} {count}
