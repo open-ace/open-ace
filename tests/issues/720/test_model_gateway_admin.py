@@ -396,3 +396,170 @@ class TestApiKeyFallback:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+# ── Issue #2170: Integration Tests (Real SQLite Database) ─────────────────────
+
+
+class TestApiKeyFallbackIntegration:
+    """Integration tests for Issue #2170 on real SQLite database."""
+
+    def test_full_update_flow_preserves_api_key(self, tmp_path, monkeypatch):
+        """P1: End-to-end verification of API key preservation."""
+        from app.modules.workspace.model_gateway.repository import ModelGatewayConfigRepository
+
+        # Setup: Use real SQLite database
+        monkeypatch.setattr(
+            "app.modules.workspace.model_gateway.repository.is_postgresql",
+            lambda: False,
+        )
+
+        db_path = str(tmp_path / "gw_integration.db")
+
+        def fake_conn(self):
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            return conn
+
+        monkeypatch.setattr(ModelGatewayConfigRepository, "_get_connection", fake_conn)
+
+        # Initialize schema
+        with sqlite3.connect(db_path) as c:
+            c.execute(_DDL)
+
+        repo = ModelGatewayConfigRepository()
+
+        # Step 1: Initial save with api_key
+        initial_config = repo.save_config(
+            base_url="https://gateway.example.com/v1",
+            api_key="sk-initial-secret-key",
+            model_prefix_mode=True,
+            model_prefix="openai",
+            created_by=1,
+        )
+        assert initial_config["base_url"] == "https://gateway.example.com/v1"
+        assert initial_config["model_prefix"] == "openai"
+
+        # Step 2: Retrieve stored config (simulating fallback)
+        stored = repo.get_config_with_key()
+        assert stored is not None
+        assert stored.api_key == "sk-initial-secret-key"
+        assert stored.base_url == "https://gateway.example.com/v1"
+
+        # Step 3: Update base_url without providing api_key (use stored key)
+        updated_config = repo.save_config(
+            base_url="https://new-gateway.example.com/v1",
+            api_key=stored.api_key,  # Fallback value
+            model_prefix_mode=False,
+            model_prefix=None,
+            created_by=1,
+        )
+        assert updated_config["base_url"] == "https://new-gateway.example.com/v1"
+
+        # Step 4: Verify key is preserved
+        final_stored = repo.get_config_with_key()
+        assert final_stored is not None
+        assert final_stored.api_key == "sk-initial-secret-key"
+        assert final_stored.base_url == "https://new-gateway.example.com/v1"
+
+        # Verify old key is gone (single row replacement)
+        repo.delete_config()
+        assert repo.get_config() is None
+
+    def test_update_with_new_key_overwrites_old(self, tmp_path, monkeypatch):
+        """P1: Verify new api_key replaces old key."""
+        from app.modules.workspace.model_gateway.repository import ModelGatewayConfigRepository
+
+        monkeypatch.setattr(
+            "app.modules.workspace.model_gateway.repository.is_postgresql",
+            lambda: False,
+        )
+
+        db_path = str(tmp_path / "gw_new_key.db")
+
+        def fake_conn(self):
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            return conn
+
+        monkeypatch.setattr(ModelGatewayConfigRepository, "_get_connection", fake_conn)
+
+        with sqlite3.connect(db_path) as c:
+            c.execute(_DDL)
+
+        repo = ModelGatewayConfigRepository()
+
+        # Initial save
+        repo.save_config(
+            base_url="https://gateway.example.com/v1",
+            api_key="old-secret-key",
+            model_prefix_mode=False,
+            model_prefix=None,
+            created_by=1,
+        )
+
+        # Update with new key
+        repo.save_config(
+            base_url="https://gateway.example.com/v1",
+            api_key="new-secret-key",
+            model_prefix_mode=False,
+            model_prefix=None,
+            created_by=1,
+        )
+
+        # Verify new key is stored
+        stored = repo.get_config_with_key()
+        assert stored is not None
+        assert stored.api_key == "new-secret-key"
+
+    def test_empty_key_preservation_in_database(self, tmp_path, monkeypatch):
+        """P1: Verify empty api_key is preserved correctly."""
+        from app.modules.workspace.model_gateway.repository import ModelGatewayConfigRepository
+
+        monkeypatch.setattr(
+            "app.modules.workspace.model_gateway.repository.is_postgresql",
+            lambda: False,
+        )
+
+        db_path = str(tmp_path / "gw_empty_key.db")
+
+        def fake_conn(self):
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            return conn
+
+        monkeypatch.setattr(ModelGatewayConfigRepository, "_get_connection", fake_conn)
+
+        with sqlite3.connect(db_path) as c:
+            c.execute(_DDL)
+
+        repo = ModelGatewayConfigRepository()
+
+        # Save with empty key
+        repo.save_config(
+            base_url="https://gateway.example.com/v1",
+            api_key="",
+            model_prefix_mode=False,
+            model_prefix=None,
+            created_by=1,
+        )
+
+        # Retrieve and verify empty key is preserved
+        stored = repo.get_config_with_key()
+        assert stored is not None
+        assert stored.api_key == ""
+
+        # Update without providing api_key (use stored empty key)
+        repo.save_config(
+            base_url="https://gateway.example.com/v2",
+            api_key=stored.api_key,
+            model_prefix_mode=False,
+            model_prefix=None,
+            created_by=1,
+        )
+
+        # Verify empty key is still there
+        final = repo.get_config_with_key()
+        assert final is not None
+        assert final.api_key == ""
+        assert final.base_url == "https://gateway.example.com/v2"
