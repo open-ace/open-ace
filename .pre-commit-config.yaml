@@ -114,6 +114,7 @@ repos:
         args: [--config-file, pyproject.toml]
         additional_dependencies:
           - types-requests
+          - types-cachetools
         pass_filenames: false
         entry: mypy scripts/shared server.py cli.py
 

@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
 from app.modules.governance.alert_notifier import normalize_alert_severity
-from app.repositories.database import Database, adapt_sql, is_postgresql
+from app.repositories.database import Database, adapt_boolean_value, adapt_sql, is_postgresql
 
 logger = logging.getLogger(__name__)
 
@@ -308,7 +308,7 @@ class AlertTransactionManager:
                         alerts_data["username"],
                         alerts_data["metadata"],
                         datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
-                        0,
+                        adapt_boolean_value(False),
                         alerts_data.get("action_url"),
                         alerts_data.get("action_text"),
                     ),

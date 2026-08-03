@@ -1751,7 +1751,7 @@ class AlertNotifier:
                 alert.tool_name,
                 json.dumps(alert.metadata),
                 alert.created_at.isoformat(),
-                1 if alert.read else 0,
+                adapt_boolean_value(alert.read),
                 alert.action_url,
                 alert.action_text,
             ),

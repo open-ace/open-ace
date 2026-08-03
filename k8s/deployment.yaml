@@ -62,6 +62,8 @@ spec:
             - secretRef:
                 name: open-ace-secrets
           env:
+            - name: SCHEDULER_MODE
+              value: "web"
             - name: POD_NAME
               valueFrom:
                 fieldRef:

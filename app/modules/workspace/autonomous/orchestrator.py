@@ -890,6 +890,13 @@ MAX_CI_REPAIR_ATTEMPTS = 5  # max automatic dev-round retries for merge-phase CI
 # not loop forever, but must allow more retries than the 5-attempt budget
 # (which is consumed only by real agent repair attempts, not infra glitches).
 MAX_CI_REPAIR_TRANSIENT_RETRIES = 6
+# Separate cap for genuine no-code-change deferrals during CI repair: an agent
+# that runs cleanly but commits nothing must not loop forever, and the bound is
+# deliberately smaller than the transient budget (6) because no-change is
+# closer to "agent is stuck" than "infra glitch". No-change rounds do NOT
+# consume a real ci_repair_attempts slot, so MAX_CI_REPAIR_ATTEMPTS=5 is
+# preserved for rounds that produce changes (#2187).
+MAX_CI_REPAIR_NO_CHANGE_RETRIES = 2  # consecutive genuine no-change rounds before giving up
 MAX_PRE_COMMIT_CONVERGENCE_PASSES = 3
 PRE_COMMIT_CONVERGENCE_TIMEOUT = 600
 CI_PRE_COMMIT_SKIP = "bandit,no-commit-to-branch"
@@ -1677,6 +1684,22 @@ class AutonomousOrchestrator:
                 lines.append(excerpt)
                 lines.append("```")
             lines.append("")
+        if self._ci_failure_uses_schema_sync(failed_checks):
+            lines.append("## schema-sync 专项规则")
+            lines.append(
+                "上面的 schema-sync 失败摘录包含完整 diff（若未见 diff，说明本轮未取到日志，请用 "
+                "`gh run view <run-id> --log-failed` 自行取）。schema/*.sql 由迁移重新生成（byte-exact），"
+                "**绝不要手编**。"
+            )
+            lines.append(
+                "- diff 的 `+` 行就是重新生成后的正确内容——照搬应用到提交的文件即可（无需本地起 Postgres）。"
+            )
+            lines.append(
+                "- 若本地有可用临时 Postgres：`python scripts/rebuild_schema_snapshots.py --postgres-url <一次性-pg-url>`，"
+                "然后提交生成的 schema/schema-postgres.sql 和 schema/schema-sqlite.sql。"
+            )
+            lines.append("- 手编（括号、缩进、列序、类型大小写）几乎必定与重新生成结果不一致。")
+            lines.append("")
         lines.extend(
             [
                 "调查要求：",
@@ -2075,6 +2098,21 @@ class AutonomousOrchestrator:
                 "files were modified by this hook",
             )
         )
+
+    @staticmethod
+    def _ci_failure_uses_schema_sync(failed_checks: list[dict]) -> bool:
+        """Whether collected CI evidence identifies a schema-sync failure.
+
+        The check name is the Actions JOB name ('schema-sync', per
+        .github/workflows/schema-sync.yml), so a name match is reliable; the
+        excerpt fallback covers log-text mentions.
+        """
+        evidence = "\n".join(
+            str(check.get("name") or "") + " " + str(check.get("failure_excerpt") or "")
+            for check in failed_checks
+            if check.get("bucket") == "fail"
+        ).lower()
+        return "schema-sync" in evidence or "schema sync" in evidence
 
     def _converge_pre_commit_fixes(
         self,
@@ -2491,14 +2529,23 @@ class AutonomousOrchestrator:
             # the next fresh prompt. (#1816 review suggestion)
             if self._is_context_overflow(repair_result):
                 message = f"CI repair failed: context overflow - {repair_result.error}"
+                terminal = True
             elif primary_error := self._primary_result_error(repair_result):
                 message = f"CI repair agent failed before producing code changes: {primary_error}"
+                terminal = True
             else:
-                message = "CI repair failed: agent produced no code changes"
+                # Genuine no-change: the agent ran cleanly but committed nothing.
+                # Defer (don't terminal-fail) so it gets a bounded retry — see
+                # MAX_CI_REPAIR_NO_CHANGE_RETRIES in _start_ci_repair_round (#2187).
+                message = "CI repair deferred: agent produced no code changes"
+                terminal = False
             milestone_updates["status"] = "failed"
             milestone_updates["error_message"] = message
             self.repo.update_milestone(repair_ms.get("milestone_id", ""), milestone_updates)
-            self._update_workflow({"status": "failed", "error_message": message})
+            if terminal:
+                self._update_workflow({"status": "failed", "error_message": message})
+            else:
+                self._update_workflow({"status": "merging", "error_message": message})
             return
 
         if not repair_result.success and not salvaged:
@@ -3479,7 +3526,11 @@ class AutonomousOrchestrator:
         # total transient deferrals so a sustained outage cannot loop forever.
         prev_error = wf.get("error_message", "") or ""
         is_transient_deferred = prev_error.startswith("CI repair deferred: transient API error")
+        is_no_change_deferred = prev_error.startswith(
+            "CI repair deferred: agent produced no code changes"
+        )
         transient_retries = int(wf.get("ci_repair_transient_retries", 0) or 0)
+        no_change_retries = int(wf.get("ci_repair_no_change_retries", 0) or 0)
         if is_transient_deferred:
             if transient_retries >= MAX_CI_REPAIR_TRANSIENT_RETRIES:
                 message = (
@@ -3501,9 +3552,39 @@ class AutonomousOrchestrator:
             # as a transient-retry counter (reset to 0 on a successful round).
             next_attempt = previous_attempts
             transient_retries += 1
+        elif is_no_change_deferred:
+            # Genuine no-code-change deferral: the agent ran cleanly but
+            # committed nothing. Defer to a bounded retry budget that does NOT
+            # consume a real ci_repair_attempts slot (same separation transient
+            # enjoys), so a single empty round no longer terminal-fails the
+            # workflow (#2187). Bound: see MAX_CI_REPAIR_NO_CHANGE_RETRIES.
+            if no_change_retries >= MAX_CI_REPAIR_NO_CHANGE_RETRIES:
+                message = (
+                    f"CI repair failed: agent produced no code changes across "
+                    f"{MAX_CI_REPAIR_NO_CHANGE_RETRIES} consecutive retries"
+                )
+                self._create_milestone(
+                    phase="merge",
+                    dev_round=dev_round,
+                    round_number=previous_attempts,
+                    milestone_type="ci_repair_no_change_exhausted",
+                    status="failed",
+                    title=(
+                        f"CI repair abandoned: agent produced no changes across "
+                        f"{MAX_CI_REPAIR_NO_CHANGE_RETRIES} retries"
+                    ),
+                    error_message=message,
+                )
+                self._update_workflow({"status": "failed", "error_message": message})
+                return
+            # Don't increment ci_repair_attempts; bump the no-change counter
+            # (reset to 0 on a change-producing round).
+            next_attempt = previous_attempts
+            no_change_retries += 1
         else:
             next_attempt = previous_attempts + 1
             transient_retries = 0
+            no_change_retries = 0
         preferred_worktree_path = self._get_preferred_worktree_path(wf)
         gh = self._get_gh()
         current_head_sha = ""
@@ -3570,7 +3651,16 @@ class AutonomousOrchestrator:
             }:
                 actionable_count += 1
                 try:
-                    check["failure_excerpt"] = gh.get_check_failure_excerpt(check)
+                    if self._ci_failure_uses_schema_sync([check]):
+                        # schema-sync's byte-exact git-diff body has no failure-marker
+                        # lines, so the default _extract_failure_lines filter strips it.
+                        # Fetch unfiltered so the diff reaches the agent context AND the
+                        # failure fingerprint (#2216; PR #2255 review B1).
+                        check["failure_excerpt"] = gh.get_check_failure_excerpt(
+                            check, filter_lines=False, max_chars=8000
+                        )
+                    else:
+                        check["failure_excerpt"] = gh.get_check_failure_excerpt(check)
                 except Exception as exc:
                     logger.warning(
                         "Failed to collect CI diagnostics for PR #%s check '%s': %s",
@@ -3594,6 +3684,16 @@ class AutonomousOrchestrator:
             if is_transient_deferred:
                 message = (
                     "CI repair deferred: transient API error "
+                    f"(awaiting CI diagnostics: {excerpt_count}/{actionable_count} "
+                    f"logs; poll {diagnostics_attempt}/{MAX_CI_DIAGNOSTICS_ATTEMPTS})"
+                )
+            elif is_no_change_deferred:
+                # Preserve the no-change signal so the next _start_ci_repair_round
+                # call still classifies this as a no-change retry (mirrors the
+                # transient guard above; without this the diagnostics-incomplete
+                # message would clobber the prefix and lose the retry budget).
+                message = (
+                    "CI repair deferred: agent produced no code changes "
                     f"(awaiting CI diagnostics: {excerpt_count}/{actionable_count} "
                     f"logs; poll {diagnostics_attempt}/{MAX_CI_DIAGNOSTICS_ATTEMPTS})"
                 )
@@ -3628,6 +3728,7 @@ class AutonomousOrchestrator:
                         "error_message": terminal,
                         "ci_diagnostics_attempts": diagnostics_attempt,
                         "ci_repair_transient_retries": transient_retries,
+                        "ci_repair_no_change_retries": no_change_retries,
                     }
                 )
                 return
@@ -3637,9 +3738,10 @@ class AutonomousOrchestrator:
                     "status": "merging",
                     "error_message": message,
                     "ci_diagnostics_attempts": diagnostics_attempt,
-                    # Persist the in-memory transient counter so it survives
-                    # across diagnostics polling cycles (#1820).
+                    # Persist the in-memory counters so they survive across
+                    # diagnostics polling cycles (#1820, #2187).
                     "ci_repair_transient_retries": transient_retries,
+                    "ci_repair_no_change_retries": no_change_retries,
                 }
             )
             return
@@ -3746,6 +3848,7 @@ class AutonomousOrchestrator:
             "error_message": "",
             "ci_repair_attempts": next_attempt,
             "ci_repair_transient_retries": transient_retries,
+            "ci_repair_no_change_retries": no_change_retries,
             # Reset the diagnostics poll counter: each (re-)entry into a CI
             # repair round gets a fresh log-fetch budget (MAX_CI_DIAGNOSTICS_ATTEMPTS).
             # This was previously a side effect of reusing ci_diagnostics_attempts

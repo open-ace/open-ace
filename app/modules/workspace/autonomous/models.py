@@ -80,6 +80,7 @@ class AutonomousWorkflow:
     ci_repair_attempts: int = 0
     ci_diagnostics_attempts: int = 0
     ci_repair_transient_retries: int = 0
+    ci_repair_no_change_retries: int = 0
     last_ci_failure_signature: str = ""
     last_ci_failure_head_sha: str = ""
     # Source of truth for AI-authored content language (en/zh/ja/ko). Set once
@@ -168,6 +169,7 @@ class AutonomousWorkflow:
             "ci_repair_attempts": self.ci_repair_attempts,
             "ci_diagnostics_attempts": self.ci_diagnostics_attempts,
             "ci_repair_transient_retries": self.ci_repair_transient_retries,
+            "ci_repair_no_change_retries": self.ci_repair_no_change_retries,
             "last_ci_failure_signature": self.last_ci_failure_signature,
             "last_ci_failure_head_sha": self.last_ci_failure_head_sha,
             "content_language": self.content_language,
@@ -238,6 +240,7 @@ class AutonomousWorkflow:
             ci_repair_attempts=data.get("ci_repair_attempts", 0),
             ci_diagnostics_attempts=data.get("ci_diagnostics_attempts", 0),
             ci_repair_transient_retries=data.get("ci_repair_transient_retries", 0),
+            ci_repair_no_change_retries=data.get("ci_repair_no_change_retries", 0),
             last_ci_failure_signature=data.get("last_ci_failure_signature", ""),
             last_ci_failure_head_sha=data.get("last_ci_failure_head_sha", ""),
             content_language=data.get("content_language", "en"),

@@ -234,10 +234,26 @@ class DataFetchScheduler:
             self._next_run = datetime.now().timestamp() + self._interval
 
     def _run_fetch(self):
-        """Run the data fetch scripts."""
+        """Run the data fetch scripts with distributed lock (Issue #2187)."""
+        import time
         from datetime import timezone as tz
 
+        from app.repositories.database import Database
         from app.routes.fetch import run_fetch_scripts
+        from app.services.leader_election import LeaderElectionClient
+
+        # Acquire distributed lock for this job
+        db = Database()
+        client = LeaderElectionClient("data_fetch", db, strategy="heartbeat", lock_timeout=1800)
+
+        if not client.try_acquire_leadership():
+            logger.info("Data fetch skipped - not leader")
+            client.record_run("skipped")
+            return
+
+        start_time = time.time()
+        status = "completed"
+        error_message = None
 
         logger.info("Starting scheduled data fetch...")
         self._last_run = datetime.now(tz.utc).replace(tzinfo=None)
@@ -246,28 +262,56 @@ class DataFetchScheduler:
             run_fetch_scripts()
             logger.info("Scheduled data fetch completed")
         except Exception as e:
+            status = "failed"
+            error_message = str(e)
             logger.exception(f"Error in scheduled data fetch: {e}")
 
         # Refresh materialized views for PostgreSQL
-        self._refresh_materialized_views()
+        try:
+            self._refresh_materialized_views()
+        except Exception as e:
+            logger.warning(f"Materialized views refresh failed: {e}")
 
         # Safety net: aggregate user_daily_stats periodically
-        self._aggregate_user_stats()
+        try:
+            self._aggregate_user_stats()
+        except Exception as e:
+            logger.warning(f"User stats aggregation failed: {e}")
 
         # Refresh daily_stats table (aggregate from daily_messages)
-        self._refresh_daily_stats()
+        try:
+            self._refresh_daily_stats()
+        except Exception as e:
+            logger.warning(f"Daily stats refresh failed: {e}")
 
         # Refresh usage_summary table
-        self._refresh_usage_summary()
+        try:
+            self._refresh_usage_summary()
+        except Exception as e:
+            logger.warning(f"Usage summary refresh failed: {e}")
 
         # Check quotas after data is fresh
-        self._check_quotas()
+        try:
+            self._check_quotas()
+        except Exception as e:
+            logger.warning(f"Quota check failed: {e}")
 
         # Optionally synchronize Feishu org structure.
-        self._maybe_sync_feishu_org()
+        try:
+            self._maybe_sync_feishu_org()
+        except Exception as e:
+            logger.warning(f"Feishu org sync failed: {e}")
 
         # Optionally synchronize DingTalk org structure.
-        self._maybe_sync_dingtalk_org()
+        try:
+            self._maybe_sync_dingtalk_org()
+        except Exception as e:
+            logger.warning(f"DingTalk org sync failed: {e}")
+
+        # Record execution
+        duration_ms = int((time.time() - start_time) * 1000)
+        client.record_run(status, duration_ms, error_message)
+        client.release_leadership()
 
     def _refresh_materialized_views(self):
         """Refresh materialized views for PostgreSQL performance optimization."""

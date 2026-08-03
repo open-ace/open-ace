@@ -902,7 +902,7 @@ export const translations: Record<Language, Translations> = {
 
     // SMTP Configuration
     smtpConfiguration: 'SMTP Configuration',
-    smtpHost: 'SMTP Host',
+    smtpHost: 'SMTP Server',
     smtpPort: 'SMTP Port',
     smtpUser: 'SMTP User',
     smtpPassword: 'SMTP Password',
@@ -910,7 +910,7 @@ export const translations: Record<Language, Translations> = {
     useTLS: 'Use TLS',
     testConnection: 'Test Connection',
     sendTestEmail: 'Send Test Email',
-    smtpRequiredFields: 'SMTP host, port, and sender email are required',
+    smtpRequiredFields: 'SMTP server, port, and sender email are required',
     invalidEmailFormat: 'Invalid email format',
     invalidPortNumber: 'Invalid port number (1-65535)',
     smtpConfigSaved: 'SMTP Configuration Saved',
@@ -2636,7 +2636,7 @@ export const translations: Record<Language, Translations> = {
 
     // SMTP Configuration (Chinese)
     smtpConfiguration: 'SMTP 配置',
-    smtpHost: 'SMTP 主机',
+    smtpHost: 'SMTP 服务器',
     smtpPort: 'SMTP 端口',
     smtpUser: 'SMTP 用户',
     smtpPassword: 'SMTP 密码',
@@ -2644,7 +2644,7 @@ export const translations: Record<Language, Translations> = {
     useTLS: '使用 TLS',
     testConnection: '测试连接',
     sendTestEmail: '发送测试邮件',
-    smtpRequiredFields: 'SMTP 主机、端口和发件人邮箱为必填项',
+    smtpRequiredFields: 'SMTP 服务器、端口和发件人邮箱为必填项',
     invalidEmailFormat: '邮箱格式无效',
     invalidPortNumber: '端口无效（1-65535）',
     smtpConfigSaved: 'SMTP 配置已保存',
@@ -5045,6 +5045,8 @@ export const translations: Record<Language, Translations> = {
     weightHelp: '同じ優先度内での加重ランダム用。デフォルト：100',
 
     // SMTP Configuration (Japanese)
+    smtpHost: 'SMTP サーバー',
+    smtpRequiredFields: 'SMTP サーバー、ポート、送信者メールアドレスは必須です',
     smtpPort465AutoSSL: 'ポート465は自動的にSSL接続を使用します',
     smtpSslConnectionSuccess: 'SMTP SSL接続テスト成功',
     smtpStarttlsConnectionSuccess: 'SMTP STARTTLS接続テスト成功',
@@ -6627,6 +6629,8 @@ export const translations: Record<Language, Translations> = {
     weightHelp: '동일 우선순위 내에서 가중 랜덤용. 기본값: 100',
 
     // SMTP Configuration (Korean)
+    smtpHost: 'SMTP 서버',
+    smtpRequiredFields: 'SMTP 서버, 포트, 발신자 이메일은 필수 항목입니다',
     smtpPort465AutoSSL: '포트 465는 자동으로 SSL 연결을 사용합니다',
     smtpSslConnectionSuccess: 'SMTP SSL 연결 테스트 성공',
     smtpStarttlsConnectionSuccess: 'SMTP STARTTLS 연결 테스트 성공',

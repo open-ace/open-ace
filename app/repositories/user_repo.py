@@ -498,8 +498,9 @@ class UserRepository:
         )
 
         try:
-            # Use local time to match database TIMESTAMP WITHOUT TIME ZONE behavior
-            self.db.execute(query, (user_id, token, datetime.now(), expires_at))
+            # Use UTC to match auth_service._utcnow() which stores expires_at in UTC
+            utcnow = datetime.now(timezone.utc).replace(tzinfo=None)
+            self.db.execute(query, (user_id, token, utcnow, expires_at))
             return True
         except Exception as e:
             logger.error(f"Error creating session: {e}")
@@ -524,8 +525,9 @@ class UserRepository:
         """
         )
 
-        # Use local time to match database TIMESTAMP WITHOUT TIME ZONE behavior
-        return self.db.fetch_one(query, (token, datetime.now()))
+        # Use UTC to match auth_service._utcnow() which stores expires_at in UTC
+        utcnow = datetime.now(timezone.utc).replace(tzinfo=None)
+        return self.db.fetch_one(query, (token, utcnow))
 
     def delete_session(self, token: str) -> bool:
         """
