@@ -3318,7 +3318,7 @@ def create_remote_directory(machine_id):
     if not machine:
         return jsonify({"error": "Machine not found"}), 404
 
-    if machine.get("status") not in ("online", "idle"):
+    if machine.get("status") not in ("online", "idle", "busy"):
         return (
             jsonify(
                 {
