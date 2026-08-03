@@ -39,6 +39,8 @@ services:
     image: ${IMAGE_NAME:-openace/open-ace:latest}
     container_name: open-ace
     restart: unless-stopped
+    # Multi-user workspace mode requires root to create system users (useradd)
+    user: "0"
     ports:
       - "${PORT:-19888}:19888"
       # Multi-user workspace: expose port range for qwen-code-webui instances
