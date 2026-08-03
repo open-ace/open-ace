@@ -1899,6 +1899,18 @@ def agent_message():
                     msg_model = msg.get("model") or model
                     msg_uuid = msg.get("uuid", "")
                     content_blocks = msg.get("content_blocks")
+                    # Issue #8: derive file_change blocks from file-operating
+                    # tool_use blocks so the frontend file-change panel shows
+                    # every AI-driven file/folder change on the web-terminal
+                    # (session_sync) path too — mirroring the live
+                    # (remote_session_manager) and replay (fetch_qwen) paths.
+                    if isinstance(content_blocks, list):
+                        from scripts.shared.file_change_parser import (
+                            append_file_change_blocks,
+                        )
+
+                        content_blocks = list(content_blocks)
+                        append_file_change_blocks(content_blocks)
                     usage = msg.get("usage", {})
 
                     if not content or len(content) > MAX_RAW_CONTENT_LENGTH:

@@ -1,4 +1,4 @@
-!/bin/bash
+#!/bin/bash
 # Docker entrypoint script for Open ACE
 # Handles database initialization and multi-user workspace setup
 
@@ -499,12 +499,15 @@ for line in open('$secrets_file'):
 ")
         if [ -n "$reloaded" ]; then
             eval "$reloaded"
-            export SECRET_KEY OPENACE_ENCRYPTION_KEY UPLOAD_AUTH_KEY
+            export SECRET_KEY OPENACE_ENCRYPTION_KEY UPLOAD_AUTH_KEY TOKEN_SECRET
         fi
     fi
 
     # 2. Generate any still-unset secret. Single python invocation generates
     #    only the missing ones and prints NAME='value' lines for eval.
+    #    TOKEN_SECRET is the workspace WebUI token signing key; it must stay
+    #    stable across restarts too, otherwise every outstanding WebUI token
+    #    is invalidated (workspace "Failed to fetch projects: UNAUTHORIZED").
     local generated
     generated=$(python3 -c "
 import os, secrets
@@ -514,10 +517,12 @@ if not os.environ.get('OPENACE_ENCRYPTION_KEY'):
     print(\"OPENACE_ENCRYPTION_KEY='\" + secrets.token_hex(16) + \"'\")
 if not os.environ.get('UPLOAD_AUTH_KEY'):
     print(\"UPLOAD_AUTH_KEY='\" + secrets.token_hex(16) + \"'\")
+if not os.environ.get('TOKEN_SECRET'):
+    print(\"TOKEN_SECRET='\" + secrets.token_hex(16) + \"'\")
 ")
     if [ -n "$generated" ]; then
         eval "$generated"
-        export SECRET_KEY OPENACE_ENCRYPTION_KEY UPLOAD_AUTH_KEY
+        export SECRET_KEY OPENACE_ENCRYPTION_KEY UPLOAD_AUTH_KEY TOKEN_SECRET
         # Log which keys were generated (name only, never the value).
         local line name
         while IFS= read -r line; do
@@ -600,10 +605,11 @@ generate_default_config() {
     # Get hostname dynamically (matches install.sh behavior)
     HOST_NAME=$(hostname -f 2>/dev/null || hostname 2>/dev/null || echo "docker-container")
 
-    # Generate random token secret (32 chars hex). UPLOAD_AUTH_KEY is sourced
-    # from ensure_secret_env above (env or persisted file) so the value stays
-    # stable across restarts; only generate here as a last-resort fallback.
-    TOKEN_SECRET=$(python3 -c "import secrets; print(secrets.token_hex(16))")
+    # Generate random token secret (32 chars hex). TOKEN_SECRET is sourced
+    # from ensure_secret_env above (env or persisted generated-secrets.env)
+    # so the value stays stable across restarts; only generate here as a
+    # last-resort fallback when config.json is being created fresh.
+    TOKEN_SECRET="${TOKEN_SECRET:-$(python3 -c "import secrets; print(secrets.token_hex(16))")}"
     UPLOAD_AUTH_KEY="${UPLOAD_AUTH_KEY:-$(python3 -c "import secrets; print(secrets.token_hex(16))")}"
 
     # Generate default config (matches install.sh defaults)

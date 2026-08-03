@@ -95,7 +95,7 @@ class ClaudeSession:
     def parse(self) -> bool:
         """Parse the JSONL file and extract metadata. Returns True if parseable."""
         try:
-            with open(self.jsonl_path) as f:
+            with open(self.jsonl_path, encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
                     if not line:
@@ -259,7 +259,7 @@ class QwenSession:
     def parse(self) -> bool:
         """Parse the JSONL file and extract metadata. Returns True if parseable."""
         try:
-            with open(self.jsonl_path) as f:
+            with open(self.jsonl_path, encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
                     if not line:
@@ -413,7 +413,7 @@ class CodexSession:
         """Parse the Codex JSONL file and extract metadata."""
         try:
             events = []
-            with open(self.jsonl_path) as f:
+            with open(self.jsonl_path, encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
                     if not line:

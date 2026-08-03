@@ -783,6 +783,19 @@ class ProcessExecutor:
         env["PYTHONIOENCODING"] = "utf-8"
         env["PYTHONUTF8"] = "1"
 
+        # Custom system prompt for Qwen Code CLI (Issue: remote workspace
+        # answered in English because QWEN_SYSTEM_MD was never passed to the
+        # CLI). qwen-code reads QWEN_SYSTEM_MD and replaces its default
+        # English system prompt with the Chinese one. The file ships with the
+        # agent install (see install.ps1/install.sh AGENT_FILES); if it is
+        # missing, leave the CLI default in place.
+        if cli_tool in ("qwen-code-cli", "qwen", "qwen-code"):
+            _system_md = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)), "system-prompt.md"
+            )
+            if os.path.isfile(_system_md):
+                env["QWEN_SYSTEM_MD"] = _system_md
+
         # Issue #2019: scrub every raw credential (static ∪ dynamic custom
         # envKeys) BEFORE injecting the proxy token, and fail closed when no
         # proxy token was provided. The agent must never inherit a real key.

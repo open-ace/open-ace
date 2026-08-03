@@ -63,6 +63,19 @@ def _params(count: int) -> str:
     return ", ".join([p] * count)
 
 
+def _utcnow_iso() -> str:
+    """Current UTC time as ISO-8601 with an explicit ``+00:00`` offset.
+
+    Storing the offset marker lets the browser frontend parse the value as
+    UTC via ``new Date(...)`` instead of local time, fixing the 8-hour
+    "last heartbeat" display offset observed in Asia/Shanghai (Issue #17).
+    All ``remote_machines`` timestamp writes (and the heartbeat-timeout
+    sweep cutoff they are compared against) must keep the same format so
+    SQLite's lexical timestamp comparisons stay correct.
+    """
+    return datetime.now(timezone.utc).isoformat()
+
+
 class RemoteAgentManager:
     """
     Singleton manager for remote agent WebSocket connections.
@@ -224,7 +237,7 @@ class RemoteAgentManager:
 
         with self.db.connection() as conn:
             cursor = conn.cursor()
-            heartbeat_cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
+            heartbeat_cutoff = datetime.now(timezone.utc) - timedelta(
                 seconds=self.HEARTBEAT_TIMEOUT_SECONDS
             )
 
@@ -235,7 +248,7 @@ class RemoteAgentManager:
                 WHERE status != 'offline' AND last_heartbeat < {_param()}
             """,
                 (
-                    datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
+                    _utcnow_iso(),
                     heartbeat_cutoff.isoformat(),
                 ),
             )
@@ -413,7 +426,7 @@ class RemoteAgentManager:
         with self._lock, self.db.connection() as conn:
             cursor = conn.cursor()
 
-            now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+            now = _utcnow_iso()
 
             try:
                 # Check for existing machine with same hostname in same tenant
@@ -983,8 +996,8 @@ class RemoteAgentManager:
                 WHERE machine_id = {_param()}
             """,
                 (
-                    datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
-                    datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
+                    _utcnow_iso(),
+                    _utcnow_iso(),
                     machine_id,
                 ),
             )
@@ -1663,7 +1676,7 @@ class RemoteAgentManager:
 
         with self.db.connection() as conn:
             cursor = conn.cursor()
-            now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+            now = _utcnow_iso()
 
             cursor.execute(
                 f"""

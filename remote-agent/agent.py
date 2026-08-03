@@ -9,6 +9,7 @@ manages CLI subprocesses through the executor module, and sends heartbeats.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import logging
 import os
@@ -43,6 +44,133 @@ def get_local_ip() -> str:
         return socket.gethostbyname(socket.gethostname())
     except Exception:
         return "127.0.0.1"
+
+
+# ── Snapshot-based change detection for non-git workspaces (Issue #8) ──
+# qwen-code-webui's file-changes panel is git-status driven. When a project
+# directory has no ``.git``, we keep a persisted tree snapshot and diff the
+# current tree against it, so AI file operations still surface in the panel.
+
+# Directory names never scanned for snapshot-based change detection.
+_SNAPSHOT_IGNORED_DIRS = frozenset(
+    {
+        ".git",
+        "__pycache__",
+        "node_modules",
+        ".venv",
+        "venv",
+        "env",
+        ".tox",
+        ".mypy_cache",
+        ".pytest_cache",
+        ".idea",
+        ".vscode",
+        "dist",
+        "build",
+        ".open-ace-agent",
+        ".openace",
+        ".cache",
+    }
+)
+
+# Re-baseline the tree snapshot when it is older than this (seconds). Changes
+# stay visible while the baseline is fresh, then age out so the panel does not
+# accumulate stale entries forever.
+_SNAPSHOT_RESET_AGE_SECONDS = 1800  # 30 minutes
+
+
+def _snapshot_dir() -> str:
+    """Directory holding per-project tree snapshots for non-git workspaces."""
+    return os.path.join(tempfile.gettempdir(), "openace_snapshots")
+
+
+def _snapshot_path_for(cwd: str) -> str:
+    """Stable per-project snapshot file path (keyed by canonical path)."""
+    key = hashlib.sha256(os.path.realpath(cwd).encode("utf-8", "surrogatepass")).hexdigest()
+    return os.path.join(_snapshot_dir(), f"{key}.json")
+
+
+def _scan_project_tree(root: str) -> dict[str, dict[str, Any]]:
+    """Walk a project and return ``{relpath: {kind, ...}}`` for every entry.
+
+    Empty directories are included (unlike git) so ``mkdir``-only operations
+    are visible in the panel. Ignored directory names (caches, vendored deps)
+    are skipped entirely.
+    """
+    entries: dict[str, dict[str, Any]] = {}
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in _SNAPSHOT_IGNORED_DIRS]
+        rel_dir = os.path.relpath(dirpath, root)
+        dir_key = "" if rel_dir == "." else rel_dir.replace("\\", "/")
+        if dir_key:
+            entries[dir_key] = {"kind": "dir"}
+        for name in filenames:
+            rel = name if not dir_key else f"{dir_key}/{name}"
+            full = os.path.join(dirpath, name)
+            try:
+                st = os.stat(full)
+            except OSError:
+                continue
+            entries[rel] = {"kind": "file", "size": st.st_size, "mtime": st.st_mtime}
+    return entries
+
+
+def _diff_snapshots(
+    old: dict[str, dict[str, Any]], new: dict[str, dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Diff two tree snapshots into the qwen-code-webui files format.
+
+    Dirs are only reported as added/deleted (their mtime churns whenever
+    children change); files are reported as added/modified/deleted.
+    """
+    files: list[dict[str, Any]] = []
+    for path, meta in new.items():
+        if path not in old:
+            files.append(
+                {
+                    "path": path,
+                    "status": "added",
+                    "additions": 0,
+                    "deletions": 0,
+                }
+            )
+        elif (
+            meta.get("kind") == "file"
+            and old[path].get("kind") == "file"
+            and (
+                old[path].get("size") != meta.get("size")
+                or old[path].get("mtime") != meta.get("mtime")
+            )
+        ):
+            files.append(
+                {
+                    "path": path,
+                    "status": "modified",
+                    "additions": 0,
+                    "deletions": 0,
+                }
+            )
+    for path in old:
+        if path not in new:
+            files.append(
+                {
+                    "path": path,
+                    "status": "deleted",
+                    "additions": 0,
+                    "deletions": 0,
+                }
+            )
+    files.sort(key=lambda f: f["path"])
+    return files
+
+
+def _write_snapshot(snapshot_path: str, tree: dict[str, dict[str, Any]], now: float) -> None:
+    """Atomically persist a tree snapshot (baseline + scan time)."""
+    os.makedirs(os.path.dirname(snapshot_path), exist_ok=True)
+    tmp = snapshot_path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump({"created_at": now, "tree": tree}, f)
+    os.replace(tmp, snapshot_path)
 
 
 class RemoteAgent:
@@ -242,15 +370,14 @@ class RemoteAgent:
         # after the parent process has accepted the TLS policy.
         self._restore_terminal_sessions()
 
-        # Restore sessions from previous run (crash recovery)
-        restored = self._executor.restore_sessions()
-        if restored:
-            logger.info("Restored %d session(s) from crash recovery", len(restored))
-            for sid in restored:
-                self._send_session_status(sid, "running")
-
         # Start session sync service
         self._session_sync.start()
+
+        # Restore sessions from previous run (crash recovery) in a background
+        # thread so the first register/heartbeat is not delayed: each session
+        # restore can wait up to 15s for SDK init, and with many sessions the
+        # agent used to appear "offline" for minutes after startup.
+        self._start_session_restore()
 
         while self._running:
             # Reset token_revoked flag for this connection attempt.
@@ -285,6 +412,38 @@ class RemoteAgent:
     # ----------------------------------------------------------------
     # HTTP polling
     # ----------------------------------------------------------------
+
+    def _start_session_restore(self) -> None:
+        """Restore crash-recovery sessions in a background thread.
+
+        Restoring happens concurrently with the HTTP polling loop so the
+        agent can register and send its first heartbeat immediately, instead
+        of after all slow restores complete (each session may wait up to 15s
+        for SDK init). Status messages are sent as each restore finishes.
+        """
+
+        def _do_restore() -> None:
+            try:
+                restored = self._executor.restore_sessions()
+            except Exception as e:
+                logger.error("Session restore failed: %s", e)
+                return
+            if restored:
+                logger.info("Restored %d session(s) from crash recovery", len(restored))
+                for sid in restored:
+                    try:
+                        self._send_session_status(sid, "running")
+                    except Exception as e:
+                        logger.warning(
+                            "Failed to report restored session %s: %s", sid[:8], e
+                        )
+
+        thread = threading.Thread(
+            target=_do_restore,
+            name="session-restore",
+            daemon=True,
+        )
+        thread.start()
 
     def _http_poll_loop(self) -> None:
         """
@@ -733,6 +892,13 @@ class RemoteAgent:
         request_id = data.get("request_id", "")
         tool_name = data.get("tool_name", "")
         message = data.get("message")
+
+        # qwen-code CLI's control_response protocol only recognizes
+        # "allow"/"deny" (session-GMPZBLOW.js: behavior !== "allow" -> cancel).
+        # Normalize the frontend's permanent-allow flavor so "allow & don't
+        # ask again" executes instead of being treated as a denial (Issue #20).
+        if behavior == "allow-permanent":
+            behavior = "allow"
 
         logger.info(
             "Permission response for session %s: %s request_id=%s tool=%s",
@@ -1393,7 +1559,11 @@ class RemoteAgent:
             return
 
         if not os.path.isdir(os.path.join(cwd, ".git")):
-            self._send_git_result(request_id, True, result={"files": []})
+            # Non-git workspace: fall back to snapshot-based change detection
+            # (Issue #8). qwen-code-webui's file-changes panel is git-status
+            # driven, so a bare directory would otherwise always show
+            # "no changes detected".
+            self._cmd_git_status_snapshot(request_id, cwd)
             return
 
         try:
@@ -1474,6 +1644,61 @@ class RemoteAgent:
 
         except Exception as e:
             logger.error("git_status failed for %s: %s", cwd, e)
+            self._send_git_result(request_id, False, error=str(e))
+
+    def _cmd_git_status_snapshot(self, request_id: str, cwd: str) -> None:
+        """Snapshot-based change detection for non-git workspaces (Issue #8).
+
+        qwen-code-webui's file-changes panel is driven by the ``files`` list
+        returned from git status. A project directory without ``.git`` has no
+        index to diff against, so we keep a persisted tree snapshot per project
+        and report added/modified/deleted paths (including empty directories,
+        which git itself ignores) relative to that snapshot.
+
+        The snapshot is re-baselined when it is older than
+        ``_SNAPSHOT_RESET_AGE_SECONDS`` so accumulated changes age out instead
+        of growing forever. Response shape matches the git branch:
+        ``{"files": [{"path", "status", "additions", "deletions"}, ...]}``.
+        """
+        try:
+            snapshot_path = _snapshot_path_for(cwd)
+            current = _scan_project_tree(cwd)
+            now = time.time()
+
+            previous: dict[str, Any] | None = None
+            if os.path.isfile(snapshot_path):
+                try:
+                    with open(snapshot_path, "r", encoding="utf-8") as f:
+                        raw = json.load(f)
+                    if isinstance(raw, dict):
+                        previous = raw
+                except (OSError, ValueError):
+                    previous = None
+
+            created_at = (previous or {}).get("created_at", 0)
+            if previous is None or now - created_at > _SNAPSHOT_RESET_AGE_SECONDS:
+                # No baseline yet, or it has aged out: re-baseline the tree so
+                # the panel starts clean and only *new* operations show up.
+                _write_snapshot(snapshot_path, current, now)
+                files: list[dict[str, Any]] = []
+            else:
+                files = _diff_snapshots(previous.get("tree", {}), current)
+
+            # For added files with 0 additions, count lines (mirrors the git branch)
+            for change in files:
+                if change["status"] == "added" and change["additions"] == 0:
+                    try:
+                        full_path = os.path.join(cwd, change["path"])
+                        if os.path.isfile(full_path):
+                            with open(full_path, errors="replace") as f:
+                                change["additions"] = sum(1 for _ in f)
+                    except OSError:
+                        pass
+
+            self._send_git_result(request_id, True, result={"files": files})
+            logger.info("git_status(snapshot) for %s: %d files", cwd, len(files))
+        except Exception as e:
+            logger.error("git_status(snapshot) failed for %s: %s", cwd, e)
             self._send_git_result(request_id, False, error=str(e))
 
     def _cmd_git_diff(self, data: dict[str, Any]) -> None:

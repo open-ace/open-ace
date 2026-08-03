@@ -194,9 +194,13 @@ def load_user():
 
         # Session token failed — try WebUI token validation
         try:
-            from app.services.webui_manager import WebUIManager
+            from app.services.webui_manager import get_webui_manager
 
-            webui_manager = WebUIManager()
+            # Use the shared singleton. A fresh ``WebUIManager()`` instance
+            # would auto-generate a new random token_secret when config.json
+            # lacks one, making the signature check fail for every outstanding
+            # WebUI token (workspace "Failed to fetch projects: UNAUTHORIZED").
+            webui_manager = get_webui_manager()
             is_valid, user_id, error = webui_manager.validate_token(token)
             if is_valid and user_id:
                 from app.repositories.user_repo import UserRepository

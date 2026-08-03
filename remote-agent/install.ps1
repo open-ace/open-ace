@@ -1,4 +1,4 @@
-﻿# Open ACE Remote Agent - Windows Install Script
+# Open ACE Remote Agent - Windows Install Script
 #
 # Usage:
 #   Invoke-WebRequest -Uri "https://<server>/api/remote/agent/install.ps1" | Invoke-Expression
@@ -128,7 +128,8 @@ $files = @(
     "zcode_app_server.py",
     "tls_config.py",
     "start-agent.ps1",
-    "start-agent.cmd"
+    "start-agent.cmd",
+    "system-prompt.md"
 )
 $adapterFiles = @("__init__.py", "base.py", "qwen_code.py", "claude_code.py", "codex_cli.py", "codex_jsonl_parser.py", "openclaw.py", "usage_parser.py", "zcode.py")
 

@@ -355,6 +355,7 @@ AGENT_FILES=(
     tls_config.py
     __init__.py
     start-agent.sh
+    system-prompt.md
 )
 
 # If running from curl, download files; if running from source, copy

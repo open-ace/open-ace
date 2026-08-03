@@ -44,8 +44,11 @@ def _get_auth_service() -> AuthService:
 
 # ── URL Token Security (Issue #1896) ─────────────────────────────────────
 
-# WebUI token TTL in seconds (default 30 minutes)
-WEBUI_TOKEN_TTL_SECONDS = 1800
+# WebUI token TTL in seconds (24 hours). qwen-code-webui caches the token in
+# sessionStorage and reuses it for the whole session without refreshing; a
+# 30-minute TTL caused the workspace to fail with "Failed to fetch projects:
+# UNAUTHORIZED" once the token aged out.
+WEBUI_TOKEN_TTL_SECONDS = 86400
 
 # URL token allowed path prefixes
 URL_TOKEN_ALLOWED_PATHS = [

@@ -145,3 +145,17 @@ class TestManagerRecorderWiring:
         assert args[2] == "allow"
         assert kwargs["decided_by"] == 7
         assert kwargs["decided_by_name"] == "alice"
+
+    def test_respond_to_permission_normalizes_allow_permanent(self, manager, spy_recorder):
+        """'allow-permanent' (allow & don't ask again) must be normalized to
+        'allow' so the CLI doesn't treat it as a denial (Issue #20)."""
+        manager.respond_to_permission("sess-1", "req-1", "allow-permanent", tool_name="Bash")
+
+        # The timeline records the normalized behavior.
+        _, args, _ = spy_recorder.record_approval_response.mock_calls[0]
+        assert args[2] == "allow"
+
+        # The command dispatched to the agent carries the normalized behavior.
+        sent_command = manager._agent_manager.send_command.call_args[0][1]
+        assert sent_command["command"] == "permission_response"
+        assert sent_command["behavior"] == "allow"

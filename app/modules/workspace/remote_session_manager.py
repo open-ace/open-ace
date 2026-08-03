@@ -692,6 +692,13 @@ class RemoteSessionManager:
         identity). ``decided_by`` / ``decided_by_name`` are injected from the
         Flask auth state by the caller.
         """
+        # qwen-code CLI's control_response protocol only recognizes
+        # "allow"/"deny" (session-GMPZBLOW.js: behavior !== "allow" -> cancel).
+        # Normalize the frontend's permanent-allow flavor so "allow & don't
+        # ask again" executes instead of being treated as a denial (Issue #20).
+        if behavior == "allow-permanent":
+            behavior = "allow"
+
         machine_id = self._get_machine_id(session_id)
 
         # Single consume point: enforce the policy decision's binding BEFORE
@@ -1049,6 +1056,23 @@ class RemoteSessionManager:
                 self._session_manager.increment_session_usage(session_id, message_delta=1)
             self._save_to_daily_messages(session_id, "system", data)
 
+    @staticmethod
+    def _append_file_change_blocks(blocks: list[dict]) -> None:
+        """Append file_change blocks derived from file-operating tool_use blocks.
+
+        Qwen/Claude CLIs emit only ``tool_use`` blocks for shell commands
+        (mkdir/mv/cp/rm) and native file tools (write_file/edit). Issue #8
+        requires the frontend file-change panel to show every AI-driven
+        file/folder change, so those tool calls are parsed into synthetic
+        ``file_change`` content blocks that ride along with the turn.
+
+        Implementation is shared with the session_sync and fetch_qwen write
+        paths via ``scripts/shared/file_change_parser.append_file_change_blocks``.
+        """
+        from scripts.shared.file_change_parser import append_file_change_blocks
+
+        append_file_change_blocks(blocks)
+
     def _accumulate_assistant_text(self, session_id: str, data: str) -> None:
         """Parse streaming JSON and accumulate assistant text for a session."""
         if not data or not data.strip():
@@ -1084,6 +1108,10 @@ class RemoteSessionManager:
                         text_parts.append(text)
                 if block_type in ("text", "tool_use", "thinking", "tool_result"):
                     structured_blocks.append(block)
+            # Issue #8: derive file_change blocks from file-operating tool_use
+            # blocks (shell mkdir/mv/cp/rm, write_file/edit) so the frontend
+            # file-change panel reflects every AI-driven file/folder change.
+            self._append_file_change_blocks(structured_blocks)
 
             # Ordinary interactive sessions persist a turn only when it
             # produced visible text; a tool/thinking-only turn writes no row
@@ -1127,6 +1155,8 @@ class RemoteSessionManager:
                                 text_parts.append(text)
                         if block_type in ("text", "tool_use", "thinking", "tool_result"):
                             structured_blocks.append(block)
+                    # Issue #8: file_change blocks from file-operating tool_use.
+                    self._append_file_change_blocks(structured_blocks)
                     is_autonomous = self._is_autonomous_session(session_id)
                     has_text = bool(text_parts)
                     if has_text or (is_autonomous and structured_blocks):

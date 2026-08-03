@@ -12,10 +12,12 @@ Tests cover:
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
 import textwrap
+import time
 from unittest.mock import MagicMock, mock_open, patch
 
 import pytest
@@ -36,6 +38,7 @@ sys.modules.setdefault("executor", MagicMock())
 sys.modules.setdefault("session_sync", MagicMock())
 sys.modules.setdefault("system_info", MagicMock())
 
+import agent as agent_module
 from agent import RemoteAgent  # noqa: E402
 
 # ---------------------------------------------------------------------------
@@ -99,17 +102,122 @@ class TestCmdGitStatus:
         assert msg["success"] is False
         assert "does not exist" in msg["error"]
 
-    def test_non_git_directory_returns_empty_files(self, tmp_path):
+    def test_non_git_directory_returns_empty_files(self, tmp_path, monkeypatch):
+        """First git_status on a non-git directory baselines the tree (Issue #8)."""
+        proj = tmp_path / "proj"
+        proj.mkdir()
+        monkeypatch.setattr(agent_module, "_snapshot_dir", lambda: str(tmp_path / "snap"))
         agent = _make_agent()
         agent._cmd_git_status(
             {
                 "request_id": "r3",
-                "project_path": str(tmp_path),
+                "project_path": str(proj),
             }
         )
         msg = _last_http_send(agent)
         assert msg["success"] is True
         assert msg["result"]["files"] == []
+
+    # ── Non-git snapshot-based change detection (Issue #8) ──────────────
+    # qwen-code-webui's file-changes panel is git-status driven. For a
+    # directory without ``.git`` the agent keeps a tree snapshot and diffs
+    # against it, so AI file operations still show up in the panel.
+
+    def test_non_git_snapshot_reports_added_dir_and_file(self, tmp_path, monkeypatch):
+        proj = tmp_path / "proj"
+        proj.mkdir()
+        monkeypatch.setattr(agent_module, "_snapshot_dir", lambda: str(tmp_path / "snap"))
+        agent = _make_agent()
+
+        # Baseline: empty tree -> no changes.
+        agent._cmd_git_status({"request_id": "s1", "project_path": str(proj)})
+        assert _last_http_send(agent)["result"]["files"] == []
+
+        # AI creates an empty directory (the original Issue #8 repro) + a file.
+        (proj / "ddd").mkdir()
+        (proj / "hello.txt").write_text("line1\nline2\n", encoding="utf-8")
+
+        agent._cmd_git_status({"request_id": "s2", "project_path": str(proj)})
+        msg = _last_http_send(agent)
+        assert msg["success"] is True
+        by_path = {f["path"]: f for f in msg["result"]["files"]}
+        assert by_path["ddd"]["status"] == "added"  # empty dir is visible
+        assert by_path["hello.txt"]["status"] == "added"
+        assert by_path["hello.txt"]["additions"] == 2  # line count
+
+    def test_non_git_snapshot_reports_modified_file(self, tmp_path, monkeypatch):
+        proj = tmp_path / "proj"
+        proj.mkdir()
+        monkeypatch.setattr(agent_module, "_snapshot_dir", lambda: str(tmp_path / "snap"))
+        agent = _make_agent()
+
+        target = proj / "app.py"
+        target.write_text("x\n", encoding="utf-8")
+        agent._cmd_git_status({"request_id": "s1", "project_path": str(proj)})
+        assert _last_http_send(agent)["result"]["files"] == []
+
+        target.write_text("x\ny\nz\n", encoding="utf-8")  # size changes reliably
+        agent._cmd_git_status({"request_id": "s2", "project_path": str(proj)})
+        msg = _last_http_send(agent)
+        assert msg["success"] is True
+        assert len(msg["result"]["files"]) == 1
+        assert msg["result"]["files"][0]["path"] == "app.py"
+        assert msg["result"]["files"][0]["status"] == "modified"
+
+    def test_non_git_snapshot_reports_deleted_path(self, tmp_path, monkeypatch):
+        proj = tmp_path / "proj"
+        proj.mkdir()
+        monkeypatch.setattr(agent_module, "_snapshot_dir", lambda: str(tmp_path / "snap"))
+        agent = _make_agent()
+
+        (proj / "old.txt").write_text("keep\n", encoding="utf-8")
+        agent._cmd_git_status({"request_id": "s1", "project_path": str(proj)})
+        assert _last_http_send(agent)["result"]["files"] == []
+
+        (proj / "old.txt").unlink()
+        agent._cmd_git_status({"request_id": "s2", "project_path": str(proj)})
+        msg = _last_http_send(agent)
+        assert msg["success"] is True
+        assert msg["result"]["files"] == [
+            {"path": "old.txt", "status": "deleted", "additions": 0, "deletions": 0}
+        ]
+
+    def test_non_git_snapshot_ignores_noise_dirs(self, tmp_path, monkeypatch):
+        proj = tmp_path / "proj"
+        (proj / "node_modules").mkdir(parents=True)
+        (proj / "node_modules" / "pkg").write_text("x", encoding="utf-8")
+        monkeypatch.setattr(agent_module, "_snapshot_dir", lambda: str(tmp_path / "snap"))
+        agent = _make_agent()
+
+        agent._cmd_git_status({"request_id": "s1", "project_path": str(proj)})
+        assert _last_http_send(agent)["result"]["files"] == []
+
+        (proj / "real.py").write_text("y\n", encoding="utf-8")
+        agent._cmd_git_status({"request_id": "s2", "project_path": str(proj)})
+        msg = _last_http_send(agent)
+        assert [f["path"] for f in msg["result"]["files"]] == ["real.py"]
+
+    def test_non_git_snapshot_rebaselines_after_reset_age(self, tmp_path, monkeypatch):
+        proj = tmp_path / "proj"
+        proj.mkdir()
+        snap_dir = tmp_path / "snap"
+        monkeypatch.setattr(agent_module, "_snapshot_dir", lambda: str(snap_dir))
+        agent = _make_agent()
+
+        (proj / "f.txt").write_text("a\n", encoding="utf-8")
+        agent._cmd_git_status({"request_id": "s1", "project_path": str(proj)})
+        assert _last_http_send(agent)["result"]["files"] == []
+
+        # Age out the baseline so the next call re-baselines instead of diffing.
+        snapshot_file = next(snap_dir.glob("*.json"))
+        data = json.loads(snapshot_file.read_text(encoding="utf-8"))
+        data["created_at"] = time.time() - agent_module._SNAPSHOT_RESET_AGE_SECONDS - 10
+        snapshot_file.write_text(json.dumps(data), encoding="utf-8")
+
+        (proj / "g.txt").write_text("b\n", encoding="utf-8")
+        agent._cmd_git_status({"request_id": "s2", "project_path": str(proj)})
+        # After a re-baseline the tree is the new baseline -> no changes reported.
+        assert _last_http_send(agent)["result"]["files"] == []
 
     def test_successful_status_modified_files(self, tmp_path):
         """Simulate a git repo with modified and added files."""
@@ -890,6 +998,49 @@ class TestCmdAttachVscode:
                 msg = _last_http_send(agent)
                 assert msg["status"] == "running"
                 assert msg["http_url"] == "http://myhost:3000"
+
+
+# ===================================================================
+# _cmd_permission_response
+# ===================================================================
+
+
+class TestCmdPermissionResponse:
+    """Tests for RemoteAgent._cmd_permission_response behavior normalization.
+
+    qwen-code CLI's control_response protocol only recognizes "allow"/"deny"
+    (session-GMPZBLOW.js: behavior !== "allow" -> cancel). The frontend's
+    "allow & don't ask again" sends "allow-permanent", which must be
+    normalized to "allow" so it isn't treated as a denial (Issue #20).
+    """
+
+    def _send(self, agent, behavior):
+        agent._executor = MagicMock()
+        agent._executor.send_permission_response.return_value = {"success": True}
+        agent._cmd_permission_response(
+            {
+                "session_id": "s1",
+                "request_id": "r1",
+                "behavior": behavior,
+                "tool_name": "Bash",
+            }
+        )
+        return agent._executor.send_permission_response.call_args[0]
+
+    def test_allow_permanent_normalized_to_allow(self):
+        agent = _make_agent()
+        args = self._send(agent, "allow-permanent")
+        assert args[2] == "allow"
+
+    def test_plain_allow_passthrough(self):
+        agent = _make_agent()
+        args = self._send(agent, "allow")
+        assert args[2] == "allow"
+
+    def test_deny_passthrough(self):
+        agent = _make_agent()
+        args = self._send(agent, "deny")
+        assert args[2] == "deny"
 
 
 # ===================================================================

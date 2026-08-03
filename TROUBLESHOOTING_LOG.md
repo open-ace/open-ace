@@ -293,14 +293,43 @@
 - **根本原因**：
   **功能缺失**，非 bug。Qwen Code CLI 的日志解析逻辑（`fetch_qwen.py`）没有实现从 shell 工具调用中提取文件变更信息并生成 `file_change` content_block 的功能。
 
-- **可能的解决方案**（待后期设计）：
-  1. **在 `fetch_qwen.py` 中添加文件变更检测逻辑**：解析 shell 工具调用的命令内容，识别 mkdir/mv/cp 等操作，生成 `file_change` content_block
-  2. **在通用层面添加文件变更提取**：在 `remote_session_manager.py` 中从 `tool_use` 事件分析工具调用内容，识别文件操作并生成 `file_change` block
-  3. **添加后处理机制**：会话完成后通过 git diff 检测文件变更，追加到 transcript 中
+- **解决办法**：
+  1. 新增 `scripts/shared/file_change_parser.py`（stdlib-only）：将 `tool_use` 块解析为 `file_change` 的 `changes` 条目
+     - 原生文件工具：`write_file` / `create_file` / `edit` → `change_type: modify`
+     - shell 工具（`run_shell_command` / `bash` / `cmd` / `powershell` 等）：解析 `mkdir`/`touch`（add）、`mv`/`rename`（move，含 `old_path`）、`cp`（add 目标）、`rm`/`rmdir`/`del`/`rd`（delete）
+     - 安全设计：含 glob/管道/重定向/`$变量`/反引号/大括号等无法可靠判断的命令一律跳过，避免误报
+     - 支持 `sudo` 前缀剥离、引号路径、Windows 路径（反斜杠保留）、复合命令（`&&`/`;`/`||`/换行）拆分
+  2. **实时路径**：`remote_session_manager.py` 新增 `_append_file_change_blocks()`，在 `_accumulate_assistant_text` 流式累积时，从 `tool_use` 块推导 `file_change` 块并随轮次写入 transcript
+  3. **历史路径**：`fetch_qwen.py` 新增 `_append_file_change_blocks()`（与实时路径同一逻辑），`process_jsonl_file` 生成 `content_blocks` 后追加 `file_change` 块，回放历史会话同样显示文件变更
+  4. **web 终端路径（session_sync，实测缺失）**：`app/routes/remote.py` 的 `msg_type == "session_sync"` 处理（agent 上报 Qwen CLI 会话数据，source=`web_terminal`）写入 `content_blocks` 时未推导 file_change 块——这是实际工作区创建文件的主要路径，2026-08-03 实测补齐：写入前对每条消息的 `content_blocks` 调用共享函数 `append_file_change_blocks()`
+  5. **收敛共享函数**：`file_change_parser.py` 新增模块级 `append_file_change_blocks(blocks)`，实时/历史/web 终端三条路径统一复用（`remote_session_manager.py`、`fetch_qwen.py` 的 `_append_file_change_blocks` 改为调用共享函数）
+  6. 新增单元测试 `tests/unit/test_file_change_parser.py`（22 例，含共享函数 2 例）及 `test_fetch_qwen.py` 集成用例（1 例）
 
-- **修改的文件**：无（留到后期设计实现）
+- **修改的文件**：
+  - 新增 `scripts/shared/file_change_parser.py`（含共享函数 `append_file_change_blocks`）
+  - 新增 `tests/unit/test_file_change_parser.py`
+  - 修改 `app/modules/workspace/remote_session_manager.py`（实时路径 `_append_file_change_blocks`）
+  - 修改 `app/routes/remote.py`（session_sync 路径追加 file_change 块）
+  - 修改 `scripts/fetch_qwen.py`（历史路径 `_append_file_change_blocks` + 调用点）
+  - 修改 `tests/unit/test_fetch_qwen.py`（新增 file_change 集成测试）
+  - 备份：`remote_session_manager.py.bak.20260803`、`fetch_qwen.py.bak.20260803`、`remote.py.bak.20260803b`、`remote_session_manager.py.bak.20260803b`、`fetch_qwen.py.bak.20260803b`、`file_change_parser.py.bak.20260803b`
 
-- **状态**：待处理（功能缺失，需后期设计文件变更检测方案）
+- **验证结果**：
+  - `py_compile` 改动文件通过（本地 + 容器内）
+  - `pytest tests/unit/test_fetch_qwen.py tests/unit/test_file_change_parser.py`：25 项全部通过（22 项 parser + 3 项 fetch_qwen）
+  - 容器内用真实上报格式（`{"type":"tool_use","name":"run_shell_command","input":{"command":"mkdir C:\workspace\ccc"}}`）验证 `append_file_change_blocks` 正确生成 `[{"path":"C:\workspace\ccc","change_type":"add"}]`
+  - DB 实测：session_sync 路径消息（source=`web_terminal`）的 content_blocks 此前无 file_change 块；部署修复后需在工作区实测确认
+
+- **补充诊断（2026-08-03 实测定位，推翻原诊断方向）**：
+  工作区实测"创建文件夹后文件变更仍不显示"后，反编译容器内 qwen-code-webui@0.2.40 前端 bundle（`/usr/lib/node_modules/qwen-code-webui/dist/static/assets/index-DO2hmkKX.js`）发现：
+  1. **"文件变更"面板是 qwen-code-webui 的组件**，其数据源是 **git status**，不是 content_blocks：
+     - bundle 中 `"content_blocks"` 匹配 **0 次**、`"file_change"` 匹配 **0 次** → 面板根本不读该数据
+     - 面板钩子 `zm()`：本地会话 → 请求 qwen-code-webui 自身 `GIT_STATUS?workingDirectory=...`；远程会话 → 请求 OpenACE `/api/remote/machines/<id>/git/status?path=...`，均期望返回 `{"files":[{"path","status","additions","deletions"}]}`
+  2. **会话 57decec1 链路**：context=`{"workspace_type":"terminal","remote_machine_id":"7fad3781-..."}`，CLI 跑在 Windows 机器 `C:\workspace` → 面板调 OpenACE → 向 agent 发 `git_status` 命令
+  3. **决定性根因**：agent 的 `_cmd_git_status`（`remote-agent/agent.py`）在目录**无 `.git` 时直接返回空 `files`** → 面板显示"未检测到文件变更"；且 git 本身**忽略空目录**，`mkdir` 创建的空文件夹即使有 git 也不会显示
+  4. 因此**本问题此前所有"注入 file_change content_block"的修复对工作区面板无效**——那些数据只对会话详情页（OpenACE 主前端 `MessageContent.tsx`）有意义。真正的修复见问题 19
+
+- **状态**：工作区面板侧未解决（原 content_blocks 方案不影响该面板）；修复见问题 19
 
 ---
 
@@ -574,3 +603,229 @@
   - 用户刷新仪表盘确认"时间范围统计"QWEN 数据正常显示
 
 - **状态**：已解决（2026-08-02 完成并验证）
+
+## 问题 16：工作区 AI 回复英文（QWEN_SYSTEM_MD 未注入 + output-language.md 强制英文）
+
+- **处理时间**：2026-08-03
+- **故障现象**：
+  向 AI 提问"你好"，AI 回复："The user is greeting me in Chinese. However, according to my output language preference, I must always respond in English."。中文系统提示词未生效，AI 按英文回复。
+
+- **诊断结论**：
+  1. 排查会话消息（session_messages）确认：**两次"你好"英文测试（12:05、22:01）实际都发生在本地工作区**（session project_path=`/workspace/admin`、workspace_type=local、source=fetch_qwen），并非远程工作区
+  2. qwen CLI 调试日志（`~/.qwen/debug/*.txt`）显示 CLI 启动时加载了记忆文件 **`/home/admin/.qwen/output-language.md`**，内容为 "# Output language preference: English" + "You MUST always respond in English regardless of the user's input language"——**模型回复内容与该文件几乎逐字一致**，确认记忆文件被注入系统提示词并压过中文提示词
+  3. Windows 远程 agent 侧（`C:\Users\nuc\.qwen\output-language.md`）为 **auto**（跟随用户语言），无此问题
+  4. 远程 agent 侧另有一个真实缺陷：`executor.py` `_build_env()` 从未设置 `QWEN_SYSTEM_MD`，且 agent 安装目录没有 `system-prompt.md`，install.ps1/install.sh 下载清单均未包含该文件
+
+- **根本原因**：
+  **主因**：容器内 qwen-code 的记忆文件 `~/.qwen/output-language.md` 被设为 English（2026-08-02 11:42 由 qwen-code 的 output-language 功能写入），qwen-code CLI 将记忆文件内容注入系统提示词，其 "MUST respond in English" 强制规则压过了 QWEN_SYSTEM_MD 的中文提示词。
+  **次因**：远程 agent 的 `_build_env()` 未注入 `QWEN_SYSTEM_MD`、安装清单缺 `system-prompt.md`，即使没有记忆文件冲突，远程 CLI 也会用默认英文提示词。
+
+- **解决办法**：
+  1. **`remote-agent/executor.py` `_build_env()`**：当 CLI 工具为 qwen-code-cli/qwen/qwen-code 时，若 agent 同目录存在 `system-prompt.md`，则设置 `env["QWEN_SYSTEM_MD"]` 指向该文件（文件缺失时保留 CLI 默认提示词）
+  2. **`remote-agent/install.ps1` / `install.sh`**：文件下载清单（AGENT_FILES）增加 `system-prompt.md`
+  3. **`remote-agent/system-prompt.md`**：从仓库根目录复制（中文提示词，含"请始终使用中文与用户交流"）
+  4. **容器内 `/home/admin/.qwen/output-language.md`**（根因修复）：改为 auto（内容与 Windows 侧一致，"Respond in the same language as the user's input"），并恢复 admin:admin 属主。该文件由 qwen-code 的 output-language 功能管理，webui 不会重新生成，一次修改即可
+
+- **修改的文件**：
+  - `remote-agent/executor.py`（`_build_env()` 注入 QWEN_SYSTEM_MD）
+  - `remote-agent/install.ps1`、`remote-agent/install.sh`（下载清单增加 system-prompt.md）
+  - `remote-agent/system-prompt.md`（新建，复制自仓库根目录）
+  - 容器 `/home/admin/.qwen/output-language.md`（English → auto）
+  - 备份：`remote-agent/{executor.py,install.ps1,install.sh}.bak.20260803`
+  - 已部署：`docker cp` 至容器 `/app/remote-agent/`；Windows agent 安装目录已由用户更新并重启
+
+- **验证结果**：
+  - 4 个文件 `py_compile` 语法通过
+  - 容器内 `/app/remote-agent/` 文件 md5 与仓库一致
+  - 容器 `output-language.md` 已改为 auto（admin:admin，841 字节）
+  - **用户复测通过**：本地工作区（/workspace/admin）提问"你好"返回中文；远程工作区新建会话提问"你好"返回中文
+
+- **状态**：已解决（2026-08-03 完成并验证）
+
+## 问题 17：远程机器显示"离线"但 agent 实际在线（首个心跳延迟 + 时区显示偏差）
+
+- **处理时间**：2026-08-03
+- **故障现象**：
+  在 admin 管理界面查看远程机器：在线机器数量为 0，但执行 agent 的机器 token 活跃、状态为离线，最后心跳还是昨晚的记录。agent 实际运行正常（能恢复历史会话）。
+
+- **诊断结论**：
+  1. **首个心跳延迟**：agent 启动流程 `start()` 中先同步执行 `_executor.restore_sessions()`（恢复 16 个历史 session，每个 SDK 初始化最多等 15s 超时，合计约 4 分钟），全部完成后才进入 HTTP polling 发送 register/首个 heartbeat → 启动后数分钟内机器一直显示离线
+  2. **时区显示偏差**：服务端 `process_heartbeat()`/`register_connection()` 用 `datetime.now(timezone.utc).replace(tzinfo=None).isoformat()` 写入 last_heartbeat（纯 UTC 无时区标记），前端 `new Date(...).toLocaleString()` 按浏览器本地时区解析 → 显示时间比实际早 8 小时（Asia/Shanghai）
+  3. **附带问题**：agent.log 中出现 `'gbk' codec can't decode byte 0xae` 错误 —— `session_sync.py` 3 处 `open(self.jsonl_path)` 未指定 encoding，Windows 默认 GBK 读取 UTF-8 JSONL 报错
+
+- **根本原因**：
+  agent 启动时同步恢复 session 阻塞了首个心跳；服务端时间戳丢失时区标记导致前端解析偏差 8 小时；session_sync 文件读取未指定 UTF-8 编码。
+
+- **解决办法**：
+  1. **`remote-agent/agent.py`**：将 `restore_sessions()` 从同步调用改为后台线程（`_start_session_restore()`），先进入 HTTP polling 完成 register/首个心跳，session 恢复完成后再逐个发送 `session_status=running`；失败不阻塞主流程
+  2. **`app/modules/workspace/remote_agent_manager.py`**：
+     - 新增 `_utcnow_iso()` helper：返回带 `+00:00` 偏移的 UTC ISO 时间戳，前端 `new Date(...)` 可按 UTC 正确解析
+     - `register_agent`/`register_connection`/`process_heartbeat` 的 `last_heartbeat`/`updated_at` 写入改用 `_utcnow_iso()`
+     - 心跳超时清扫的 `heartbeat_cutoff` 改用带时区格式，保持 SQLite 词法比较一致（PostgreSQL timestamp 列解析正常）
+     - 其余表（agent_sessions 等）时间戳保持原格式，避免跨表比较不一致
+  3. **`remote-agent/session_sync.py`**：3 处 `open(self.jsonl_path)` 增加 `encoding="utf-8"`
+
+- **修改的文件**：
+  - `remote-agent/agent.py`（新增 `_start_session_restore()`，异步恢复 session）
+  - `remote-agent/session_sync.py`（3 处 open 加 encoding="utf-8"）
+  - `app/modules/workspace/remote_agent_manager.py`（`_utcnow_iso()` + 4 处写入点 + 心跳超时 cutoff）
+  - 备份：`remote-agent/{agent.py,session_sync.py}.bak.20260803`、`app/modules/workspace/remote_agent_manager.py.bak.20260803`
+
+- **验证结果**：
+  - 4 个文件 `py_compile` 语法通过
+  - 容器重启后 remote_machines 表显示机器 status=busy、last_heartbeat=13:55:35（UTC）= 本地 21:55（即时心跳，自动重连成功）
+  - 容器内验证 `_utcnow_iso()` 返回 `2026-08-03T13:56:06.604099+00:00`（带时区标记）
+  - 待 Windows agent 更新文件并重启后，验证管理界面在线状态与心跳时间显示
+
+- **状态**：代码修改完成，容器侧已部署；Windows agent 侧待手动更新（见下方命令）
+
+## 问题 18：容器重启后工作区报"Failed to fetch projects: UNAUTHORIZED"
+
+- **处理时间**：2026-08-03
+- **故障现象**：
+  部署问题 8（docker cp + restart）后，工作区无法打开，报错 `错误: Failed to fetch projects: UNAUTHORIZED`；**刷新页面后仍然报错**。
+
+- **诊断结论**：
+  1. 错误来自 **qwen-code-webui 前端**（旧前端构建产物中"项目选择器"组件）：它从 `sessionStorage['qwen-webui-token']` / iframe URL 读取 WebUI token，拼接到 `openace_url/api/projects?token=...` 调用；响应非 200 时抛出 `Failed to fetch projects: ${statusText}`（401 的 statusText 即 `UNAUTHORIZED`）
+  2. **当前 frontend/src 已移除该逻辑**（改用 session 认证的 `/api/workspace/remote-projects`），但 **static 前端构建产物未更新**，容器仍运行旧前端
+  3. **WebUI token 验证失败的两个根因**：
+     - `workspace.token_secret` 若在 config.json 中缺失，`WebUIManager.__init__` 每次进程启动生成**随机 secret 且不持久化** → 容器/gunicorn 重启后所有旧 token 签名失效（`webui_manager.py` 第 183-184 行）
+     - `workspace.py load_user` 用 `WebUIManager()` **新建实例**验证 token，与 token 生成用的 `get_webui_manager()` 单例 secret 不一致 → config.json 缺 secret 时 workspace 路由必 401
+  4. **"刷新后仍报错"的原因**：iframe 写入 `sessionStorage` 的旧 token 不会随页面刷新更新；主前端旧组件读到的是旧 token（已过期或 secret 已变）→ 永久 401
+
+- **根本原因**：
+  旧前端构建产物用"sessionStorage 缓存的 WebUI token"调用 `/api/projects`；token_secret 未持久化 + workspace 认证用错实例，导致 token 验证失败且刷新不刷新 sessionStorage 中的旧 token。
+
+- **解决办法**：
+  1. **`app/services/webui_manager.py`**：
+     - `__init__` 中 token_secret 缺失时生成后**写回 config.json**（新增 `_persist_token_secret()`），保证跨进程/容器重启 secret 稳定；已有值不被覆盖
+     - v2 token TTL 从 30 分钟延长至 24 小时（`TTL_SECONDS = 86400`）
+  2. **`app/routes/workspace.py`**：`load_user` 中 `WebUIManager()` 改为 `get_webui_manager()` 单例，与 token 生成/验证统一
+  3. **`app/auth/decorators.py`**：`WEBUI_TOKEN_TTL_SECONDS = 1800` → `86400`（与 webui_manager 一致）
+  4. **`docker-entrypoint.sh`**：
+     - 修复 shebang（`!/bin/bash` → `#!/bin/bash`）
+     - `ensure_secret_env` 增加 `TOKEN_SECRET` 的生成/持久化（与 SECRET_KEY/UPLOAD_AUTH_KEY 相同机制，写入 generated-secrets.env）
+     - `generate_default_config` 复用环境变量中的 `TOKEN_SECRET`（`${TOKEN_SECRET:-...}`），不再每次新生成
+  5. **前端重建**：`cd frontend && npm install && npm run build`（vite 输出到 `static/js/dist/`，Flask `pages.py` 从该目录提供 SPA），新构建产物已移除"sessionStorage token 调用 /api/projects"逻辑
+
+- **修改的文件**：
+  - `app/services/webui_manager.py`（token_secret 持久化 + TTL 86400）
+  - `app/routes/workspace.py`（认证改用单例）
+  - `app/auth/decorators.py`（TTL 86400）
+  - `docker-entrypoint.sh`（shebang + TOKEN_SECRET 持久化）
+  - `frontend/`（重新构建，产出 `static/js/dist/`）
+  - 备份：`{webui_manager.py,workspace.py,decorators.py,docker-entrypoint.sh}.bak.20260803`
+
+- **验证结果**：
+  - 3 个 Python 文件 `py_compile` 通过
+  - 独立验证脚本（stub 掉 Unix-only 的 `pwd` 后加载真实 `WebUIManager`）：
+    - 无 token_secret 的 config.json → 首次生成并写回 ✅
+    - 第二个实例复用持久化 secret（跨实例稳定）✅
+    - 生成 v2 token 验证通过 ✅
+    - 已有 token_secret 不被覆盖 ✅
+  - 前端 `npm run build` 成功（4.79s），`static/js/dist/index.html` 引用新产物；`grep -r "Failed to fetch projects|qwen-webui-token" static/js/dist` 无匹配（旧逻辑已消失）
+  - 清理了运行验证脚本产生的 200 个 sqlite 临时文件
+
+- **状态**：代码修改完成，待部署容器验证（见下方部署/回滚说明）
+
+---
+
+## 问题 19：工作区"文件变更"面板不显示 AI 文件操作（面板基于 git status，非 git 目录无变更可报）
+
+- **处理时间**：2026-08-03
+- **故障现象**：
+  工作区中 AI（Qwen Code CLI）创建目录/文件后，右侧"文件变更"面板一直显示"未检测到文件变更"，点击"刷新"按钮也无变化（会话 57decec1 实测：`mkdir C:\workspace\ddd` 后仍不显示）。
+
+- **诊断结论**（完整链路）：
+  1. "文件变更"面板是 **qwen-code-webui 前端组件**，数据源是 **git status**（见问题 8 补充诊断）：
+     - 远程会话：`zm()` → `mo(machineId, workingDirectory)` → OpenACE `/api/remote/machines/<id>/git/status?path=<project>`（[remote.py `remote_git_status`](app/routes/remote.py)）
+     - OpenACE 向远程 agent 发 `git_status` 命令（`_dispatch_remote_git_command`）
+  2. agent 端 `_cmd_git_status`（[remote-agent/agent.py](remote-agent/agent.py)）：`C:\workspace` **无 `.git` 目录** → 直接返回 `{"files": []}` → 面板渲染 `files.length === 0` → "未检测到文件变更"
+  3. 即使有 git，`git status` 也**忽略空目录**，`mkdir` 创建的空文件夹不会出现
+  4. 面板期望的数据结构：`[{"path", "status"(added/modified/deleted), "additions", "deletions"}]`（渲染逻辑含 A/M/D 徽标和 `+N/-N` 统计）
+
+- **根本原因**：
+  功能缺陷。qwen-code-webui 的文件变更面板只认 git status；非 git 项目目录（本场景 `C:\workspace`）没有基线可对比，agent 返回空列表，导致 AI 的所有文件操作都无法显示。问题 8 的 content_blocks 方案与该面板无关。
+
+- **解决办法**：
+  在 agent 端为**非 git 目录**增加"快照差异"回退（git 目录逻辑保持不变）：
+  1. `remote-agent/agent.py` 新增模块级函数：
+     - `_scan_project_tree(root)`：递归扫描项目树，返回 `{relpath: {kind, size?, mtime?}}`；**空目录也记录**（弥补 git 忽略空目录的缺陷）；跳过噪声目录（`__pycache__`/`node_modules`/`.venv`/`dist`/`build` 等）
+     - `_diff_snapshots(old, new)`：对比两次快照，输出 `{path, status, additions, deletions}`；目录只报 added/deleted，文件报 added/modified/deleted（按 size/mtime 变化判定 modified）
+     - `_write_snapshot()`：原子写入快照（临时文件 + `os.replace`）
+     - `_snapshot_path_for(cwd)`：快照按项目真实路径哈希存储于 `%TEMP%/openace_snapshots/<sha256>.json`
+  2. `_cmd_git_status` 修改：目录无 `.git` 时调用新方法 `_cmd_git_status_snapshot(request_id, cwd)`，返回格式与 git 分支完全一致
+  3. **重基线机制**：快照创建时间超过 `_SNAPSHOT_RESET_AGE_SECONDS`（30 分钟）后重新基线化——面板只显示"快照新鲜期内"累积的变更，避免无限累积陈旧条目；首个调用（无快照）建立基线并返回空（与面板首次加载行为一致）
+  4. 为新增的 added 文件统计行数（复用 git 分支已有逻辑，供面板 `+N` 显示）
+
+- **修改的文件**：
+  - `remote-agent/agent.py`（`import hashlib`、模块级快照函数、`_cmd_git_status` 分派 + `_cmd_git_status_snapshot`）
+  - `tests/issues/610/test_remote_agent_handlers.py`（更新 1 个既有非 git 测试 + 新增 5 个快照测试：空目录 added、文件 added+行数、modified、deleted、噪声目录忽略、重基线）
+  - 备份：`remote-agent/agent.py.bak.20260803`（原有）
+
+- **验证结果**：
+  - `py_compile` 通过
+  - `uv run --with pytest --noconftest pytest tests/issues/610/test_remote_agent_handlers.py`：62 通过 / 1 失败；失败项 `test_path_with_tilde_expansion` 为**既有环境问题**（Windows 的 `os.path.expanduser("~")` 优先 `USERPROFILE` 而非被 patch 的 `HOME`，与本次改动无关）；5 个新增快照测试全部通过
+
+- **部署/验证步骤**（需用户执行）：
+  1. 将 `remote-agent/agent.py` 复制到 Windows 机器的 agent 安装目录（`C:\Users\nuc\.open-ace-agent\agent.py`），替换旧文件
+  2. 重启 agent 进程（双击桌面 `OpenACE-Agent.cmd` 或执行 `start-agent.ps1`）
+  3. 打开工作区，等面板完成首次轮询（建立基线，显示"未检测到文件变更"是正常现象）
+  4. 让 AI 在工作目录创建**新**文件夹/文件 → 面板 5 秒轮询或手动点"刷新"后应显示 added/modified 条目；删除文件显示 deleted
+  5. 注意：基线建立前已存在的目录/文件不会显示（与 git 的 untracked 语义一致，只显示基线之后的变更）
+
+- **状态**：已解决（2026-08-03 部署 Windows agent 后实测：面板已显示文件变更）
+
+---
+
+## 问题 20：权限对话框选"允许且不再询问"被判定为拒绝（allow-permanent 未被 CLI 识别）
+
+- **处理时间**：2026-08-03
+- **故障现象**：
+  工作区 AI 创建文件夹/文件时弹出权限对话框（允许本次 / 允许且不再询问 / 拒绝），选择**"允许且不再询问"**后操作仍被判定为拒绝、无法执行。"允许本次"和"拒绝"正常。此为问题 14（"同意所有操作"被拒）修复后**复现的同类问题**。
+
+- **诊断结论**（完整链路）：
+  1. **问题 14 的补丁仍然存在**（容器内 bundle `H(),A){L.sendPermissionResponse` 3 处、依赖数组 `[z,ct,dt,B,vt,H,A,L,U]` 3 处——此前 grep 返回 0 是误报：minified bundle 是单行文件，`grep -c` 按"行"计数且模式含 `{`/`}`）
+  2. 反编译 qwen-code-webui bundle，权限对话框三按钮映射（组件 `gc`）：
+     - `allow`（允许本次）→ `Vt` → WebSocket 发送 `behavior="allow"`
+     - **`allowPermanent`（允许且不再询问）→ `Ht` → WebSocket 发送 `behavior="allow-permanent"`**
+     - `deny`（拒绝）→ `Wt` → `behavior="deny"`
+  3. 问题 14 修复的是 `Ut`（"同意所有操作"场景，`run_shell_command` 时按钮为 allowSpecific/allowAll），补丁后发 `allow`，所以当时通过；**`Ht` 的 `allow-permanent` 路径从未被验证过**
+  4. **决定性根因**：Windows 机器上的 qwen-code CLI（@qwen-code/qwen-code@0.15.10）解析 `control_response` 时（`chunks/session-GMPZBLOW.js` 第 1176-1193 行）：
+     ```js
+     const behavior = String(payload["behavior"] || "").toLowerCase();
+     if (behavior === "allow") { /* proceed_once */ }
+     else { /* cancel → 拒绝 */ }
+     ```
+     **只识别 `behavior === "allow"`**，`allow-permanent` 落入 else 分支 → cancel → 被当作拒绝
+  5. 链路：前端 `Ht` → WebSocket `allow-permanent` → OpenACE `respond_to_permission`（原样透传）→ agent `_cmd_permission_response` → CLI stdin `control_response {"behavior":"allow-permanent"}` → CLI cancel
+
+- **根本原因**：
+  qwen-code-webui 前端的"允许且不再询问"通过 WebSocket 发送 `allow-permanent`，而 CLI 的 control_response 协议**只有 `allow`/`deny` 两种取值**（无永久允许应答方式），`allow-permanent` 被 CLI 按"非 allow"处理为拒绝。属于**前后端协议取值不匹配**（上游 qwen-code-webui 与 CLI 之间的缺陷）。
+
+- **解决办法**：
+  在行为值到达 CLI 前，将 `allow-permanent` **归一化为 `allow`**（"允许且不再询问"按"允许本次"生效，操作可执行、不再误判为拒绝；永久允许语义留作后续增强，与问题 14 结论一致）：
+  1. **服务端** `app/modules/workspace/remote_session_manager.py` 的 `respond_to_permission` 入口归一化（该方法为所有权限应答的唯一 chokepoint）：
+     ```python
+     if behavior == "allow-permanent":
+         behavior = "allow"
+     ```
+  2. **agent 端** `remote-agent/agent.py` 的 `_cmd_permission_response` 同样归一化（兜底，覆盖将来绕过服务端的入口）
+
+- **修改的文件**：
+  - `app/modules/workspace/remote_session_manager.py`（`respond_to_permission` 归一化）
+  - `remote-agent/agent.py`（`_cmd_permission_response` 归一化）
+  - `tests/unit/test_remote_session_manager_timeline.py`（新增 `test_respond_to_permission_normalizes_allow_permanent`）
+  - `tests/issues/610/test_remote_agent_handlers.py`（新增 `TestCmdPermissionResponse` 3 例）
+
+- **验证结果**：
+  - `py_compile` 通过
+  - `test_remote_agent_handlers.py`：65 通过 / 1 失败（`test_path_with_tilde_expansion` 为既有 Windows 环境问题，与本次改动无关）；新增 `TestCmdPermissionResponse` 3 例全部通过
+  - `test_remote_session_manager_timeline.py`：11 项全部通过（含新增归一化测试）
+
+- **部署/验证步骤**：
+  1. 服务端：`remote_session_manager.py` 部署到容器并重启 gunicorn（本次可随容器重启一起完成）
+  2. agent 端：替换 Windows 的 `agent.py` 并重启 agent（与问题 19 部署方式相同）
+  3. 实测：工作区让 AI 执行操作，权限对话框选"允许且不再询问"→ 操作应正常执行
+
+- **状态**：已解决（代码 + 单测完成，待部署后实测）

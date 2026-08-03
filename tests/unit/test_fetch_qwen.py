@@ -79,3 +79,53 @@ def test_process_jsonl_file_counts_cache_in_total_without_double_counting_though
     assert messages[0]["tokens_used"] == 1050
     assert messages[0]["input_tokens"] == 200
     assert messages[0]["output_tokens"] == 50
+
+
+def test_process_jsonl_file_appends_file_change_blocks_from_tool_use(tmp_path):
+    """Issue #8: shell/native file tool_use blocks yield file_change blocks."""
+    jsonl = _write_jsonl(
+        tmp_path / "sess-qwen-fc.jsonl",
+        [
+            {
+                "type": "assistant",
+                "timestamp": "2026-07-15T07:00:00Z",
+                "model": "qwen-max",
+                "sessionId": "sess-qwen-fc",
+                "uuid": "assistant-1",
+                "message": {
+                    "message_id": "assistant-1",
+                    "parts": [
+                        {"text": "creating structure"},
+                        {
+                            "type": "functionCall",
+                            "functionCall": {
+                                "name": "run_shell_command",
+                                "args": {"command": "mkdir -p src/app"},
+                            },
+                        },
+                    ],
+                },
+                "usageMetadata": {
+                    "promptTokenCount": 100,
+                    "candidatesTokenCount": 10,
+                    "totalTokenCount": 110,
+                },
+            }
+        ],
+    )
+
+    daily, messages = process_jsonl_file(jsonl, "localhost", "rhuang")
+
+    assert len(messages) == 1
+    blocks = messages[0]["content_blocks"]
+    tool_use = next(b for b in blocks if b["type"] == "tool_use")
+    assert tool_use["name"] == "run_shell_command"
+    file_changes = [b for b in blocks if b["type"] == "file_change"]
+    assert file_changes == [
+        {
+            "type": "file_change",
+            "changes": [{"path": "src/app", "change_type": "add"}],
+            "status": "accepted",
+            "success": True,
+        }
+    ]

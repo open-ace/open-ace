@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 Open ACE - AI Computing Explorer - WebUI Manager Service
 
@@ -179,9 +179,15 @@ class WebUIManager:
         self._cleanup_greenlet: gevent.Greenlet | None = None
         self._running = False
 
-        # Generate token secret if not configured
+        # Generate token secret if not configured. The value is persisted back
+        # to config.json so every process/container restart shares the same
+        # secret; without persistence a fresh random secret per restart
+        # invalidates all outstanding WebUI tokens and the workspace iframe
+        # reports "Failed to fetch projects: UNAUTHORIZED" until the secret is
+        # regenerated. (Issue #8 regression)
         if not self.config.token_secret:
             self.config.token_secret = secrets.token_hex(32)
+            self._persist_token_secret()
 
         # Platform detection
         self._platform = platform.system().lower()
@@ -230,6 +236,32 @@ class WebUIManager:
         except Exception as e:
             logger.error(f"Error loading config: {e}")
             return WorkspaceConfig()
+
+    def _persist_token_secret(self) -> None:
+        """Persist ``workspace.token_secret`` back to config.json.
+
+        Called once when a secret was auto-generated (config.json did not
+        contain one). Persisting makes the secret stable across process and
+        container restarts; otherwise a fresh random secret per restart
+        invalidates every outstanding WebUI token and the workspace iframe
+        reports "Failed to fetch projects: UNAUTHORIZED".
+        """
+        from app.repositories.database import CONFIG_DIR
+
+        config_path = os.path.join(CONFIG_DIR, "config.json")
+        try:
+            with open(config_path, encoding="utf-8") as f:
+                config = json.load(f)
+        except (OSError, json.JSONDecodeError) as e:
+            logger.warning(f"Failed to read config.json for token_secret persistence: {e}")
+            return
+        config.setdefault("workspace", {})["token_secret"] = self.config.token_secret
+        try:
+            with open(config_path, "w", encoding="utf-8") as f:
+                json.dump(config, f, ensure_ascii=False, indent=2)
+            logger.info("Persisted generated workspace.token_secret to config.json")
+        except OSError as e:
+            logger.warning(f"Failed to write token_secret to config.json: {e}")
 
     def _remove_port_from_url(self, url: str) -> str:
         """Remove any existing port from URL, keeping only scheme and host.
@@ -499,8 +531,11 @@ class WebUIManager:
 
         v2 format: v2:{user_id}:{port}:{timestamp}:{random}:{signature}
         """
-        # TTL in seconds (30 minutes default)
-        TTL_SECONDS = 1800
+        # TTL in seconds (24 hours). qwen-code-webui caches the token in
+        # sessionStorage and reuses it for the whole session without
+        # refreshing; a 30-minute TTL made the workspace fail with
+        # "Failed to fetch projects: UNAUTHORIZED" once the token aged out.
+        TTL_SECONDS = 86400
 
         try:
             parts = token.split(":")
