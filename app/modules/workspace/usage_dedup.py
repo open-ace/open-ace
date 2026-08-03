@@ -38,16 +38,19 @@ class SimpleTTLCache:
         self._lock = threading.Lock()
 
     def __contains__(self, key: str) -> bool:
+        """Check if key exists in cache."""
         with self._lock:
             self._cleanup()
             return key in self._cache
 
     def __setitem__(self, key: str, value: Any) -> None:
+        """Set key to value with TTL."""
         with self._lock:
             self._cleanup()
             self._cache[key] = (value, time.time() + self._ttl)
 
     def __getitem__(self, key: str) -> Any:
+        """Get value by key."""
         with self._lock:
             self._cleanup()
             if key in self._cache:
@@ -86,8 +89,8 @@ class UsageDedupCache:
             ttl: Time-to-live in seconds (default 5 minutes).
         """
         cache_class = TTLCache if HAS_CACHETOOLS else SimpleTTLCache
-        self._request_id_cache = cache_class(maxsize=maxsize, ttl=ttl)
-        self._composite_cache = cache_class(maxsize=maxsize, ttl=ttl)
+        self._request_id_cache: TTLCache | SimpleTTLCache = cache_class(maxsize=maxsize, ttl=ttl)
+        self._composite_cache: TTLCache | SimpleTTLCache = cache_class(maxsize=maxsize, ttl=ttl)
         self._lock = threading.Lock()
 
     def check_and_record(self, evidence: UsageEvidence) -> UsageEvidence | None:
@@ -158,8 +161,8 @@ class UsageDedupCache:
                 self._request_id_cache.clear()  # type: ignore[union-attr]
                 self._composite_cache.clear()  # type: ignore[union-attr]
             else:
-                self._request_id_cache._cache.clear()
-                self._composite_cache._cache.clear()
+                self._request_id_cache._cache.clear()  # type: ignore[union-attr]
+                self._composite_cache._cache.clear()  # type: ignore[union-attr]
 
     def get_stats(self) -> dict[str, int]:
         """Get cache statistics.
@@ -175,8 +178,8 @@ class UsageDedupCache:
                 }
             else:
                 return {
-                    "request_id_cache_size": len(self._request_id_cache._cache),
-                    "composite_cache_size": len(self._composite_cache._cache),
+                    "request_id_cache_size": len(self._request_id_cache._cache),  # type: ignore[union-attr]
+                    "composite_cache_size": len(self._composite_cache._cache),  # type: ignore[union-attr]
                 }
 
 
