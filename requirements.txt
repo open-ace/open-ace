@@ -43,4 +43,8 @@ isort>=5.12.0
 ruff>=0.1.0
 mypy>=1.0.0
 types-requests>=2.28.0
+types-cachetools>=5.5.0
 pre-commit>=3.0.0
+
+# Caching
+cachetools>=5.5.0
