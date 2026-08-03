@@ -6,7 +6,7 @@
  */
 
 import React, { useState } from 'react';
-import { Modal, Button, TextInput, PasswordPolicyHint } from '@/components/common';
+import { Modal, Button, TextInput, PasswordPolicyHint, useToast } from '@/components/common';
 import { useAuth, useLanguage, useMustChangePassword, usePasswordPolicy } from '@/hooks';
 import { t } from '@/i18n';
 
@@ -15,6 +15,7 @@ export const ForceChangePasswordModal: React.FC = () => {
   const mustChangePassword = useMustChangePassword();
   const { changePassword, isChangingPassword, changePasswordError } = useAuth();
   const { data: passwordPolicy } = usePasswordPolicy();
+  const toast = useToast();
 
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -49,7 +50,9 @@ export const ForceChangePasswordModal: React.FC = () => {
 
     try {
       await changePassword(currentPassword, newPassword);
-      // After successful change, the auth hook will refetch and update must_change_password
+      toast.success(
+        t('passwordChangedSuccess', language) ?? 'Password changed successfully'
+      );
     } catch (err) {
       const errorMessage =
         (err as Error)?.message ??
