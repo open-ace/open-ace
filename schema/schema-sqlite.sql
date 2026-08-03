@@ -95,7 +95,9 @@ CREATE TABLE agent_sessions (
  paused_at TIMESTAMP,
  cli_session_id text DEFAULT '',
  tenant_id integer DEFAULT 1 NOT NULL,
- tenant_version integer DEFAULT 1 NOT NULL
+ tenant_version integer DEFAULT 1 NOT NULL,
+ total_cache_read_tokens integer DEFAULT 0,
+ total_cache_write_tokens integer DEFAULT 0
 );
 
 CREATE TABLE agent_tokens (
