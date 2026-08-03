@@ -4448,8 +4448,8 @@ with open('$config_dir/config.json', 'w') as f:
         if [ -d "$target_path/vendor" ] && [ "$(ls -A "$target_path/vendor" 2>/dev/null)" ]; then
             print_info "Installing from vendor directory (offline mode)..."
             # VERSION-CHECK-BEGIN: Check version compatibility before offline install
-            current_minor=$(python3 -c "import sys; print(sys.version_info.minor)" 2>/dev/null)
-            supported_versions=$(ls "$target_path/vendor"/*.whl 2>/dev/null | grep -o "cp3[0-9][0-9]*" | sort -u | sed "s/cp3/3./" | tr "\n" " ")
+            local current_minor=$(python3 -c "import sys; print(sys.version_info.minor)" 2>/dev/null)
+            local supported_versions=$(ls "$target_path/vendor"/*.whl 2>/dev/null | grep -o "cp3[0-9][0-9]*" | sort -u | sed "s/cp3/3./" | tr "\n" " ")
             if [ -n "$supported_versions" ] && ! echo " $supported_versions " | grep -q " 3\.$current_minor "; then
                 print_warning "当前 Python 版本 3.$current_minor 可能不在离线包支持范围内"
                 print_info "离线包支持的版本: $supported_versions"
