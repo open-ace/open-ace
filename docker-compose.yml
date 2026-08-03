@@ -113,7 +113,7 @@ services:
 # Independent scheduler process for background tasks.
 # Uses leader election to ensure only one active scheduler.
 # For single-instance development, omit this service.
-scheduler:
+  scheduler:
     image: ${IMAGE_NAME:-openace/open-ace:latest}
     container_name: open-ace-scheduler
     restart: unless-stopped

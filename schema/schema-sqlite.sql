@@ -899,6 +899,32 @@ CREATE TABLE role_permissions (
  permission text NOT NULL
 );
 
+CREATE TABLE scheduler_leaders (
+ job_name TEXT NOT NULL,
+ leader_id TEXT NOT NULL,
+ owner_info TEXT,
+ acquired_at TIMESTAMP NOT NULL,
+ expires_at TIMESTAMP NOT NULL,
+ heartbeat_at TIMESTAMP NOT NULL,
+ last_run_at TIMESTAMP,
+ run_count INTEGER DEFAULT 0 NOT NULL,
+ skip_count INTEGER DEFAULT 0 NOT NULL,
+ fail_count INTEGER DEFAULT 0 NOT NULL,
+ PRIMARY KEY (job_name)
+);
+
+CREATE TABLE scheduler_runs (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ job_name TEXT NOT NULL,
+ leader_id TEXT NOT NULL,
+ started_at TIMESTAMP NOT NULL,
+ ended_at TIMESTAMP,
+ status TEXT NOT NULL,
+ duration_ms INTEGER,
+ error_message TEXT,
+ metrics TEXT
+);
+
 CREATE TABLE security_settings (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  setting_key TEXT NOT NULL,
@@ -1763,6 +1789,14 @@ CREATE INDEX idx_run_events_event_type ON agent_run_events (event_type);
 CREATE INDEX idx_run_events_run_id ON agent_run_events (run_id);
 
 CREATE INDEX idx_run_events_session_id ON agent_run_events (session_id, id);
+
+CREATE INDEX idx_scheduler_leaders_expires ON scheduler_leaders (expires_at);
+
+CREATE INDEX idx_scheduler_leaders_heartbeat ON scheduler_leaders (heartbeat_at);
+
+CREATE INDEX idx_scheduler_runs_job_time ON scheduler_runs (job_name, started_at DESC);
+
+CREATE INDEX idx_scheduler_runs_status ON scheduler_runs (status);
 
 CREATE INDEX idx_security_settings_key ON security_settings (setting_key);
 
