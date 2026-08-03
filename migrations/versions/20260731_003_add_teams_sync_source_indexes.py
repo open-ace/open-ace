@@ -12,7 +12,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import sqlalchemy as sa
 from alembic import op
 
 if TYPE_CHECKING:
@@ -44,23 +43,22 @@ def upgrade() -> None:
     between PostgreSQL and SQLite schema snapshots.
     """
     # Create simple index on sync_source for both PostgreSQL and SQLite
+    # Use IF NOT EXISTS for idempotency — the index may already exist from
+    # a previous partial migration run or manual creation.
     if _is_postgresql():
         # PostgreSQL: Cast settings to jsonb before extracting sync_source
-        op.create_index(
-            "idx_teams_sync_source",
-            "teams",
-            [sa.text("(settings::jsonb->>'sync_source')")],
+        op.execute(
+            "CREATE INDEX IF NOT EXISTS idx_teams_sync_source "
+            "ON teams ((settings::jsonb->>'sync_source'))"
         )
     else:
         # SQLite: Use ->> operator directly (no cast needed)
         try:
-            op.create_index(
-                "idx_teams_sync_source",
-                "teams",
-                [sa.text("(settings->>'sync_source')")],
+            op.execute(
+                "CREATE INDEX IF NOT EXISTS idx_teams_sync_source "
+                "ON teams ((settings->>'sync_source'))"
             )
-        except Exception:
-            # SQLite may not support JSON expression indexes
+        except Exception:  # nosec: B110 - SQLite may lack JSON index support
             pass
 
 
@@ -71,5 +69,5 @@ def downgrade() -> None:
     else:
         try:
             op.drop_index("idx_teams_sync_source", table_name="teams")
-        except Exception:
+        except Exception:  # nosec: B110 - best-effort downgrade
             pass
