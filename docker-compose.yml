@@ -107,9 +107,53 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # ===========================================================================
-  # PostgreSQL Database (required for production)
-  # ===========================================================================
+# ===========================================================================
+# Scheduler Worker (Issue #2187)
+# ===========================================================================
+# Independent scheduler process for background tasks.
+# Uses leader election to ensure only one active scheduler.
+# For single-instance development, omit this service.
+scheduler:
+    image: ${IMAGE_NAME:-openace/open-ace:latest}
+    container_name: open-ace-scheduler
+    restart: unless-stopped
+    profiles:
+      - scheduler
+    environment:
+      - FLASK_ENV=production
+      - PYTHONUNBUFFERED=1
+      - SCHEDULER_MODE=scheduler
+      - SECRET_KEY=${SECRET_KEY:-}
+      - OPENACE_ENCRYPTION_KEY=${OPENACE_ENCRYPTION_KEY:-}
+      - DATABASE_URL=postgresql://${DB_USER:-ace}:${DB_PASSWORD:-dev-password-change-in-production}@postgres:5432/${DB_NAME:-ace}
+      - SCHEDULER_HEARTBEAT_INTERVAL=${SCHEDULER_HEARTBEAT_INTERVAL:-10}
+      - SCHEDULER_HEARTBEAT_TIMEOUT=${SCHEDULER_HEARTBEAT_TIMEOUT:-60}
+      - SCHEDULER_LOCK_TIMEOUT=${SCHEDULER_LOCK_TIMEOUT:-1800}
+      - SCHEDULER_METRICS_PORT=9090
+    volumes:
+      - config-data:/home/open-ace/.open-ace
+      - ./logs:/app/logs
+      - workspace-data:/workspace
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9090/metrics')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - open-ace-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+# ===========================================================================
+# PostgreSQL Database (required for production)
+# ===========================================================================
   postgres:
     # Same registry override as the app build (BASE_REGISTRY). When unset this
     # resolves to docker.io's postgres:15-alpine via the library/ auto-prefix.

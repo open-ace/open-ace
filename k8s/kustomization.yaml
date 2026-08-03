@@ -13,6 +13,8 @@ resources:
   - database.yaml
   - deployment.yaml
   - service.yaml
+  - scheduler-deployment.yaml
+  - scheduler-service.yaml
   - policies.yaml
 
 # Common labels applied to all resources
