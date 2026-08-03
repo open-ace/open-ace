@@ -500,7 +500,8 @@ CREATE TABLE autonomous_workflows (
     sandbox_last_error text,
     sandbox_remote_session_id text,
     sandbox_effective_policy text,
-    ci_repair_transient_retries integer DEFAULT 0
+    ci_repair_transient_retries integer DEFAULT 0,
+    ci_repair_no_change_retries integer DEFAULT 0
 );
 
 CREATE SEQUENCE autonomous_workflows_id_seq
