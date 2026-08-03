@@ -11,9 +11,10 @@ import hashlib
 import logging
 import threading
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from app.modules.workspace.usage_evidence import UsageEvidence
+if TYPE_CHECKING:
+    from app.modules.workspace.usage_evidence import UsageEvidence
 
 logger = logging.getLogger(__name__)
 

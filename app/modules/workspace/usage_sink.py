@@ -8,9 +8,10 @@ Issue #2184: Multi-provider usage recording with unified sink.
 from __future__ import annotations
 
 import logging
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
-from app.modules.workspace.usage_evidence import UsageEvidence
+if TYPE_CHECKING:
+    from app.modules.workspace.usage_evidence import UsageEvidence
 
 logger = logging.getLogger(__name__)
 
@@ -267,6 +268,8 @@ class MessageRecordingSink:
         This is kept separate from SessionSink because message recording
         is a distinct operation with different error handling requirements.
 
+        Also updates message_count in session after recording messages.
+
         Args:
             evidence: Usage evidence.
 
@@ -277,15 +280,13 @@ class MessageRecordingSink:
             return True
 
         try:
-            import json
-
             from app.modules.workspace.session_manager import get_session_manager
 
             sm = get_session_manager()
 
             # Record messages from request/response
             # This mirrors the existing _record_messages logic
-            _record_messages_internal(
+            message_delta = _record_messages_internal(
                 sm=sm,
                 session_id=evidence.session_id,
                 request_body=self.request_body,
@@ -293,6 +294,15 @@ class MessageRecordingSink:
                 output_tokens=self.output_tokens or evidence.output_tokens,
                 model=self.model or evidence.model,
             )
+
+            # Update message_count in session if any messages were inserted
+            if message_delta > 0:
+                sm.increment_session_usage(
+                    session_id=evidence.session_id,
+                    message_delta=message_delta,
+                    tenant_id=evidence.tenant_id,
+                )
+
             return True
         except Exception as e:
             logger.debug("MessageRecordingSink failed (non-critical): %s", e)

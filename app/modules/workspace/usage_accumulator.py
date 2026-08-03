@@ -14,7 +14,6 @@ from enum import Enum
 from typing import Any
 
 from app.modules.workspace.usage_evidence import UsageEvidence
-from app.modules.workspace.usage_parser import UsageParser
 
 logger = logging.getLogger(__name__)
 

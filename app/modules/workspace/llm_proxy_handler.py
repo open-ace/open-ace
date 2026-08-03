@@ -330,52 +330,94 @@ def _record_llm_usage(
     provider: str,
     content_type: str,
     request_body: bytes | None = None,
+    request_path: str = "",
+    request_id: str | None = None,
+    model: str | None = None,
 ) -> None:
-    """Extract and record token usage and messages from LLM responses."""
+    """Extract and record token usage and messages from LLM responses.
+
+    Issue #2184: Multi-provider usage recording with cache token support.
+    Uses UsageEvidence, UsageParser, UsageDedupCache, and UsageSink for
+    unified handling of OpenAI, Anthropic, and Gateway responses.
+    """
+    from app.modules.workspace.usage_dedup import get_dedup_cache
+    from app.modules.workspace.usage_diagnostics import (
+        increment_metric,
+        log_usage_missing,
+    )
+    from app.modules.workspace.usage_evidence import UsageEvidence
+    from app.modules.workspace.usage_parser import (
+        UsageParserFactory,
+        parse_sse_line,
+    )
+    from app.modules.workspace.usage_sink import create_default_sink
+
     try:
-        if b"usage" not in content:
-            return
-
-        usage = None
-        response_model = None
-        try:
-            data = json.loads(content)
-            usage = data.get("usage", {})
-            response_model = data.get("model")
-        except json.JSONDecodeError:
-            for line in content.split(b"\n"):
-                line = line.strip()
-                if not line or not line.startswith(b"data:"):
-                    continue
-                payload = line[len(b"data:") :].strip()
-                if payload == b"[DONE]":
-                    continue
-                try:
-                    chunk = json.loads(payload)
-                except (json.JSONDecodeError, ValueError):
-                    continue
-                if "usage" in chunk:
-                    usage = chunk["usage"]
-                    response_model = chunk.get("model")
-                    break
-
-        if not usage or not isinstance(usage, dict):
-            return
-
-        input_tokens = usage.get("prompt_tokens", 0)
-        output_tokens = usage.get("completion_tokens", 0)
-        if not input_tokens and not output_tokens:
-            return
-
-        from app.modules.governance.quota_manager import QuotaManager
-        from app.modules.workspace.session_manager import get_session_manager
-
-        quota_mgr = QuotaManager()
-        quota_mgr.record_usage(
-            user_id=user_id,
-            tokens=input_tokens + output_tokens,
-            requests=1,
+        # Determine protocol from context
+        protocol = UsageParserFactory.determine_protocol(
+            request_path=request_path,
+            provider=provider,
+            content_type=content_type,
+            response_body=None,
         )
+
+        # Create parser for this request
+        parser = UsageParserFactory.create_parser(
+            protocol,
+            provider=provider,
+            model=model,
+            session_id=session_id,
+            user_id=user_id,
+            tenant_id=0,  # Will be set from session
+            request_id=request_id,
+        )
+
+        # Parse usage from content
+        evidence: UsageEvidence | None = None
+        is_sse = "text/event-stream" in content_type
+
+        if is_sse:
+            # For SSE, collect usage from all chunks, don't break on first
+            for line in content.split(b"\n"):
+                chunk_data = parse_sse_line(line)
+                if chunk_data is None or chunk_data.get("_done"):
+                    continue
+                if "_event_type" in chunk_data:
+                    continue
+
+                chunk_evidence = parser.parse_sse_chunk(chunk_data)
+                if chunk_evidence:
+                    if evidence is None:
+                        evidence = chunk_evidence
+                    else:
+                        evidence = evidence.merge_with(chunk_evidence)
+
+                    # Don't break - collect all usage events
+        else:
+            # Non-streaming response
+            try:
+                data = json.loads(content)
+                evidence = parser.parse(data)
+            except json.JSONDecodeError:
+                pass
+
+        # Handle missing usage
+        if evidence is None:
+            log_usage_missing(
+                session_id=session_id,
+                provider=provider,
+                protocol=protocol,
+                request_id=request_id,
+                chunks_seen=len(content.split(b"\n")) if is_sse else 1,
+            )
+            increment_metric(
+                "llm_proxy_usage_parse_errors_total",
+                {"provider": provider, "reason": "missing_usage"},
+            )
+            return
+
+        # Get session for tenant_id
+        from app.modules.workspace.session_manager import get_session_manager
 
         sm = get_session_manager()
         session = sm.get_session(session_id)
@@ -393,37 +435,68 @@ def _record_llm_usage(
                 logger.info("Auto-created session %s for user %d", session_id, user_id)
             except Exception as exc:
                 logger.warning("Failed to auto-create session %s: %s", session_id, exc)
-                # Retry get_session - another concurrent request may have created it
                 session = sm.get_session(session_id)
                 if not session:
                     logger.error("Session %s still not found after retry", session_id)
                     return
 
-        # Record transcript first; summary is updated explicitly afterwards so
-        # transcript persistence never owns agent_sessions side effects.
-        message_delta = _record_messages(
-            sm=sm,
+        # Update evidence with session context
+        evidence = UsageEvidence(
+            input_tokens=evidence.input_tokens,
+            output_tokens=evidence.output_tokens,
+            cache_read_tokens=evidence.cache_read_tokens,
+            cache_write_tokens=evidence.cache_write_tokens,
+            reasoning_tokens=evidence.reasoning_tokens,
+            provider=evidence.provider,
+            model=evidence.model,
+            protocol=evidence.protocol,
+            api_version=evidence.api_version,
+            is_final=evidence.is_final,
+            is_indeterminate=evidence.is_indeterminate,
+            is_merged=evidence.is_merged,
+            raw_usage=evidence.raw_usage,
+            parse_status=evidence.parse_status,
+            parse_diagnostics=evidence.parse_diagnostics,
+            request_id=evidence.request_id or request_id,
             session_id=session_id,
+            user_id=user_id,
+            tenant_id=session.tenant_id if session else 1,
+        )
+
+        # Deduplication check
+        dedup_cache = get_dedup_cache()
+        existing = dedup_cache.check_and_record(evidence)
+        if existing:
+            logger.debug(
+                "Duplicate usage detected for request %s in session %s",
+                evidence.request_id,
+                session_id,
+            )
+            increment_metric(
+                "llm_proxy_usage_dedup_hits_total",
+                {"provider": provider, "match_type": "request_id" if evidence.request_id else "composite"},
+            )
+            return
+
+        # Record usage through unified sink
+        sink = create_default_sink(
             request_body=request_body,
             response_body=content,
-            output_tokens=output_tokens,
-            model=response_model,
+            output_tokens=evidence.output_tokens,
+            model=evidence.model,
         )
-        sm.increment_session_usage(
-            session_id,
-            message_delta=message_delta,
-            request_delta=1,
-            total_tokens_delta=input_tokens + output_tokens,
-            total_input_delta=input_tokens,
-            total_output_delta=output_tokens,
+        sink.consume(evidence)
+
+        # Record metrics
+        increment_metric(
+            "llm_proxy_usage_events_total",
+            {
+                "provider": evidence.provider,
+                "protocol": evidence.protocol,
+                "status": evidence.parse_status,
+            },
         )
 
-        try:
-            from app.repositories.daily_stats_repo import DailyStatsRepository
-
-            DailyStatsRepository().refresh_stats()
-        except Exception:
-            pass
     except Exception:
         logger.debug("Failed to record LLM usage", exc_info=True)
 
@@ -555,6 +628,8 @@ def _finalize_upstream_response(
     user_id: int,
     provider: str,
     content_type: str | None = None,
+    request_path: str = "",
+    requested_model: str | None = None,
 ) -> Response:
     """Stream or return an upstream response, recording LLM usage on completion.
 
@@ -562,9 +637,15 @@ def _finalize_upstream_response(
     handling + usage recording lives in exactly one place (this is the shared tail
     that lets the gateway seam stay small and removable). For ``text/event-stream``
     the usage is recorded after the stream drains; otherwise immediately.
+
+    Issue #2184: Added request_path, requested_model, and request_id extraction
+    for multi-provider usage recording with proper protocol detection.
     """
     if content_type is None:
         content_type = resp.headers.get("Content-Type", "")
+
+    # Extract request_id from response headers
+    request_id = resp.headers.get("x-request-id") or resp.headers.get("openai-request-id")
 
     def generate(_resp=resp, _content_type=content_type, _body=body):
         total_content = b""
@@ -579,6 +660,9 @@ def _finalize_upstream_response(
                 provider,
                 _content_type,
                 request_body=_body,
+                request_path=request_path,
+                request_id=request_id,
+                model=requested_model,
             )
         except Exception as exc:
             logger.error("Failed to record LLM usage: %s", exc)
@@ -598,7 +682,17 @@ def _finalize_upstream_response(
 
     content = resp.content
     try:
-        _record_llm_usage(content, session_id, user_id, provider, content_type, request_body=body)
+        _record_llm_usage(
+            content,
+            session_id,
+            user_id,
+            provider,
+            content_type,
+            request_body=body,
+            request_path=request_path,
+            request_id=request_id,
+            model=requested_model,
+        )
     except Exception as exc:
         logger.error("Failed to record LLM usage: %s", exc)
     return Response(
@@ -775,6 +869,7 @@ def _forward_via_gateway(
     session_id: str,
     user_id: int,
     provider: str,
+    requested_model: str | None = None,
 ) -> Response | tuple[Response, int]:
     """Execute a single gateway attempt and return the finalized response.
 
@@ -835,7 +930,9 @@ def _forward_via_gateway(
             if sse_response is not None:
                 return sse_response
 
-        return _finalize_upstream_response(resp, body, session_id, user_id, provider)
+        return _finalize_upstream_response(
+            resp, body, session_id, user_id, provider, request_path=plan.path, requested_model=requested_model
+        )
     except Exception as exc:
         logger.error("LLM proxy gateway error: %s", exc)
         return (
@@ -989,7 +1086,7 @@ def handle_llm_proxy_request(
                 503,
             )
         return _forward_via_gateway(
-            _gateway_plan, session_id=session_id, user_id=user_id, provider=provider
+            _gateway_plan, session_id=session_id, user_id=user_id, provider=provider, requested_model=requested_model
         )
     # ── end model-gateway seam ───────────────────────────────────────────
 
@@ -1337,7 +1434,9 @@ def handle_llm_proxy_request(
                 if sse_response is not None:
                     return sse_response
 
-            return _finalize_upstream_response(resp, body, session_id, user_id, provider)
+            return _finalize_upstream_response(
+                resp, body, session_id, user_id, provider, request_path=path, requested_model=requested_model
+            )
 
         except Exception as exc:
             logger.error("LLM proxy error: %s", exc)
