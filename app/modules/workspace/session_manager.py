@@ -241,6 +241,8 @@ class AgentSession:
     total_tokens: int = 0
     total_input_tokens: int = 0
     total_output_tokens: int = 0
+    total_cache_read_tokens: int = 0  # Issue #2184: Cache read tokens
+    total_cache_write_tokens: int = 0  # Issue #2184: Cache write tokens
     message_count: int = 0
     request_count: int = 0  # Number of API requests (assistant messages only)
     model: str | None = None
@@ -278,6 +280,8 @@ class AgentSession:
             "total_tokens": self.total_tokens,
             "total_input_tokens": self.total_input_tokens,
             "total_output_tokens": self.total_output_tokens,
+            "total_cache_read_tokens": self.total_cache_read_tokens,
+            "total_cache_write_tokens": self.total_cache_write_tokens,
             "message_count": self.message_count,
             "request_count": self.request_count,
             "model": self.model,
@@ -313,7 +317,10 @@ class AgentSession:
             total_tokens=data.get("total_tokens", 0),
             total_input_tokens=data.get("total_input_tokens", 0),
             total_output_tokens=data.get("total_output_tokens", 0),
+            total_cache_read_tokens=data.get("total_cache_read_tokens", 0),
+            total_cache_write_tokens=data.get("total_cache_write_tokens", 0),
             message_count=data.get("message_count", 0),
+            request_count=data.get("request_count", 0),
             model=data.get("model"),
             tags=data.get("tags", []),
             created_at=(
@@ -1056,6 +1063,8 @@ class SessionManager:
         total_tokens_delta: int = 0,
         total_input_delta: int = 0,
         total_output_delta: int = 0,
+        total_cache_read_delta: int = 0,
+        total_cache_write_delta: int = 0,
         message_delta: int = 0,
         tenant_id: int | None = None,
         require_tenant: bool = True,
@@ -1063,16 +1072,26 @@ class SessionManager:
         """Increment a session's cumulative usage counters by the given deltas.
 
         ``agent_sessions.{message_count,request_count,total_tokens,
-        total_input_tokens,total_output_tokens}`` must be monotonically
-        accumulated so that ``Σ milestone.phase_* == session.*`` holds (#1003).
-        The previous per-call overwrite (update_session_fields) reset the column
-        to each call's local count, breaking the invariant. Callers pass the
-        per-call ``AgentTaskResult`` counters as deltas. ``message_delta`` lets
-        transcript writers (which keep ``add_message`` side-effect-free via
-        ``count_usage=False``) own ``message_count`` explicitly (#1128).
+        total_input_tokens,total_output_tokens,total_cache_read_tokens,
+        total_cache_write_tokens}`` must be monotonically accumulated so that
+        ``Σ milestone.phase_* == session.*`` holds (#1003).
 
-        ``require_tenant=True`` fails closed on an unresolved (None) tenant so
-        the tenant clause cannot be silently disabled (#1789).
+        Issue #2184: Added cache token support for accurate quota/cost reporting.
+
+        Args:
+            session_id: Session ID to update.
+            request_delta: Increment for request_count.
+            total_tokens_delta: Increment for total_tokens.
+            total_input_delta: Increment for total_input_tokens.
+            total_output_delta: Increment for total_output_tokens.
+            total_cache_read_delta: Increment for total_cache_read_tokens.
+            total_cache_write_delta: Increment for total_cache_write_tokens.
+            message_delta: Increment for message_count.
+            tenant_id: Tenant ID for scope check.
+            require_tenant: Fail closed if tenant_id is None.
+
+        Returns:
+            True if update succeeded.
         """
         if not session_id:
             return False
@@ -1082,28 +1101,61 @@ class SessionManager:
         tenant_clause, tenant_params = self._tenant_scope_condition(
             cursor, "agent_sessions", tenant_id, require_tenant=require_tenant
         )
-        cursor.execute(
-            f"""
-            UPDATE agent_sessions
-            SET message_count = COALESCE(message_count, 0) + {p},
-                request_count = COALESCE(request_count, 0) + {p},
-                total_tokens = COALESCE(total_tokens, 0) + {p},
-                total_input_tokens = COALESCE(total_input_tokens, 0) + {p},
-                total_output_tokens = COALESCE(total_output_tokens, 0) + {p},
-                updated_at = {p}
-            WHERE session_id = {p}{tenant_clause}
-            """,
-            (
-                message_delta,
-                request_delta,
-                total_tokens_delta,
-                total_input_delta,
-                total_output_delta,
-                datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
-                session_id,
-                *tenant_params,
-            ),
-        )
+
+        # Check if cache token columns exist
+        has_cache_columns = self._column_exists(cursor, "agent_sessions", "total_cache_read_tokens")
+
+        if has_cache_columns:
+            cursor.execute(
+                f"""
+                UPDATE agent_sessions
+                SET message_count = COALESCE(message_count, 0) + {p},
+                    request_count = COALESCE(request_count, 0) + {p},
+                    total_tokens = COALESCE(total_tokens, 0) + {p},
+                    total_input_tokens = COALESCE(total_input_tokens, 0) + {p},
+                    total_output_tokens = COALESCE(total_output_tokens, 0) + {p},
+                    total_cache_read_tokens = COALESCE(total_cache_read_tokens, 0) + {p},
+                    total_cache_write_tokens = COALESCE(total_cache_write_tokens, 0) + {p},
+                    updated_at = {p}
+                WHERE session_id = {p}{tenant_clause}
+                """,
+                (
+                    message_delta,
+                    request_delta,
+                    total_tokens_delta,
+                    total_input_delta,
+                    total_output_delta,
+                    total_cache_read_delta,
+                    total_cache_write_delta,
+                    datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
+                    session_id,
+                    *tenant_params,
+                ),
+            )
+        else:
+            # Fallback without cache columns (pre-migration)
+            cursor.execute(
+                f"""
+                UPDATE agent_sessions
+                SET message_count = COALESCE(message_count, 0) + {p},
+                    request_count = COALESCE(request_count, 0) + {p},
+                    total_tokens = COALESCE(total_tokens, 0) + {p},
+                    total_input_tokens = COALESCE(total_input_tokens, 0) + {p},
+                    total_output_tokens = COALESCE(total_output_tokens, 0) + {p},
+                    updated_at = {p}
+                WHERE session_id = {p}{tenant_clause}
+                """,
+                (
+                    message_delta,
+                    request_delta,
+                    total_tokens_delta,
+                    total_input_delta,
+                    total_output_delta,
+                    datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
+                    session_id,
+                    *tenant_params,
+                ),
+            )
         success = cursor.rowcount > 0
         conn.commit()
         conn.close()
@@ -2248,6 +2300,8 @@ class SessionManager:
             total_tokens=get_value("total_tokens") or 0,
             total_input_tokens=get_value("total_input_tokens") or 0,
             total_output_tokens=get_value("total_output_tokens") or 0,
+            total_cache_read_tokens=get_value("total_cache_read_tokens") or 0,
+            total_cache_write_tokens=get_value("total_cache_write_tokens") or 0,
             message_count=get_value("message_count") or 0,
             request_count=get_value("request_count") or 0,
             model=get_value("model"),
