@@ -247,7 +247,13 @@ export const remoteApi = {
 
   generateRegistrationToken(
     tenantId?: number
-  ): Promise<{ success: boolean; registration_token: string; message: string }> {
+  ): Promise<{
+    success: boolean;
+    registration_token: string;
+    message: string;
+    install_commands?: Record<string, string>;
+    start_commands?: Record<string, string>;
+  }> {
     return apiClient.post('/api/remote/machines/register', { tenant_id: tenantId ?? 1 });
   },
 

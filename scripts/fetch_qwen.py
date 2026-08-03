@@ -407,7 +407,10 @@ def extract_content_blocks_from_entry(
 
 
 def process_jsonl_file(
-    filepath: Path, hostname: str = "localhost", system_account: str | None = None
+    filepath: Path,
+    hostname: str = "localhost",
+    system_account: str | None = None,
+    user_id: int | None = None,
 ) -> tuple:
     """Process a single JSONL file and return daily token aggregates and messages.
 
@@ -415,6 +418,9 @@ def process_jsonl_file(
         filepath: Path to the JSONL file
         hostname: Host name for this machine
         system_account: System account (linux/mac username) for multi-user mode
+        user_id: Resolved users.id for the sender, used to populate the
+            daily_messages.user_id column so tenant-scoped queries (summary,
+            analysis) can attribute these messages to the right tenant.
 
     Returns:
         tuple: (daily_stats dict, messages list)
@@ -617,6 +623,7 @@ def process_jsonl_file(
                                         if system_account
                                         else get_default_sender_name("qwen")
                                     ),
+                                    "user_id": user_id,
                                     "agent_session_id": agent_session_id,
                                     "conversation_id": conversation_id,
                                     "project_path": project_path,
@@ -727,6 +734,35 @@ def find_qwen_project_dir() -> Path | None:
     return None
 
 
+def _resolve_user_id(db, system_account: str | None) -> int | None:
+    """Resolve users.id for a system_account/username, or None if unknown.
+
+    The daily_messages.user_id column drives tenant-scoped queries
+    (get_summary_by_tool etc. filter ``user_id IN (users of tenant)``).
+    Fetched messages historically wrote user_id as NULL, which made those
+    queries miss qwen rows entirely. Resolving here restores attribution.
+    """
+    if not system_account:
+        return None
+    try:
+        from shared.db import _execute, _placeholder, get_connection
+
+        conn = get_connection()
+        cursor = conn.cursor()
+        placeholder = _placeholder()
+        _execute(
+            cursor,
+            f"SELECT id FROM users WHERE system_account = {placeholder} OR username = {placeholder}",
+            (system_account, system_account),
+        )
+        row = cursor.fetchone()
+        conn.close()
+        return row["id"] if row else None
+    except Exception as e:
+        print(f"Warning: failed to resolve user_id for {system_account}: {e}")
+        return None
+
+
 def _process_projects_dir(
     project_dir: Path,
     hostname: str,
@@ -734,6 +770,7 @@ def _process_projects_dir(
     aggregated: dict,
     all_messages: list,
     recent: bool = False,
+    user_id: int | None = None,
 ) -> int:
     """
     Process a qwen projects directory and aggregate results.
@@ -745,6 +782,8 @@ def _process_projects_dir(
         aggregated: Aggregated daily stats dict (modified in place)
         all_messages: List to collect messages (modified in place)
         recent: If True, only process files modified today
+        user_id: Resolved users.id for system_account; attached to each
+            message so daily_messages rows carry tenant attribution.
 
     Returns:
         Number of files processed
@@ -790,7 +829,7 @@ def _process_projects_dir(
         print(f"  Scanning: {proj_dir.name} ({len(jsonl_files)} files{suffix})")
         for f in jsonl_files:
             total_files += 1
-            daily, messages = process_jsonl_file(f, hostname, system_account)
+            daily, messages = process_jsonl_file(f, hostname, system_account, user_id)
             # Aggregate daily stats
             for date, stats in daily.items():
                 for key in [
@@ -1224,8 +1263,19 @@ def fetch_and_save(
         total_files = 0
         for system_account, user_project_dir in user_projects:
             print(f"\nProcessing user: {system_account}")
+            # Resolve the user_id once per system_account so tenant-scoped
+            # queries can attribute these messages (Issue: time-range summary
+            # showed 0 tokens while daily_usage had data, because daily_messages
+            # rows were written with user_id NULL).
+            user_id = _resolve_user_id(db, system_account)
             files_processed = _process_projects_dir(
-                user_project_dir, hostname, system_account, aggregated, all_messages, recent
+                user_project_dir,
+                hostname,
+                system_account,
+                aggregated,
+                all_messages,
+                recent,
+                user_id,
             )
             total_files += files_processed
 

@@ -57,8 +57,10 @@ export const RemoteMachineManagement: React.FC = () => {
   // Dialog states
   const [showTokenDialog, setShowTokenDialog] = useState(false);
   const [generatedToken, setGeneratedToken] = useState<string>('');
+  const [startCommands, setStartCommands] = useState<Record<string, string>>({});
   const [copied, setCopied] = useState(false);
   const [copiedInstall, setCopiedInstall] = useState(false);
+  const [copiedStart, setCopiedStart] = useState(false);
   const [selectedOS, setSelectedOS] = useState<'linux' | 'windows' | 'macos'>('linux');
 
   const [selectedMachine, setSelectedMachine] = useState<RemoteMachine | null>(null);
@@ -89,6 +91,7 @@ export const RemoteMachineManagement: React.FC = () => {
     try {
       const result = await generateToken.mutateAsync(undefined);
       setGeneratedToken(result.registration_token);
+      setStartCommands(result.start_commands ?? {});
       setShowTokenDialog(true);
     } catch (err) {
       console.error('Failed to generate token:', err);
@@ -140,6 +143,34 @@ export const RemoteMachineManagement: React.FC = () => {
         return `powershell -Command "Invoke-WebRequest -Uri '${server}/api/remote/agent/install.ps1' -OutFile 'install.ps1'; powershell -ExecutionPolicy Bypass -File install.ps1 -ServerUrl '${server}' -RegistrationToken '${generatedToken}'"`;
       default:
         return '';
+    }
+  };
+
+  // Daily start command based on selected OS (agent reconnect after reboot)
+  const getStartCommand = () => {
+    const server = window.location.origin;
+    if (startCommands[selectedOS]) {
+      return startCommands[selectedOS];
+    }
+    // Fallback
+    switch (selectedOS) {
+      case 'linux':
+      case 'macos':
+        return `bash ${server}/api/remote/agent/start.sh`;
+      case 'windows':
+        return `powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\\.open-ace-agent\\start-agent.ps1"`;
+      default:
+        return '';
+    }
+  };
+
+  const handleCopyStartCommand = async () => {
+    const success = await copyToClipboard(getStartCommand());
+    if (success) {
+      setCopiedStart(true);
+      setTimeout(() => setCopiedStart(false), 2000);
+    } else {
+      toast.error(t('copyFailed', language) || 'Copy failed');
     }
   };
 
@@ -547,6 +578,25 @@ export const RemoteMachineManagement: React.FC = () => {
             </Button>
           </div>
           <small className="text-muted">{t('installCommandDesc', language)}</small>
+        </div>
+
+        {/* Start Agent Command */}
+        <div className="mt-3">
+          <p className="text-muted mb-1">
+            <strong>{t('startCommand', language)}</strong>
+          </p>
+          <div className="input-group">
+            <input
+              type="text"
+              className="form-control font-monospace"
+              value={getStartCommand()}
+              readOnly
+            />
+            <Button variant="outline-secondary" onClick={handleCopyStartCommand}>
+              {copiedStart ? <i className="bi bi-check" /> : <i className="bi bi-clipboard" />}
+            </Button>
+          </div>
+          <small className="text-muted">{t('startCommandDesc', language)}</small>
         </div>
       </Modal>
 

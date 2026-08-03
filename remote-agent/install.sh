@@ -354,6 +354,7 @@ AGENT_FILES=(
     zcode_app_server.py
     tls_config.py
     __init__.py
+    start-agent.sh
 )
 
 # If running from curl, download files; if running from source, copy
@@ -885,5 +886,15 @@ echo ""
 log_info "Machine ID: $MACHINE_ID"
 log_info "Config: ${INSTALL_DIR}/config.json"
 log_info "Logs: ${INSTALL_DIR}/agent.log"
+echo ""
+log_info "日常使用（客户端重启后连接服务器）:"
+log_info "  1) 一键启动 Agent:"
+log_info "     bash ${INSTALL_DIR}/start-agent.sh"
+log_info "  2) 配置开机自启（仅需执行一次）:"
+log_info "     bash ${INSTALL_DIR}/start-agent.sh --auto-start"
+log_info ""
+log_info "说明: Agent 启动后会自动连接服务器。即使服务器重启，"
+log_info "      Agent 也会在 1-60 秒内自动重连，无需重新生成注册令牌。"
+log_info "      首次安装时的 config.json 已保存 machine_id 和 agent_token，长期有效。"
 echo ""
 log_info "To view logs: tail -f ${INSTALL_DIR}/agent.log"

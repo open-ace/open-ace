@@ -6,6 +6,16 @@ This module provides the Flask application factory for the Open ACE platform.
 
 from __future__ import annotations
 
+# ⚠️ gevent monkey-patch must run before any other imports in the gunicorn path.
+# Gunicorn loads "app:create_app()" first, then creates GeventPyWSGIWorker which
+# calls monkey.patch_all(). By that time urllib3 may already be imported (cached
+# by requests or any transitive dep), leading to "Monkey-patching ssl after ssl
+# has already been imported" → RecursionError in the LLM proxy safe_request path.
+# Patch early here so that every subsequent import sees patched stdlib modules.
+import gevent.monkey
+
+gevent.monkey.patch_all()
+
 import logging
 import os
 import re

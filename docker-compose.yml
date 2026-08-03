@@ -39,6 +39,8 @@ services:
     image: ${IMAGE_NAME:-openace/open-ace:latest}
     container_name: open-ace
     restart: unless-stopped
+    # Multi-user workspace mode requires root to create system users (useradd)
+    user: "0"
     ports:
       - "${PORT:-19888}:19888"
       # Multi-user workspace: expose port range for qwen-code-webui instances
@@ -61,7 +63,8 @@ services:
       # Production mode requires explicit strong password via DB_PASSWORD env var.
       - DATABASE_URL=postgresql://${DB_USER:-ace}:${DB_PASSWORD:-dev-password-change-in-production}@postgres:5432/${DB_NAME:-ace}
       # Multi-user Workspace
-      - WORKSPACE_MULTI_USER_MODE=${WORKSPACE_MULTI_USER_MODE:-false}
+      - WORKSPACE_MULTI_USER_MODE=${WORKSPACE_MULTI_USER_MODE:-true}
+      - OPENACE_ALLOW_ROOT_MULTI_USER=${OPENACE_ALLOW_ROOT_MULTI_USER:-1}
       # Workspace base directory (users' projects stored under /workspace/<username>/)
       - WORKSPACE_BASE_DIR=/workspace
       # Data fetch: container runs as root, use venv Python (Issue #1121)

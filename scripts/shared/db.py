@@ -996,7 +996,7 @@ def save_messages_batch(messages: list[dict], batch_size: int = 1000) -> int:
                 _execute(
                     cursor,
                     """
-                    SELECT message_id, tokens_used, input_tokens, output_tokens, sender_id, sender_name, model
+                    SELECT message_id, tokens_used, input_tokens, output_tokens, sender_id, sender_name, model, user_id
                     FROM daily_messages
                     WHERE date = %s AND tool_name = %s AND host_name = %s
                 """,
@@ -1006,7 +1006,7 @@ def save_messages_batch(messages: list[dict], batch_size: int = 1000) -> int:
                 _execute(
                     cursor,
                     """
-                    SELECT message_id, tokens_used, input_tokens, output_tokens, sender_id, sender_name, model
+                    SELECT message_id, tokens_used, input_tokens, output_tokens, sender_id, sender_name, model, user_id
                     FROM daily_messages
                     WHERE date = ? AND tool_name = ? AND host_name = ?
                 """,
@@ -1026,6 +1026,7 @@ def save_messages_batch(messages: list[dict], batch_size: int = 1000) -> int:
                         "sender_id": row[4],
                         "sender_name": row[5],
                         "model": row[6],
+                        "user_id": row[7],
                     }
 
         # Process messages in batches
@@ -1045,6 +1046,7 @@ def save_messages_batch(messages: list[dict], batch_size: int = 1000) -> int:
                 sender_id = msg.get("sender_id")
                 sender_name = msg.get("sender_name")
                 model = msg.get("model")
+                user_id = msg.get("user_id")
 
                 # Normalize the role at the write boundary (toolResult /
                 # tool_result -> tool) so variant spellings never reach the
@@ -1085,14 +1087,17 @@ def save_messages_batch(messages: list[dict], batch_size: int = 1000) -> int:
                     # Preserve model if new value is None and existing value exists
                     if model is None and existing.get("model"):
                         model = existing["model"]
+                    # Preserve user_id if new value is None and existing value exists
+                    if user_id is None and existing.get("user_id") is not None:
+                        user_id = existing["user_id"]
 
                 if is_postgresql():
                     _execute(
                         cursor,
                         """
                         INSERT INTO daily_messages
-                        (date, tool_name, host_name, message_id, parent_id, role, content, full_entry, tokens_used, input_tokens, output_tokens, model, timestamp, sender_id, sender_name, message_source, feishu_conversation_id, group_subject, is_group_chat, agent_session_id, conversation_id)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        (date, tool_name, host_name, message_id, parent_id, role, content, full_entry, tokens_used, input_tokens, output_tokens, model, timestamp, sender_id, sender_name, message_source, feishu_conversation_id, group_subject, is_group_chat, agent_session_id, conversation_id, user_id)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         ON CONFLICT (date, tool_name, host_name, message_id) DO UPDATE SET
                             parent_id = EXCLUDED.parent_id,
                             role = EXCLUDED.role,
@@ -1110,7 +1115,8 @@ def save_messages_batch(messages: list[dict], batch_size: int = 1000) -> int:
                             group_subject = EXCLUDED.group_subject,
                             is_group_chat = EXCLUDED.is_group_chat,
                             agent_session_id = EXCLUDED.agent_session_id,
-                            conversation_id = EXCLUDED.conversation_id
+                            conversation_id = EXCLUDED.conversation_id,
+                            user_id = EXCLUDED.user_id
                     """,
                         (
                             date,
@@ -1134,6 +1140,7 @@ def save_messages_batch(messages: list[dict], batch_size: int = 1000) -> int:
                             msg.get("is_group_chat"),
                             msg.get("agent_session_id"),
                             msg.get("conversation_id"),
+                            user_id,
                         ),
                     )
                 else:
@@ -1141,8 +1148,8 @@ def save_messages_batch(messages: list[dict], batch_size: int = 1000) -> int:
                         cursor,
                         """
                         INSERT OR REPLACE INTO daily_messages
-                        (date, tool_name, host_name, message_id, parent_id, role, content, full_entry, tokens_used, input_tokens, output_tokens, model, timestamp, sender_id, sender_name, message_source, feishu_conversation_id, group_subject, is_group_chat, agent_session_id, conversation_id)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        (date, tool_name, host_name, message_id, parent_id, role, content, full_entry, tokens_used, input_tokens, output_tokens, model, timestamp, sender_id, sender_name, message_source, feishu_conversation_id, group_subject, is_group_chat, agent_session_id, conversation_id, user_id)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                         (
                             date,
@@ -1166,6 +1173,7 @@ def save_messages_batch(messages: list[dict], batch_size: int = 1000) -> int:
                             msg.get("is_group_chat"),
                             msg.get("agent_session_id"),
                             msg.get("conversation_id"),
+                            user_id,
                         ),
                     )
 

@@ -84,6 +84,8 @@ def load_user():
         "/api/remote/agent/install.ps1",
         "/api/remote/agent/uninstall.sh",
         "/api/remote/agent/uninstall.ps1",
+        # Public daily-start script (one-click agent restart after reboot)
+        "/api/remote/agent/start.sh",
     }
     if request.path in _exact_exempt:
         return
@@ -531,11 +533,50 @@ def register_machine():
         created_by=g.user["id"],
     )
 
+    # Build start commands for after installation (agent re-connect daily use)
+    server_origin = request.host_url.rstrip("/")
+
+    # Install command strings (already shown in the UI)
+    install_commands = {
+        "linux": (
+            f"curl -fsSL {server_origin}/api/remote/agent/install.sh | "
+            f"bash -s -- --server {server_origin} --token {token}"
+        ),
+        "macos": (
+            f"curl -fsSL {server_origin}/api/remote/agent/install.sh | "
+            f"bash -s -- --server {server_origin} --token {token}"
+        ),
+        "windows": (
+            f"powershell -Command \"Invoke-WebRequest -Uri "
+            f"'{server_origin}/api/remote/agent/install.ps1' -OutFile 'install.ps1'; "
+            f"powershell -ExecutionPolicy Bypass -File install.ps1 "
+            f"-ServerUrl '{server_origin}' -RegistrationToken '{token}'\""
+        ),
+    }
+
+    # Daily start commands (client restart -> reconnect, no new token needed)
+    start_commands = {
+        "linux": (
+            f"bash {server_origin}/api/remote/agent/start.sh || "
+            f"bash ~/.open-ace-agent/start-agent.sh"
+        ),
+        "macos": (
+            f"bash {server_origin}/api/remote/agent/start.sh || "
+            f"bash ~/.open-ace-agent/start-agent.sh"
+        ),
+        "windows": (
+            f"powershell -ExecutionPolicy Bypass -File "
+            f"\"$env:USERPROFILE\\.open-ace-agent\\start-agent.ps1\""
+        ),
+    }
+
     return jsonify(
         {
             "success": True,
             "registration_token": token,
             "message": "Use this token to register a remote agent. It is valid for one use.",
+            "install_commands": install_commands,
+            "start_commands": start_commands,
         }
     )
 
@@ -1196,6 +1237,19 @@ def agent_install_script_windows():
     if not os.path.isfile(install_ps1):
         return jsonify({"error": "install.ps1 not found"}), 404
     return Response(open(install_ps1).read(), mimetype="text/plain")
+
+
+@remote_bp.route("/agent/start.sh", methods=["GET"])
+def agent_start_script():
+    """Serve the agent daily-start shell script (Linux/macOS).
+
+    The client runs this script after a reboot to reconnect to the server.
+    It reuses the saved machine_id / agent_token — no new token is needed.
+    """
+    start_sh = os.path.join(AGENT_DIR, "start-agent.sh")
+    if not os.path.isfile(start_sh):
+        return jsonify({"error": "start-agent.sh not found"}), 404
+    return Response(open(start_sh).read(), mimetype="text/x-shellscript")
 
 
 @remote_bp.route("/agent/uninstall.sh", methods=["GET"])
@@ -3104,7 +3158,9 @@ def create_remote_directory(machine_id):
     if not machine:
         return jsonify({"error": "Machine not found"}), 404
 
-    if machine.get("status") not in ("online", "idle"):
+    # Agent heartbeat reports "busy" while active sessions exist — treat it
+    # as online (consistent with browse_remote_directory).
+    if machine.get("status") not in ("online", "idle", "busy"):
         return (
             jsonify(
                 {

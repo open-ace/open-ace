@@ -1,9 +1,10 @@
-"""Shared LLM proxy request handling for local and remote workspace scopes."""
+﻿"""Shared LLM proxy request handling for local and remote workspace scopes."""
 
 from __future__ import annotations
 
 import json
 import logging
+import traceback
 from typing import Any
 
 from flask import Response, g, jsonify, request, stream_with_context
@@ -1216,6 +1217,7 @@ def handle_llm_proxy_request(
                 except Exception as exc:
                     # safe_request may raise OutboundUrlBlockedError
                     logger.error("LLM proxy safe_request error: %s", exc)
+                    logger.error("LLM proxy safe_request traceback: %s", traceback.format_exc())
                     return (
                         jsonify(
                             {

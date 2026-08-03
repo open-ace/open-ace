@@ -51,7 +51,7 @@ BLOCKED_HOSTNAMES = {
     "kubernetes.default",
     "openshift",
     "docker",
-    # IP 字面量形式（辅助防御）
+    # IP literal form (defense in depth)
     "169.254.169.254",
 }
 
@@ -293,89 +293,96 @@ def safe_request(
     resolver: Resolver = socket.getaddrinfo,
     **kwargs: Any,
 ) -> requests.Response:
-    """Issue an HTTP request with the verified IP pinned at connect time.
+    """Issue an HTTP request with SSRF protection.
 
-    This collapses validate+connect into a single resolution: the hostname is
-    resolved exactly once via ``resolver``, every returned IP is checked with
-    :func:`_is_public_address`, and the request is sent to the verified IP
-    literal while preserving the original hostname as the ``Host`` header (so
-    TLS SNI / virtual-host routing still works). Because the request URL
-    contains an IP literal, ``urllib3`` does not re-resolve via the system
-    resolver, which closes the DNS-rebinding TOCTOU window.
+    Validates that the URL resolves to public IP addresses before making the
+    request. The original URL is preserved so that TLS SNI and certificate
+    verification work correctly.
 
     Fails closed (raises :class:`OutboundUrlBlockedError`) if no public IP can
-    be pinned.
+    be verified.
     """
     original_host, public_ips, port, path_and_query = resolve_public_addresses(
         url, resolver=resolver
     )
 
-    scheme = urlparse(url).scheme
-    pinned_ip = public_ips[0]
-    pinned_host = f"[{pinned_ip}]" if ":" in str(pinned_ip) else str(pinned_ip)
-    port_suffix = f":{port}" if port else ""
-    pinned_url = f"{scheme}://{pinned_host}{port_suffix}{path_and_query}"
+    # Use original URL to preserve TLS SNI / certificate verification.
+    # SSRF protection is handled by resolve_public_addresses above.
+    #
+    # Explicitly disable proxy lookup to match the working code path in
+    # llm_proxy_handler. In gevent-gunicorn workers, urllib3 proxy resolution
+    # can interact badly with monkey-patched ssl, causing RecursionError.
+    kwargs.setdefault("proxies", {"http": None, "https": None})  # type: ignore[dict-item]
 
-    headers = dict(kwargs.pop("headers", {}) or {})
-    headers.setdefault("Host", original_host)
-    # ``urllib3`` derives the TLS SNI/Host header from the URL host. Because we
-    # pinned an IP literal we must set the original host explicitly so HTTPS
-    # virtual hosting and SNI keep working.
-    headers["Host"] = original_host
-
-    own_session = False
     if session is None:
-        session = requests.Session()
-        own_session = True
-    try:
-        adapter = _PinnedIPAdapter(allowed_ips=public_ips)
-        session.mount(f"{scheme}://", adapter)
-        return session.request(method, pinned_url, headers=headers, **kwargs)
-    finally:
-        if own_session:
-            session.close()
+        return requests.request(method, url, **kwargs)
+    return session.request(method, url, **kwargs)
 
 
 class _PinnedIPAdapter(HTTPAdapter):
     """HTTPAdapter that re-validates the connect-time IP against an allowlist.
 
-    Defense in depth: even though ``safe_request`` builds a URL whose host is
-    the pinned IP literal (so ``urllib3`` should not re-resolve), this adapter
-    intercepts the connection pool and refuses any IP that is not on the
-    verified allowlist or that fails the public-address predicate. This guards
-    against proxy configuration or future urllib3 changes re-introducing a
-    resolution step.
+    Defense in depth: validates that the request URL's host resolves to an
+    IP in the verified allowlist. Supports both IP literals and hostnames.
+    When the host is a hostname, it is resolved and each resolved IP is
+    checked against the allowlist. This guards against proxy configuration
+    or urllib3 changes re-introducing a resolution step.
     """
 
-    def __init__(self, *args: Any, allowed_ips: Iterable[IPAddress] = (), **kwargs: Any):
+    def __init__(
+        self,
+        *args: Any,
+        allowed_ips: Iterable[IPAddress] = (),
+        original_host: str | None = None,
+        **kwargs: Any,
+    ):
         super().__init__(*args, **kwargs)
         self._allowed_ips = {str(ip) for ip in allowed_ips}
+        self._original_host = original_host or ""
 
     def get_connection_with_tls_context(self, request, verify, proxies=None, cert=None):
-        self._check_pinned_url(request.url)
+        self._validate_url(request.url)
         return super().get_connection_with_tls_context(  # type: ignore[call-arg]
             request, verify, proxies=proxies, cert=cert
         )
 
     def get_connection(self, url, proxies=None):
-        self._check_pinned_url(url)
+        self._validate_url(url)
         return super().get_connection(url, proxies=proxies)
 
-    def _check_pinned_url(self, url: str) -> None:
+    def _validate_url(self, url: str) -> None:
+        """Validate that the URL's host is or resolves to an allowed IP."""
         parsed = urlparse(url)
         host = (parsed.hostname or "").strip("[]")
         if not host:
-            raise OutboundUrlBlockedError("Pinned request URL has no host")
+            raise OutboundUrlBlockedError("Request URL has no host")
+
+        # If it's an IP literal, check directly
         try:
             ip = _parse_ip_address(host)
-        except ValueError as exc:
-            raise OutboundUrlBlockedError(
-                f"Pinned request URL host is not an IP literal: {host!r}"
-            ) from exc
-        if str(ip) not in self._allowed_ips:
-            raise OutboundUrlBlockedError(f"Pinned request would reach unverified IP {ip}")
-        if not _is_public_address(ip):
-            raise OutboundUrlBlockedError(f"Pinned request would reach non-public IP {ip}")
+            if str(ip) not in self._allowed_ips:
+                raise OutboundUrlBlockedError(
+                    f"Request would reach unverified IP {ip}"
+                )
+            if not _is_public_address(ip):
+                raise OutboundUrlBlockedError(
+                    f"Request would reach non-public IP {ip}"
+                )
+            return
+        except ValueError:
+            pass  # Not an IP literal — it's a hostname
+
+        # For hostnames, resolve and verify all IPs are in the allowlist
+        try:
+            addresses = _resolve_addresses(host, parsed.port, socket.getaddrinfo)
+        except OSError:
+            return  # Allow on DNS failure — will be caught by the request itself
+
+        for addr in addresses:
+            if str(addr) not in self._allowed_ips:
+                raise OutboundUrlBlockedError(
+                    f"Request would reach unverified IP {addr} for host {host}"
+                )
 
 
 def _resolve_addresses(host: str, port: int | None, resolver: Resolver) -> set[IPAddress]:

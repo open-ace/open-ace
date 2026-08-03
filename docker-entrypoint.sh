@@ -1,4 +1,4 @@
-#!/bin/bash
+!/bin/bash
 # Docker entrypoint script for Open ACE
 # Handles database initialization and multi-user workspace setup
 
@@ -1178,7 +1178,7 @@ ${SECURITY_WRAPPERS_RULE}
 # webui_manager no longer sets it (it controls Node *module* resolution, not
 # the binary path), so keeping it here was dead config.
 # GH_TOKEN and GIT_* vars are for autonomous dev GitHub operations (Issue #1517).
-Defaults env_keep += "OPENAI_API_KEY OPENAI_BASE_URL BAILIAN_CODING_PLAN_API_KEY ANTHROPIC_API_KEY ANTHROPIC_BASE_URL GEMINI_API_KEY GEMINI_BASE_URL OPENCLAW_TOKEN OPENCLAW_GATEWAY_URL OPENACE_LOG_DIR OPENACE_PROXY_TOKEN OPENACE_PROXY_URL SESSION_TIMEOUT_MS KEEPALIVE_INTERVAL_MS PATH GH_TOKEN GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL"
+Defaults env_keep += "OPENAI_API_KEY OPENAI_BASE_URL BAILIAN_CODING_PLAN_API_KEY ANTHROPIC_API_KEY ANTHROPIC_BASE_URL GEMINI_API_KEY GEMINI_BASE_URL OPENCLAW_TOKEN OPENCLAW_GATEWAY_URL OPENACE_LOG_DIR OPENACE_PROXY_TOKEN OPENACE_PROXY_URL SESSION_TIMEOUT_MS KEEPALIVE_INTERVAL_MS PATH GH_TOKEN GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL QWEN_SYSTEM_MD"
 SUDOERS_EOF
         chmod 440 /etc/sudoers.d/open-ace-webui
 
@@ -1207,7 +1207,10 @@ echo "=========================================="
 echo "  Open ACE - Starting Gunicorn"
 echo "=========================================="
 
-exec gunicorn \
+# Use gunicorn_entry.py wrapper that monkey-patches gevent BEFORE gunicorn
+# (or any transitive dep) imports urllib3. This prevents urllib3.util.ssl_
+# RecursionError under the gevent event loop during LLM proxy outbound requests.
+exec python3 /app/gunicorn_entry.py \
     --bind 0.0.0.0:19888 \
     --worker-class app.gunicorn_worker.TerminalGeventWorker \
     --workers 1 \

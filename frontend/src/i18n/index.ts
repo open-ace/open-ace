@@ -1319,6 +1319,10 @@ export const translations: Record<Language, Translations> = {
     installCommand: 'Install Command',
     installCommandDesc: 'Run this command on the remote machine to install and register the agent.',
     copyInstallCommand: 'Copy Install Command',
+    startCommand: 'Start Agent Command',
+    startCommandDesc:
+      'After installation, run this command on the remote machine to start the agent and reconnect. No new token is needed.',
+    copyStartCommand: 'Copy Start Command',
     uninstallCommand: 'Uninstall Command',
     uninstallCommandDesc:
       'Run this command on the remote machine to uninstall the agent after deregistration.',
@@ -3019,6 +3023,10 @@ export const translations: Record<Language, Translations> = {
     installCommand: '安装命令',
     installCommandDesc: '在远程机器上执行此命令以安装并注册 Agent。',
     copyInstallCommand: '复制安装命令',
+    startCommand: '启动 Agent 命令',
+    startCommandDesc:
+      '安装完成后，在远程机器上执行此命令以启动 Agent 并连接服务器，无需新令牌。',
+    copyStartCommand: '复制启动命令',
     uninstallCommand: '卸载命令',
     uninstallCommandDesc: '注销后，在远程机器上执行此命令以卸载 Agent。',
     permission: '权限',

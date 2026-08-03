@@ -58,6 +58,7 @@ dmypy.json
 docs/
 *.md
 !README.md
+!system-prompt.md
 
 # Development files
 .qwen/

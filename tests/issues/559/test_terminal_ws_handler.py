@@ -366,6 +366,7 @@ class TestHandleVSCodeWs:
             self.UUID,
             handler.socket,
             "ws://remote:45678/stable/ws?folder=%2Froot%2Fworkspace",
+            "",  # cs_password (empty when not in info dict)
         )
         mock_send_close.assert_not_called()
         assert handler.close_connection is True
@@ -398,6 +399,7 @@ class TestHandleVSCodeWs:
             self.UUID,
             handler.socket,
             "ws://remote:45678/stable/ws?reconnectionToken=abc",
+            "",  # cs_password (empty when not in info dict)
         )
         mock_send_close.assert_not_called()
 

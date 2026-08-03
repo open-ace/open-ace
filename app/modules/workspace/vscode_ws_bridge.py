@@ -142,13 +142,21 @@ def bridge_vscode_ws(browser_ws: Any, remote_ws_url: str, vscode_id: str) -> Non
         _unregister_bridge(state)
 
 
-def bridge_vscode_ws_raw(vscode_id: str, browser_sock, remote_ws_url: str) -> None:
+def bridge_vscode_ws_raw(vscode_id: str, browser_sock, remote_ws_url: str, cs_password: str = "") -> None:
     """Bridge a raw browser socket (via RemoteWSHandler) to a remote code-server.
 
     Uses ``ws_frame`` for browser-side I/O and ``websockets.sync`` for the
     remote side.  The browser socket has already completed the WS handshake
     before this function is called.
+
+    Args:
+        vscode_id: VSCode session ID for cleanup tracking.
+        browser_sock: Browser's raw socket for WebSocket I/O.
+        remote_ws_url: WebSocket URL of the remote code-server.
+        cs_password: code-server's own password for authentication (optional).
     """
+    import base64 as _b64
+
     state = VSCodeBridgeConnection(vscode_id=vscode_id, browser_ws=browser_sock)
     _register_bridge(state)
 
@@ -156,12 +164,19 @@ def bridge_vscode_ws_raw(vscode_id: str, browser_sock, remote_ws_url: str) -> No
     origin_scheme = "https" if parsed.scheme == "wss" else "http"
     origin = f"{origin_scheme}://{parsed.netloc}" if parsed.netloc else None
 
+    # Build additional headers for code-server password authentication
+    additional_headers = {}
+    if cs_password:
+        auth_value = _b64.b64encode(f":{cs_password}".encode()).decode()
+        additional_headers["Authorization"] = f"Basic {auth_value}"
+
     try:
         with connect(
             remote_ws_url,
             origin=origin,
             close_timeout=5,
             proxy=None,
+            additional_headers=additional_headers,
         ) as remote_ws:
             state.remote_ws = remote_ws
             logger.info("Connected raw bridge to remote code-server: %s", remote_ws_url)

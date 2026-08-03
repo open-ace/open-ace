@@ -1,4 +1,4 @@
-# Open ACE Remote Agent - Windows Install Script
+﻿# Open ACE Remote Agent - Windows Install Script
 #
 # Usage:
 #   Invoke-WebRequest -Uri "https://<server>/api/remote/agent/install.ps1" | Invoke-Expression
@@ -126,7 +126,9 @@ $files = @(
     "openace_cli.py",
     "cli_settings.py",
     "zcode_app_server.py",
-    "tls_config.py"
+    "tls_config.py",
+    "start-agent.ps1",
+    "start-agent.cmd"
 )
 $adapterFiles = @("__init__.py", "base.py", "qwen_code.py", "claude_code.py", "codex_cli.py", "codex_jsonl_parser.py", "openclaw.py", "usage_parser.py", "zcode.py")
 
@@ -452,6 +454,37 @@ if ($agentProc -and $agentProc.Id) {
     Write-Host "[WARN] Failed to start agent. Start manually: python $InstallDir\agent.py" -ForegroundColor Yellow
 }
 
+# Step 10: Create a double-click desktop shortcut command
+Write-Host "[INFO] Creating desktop shortcut..." -ForegroundColor Cyan
+try {
+    $desktopDir = [Environment]::GetFolderPath("Desktop")
+    if (-not $desktopDir -or -not (Test-Path $desktopDir)) {
+        # Fallback: CommonDesktopDirectory
+        $desktopDir = [Environment]::GetFolderPath("CommonDesktopDirectory")
+    }
+    if (-not $desktopDir -or -not (Test-Path $desktopDir)) {
+        # Fallback: user profile Desktop
+        $desktopDir = Join-Path $env:USERPROFILE "Desktop"
+    }
+
+    $shortcutPath = Join-Path $desktopDir "OpenACE-Agent.cmd"
+    $cmdLines = @(
+        "@echo off",
+        "chcp 65001 >nul",
+        "title Open ACE Remote Agent",
+        "rem Double-click to start the agent and connect to the server.",
+        "powershell -NoProfile -ExecutionPolicy Bypass -File `"$InstallDir\start-agent.ps1`" %*",
+        "echo.",
+        "pause"
+    )
+    Set-Content -Path $shortcutPath -Value $cmdLines -Encoding ASCII
+    Write-Host "[OK] Desktop shortcut created: $shortcutPath" -ForegroundColor Green
+} catch {
+    Write-Host "[WARN] Failed to create desktop shortcut: $_" -ForegroundColor Yellow
+    Write-Host "       Manual: copy start-agent.cmd from $InstallDir to your desktop." -ForegroundColor Gray
+}
+
+
 Write-Host ""
 Write-Host "[OK] ============================================" -ForegroundColor Green
 Write-Host "[OK] Open ACE Remote Agent installed successfully!" -ForegroundColor Green
@@ -460,3 +493,19 @@ Write-Host ""
 Write-Host "Machine ID: $machineId"
 Write-Host "Config: $InstallDir\config.json"
 Write-Host "Agent PID: $($agentProc.Id)"
+Write-Host ""
+Write-Host "============================================================" -ForegroundColor Cyan
+Write-Host "日常使用（客户端重启后连接服务器）" -ForegroundColor Cyan
+Write-Host "============================================================" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "1) 一键启动 Agent（已生成桌面快捷方式，双击即可）:" -ForegroundColor White
+Write-Host "   桌面: OpenACE-Agent.cmd" -ForegroundColor Gray
+Write-Host "   或命令行:" -ForegroundColor Gray
+Write-Host "   powershell -ExecutionPolicy Bypass -File `"$InstallDir\start-agent.ps1`"" -ForegroundColor Gray
+Write-Host ""
+Write-Host "2) 配置开机自启（登录后自动启动，仅需执行一次）:" -ForegroundColor White
+Write-Host "   powershell -ExecutionPolicy Bypass -File `"$InstallDir\start-agent.ps1`" -InstallAutoStart" -ForegroundColor Gray
+Write-Host ""
+Write-Host "说明: Agent 启动后会自动连接服务器。即使服务器重启，" -ForegroundColor Gray
+Write-Host "      Agent 也会在 1-60 秒内自动重连，无需重新生成注册令牌。" -ForegroundColor Gray
+Write-Host "      首次安装时的 config.json 已保存 machine_id 和 agent_token，长期有效。" -ForegroundColor Gray

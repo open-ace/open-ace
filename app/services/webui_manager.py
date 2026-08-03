@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
 Open ACE - AI Computing Explorer - WebUI Manager Service
 
@@ -863,6 +863,17 @@ class WebUIManager:
         # These prevent premature session termination during long-running tasks.
         child_env["SESSION_TIMEOUT_MS"] = "86400000"  # 24 hours
         child_env["KEEPALIVE_INTERVAL_MS"] = "10000"  # 10 seconds (more frequent)
+
+        # Custom system prompt for Qwen Code CLI
+        # QWEN_SYSTEM_MD points to a markdown file whose content replaces the
+        # default English system prompt. Default path; override via
+        # OPENACE_SYSTEM_PROMPT_PATH env or workspace config for tenant/user
+        # customization.
+        _system_prompt_path = os.environ.get(
+            "OPENACE_SYSTEM_PROMPT_PATH", "/app/system-prompt.md"
+        )
+        if os.path.isfile(_system_prompt_path):
+            child_env["QWEN_SYSTEM_MD"] = _system_prompt_path
 
         # Change log directory ownership to system_account (Linux/macOS only)
         # This allows webui to create additional log files if needed
