@@ -215,6 +215,24 @@ CREATE TABLE api_key_store (
  resolved_at TIMESTAMP
 );
 
+CREATE TABLE archive_files (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ tenant_id integer NOT NULL,
+ execution_id TEXT NOT NULL,
+ data_type TEXT NOT NULL,
+ batch_id integer NOT NULL,
+ file_path text NOT NULL,
+ file_size INTEGER,
+ checksum TEXT NOT NULL,
+ record_count integer NOT NULL,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+ expires_at TIMESTAMP,
+ deleted_at TIMESTAMP,
+ verified_at TIMESTAMP,
+ verification_status TEXT,
+ source_deleted INTEGER DEFAULT 0 NOT NULL
+);
+
 CREATE TABLE audit_logs (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  "timestamp" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -521,6 +539,22 @@ CREATE TABLE knowledge_base (
  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE legal_holds (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ tenant_id integer NOT NULL,
+ hold_type TEXT NOT NULL,
+ data_type TEXT,
+ record_id text,
+ reason text NOT NULL,
+ case_reference TEXT,
+ created_by integer NOT NULL,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+ expires_at TIMESTAMP,
+ lifted_by integer,
+ lifted_at TIMESTAMP,
+ lift_reason text
+);
+
 CREATE TABLE login_attempts (
  username TEXT PRIMARY KEY NOT NULL,
  attempt_count integer DEFAULT 0 NOT NULL,
@@ -716,6 +750,20 @@ CREATE TABLE quota_usage (
     CONSTRAINT chk_quota_usage_tokens_positive CHECK ((tokens_used >= 0))
 );
 
+CREATE TABLE recycle_bin (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ tenant_id integer NOT NULL,
+ execution_id TEXT NOT NULL,
+ data_type TEXT NOT NULL,
+ original_id integer NOT NULL,
+ record_data text NOT NULL,
+ deleted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+ expires_at TIMESTAMP NOT NULL,
+ restored_at TIMESTAMP,
+ restored_by integer,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
 CREATE TABLE registration_tokens (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  token_hash TEXT NOT NULL,
@@ -773,10 +821,75 @@ CREATE TABLE remote_runtime_outputs (
  expires_at TIMESTAMP
 );
 
+CREATE TABLE retention_evidence (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ execution_id TEXT NOT NULL,
+ tenant_id integer NOT NULL,
+ data_type TEXT NOT NULL,
+ action TEXT NOT NULL,
+ before_count integer,
+ after_count integer,
+ records_affected integer,
+ cutoff_date TIMESTAMP NOT NULL,
+ archive_location text,
+ archive_checksum TEXT,
+ error_count integer DEFAULT 0 NOT NULL,
+ error_sample text,
+ policy_version integer,
+ policy_config text,
+ policy_source TEXT,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+CREATE TABLE retention_executions (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ execution_id TEXT NOT NULL,
+ tenant_id integer NOT NULL,
+ policy_id integer,
+ status TEXT NOT NULL,
+ dry_run INTEGER DEFAULT 0 NOT NULL,
+ started_at TIMESTAMP,
+ completed_at TIMESTAMP,
+ lock_acquired_at TIMESTAMP,
+ lock_expires_at TIMESTAMP,
+ records_scanned integer DEFAULT 0 NOT NULL,
+ records_affected integer DEFAULT 0 NOT NULL,
+ records_skipped integer DEFAULT 0 NOT NULL,
+ records_archived integer DEFAULT 0 NOT NULL,
+ records_anonymized integer DEFAULT 0 NOT NULL,
+ records_in_recycle_bin integer DEFAULT 0 NOT NULL,
+ error_message text,
+ error_details text,
+ batch_size integer DEFAULT 1000 NOT NULL,
+ last_batch_id integer,
+ total_batches integer,
+ last_batch_status TEXT,
+ max_records_override integer,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
 CREATE TABLE retention_history (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  "timestamp" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
  report_data text NOT NULL
+);
+
+CREATE TABLE retention_policies (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ tenant_id integer,
+ data_type TEXT NOT NULL,
+ retention_days integer NOT NULL,
+ action TEXT NOT NULL,
+ enabled INTEGER DEFAULT 1 NOT NULL,
+ version integer DEFAULT 1 NOT NULL,
+ archive_target TEXT,
+ archive_config text,
+ anonymize_fields text,
+ backup_before_anonymize INTEGER DEFAULT 0 NOT NULL,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+ updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+ created_by integer,
+ updated_by integer
 );
 
 CREATE TABLE role_permissions (
@@ -1288,6 +1401,10 @@ CREATE UNIQUE INDEX remote_machines_machine_id_key ON remote_machines (machine_i
 
 CREATE UNIQUE INDEX remote_runtime_commands_command_id_key ON remote_runtime_commands (command_id);
 
+CREATE UNIQUE INDEX retention_executions_execution_id_key ON retention_executions (execution_id);
+
+CREATE UNIQUE INDEX retention_policies_tenant_id_data_type_version_key ON retention_policies (tenant_id, data_type, version);
+
 CREATE UNIQUE INDEX role_permissions_role_permission_key ON role_permissions (role, permission);
 
 CREATE UNIQUE INDEX security_settings_setting_key_key ON security_settings (setting_key);
@@ -1410,7 +1527,21 @@ CREATE INDEX idx_annotations_session ON annotations (session_id);
 
 CREATE INDEX idx_api_key_store_tenant_provider ON api_key_store (tenant_id, provider);
 
+CREATE INDEX idx_archive_files_batch ON archive_files (execution_id, batch_id);
+
+CREATE INDEX idx_archive_files_checksum ON archive_files (checksum);
+
+CREATE INDEX idx_archive_files_expires ON archive_files (expires_at);
+
+CREATE INDEX idx_archive_files_tenant ON archive_files (tenant_id);
+
 CREATE INDEX idx_audit_action ON audit_logs (action);
+
+CREATE INDEX idx_audit_logs_tenant_id ON audit_logs (tenant_id);
+
+CREATE INDEX idx_audit_logs_tenant_timestamp ON audit_logs (tenant_id, "timestamp");
+
+CREATE INDEX idx_audit_logs_timestamp ON audit_logs ("timestamp");
 
 CREATE INDEX idx_audit_resource ON audit_logs (resource_type, resource_id);
 
@@ -1483,6 +1614,12 @@ CREATE INDEX idx_hourly_stats_tenant_date ON hourly_stats (tenant_id, date);
 CREATE INDEX idx_insights_reports_user_date ON insights_reports (user_id, start_date, end_date);
 
 CREATE INDEX idx_knowledge_team ON knowledge_base (team_id);
+
+CREATE INDEX idx_legal_holds_active ON legal_holds (id) WHERE (lifted_at IS NULL);
+
+CREATE INDEX idx_legal_holds_data_type ON legal_holds (data_type);
+
+CREATE INDEX idx_legal_holds_tenant ON legal_holds (tenant_id);
 
 CREATE INDEX idx_login_attempts_locked_until ON login_attempts (locked_until);
 
@@ -1576,6 +1713,12 @@ CREATE INDEX idx_quota_usage_date ON quota_usage (date);
 
 CREATE INDEX idx_quota_usage_user ON quota_usage (user_id);
 
+CREATE INDEX idx_recycle_bin_execution ON recycle_bin (execution_id);
+
+CREATE INDEX idx_recycle_bin_expires ON recycle_bin (expires_at);
+
+CREATE INDEX idx_recycle_bin_tenant ON recycle_bin (tenant_id);
+
 CREATE INDEX idx_registration_tokens_hash ON registration_tokens (token_hash);
 
 CREATE INDEX idx_remote_machines_hostname_tenant ON remote_machines (hostname, tenant_id);
@@ -1591,6 +1734,26 @@ CREATE INDEX idx_remote_runtime_commands_machine_status ON remote_runtime_comman
 CREATE INDEX idx_remote_runtime_outputs_expires ON remote_runtime_outputs (expires_at);
 
 CREATE INDEX idx_remote_runtime_outputs_session_index ON remote_runtime_outputs (session_id, event_index);
+
+CREATE INDEX idx_retention_evidence_execution ON retention_evidence (execution_id);
+
+CREATE INDEX idx_retention_evidence_tenant ON retention_evidence (tenant_id);
+
+CREATE INDEX idx_retention_evidence_timestamp ON retention_evidence (created_at);
+
+CREATE INDEX idx_retention_executions_execution_id ON retention_executions (execution_id);
+
+CREATE INDEX idx_retention_executions_lock ON retention_executions (lock_acquired_at, lock_expires_at);
+
+CREATE INDEX idx_retention_executions_status ON retention_executions (status);
+
+CREATE INDEX idx_retention_executions_tenant ON retention_executions (tenant_id);
+
+CREATE INDEX idx_retention_policies_data_type ON retention_policies (data_type);
+
+CREATE INDEX idx_retention_policies_enabled ON retention_policies (enabled);
+
+CREATE INDEX idx_retention_policies_tenant ON retention_policies (tenant_id);
 
 CREATE INDEX idx_run_events_created_at ON agent_run_events (created_at);
 
@@ -1650,9 +1813,7 @@ CREATE INDEX idx_team_members_user ON team_members (user_id);
 
 CREATE INDEX idx_teams_owner ON teams (owner_id);
 
--- Note: SQLite does not support ->> operator for JSON extraction.
--- This index is skipped for SQLite; use json_extract() in queries instead.
--- CREATE INDEX idx_teams_sync_source ON teams ((((settings) ->> 'sync_source')));
+CREATE INDEX idx_teams_sync_source ON teams ((((settings) ->> 'sync_source')));
 
 CREATE INDEX idx_tenant_migrations_status ON tenant_migrations (status);
 
@@ -1755,158 +1916,3 @@ CREATE UNIQUE INDEX policy_rules_rule_key_version_key ON policy_rules (rule_key,
 CREATE UNIQUE INDEX uq_projects_path ON projects (tenant_id, path) WHERE (is_active IS TRUE);
 
 CREATE UNIQUE INDEX uq_user_projects_user_project ON user_projects (user_id, project_id);
-
--- Issue #2188: Retention policy and execution tables
-
-CREATE TABLE retention_policies (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    tenant_id INTEGER,
-    data_type TEXT NOT NULL,
-    retention_days INTEGER NOT NULL,
-    action TEXT NOT NULL,
-    enabled INTEGER DEFAULT 1,
-    version INTEGER DEFAULT 1,
-    archive_target TEXT,
-    archive_config TEXT,
-    anonymize_fields TEXT,
-    backup_before_anonymize INTEGER DEFAULT 0,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    created_by INTEGER,
-    updated_by INTEGER,
-    UNIQUE(tenant_id, data_type, version),
-    FOREIGN KEY (tenant_id) REFERENCES tenants(id)
-);
-
-CREATE INDEX idx_retention_policies_tenant ON retention_policies(tenant_id);
-CREATE INDEX idx_retention_policies_enabled ON retention_policies(enabled);
-CREATE INDEX idx_retention_policies_data_type ON retention_policies(data_type);
-
-CREATE TABLE retention_executions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    execution_id TEXT NOT NULL UNIQUE,
-    tenant_id INTEGER NOT NULL,
-    policy_id INTEGER,
-    status TEXT NOT NULL,
-    dry_run INTEGER DEFAULT 0,
-    started_at TIMESTAMP,
-    completed_at TIMESTAMP,
-    lock_acquired_at TIMESTAMP,
-    lock_expires_at TIMESTAMP,
-    records_scanned INTEGER DEFAULT 0,
-    records_affected INTEGER DEFAULT 0,
-    records_skipped INTEGER DEFAULT 0,
-    records_archived INTEGER DEFAULT 0,
-    records_anonymized INTEGER DEFAULT 0,
-    records_in_recycle_bin INTEGER DEFAULT 0,
-    error_message TEXT,
-    error_details TEXT,
-    batch_size INTEGER DEFAULT 1000,
-    last_batch_id INTEGER,
-    total_batches INTEGER,
-    last_batch_status TEXT,
-    max_records_override INTEGER,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (tenant_id) REFERENCES tenants(id),
-    FOREIGN KEY (policy_id) REFERENCES retention_policies(id)
-);
-
-CREATE INDEX idx_retention_executions_tenant ON retention_executions(tenant_id);
-CREATE INDEX idx_retention_executions_status ON retention_executions(status);
-CREATE INDEX idx_retention_executions_execution_id ON retention_executions(execution_id);
-CREATE INDEX idx_retention_executions_lock ON retention_executions(lock_acquired_at, lock_expires_at);
-
-CREATE TABLE legal_holds (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    tenant_id INTEGER NOT NULL,
-    hold_type TEXT NOT NULL,
-    data_type TEXT,
-    record_id TEXT,
-    reason TEXT NOT NULL,
-    case_reference TEXT,
-    created_by INTEGER NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    expires_at TIMESTAMP,
-    lifted_by INTEGER,
-    lifted_at TIMESTAMP,
-    lift_reason TEXT,
-    FOREIGN KEY (tenant_id) REFERENCES tenants(id)
-);
-
-CREATE INDEX idx_legal_holds_tenant ON legal_holds(tenant_id);
-CREATE INDEX idx_legal_holds_active ON legal_holds(lifted_at IS NULL);
-CREATE INDEX idx_legal_holds_data_type ON legal_holds(data_type);
-
-CREATE TABLE retention_evidence (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    execution_id TEXT NOT NULL,
-    tenant_id INTEGER NOT NULL,
-    data_type TEXT NOT NULL,
-    action TEXT NOT NULL,
-    before_count INTEGER,
-    after_count INTEGER,
-    records_affected INTEGER,
-    cutoff_date TIMESTAMP NOT NULL,
-    archive_location TEXT,
-    archive_checksum TEXT,
-    error_count INTEGER DEFAULT 0,
-    error_sample TEXT,
-    policy_version INTEGER,
-    policy_config TEXT,
-    policy_source TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (execution_id) REFERENCES retention_executions(execution_id)
-);
-
-CREATE INDEX idx_retention_evidence_execution ON retention_evidence(execution_id);
-CREATE INDEX idx_retention_evidence_tenant ON retention_evidence(tenant_id);
-CREATE INDEX idx_retention_evidence_timestamp ON retention_evidence(created_at);
-
-CREATE TABLE archive_files (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    tenant_id INTEGER NOT NULL,
-    execution_id TEXT NOT NULL,
-    data_type TEXT NOT NULL,
-    batch_id INTEGER NOT NULL,
-    file_path TEXT NOT NULL,
-    file_size INTEGER,
-    checksum TEXT NOT NULL,
-    record_count INTEGER NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    expires_at TIMESTAMP,
-    deleted_at TIMESTAMP,
-    verified_at TIMESTAMP,
-    verification_status TEXT,
-    source_deleted INTEGER DEFAULT 0,
-    FOREIGN KEY (execution_id) REFERENCES retention_executions(execution_id)
-);
-
-CREATE INDEX idx_archive_files_tenant ON archive_files(tenant_id);
-CREATE INDEX idx_archive_files_expires ON archive_files(expires_at);
-CREATE INDEX idx_archive_files_checksum ON archive_files(checksum);
-CREATE INDEX idx_archive_files_batch ON archive_files(execution_id, batch_id);
-
-CREATE TABLE recycle_bin (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    tenant_id INTEGER NOT NULL,
-    execution_id TEXT NOT NULL,
-    data_type TEXT NOT NULL,
-    original_id INTEGER NOT NULL,
-    record_data TEXT NOT NULL,
-    deleted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    expires_at TIMESTAMP NOT NULL,
-    restored_at TIMESTAMP,
-    restored_by INTEGER,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (tenant_id) REFERENCES tenants(id),
-    FOREIGN KEY (execution_id) REFERENCES retention_executions(execution_id)
-);
-
-CREATE INDEX idx_recycle_bin_tenant ON recycle_bin(tenant_id);
-CREATE INDEX idx_recycle_bin_expires ON recycle_bin(expires_at);
-CREATE INDEX idx_recycle_bin_execution ON recycle_bin(execution_id);
-
--- Issue #2188 Phase 0: Audit logs retention indexes
-CREATE INDEX idx_audit_logs_tenant_id ON audit_logs(tenant_id);
-CREATE INDEX idx_audit_logs_timestamp ON audit_logs(timestamp);
-CREATE INDEX idx_audit_logs_tenant_timestamp ON audit_logs(tenant_id, timestamp);
