@@ -1,8 +1,8 @@
 """Backfill session_messages columns missing from historical migrations
 
-Revision ID: 20260802_002_backfill_session_messages_columns
-Revises: 20260802_001_backfill_agent_sessions_columns
-Create Date: 2026-08-02
+Revision ID: 20260803_004_backfill_session_messages_columns
+Revises: 20260803_003_backfill_agent_sessions_columns
+Create Date: 2026-08-03
 
 Issue: #2190
 
@@ -24,8 +24,8 @@ from __future__ import annotations
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "20260802_002_backfill_session_messages_columns"
-down_revision: str | None = "20260802_001_backfill_agent_sessions_columns"
+revision: str = "20260803_004_backfill_session_messages_columns"
+down_revision: str | None = "20260803_003_backfill_agent_sessions_columns"
 branch_labels: str | None = None
 depends_on: str | None = None
 

@@ -110,7 +110,7 @@ def main() -> int:
 
     db_url = _get_db_url()
 
-    logger.info(f"Auditing database schema status...")
+    logger.info("Auditing database schema status...")
     logger.info(f"Database: {db_url.split('@')[-1] if '@' in db_url else db_url}")
 
     result = audit_database(db_url)

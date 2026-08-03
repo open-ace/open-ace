@@ -39,7 +39,9 @@ class TestGetDatabaseRevision:
         with engine.connect() as conn:
             # Create alembic_version table
             conn.execute(sa.text("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)"))
-            conn.execute(sa.text("INSERT INTO alembic_version (version_num) VALUES ('test_revision')"))
+            conn.execute(
+                sa.text("INSERT INTO alembic_version (version_num) VALUES ('test_revision')")
+            )
             conn.commit()
 
             result = get_database_revision(conn)
@@ -74,7 +76,9 @@ class TestCheckSchemaCompatibility:
             # Create alembic_version with newer revision
             conn.execute(sa.text("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)"))
             conn.execute(
-                sa.text(f"INSERT INTO alembic_version (version_num) VALUES ('{MIN_SUPPORTED_REVISION}')")
+                sa.text(
+                    f"INSERT INTO alembic_version (version_num) VALUES ('{MIN_SUPPORTED_REVISION}')"
+                )
             )
             conn.commit()
 
@@ -86,7 +90,9 @@ class TestCheckSchemaCompatibility:
         engine = sa.create_engine("sqlite:///:memory:")
         with engine.connect() as conn:
             conn.execute(sa.text("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)"))
-            conn.execute(sa.text("INSERT INTO alembic_version (version_num) VALUES ('20260802_001')"))
+            conn.execute(
+                sa.text("INSERT INTO alembic_version (version_num) VALUES ('20260803_003')")
+            )
             conn.commit()
 
             # Should not raise - this is a valid version after baseline
@@ -97,7 +103,9 @@ class TestCheckSchemaCompatibility:
         engine = sa.create_engine("sqlite:///:memory:")
         with engine.connect() as conn:
             conn.execute(sa.text("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)"))
-            conn.execute(sa.text("INSERT INTO alembic_version (version_num) VALUES ('20260701_001')"))
+            conn.execute(
+                sa.text("INSERT INTO alembic_version (version_num) VALUES ('20260701_001')")
+            )
             conn.commit()
 
             # Should raise when checking against a newer timestamp revision
@@ -113,7 +121,9 @@ class TestCheckSchemaCompatibility:
         with engine.connect() as conn:
             # Create alembic_version with old revision
             conn.execute(sa.text("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)"))
-            conn.execute(sa.text("INSERT INTO alembic_version (version_num) VALUES ('old_revision')"))
+            conn.execute(
+                sa.text("INSERT INTO alembic_version (version_num) VALUES ('old_revision')")
+            )
             conn.commit()
 
             with pytest.raises(SchemaCompatibilityError) as exc_info:
@@ -128,7 +138,9 @@ class TestCheckSchemaCompatibility:
         with engine.connect() as conn:
             # Create incompatible version
             conn.execute(sa.text("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)"))
-            conn.execute(sa.text("INSERT INTO alembic_version (version_num) VALUES ('old_revision')"))
+            conn.execute(
+                sa.text("INSERT INTO alembic_version (version_num) VALUES ('old_revision')")
+            )
             conn.commit()
 
             # Should not raise with skip_check=True
@@ -140,7 +152,9 @@ class TestCheckSchemaCompatibility:
         with engine.connect() as conn:
             # Create incompatible version
             conn.execute(sa.text("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)"))
-            conn.execute(sa.text("INSERT INTO alembic_version (version_num) VALUES ('old_revision')"))
+            conn.execute(
+                sa.text("INSERT INTO alembic_version (version_num) VALUES ('old_revision')")
+            )
             conn.commit()
 
             # Set environment variable
@@ -191,7 +205,9 @@ class TestIsProductionEnvironment:
 
     def test_development_returns_false(self):
         """Test development mode returns False."""
-        with patch("app.repositories.schema_guard.get_environment_mode", return_value="development"):
+        with patch(
+            "app.repositories.schema_guard.get_environment_mode", return_value="development"
+        ):
             assert is_production_environment() is False
 
 

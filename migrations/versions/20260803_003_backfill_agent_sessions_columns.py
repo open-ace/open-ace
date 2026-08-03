@@ -1,8 +1,8 @@
 """Backfill agent_sessions columns missing from historical migrations
 
-Revision ID: 20260802_001_backfill_agent_sessions_columns
-Revises: 20260801_001_add_platform_tenant_admin_roles
-Create Date: 2026-08-02
+Revision ID: 20260803_003_backfill_agent_sessions_columns
+Revises: 20260803_002_create_retention_tables
+Create Date: 2026-08-03
 
 Issue: #2190
 
@@ -26,8 +26,8 @@ from __future__ import annotations
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "20260802_001_backfill_agent_sessions_columns"
-down_revision: str | None = "20260801_001_add_platform_tenant_admin_roles"
+revision: str = "20260803_003_backfill_agent_sessions_columns"
+down_revision: str | None = "20260803_002_create_retention_tables"
 branch_labels: str | None = None
 depends_on: str | None = None
 
