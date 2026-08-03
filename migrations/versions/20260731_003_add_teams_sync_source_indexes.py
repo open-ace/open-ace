@@ -52,11 +52,11 @@ def upgrade() -> None:
             "ON teams ((settings::jsonb->>'sync_source'))"
         )
     else:
-        # SQLite: Use ->> operator directly (no cast needed)
+        # SQLite: Use json_extract function (->> operator is PostgreSQL-specific)
         try:
             op.execute(
                 "CREATE INDEX IF NOT EXISTS idx_teams_sync_source "
-                "ON teams ((settings->>'sync_source'))"
+                "ON teams ((json_extract(settings, '$.sync_source')))"
             )
         except Exception:  # nosec: B110 - SQLite may lack JSON index support
             pass

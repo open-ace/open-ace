@@ -2508,6 +2508,12 @@ ALTER TABLE ONLY role_permissions
 ALTER TABLE ONLY role_permissions
     ADD CONSTRAINT role_permissions_role_permission_key UNIQUE (role, permission);
 
+ALTER TABLE ONLY scheduler_leaders
+    ADD CONSTRAINT scheduler_leaders_pkey PRIMARY KEY (job_name);
+
+ALTER TABLE ONLY scheduler_runs
+    ADD CONSTRAINT scheduler_runs_pkey PRIMARY KEY (id);
+
 ALTER TABLE ONLY security_settings
     ADD CONSTRAINT security_settings_pkey PRIMARY KEY (id);
 
