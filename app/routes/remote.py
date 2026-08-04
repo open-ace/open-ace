@@ -501,7 +501,8 @@ def _check_machine_tenant_access(machine_id: str) -> tuple[dict | None, tuple | 
     user_tenant_id = g.user.get("tenant_id")
 
     # Platform admin: can access any machine
-    if user_role == "platform_admin":
+    # Issue #2286: Accept legacy 'admin' role alongside 'platform_admin' for backward compatibility.
+    if user_role in ("platform_admin", "admin"):
         return machine, None
 
     # Tenant admin: can only access machines in their tenant
@@ -588,6 +589,15 @@ def register_machine():
         tenant_id = data.get("tenant_id")
         if tenant_id is None:
             return jsonify({"error": "tenant_id is required for platform admin"}), 400
+        tenant_id = int(tenant_id)
+    elif user_role == "admin":
+        # Legacy admin: backward compatibility
+        # Issue #2286: Accept legacy 'admin' role alongside 'platform_admin'
+        tenant_id = data.get("tenant_id")
+        if tenant_id is None:
+            tenant_id = user_tenant_id
+            if tenant_id is None:
+                return jsonify({"error": "tenant_id is required"}), 400
         tenant_id = int(tenant_id)
     elif user_role == "tenant_admin":
         # Tenant admin can only register machines for their own tenant
@@ -3681,7 +3691,8 @@ def remote_vscode_proxy(vscode_id, path=""):
         # Check tenant isolation (Issue #2183)
         if session_tenant_id is not None and user_tenant_id != session_tenant_id:
             # Platform admin can access cross-tenant (with audit)
-            if g.user.get("role") == "platform_admin":
+            # Issue #2286: Accept legacy 'admin' role alongside 'platform_admin' for backward compatibility.
+            if g.user.get("role") in ("platform_admin", "admin"):
                 audit_logger.log(
                     action=AuditAction.ADMIN_CROSS_TENANT_ACCESS.value,
                     severity="info",

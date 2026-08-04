@@ -64,6 +64,10 @@ def get_all_rules():
 
     if user_role == "platform_admin":
         # Platform admin: can see all rules
+        # Issue #2286: Accept legacy 'admin' role alongside 'platform_admin' for backward compatibility.
+        rules = repo.get_all()
+    elif user_role == "admin":
+        # Legacy admin: backward compatibility - can see all rules
         rules = repo.get_all()
     elif user_role == "tenant_admin":
         # Tenant admin: only see rules for users in their tenant

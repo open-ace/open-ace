@@ -1054,7 +1054,7 @@ def same_tenant_or_platform_admin(f=None):
 
     Validation rules:
     1. User is authenticated
-    2. If platform_admin: allow (log cross-tenant operation)
+    2. If platform_admin or legacy admin: allow (log cross-tenant operation)
     3. If tenant_admin: verify tenant_id matches
     4. Other roles: deny
 
@@ -1067,6 +1067,7 @@ def same_tenant_or_platform_admin(f=None):
     - 403: Not authorized or cross-tenant access denied
 
     Issue #2179: Support both platform admin and tenant admin scenarios
+    Issue #2286: Accept legacy 'admin' role alongside 'platform_admin' for backward compatibility
     """
 
     def decorator(func):
@@ -1085,8 +1086,9 @@ def same_tenant_or_platform_admin(f=None):
             user_tenant_id = user.get("tenant_id")
             user_id = user.get("id")
 
-            # Platform admin: allow with audit logging
-            if user_role == "platform_admin":
+            # Platform admin or legacy admin: allow with audit logging
+            # Issue #2286: Accept legacy 'admin' role alongside 'platform_admin' for backward compatibility.
+            if user_role in ("platform_admin", "admin"):
                 g.user = user
                 g.user_id = user_id
                 g.user_role = user_role
