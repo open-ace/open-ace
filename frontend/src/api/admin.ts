@@ -9,7 +9,7 @@ export interface AdminUser {
   id: number;
   username: string;
   email: string;
-  role: 'admin' | 'manager' | 'user' | 'readonly';
+  role: 'admin' | 'platform_admin' | 'tenant_admin' | 'manager' | 'user' | 'readonly';
   is_active: boolean;
   created_at: string;
   last_login?: string;

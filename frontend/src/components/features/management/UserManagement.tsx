@@ -76,6 +76,8 @@ export const UserManagement: React.FC = () => {
 
   const roleOptions = [
     { value: 'admin', label: t('roleAdmin', language) },
+    { value: 'platform_admin', label: t('rolePlatformAdmin', language) },
+    { value: 'tenant_admin', label: t('roleTenantAdmin', language) },
     { value: 'manager', label: t('roleManager', language) },
     { value: 'user', label: t('roleUser', language) },
     { value: 'readonly', label: t('roleReadonly', language) },
@@ -166,7 +168,7 @@ export const UserManagement: React.FC = () => {
       email: user.email,
       password: '',
       confirm_password: '',
-      role: user.role,
+      role: user.role as CreateUserRequest['role'],
       system_account: user.system_account ?? '',
       is_active: user.is_active,
       tenant_id: user.tenant_id,
