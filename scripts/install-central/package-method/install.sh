@@ -1992,6 +1992,26 @@ CONF_EOF
     return 0
 }
 
+# Find visudo command with fallback and validation.
+# Returns the visudo command path on success, or returns 1 on failure.
+_find_visudo() {
+    # Expand PATH to include standard sbin directories for fallback scenarios
+    export PATH="/usr/sbin:/usr/local/sbin:$PATH"
+
+    local visudo_cmd="/usr/sbin/visudo"
+    if [ ! -x "$visudo_cmd" ]; then
+        visudo_cmd="visudo"  # fallback to PATH lookup
+    fi
+
+    # Verify the command exists and is executable
+    if ! command -v "$visudo_cmd" &>/dev/null; then
+        print_error "visudo command not found. Please ensure sudo is properly installed."
+        return 1
+    fi
+
+    echo "$visudo_cmd"
+}
+
 # Configure the minimal privilege required by every local autonomous workflow,
 # including the default single-user install.  This is intentionally separate
 # from the broad multi-user workspace sudoers file.
@@ -2007,7 +2027,14 @@ configure_autonomous_agent_sudoers() {
 $run_user ALL=(root) NOPASSWD: $wrapper_path --isolated *
 SUDOERS_EOF
     chmod 440 "$sudoers_file"
-    if ! visudo -c -f "$sudoers_file" >/dev/null 2>&1; then
+
+    # Validate sudoers syntax
+    local visudo_cmd
+    if ! visudo_cmd="$(_find_visudo)"; then
+        unlink "$sudoers_file" 2>/dev/null || true
+        return 1
+    fi
+    if ! $visudo_cmd -c -f "$sudoers_file" >/dev/null 2>&1; then
         unlink "$sudoers_file" 2>/dev/null || true
         print_warning "Invalid autonomous agent sudoers configuration"
         return 1
@@ -2119,7 +2146,12 @@ printf '%s\n' \
 # Validate before touching the active sudoers include. Install to an ignored
 # dot-file first, then rename atomically so interruption cannot leave a partial
 # rule that locks out subsequent sudo recovery.
-as_root visudo -c -f "$rule_tmp" >/dev/null
+local visudo_cmd
+if ! visudo_cmd="$(_find_visudo)"; then
+    rm -f "$rule_tmp"
+    exit 1
+fi
+as_root "$visudo_cmd" -c -f "$rule_tmp" >/dev/null
 as_root install -o root -g root -m 440 "$rule_tmp" \
     /etc/sudoers.d/.open-ace-autonomous-agent.new
 as_root mv /etc/sudoers.d/.open-ace-autonomous-agent.new \
@@ -2563,7 +2595,19 @@ ${current_user_rules}
     chmod 440 "$sudoers_file"
 
     # Validate sudoers syntax
-    if visudo -c -f "$sudoers_file" &>/dev/null; then
+    local visudo_cmd
+    if ! visudo_cmd="$(_find_visudo)"; then
+        # Restore backup on failure
+        if [ -n "$sudoers_backup" ] && [ -f "$sudoers_backup" ]; then
+            cp -p "$sudoers_backup" "$sudoers_file"
+            chmod 440 "$sudoers_file"
+            print_warning "Restored previous sudoers from $sudoers_backup"
+        else
+            rm -f "$sudoers_file"
+        fi
+        return 1
+    fi
+    if $visudo_cmd -c -f "$sudoers_file" &>/dev/null; then
         print_success "Sudoers configured successfully: $sudoers_file"
         print_info "Service account '$run_user' can execute:"
         print_info "  sudo -u <username> $webui_path --port <port>"
