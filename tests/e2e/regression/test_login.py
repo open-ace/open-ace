@@ -194,7 +194,7 @@ def test_logout():
 
             save_screenshot(page, MODULE_NAME, "04_logout_success")
 
-        except Exception as e:
+        except Exception:
             # 保存失败截图
             save_screenshot(page, MODULE_NAME, "04_logout_error")
             raise  # 重新抛出，不吞掉
