@@ -60,6 +60,20 @@ export interface MappingSuggestion {
   rule_id: number | null;
 }
 
+// Issue #2131: New response type for generate default rules
+export interface MappingRuleInfo {
+  pattern: string;
+  match_type: string;
+  priority: number;
+}
+
+export interface GenerateDefaultRulesResponse {
+  created: MappingRule[];
+  skipped: MappingRuleInfo[];
+  created_count: number;
+  skipped_count: number;
+}
+
 // API
 export const mappingRulesApi = {
   async getAllRules(): Promise<MappingRule[]> {
@@ -103,8 +117,8 @@ export const mappingRulesApi = {
     await apiClient.delete(`/api/mapping-rules/${id}`);
   },
 
-  async generateDefaultRules(userId: number): Promise<MappingRule[]> {
-    return apiClient.post<MappingRule[]>(`/api/mapping-rules/user/${userId}/generate-default`);
+  async generateDefaultRules(userId: number): Promise<GenerateDefaultRulesResponse> {
+    return apiClient.post<GenerateDefaultRulesResponse>(`/api/mapping-rules/user/${userId}/generate-default`);
   },
 
   async getMappingStats(): Promise<MappingStats> {
