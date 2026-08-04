@@ -1036,7 +1036,8 @@ export const Workspace: React.FC = () => {
       // Case 1: URL restore params - create a single tab with the restore session
       // Build settings from URL params
       const urlSettings:
-        { model?: string; useWebUI?: boolean; permissionMode?: string } | undefined =
+        | { model?: string; useWebUI?: boolean; permissionMode?: string }
+        | undefined =
         urlModel || urlUseWebUI !== null || urlPermissionMode
           ? {
               model: urlModel ?? undefined,
