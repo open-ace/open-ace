@@ -24,10 +24,10 @@ from app.auth.decorators import (
     _load_user_from_token,
     enforce_password_change_requirement,
 )
+from app.models.user import User
 from app.modules.governance.audit_logger import AuditAction, AuditLogger
 from app.modules.workspace.remote_agent_manager import get_remote_agent_manager
 from app.modules.workspace.remote_session_manager import get_remote_session_manager
-from app.models.user import User
 
 logger = logging.getLogger(__name__)
 

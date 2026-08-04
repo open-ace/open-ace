@@ -24,6 +24,7 @@ from app.auth.decorators import (
     enforce_password_change_requirement,
     security_annotated,
 )
+from app.models.user import User
 from app.modules.workspace.api_key_proxy import get_api_key_proxy_service
 from app.modules.workspace.collaboration import SharePermission, get_collaboration_manager
 from app.modules.workspace.llm_proxy_handler import handle_llm_proxy_request
@@ -39,7 +40,6 @@ from app.routes.fs import is_valid_path
 from app.utils.request_context import get_current_tenant_id
 from app.utils.tool_names import TOOL_NAME_ALIASES, normalize_tool_name
 from app.utils.workspace import get_workspace_base_dir, get_workspace_base_dirs
-from app.models.user import User
 
 logger = logging.getLogger(__name__)
 
@@ -680,7 +680,9 @@ def delete_prompt(template_id):
 
         library = get_prompt_library()
         # Admin users can delete any template; others can only delete their own
-        success = library.delete_template(template_id, None if User.is_admin_role(user_role) else user_id)
+        success = library.delete_template(
+            template_id, None if User.is_admin_role(user_role) else user_id
+        )
 
         if not success:
             return jsonify({"success": False, "error": "Template not found or not authorized"}), 404
@@ -2395,6 +2397,7 @@ def list_webui_instances():
         return jsonify({"error": "Internal server error"}), 500
 
 
+@security_annotated(reason="Admin-only endpoint to stop user webui instances")
 @workspace_bp.route("/instances/<int:user_id>/stop", methods=["POST"])
 def stop_user_webui_instance(user_id):
     """Stop a specific user's webui instance (admin only)."""

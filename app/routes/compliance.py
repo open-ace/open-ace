@@ -12,13 +12,13 @@ from datetime import datetime, timedelta, timezone
 from flask import Blueprint, Response, g, jsonify, request
 
 from app.auth.decorators import admin_required, resolve_tenant_scope
+from app.models.user import User
 from app.modules.compliance.audit import AuditAnalyzer
 from app.modules.compliance.report import ReportGenerator, ReportType
 from app.modules.compliance.retention import DataRetentionManager
 from app.modules.governance.audit_logger import AuditLogger
 from app.repositories.database import Database
 from app.repositories.governance_repo import GovernanceRepository
-from app.models.user import User
 
 logger = logging.getLogger(__name__)
 
