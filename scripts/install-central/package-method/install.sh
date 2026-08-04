@@ -2319,7 +2319,9 @@ $run_user ALL=(root) NOPASSWD: $wrapper_bin *"
     # Build current user's complete rule block (avoid empty lines from empty variables)
     local current_user_rules="# Rules for $run_user (updated on $(date '+%Y-%m-%d %H:%M:%S'))
 # WebUI 启动规则：允许以任意用户运行，Python 层验证目标用户
-$run_user ALL=(ALL) NOPASSWD: $webui_path *"
+# Issue #2298: /usr/bin/env 用于内联传递 LLM 配置环境变量（OPENAI_API_KEY 等），
+# 绕过 sudo env_keep 过滤。env 中的值是 proxy_token，非真实 API key。
+$run_user ALL=(ALL) NOPASSWD: $webui_path *, /usr/bin/env *"
 
     # Only add webui_local_rule if not empty
     if [ -n "$webui_local_rule" ]; then
@@ -2362,6 +2364,8 @@ ${fetch_rules}"
 # env_keep 主要用于 WebUI 启动（sudo -u），需要清理敏感凭据
 # 移除：OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY, OPENCLAW_TOKEN, GH_TOKEN
 # 保留：非敏感变量（proxy_token, GIT_*签名变量, PATH）
+# 【Issue #2298】OPENAI_API_KEY/OPENAI_BASE_URL 不再通过 env_keep，
+# 改由 webui_manager 通过 sudo -u user /usr/bin/env KEY=val ... 内联传递
 Defaults env_keep += \"OPENACE_PROXY_TOKEN OPENACE_PROXY_URL OPENACE_MODEL OPENACE_LOG_DIR PATH\"
 Defaults env_keep += \"GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL\"
 Defaults env_keep += \"SESSION_TIMEOUT_MS KEEPALIVE_INTERVAL_MS\"

@@ -1059,12 +1059,34 @@ class WebUIManager:
                 ]
                 cwd = None
             else:
-                # Different user: use sudo -u for global executable
-                # Environment variables are passed via sudoers env_keep configuration
+                # Different user: use sudo -u with /usr/bin/env to pass environment.
+                # Issue #2298: Popen(env=child_env) is filtered by sudo env_keep,
+                # so we inline env vars as /usr/bin/env arguments to bypass it.
+                # Only pass vars NOT already preserved by sudoers env_keep
+                # (PATH, OPENACE_PROXY_*, OPENACE_MODEL, OPENACE_LOG_DIR,
+                #  GIT_*, SESSION_TIMEOUT_MS, KEEPALIVE_INTERVAL_MS).
+                env_args = []
+                # Standard keys: LLM config + locale + proxy
+                for key in ["OPENAI_API_KEY", "OPENAI_BASE_URL", "LANG", "LC_ALL",
+                           "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY"]:
+                    if child_env.get(key):
+                        env_args.append(f"{key}={child_env[key]}")
+                # Dynamic envKeys from model pool (e.g., BAILIAN_CODING_PLAN_API_KEY)
+                known_keys = {"PATH", "OPENACE_PROXY_TOKEN", "OPENACE_PROXY_URL",
+                             "OPENACE_MODEL", "OPENACE_LOG_DIR",
+                             "SESSION_TIMEOUT_MS", "KEEPALIVE_INTERVAL_MS",
+                             "OPENAI_API_KEY", "OPENAI_BASE_URL", "LANG", "LC_ALL",
+                             "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY"}
+                for key, value in child_env.items():
+                    if key not in known_keys and value:
+                        env_args.append(f"{key}={value}")
+
                 cmd = [
                     "sudo",
                     "-u",
                     system_account,
+                    "/usr/bin/env",
+                ] + env_args + [
                     webui_cmd,
                     "--port",
                     str(port),
