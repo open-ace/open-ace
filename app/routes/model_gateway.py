@@ -78,9 +78,7 @@ def update_model_gateway_config():
                     )
                 else:
                     logger.warning("No stored gateway config found for api_key fallback")
-                    return jsonify(
-                        {"success": False, "error": "Gateway API key is required"}
-                    ), 400
+                    return jsonify({"success": False, "error": "Gateway API key is required"}), 400
             except Exception as e:
                 logger.error("Failed to retrieve stored gateway config: %s", e)
                 return jsonify({"success": False, "error": "Internal server error"}), 500
