@@ -317,9 +317,11 @@ class TestSchedulerSafetyNet:
         with patch(
             "app.services.user_stats_aggregator.aggregate_user_stats_background",
             side_effect=RuntimeError("db error"),
-        ):
+        ) as mock_bg:
             # Should not raise
             scheduler._aggregate_user_stats()
+            # The background call was attempted (and its RuntimeError swallowed)
+            mock_bg.assert_called_once()
 
     def test_run_fetch_calls_aggregate(self):
         """_run_fetch should call _aggregate_user_stats after fetch."""

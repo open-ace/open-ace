@@ -265,7 +265,9 @@ class TestSessionManager:
         try:
             conn.cursor().execute("ALTER TABLE session_messages ADD COLUMN source TEXT DEFAULT ''")
             conn.commit()
-        except Exception:
+        except (
+            Exception
+        ):  # allow-swallow: idempotent ALTER TABLE migration (column may already exist)
             conn.rollback()
         finally:
             conn.close()

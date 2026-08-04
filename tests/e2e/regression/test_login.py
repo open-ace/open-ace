@@ -18,7 +18,7 @@ sys.path.insert(
     0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 )
 
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import TimeoutError, sync_playwright
 
 from tests.e2e.regression.test_helpers import (
     BASE_URL,
@@ -154,27 +154,47 @@ def test_logout():
                         f"Login did not redirect after 120s during logout test. Error: {e}"
                     ) from e
 
-            # 查找并点击登出按钮
+            # Issue #2189: 查找并点击登出按钮 - 明确失败而非静默
             logout_selectors = [
                 'a[href="/logout"]',
                 'button:has-text("Logout")',
                 '.user-menu a:has-text("Logout")',
             ]
-            if check_element_exists(page, logout_selectors):
-                try:
-                    logout_btn = page.locator(
-                        logout_selectors[0] + ", " + logout_selectors[1]
-                    ).first
-                    if logout_btn.is_visible():
-                        logout_btn.click()
-                        page.wait_for_timeout(1000)
-                        # 验证重定向到登录页面
-                        assert "/login" in page.url, "登出后应重定向到登录页面"
-                except Exception:
-                    pass
 
-            save_screenshot(page, MODULE_NAME, "04_logout")
-            return True
+            logout_found = False
+            for selector in logout_selectors:
+                try:
+                    logout_btn = page.wait_for_selector(selector, state="visible", timeout=5000)
+                    if logout_btn:
+                        logout_found = True
+                        logout_btn.click()
+                        break
+                except TimeoutError:
+                    # Only catch timeout, other exceptions should propagate
+                    continue
+
+            # Issue #2189: 找不到必须失败
+            if not logout_found:
+                save_screenshot(page, MODULE_NAME, "04_logout_no_button")
+                pytest.fail(f"Logout button not found. Tried selectors: {logout_selectors}")
+
+            # Issue #2189: 等待重定向完成（使用明确条件）
+            try:
+                page.wait_for_url("**/login**", timeout=10000)
+            except TimeoutError:
+                save_screenshot(page, MODULE_NAME, "04_logout_no_redirect")
+                pytest.fail(f"Logout did not redirect to login page. Current URL: {page.url}")
+
+            # Issue #2189: 最终断言
+            assert "/login" in page.url, f"Expected login URL, got {page.url}"
+
+            save_screenshot(page, MODULE_NAME, "04_logout_success")
+
+        except Exception:
+            # 保存失败截图
+            save_screenshot(page, MODULE_NAME, "04_logout_error")
+            raise  # 重新抛出，不吞掉
+
         finally:
             browser.close()
 

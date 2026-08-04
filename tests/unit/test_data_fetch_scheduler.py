@@ -231,10 +231,12 @@ class TestDataFetchSchedulerRunFetch:
         mock_agg.assert_called_once()
 
     @patch("app.repositories.database.is_postgresql", return_value=False)
-    def test_refresh_materialized_views_skips_non_postgres(self, mock_pg):
+    @patch("app.repositories.database.Database")
+    def test_refresh_materialized_views_skips_non_postgres(self, mock_db_cls, mock_pg):
         s = DataFetchScheduler()
         s._refresh_materialized_views()
-        # Should return early without doing anything
+        # Non-postgres: should return early without touching the DB at all
+        mock_db_cls.assert_not_called()
 
     @patch("app.repositories.database.is_postgresql", return_value=True)
     @patch("app.repositories.database.Database")
@@ -268,6 +270,8 @@ class TestDataFetchSchedulerRunFetch:
 
         s = DataFetchScheduler()
         s._refresh_materialized_views()  # Should not raise
+        # Error during existence check must abort before attempting REFRESH
+        mock_db.execute.assert_not_called()
 
     @patch("app.services.user_stats_aggregator.aggregate_user_stats_background")
     def test_aggregate_user_stats_success(self, mock_agg):
@@ -280,6 +284,8 @@ class TestDataFetchSchedulerRunFetch:
         mock_agg.side_effect = Exception("Agg error")
         s = DataFetchScheduler()
         s._aggregate_user_stats()  # Should not raise
+        # Aggregation was attempted (and its failure swallowed)
+        mock_agg.assert_called_once()
 
     @patch("app.services.summary_service.SummaryService")
     def test_refresh_usage_summary_success(self, mock_svc_cls):
@@ -296,6 +302,8 @@ class TestDataFetchSchedulerRunFetch:
         mock_svc_cls.side_effect = Exception("Summary error")
         s = DataFetchScheduler()
         s._refresh_usage_summary()  # Should not raise
+        # SummaryService instantiation was attempted (and its failure swallowed)
+        mock_svc_cls.assert_called_once()
 
     @patch("app.repositories.daily_stats_repo.DailyStatsRepository")
     def test_refresh_daily_stats_success(self, mock_repo_cls):
@@ -312,6 +320,8 @@ class TestDataFetchSchedulerRunFetch:
         mock_repo_cls.side_effect = Exception("Stats refresh error")
         s = DataFetchScheduler()
         s._refresh_daily_stats()  # Should not raise
+        # Repository instantiation was attempted (and its failure swallowed)
+        mock_repo_cls.assert_called_once()
 
 
 class TestDataFetchSchedulerCheckQuotas:
@@ -366,7 +376,10 @@ class TestDataFetchSchedulerCheckQuotas:
         mock_db_cls.return_value = mock_db
 
         s = DataFetchScheduler()
-        s._check_quotas()  # Should not raise
+        with patch.object(s, "_enforce_user_quota") as mock_enforce:
+            s._check_quotas()  # Should not raise
+            # DB error aborts the query loop before any enforcement happens
+            mock_enforce.assert_not_called()
 
 
 class TestDataFetchSchedulerEnforceUserQuota:
@@ -517,6 +530,8 @@ class TestDataFetchSchedulerEnforceUserQuota:
 
         # Should not raise
         s._enforce_user_quota(row, today, "daily")
+        # Session listing failed mid-enforcement: no session should be terminated
+        mock_sm.complete_session.assert_not_called()
 
     @patch("app.modules.governance.alert_transaction_manager.create_quota_alert_transactional")
     @patch("app.modules.workspace.session_manager.SessionManager")
