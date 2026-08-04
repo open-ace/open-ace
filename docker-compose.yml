@@ -91,7 +91,7 @@ services:
       # Recommend using dedicated SSH keys with restricted commands in authorized_keys
       # - ~/.ssh:/root/.ssh:ro
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:19888/health')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:19888/readyz')"]
       interval: 30s
       timeout: 10s
       retries: 3

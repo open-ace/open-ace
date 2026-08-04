@@ -48,3 +48,7 @@ pre-commit>=3.0.0
 
 # Caching
 cachetools>=5.5.0
+
+# Monitoring (Issue #2186)
+prometheus_client>=0.20.0,<1.0.0
+prometheus_flask_exporter>=0.23.0,<1.0.0

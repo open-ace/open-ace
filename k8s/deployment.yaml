@@ -23,7 +23,7 @@ spec:
       annotations:
         prometheus.io/scrape: "true"
         prometheus.io/port: "19888"
-        prometheus.io/path: "/health"
+        prometheus.io/path: "/metrics"
       labels:
         app.kubernetes.io/name: open-ace
         app.kubernetes.io/component: web
@@ -85,7 +85,7 @@ spec:
               memory: "512Mi"
           livenessProbe:
             httpGet:
-              path: /health
+              path: /livez
               port: http
             initialDelaySeconds: 10
             periodSeconds: 10
@@ -93,12 +93,21 @@ spec:
             failureThreshold: 3
           readinessProbe:
             httpGet:
-              path: /health
+              path: /readyz
               port: http
             initialDelaySeconds: 5
             periodSeconds: 5
-            timeoutSeconds: 3
+            timeoutSeconds: 10
             failureThreshold: 3
+          # Startup probe for slow initialization (Issue #2186)
+          startupProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 0
+            periodSeconds: 5
+            timeoutSeconds: 10
+            failureThreshold: 60  # 300s max startup time
           volumeMounts:
             - name: data
               mountPath: /workspace

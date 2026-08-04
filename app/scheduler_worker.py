@@ -157,16 +157,64 @@ class SchedulerWorker:
             sys.exit(1)
 
     def _start_metrics_server(self) -> None:
-        """Start Prometheus metrics HTTP server."""
-        try:
-            from prometheus_client import start_http_server
+        """Start Prometheus metrics HTTP server with custom endpoints.
 
-            start_http_server(self._metrics_port)
-            logger.info(f"Prometheus metrics server started on port {self._metrics_port}")
-        except ImportError:
+        Issue #2186: Added /livez and /health endpoints for Kubernetes probes.
+        """
+        try:
+            from prometheus_client import REGISTRY, make_wsgi_app
+            from werkzeug.serving import make_server
+
+            # Create the base metrics WSGI app
+            metrics_app = make_wsgi_app(REGISTRY)
+
+            # Create custom WSGI app with additional endpoints
+            def scheduler_metrics_app(environ, start_response):
+                """Custom WSGI app with /livez and /health endpoints."""
+                path = environ.get("PATH_INFO", "/")
+
+                if path == "/livez":
+                    # Liveness probe - minimal check
+                    from datetime import datetime, timezone
+
+                    timestamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+                    response_body = f'{{"status": "alive", "timestamp": "{timestamp}"}}'
+                    start_response("200 OK", [("Content-Type", "application/json")])
+                    return [response_body.encode("utf-8")]
+
+                elif path == "/health":
+                    # Health check - includes leader status
+                    try:
+                        from app.services.leader_election import is_leader
+
+                        is_leader_now = is_leader()
+                        response_body = f'{{"status": "healthy", "is_leader": {str(is_leader_now).lower()}}}'
+                        start_response("200 OK", [("Content-Type", "application/json")])
+                        return [response_body.encode("utf-8")]
+                    except Exception:
+                        # If leader election check fails, still return healthy for liveness
+                        start_response("200 OK", [("Content-Type", "application/json")])
+                        return [b'{"status": "healthy", "is_leader": "unknown"}']
+
+                elif path == "/metrics":
+                    # Prometheus metrics endpoint
+                    return metrics_app(environ, start_response)
+
+                else:
+                    # Unknown path
+                    start_response("404 Not Found", [("Content-Type", "application/json")])
+                    return [b'{"error": "not_found"}']
+
+            # Start the server
+            self._metrics_server = make_server("0.0.0.0", self._metrics_port, scheduler_metrics_app)
+            server_thread = threading.Thread(target=self._metrics_server.serve_forever, daemon=True)
+            server_thread.start()
+            logger.info(f"Metrics server started on port {self._metrics_port}")
+            logger.info("Endpoints: /livez (liveness), /health (health+leader), /metrics (prometheus)")
+
+        except ImportError as e:
             logger.warning(
-                "prometheus_client not available - metrics server not started. "
-                "Install with: pip install prometheus_client"
+                f"prometheus_client or werkzeug not available - metrics server not started: {e}"
             )
         except Exception as e:
             logger.warning(f"Failed to start metrics server: {e}")
