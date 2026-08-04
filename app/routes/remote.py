@@ -3680,8 +3680,9 @@ def remote_vscode_proxy(vscode_id, path=""):
 
         # Check tenant isolation (Issue #2183)
         if session_tenant_id is not None and user_tenant_id != session_tenant_id:
-            # Platform admin can access cross-tenant (with audit)
-            if g.user.get("role") == "platform_admin":
+            # Platform admin (or legacy admin) can access cross-tenant (with audit)
+            # Issue #2286: Accept legacy 'admin' role for backward compatibility
+            if g.user.get("role") in ("platform_admin", "admin"):
                 audit_logger.log(
                     action=AuditAction.ADMIN_CROSS_TENANT_ACCESS.value,
                     severity="info",

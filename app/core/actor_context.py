@@ -25,8 +25,11 @@ class ActorContext:
 
         Returns:
             bool: True 如果是平台管理员
+
+        Issue #2286: Accept legacy 'admin' role alongside 'platform_admin'
+        for backward compatibility.
         """
-        return self.role == "platform_admin"
+        return self.role in ("platform_admin", "admin")
 
     def is_tenant_admin(self) -> bool:
         """是否为租户管理员

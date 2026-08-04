@@ -156,7 +156,8 @@ def generate_report():
     target_tenant_id = caller_tenant_id
 
     # Platform admin can request cross-tenant reports with explicit tenant_id
-    if user_role == "platform_admin" and data.get("tenant_id") is not None:
+    # Issue #2286: Accept legacy 'admin' role alongside 'platform_admin' for backward compatibility.
+    if user_role in ("platform_admin", "admin") and data.get("tenant_id") is not None:
         requested_tenant_id = data["tenant_id"]
         # Validate tenant exists
         db = Database()

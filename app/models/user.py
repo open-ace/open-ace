@@ -124,8 +124,11 @@ class User:
 
         Returns:
             bool: True if user is a platform admin
+
+        Issue #2286: Accept legacy 'admin' role alongside 'platform_admin'
+        for backward compatibility.
         """
-        return self.role == "platform_admin"
+        return self.role in ("platform_admin", "admin")
 
     def is_tenant_admin(self) -> bool:
         """Check if user is a tenant admin.
