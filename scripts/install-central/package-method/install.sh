@@ -2499,8 +2499,8 @@ ${line}"
             need_update=true
         fi
 
-        # 【新增】Warn about sudoers vs systemd service user mismatch
-        if command -v systemctl &>/dev/null && systemctl is-enabled --quiet open-ace.service 2>/dev/null; then
+        # Check if systemd unit exists (not is-enabled, which fails for disabled services)
+        if command -v systemctl &>/dev/null && systemctl cat open-ace.service &>/dev/null 2>&1; then
             local svc_file=$(systemctl show open-ace.service -p FragmentPath 2>/dev/null | cut -d= -f2)
             if [ -z "$svc_file" ] || [ ! -f "$svc_file" ]; then
                 svc_file="/etc/systemd/system/open-ace.service"
@@ -2937,7 +2937,8 @@ verify_upgrade_systemd_config() {
         return 0
     fi
 
-    if ! systemctl is-enabled --quiet open-ace.service 2>/dev/null; then
+    # Check if systemd unit exists (not is-enabled, which fails for disabled services)
+    if ! systemctl cat open-ace.service &>/dev/null 2>&1; then
         return 0
     fi
 
@@ -2998,7 +2999,8 @@ detect_and_load_local_upgrade() {
 
     # Priority 1: From systemd service file (highest priority - matches running service)
     # Use systemctl show to get actual service file path (not hardcoded)
-    if command -v systemctl &>/dev/null && systemctl is-enabled --quiet open-ace.service 2>/dev/null; then
+    # Check unit existence (not is-enabled, which fails for disabled services)
+    if command -v systemctl &>/dev/null && systemctl cat open-ace.service &>/dev/null 2>&1; then
         local service_file=$(systemctl show open-ace.service -p FragmentPath 2>/dev/null | cut -d= -f2)
         if [ -z "$service_file" ] || [ ! -f "$service_file" ]; then
             service_file="/etc/systemd/system/open-ace.service"
@@ -3574,9 +3576,13 @@ install_local() {
     fi
 
     # For upgrade mode: handle systemd service configuration
-    # This ensures new code takes effect after upgrade
+    # This ensures new code takes effect after upgrade.
+    # Check is-active (not is-enabled) so that a disabled-but-running
+    # service still gets restarted after an upgrade.  is-enabled only
+    # reflects the auto-start-at-boot setting, not the current run-state.
+    # Issue #2283: upgrade port 19888 conflict when service is disabled.
     if [ "$DO_UPGRADE" = "yes" ] && command -v systemctl &>/dev/null; then
-        if systemctl is-enabled --quiet open-ace.service 2>/dev/null; then
+        if systemctl is-active --quiet open-ace.service 2>/dev/null; then
             # Get actual service file path (not hardcoded)
             local service_file=$(systemctl show open-ace.service -p FragmentPath 2>/dev/null | cut -d= -f2)
             if [ -z "$service_file" ] || [ ! -f "$service_file" ]; then
@@ -3663,7 +3669,8 @@ install_local() {
     local autonomous_run_user="$DEPLOY_USER"
     local autonomous_install_dir="$target_path"
     local autonomous_service_file=""
-    if command -v systemctl &>/dev/null && systemctl is-enabled --quiet open-ace.service 2>/dev/null; then
+    # Check if systemd unit exists (not is-enabled, which fails for disabled services)
+    if command -v systemctl &>/dev/null && systemctl cat open-ace.service &>/dev/null 2>&1; then
         autonomous_service_file=$(systemctl show open-ace.service -p FragmentPath 2>/dev/null | cut -d= -f2)
         [ -n "$autonomous_service_file" ] && [ -f "$autonomous_service_file" ] || autonomous_service_file="/etc/systemd/system/open-ace.service"
         local detected_service_user
@@ -3699,7 +3706,8 @@ install_local() {
         local sudoers_run_user="$DEPLOY_USER"
         local sudoers_install_dir="$target_path"
 
-        if command -v systemctl &>/dev/null && systemctl is-enabled --quiet open-ace.service 2>/dev/null; then
+        # Check if systemd unit exists (not is-enabled, which fails for disabled services)
+        if command -v systemctl &>/dev/null && systemctl cat open-ace.service &>/dev/null 2>&1; then
             local svc_file=$(systemctl show open-ace.service -p FragmentPath 2>/dev/null | cut -d= -f2)
             if [ -z "$svc_file" ] || [ ! -f "$svc_file" ]; then
                 svc_file="/etc/systemd/system/open-ace.service"
@@ -5179,8 +5187,10 @@ do_upgrade_remote() {
     print_success "Remote upgrade completed"
     print_info "Backup saved to: $backup_dir on $DEPLOY_HOST"
 
-    # Check if systemd service exists on remote and update SECRET_KEY if missing
-    if ssh "$remote" "command -v systemctl &>/dev/null && systemctl is-enabled --quiet open-ace.service 2>/dev/null"; then
+    # Check if systemd service exists on remote and update SECRET_KEY if missing.
+    # Use systemctl cat to check unit existence, not is-enabled (which fails for
+    # disabled services, skipping the restart entirely — same issue as local upgrade).
+    if ssh "$remote" "command -v systemctl &>/dev/null && systemctl cat open-ace.service &>/dev/null 2>&1"; then
         print_info "Checking systemd service on remote..."
         local service_file="/etc/systemd/system/open-ace.service"
         local current_secret=$(ssh "$remote" "grep '^Environment=SECRET_KEY=' $service_file 2>/dev/null | cut -d'=' -f3")
@@ -5191,7 +5201,7 @@ do_upgrade_remote() {
             print_info "Generated SECRET_KEY for Flask encryption"
         else
             print_info "Restarting systemd service on remote..."
-            ssh "$remote" "sudo systemctl restart open-ace.service"
+            ssh "$remote" "sudo systemctl daemon-reload && sudo systemctl restart open-ace.service"
         fi
 
         # Check if systemd service is missing WORKSPACE_BASE_DIR (Issue #1217)
