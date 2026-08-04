@@ -599,6 +599,8 @@ class AuthService:
 
         Returns:
             bool: True if admin.
+
+        Issue #2286: Accept legacy 'admin' role alongside 'platform_admin'.
         """
         session = self.get_session(token)
         if session is None:

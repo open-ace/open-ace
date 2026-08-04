@@ -843,6 +843,9 @@ def resolve_tenant_scope() -> tuple[int | None, bool]:
     This helper is side-effect free; callers decide what to do when a
     non-admin has no tenant (the route layer denies with 403, see
     :func:`require_tenant_scope`).
+
+    Issue #2286: Accept legacy 'admin' role alongside 'platform_admin' for
+    backward compatibility.
     """
     user = getattr(g, "user", None) or {}
     is_admin = User.is_admin_role(user.get("role"))
@@ -928,7 +931,7 @@ def platform_admin_required(f=None):
 
     Validation rules:
     1. User is authenticated
-    2. User role is 'platform_admin'
+    2. User role is 'platform_admin' (or legacy 'admin' for backward compatibility)
     3. Platform admin can have tenant_id=NULL or any tenant_id
 
     Failure responses:
@@ -936,6 +939,7 @@ def platform_admin_required(f=None):
     - 403: Not a platform admin
 
     Issue #2179: Platform admin can manage all tenants
+    Issue #2286: Accept legacy 'admin' role for backward compatibility
     """
 
     def decorator(func):
@@ -951,7 +955,9 @@ def platform_admin_required(f=None):
                 return jsonify({"error": "Invalid or expired session"}), 401
 
             # Check platform admin role
-            if user.get("role") != "platform_admin":
+            # Issue #2286: Also accept legacy 'admin' role for backward compatibility
+            # with installations that were initialized before the role model migration (#2179).
+            if user.get("role") not in ("platform_admin", "admin"):
                 return jsonify({"error": "Platform admin access required"}), 403
 
             g.user = user

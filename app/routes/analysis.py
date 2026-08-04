@@ -29,6 +29,8 @@ def _get_tenant_filter() -> tuple[bool, int | None]:
         tuple: (is_admin, tenant_id)
         - is_admin: True if user is admin (global scope)
         - tenant_id: The tenant_id to filter by, or None for admin/invalid
+
+    Issue #2286: Accept legacy 'admin' role alongside 'platform_admin'.
     """
     user = getattr(g, "user", None) or {}
     is_admin = User.is_admin_role(user.get("role"))
