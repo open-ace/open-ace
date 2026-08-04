@@ -96,6 +96,40 @@ class TestWebUIEnvIsolation:
                     "/usr/local/bin:/usr/bin:/bin"
                 ), "PATH should prepend system directories"
 
+    def test_build_webui_env_preserves_inherited_path(self, manager):
+        """Verify inherited PATH is preserved (Issue #1141 regression check).
+
+        macOS Apple Silicon installs node in /opt/homebrew/bin which is not
+        in the hardcoded PATH. Preserving inherited PATH ensures custom node
+        installations are found, preventing Issue #1083 regression.
+        """
+        mock_pool = {"proxy_token": "test-token"}
+
+        # Simulate macOS environment with custom PATH
+        custom_path = "/opt/homebrew/bin:/custom/path"
+        with patch.dict(os.environ, {"PATH": custom_path}):
+            with patch.object(
+                manager,
+                "_build_local_session_model_pool",
+                return_value=mock_pool,
+            ):
+                env, _ = manager._build_webui_env(
+                    user_id=1,
+                    system_account="testuser",
+                    openace_api_url="http://localhost:19888",
+                )
+
+                # Should preserve inherited paths
+                assert (
+                    "/opt/homebrew/bin" in env["PATH"]
+                ), "Inherited PATH should be preserved for macOS"
+                assert "/custom/path" in env["PATH"], "Inherited PATH should be preserved"
+
+                # System dirs should be prepended
+                assert env["PATH"].startswith(
+                    "/usr/local/bin:/usr/bin:/bin"
+                ), "System dirs should be prepended"
+
     def test_build_webui_env_proxy_passthrough(self, manager):
         """Verify HTTP proxy settings are passed through if configured."""
         mock_pool = {"proxy_token": "test-token"}

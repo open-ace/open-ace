@@ -910,9 +910,13 @@ class WebUIManager:
             Tuple of (environment dict, model pool dict).
         """
         # Start with minimal base environment
+        # Issue #1141: Prepend system dirs, but preserve inherited PATH for macOS etc.
+        # macOS Apple Silicon has node in /opt/homebrew/bin, which is not in the hardcoded PATH.
+        # Preserving inherited PATH ensures custom node installations are found.
+        _system_dirs = "/usr/local/bin:/usr/bin:/bin"
+        _inherited_path = os.environ.get("PATH", "")
         child_env = {
-            # Essential for Node.js binary resolution
-            "PATH": "/usr/local/bin:/usr/bin:/bin",
+            "PATH": _system_dirs + (":" + _inherited_path if _inherited_path else ""),
             # Language/encoding
             "LANG": os.environ.get("LANG", "C.UTF-8"),
             "LC_ALL": os.environ.get("LC_ALL", ""),
