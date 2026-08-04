@@ -176,18 +176,14 @@ def test_logout():
             # Issue #2189: 找不到必须失败
             if not logout_found:
                 save_screenshot(page, MODULE_NAME, "04_logout_no_button")
-                pytest.fail(
-                    f"Logout button not found. Tried selectors: {logout_selectors}"
-                )
+                pytest.fail(f"Logout button not found. Tried selectors: {logout_selectors}")
 
             # Issue #2189: 等待重定向完成（使用明确条件）
             try:
                 page.wait_for_url("**/login**", timeout=10000)
             except TimeoutError:
                 save_screenshot(page, MODULE_NAME, "04_logout_no_redirect")
-                pytest.fail(
-                    f"Logout did not redirect to login page. Current URL: {page.url}"
-                )
+                pytest.fail(f"Logout did not redirect to login page. Current URL: {page.url}")
 
             # Issue #2189: 最终断言
             assert "/login" in page.url, f"Expected login URL, got {page.url}"
