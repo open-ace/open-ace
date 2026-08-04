@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 from flask import Blueprint, Response, g, jsonify, request
 
 from app.auth.decorators import admin_required, resolve_tenant_scope
+from app.models.user import User
 from app.modules.compliance.audit import AuditAnalyzer
 from app.modules.compliance.report import ReportGenerator, ReportType
 from app.modules.compliance.retention import DataRetentionManager
@@ -185,7 +186,7 @@ def generate_report():
     # Legacy admin: backward compatibility
     # - With tenant_id: scoped to that tenant (like tenant_admin)
     # - Without tenant_id: global access (like platform_admin)
-    elif user_role == "admin":
+    elif User.is_admin_role(user_role):
         if caller_tenant_id is not None:
             # Scoped to caller's tenant
             target_tenant_id = caller_tenant_id

@@ -118,7 +118,9 @@ export const mappingRulesApi = {
   },
 
   async generateDefaultRules(userId: number): Promise<GenerateDefaultRulesResponse> {
-    return apiClient.post<GenerateDefaultRulesResponse>(`/api/mapping-rules/user/${userId}/generate-default`);
+    return apiClient.post<GenerateDefaultRulesResponse>(
+      `/api/mapping-rules/user/${userId}/generate-default`
+    );
   },
 
   async getMappingStats(): Promise<MappingStats> {

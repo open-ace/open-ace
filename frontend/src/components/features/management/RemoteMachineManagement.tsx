@@ -36,6 +36,7 @@ import {
 } from '@/components/common';
 import type { RemoteMachine } from '@/api';
 import { copyToClipboard } from '@/utils';
+import { isAdminRole } from '@/utils/permissions';
 
 export const RemoteMachineManagement: React.FC = () => {
   const language = useLanguage();
@@ -52,7 +53,7 @@ export const RemoteMachineManagement: React.FC = () => {
   const machines = machinesData?.machines ?? [];
 
   // P1-3: Use explicit user_role from API instead of implicit derivation
-  const isSystemAdmin = machinesData?.user_role === 'admin';
+  const isSystemAdmin = isAdminRole(machinesData?.user_role);
 
   // Dialog states
   const [showTokenDialog, setShowTokenDialog] = useState(false);
