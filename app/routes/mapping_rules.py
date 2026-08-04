@@ -13,11 +13,11 @@ import logging
 from flask import Blueprint, g, jsonify, request
 
 from app.auth.decorators import admin_required
+from app.models.user import User
 from app.repositories.tool_account_mapping_rule_repo import ToolAccountMappingRuleRepository
 from app.repositories.user_repo import UserRepository
 from app.repositories.user_tool_account_repo import UserToolAccountRepository
 from app.services.tool_account_auto_mapping_service import ToolAccountAutoMappingService
-from app.models.user import User
 
 logger = logging.getLogger(__name__)
 
@@ -202,7 +202,8 @@ def update_rule(id: int):
     # If user_id is being changed, validate new user too
     new_user_id = data.get("user_id")
     if new_user_id and (
-        user_role == "tenant_admin" or (User.is_admin_role(user_role) and user_tenant_id is not None)
+        user_role == "tenant_admin"
+        or (User.is_admin_role(user_role) and user_tenant_id is not None)
     ):
         if not _validate_user_in_tenant(new_user_id, user_tenant_id):
             return jsonify({"error": "Cannot assign rule to user in different tenant"}), 403
