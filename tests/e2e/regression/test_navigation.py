@@ -104,6 +104,7 @@ def test_menu_navigation():
             browser.close()
 
 
+@pytest.mark.priority_p0
 def test_page_title_updates():
     """测试页面标题更新"""
     with sync_playwright() as p:
