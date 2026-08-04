@@ -510,15 +510,7 @@ export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
                 </span>
                 <span className="d-flex align-items-center gap-1 mt-2 flex-wrap">
                   <Badge
-                    variant={
-                      statusCfg.variant as
-                        | 'secondary'
-                        | 'info'
-                        | 'primary'
-                        | 'warning'
-                        | 'success'
-                        | 'danger'
-                    }
+                    variant={statusCfg.variant as 'secondary' | 'info' | 'primary' | 'warning' | 'success' | 'danger'}
                   >
                     <i className={`bi ${statusCfg.icon} me-1`}></i>
                     {t(statusCfg.labelKey, language)}
