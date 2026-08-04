@@ -983,9 +983,7 @@ class WebUIManager:
         # Issue #2298: Build minimal environment for WebUI process
         # Do NOT use os.environ.copy() to avoid leaking sensitive variables
         # (DATABASE_URL, TOKEN_SECRET, GH_TOKEN, etc.)
-        child_env, model_pool = self._build_webui_env(
-            user_id, system_account, openace_api_url
-        )
+        child_env, model_pool = self._build_webui_env(user_id, system_account, openace_api_url)
 
         # Set OPENACE_LOG_DIR to /tmp to avoid HOME permission issues
         webui_log_dir = f"/tmp/qwen-code-webui-{user_id}"

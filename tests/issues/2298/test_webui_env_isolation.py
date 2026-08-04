@@ -71,9 +71,9 @@ class TestWebUIEnvIsolation:
                 assert "DATABASE_URL" not in env, "DATABASE_URL should NOT be in WebUI env"
                 assert "TOKEN_SECRET" not in env, "TOKEN_SECRET should NOT be in WebUI env"
                 assert "GH_TOKEN" not in env, "GH_TOKEN should NOT be in WebUI env"
-                assert "ANTHROPIC_API_KEY" not in env, (
-                    "ANTHROPIC_API_KEY should NOT be in WebUI env"
-                )
+                assert (
+                    "ANTHROPIC_API_KEY" not in env
+                ), "ANTHROPIC_API_KEY should NOT be in WebUI env"
 
     def test_build_webui_env_path_prepend(self, manager):
         """Verify PATH is prepended with system directories."""
@@ -92,9 +92,9 @@ class TestWebUIEnvIsolation:
                 )
 
                 # PATH should start with system directories
-                assert env["PATH"].startswith("/usr/local/bin:/usr/bin:/bin"), (
-                    "PATH should prepend system directories"
-                )
+                assert env["PATH"].startswith(
+                    "/usr/local/bin:/usr/bin:/bin"
+                ), "PATH should prepend system directories"
 
     def test_build_webui_env_proxy_passthrough(self, manager):
         """Verify HTTP proxy settings are passed through if configured."""
@@ -150,12 +150,10 @@ class TestWebUIEnvIsolation:
             )
 
             # Dynamic envKey should be collected
-            assert "BAILIAN_CODING_PLAN_API_KEY" in env, (
-                "Dynamic envKey should be in environment"
-            )
-            assert env["BAILIAN_CODING_PLAN_API_KEY"] == "test-proxy-token", (
-                "Dynamic envKey should equal proxy_token"
-            )
+            assert "BAILIAN_CODING_PLAN_API_KEY" in env, "Dynamic envKey should be in environment"
+            assert (
+                env["BAILIAN_CODING_PLAN_API_KEY"] == "test-proxy-token"
+            ), "Dynamic envKey should equal proxy_token"
 
     def test_build_webui_env_no_proxy_when_not_configured(self, manager):
         """Verify proxy variables are not set if not configured."""

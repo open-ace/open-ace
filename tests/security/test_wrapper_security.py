@@ -396,9 +396,7 @@ class TestSudoersSecurityBaseline:
             if "env_keep" in line:
                 for key in forbidden_keys:
                     if key in line:
-                        pytest.fail(
-                            f"env_keep should not contain real third-party API key: {key}"
-                        )
+                        pytest.fail(f"env_keep should not contain real third-party API key: {key}")
 
 
 if __name__ == "__main__":
