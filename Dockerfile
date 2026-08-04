@@ -267,9 +267,9 @@ ENV PYTHONUNBUFFERED=1 \
 # Expose port
 EXPOSE 19888
 
-# Health check
+# Health check (Issue #2186: uses /readyz for actual health)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:19888/health')" || exit 1
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:19888/readyz')" || exit 1
 
 # Run the application
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]

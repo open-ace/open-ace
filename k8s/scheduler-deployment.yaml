@@ -112,7 +112,7 @@ spec:
               memory: "512Mi"
           livenessProbe:
             httpGet:
-              path: /health
+              path: /livez
               port: metrics
             initialDelaySeconds: 10
             periodSeconds: 10

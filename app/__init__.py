@@ -325,6 +325,48 @@ def create_app(config=None):
     # Register error handlers
     register_error_handlers(app)
 
+    # Initialize Prometheus metrics (Issue #2186)
+    # Only for web workers - scheduler has its own metrics server
+    scheduler_mode = os.environ.get("SCHEDULER_MODE", "web")
+    prometheus_initialized = False
+    if scheduler_mode != "scheduler":
+        try:
+            from prometheus_flask_exporter import PrometheusMetrics
+
+            # Initialize metrics with /metrics path
+            # PrometheusMetrics auto-registers to Flask app on init
+            PrometheusMetrics(
+                app,
+                path="/metrics",
+                group_by_endpoint=True,
+                buckets=[0.01, 0.05, 0.1, 0.5, 1, 5],
+            )
+            prometheus_initialized = True
+            logger.info("Prometheus metrics initialized on /metrics")
+        except ImportError:
+            logger.warning(
+                "prometheus_flask_exporter not available - metrics endpoint will return 503. "
+                "Install with: pip install prometheus_flask_exporter"
+            )
+        except Exception as e:
+            logger.warning(f"Failed to initialize Prometheus metrics: {e}")
+
+    # Fallback /metrics endpoint if PrometheusMetrics not initialized
+    if not prometheus_initialized:
+
+        @app.route("/metrics")
+        def metrics_endpoint():
+            """Fallback metrics endpoint when prometheus_flask_exporter is not available."""
+            return (
+                jsonify(
+                    {
+                        "status": "error",
+                        "message": "prometheus_flask_exporter not installed. Install with: pip install prometheus_flask_exporter",
+                    }
+                ),
+                503,
+            )
+
     # Register blueprints
     register_blueprints(app)
 
@@ -364,8 +406,20 @@ def create_app(config=None):
         ensure_all_tables()
         logger.info(f"Development schema bootstrap completed (mode={env_mode})")
 
-    # Pre-check encryption key registry (Issue #1820)
-    _precheck_encryption_registry()
+    # Pre-check encryption key registry (Issue #1820, #2186)
+    try:
+        _precheck_encryption_registry()
+    except Exception as e:
+        # Record initialization error for /readyz check
+        from app.utils.health_checks import set_init_error
+
+        set_init_error(str(e), category="encryption")
+        # Re-raise in production to prevent startup
+        from app.utils.security_mode import is_production
+
+        if is_production():
+            raise
+        logger.warning(f"Encryption pre-check failed (non-production): {e}")
 
     # Pre-check API key encryption availability
     try:
@@ -381,19 +435,53 @@ def create_app(config=None):
     except Exception:
         pass  # cryptography not installed — handled at encrypt/decrypt time
 
-    # Health check endpoint
+    # Mark initialization as completed (Issue #2186)
+    from app.utils.health_checks import mark_init_completed
+
+    mark_init_completed()
+
+    # Liveness probe endpoint (Issue #2186)
+    @app.route("/livez")
+    def liveness_check():
+        """Liveness probe for Kubernetes.
+
+        Only checks if the process is alive and can respond.
+        Does NOT check dependencies to avoid restart storms.
+        """
+        from app.utils.health_checks import get_current_timestamp
+
+        return jsonify({"status": "alive", "timestamp": get_current_timestamp()}), 200
+
+    # Health check endpoint (deprecated, delegates to /readyz)
     @app.route("/health")
     def health_check():
-        """Health check endpoint for Docker and load balancers."""
+        """Health check endpoint for Docker and load balancers.
+
+        DEPRECATED: Use /livez for liveness and /readyz for readiness.
+        This endpoint now delegates to /readyz for compatibility.
+        """
+        from werkzeug.wrappers import Response as WerkzeugResponse
+
         from app.utils.version import get_git_commit
 
-        return jsonify(
-            {
-                "status": "healthy",
-                "service": "open-ace",
-                "version": get_git_commit(),
-            }
-        )
+        # Get readiness check result - this returns (Response, status_code)
+        ready_response = readiness_check()
+
+        # Handle tuple (Response, status_code)
+        if isinstance(ready_response, tuple) and len(ready_response) == 2:
+            response_obj, status_code = ready_response
+            if isinstance(response_obj, WerkzeugResponse):
+                # Get the JSON data from the response
+                data = response_obj.get_json()
+
+                # Add deprecation notice
+                if isinstance(data, dict):
+                    data["deprecated"] = True
+                    data["message"] = "Use /livez for liveness and /readyz for readiness"
+                    data["version"] = get_git_commit()
+                return jsonify(data), status_code
+
+        return ready_response
 
     # Security status endpoint (Issue #1893)
     @app.route("/security-status")
@@ -419,9 +507,9 @@ def create_app(config=None):
     def readiness_check():
         """Readiness check endpoint for Kubernetes and load balancers.
 
-        Checks database connection and schema version compatibility.
-        Returns HTTP 503 if any check fails, with clear recovery instructions.
-        Does NOT automatically fix schema issues.
+        Checks database connection, schema version compatibility, config directory,
+        workspace directory, encryption keys, and initialization status.
+        Returns HTTP 503 if any critical check fails.
         """
         from app.repositories.database import Database, is_postgresql
         from app.repositories.schema_guard import (
@@ -429,25 +517,30 @@ def create_app(config=None):
             get_database_revision,
             get_environment_mode,
         )
+        from app.utils.health_checks import (
+            check_config_directory,
+            check_database_connection,
+            check_encryption_registry,
+            check_initialization_status,
+            check_workspace_directory,
+            run_check_with_timeout,
+        )
 
         checks: dict[str, dict[str, str | bool | None]] = {
             "database": {"status": "unknown"},
             "schema_version": {"status": "unknown", "compatible": False},
-            "background_services": {"status": "unknown"},
+            "config_dir": {"status": "unknown"},
+            "workspace_dir": {"status": "unknown"},
+            "encryption_keys": {"status": "unknown"},
+            "init_status": {"status": "unknown"},
         }
 
         status_code = 200
 
-        # Check database connection
-        try:
-            db = Database()
-            conn = db.get_connection()
-            conn.execute(sa.text("SELECT 1"))
-            conn.close()
-            checks["database"]["status"] = "ok"
-        except Exception as e:
-            checks["database"]["status"] = "error"
-            checks["database"]["error"] = str(e)
+        # Check database connection with timeout (Issue #2186)
+        db_result = check_database_connection(timeout=2.0)
+        checks["database"] = db_result
+        if db_result.get("status") != "ok":
             status_code = 503
 
         # Check schema version (PostgreSQL production only)
@@ -476,32 +569,46 @@ def create_app(config=None):
                     checks["schema_version"]["compatible"] = True
 
             except Exception as e:
+                from app.utils.health_checks import _sanitize_error_message
+
                 checks["schema_version"]["status"] = "error"
-                checks["schema_version"]["error"] = str(e)
+                checks["schema_version"]["error"] = _sanitize_error_message(e)
                 status_code = 503
         else:
             # SQLite development mode - skip schema version check
             checks["schema_version"]["status"] = "skipped"
             checks["schema_version"]["compatible"] = True
 
-        # Check background services (simplified)
-        try:
-            # Just check if they're importable
-            from app.services.data_fetch_scheduler import init_scheduler
+        # Check config directory with timeout (Issue #2186)
+        config_result = run_check_with_timeout(check_config_directory, timeout_seconds=1.0)
+        checks["config_dir"] = config_result
+        if config_result.get("status") not in ("ok", "skipped"):
+            status_code = 503
 
-            checks["background_services"]["status"] = "ok"
-        except Exception as e:
-            checks["background_services"]["status"] = "error"
-            checks["background_services"]["error"] = str(e)
-            # Background services failure is not critical for readiness
-            # status_code remains unchanged
+        # Check workspace directory with timeout (Issue #2186)
+        workspace_result = run_check_with_timeout(check_workspace_directory, timeout_seconds=1.0)
+        checks["workspace_dir"] = workspace_result
+        if workspace_result.get("status") not in ("ok", "skipped"):
+            status_code = 503
+
+        # Check encryption keys with timeout (Issue #2186)
+        encryption_result = run_check_with_timeout(check_encryption_registry, timeout_seconds=2.0)
+        checks["encryption_keys"] = encryption_result
+        if encryption_result.get("status") == "error":
+            status_code = 503
+
+        # Check initialization status (Issue #2186)
+        init_result = check_initialization_status()
+        checks["init_status"] = init_result
+        if init_result.get("status") != "ok":
+            status_code = 503
 
         # Build response
         if status_code == 503:
             response = {
                 "status": "not_ready",
                 "checks": checks,
-                "action": "Run 'alembic upgrade head' to migrate database",
+                "action": "Check logs for details. Run 'alembic upgrade head' if schema migration needed.",
             }
         else:
             response = {
