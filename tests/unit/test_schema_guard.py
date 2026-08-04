@@ -66,8 +66,8 @@ class TestCheckSchemaCompatibility:
         """Test that fresh database (no alembic_version) is allowed."""
         engine = sa.create_engine("sqlite:///:memory:")
         with engine.connect() as conn:
-            # Should not raise
-            check_schema_compatibility(conn)
+            # Returns None (no raise) on a fresh database
+            assert check_schema_compatibility(conn) is None
 
     def test_compatible_version_passes(self):
         """Test that compatible version passes check."""
@@ -82,8 +82,8 @@ class TestCheckSchemaCompatibility:
             )
             conn.commit()
 
-            # Should not raise
-            check_schema_compatibility(conn)
+            # Exact-match revision passes silently (returns None)
+            assert check_schema_compatibility(conn) is None
 
     def test_normal_version_after_baseline_passes(self):
         """Test that a normal timestamp version after baseline passes check."""
@@ -95,8 +95,8 @@ class TestCheckSchemaCompatibility:
             )
             conn.commit()
 
-            # Should not raise - this is a valid version after baseline
-            check_schema_compatibility(conn)
+            # Timestamp revision >= baseline passes silently (returns None)
+            assert check_schema_compatibility(conn) is None
 
     def test_older_timestamp_version_with_explicit_min(self):
         """Test that older timestamp version fails with explicit min_revision."""
@@ -144,7 +144,7 @@ class TestCheckSchemaCompatibility:
             conn.commit()
 
             # Should not raise with skip_check=True
-            check_schema_compatibility(conn, skip_check=True)
+            assert check_schema_compatibility(conn, skip_check=True) is None
 
     def test_environment_variable_bypass(self):
         """Test that OPENACE_SKIP_SCHEMA_CHECK bypasses validation."""
@@ -159,8 +159,8 @@ class TestCheckSchemaCompatibility:
 
             # Set environment variable
             with patch.dict(os.environ, {"OPENACE_SKIP_SCHEMA_CHECK": "true"}):
-                # Should not raise
-                check_schema_compatibility(conn)
+                # Env bypass suppresses the incompatibility (returns None)
+                assert check_schema_compatibility(conn) is None
 
 
 class TestGetEnvironmentMode:

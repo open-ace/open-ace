@@ -240,8 +240,10 @@ class TestRecordFailedLogin:
         mock_db.fetch_one.side_effect = Exception("DB error")
         mock_db_cls.return_value = mock_db
 
-        # Should not raise
+        # Should not raise: DB error on the initial lookup is swallowed; no
+        # subsequent UPDATE/INSERT should be attempted.
         _record_failed_login("testuser")
+        mock_db.execute.assert_not_called()
 
 
 class TestClearFailedLogins:
@@ -263,8 +265,10 @@ class TestClearFailedLogins:
         mock_db.execute.side_effect = Exception("DB error")
         mock_db_cls.return_value = mock_db
 
-        # Should not raise
+        # Should not raise: the DELETE is attempted (execute called once) but the
+        # resulting DB error is swallowed rather than propagated to the caller.
         _clear_failed_logins("testuser")
+        mock_db.execute.assert_called_once()
 
 
 class TestAuthService:

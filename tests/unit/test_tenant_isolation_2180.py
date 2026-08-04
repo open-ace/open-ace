@@ -26,8 +26,8 @@ class TestTenantScopedService:
     def test_validate_resource_tenant_success(self):
         """Validation should pass for matching tenant."""
         service = TenantScopedService(tenant_id=1)
-        # Should not raise
-        service.validate_resource_tenant(1)
+        # Should not raise and return None on success
+        assert service.validate_resource_tenant(1) is None
 
     def test_validate_resource_tenant_cross_tenant(self):
         """Validation should fail for different tenant."""
@@ -44,8 +44,8 @@ class TestTenantScopedService:
     def test_validate_user_in_tenant_success(self):
         """User validation should pass for matching tenant."""
         service = TenantScopedService(tenant_id=1)
-        # Should not raise
-        service.validate_user_in_tenant(1)
+        # Should not raise and return None on success
+        assert service.validate_user_in_tenant(1) is None
 
     def test_validate_user_in_tenant_cross_tenant(self):
         """User validation should fail for different tenant."""

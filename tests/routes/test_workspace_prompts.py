@@ -29,21 +29,21 @@ class TestSecurityAnnotatedDecorator:
         from app.auth.decorators import security_annotated
 
         @security_annotated(reason="Test reason")
-        def test_func():
+        def sample_func():
             return "test"
 
-        assert hasattr(test_func, "_security_annotation")
-        assert test_func._security_annotation == "Test reason"
+        assert hasattr(sample_func, "_security_annotation")
+        assert sample_func._security_annotation == "Test reason"
 
     def test_decorator_preserves_function(self):
         """Test that @security_annotated preserves function behavior."""
         from app.auth.decorators import security_annotated
 
         @security_annotated(reason="Test reason")
-        def test_func(x):
+        def sample_func(x):
             return x * 2
 
-        assert test_func(5) == 10
+        assert sample_func(5) == 10
 
 
 class TestScannerRecognition:

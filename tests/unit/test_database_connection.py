@@ -66,9 +66,11 @@ class TestDatabaseConnectionSQLite:
         with sqlite_db.connection() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM test_table")
-            _ = cursor.fetchall()
-            # SQLite behavior: changes may persist without explicit commit
-            # depending on connection settings
+            result = cursor.fetchall()
+            # Each connection() opens a fresh sqlite3 connection, so the
+            # uncommitted INSERT above is discarded — the row count documents
+            # the actual SQLite no-commit behavior the context manager relies on.
+            assert len(result) == 0
 
     def test_connection_with_exception(self, sqlite_db):
         """Test that exception triggers proper cleanup."""
