@@ -1267,7 +1267,13 @@ def fetch_and_save(
             # rows were written with user_id NULL).
             user_id = _resolve_user_id(db, system_account)
             files_processed = _process_projects_dir(
-                user_project_dir, hostname, system_account, aggregated, all_messages, recent, user_id
+                user_project_dir,
+                hostname,
+                system_account,
+                aggregated,
+                all_messages,
+                recent,
+                user_id,
             )
             total_files += files_processed
 
