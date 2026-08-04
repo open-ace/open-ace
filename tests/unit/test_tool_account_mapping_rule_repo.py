@@ -104,6 +104,69 @@ class TestToolAccountMappingRuleRepository(unittest.TestCase):
             result = self.repo.create(user_id=5, pattern="test-*")
             self.assertIsNone(result)
 
+    # create_or_ignore (Issue #2131)
+    def test_create_or_ignore_success_postgresql(self):
+        """Test create_or_ignore inserts successfully on PostgreSQL."""
+        with patch("app.repositories.database.is_postgresql", return_value=True):
+            self.mock_db.fetch_one.return_value = self._row(
+                id=1, user_id=5, pattern="test-*", match_type="prefix", priority=10
+            )
+            result = self.repo.create_or_ignore(
+                user_id=5, pattern="test-*", match_type="prefix", priority=10
+            )
+            self.assertIsNotNone(result)
+            self.assertEqual(result.pattern, "test-*")
+
+    def test_create_or_ignore_conflict_postgresql(self):
+        """Test create_or_ignore returns None on conflict (PostgreSQL)."""
+        with patch("app.repositories.database.is_postgresql", return_value=True):
+            # ON CONFLICT DO NOTHING RETURNING * returns no rows
+            self.mock_db.fetch_one.return_value = None
+            result = self.repo.create_or_ignore(user_id=5, pattern="test-*", match_type="prefix")
+            self.assertIsNone(result)
+
+    def test_create_or_ignore_database_error_postgresql(self):
+        """Test create_or_ignore raises exception on database error (PostgreSQL)."""
+        with patch("app.repositories.database.is_postgresql", return_value=True):
+            self.mock_db.fetch_one.side_effect = Exception("Connection failed")
+            with self.assertRaises(Exception) as context:
+                self.repo.create_or_ignore(user_id=5, pattern="test-*")
+            self.assertIn("Connection failed", str(context.exception))
+
+    def test_create_or_ignore_success_sqlite(self):
+        """Test create_or_ignore inserts successfully on SQLite."""
+        with patch("app.repositories.database.is_postgresql", return_value=False):
+            # Mock execute for INSERT OR IGNORE
+            self.mock_db.execute.return_value = None
+            # Mock fetch_one for SELECT after insert
+            self.mock_db.fetch_one.return_value = self._row(
+                id=1, user_id=5, pattern="test-*", match_type="prefix"
+            )
+            result = self.repo.create_or_ignore(user_id=5, pattern="test-*")
+            self.assertIsNotNone(result)
+            self.assertEqual(result.pattern, "test-*")
+
+    def test_create_or_ignore_conflict_sqlite(self):
+        """Test create_or_ignore returns existing rule on conflict (SQLite)."""
+        with patch("app.repositories.database.is_postgresql", return_value=False):
+            # Mock execute for INSERT OR IGNORE
+            self.mock_db.execute.return_value = None
+            # Mock fetch_one for SELECT after insert - returns existing rule
+            self.mock_db.fetch_one.return_value = self._row(
+                id=1, user_id=5, pattern="test-*", match_type="prefix"
+            )
+            result = self.repo.create_or_ignore(user_id=5, pattern="test-*")
+            # Returns the existing rule (cannot distinguish newly inserted vs existing)
+            self.assertIsNotNone(result)
+
+    def test_create_or_ignore_database_error_sqlite(self):
+        """Test create_or_ignore raises exception on database error (SQLite)."""
+        with patch("app.repositories.database.is_postgresql", return_value=False):
+            self.mock_db.execute.side_effect = Exception("Connection failed")
+            with self.assertRaises(Exception) as context:
+                self.repo.create_or_ignore(user_id=5, pattern="test-*")
+            self.assertIn("Connection failed", str(context.exception))
+
     # update
     def test_update_success(self):
         """Test update returns updated rule."""
@@ -137,8 +200,8 @@ class TestToolAccountMappingRuleRepository(unittest.TestCase):
     # batch_create_for_user
     def test_batch_create_for_user(self):
         """Test batch_create_for_user creates multiple rules."""
-        with patch.object(self.repo, "create") as mock_create:
-            mock_create.side_effect = [
+        with patch.object(self.repo, "create_or_ignore") as mock_create_or_ignore:
+            mock_create_or_ignore.side_effect = [
                 ToolAccountMappingRule(id=1, user_id=5, pattern="a-*", match_type="prefix"),
                 ToolAccountMappingRule(id=2, user_id=5, pattern="b-*", match_type="prefix"),
             ]
@@ -149,6 +212,26 @@ class TestToolAccountMappingRuleRepository(unittest.TestCase):
                     {"pattern": "b-*", "match_type": "prefix"},
                 ],
             )
+            self.assertEqual(len(result), 2)
+
+    def test_batch_create_for_user_with_conflict(self):
+        """Test batch_create_for_user handles conflicts gracefully (Issue #2131)."""
+        with patch.object(self.repo, "create_or_ignore") as mock_create_or_ignore:
+            # First rule succeeds, second conflicts (returns None), third succeeds
+            mock_create_or_ignore.side_effect = [
+                ToolAccountMappingRule(id=1, user_id=5, pattern="a-*", match_type="prefix"),
+                None,  # Conflict
+                ToolAccountMappingRule(id=3, user_id=5, pattern="c-*", match_type="prefix"),
+            ]
+            result = self.repo.batch_create_for_user(
+                user_id=5,
+                rules=[
+                    {"pattern": "a-*", "match_type": "prefix"},
+                    {"pattern": "b-*", "match_type": "prefix"},
+                    {"pattern": "c-*", "match_type": "prefix"},
+                ],
+            )
+            # Should return only created rules (2 out of 3)
             self.assertEqual(len(result), 2)
 
     # _row_to_model

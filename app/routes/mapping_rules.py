@@ -265,6 +265,7 @@ def generate_default_rules(user_id: int):
     """
     Generate default mapping rules for a user.
 
+    Issue #2131: Return detailed results with created and skipped counts.
     Issue #2180: Validate user belongs to caller's tenant.
     """
     user_role = g.user.get("role")
@@ -282,8 +283,25 @@ def generate_default_rules(user_id: int):
             return jsonify({"error": "User not found"}), 404
 
     service = ToolAccountAutoMappingService()
-    rules = service.create_default_rules_for_user(user_id)
-    return jsonify([rule.to_dict() for rule in rules]), 201
+    try:
+        result = service.create_default_rules_for_user(user_id)
+
+        response = {
+            "created": [rule.to_dict() for rule in result.created],
+            "skipped": result.skipped,
+            "created_count": result.created_count,
+            "skipped_count": result.skipped_count,
+        }
+
+        # Return 201 if new rules were created, 200 if all were skipped
+        if result.created_count > 0:
+            return jsonify(response), 201
+        else:
+            return jsonify(response), 200
+
+    except Exception as e:
+        logger.error(f"Error generating default rules for user {user_id}: {e}")
+        return jsonify({"error": "Failed to generate default rules"}), 500
 
 
 @mapping_rules_bp.route("/api/mapping-stats", methods=["GET"])
