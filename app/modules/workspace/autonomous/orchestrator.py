@@ -1940,6 +1940,19 @@ class AutonomousOrchestrator:
             )
         return ""
 
+    @staticmethod
+    def _is_merge_commit(gh: GitHubOps, commit_sha: str) -> bool:
+        """Check if a commit is a merge commit (has two parents).
+
+        A merge commit has at least two parent commits (SHA^1 and SHA^2).
+        Regular commits have only one parent (SHA^1).
+        """
+        try:
+            result = gh._run_git(["rev-parse", f"{commit_sha}^2"], check=False)
+            return result.returncode == 0
+        except Exception:
+            return False
+
     def _validate_autonomous_change_scope(
         self,
         gh: GitHubOps,
@@ -1950,6 +1963,33 @@ class AutonomousOrchestrator:
         """Fail closed on both per-round and cumulative branch scope."""
         if not commit_before or not commit_after:
             return "Autonomous change scope could not be verified: missing commit boundary"
+
+        # If commit_after is a merge commit, use merge-base to find effective base.
+        # This excludes changes introduced by merging upstream main, which should not
+        # count as autonomous changes. This mirrors the logic in
+        # _validate_pre_merge_change_scope for consistent scope validation.
+        if self._is_merge_commit(gh, commit_after):
+            try:
+                gh._run_git(["fetch", "origin", "main"])
+                fetched_main_head = gh.resolve_commit("FETCH_HEAD")
+                merge_base_result = gh._run_git(
+                    ["merge-base", commit_after, fetched_main_head], check=False
+                )
+                effective_base = merge_base_result.stdout.strip()
+                if merge_base_result.returncode == 0 and effective_base:
+                    # Use merge-base as the effective round base for scope validation.
+                    # This only counts changes in the PR branch, not merge-introduced changes.
+                    commit_before = effective_base
+                    logger.info(
+                        "Merge commit detected: using merge-base %s as effective round base",
+                        effective_base[:12],
+                    )
+            except Exception as exc:
+                # Fallback to original logic if merge-base derivation fails
+                logger.warning(
+                    "Failed to derive merge-base for merge commit scope validation: %s", exc
+                )
+
         ranges = [("current round", commit_before)]
         cumulative_base = (wf.get("base_commit_sha") or "").strip()
         if not cumulative_base:
