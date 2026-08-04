@@ -1,0 +1,50 @@
+{
+  "version": "1.0",
+  "created_at": "2026-08-04",
+  "created_before_modification": true,
+  "layers": {
+    "default": {
+      "min_tests": 3566,
+      "min_files": 90,
+      "last_updated": "2026-08-04",
+      "update_reason": "Initial baseline before pytest.ini modification",
+      "actual_collected": 3962,
+      "threshold_percent": 90
+    },
+    "critical": {
+      "exact_files": [
+        "tests/e2e/regression/test_login.py",
+        "tests/e2e/regression/test_navigation.py"
+      ],
+      "min_tests": 5,
+      "min_files": 2,
+      "last_updated": "2026-08-04",
+      "update_reason": "Critical E2E tests baseline"
+    },
+    "e2e_pytest": {
+      "min_tests": 1,
+      "min_files": 1,
+      "last_updated": "2026-08-04",
+      "update_reason": "E2E pytest compatible tests baseline",
+      "note": "Currently excluded by norecursedirs"
+    },
+    "issues": {
+      "min_tests": 1793,
+      "min_files": 80,
+      "last_updated": "2026-08-04",
+      "update_reason": "Issue tests baseline",
+      "actual_collected": 1992,
+      "threshold_percent": 90
+    }
+  },
+  "tolerance": {
+    "allowed_decrease_percent": 5,
+    "require_review_threshold": 10
+  },
+  "notes": [
+    "Baseline created before pytest.ini modification to enable e2e_*.py collection",
+    "tests/e2e currently excluded by norecursedirs in pytest.ini",
+    "Actual test counts from: tests/ (3962), tests/issues (1992)",
+    "Threshold set to 90% of actual count for conservative baseline"
+  ]
+}

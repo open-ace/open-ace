@@ -87,11 +87,13 @@ jobs:
           # pytest.ini's norecursedirs. PostgreSQL tests are marked and deselected
           # here; they run in the postgres-test job below.
           # Coverage includes scripts/shared and P0 security modules (Issue #1856)
+          # Issue #2189: Add coverage threshold to ensure failure propagates
           pytest tests/ -v \
             --cov=scripts/shared \
             --cov=app/auth \
             --cov=app/remote_ws_handler \
             --cov=app/modules/sso \
+            --cov-fail-under=30 \
             --cov-report=xml \
             --cov-report=html \
             -m "not postgres"
