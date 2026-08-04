@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import logging
 import os
-import sys
 from datetime import datetime, timezone
 from typing import Any
 
@@ -283,7 +282,8 @@ def run_check_with_timeout(check_func, timeout_seconds: float = 1.0) -> dict[str
     Returns:
         Dict with status and optional error message.
     """
-    from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
+    from concurrent.futures import ThreadPoolExecutor
+    from concurrent.futures import TimeoutError as FuturesTimeoutError
 
     try:
         with ThreadPoolExecutor(max_workers=1) as executor:
