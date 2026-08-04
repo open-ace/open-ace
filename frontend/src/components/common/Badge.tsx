@@ -5,15 +5,7 @@
 import React from 'react';
 import { cn } from '@/utils';
 
-export type BadgeVariant =
-  | 'primary'
-  | 'secondary'
-  | 'success'
-  | 'danger'
-  | 'warning'
-  | 'info'
-  | 'light'
-  | 'dark';
+export type BadgeVariant = 'primary' | 'secondary' | 'success' | 'danger' | 'warning' | 'info' | 'light' | 'dark';
 
 interface BadgeProps {
   variant?: BadgeVariant;
