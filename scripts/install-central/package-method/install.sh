@@ -2681,9 +2681,14 @@ install_systemd_service() {
     fi
     print_info "Using Python: $python_path"
 
-    # Generate SECRET_KEY for Flask session and API key encryption
+    # Generate SECRET_KEY for Flask session
     local secret_key="${SECRET_KEY:-$(openssl rand -hex 32)}"
     print_info "Generated SECRET_KEY for Flask encryption"
+
+    # Generate OPENACE_ENCRYPTION_KEY for API key and SMTP password encryption
+    # This key is separate from SECRET_KEY per PR #1871 security hardening
+    local enc_key="${OPENACE_ENCRYPTION_KEY:-$(openssl rand -hex 16)}"
+    print_info "Generated OPENACE_ENCRYPTION_KEY for sensitive data encryption"
 
     # Create service file from template
     print_info "Creating systemd service file..."
@@ -2695,6 +2700,7 @@ install_systemd_service() {
         -e "s|__PYTHON__|$python_path|g" \
         -e "s|__HOME__|$home_dir|g" \
         -e "s|__SECRET_KEY__|$secret_key|g" \
+        -e "s|__OPENACE_ENCRYPTION_KEY__|$enc_key|g" \
         -e "s|__WORKSPACE_BASE_DIR__|$WORKSPACE_BASE_DIR|g" \
         "$service_template" > "$service_file"
 
@@ -2790,9 +2796,14 @@ install_systemd_service_remote() {
     fi
     print_info "Using Python on remote: $python_path"
 
-    # Generate SECRET_KEY for Flask session and API key encryption
+    # Generate SECRET_KEY for Flask session
     local secret_key="${SECRET_KEY:-$(openssl rand -hex 32)}"
     print_info "Generated SECRET_KEY for Flask encryption"
+
+    # Generate OPENACE_ENCRYPTION_KEY for API key and SMTP password encryption
+    # This key is separate from SECRET_KEY per PR #1871 security hardening
+    local enc_key="${OPENACE_ENCRYPTION_KEY:-$(openssl rand -hex 16)}"
+    print_info "Generated OPENACE_ENCRYPTION_KEY for sensitive data encryption"
 
     # Generate service file content locally using sed
     local service_content=$(sed -e "s|__USER__|$user|g" \
@@ -2803,6 +2814,7 @@ install_systemd_service_remote() {
         -e "s|__PYTHON__|$python_path|g" \
         -e "s|__HOME__|$home_dir|g" \
         -e "s|__SECRET_KEY__|$secret_key|g" \
+        -e "s|__OPENACE_ENCRYPTION_KEY__|$enc_key|g" \
         -e "s|__WORKSPACE_BASE_DIR__|$WORKSPACE_BASE_DIR|g" \
         "$service_template")
 
