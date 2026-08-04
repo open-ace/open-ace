@@ -1230,6 +1230,7 @@ class AutonomousOrchestrator:
         branch = gh.get_current_branch()
         head = gh.get_current_commit()
         origin = gh._run_git(["remote", "get-url", "origin"], check=False).stdout.strip()
+        main_head = gh._run_git(["rev-parse", "origin/main"], check=False).stdout.strip()
         git_dir = gh._run_git(["rev-parse", "--absolute-git-dir"]).stdout.strip()
         common_dir = gh._run_git(
             ["rev-parse", "--path-format=absolute", "--git-common-dir"]
@@ -1245,12 +1246,74 @@ class AutonomousOrchestrator:
             "top_level": os.path.realpath(top_level) if top_level else "",
             "branch": branch,
             "head": head,
+            "main_head": main_head,
             "origin": origin,
             "git_dir": os.path.realpath(git_dir),
             "common_dir": os.path.realpath(common_dir),
             "git_identity": git_identity,
             "common_identity": common_identity,
         }
+
+    def _recover_worktree_branch(
+        self,
+        gh: "GitHubOps",
+        expected_branch: str,
+        before_head: str,
+        before_main_head: str,
+    ) -> str | None:
+        """Recover the worktree onto ``expected_branch`` after an agent left it
+        on another branch (e.g. a read-only ``git checkout main``). Returns a
+        non-empty reason when recovery was safe and performed (worktree is now
+        on ``expected_branch``); None when the change is NOT safely recoverable
+        and the caller must fail closed (#2271, prod 212/208).
+
+        Recovery runs only when the agent's branch switch was provably
+        read-only:
+
+        * ``expected_branch`` ref is unchanged (``== before_head``) — the agent
+          did not move the feature branch.
+        * The worktree is clean (``git status --porcelain`` empty) — staged or
+          untracked changes would otherwise ride the checkout into the feature
+          branch and get pushed.
+        * The wrong branch's HEAD still equals ``before_main_head`` (the main
+          HEAD captured before the agent ran) — the agent committed nothing to
+          / fetched no advance of the wrong branch. Live ``origin/main`` is
+          intentionally NOT trusted: an agent can ``update-ref`` it.
+
+        Anything else returns None so the caller keeps the #1611 fail-closed
+        guard.
+        """
+        if not expected_branch or not before_head or not before_main_head:
+            return None
+        try:
+            feature_ref = gh._run_git(["rev-parse", expected_branch], check=False).stdout.strip()
+        except Exception:
+            return None
+        if not feature_ref or feature_ref != before_head:
+            return None
+        try:
+            porcelain = gh._run_git(["status", "--porcelain"], check=False).stdout.strip()
+        except Exception:
+            return None
+        if porcelain:
+            return None
+        try:
+            wrong_branch_head = gh.get_current_commit()
+        except Exception:
+            return None
+        if not wrong_branch_head or wrong_branch_head != before_main_head:
+            return None
+        try:
+            gh._run_git(["checkout", expected_branch], check=True)
+        except Exception:
+            return None
+        logger.warning(
+            "Recovered worktree onto %s after an agent left it on another "
+            "branch (read-only checkout); feature ref %s unchanged, worktree clean.",
+            expected_branch,
+            before_head,
+        )
+        return f"recovered worktree onto {expected_branch} after read-only agent branch switch"
 
     def _ancestor_check(self, gh: "GitHubOps", a: str, b: str) -> bool | None:
         """Return True if ``a`` is an ancestor of ``b``, False if not, None on
@@ -1391,10 +1454,33 @@ class AutonomousOrchestrator:
                 f"expected repo root {expected_root}, actual {actual_root}"
             )
         if expected_branch and after_effective.get("branch") != expected_branch:
-            return (
-                "Agent changed the workflow branch unexpectedly: "
-                f"expected {expected_branch}, actual {after_effective.get('branch', '')}"
-            )
+            # #2271 (prod 212/208): an agent may leave the worktree on another
+            # branch via a read-only checkout (e.g. ``git checkout main`` to
+            # read a file). When that switch is provably read-only (feature
+            # branch ref unchanged, worktree clean, wrong-branch HEAD == the
+            # pre-run main HEAD), recover onto expected_branch instead of
+            # permanently failing the workflow. Anything else stays fail-closed.
+            recovered = None
+            try:
+                recover_gh = GitHubOps(repo_path, system_account=system_account)
+                recovered = self._recover_worktree_branch(
+                    recover_gh,
+                    expected_branch,
+                    before_state.get("effective", {}).get("head", ""),
+                    before_state.get("effective", {}).get("main_head", ""),
+                )
+            except Exception:
+                recovered = None
+            if recovered:
+                logger.info("Workflow %s: %s", self._workflow_id[:8], recovered)
+                # Worktree is back on expected_branch; fall through (no
+                # violation). origin/git_dir/common_dir below are unaffected by
+                # a branch-only checkout and remain valid.
+            else:
+                return (
+                    "Agent changed the workflow branch unexpectedly: "
+                    f"expected {expected_branch}, actual {after_effective.get('branch', '')}"
+                )
         before_origin = before_state.get("effective", {}).get("origin", "")
         after_origin = after_effective.get("origin", "")
         if before_origin != after_origin:
