@@ -3503,6 +3503,16 @@ install_local() {
                 print_info "Generated SECRET_KEY for Flask encryption"
             fi
 
+            # Check if systemd service is missing OPENACE_ENCRYPTION_KEY (upgrade from older version)
+            # PR #1871: Add encryption key for API keys and SMTP passwords
+            local current_enc_key=$(grep "^Environment=OPENACE_ENCRYPTION_KEY=" "$service_file" 2>/dev/null | cut -d'=' -f3)
+            if [ -z "$current_enc_key" ]; then
+                print_warning "Adding missing OPENACE_ENCRYPTION_KEY to systemd service..."
+                local enc_key="${OPENACE_ENCRYPTION_KEY:-$(openssl rand -hex 16)}"
+                sed -i "/^Environment=SECRET_KEY=/a Environment=OPENACE_ENCRYPTION_KEY=$enc_key" "$service_file"
+                print_info "Generated OPENACE_ENCRYPTION_KEY for sensitive data encryption"
+            fi
+
             # Check and fix WORKSPACE_BASE_DIR (Issue #1217, #1308)
             # WORKSPACE_BASE_DIR should always be /home for Package version
             # This ensures user paths are /home/{username} instead of /home/{service_user}/{username}
@@ -4822,6 +4832,16 @@ do_upgrade_remote() {
         else
             print_info "Restarting systemd service on remote..."
             ssh "$remote" "sudo systemctl restart open-ace.service"
+        fi
+
+        # Check if systemd service is missing OPENACE_ENCRYPTION_KEY (upgrade from older version)
+        # PR #1871: Add encryption key for API keys and SMTP passwords
+        local current_enc_key=$(ssh "$remote" "grep '^Environment=OPENACE_ENCRYPTION_KEY=' $service_file 2>/dev/null | cut -d'=' -f3")
+        if [ -z "$current_enc_key" ]; then
+            print_warning "Adding missing OPENACE_ENCRYPTION_KEY to systemd service on remote..."
+            local enc_key="${OPENACE_ENCRYPTION_KEY:-$(openssl rand -hex 16)}"
+            ssh "$remote" "sudo sed -i '/^Environment=SECRET_KEY=/a Environment=OPENACE_ENCRYPTION_KEY=$enc_key' $service_file && sudo systemctl daemon-reload && sudo systemctl restart open-ace.service"
+            print_info "Generated OPENACE_ENCRYPTION_KEY for sensitive data encryption"
         fi
 
         # Check if systemd service is missing WORKSPACE_BASE_DIR (Issue #1217)
