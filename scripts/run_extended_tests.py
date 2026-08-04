@@ -274,9 +274,7 @@ def build_pytest_command(args: argparse.Namespace) -> list[str]:
     # Issue #2189: Print collection manifest and check baseline
     print_collection_manifest(targets)
     if not check_baseline(args.category, len(targets)):
-        raise ValueError(
-            f"Test count below baseline threshold for category: {args.category}"
-        )
+        raise ValueError(f"Test count below baseline threshold for category: {args.category}")
 
     cmd = [sys.executable, "-m", "pytest", *targets, "-m", "not postgres"]
     if args.parallel > 0:
