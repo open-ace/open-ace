@@ -1020,10 +1020,7 @@ export const Workspace: React.FC = () => {
     const urlPermissionMode = searchParams.get('permissionMode');
     // Remote workspace params from URL
     const urlWorkspaceType = searchParams.get('workspaceType') as
-      | 'local'
-      | 'remote'
-      | 'terminal'
-      | null;
+      'local' | 'remote' | 'terminal' | null;
     const urlMachineId = searchParams.get('machineId');
     const urlMachineName = searchParams.get('machineName');
     const urlTerminalId = searchParams.get('terminalId');
@@ -1039,8 +1036,7 @@ export const Workspace: React.FC = () => {
       // Case 1: URL restore params - create a single tab with the restore session
       // Build settings from URL params
       const urlSettings:
-        | { model?: string; useWebUI?: boolean; permissionMode?: string }
-        | undefined =
+        { model?: string; useWebUI?: boolean; permissionMode?: string } | undefined =
         urlModel || urlUseWebUI !== null || urlPermissionMode
           ? {
               model: urlModel ?? undefined,
