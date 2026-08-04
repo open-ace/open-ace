@@ -32,7 +32,7 @@ def test_defaults_when_conf_absent(tmp_path):
     assert policy.memory_max_bytes == 0  # 0 = unset/no limit
     assert policy.pids_max == 0
     assert policy.cpu_max == ""
-    assert policy.max_concurrent_workflows == 3
+    assert policy.max_concurrent_workflows == 10
 
 
 def test_parses_resource_keys(tmp_path):
