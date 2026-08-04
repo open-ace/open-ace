@@ -18,6 +18,7 @@ from app.modules.compliance.retention import DataRetentionManager
 from app.modules.governance.audit_logger import AuditLogger
 from app.repositories.database import Database
 from app.repositories.governance_repo import GovernanceRepository
+from app.models.user import User
 
 logger = logging.getLogger(__name__)
 
@@ -185,7 +186,7 @@ def generate_report():
     # Legacy admin: backward compatibility
     # - With tenant_id: scoped to that tenant (like tenant_admin)
     # - Without tenant_id: global access (like platform_admin)
-    elif user_role == "admin":
+    elif User.is_admin_role(user_role):
         if caller_tenant_id is not None:
             # Scoped to caller's tenant
             target_tenant_id = caller_tenant_id

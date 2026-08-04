@@ -7,6 +7,8 @@ Data models for session management.
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
+from app.models.user import User
+
 
 @dataclass
 class Session:
@@ -60,4 +62,4 @@ class Session:
 
     def is_admin(self) -> bool:
         """Check if session belongs to an admin user."""
-        return self.role == "admin"
+        return User.is_admin_role(self.role)

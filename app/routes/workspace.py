@@ -39,6 +39,7 @@ from app.routes.fs import is_valid_path
 from app.utils.request_context import get_current_tenant_id
 from app.utils.tool_names import TOOL_NAME_ALIASES, normalize_tool_name
 from app.utils.workspace import get_workspace_base_dir, get_workspace_base_dirs
+from app.models.user import User
 
 logger = logging.getLogger(__name__)
 
@@ -194,7 +195,7 @@ def _check_prompt_ownership(
     user_role = g.user.get("role") if hasattr(g, "user") and g.user else None
 
     # Admin can access any template
-    if user_role == "admin":
+    if User.is_admin_role(user_role):
         return True, ""
 
     # Check if user is the author
@@ -679,7 +680,7 @@ def delete_prompt(template_id):
 
         library = get_prompt_library()
         # Admin users can delete any template; others can only delete their own
-        success = library.delete_template(template_id, None if user_role == "admin" else user_id)
+        success = library.delete_template(template_id, None if User.is_admin_role(user_role) else user_id)
 
         if not success:
             return jsonify({"success": False, "error": "Template not found or not authorized"}), 404

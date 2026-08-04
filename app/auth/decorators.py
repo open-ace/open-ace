@@ -30,6 +30,8 @@ from urllib.parse import unquote
 
 from flask import Response, g, jsonify, request
 
+from app.models.user import User
+
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
@@ -503,7 +505,7 @@ def _check_session_ownership(user_id: int, session_id: str, tenant_id: int | Non
 def _check_machine_admin(user_id: int, machine_id: str) -> bool:
     """Check if user is system admin or machine admin."""
     g_user = getattr(g, "user", {})
-    if g_user.get("role") == "admin":
+    if User.is_admin_role(g_user.get("role")):
         return True
     try:
         from app.services.remote_agent_manager import get_remote_agent_manager
@@ -612,7 +614,7 @@ def auth_required(f=None, *, ownership=None):
                 return password_change_response
 
             # Ownership checks (admin bypasses)
-            if g.user_role == "admin":
+            if User.is_admin_role(g.user_role):
                 return func(*args, **kwargs)
 
             if ownership == "session":
@@ -843,7 +845,7 @@ def resolve_tenant_scope() -> tuple[int | None, bool]:
     :func:`require_tenant_scope`).
     """
     user = getattr(g, "user", None) or {}
-    is_admin = user.get("role") == "admin"
+    is_admin = User.is_admin_role(user.get("role"))
     tenant_id = _normalize_user_tenant_id(user.get("tenant_id"))
     return tenant_id, is_admin
 
