@@ -13,6 +13,7 @@ from typing import cast
 
 from app.repositories.user_repo import UserRepository
 from app.utils.validators import validate_password
+from app.models.user import User
 
 logger = logging.getLogger(__name__)
 
@@ -602,7 +603,7 @@ class AuthService:
         session = self.get_session(token)
         if session is None:
             return False
-        return session.get("role") == "admin"
+        return User.is_admin_role(session.get("role"))
 
     def require_auth(self, token: str) -> tuple[bool, dict | None]:
         """
