@@ -27,6 +27,7 @@ from app.auth.decorators import (
 from app.modules.governance.audit_logger import AuditAction, AuditLogger
 from app.modules.workspace.remote_agent_manager import get_remote_agent_manager
 from app.modules.workspace.remote_session_manager import get_remote_session_manager
+from app.models.user import User
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +41,7 @@ def check_session_access(
     if not status:
         return None, (jsonify({"error": "Session not found"}), 404)
     # System admins intentionally have global session visibility for operations.
-    if g.user.get("role") == "admin":
+    if User.is_admin_role(g.user.get("role")):
         # Log admin cross-tenant access for audit trail (Issue #1824)
         admin_tenant = g.user.get("tenant_id")
         session_tenant = status.get("tenant_id")

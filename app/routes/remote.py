@@ -28,6 +28,7 @@ from typing import Any
 from flask import Blueprint, Response, g, jsonify, request, stream_with_context
 
 from app.auth.decorators import _extract_token, admin_required, enforce_password_change_requirement
+from app.models.user import User
 from app.modules.governance.audit_logger import AuditAction, AuditLogger
 from app.modules.workspace.agent_token import token_hash_prefix
 from app.modules.workspace.api_key_proxy import get_api_key_proxy_service
@@ -425,7 +426,7 @@ def _validate_usage_report_binding(
 
 def _require_machine_admin(machine_id):
     """Check system admin or machine admin. Returns error or None."""
-    if g.user.get("role") == "admin":
+    if User.is_admin_role(g.user.get("role")):
         return None
     mgr = get_remote_agent_manager()
     perm = mgr.get_user_permission(machine_id, g.user["id"])
@@ -471,7 +472,7 @@ def _check_machine_access(machine_id):
     """Check if user has access to machine. Returns error or None."""
     if not machine_id:
         return jsonify({"error": "machine_id is required"}), 400
-    if g.user.get("role") == "admin":
+    if User.is_admin_role(g.user.get("role")):
         return None
     mgr = get_remote_agent_manager()
     if not mgr.check_user_access(machine_id, g.user["id"]):
@@ -519,7 +520,7 @@ def _check_machine_tenant_access(machine_id: str) -> tuple[dict | None, tuple | 
         return machine, None
 
     # Legacy admin: check tenant_id if available
-    if user_role == "admin":
+    if User.is_admin_role(user_role):
         if user_tenant_id is not None and machine_tenant_id != user_tenant_id:
             return None, (jsonify({"error": "Machine not found"}), 404)
         return machine, None
@@ -650,7 +651,7 @@ def list_machines():
         if user_tenant_id is None:
             return jsonify({"error": "Tenant admin must have tenant_id"}), 403
         machines = agent_mgr.list_machines(tenant_id=user_tenant_id)
-    elif user_role == "admin":
+    elif User.is_admin_role(user_role):
         # Legacy admin role: requires explicit tenant_id or fall back to user's tenant
         tenant_id = request.args.get("tenant_id", type=int)
         if tenant_id is None:

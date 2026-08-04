@@ -18,6 +18,7 @@ import requests
 from flask import Blueprint, Response, g, jsonify, make_response, redirect, request, url_for
 
 from app.auth.decorators import admin_required, auth_required, public_endpoint
+from app.models.user import User
 from app.modules.governance.audit_logger import AuditAction, AuditLogger
 from app.modules.sso.manager import SSOManager
 from app.modules.sso.provider import get_provider_config, list_providers
@@ -321,7 +322,7 @@ def validate_tenant_access(
     user_role = user.get("role")
 
     # Admin has cross-tenant access
-    is_admin = user_role == "admin"
+    is_admin = User.is_admin_role(user_role)
 
     # If provider_name is given, check provider's tenant
     if provider_name:
@@ -1214,7 +1215,7 @@ def export_providers():
     # Get user role
     user_id = g.user_id
     user = user_repo.get_user_by_id(user_id)
-    is_admin = user and user.get("role") == "admin"
+    is_admin = user and User.is_admin_role(user.get("role"))
 
     # Query providers
     if is_admin and not effective_tenant_id:
@@ -2021,7 +2022,7 @@ def get_user_identities(user_id: int):
 
     # Only allow users to see their own identities (or admins)
     session_user_id = g.user_id
-    is_admin = g.user_role == "admin"
+    is_admin = User.is_admin_role(g.user_role)
 
     if session_user_id != user_id and not is_admin:
         return jsonify({"error": "Access denied"}), 403
@@ -2051,7 +2052,7 @@ def unlink_identity(user_id: int, provider_name: str):
 
     # Only allow users to unlink their own identities (or admins)
     session_user_id = g.user_id
-    is_admin = g.user_role == "admin"
+    is_admin = User.is_admin_role(g.user_role)
 
     if session_user_id != user_id and not is_admin:
         return jsonify({"error": "Access denied"}), 403
