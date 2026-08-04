@@ -43,7 +43,7 @@ export function isPlatformAdmin(user: User | null | undefined): boolean {
  * @returns true if user is tenant admin with tenant_id
  */
 export function isTenantAdmin(user: User | null | undefined): boolean {
-  return user?.role === 'tenant_admin' && user?.tenant_id != null;
+  return user?.role === 'tenant_admin' && user?.tenant_id !== null && user?.tenant_id !== undefined;
 }
 
 /**

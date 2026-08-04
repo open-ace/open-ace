@@ -1020,7 +1020,10 @@ export const Workspace: React.FC = () => {
     const urlPermissionMode = searchParams.get('permissionMode');
     // Remote workspace params from URL
     const urlWorkspaceType = searchParams.get('workspaceType') as
-      'local' | 'remote' | 'terminal' | null;
+      | 'local'
+      | 'remote'
+      | 'terminal'
+      | null;
     const urlMachineId = searchParams.get('machineId');
     const urlMachineName = searchParams.get('machineName');
     const urlTerminalId = searchParams.get('terminalId');
