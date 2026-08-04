@@ -3721,6 +3721,8 @@ install_local() {
     print_info "Installation path: $target_path"
     print_info "Config directory: $config_dir"
     echo ""
+
+    # Auto-start the web server after installation
     if [ "$INSTALL_SERVICE" = "yes" ] && command -v systemctl &>/dev/null; then
         echo "Service management:"
         echo "  systemctl status open-ace"
@@ -3730,9 +3732,60 @@ install_local() {
         echo ""
         echo "View logs:"
         echo "  journalctl -u open-ace -f"
+        echo ""
+
+        # Service should already be running from install_systemd_service
+        if systemctl is-active --quiet open-ace.service 2>/dev/null; then
+            print_success "Web server is running on port ${SERVICE_PORT:-19888}"
+        else
+            print_warning "Service not running. Start with: systemctl start open-ace"
+        fi
     else
-        echo "To start the web server:"
-        echo "  cd $target_path && python3 server.py"
+        # No systemd service installed - start manually as the correct user
+        print_info "Starting web server as user '$DEPLOY_USER'..."
+
+        # Check if port is already in use
+        if ss -tlnp 2>/dev/null | grep -q ":${SERVICE_PORT:-19888}"; then
+            print_warning "Port ${SERVICE_PORT:-19888} is already in use"
+            print_info "Stop existing process or change port in config"
+        else
+            # Start the server in background as the correct user
+            local port="${SERVICE_PORT:-19888}"
+            local host="${SERVICE_HOST:-0.0.0.0}"
+
+            # Ensure logs directory exists
+            mkdir -p "$target_path/logs" 2>/dev/null || true
+            chown "$DEPLOY_USER:$(id -gn "$DEPLOY_USER")" "$target_path/logs" 2>/dev/null || true
+
+            # Use nohup to run in background
+            print_info "Starting web server on $host:$port as user '$DEPLOY_USER'..."
+            su - "$DEPLOY_USER" -c "cd '$target_path' && AI_TOKEN_WEB_PORT=$port AI_TOKEN_WEB_HOST=$host nohup python3 server.py > logs/server.log 2>&1 &"
+
+            # Wait a moment for server to start
+            sleep 3
+
+            # Check if server is listening
+            if ss -tlnp 2>/dev/null | grep -q ":$port"; then
+                print_success "Web server is running on port $port"
+                echo ""
+                echo "Access the web interface:"
+                echo "  http://localhost:$port"
+                if [ -n "$host" ] && [ "$host" != "127.0.0.1" ] && [ "$host" != "localhost" ]; then
+                    local server_ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+                    [ -n "$server_ip" ] && echo "  http://$server_ip:$port"
+                fi
+                echo ""
+                echo "Stop the server:"
+                echo "  pkill -f 'python3.*server.py' # Stop all instances"
+                echo "  pkill -u $DEPLOY_USER -f 'python3.*server.py' # Stop only user instances"
+                echo ""
+                echo "View logs:"
+                echo "  tail -f $target_path/logs/server.log"
+            else
+                print_warning "Server may have failed to start. Check logs:"
+                print_info "  tail -f $target_path/logs/server.log"
+            fi
+        fi
     fi
     echo ""
 }
