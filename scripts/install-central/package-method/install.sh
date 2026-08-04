@@ -2635,6 +2635,95 @@ run_pip_as_user() {
     fi
 }
 
+# Install/upgrade the standalone scheduler worker service (openace-scheduler.service).
+# Since the #2187 scheduler split, background schedulers run here — NOT in the web
+# process. install.sh must manage this unit the same way it manages open-ace.service,
+# else (a) a fresh install has no scheduler → no autonomous workflows, and (b) every
+# upgrade redeployed scheduler_worker.py but never restarted the unit, so the scheduler
+# kept running pre-deploy code (Python doesn't hot-reload). #2293.
+#
+# Self-contained: derives User/Group/WorkingDirectory/Python/HOME/SECRET_KEY/
+# WORKSPACE_BASE_DIR from the installed open-ace.service unit so the same call works
+# for fresh install (open-ace.service was just written) and upgrade (it pre-exists).
+configure_scheduler_service() {
+    local scheduler_template="$SOURCE_DIR/scripts/openace-scheduler.service"
+    local scheduler_file="/etc/systemd/system/openace-scheduler.service"
+
+    # Only where the template ships (post-#2187) and systemd is available.
+    if [ ! -f "$scheduler_template" ]; then
+        return 0
+    fi
+    if ! command -v systemctl >/dev/null 2>&1; then
+        print_warning "systemctl not found; skipping scheduler service setup"
+        return 0
+    fi
+    # The scheduler mirrors open-ace.service's identity. Derive from the web unit.
+    if ! systemctl cat open-ace.service >/dev/null 2>&1; then
+        print_warning "open-ace.service not installed; cannot derive scheduler identity"
+        return 0
+    fi
+    local web_unit
+    web_unit=$(systemctl show open-ace.service -p FragmentPath --value 2>/dev/null)
+    [ -n "$web_unit" ] && [ -f "$web_unit" ] || web_unit="/etc/systemd/system/open-ace.service"
+
+    local cs_user cs_group cs_path cs_python cs_home cs_secret cs_workspace
+    cs_user=$(grep '^User=' "$web_unit" | tail -1 | cut -d= -f2)
+    cs_group=$(grep '^Group=' "$web_unit" | tail -1 | cut -d= -f2)
+    cs_path=$(grep '^WorkingDirectory=' "$web_unit" | tail -1 | cut -d= -f2)
+    # ExecStart is the python binary followed by server.py; take the first token.
+    cs_python=$(grep '^ExecStart=' "$web_unit" | tail -1 | sed -E 's/^ExecStart=([^ ]+) .*/\1/')
+    # Environment=SECRET_KEY=<value> → 3rd '='-delimited field.
+    cs_secret=$(grep '^Environment=SECRET_KEY=' "$web_unit" | tail -1 | cut -d= -f3)
+    cs_workspace=$(grep '^Environment=WORKSPACE_BASE_DIR=' "$web_unit" | tail -1 | cut -d= -f3)
+    cs_home=$(grep '^Environment=HOME=' "$web_unit" | tail -1 | cut -d= -f3)
+    [ -n "$cs_group" ] || cs_group=$(id -gn "$cs_user" 2>/dev/null || echo "$cs_user")
+    [ -n "$cs_home" ] || cs_home=$(getent passwd "$cs_user" | cut -d: -f6)
+    [ -n "$cs_workspace" ] || cs_workspace="/home"
+
+    print_info "Installing scheduler service (openace-scheduler.service)..."
+    sed -e "s|__USER__|$cs_user|g" \
+        -e "s|__GROUP__|$cs_group|g" \
+        -e "s|__INSTALL_PATH__|$cs_path|g" \
+        -e "s|__PYTHON__|$cs_python|g" \
+        -e "s|__HOME__|$cs_home|g" \
+        -e "s|__SECRET_KEY__|$cs_secret|g" \
+        -e "s|__WORKSPACE_BASE_DIR__|$cs_workspace|g" \
+        "$scheduler_template" > "$scheduler_file" || {
+        print_warning "Failed to render $scheduler_file; scheduler service not updated"
+        return 1
+    }
+
+    # The scheduler process runs the autonomous scheduler that launches agents via
+    # openace-run-as (sudo) AND drives cross-user git/fs ops (sudo -u <account>).
+    # Both need NoNewPrivileges=false regardless of multi-user mode — same as the
+    # unconditional handling open-ace.service gets in the autonomous-isolation block.
+    if grep -q '^NoNewPrivileges=' "$scheduler_file"; then
+        sed -i 's/NoNewPrivileges=.*/NoNewPrivileges=false/' "$scheduler_file"
+    else
+        sed -i '/^\[Service\]/a NoNewPrivileges=false' "$scheduler_file"
+    fi
+
+    systemctl daemon-reload
+    systemctl enable openace-scheduler.service >/dev/null 2>&1
+
+    # restart picks up redeployed code on upgrade; start covers fresh install.
+    if systemctl is-active --quiet openace-scheduler.service; then
+        print_info "Restarting openace-scheduler service..."
+        systemctl restart openace-scheduler.service
+    else
+        print_info "Starting openace-scheduler service..."
+        systemctl start openace-scheduler.service
+    fi
+    sleep 2
+    if systemctl is-active --quiet openace-scheduler.service; then
+        print_success "Scheduler service active (background autonomous schedulers)"
+    else
+        print_warning "Scheduler service failed to start; background autonomous workflows won't run"
+        print_info "Check: systemctl status openace-scheduler, journalctl -u openace-scheduler"
+    fi
+    return 0
+}
+
 install_systemd_service() {
     local target_path="$1"
     local user="$2"
@@ -2755,6 +2844,11 @@ install_systemd_service() {
         print_info "For full logs: journalctl -u open-ace -n 50"
         return 1
     fi
+
+    # Install/restart the standalone scheduler worker so background autonomous
+    # schedulers run (#2293). Non-fatal: web is up; failure just means no
+    # background autonomous workflows until the scheduler is started manually.
+    configure_scheduler_service || print_warning "Scheduler service setup failed; run journalctl -u openace-scheduler"
 
     return 0
 }
@@ -3694,6 +3788,10 @@ install_local() {
         systemctl try-restart open-ace.service || \
             print_warning "Restart open-ace manually to activate autonomous agent isolation"
     fi
+
+    # Re-render + restart the scheduler so it picks up redeployed code (#2293).
+    # Without this the scheduler keeps running pre-upgrade scheduler_worker.py.
+    configure_scheduler_service || print_warning "Scheduler service upgrade failed; restart openace-scheduler manually"
 
     # Configure sudoers for multi-user workspace mode
     # sudoers run_user should match the systemd service's actual running user
