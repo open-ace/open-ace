@@ -85,12 +85,13 @@ class TestValidateSecretStrength:
         """Test that a strong key passes validation."""
         reset_security_mode_cache()
         with patch.dict(os.environ, {"OPENACE_SECURITY_MODE": "development"}, clear=False):
-            # Should not raise
-            validate_secret_strength(
+            # Should not raise; returns None on success
+            result = validate_secret_strength(
                 "a-very-long-and-secure-secret-key-32-chars",
                 "TEST_KEY",
                 min_length=32,
             )
+            assert result is None
 
     def test_raises_on_empty_in_production(self):
         """Test that empty key raises in production mode."""
@@ -129,22 +130,25 @@ class TestValidateSecretStrength:
         """Test that empty key logs warning in development mode."""
         reset_security_mode_cache()
         with patch.dict(os.environ, {"OPENACE_SECURITY_MODE": "development"}, clear=False):
-            # Should not raise
-            validate_secret_strength(None, "TEST_KEY")
+            # Should not raise; returns None after logging warning
+            result = validate_secret_strength(None, "TEST_KEY")
+            assert result is None
 
     def test_warns_on_weak_value_in_development(self):
         """Test that weak value logs warning in development mode."""
         reset_security_mode_cache()
         with patch.dict(os.environ, {"OPENACE_SECURITY_MODE": "development"}, clear=False):
-            # Should not raise
-            validate_secret_strength("dev-secret-key", "TEST_KEY")
+            # Should not raise; returns None after logging warning
+            result = validate_secret_strength("dev-secret-key", "TEST_KEY")
+            assert result is None
 
     def test_warns_on_short_value_in_development(self):
         """Test that short value logs warning in development mode."""
         reset_security_mode_cache()
         with patch.dict(os.environ, {"OPENACE_SECURITY_MODE": "development"}, clear=False):
-            # Should not raise
-            validate_secret_strength("too-short", "TEST_KEY", min_length=32)
+            # Should not raise; returns None after logging warning
+            result = validate_secret_strength("too-short", "TEST_KEY", min_length=32)
+            assert result is None
 
 
 class TestGetSecretKeyForApp:

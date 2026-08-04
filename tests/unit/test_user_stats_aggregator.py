@@ -211,3 +211,6 @@ class TestAggregateUserStatsBackground:
             mock_get.side_effect = Exception("Aggregation failed")
             # Should not raise
             aggregate_user_stats_background()
+            # get_aggregator was attempted (and its failure swallowed by the
+            # background wrapper's try/except)
+            mock_get.assert_called_once()

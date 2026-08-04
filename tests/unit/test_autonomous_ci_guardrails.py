@@ -506,9 +506,12 @@ def test_cross_user_guard_accepts_root_owned_world_executable_install(monkeypatc
 
     monkeypatch.setattr(agent_runner.os, "stat", root_owned)
 
-    agent_runner.AutonomousAgentRunner._validate_cross_user_guard_bin(
+    # Root-owned, world-executable guard install is the accepted state: the
+    # validator must return None without raising RuntimeError.
+    result = agent_runner.AutonomousAgentRunner._validate_cross_user_guard_bin(
         {"PATH": f"{guard_dir}:/usr/bin"}
     )
+    assert result is None
 
 
 def test_local_agent_fails_closed_without_trusted_repo_snapshot():
