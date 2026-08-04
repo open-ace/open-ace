@@ -52,7 +52,9 @@ export const RemoteMachineManagement: React.FC = () => {
   const machines = machinesData?.machines ?? [];
 
   // P1-3: Use explicit user_role from API instead of implicit derivation
-  const isSystemAdmin = machinesData?.user_role === 'admin';
+  const isSystemAdmin = ['admin', 'platform_admin', 'tenant_admin'].includes(
+    machinesData?.user_role ?? ''
+  );
 
   // Dialog states
   const [showTokenDialog, setShowTokenDialog] = useState(false);
