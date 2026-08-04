@@ -2007,7 +2007,9 @@ configure_autonomous_agent_sudoers() {
 $run_user ALL=(root) NOPASSWD: $wrapper_path --isolated *
 SUDOERS_EOF
     chmod 440 "$sudoers_file"
-    if ! visudo -c -f "$sudoers_file" >/dev/null 2>&1; then
+    local visudo_cmd="/usr/sbin/visudo"
+    [ ! -x "$visudo_cmd" ] && visudo_cmd="visudo"
+    if ! $visudo_cmd -c -f "$sudoers_file" >/dev/null 2>&1; then
         unlink "$sudoers_file" 2>/dev/null || true
         print_warning "Invalid autonomous agent sudoers configuration"
         return 1
@@ -2119,7 +2121,9 @@ printf '%s\n' \
 # Validate before touching the active sudoers include. Install to an ignored
 # dot-file first, then rename atomically so interruption cannot leave a partial
 # rule that locks out subsequent sudo recovery.
-as_root visudo -c -f "$rule_tmp" >/dev/null
+local visudo_cmd="/usr/sbin/visudo"
+[ ! -x "$visudo_cmd" ] && visudo_cmd="visudo"
+as_root "$visudo_cmd" -c -f "$rule_tmp" >/dev/null
 as_root install -o root -g root -m 440 "$rule_tmp" \
     /etc/sudoers.d/.open-ace-autonomous-agent.new
 as_root mv /etc/sudoers.d/.open-ace-autonomous-agent.new \
@@ -2555,7 +2559,12 @@ ${current_user_rules}
     chmod 440 "$sudoers_file"
 
     # Validate sudoers syntax
-    if visudo -c -f "$sudoers_file" &>/dev/null; then
+    # Use absolute path for visudo (may not be in PATH on some systems)
+    local visudo_cmd="/usr/sbin/visudo"
+    if [ ! -x "$visudo_cmd" ]; then
+        visudo_cmd="visudo"  # fallback to PATH lookup
+    fi
+    if $visudo_cmd -c -f "$sudoers_file" &>/dev/null; then
         print_success "Sudoers configured successfully: $sudoers_file"
         print_info "Service account '$run_user' can execute:"
         print_info "  sudo -u <username> $webui_path --port <port>"
