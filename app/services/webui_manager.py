@@ -893,6 +893,41 @@ class WebUIManager:
                 "proxy_token": "",
             }
 
+    def _build_webui_env(
+        self,
+        user_id: int,
+        system_account: str,
+        openace_api_url: str,
+    ) -> tuple[dict[str, str], dict[str, Any]]:
+        """
+        Build minimal environment for WebUI process.
+
+        Issue #2298: Use explicit environment instead of os.environ.copy()
+        to prevent leaking sensitive variables (DATABASE_URL, TOKEN_SECRET,
+        GH_TOKEN, ANTHROPIC_API_KEY, etc.) to WebUI child process.
+
+        Returns:
+            Tuple of (environment dict, model pool dict).
+        """
+        # Start with minimal base environment
+        child_env = {
+            # Essential for Node.js binary resolution
+            "PATH": "/usr/local/bin:/usr/bin:/bin",
+            # Language/encoding
+            "LANG": os.environ.get("LANG", "C.UTF-8"),
+            "LC_ALL": os.environ.get("LC_ALL", ""),
+        }
+
+        # Configure LLM proxy (includes dynamic envKey collection)
+        model_pool = self._configure_local_openai_proxy(user_id, child_env, openace_api_url)
+
+        # Optional: HTTP proxy settings (if configured in service environment)
+        for proxy_var in ["HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY"]:
+            if proxy_var in os.environ:
+                child_env[proxy_var] = os.environ[proxy_var]
+
+        return child_env, model_pool
+
     def _launch_webui_process(
         self, user_id: int, system_account: str, port: int, base_url: str
     ) -> tuple[subprocess.Popen | None, dict[str, Any]]:
@@ -945,9 +980,12 @@ class WebUIManager:
             server_port = server_config.get("web_port", 19888)
             openace_api_url = f"{openace_api_url}:{server_port}"
 
-        # Build child environment first (needed for sudo env passing)
-        child_env = os.environ.copy()
-        model_pool = self._configure_local_openai_proxy(user_id, child_env, openace_api_url)
+        # Issue #2298: Build minimal environment for WebUI process
+        # Do NOT use os.environ.copy() to avoid leaking sensitive variables
+        # (DATABASE_URL, TOKEN_SECRET, GH_TOKEN, etc.)
+        child_env, model_pool = self._build_webui_env(
+            user_id, system_account, openace_api_url
+        )
 
         # Set OPENACE_LOG_DIR to /tmp to avoid HOME permission issues
         webui_log_dir = f"/tmp/qwen-code-webui-{user_id}"
@@ -981,21 +1019,6 @@ class WebUIManager:
                     logger.warning(f"User '{system_account}' not found, skipping chown")
                 except OSError as e:
                     logger.warning(f"Failed to chown log dir: {e}")
-
-        # Ensure PATH can resolve the `node` binary while preserving the host's
-        # inherited PATH. Prepend the standard system directories so Docker
-        # (node in /usr/bin) keeps resolving (Issue #1083), then append the
-        # inherited PATH so host-installed binaries are still found — e.g.
-        # /opt/homebrew/bin on Apple Silicon macOS, where Homebrew installs
-        # node. NODE_PATH is intentionally NOT set: it controls Node *module*
-        # resolution (a list of directories, not a binary path), so pointing it
-        # at an executable was semantically wrong and could only interfere with
-        # module lookup.
-        _system_dirs = "/usr/local/bin:/usr/bin:/bin"
-        _inherited_path = child_env.get("PATH", "")
-        child_env["PATH"] = (
-            _system_dirs + ":" + _inherited_path if _inherited_path else _system_dirs
-        )
 
         # Build command based on platform
         if webui_dir:
