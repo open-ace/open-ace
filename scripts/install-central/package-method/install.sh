@@ -2500,7 +2500,7 @@ ${line}"
         fi
 
         # 【新增】Warn about sudoers vs systemd service user mismatch
-        if command -v systemctl &>/dev/null && systemctl is-enabled --quiet open-ace.service 2>/dev/null; then
+        if command -v systemctl &>/dev/null && systemctl cat open-ace.service &>/dev/null; then
             local svc_file=$(systemctl show open-ace.service -p FragmentPath 2>/dev/null | cut -d= -f2)
             if [ -z "$svc_file" ] || [ ! -f "$svc_file" ]; then
                 svc_file="/etc/systemd/system/open-ace.service"
@@ -2937,7 +2937,7 @@ verify_upgrade_systemd_config() {
         return 0
     fi
 
-    if ! systemctl is-enabled --quiet open-ace.service 2>/dev/null; then
+    if ! systemctl cat open-ace.service &>/dev/null; then
         return 0
     fi
 
@@ -2998,7 +2998,7 @@ detect_and_load_local_upgrade() {
 
     # Priority 1: From systemd service file (highest priority - matches running service)
     # Use systemctl show to get actual service file path (not hardcoded)
-    if command -v systemctl &>/dev/null && systemctl is-enabled --quiet open-ace.service 2>/dev/null; then
+    if command -v systemctl &>/dev/null && systemctl cat open-ace.service &>/dev/null; then
         local service_file=$(systemctl show open-ace.service -p FragmentPath 2>/dev/null | cut -d= -f2)
         if [ -z "$service_file" ] || [ ! -f "$service_file" ]; then
             service_file="/etc/systemd/system/open-ace.service"
@@ -3574,15 +3574,58 @@ install_local() {
     fi
 
     # For upgrade mode: handle systemd service configuration
-    # This ensures new code takes effect after upgrade
+    # This ensures new code takes effect after upgrade.
+    #
+    # Issue #2290: WORKSPACE_BASE_DIR and SECRET_KEY checks must run
+    # regardless of service status (enabled/disabled/active/inactive).
+    # Previously these checks were inside the is-enabled block, which
+    # meant a disabled-but-active service never got its config fixed.
+    # We now resolve the service file via `systemctl cat` (checks unit
+    # file existence, not run-state) and run the fix-ups unconditionally.
     if [ "$DO_UPGRADE" = "yes" ] && command -v systemctl &>/dev/null; then
-        if systemctl is-enabled --quiet open-ace.service 2>/dev/null; then
-            # Get actual service file path (not hardcoded)
-            local service_file=$(systemctl show open-ace.service -p FragmentPath 2>/dev/null | cut -d= -f2)
+        # Resolve service file path via systemctl cat (detects unit file
+        # existence regardless of enabled/disabled/active state)
+        local service_file=""
+        if systemctl cat open-ace.service &>/dev/null; then
+            service_file=$(systemctl show open-ace.service -p FragmentPath 2>/dev/null | cut -d= -f2)
             if [ -z "$service_file" ] || [ ! -f "$service_file" ]; then
                 service_file="/etc/systemd/system/open-ace.service"
             fi
+        fi
 
+        # -- Phase 1: Fix missing config in service file (runs always) --
+        if [ -n "$service_file" ] && [ -f "$service_file" ]; then
+            # Check if systemd service is missing SECRET_KEY (upgrade from older version)
+            local current_secret=$(grep "^Environment=SECRET_KEY=" "$service_file" 2>/dev/null | cut -d'=' -f3)
+            if [ -z "$current_secret" ]; then
+                print_warning "Adding missing SECRET_KEY to systemd service..."
+                local secret_key="${SECRET_KEY:-$(openssl rand -hex 32)}"
+                sed -i "/^Environment=HOME=/a Environment=SECRET_KEY=$secret_key" "$service_file"
+                print_info "Generated SECRET_KEY for Flask encryption"
+            fi
+
+            # Check and fix WORKSPACE_BASE_DIR (Issue #1217, #1308, #2290)
+            # WORKSPACE_BASE_DIR should always be /home for Package version.
+            # This ensures user paths are /home/{username} instead of
+            # /home/{service_user}/{username}.  Without this env var, the
+            # app falls back to str(Path.home()) which is the service user's
+            # home (e.g. /home/ivyent), producing incorrect workspace paths.
+            local current_workspace_base=$(grep "^Environment=WORKSPACE_BASE_DIR=" "$service_file" 2>/dev/null | cut -d'=' -f3)
+            if [ -z "$current_workspace_base" ]; then
+                print_warning "Adding missing WORKSPACE_BASE_DIR to systemd service..."
+                sed -i "/^Environment=SECRET_KEY=/a Environment=WORKSPACE_BASE_DIR=/home" "$service_file"
+                print_info "Set WORKSPACE_BASE_DIR=/home (Issue #1217, #1308, #2290)"
+            elif [ "$current_workspace_base" != "/home" ]; then
+                print_warning "Fixing incorrect WORKSPACE_BASE_DIR (was: $current_workspace_base)..."
+                sed -i "s|^Environment=WORKSPACE_BASE_DIR=.*|Environment=WORKSPACE_BASE_DIR=/home|" "$service_file"
+                print_info "Fixed WORKSPACE_BASE_DIR=/home (Issue #1308, #2290)"
+            fi
+        fi
+
+        # -- Phase 2: Update service config if user chose to switch --
+        # Issue #2283: use is-active (not is-enabled) so that a
+        # disabled-but-running service still gets restarted after upgrade.
+        if systemctl is-active --quiet open-ace.service 2>/dev/null; then
             # If user chose to switch service to this installation, update service config via sed
             # (Preserves SECRET_KEY, avoids double restart, avoids overwriting custom modifications)
             if [ "$UPGRADE_SWITCH_SERVICE" = "yes" ]; then
@@ -3621,29 +3664,6 @@ install_local() {
                 print_success "Service configuration updated (SECRET_KEY preserved)"
             fi
 
-            # Check if systemd service is missing SECRET_KEY (upgrade from older version)
-            local current_secret=$(grep "^Environment=SECRET_KEY=" "$service_file" 2>/dev/null | cut -d'=' -f3)
-            if [ -z "$current_secret" ]; then
-                print_warning "Adding missing SECRET_KEY to systemd service..."
-                local secret_key="${SECRET_KEY:-$(openssl rand -hex 32)}"
-                sed -i "/^Environment=HOME=/a Environment=SECRET_KEY=$secret_key" "$service_file"
-                print_info "Generated SECRET_KEY for Flask encryption"
-            fi
-
-            # Check and fix WORKSPACE_BASE_DIR (Issue #1217, #1308)
-            # WORKSPACE_BASE_DIR should always be /home for Package version
-            # This ensures user paths are /home/{username} instead of /home/{service_user}/{username}
-            local current_workspace_base=$(grep "^Environment=WORKSPACE_BASE_DIR=" "$service_file" 2>/dev/null | cut -d'=' -f3)
-            if [ -z "$current_workspace_base" ]; then
-                print_warning "Adding missing WORKSPACE_BASE_DIR to systemd service..."
-                sed -i "/^Environment=SECRET_KEY=/a Environment=WORKSPACE_BASE_DIR=/home" "$service_file"
-                print_info "Set WORKSPACE_BASE_DIR=/home (Issue #1217, #1308)"
-            elif [ "$current_workspace_base" != "/home" ]; then
-                print_warning "Fixing incorrect WORKSPACE_BASE_DIR (was: $current_workspace_base)..."
-                sed -i "s|^Environment=WORKSPACE_BASE_DIR=.*|Environment=WORKSPACE_BASE_DIR=/home|" "$service_file"
-                print_info "Fixed WORKSPACE_BASE_DIR=/home (Issue #1308)"
-            fi
-
             print_info "Restarting open-ace service..."
             systemctl daemon-reload
             systemctl restart open-ace.service
@@ -3663,7 +3683,7 @@ install_local() {
     local autonomous_run_user="$DEPLOY_USER"
     local autonomous_install_dir="$target_path"
     local autonomous_service_file=""
-    if command -v systemctl &>/dev/null && systemctl is-enabled --quiet open-ace.service 2>/dev/null; then
+    if command -v systemctl &>/dev/null && systemctl cat open-ace.service &>/dev/null; then
         autonomous_service_file=$(systemctl show open-ace.service -p FragmentPath 2>/dev/null | cut -d= -f2)
         [ -n "$autonomous_service_file" ] && [ -f "$autonomous_service_file" ] || autonomous_service_file="/etc/systemd/system/open-ace.service"
         local detected_service_user
@@ -3699,7 +3719,7 @@ install_local() {
         local sudoers_run_user="$DEPLOY_USER"
         local sudoers_install_dir="$target_path"
 
-        if command -v systemctl &>/dev/null && systemctl is-enabled --quiet open-ace.service 2>/dev/null; then
+        if command -v systemctl &>/dev/null && systemctl cat open-ace.service &>/dev/null; then
             local svc_file=$(systemctl show open-ace.service -p FragmentPath 2>/dev/null | cut -d= -f2)
             if [ -z "$svc_file" ] || [ ! -f "$svc_file" ]; then
                 svc_file="/etc/systemd/system/open-ace.service"
@@ -5180,7 +5200,9 @@ do_upgrade_remote() {
     print_info "Backup saved to: $backup_dir on $DEPLOY_HOST"
 
     # Check if systemd service exists on remote and update SECRET_KEY if missing
-    if ssh "$remote" "command -v systemctl &>/dev/null && systemctl is-enabled --quiet open-ace.service 2>/dev/null"; then
+    # Issue #2290: use `systemctl cat` instead of `is-enabled` so the check
+    # passes for disabled-but-active services (same root cause as #2283).
+    if ssh "$remote" "command -v systemctl &>/dev/null && systemctl cat open-ace.service &>/dev/null"; then
         print_info "Checking systemd service on remote..."
         local service_file="/etc/systemd/system/open-ace.service"
         local current_secret=$(ssh "$remote" "grep '^Environment=SECRET_KEY=' $service_file 2>/dev/null | cut -d'=' -f3")
