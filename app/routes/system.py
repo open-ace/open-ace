@@ -18,6 +18,7 @@ from app.auth.decorators import (
     _load_user_from_token,
     enforce_password_change_requirement,
 )
+from app.models.user import User
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +55,7 @@ def load_user():
 
 def _admin_required():
     """Check if the current user is an admin."""
-    if not hasattr(g, "user_role") or g.user_role != "admin":
+    if not hasattr(g, "user_role") or not User.is_admin_role(g.user_role):
         return jsonify({"error": "Admin access required"}), 403
     return None
 

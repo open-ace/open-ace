@@ -2582,7 +2582,7 @@ def attach_terminal(terminal_id):
 
     # Check access
     agent_mgr = get_remote_agent_manager()
-    if g.user.get("role") != "admin":
+    if not User.is_admin_role(g.user.get("role")):
         if not agent_mgr.check_user_access(machine_id, g.user["id"]):
             return jsonify({"error": "Access denied"}), 403
 
@@ -2728,7 +2728,7 @@ def get_terminal_status(terminal_id):
             return jsonify({"success": True, "terminal": info})
 
     # Standard user authentication
-    if g.user.get("role") != "admin":
+    if not User.is_admin_role(g.user.get("role")):
         if not agent_mgr.check_user_access(machine_id, g.user["id"]):
             return jsonify({"error": "Access denied"}), 403
 
@@ -3302,7 +3302,7 @@ def create_remote_directory(machine_id):
 
     agent_mgr = get_remote_agent_manager()
 
-    if g.user.get("role") != "admin":
+    if not User.is_admin_role(g.user.get("role")):
         if not agent_mgr.check_user_access(machine_id, g.user["id"]):
             return jsonify({"error": "Access denied"}), 403
 
@@ -3394,7 +3394,7 @@ def _dispatch_remote_git_command(machine_id, command, required_params):
 
     agent_mgr = get_remote_agent_manager()
 
-    if g.user.get("role") != "admin":
+    if not User.is_admin_role(g.user.get("role")):
         if not agent_mgr.check_user_access(machine_id, g.user["id"]):
             return jsonify({"error": "Access denied"}), 403
 
@@ -3562,7 +3562,7 @@ def remote_vscode_status(vscode_id):
 
     machine_id, info = found
 
-    if g.user.get("role") != "admin":
+    if not User.is_admin_role(g.user.get("role")):
         if not agent_mgr.check_user_access(machine_id, g.user["id"]):
             return jsonify({"error": "Access denied"}), 403
 
@@ -3597,7 +3597,7 @@ def remote_vscode_attach(vscode_id):
     if not machine_id:
         return jsonify({"success": False, "error": "machine_id is required"}), 400
 
-    if g.user.get("role") != "admin":
+    if not User.is_admin_role(g.user.get("role")):
         if not agent_mgr.check_user_access(machine_id, g.user["id"]):
             return jsonify({"error": "Access denied"}), 403
 
