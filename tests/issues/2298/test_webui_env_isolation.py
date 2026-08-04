@@ -8,8 +8,9 @@ Verify that WebUI process receives minimal environment with:
 """
 
 import os
-import pytest
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from app.services.webui_manager import WebUIManager
 
