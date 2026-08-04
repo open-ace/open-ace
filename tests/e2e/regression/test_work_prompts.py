@@ -105,8 +105,8 @@ def test_prompt_search():
                         search_input.fill("test")
                         page.wait_for_timeout(500)
                         search_input.clear()
-                except Exception:
-                    pass
+                except Exception as exc:  # Issue #2189: don't swallow
+                    print(f"(non-fatal: {exc})")
 
             save_screenshot(page, MODULE_NAME, "03_search")
             return True
@@ -134,8 +134,8 @@ def test_prompt_detail():
                     if prompt_item.is_visible():
                         prompt_item.click()
                         page.wait_for_timeout(500)
-                except Exception:
-                    pass
+                except Exception as exc:  # Issue #2189: don't swallow
+                    print(f"(non-fatal: {exc})")
 
             save_screenshot(page, MODULE_NAME, "04_detail")
             return True

@@ -150,8 +150,8 @@ def test_log_detail():
                     if log_item.is_visible():
                         log_item.click()
                         page.wait_for_timeout(500)
-                except Exception:
-                    pass
+                except Exception as exc:  # Issue #2189: don't swallow
+                    print(f"(non-fatal: {exc})")
 
             save_screenshot(page, MODULE_NAME, "05_detail")
             return True

@@ -126,8 +126,8 @@ def test_edit_user():
                     if edit_btn.is_visible():
                         edit_btn.click()
                         page.wait_for_timeout(500)
-                except Exception:
-                    pass
+                except Exception as exc:  # Issue #2189: don't swallow
+                    print(f"(non-fatal: {exc})")
 
             save_screenshot(page, MODULE_NAME, "04_edit_user")
             return True

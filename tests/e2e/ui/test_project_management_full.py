@@ -92,8 +92,8 @@ def test_project_management(ui_screenshot_dir):
             error_visible = False
             try:
                 error_visible = error_elem.is_visible(timeout=3000)
-            except Exception:
-                pass
+            except Exception as exc:  # Issue #2189: don't swallow
+                print(f"(non-fatal: {exc})")
             if error_visible:
                 error_text = error_elem.text_content()
                 print(f"    ERROR: {error_text}")
@@ -133,8 +133,8 @@ def test_project_management(ui_screenshot_dir):
                 view_visible = False
                 try:
                     view_visible = view_btn.is_visible(timeout=3000)
-                except Exception:
-                    pass
+                except Exception as exc:  # Issue #2189: don't swallow
+                    print(f"(non-fatal: {exc})")
                 if view_visible:
                     view_btn.click()
                     time.sleep(2)
@@ -144,8 +144,8 @@ def test_project_management(ui_screenshot_dir):
                     modal_visible = False
                     try:
                         modal_visible = modal.is_visible(timeout=3000)
-                    except Exception:
-                        pass
+                    except Exception as exc:  # Issue #2189: don't swallow
+                        print(f"(non-fatal: {exc})")
                     if modal_visible:
                         print("    Modal opened successfully")
                         save_screenshot(page, "05_detail_modal")
@@ -171,8 +171,8 @@ def test_project_management(ui_screenshot_dir):
                 delete_visible = False
                 try:
                     delete_visible = delete_btn.is_visible(timeout=3000)
-                except Exception:
-                    pass
+                except Exception as exc:  # Issue #2189: don't swallow
+                    print(f"(non-fatal: {exc})")
                 if delete_visible:
                     delete_btn.click()
                     time.sleep(1)
@@ -182,8 +182,8 @@ def test_project_management(ui_screenshot_dir):
                     confirm_visible = False
                     try:
                         confirm_visible = confirm_modal.is_visible(timeout=3000)
-                    except Exception:
-                        pass
+                    except Exception as exc:  # Issue #2189: don't swallow
+                        print(f"(non-fatal: {exc})")
                     if confirm_visible:
                         print("    Delete confirmation modal shown")
                         save_screenshot(page, "06_delete_modal")

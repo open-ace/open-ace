@@ -123,8 +123,8 @@ def test_refresh_functionality():
                     if refresh_btn.is_visible():
                         refresh_btn.click()
                         page.wait_for_timeout(1000)
-                except Exception:
-                    pass
+                except Exception as exc:  # Issue #2189: don't swallow
+                    print(f"(non-fatal: {exc})")
 
             save_screenshot(page, MODULE_NAME, "04_refresh")
             return True

@@ -98,11 +98,16 @@ jobs:
             exit 1
           fi
 
-          # Check against baseline (if exists)
+          # Check against baseline (if exists) — Issue #2189 Scope #4b: hard gate.
+          # A drop below the baseline (already set conservatively at ~90% of the
+          # actual collected count) fails the required test job so silent test
+          # loss cannot merge. Raise the baseline in .test-baseline.json when
+          # collection legitimately shrinks.
           if [ -f ".test-baseline.json" ]; then
             baseline=$(python -c "import json; print(json.load(open('.test-baseline.json'))['layers']['default']['min_tests'])" 2>/dev/null || echo "0")
             if [ "$baseline" -gt 0 ] && [ "$count" -lt "$baseline" ]; then
-              echo "::warning::Test count $count below baseline $baseline"
+              echo "::error::Test count $count below baseline $baseline (Issue #2189 under-count hard gate). Update .test-baseline.json if the drop is intentional."
+              exit 1
             fi
           fi
 
@@ -111,6 +116,16 @@ jobs:
           tail -n 20 collection.txt
           echo "Total tests collected: $count"
           echo "================================="
+
+      - name: Scan test code for false-positive patterns
+        run: |
+          # Issue #2189 Scope #6: fail if any broad `except Exception: pass` P0
+          # remains in core tests. Auto-generated tests/issues subtrees are
+          # excluded (raise a follow-up to cover them); the scanner is fast and
+          # version-independent, so it runs on every Python in the matrix.
+          python scripts/scan_test_false_positives.py tests \
+            --pattern broad_except_pass \
+            --exclude-dirs tests/issues
 
       - name: Run tests
         run: |

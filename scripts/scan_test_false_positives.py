@@ -8,6 +8,7 @@ Detects:
 3. Broad except: pass in helper functions (P1)
 """
 
+import argparse
 import ast
 import re
 import sys
@@ -155,30 +156,102 @@ def scan_file(filepath: Path) -> list[Finding]:
     return visitor.findings
 
 
-def scan_tests(test_dir: Path) -> list[Finding]:
-    """Scan all test files for false positive patterns."""
+def _is_excluded(rel_path: Path, exclude_dirs: list[str], root_name: str = "") -> bool:
+    """Return True if ``rel_path`` falls under one of the exclude dirs.
+
+    Each exclude may be specified either relative to the scan root (``issues``)
+    or with the scan-root prefix (``tests/issues``); both are accepted.
+    """
+    posix = rel_path.as_posix()
+    prefix = f"{root_name}/" if root_name else ""
+    for excl in exclude_dirs:
+        norm = excl.strip().strip("/").rstrip("/")
+        if not norm:
+            continue
+        if prefix and norm.startswith(prefix):
+            norm = norm[len(prefix) :]
+        if posix == norm or posix.startswith(norm + "/"):
+            return True
+    return False
+
+
+def scan_tests(
+    test_dir: Path,
+    pattern: str = "all",
+    exclude_dirs: list[str] | None = None,
+) -> list[Finding]:
+    """Scan all test files for false positive patterns.
+
+    Args:
+        test_dir: Root directory to scan recursively.
+        pattern: Restrict to a single pattern (``broad_except_pass``,
+            ``no_assertion``, or ``all``).
+        exclude_dirs: Directory subtrees (relative to ``test_dir``) to skip,
+            e.g. auto-generated ``tests/issues``.
+    """
+    exclude_dirs = exclude_dirs or []
     all_findings: list[Finding] = []
 
     for py_file in test_dir.rglob("*.py"):
         # Only scan test files
         if not (py_file.name.startswith(("test_", "e2e_")) or py_file.name.endswith("_test.py")):
             continue
+        try:
+            rel = py_file.relative_to(test_dir)
+        except ValueError:
+            rel = py_file
+        if _is_excluded(rel, exclude_dirs, root_name=test_dir.name):
+            continue
 
         findings = scan_file(py_file)
+        if pattern != "all":
+            findings = [f for f in findings if f.pattern == pattern]
         all_findings.extend(findings)
 
     return all_findings
 
 
-def main() -> int:
-    """Main entry point."""
-    project_root = Path(__file__).resolve().parents[1]
-    tests_dir = project_root / "tests"
+def main(argv: list[str] | None = None) -> int:
+    """Main entry point.
 
-    print("Scanning test code for false positive patterns (Issue #2189)...")
+    Exit code is 1 if any P0 finding remains after pattern/exclude filtering.
+    """
+    project_root = Path(__file__).resolve().parents[1]
+
+    parser = argparse.ArgumentParser(
+        description="Scan test code for false-positive patterns (Issue #2189)."
+    )
+    parser.add_argument(
+        "dir",
+        nargs="?",
+        default="tests",
+        help="Root test directory to scan (default: tests). Relative paths "
+        "resolve against the project root.",
+    )
+    parser.add_argument(
+        "--pattern",
+        choices=["all", "broad_except_pass", "no_assertion"],
+        default="all",
+        help="Restrict the scan to a single pattern (default: all).",
+    )
+    parser.add_argument(
+        "--exclude-dirs",
+        nargs="*",
+        default=[],
+        metavar="DIR",
+        help="Directory subtrees to skip (e.g. tests/issues).",
+    )
+    args = parser.parse_args(argv)
+
+    test_dir = Path(args.dir)
+    if not test_dir.is_absolute():
+        test_dir = project_root / test_dir
+
+    print(f"Scanning {test_dir} for false positive patterns (Issue #2189)...")
+    print(f"  pattern={args.pattern!r} exclude_dirs={args.exclude_dirs}")
     print("=" * 70)
 
-    findings = scan_tests(tests_dir)
+    findings = scan_tests(test_dir, pattern=args.pattern, exclude_dirs=args.exclude_dirs)
 
     if not findings:
         print("No false positive patterns detected.")

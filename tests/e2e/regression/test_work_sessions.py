@@ -104,8 +104,8 @@ def test_session_filter():
                         filter_input.fill("test")
                         page.wait_for_timeout(500)
                         filter_input.clear()
-                except Exception:
-                    pass
+                except Exception as exc:  # Issue #2189: don't swallow
+                    print(f"(non-fatal: {exc})")
 
             save_screenshot(page, MODULE_NAME, "03_filter")
             return True
@@ -133,8 +133,8 @@ def test_session_detail():
                     if session_item.is_visible():
                         session_item.click()
                         page.wait_for_timeout(500)
-                except Exception:
-                    pass
+                except Exception as exc:  # Issue #2189: don't swallow
+                    print(f"(non-fatal: {exc})")
 
             save_screenshot(page, MODULE_NAME, "04_detail")
             return True

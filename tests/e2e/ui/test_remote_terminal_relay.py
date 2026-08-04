@@ -233,8 +233,8 @@ def test_remote_terminal_e2e(ui_screenshot_dir):
             test_results.append(("测试执行", False))
             try:
                 screenshot("error")
-            except Exception:
-                pass
+            except Exception as exc:  # Issue #2189: don't swallow
+                print(f"(non-fatal: {exc})")
         finally:
             browser.close()
 
