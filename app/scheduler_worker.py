@@ -188,7 +188,9 @@ class SchedulerWorker:
                         from app.services.leader_election import is_leader
 
                         is_leader_now = is_leader()
-                        response_body = f'{{"status": "healthy", "is_leader": {str(is_leader_now).lower()}}}'
+                        response_body = (
+                            f'{{"status": "healthy", "is_leader": {str(is_leader_now).lower()}}}'
+                        )
                         start_response("200 OK", [("Content-Type", "application/json")])
                         return [response_body.encode("utf-8")]
                     except Exception:
@@ -210,7 +212,9 @@ class SchedulerWorker:
             server_thread = threading.Thread(target=self._metrics_server.serve_forever, daemon=True)
             server_thread.start()
             logger.info(f"Metrics server started on port {self._metrics_port}")
-            logger.info("Endpoints: /livez (liveness), /health (health+leader), /metrics (prometheus)")
+            logger.info(
+                "Endpoints: /livez (liveness), /health (health+leader), /metrics (prometheus)"
+            )
 
         except ImportError as e:
             logger.warning(

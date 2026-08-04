@@ -357,12 +357,15 @@ def create_app(config=None):
         @app.route("/metrics")
         def metrics_endpoint():
             """Fallback metrics endpoint when prometheus_flask_exporter is not available."""
-            return jsonify(
-                {
-                    "status": "error",
-                    "message": "prometheus_flask_exporter not installed. Install with: pip install prometheus_flask_exporter",
-                }
-            ), 503
+            return (
+                jsonify(
+                    {
+                        "status": "error",
+                        "message": "prometheus_flask_exporter not installed. Install with: pip install prometheus_flask_exporter",
+                    }
+                ),
+                503,
+            )
 
     # Register blueprints
     register_blueprints(app)

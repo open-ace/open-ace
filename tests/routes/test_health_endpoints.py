@@ -150,7 +150,7 @@ class TestReadyzEndpoint:
             # We test that the sanitized error message is returned
             with patch(
                 "app.utils.health_checks.check_database_connection",
-                return_value={"status": "error", "error": "connection_failed"}
+                return_value={"status": "error", "error": "connection_failed"},
             ):
                 resp = client.get("/readyz")
                 data = json.loads(resp.data)
@@ -258,10 +258,7 @@ class TestHealthChecksUtility:
 
     def test_check_initialization_status_error(self):
         """Test initialization status check when failed."""
-        from app.utils.health_checks import (
-            check_initialization_status,
-            set_init_error,
-        )
+        from app.utils.health_checks import check_initialization_status, set_init_error
 
         set_init_error("Test error", "test")
         result = check_initialization_status()
@@ -290,10 +287,7 @@ class TestHealthChecksUtility:
             return {"status": "ok"}
 
         with app.app_context():
-            with patch(
-                "app.utils.health_checks.check_config_directory",
-                side_effect=slow_check
-            ):
+            with patch("app.utils.health_checks.check_config_directory", side_effect=slow_check):
                 # Should not timeout because run_check_with_timeout has 1s timeout
                 resp = client.get("/readyz")
                 # Should return 503 due to timeout
