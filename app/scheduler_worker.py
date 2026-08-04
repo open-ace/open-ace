@@ -140,8 +140,11 @@ class SchedulerWorker:
             # Import check script
             import scripts.check_min_revision
 
-            # Run check
-            if not scripts.check_min_revision.check_min_revision():
+            # Run check. scripts.check_min_revision.main() returns 0 when the
+            # DB revision is on the supported lineage (or the DB is fresh), and
+            # non-zero when it's too old/unsupported — the same semantics the
+            # CLI entry point uses.
+            if scripts.check_min_revision.main() != 0:
                 logger.error(
                     "Database schema version is too old. "
                     "Required: baseline_2026_06_23. "
