@@ -3,6 +3,7 @@
  */
 
 import { apiClient } from './client';
+import type { ToolAccount } from './toolAccounts';
 
 // Types
 export interface MappingRule {
@@ -59,14 +60,28 @@ export interface MappingSuggestion {
   rule_id: number | null;
 }
 
+// Issue #2131: New response type for generate default rules
+export interface MappingRuleInfo {
+  pattern: string;
+  match_type: string;
+  priority: number;
+}
+
+export interface GenerateDefaultRulesResponse {
+  created: MappingRule[];
+  skipped: MappingRuleInfo[];
+  created_count: number;
+  skipped_count: number;
+}
+
 // API
 export const mappingRulesApi = {
   async getAllRules(): Promise<MappingRule[]> {
-    return apiClient.get<MappingRule[]>('/mapping-rules');
+    return apiClient.get<MappingRule[]>('/api/mapping-rules');
   },
 
   async getUserRules(userId: number): Promise<MappingRule[]> {
-    return apiClient.get<MappingRule[]>(`/mapping-rules/user/${userId}`);
+    return apiClient.get<MappingRule[]>(`/api/mapping-rules/user/${userId}`);
   },
 
   async createRule(data: {
@@ -79,7 +94,7 @@ export const mappingRulesApi = {
     is_active?: boolean;
     description?: string;
   }): Promise<MappingRule> {
-    return apiClient.post<MappingRule>('/mapping-rules', data);
+    return apiClient.post<MappingRule>('/api/mapping-rules', data);
   },
 
   async updateRule(
@@ -95,19 +110,21 @@ export const mappingRulesApi = {
       description?: string;
     }
   ): Promise<MappingRule> {
-    return apiClient.put<MappingRule>(`/mapping-rules/${id}`, data);
+    return apiClient.put<MappingRule>(`/api/mapping-rules/${id}`, data);
   },
 
   async deleteRule(id: number): Promise<void> {
-    await apiClient.delete(`/mapping-rules/${id}`);
+    await apiClient.delete(`/api/mapping-rules/${id}`);
   },
 
-  async generateDefaultRules(userId: number): Promise<MappingRule[]> {
-    return apiClient.post<MappingRule[]>(`/mapping-rules/user/${userId}/generate-default`);
+  async generateDefaultRules(userId: number): Promise<GenerateDefaultRulesResponse> {
+    return apiClient.post<GenerateDefaultRulesResponse>(
+      `/api/mapping-rules/user/${userId}/generate-default`
+    );
   },
 
   async getMappingStats(): Promise<MappingStats> {
-    return apiClient.get<MappingStats>('/mapping-stats');
+    return apiClient.get<MappingStats>('/api/mapping-stats');
   },
 
   async runAutoMapping(dryRun: boolean = false): Promise<{
@@ -121,23 +138,23 @@ export const mappingRulesApi = {
       unmapped_count: number;
       mappings: AutoMappingResult[];
       dry_run: boolean;
-    }>('/mapping-rules/auto-map', { dry_run: dryRun });
+    }>('/api/mapping-rules/auto-map', { dry_run: dryRun });
   },
 
   async testMatch(toolAccount: string, toolType?: string): Promise<MatchTestResult> {
-    return apiClient.post<MatchTestResult>('/mapping-rules/test-match', {
+    return apiClient.post<MatchTestResult>('/api/mapping-rules/test-match', {
       tool_account: toolAccount,
       tool_type: toolType,
     });
   },
 
   async getUnmappedAccounts(): Promise<UnmappedAccount[]> {
-    return apiClient.get<UnmappedAccount[]>('/unmapped-accounts');
+    return apiClient.get<UnmappedAccount[]>('/api/unmapped-accounts');
   },
 
   async suggestMapping(senderName: string): Promise<MappingSuggestion> {
     return apiClient.get<MappingSuggestion>(
-      `/unmapped-accounts/${encodeURIComponent(senderName)}/suggest-mapping`
+      `/api/unmapped-accounts/${encodeURIComponent(senderName)}/suggest-mapping`
     );
   },
 
@@ -147,13 +164,13 @@ export const mappingRulesApi = {
     toolType?: string,
     description?: string
   ): Promise<ToolAccount> {
-    return apiClient.post<ToolAccount>(`/unmapped-accounts/${encodeURIComponent(senderName)}/map`, {
-      user_id: userId,
-      tool_type: toolType,
-      description,
-    });
+    return apiClient.post<ToolAccount>(
+      `/api/unmapped-accounts/${encodeURIComponent(senderName)}/map`,
+      {
+        user_id: userId,
+        tool_type: toolType,
+        description,
+      }
+    );
   },
 };
-
-// Import ToolAccount type from toolAccounts.ts
-import type { ToolAccount } from './toolAccounts';

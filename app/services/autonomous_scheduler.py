@@ -26,7 +26,11 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Maximum concurrent workflow executions
-MAX_CONCURRENT_WORKFLOWS = 3
+# Global ceiling on concurrently-running workflows across ALL users (a per-user
+# cap is enforced separately via tenant ``max_sessions_per_user`` in selection).
+# Raised 3 → 10 (#2295): the former global-3 starved multi-user deployments.
+# Still overridable via ``agent_max_concurrent_workflows`` in agent-launcher.conf.
+MAX_CONCURRENT_WORKFLOWS = 10
 
 # Issue #2020: the concurrency cap is configurable via the same
 # agent-launcher.conf the launcher reads. The constant above is the default
@@ -126,6 +130,10 @@ class AutonomousScheduler:
         # See #1002: deduping on project_path alone starved forked children.
         self._in_progress_workspaces: set[str] = set()
         self._in_progress_branches: set[str] = set()
+        # Per-user running workflow_ids (#2295). Keyed by owner user_id (None/0
+        # owners bucket under 0 and count only against the global ceiling). The
+        # scheduler selection gates each user at their tenant max_sessions_per_user.
+        self._in_progress_by_user: dict[int, set[str]] = {}
         self._in_progress_lock = threading.Lock()
         self._running_orchestrators: dict[str, AutonomousOrchestrator] = {}
         self._orchestrator_lock = threading.Lock()
@@ -218,6 +226,11 @@ class AutonomousScheduler:
                 batch_id = wf.get("batch_id")
                 if batch_id:
                     self._in_progress_batch_ids.discard(batch_id)
+                # Per-user bucket (#2295). wf.get (not wf[]) — legacy/odd rows may
+                # lack the key; the review flagged wf["user_id"] would KeyError.
+                owner_id = wf.get("user_id")
+                if owner_id is not None:
+                    self._in_progress_by_user.get(owner_id, set()).discard(workflow_id)
 
         # Release the DB-level lock so the next cycle can acquire it.
         try:
@@ -456,6 +469,13 @@ class AutonomousScheduler:
         # Get workflow's batch_id and git-conflict keys for cleanup
         workflow = repo.get_workflow(workflow_id)
         batch_id = workflow.get("batch_id") if workflow else None
+        # Owner used for per-user in-progress accounting (#2295). Resolved here
+        # (NOT inside the try below) so the Site-A early return + the finally can
+        # both discard from _in_progress_by_user without a NameError.
+        owner_id = workflow.get("user_id") if workflow else None
+        # None owner (legacy rows) buckets under 0; counts only against the global
+        # ceiling, not any per-user cap (the selection gate skips None owners).
+        owner_bucket = owner_id if owner_id is not None else 0
         workspace, branch = self._conflict_keys(workflow) if workflow else ("", "")
         # Waiting workflows bypass conflict locks (see _process_workflows).
         # Capture this so cleanup paths don't release another workflow's keys.
@@ -473,6 +493,7 @@ class AutonomousScheduler:
             logger.debug("Workflow %s is locked by another instance, skipping", workflow_id[:8])
             with self._in_progress_lock:
                 self._in_progress_ids.discard(workflow_id)
+                self._in_progress_by_user.get(owner_bucket, set()).discard(workflow_id)
                 if batch_id and not was_waiting:
                     self._in_progress_batch_ids.discard(batch_id)
                 if workspace and not was_waiting:
@@ -498,7 +519,7 @@ class AutonomousScheduler:
         # quota-paused workflow would hold both forever.
         orchestrator = None
         try:
-            owner_id = workflow.get("user_id") if workflow else None
+            # owner_id resolved above (alongside batch_id) for in-progress accounting.
             if owner_id is not None:
                 try:
                     from app.modules.governance.quota_manager import QuotaManager
@@ -558,6 +579,7 @@ class AutonomousScheduler:
                 logger.warning("Failed to release lock for workflow %s", workflow_id[:8])
             with self._in_progress_lock:
                 self._in_progress_ids.discard(workflow_id)
+                self._in_progress_by_user.get(owner_bucket, set()).discard(workflow_id)
                 if batch_id and not was_waiting:
                     self._in_progress_batch_ids.discard(batch_id)
                 if workspace and not was_waiting:
@@ -722,6 +744,35 @@ class AutonomousScheduler:
             repo.update_workflow(workflow["workflow_id"], {"status": "pending"})
             _emit_event_safe(workflow["workflow_id"], "status_change", {"status": "pending"})
 
+    def _per_user_cap(self, user_id: int | None) -> int | None:
+        """The per-user running cap = the owner's tenant ``max_sessions_per_user``.
+
+        Mirrors the create-time ``_check_user_concurrent_limit`` lookup
+        (app/routes/autonomous.py). Returns None for a None owner (legacy rows),
+        which the selection gate treats as "no per-user limit" — such workflows
+        count only against the global ceiling. Default 5 when the user has no
+        tenant or the tenant has no explicit quota.
+        """
+        if user_id is None:
+            return None
+        from app.repositories.tenant_repo import TenantRepository
+        from app.repositories.user_repo import UserRepository
+
+        DEFAULT_MAX_SESSIONS = 5
+        try:
+            user = UserRepository().get_user_by_id(user_id)
+            if not user:
+                return DEFAULT_MAX_SESSIONS
+            tenant_id = user.get("tenant_id")
+            if not tenant_id:
+                return DEFAULT_MAX_SESSIONS
+            tenant = TenantRepository().get_by_id(tenant_id)
+            if tenant:
+                return tenant.quota.max_sessions_per_user
+        except Exception as exc:  # noqa: BLE001 — fail-open like the create-time check
+            logger.warning("per-user cap lookup failed for user %s: %s", user_id, exc)
+        return DEFAULT_MAX_SESSIONS
+
     def _process_workflows(self):
         """Find and process active workflows using thread pool for concurrency.
 
@@ -787,15 +838,39 @@ class AutonomousScheduler:
         # were already running before this poll; without local reservations,
         # multiple newly auto-resumed siblings from one batch (or workflows
         # sharing a worktree/branch) can all enter ``to_process`` together.
+        #
+        # Per-user running cap (#2295): resolve each owner's tenant
+        # max_sessions_per_user once per cycle (DB lookups OUTSIDE the lock),
+        # then gate inside the lock. None owners (legacy rows) skip the
+        # per-user gate and count only against the global ceiling.
+        per_user_caps: dict[int | None, int | None] = {}
+        for wf in active:
+            uid = wf.get("user_id")
+            if uid not in per_user_caps:
+                per_user_caps[uid] = self._per_user_cap(uid)
+
         with self._in_progress_lock:
             slots_available = get_max_concurrent_workflows() - len(self._in_progress_ids)
             selected_batches: set[str] = set()
             selected_workspaces: set[str] = set()
             selected_branches: set[str] = set()
+            selected_by_user: dict[int, int] = {}  # per-user reservations this cycle
             to_process: list[dict] = []
             for wf in active:
                 if len(to_process) >= max(0, slots_available):
                     break
+                # Per-user gate. Waiting workflows count against it (matching
+                # count_active_workflows_by_user); they still bypass conflict
+                # keys below. cap is None only for legacy None-owner rows.
+                uid = wf.get("user_id")
+                cap = per_user_caps.get(uid)
+                bucket = uid if uid is not None else 0
+                if cap is not None:
+                    running = len(
+                        self._in_progress_by_user.get(bucket, set())
+                    ) + selected_by_user.get(bucket, 0)
+                    if running >= cap:
+                        continue
                 batch_id = wf.get("batch_id")
                 workspace, branch = self._conflict_keys(wf)
                 is_waiting = wf.get("status") == "waiting"
@@ -806,6 +881,8 @@ class AutonomousScheduler:
                 if branch and branch in selected_branches and not is_waiting:
                     continue
                 to_process.append(wf)
+                if cap is not None:
+                    selected_by_user[bucket] = selected_by_user.get(bucket, 0) + 1
                 if batch_id:
                     selected_batches.add(batch_id)
                 if workspace:
@@ -819,7 +896,14 @@ class AutonomousScheduler:
         # Mark workflows, their batches, and git-conflict keys as in-progress
         with self._in_progress_lock:
             for wf in to_process:
-                self._in_progress_ids.add(wf.get("workflow_id", ""))
+                wf_id = wf.get("workflow_id", "")
+                self._in_progress_ids.add(wf_id)
+                # Per-user in-progress accounting (#2295). Bucket key matches the
+                # discard sites in _advance_single (Site A + finally) + clear_in_progress.
+                uid = wf.get("user_id")
+                self._in_progress_by_user.setdefault(uid if uid is not None else 0, set()).add(
+                    wf_id
+                )
                 # Waiting workflows bypass conflict locks — don't reserve their
                 # keys so we don't block other workflows, and don't release
                 # another workflow's keys in _advance_single's finally.

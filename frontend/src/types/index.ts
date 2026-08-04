@@ -7,7 +7,7 @@ export interface User {
   id: string;
   username: string;
   email: string;
-  role: 'admin' | 'manager' | 'user' | 'readonly';
+  role: 'admin' | 'platform_admin' | 'tenant_admin' | 'manager' | 'user' | 'readonly';
   tenant_id?: number;
   createdAt: string;
   lastLogin?: string;

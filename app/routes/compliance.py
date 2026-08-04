@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 from flask import Blueprint, Response, g, jsonify, request
 
 from app.auth.decorators import admin_required, resolve_tenant_scope
+from app.models.user import User
 from app.modules.compliance.audit import AuditAnalyzer
 from app.modules.compliance.report import ReportGenerator, ReportType
 from app.modules.compliance.retention import DataRetentionManager
@@ -155,7 +156,8 @@ def generate_report():
     target_tenant_id = caller_tenant_id
 
     # Platform admin can request cross-tenant reports with explicit tenant_id
-    if user_role == "platform_admin" and data.get("tenant_id") is not None:
+    # Issue #2286: Accept legacy 'admin' role alongside 'platform_admin' for backward compatibility.
+    if user_role in ("platform_admin", "admin") and data.get("tenant_id") is not None:
         requested_tenant_id = data["tenant_id"]
         # Validate tenant exists
         db = Database()
@@ -185,7 +187,7 @@ def generate_report():
     # Legacy admin: backward compatibility
     # - With tenant_id: scoped to that tenant (like tenant_admin)
     # - Without tenant_id: global access (like platform_admin)
-    elif user_role == "admin":
+    elif User.is_admin_role(user_role):
         if caller_tenant_id is not None:
             # Scoped to caller's tenant
             target_tenant_id = caller_tenant_id

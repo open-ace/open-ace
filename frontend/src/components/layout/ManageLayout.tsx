@@ -28,6 +28,7 @@ import { useAuth } from '@/hooks';
 import { t } from '@/i18n';
 import { ModeSwitcher } from '@/components/common';
 import { Header } from './Header';
+import { isAdmin } from '@/utils/permissions';
 
 interface NavItem {
   id: string;
@@ -373,7 +374,7 @@ export const ManageLayout: React.FC<ManageLayoutProps> = ({ children }) => {
                   )}
                 >
                   {section.items.map((item) => {
-                    const isDisabled = item.adminOnly && user?.role !== 'admin';
+                    const isDisabled = item.adminOnly && !isAdmin(user);
                     return (
                       <li key={item.id}>
                         <Link

@@ -1230,6 +1230,7 @@ class AutonomousOrchestrator:
         branch = gh.get_current_branch()
         head = gh.get_current_commit()
         origin = gh._run_git(["remote", "get-url", "origin"], check=False).stdout.strip()
+        main_head = gh._run_git(["rev-parse", "origin/main"], check=False).stdout.strip()
         git_dir = gh._run_git(["rev-parse", "--absolute-git-dir"]).stdout.strip()
         common_dir = gh._run_git(
             ["rev-parse", "--path-format=absolute", "--git-common-dir"]
@@ -1245,12 +1246,88 @@ class AutonomousOrchestrator:
             "top_level": os.path.realpath(top_level) if top_level else "",
             "branch": branch,
             "head": head,
+            "main_head": main_head,
             "origin": origin,
             "git_dir": os.path.realpath(git_dir),
             "common_dir": os.path.realpath(common_dir),
             "git_identity": git_identity,
             "common_identity": common_identity,
         }
+
+    def recover_worktree_branch(
+        self,
+        gh: "GitHubOps",
+        expected_branch: str,
+        before_head: str,
+        before_main_head: str,
+    ) -> str | None:
+        """Public PhaseHost-facing alias for ``_recover_worktree_branch`` (#2302).
+
+        Lets the pr_review push check recover a worktree the agent left on
+        another branch, without reaching past the PhaseHost protocol.
+        """
+        return self._recover_worktree_branch(gh, expected_branch, before_head, before_main_head)
+
+    def _recover_worktree_branch(
+        self,
+        gh: "GitHubOps",
+        expected_branch: str,
+        before_head: str,
+        before_main_head: str,
+    ) -> str | None:
+        """Recover the worktree onto ``expected_branch`` after an agent left it
+        on another branch (e.g. a read-only ``git checkout main``). Returns a
+        non-empty reason when recovery was safe and performed (worktree is now
+        on ``expected_branch``); None when the change is NOT safely recoverable
+        and the caller must fail closed (#2271, prod 212/208).
+
+        Recovery runs only when the agent's branch switch was provably
+        read-only:
+
+        * ``expected_branch`` ref is unchanged (``== before_head``) — the agent
+          did not move the feature branch.
+        * The worktree is clean (``git status --porcelain`` empty) — staged or
+          untracked changes would otherwise ride the checkout into the feature
+          branch and get pushed.
+        * The wrong branch's HEAD still equals ``before_main_head`` (the main
+          HEAD captured before the agent ran) — the agent committed nothing to
+          / fetched no advance of the wrong branch. Live ``origin/main`` is
+          intentionally NOT trusted: an agent can ``update-ref`` it.
+
+        Anything else returns None so the caller keeps the #1611 fail-closed
+        guard.
+        """
+        if not expected_branch or not before_head or not before_main_head:
+            return None
+        try:
+            feature_ref = gh._run_git(["rev-parse", expected_branch], check=False).stdout.strip()
+        except Exception:
+            return None
+        if not feature_ref or feature_ref != before_head:
+            return None
+        try:
+            porcelain = gh._run_git(["status", "--porcelain"], check=False).stdout.strip()
+        except Exception:
+            return None
+        if porcelain:
+            return None
+        try:
+            wrong_branch_head = gh.get_current_commit()
+        except Exception:
+            return None
+        if not wrong_branch_head or wrong_branch_head != before_main_head:
+            return None
+        try:
+            gh._run_git(["checkout", expected_branch], check=True)
+        except Exception:
+            return None
+        logger.warning(
+            "Recovered worktree onto %s after an agent left it on another "
+            "branch (read-only checkout); feature ref %s unchanged, worktree clean.",
+            expected_branch,
+            before_head,
+        )
+        return f"recovered worktree onto {expected_branch} after read-only agent branch switch"
 
     def _ancestor_check(self, gh: "GitHubOps", a: str, b: str) -> bool | None:
         """Return True if ``a`` is an ancestor of ``b``, False if not, None on
@@ -1391,10 +1468,33 @@ class AutonomousOrchestrator:
                 f"expected repo root {expected_root}, actual {actual_root}"
             )
         if expected_branch and after_effective.get("branch") != expected_branch:
-            return (
-                "Agent changed the workflow branch unexpectedly: "
-                f"expected {expected_branch}, actual {after_effective.get('branch', '')}"
-            )
+            # #2271 (prod 212/208): an agent may leave the worktree on another
+            # branch via a read-only checkout (e.g. ``git checkout main`` to
+            # read a file). When that switch is provably read-only (feature
+            # branch ref unchanged, worktree clean, wrong-branch HEAD == the
+            # pre-run main HEAD), recover onto expected_branch instead of
+            # permanently failing the workflow. Anything else stays fail-closed.
+            recovered = None
+            try:
+                recover_gh = GitHubOps(repo_path, system_account=system_account)
+                recovered = self._recover_worktree_branch(
+                    recover_gh,
+                    expected_branch,
+                    before_state.get("effective", {}).get("head", ""),
+                    before_state.get("effective", {}).get("main_head", ""),
+                )
+            except Exception:
+                recovered = None
+            if recovered:
+                logger.info("Workflow %s: %s", self._workflow_id[:8], recovered)
+                # Worktree is back on expected_branch; fall through (no
+                # violation). origin/git_dir/common_dir below are unaffected by
+                # a branch-only checkout and remain valid.
+            else:
+                return (
+                    "Agent changed the workflow branch unexpectedly: "
+                    f"expected {expected_branch}, actual {after_effective.get('branch', '')}"
+                )
         before_origin = before_state.get("effective", {}).get("origin", "")
         after_origin = after_effective.get("origin", "")
         if before_origin != after_origin:
@@ -1854,6 +1954,19 @@ class AutonomousOrchestrator:
             )
         return ""
 
+    @staticmethod
+    def _is_merge_commit(gh: GitHubOps, commit_sha: str) -> bool:
+        """Check if a commit is a merge commit (has two parents).
+
+        A merge commit has at least two parent commits (SHA^1 and SHA^2).
+        Regular commits have only one parent (SHA^1).
+        """
+        try:
+            result = gh._run_git(["rev-parse", f"{commit_sha}^2"], check=False)
+            return result.returncode == 0
+        except Exception:
+            return False
+
     def _validate_autonomous_change_scope(
         self,
         gh: GitHubOps,
@@ -1864,6 +1977,33 @@ class AutonomousOrchestrator:
         """Fail closed on both per-round and cumulative branch scope."""
         if not commit_before or not commit_after:
             return "Autonomous change scope could not be verified: missing commit boundary"
+
+        # If commit_after is a merge commit, use merge-base to find effective base.
+        # This excludes changes introduced by merging upstream main, which should not
+        # count as autonomous changes. This mirrors the logic in
+        # _validate_pre_merge_change_scope for consistent scope validation.
+        if self._is_merge_commit(gh, commit_after):
+            try:
+                gh._run_git(["fetch", "origin", "main"])
+                fetched_main_head = gh.resolve_commit("FETCH_HEAD")
+                merge_base_result = gh._run_git(
+                    ["merge-base", commit_after, fetched_main_head], check=False
+                )
+                effective_base = merge_base_result.stdout.strip()
+                if merge_base_result.returncode == 0 and effective_base:
+                    # Use merge-base as the effective round base for scope validation.
+                    # This only counts changes in the PR branch, not merge-introduced changes.
+                    commit_before = effective_base
+                    logger.info(
+                        "Merge commit detected: using merge-base %s as effective round base",
+                        effective_base[:12],
+                    )
+            except Exception as exc:
+                # Fallback to original logic if merge-base derivation fails
+                logger.warning(
+                    "Failed to derive merge-base for merge commit scope validation: %s", exc
+                )
+
         ranges = [("current round", commit_before)]
         cumulative_base = (wf.get("base_commit_sha") or "").strip()
         if not cumulative_base:
@@ -8428,7 +8568,7 @@ class AutonomousOrchestrator:
         # changes the way dev does, else the fix never reaches the PR (#960
         # symptom). A no-op fix is genuinely empty, not a failed dev round.
         commit_sha = ""
-        diff_stats = {}
+        diff_stats: dict[str, int] = {}
         try:
             commit_sha = gh.get_current_commit()
         except Exception as exc:

@@ -64,13 +64,35 @@ export const MappingRulesEditor: React.FC<MappingRulesEditorProps> = ({
   const handleGenerateDefaultRules = async () => {
     setIsGenerating(true);
     try {
-      const generated = await mappingRulesApi.generateDefaultRules(userId);
-      setRules(generated);
-      toast.success(
-        language === 'zh'
-          ? `已生成 ${generated.length} 条默认规则`
-          : `Generated ${generated.length} default rules`
-      );
+      const result = await mappingRulesApi.generateDefaultRules(userId);
+
+      // Update rules list with created rules
+      setRules(result.created);
+
+      // Show appropriate message based on result
+      if (result.created_count > 0 && result.skipped_count > 0) {
+        // Partial success: some created, some skipped
+        toast.success(
+          language === 'zh'
+            ? `已生成 ${result.created_count} 条新规则，跳过 ${result.skipped_count} 条已存在规则`
+            : `Generated ${result.created_count} new rules, skipped ${result.skipped_count} existing rules`
+        );
+      } else if (result.created_count > 0) {
+        // All new rules created
+        toast.success(
+          language === 'zh'
+            ? `已生成 ${result.created_count} 条默认规则`
+            : `Generated ${result.created_count} default rules`
+        );
+      } else if (result.skipped_count > 0) {
+        // All rules already existed
+        toast.info(
+          language === 'zh'
+            ? '用户已有默认规则，无需重复生成'
+            : 'Default rules already exist, no need to regenerate'
+        );
+      }
+
       onChange?.();
     } catch (err) {
       console.error('Failed to generate default rules:', err);

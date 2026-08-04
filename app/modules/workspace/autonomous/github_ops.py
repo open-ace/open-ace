@@ -53,6 +53,12 @@ _TRANSIENT_ERROR_KEYWORDS = [
     "unable to access",
     "rpc failed",
     "early eof",
+    # libcurl "Empty reply from server" — git emits this verbatim (in English,
+    # even under a non-C host locale) on a transient TLS/connection drop to the
+    # remote. Without it, exit-128 empty-reply permanent-fails the workflow
+    # instead of retrying (#2299).
+    "empty reply",
+    "empty response",
 ]
 
 

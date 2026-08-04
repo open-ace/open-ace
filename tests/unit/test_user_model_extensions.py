@@ -17,11 +17,16 @@ class TestUserModelExtensions:
         user = User(id=1, role="platform_admin", tenant_id=None)
         assert user.is_platform_admin() is True
 
-    def test_is_platform_admin_false_admin(self):
-        """Test platform admin check for legacy admin role"""
+    def test_is_platform_admin_legacy_admin(self):
+        """Test platform admin check for legacy admin role.
+
+        Issue #2286: Legacy 'admin' role is treated as platform_admin
+        for backward compatibility with installations initialized before
+        the #2179 role model migration.
+        """
         user = User(id=1, role="admin", tenant_id=None)
-        # Legacy admin is NOT platform admin
-        assert user.is_platform_admin() is False
+        # Legacy admin IS treated as platform admin (backward compatibility)
+        assert user.is_platform_admin() is True
 
     def test_is_platform_admin_false_tenant_admin(self):
         """Test platform admin check for tenant admin"""

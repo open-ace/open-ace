@@ -196,7 +196,10 @@ def test_cumulative_scope_guard_derives_immutable_base_when_main_moved(monkeypat
         ["app/a.py", "app/b.py"],
     ]
 
-    reason = orch._validate_autonomous_change_scope(gh, {}, "round-base", "head")
+    # Mock _is_merge_commit to return False (not a merge commit)
+    # so the test focuses on cumulative scope guard logic
+    with patch.object(orch, "_is_merge_commit", return_value=False):
+        reason = orch._validate_autonomous_change_scope(gh, {}, "round-base", "head")
 
     assert reason == ""
     gh._run_git.assert_called_once_with(["merge-base", "head", "origin/main"], check=False)
@@ -212,7 +215,9 @@ def test_cumulative_scope_guard_fails_closed_when_base_cannot_be_derived():
     gh = MagicMock()
     gh._run_git.return_value = MagicMock(returncode=1, stdout="")
 
-    reason = orch._validate_autonomous_change_scope(gh, {}, "round-base", "head")
+    # Mock _is_merge_commit to return False (not a merge commit)
+    with patch.object(orch, "_is_merge_commit", return_value=False):
+        reason = orch._validate_autonomous_change_scope(gh, {}, "round-base", "head")
 
     assert "missing immutable base commit" in reason
     gh.get_changed_files.assert_not_called()

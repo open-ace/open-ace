@@ -51,9 +51,17 @@ k8s/
 | CPU | 100m | 500m |
 | 内存 | 256Mi | 512Mi |
 
-**健康检查：**
-- 存活检查：HTTP GET `/health`，initialDelay=10s，period=10s
-- 就绪检查：HTTP GET `/health`，initialDelay=5s，period=5s
+**健康检查（Issue #2186）：**
+- 存活检查：HTTP GET `/livez`，initialDelay=10s，period=10s（仅检查进程存活）
+- 就绪检查：HTTP GET `/readyz`，initialDelay=5s，period=5s（检查数据库、配置、依赖）
+- 启动探针：HTTP GET `/readyz`，failureThreshold=60，period=5s（最多等待 300s）
+- Prometheus 抓取：`/metrics` 端点（Prometheus 格式）
+
+**端点职责：**
+- `/livez`：进程存活检查，不检查依赖，避免因短暂抖动触发重启
+- `/readyz`：就绪检查，验证数据库连接、Schema 兼容性、配置目录、工作空间
+- `/metrics`：Prometheus 指标暴露
+- `/health`：已弃用，委托给 `/readyz`，响应包含 `deprecated: true`
 
 **Pod 反亲和性：** 优先分散到不同节点，以便在容量允许时保持可用性。
 
