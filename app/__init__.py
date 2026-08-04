@@ -334,7 +334,8 @@ def create_app(config=None):
             from prometheus_flask_exporter import PrometheusMetrics
 
             # Initialize metrics with /metrics path
-            metrics = PrometheusMetrics(
+            # PrometheusMetrics auto-registers to Flask app on init
+            PrometheusMetrics(
                 app,
                 path="/metrics",
                 group_by_endpoint=True,
