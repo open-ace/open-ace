@@ -73,8 +73,7 @@ def login(page: Page):
     except PlaywrightTimeoutError:
         save_screenshot(page, "login", "form_not_visible")
         raise AssertionError(
-            "Login form elements not visible within 10s. "
-            "Check if page loaded correctly"
+            "Login form elements not visible within 10s. " "Check if page loaded correctly"
         )
 
     # 填写凭据
