@@ -32,6 +32,34 @@ from app.utils.workspace import run_as_root_if_needed
 
 logger = logging.getLogger(__name__)
 
+# Environment variable keys that are handled by sudoers env_keep
+# (preserved automatically) and should NOT be inlined via
+# openace-webui-launch. Everything else (dynamic envKeys from model
+# pools, etc.) gets inlined automatically.
+_WEBUI_ENV_SUDO_KNOWN_KEYS = frozenset(
+    {
+        "PATH",
+        "OPENACE_PROXY_TOKEN",
+        "OPENACE_PROXY_URL",
+        "OPENACE_MODEL",
+        "OPENACE_LOG_DIR",
+        "SESSION_TIMEOUT_MS",
+        "KEEPALIVE_INTERVAL_MS",
+        "OPENAI_API_KEY",
+        "OPENAI_BASE_URL",
+        "LANG",
+        "LC_ALL",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "NO_PROXY",
+    }
+)
+
+# Path to the secure launch wrapper that enables inline env-var
+# passthrough via /usr/bin/env without granting unrestricted env access
+# in sudoers (Issue #2305 review).
+_WEBUI_LAUNCH_WRAPPER = "/usr/local/bin/openace-webui-launch"
+
 
 @dataclass
 class WebUIInstance:
@@ -1022,7 +1050,10 @@ class WebUIManager:
                 except OSError as e:
                     logger.warning(f"Failed to chown log dir: {e}")
 
-        # Build command based on platform
+        # Build command based on platform.
+        # popen_env tracks whether to pass child_env to Popen; for the sudo
+        # inline path env vars are already in the command, so skip it.
+        popen_env = child_env
         if webui_dir:
             # Running from project directory using node
             cmd = [
@@ -1059,46 +1090,55 @@ class WebUIManager:
                 ]
                 cwd = None
             else:
-                # Different user: use sudo -u with /usr/bin/env to pass environment.
+                # Different user: use sudo -u with openace-webui-launch wrapper
+                # to pass environment variables inline.
                 # Issue #2298: Popen(env=child_env) is filtered by sudo env_keep,
-                # so we inline env vars as /usr/bin/env arguments to bypass it.
-                # Only pass vars NOT already preserved by sudoers env_keep
-                # (PATH, OPENACE_PROXY_*, OPENACE_MODEL, OPENACE_LOG_DIR,
-                #  GIT_*, SESSION_TIMEOUT_MS, KEEPALIVE_INTERVAL_MS).
+                # so we inline env vars as arguments to the launch wrapper.
+                # The wrapper execs /usr/bin/env with all supplied args; sudoers
+                # restricts it to only be called with the webui path as first
+                # non-env argument (no arbitrary command execution).
                 env_args = []
                 # Standard keys: LLM config + locale + proxy
-                for key in ["OPENAI_API_KEY", "OPENAI_BASE_URL", "LANG", "LC_ALL",
-                           "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY"]:
+                for key in [
+                    "OPENAI_API_KEY",
+                    "OPENAI_BASE_URL",
+                    "LANG",
+                    "LC_ALL",
+                    "HTTP_PROXY",
+                    "HTTPS_PROXY",
+                    "NO_PROXY",
+                ]:
                     if child_env.get(key):
                         env_args.append(f"{key}={child_env[key]}")
                 # Dynamic envKeys from model pool (e.g., BAILIAN_CODING_PLAN_API_KEY)
-                known_keys = {"PATH", "OPENACE_PROXY_TOKEN", "OPENACE_PROXY_URL",
-                             "OPENACE_MODEL", "OPENACE_LOG_DIR",
-                             "SESSION_TIMEOUT_MS", "KEEPALIVE_INTERVAL_MS",
-                             "OPENAI_API_KEY", "OPENAI_BASE_URL", "LANG", "LC_ALL",
-                             "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY"}
                 for key, value in child_env.items():
-                    if key not in known_keys and value:
+                    if key not in _WEBUI_ENV_SUDO_KNOWN_KEYS and value:
                         env_args.append(f"{key}={value}")
 
-                cmd = [
-                    "sudo",
-                    "-u",
-                    system_account,
-                    "/usr/bin/env",
-                ] + env_args + [
-                    webui_cmd,
-                    "--port",
-                    str(port),
-                    "--host",
-                    "0.0.0.0",
-                    "--token-secret",
-                    self.config.token_secret,
-                    "--quota-check-enabled",
-                    "--openace-api-url",
-                    openace_api_url,
-                ]
+                cmd = (
+                    [
+                        "sudo",
+                        "-u",
+                        system_account,
+                        _WEBUI_LAUNCH_WRAPPER,
+                    ]
+                    + env_args
+                    + [
+                        webui_cmd,
+                        "--port",
+                        str(port),
+                        "--host",
+                        "0.0.0.0",
+                        "--token-secret",
+                        self.config.token_secret,
+                        "--quota-check-enabled",
+                        "--openace-api-url",
+                        openace_api_url,
+                    ]
+                )
                 cwd = None
+                # Env vars already inlined via launch wrapper; skip Popen env param.
+                popen_env = None
         else:
             # Other platforms: direct execution (no user switching)
             cmd = [
@@ -1130,7 +1170,7 @@ class WebUIManager:
                 cmd,
                 start_new_session=True,  # Detach from parent process group
                 cwd=cwd,
-                env=child_env,  # Passed to sudo; preserved via sudoers env_keep
+                env=popen_env,  # None for sudo-inline path (vars already in cmd)
                 stdout=subprocess.DEVNULL,  # WebUI handles its own logging via OPENACE_LOG_DIR
                 stderr=subprocess.DEVNULL,
             )

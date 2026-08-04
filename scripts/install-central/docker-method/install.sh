@@ -852,10 +852,10 @@ $RUN_USER ALL=(root) NOPASSWD: $wrapper_bin *"
 # Allows the service account to run qwen-code-webui as other users
 # 【安全加固 Issue #2181】删除高风险通配规则
 
-# WebUI 启动规则：允许以任意用户运行，Python 层验证目标用户
-# Issue #2298: /usr/bin/env 用于内联传递 LLM 配置环境变量（OPENAI_API_KEY 等），
-# 绕过 sudo env_keep 过滤。env 中的值是 proxy_token，非真实 API key。
-$RUN_USER ALL=(ALL) NOPASSWD: $webui_path *, /usr/bin/env *
+# WebUI 启动规则：通过 openace-webui-launch wrapper 以任意用户运行
+# Issue #2298: wrapper 内联传递 LLM 配置环境变量，绕过 sudo env_keep 过滤。
+# wrapper 限定首参为 $webui_path，防止 /usr/bin/env * 权限提升。
+$RUN_USER ALL=(ALL) NOPASSWD: /usr/local/bin/openace-webui-launch "$webui_path" *
 
 # 低风险工具（Issue #2181：移除 cat/chown/rm，改用 wrapper）
 $RUN_USER ALL=(root) NOPASSWD: /usr/bin/test *, /usr/bin/ls *, /usr/bin/stat *, /usr/bin/mkdir *, /usr/bin/id *, /usr/bin/find *

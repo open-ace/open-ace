@@ -12,7 +12,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app.services.webui_manager import WebUIManager
+from app.services.webui_manager import (
+    WebUIManager,
+    _WEBUI_ENV_SUDO_KNOWN_KEYS,
+    _WEBUI_LAUNCH_WRAPPER,
+)
 
 
 class TestWebUIEnvIsolation:
@@ -245,3 +249,210 @@ class TestWebUIEnvIsolation:
                 # Assert none of the forbidden variables leak
                 for var in forbidden_vars:
                     assert var not in env, f"{var} should NOT be in WebUI environment"
+
+
+class TestSudoInlineEnvArgs:
+    """Test sudo inline env-arg passthrough for Issue #2298 / PR #2305."""
+
+    def test_known_keys_contains_expected_vars(self):
+        """_WEBUI_ENV_SUDO_KNOWN_KEYS should contain all env_keep-managed vars."""
+        expected = {
+            "PATH",
+            "OPENACE_PROXY_TOKEN",
+            "OPENACE_PROXY_URL",
+            "OPENACE_MODEL",
+            "OPENACE_LOG_DIR",
+            "SESSION_TIMEOUT_MS",
+            "KEEPALIVE_INTERVAL_MS",
+            "OPENAI_API_KEY",
+            "OPENAI_BASE_URL",
+            "LANG",
+            "LC_ALL",
+            "HTTP_PROXY",
+            "HTTPS_PROXY",
+            "NO_PROXY",
+        }
+        missing = expected - _WEBUI_ENV_SUDO_KNOWN_KEYS
+        assert not missing, f"Missing keys in _WEBUI_ENV_SUDO_KNOWN_KEYS: {missing}"
+        extra = _WEBUI_ENV_SUDO_KNOWN_KEYS - expected
+        assert not extra, f"Unexpected keys in _WEBUI_ENV_SUDO_KNOWN_KEYS: {extra}"
+
+    def test_known_keys_is_frozenset(self):
+        """_WEBUI_ENV_SUDO_KNOWN_KEYS should be immutable frozenset."""
+        assert isinstance(
+            _WEBUI_ENV_SUDO_KNOWN_KEYS, frozenset
+        ), "Should be frozenset for immutability"
+
+    def test_launch_wrapper_path_constant(self):
+        """_WEBUI_LAUNCH_WRAPPER should point to the secure wrapper."""
+        assert _WEBUI_LAUNCH_WRAPPER == "/usr/local/bin/openace-webui-launch"
+
+    def test_dynamic_envkey_not_in_known_keys(self):
+        """Dynamic envKeys from model pool should NOT be in KNOWN_KEYS
+        (they get inlined automatically in the sudo path)."""
+        dynamic_envkey = "BAILIAN_CODING_PLAN_API_KEY"
+        assert (
+            dynamic_envkey not in _WEBUI_ENV_SUDO_KNOWN_KEYS
+        ), f"{dynamic_envkey} is dynamic and should NOT be in known_keys"
+
+    @pytest.fixture
+    def manager(self):
+        config = MagicMock()
+        config.token_secret = "test-secret"
+        config.webui_callback_url = ""
+        return WebUIManager(config)
+
+    @patch("app.services.webui_manager.pwd")
+    @patch("app.services.webui_manager.subprocess.Popen")
+    def test_sudo_path_cmd_includes_launch_wrapper(self, mock_popen, mock_pwd, manager):
+        """Verify sudo path uses the wrapper, not raw /usr/bin/env."""
+        # Set platform to linux + current_user != system_account
+        manager._platform = "linux"
+        mock_pwd.getpwuid.return_value.pw_name = "service_user"
+
+        mock_pool = {"proxy_token": "test-token", "provider": "openai", "models": []}
+        with patch.object(manager, "_build_local_session_model_pool", return_value=mock_pool):
+            with patch.object(
+                manager,
+                "_build_webui_env",
+                return_value=(
+                    {"OPENAI_API_KEY": "tk", "OPENAI_BASE_URL": "url", "PATH": "/bin"},
+                    mock_pool,
+                ),
+            ):
+                with patch.object(
+                    manager, "_find_webui_executable", return_value=("/opt/qwen-code-webui", None)
+                ):
+                    with patch.object(manager, "_get_or_select_port", return_value=3100):
+                        process, _ = manager._launch_webui_process(
+                            user_id=1,
+                            system_account="target_user",
+                            openace_api_url="http://localhost",
+                        )
+
+                call_args = mock_popen.call_args
+                cmd = call_args[0][0]  # cmd list
+
+                # The command should include the launch wrapper, not raw /usr/bin/env
+                assert _WEBUI_LAUNCH_WRAPPER in cmd, "sudo path should use openace-webui-launch"
+                assert "/usr/bin/env" not in cmd, "should not use raw /usr/bin/env"
+
+    @patch("app.services.webui_manager.pwd")
+    @patch("app.services.webui_manager.subprocess.Popen")
+    def test_sudo_path_skips_popen_env(self, mock_popen, mock_pwd, manager):
+        """Verify sudo path does NOT pass child_env to Popen (vars are inlined)."""
+        manager._platform = "linux"
+        mock_pwd.getpwuid.return_value.pw_name = "service_user"
+
+        mock_pool = {"proxy_token": "test-token", "provider": "openai", "models": []}
+        with patch.object(manager, "_build_local_session_model_pool", return_value=mock_pool):
+            with patch.object(
+                manager,
+                "_build_webui_env",
+                return_value=(
+                    {"OPENAI_API_KEY": "tk", "PATH": "/bin", "LANG": "C.UTF-8"},
+                    mock_pool,
+                ),
+            ):
+                with patch.object(
+                    manager, "_find_webui_executable", return_value=("/opt/qwen-code-webui", None)
+                ):
+                    with patch.object(manager, "_get_or_select_port", return_value=3100):
+                        manager._launch_webui_process(
+                            user_id=1,
+                            system_account="target_user",
+                            openace_api_url="http://localhost",
+                        )
+
+                call_kwargs = mock_popen.call_args[1]
+                # In sudo path, env should be None (not child_env)
+                assert call_kwargs.get("env") is None, (
+                    "sudo path should not pass child_env to Popen "
+                    "(env vars already inlined via launch wrapper)"
+                )
+
+    @patch("app.services.webui_manager.pwd")
+    @patch("app.services.webui_manager.subprocess.Popen")
+    def test_same_user_path_passes_child_env(self, mock_popen, mock_pwd, manager):
+        """Verify same-user path still passes child_env to Popen."""
+        manager._platform = "linux"
+        mock_pwd.getpwuid.return_value.pw_name = "same_user"
+
+        mock_pool = {"proxy_token": "test-token", "provider": "openai", "models": []}
+        with patch.object(manager, "_build_local_session_model_pool", return_value=mock_pool):
+            with patch.object(
+                manager,
+                "_build_webui_env",
+                return_value=(
+                    {"OPENAI_API_KEY": "tk", "PATH": "/bin"},
+                    mock_pool,
+                ),
+            ):
+                with patch.object(
+                    manager, "_find_webui_executable", return_value=("/opt/qwen-code-webui", None)
+                ):
+                    with patch.object(manager, "_get_or_select_port", return_value=3100):
+                        manager._launch_webui_process(
+                            user_id=1,
+                            system_account="same_user",
+                            openace_api_url="http://localhost",
+                        )
+
+                call_kwargs = mock_popen.call_args[1]
+                # In same-user path, env should be child_env (not None)
+                assert (
+                    call_kwargs.get("env") is not None
+                ), "same-user path should pass child_env to Popen"
+                assert "OPENAI_API_KEY" in call_kwargs["env"]
+
+    @patch("app.services.webui_manager.pwd")
+    @patch("app.services.webui_manager.subprocess.Popen")
+    def test_sudo_path_inlines_dynamic_envkey(self, mock_popen, mock_pwd, manager):
+        """Verify dynamic envKey is inlined in sudo path command."""
+        manager._platform = "linux"
+        mock_pwd.getpwuid.return_value.pw_name = "service_user"
+
+        # Model pool with a custom envKey (dynamic)
+        mock_pool = {
+            "proxy_token": "test-token",
+            "provider": "bailian",
+            "models": [{"name": "qwen-coding", "envKey": "BAILIAN_CODING_PLAN_API_KEY"}],
+        }
+        with patch.object(manager, "_build_local_session_model_pool", return_value=mock_pool):
+            with patch.object(
+                manager,
+                "_build_webui_env",
+                return_value=(
+                    {
+                        "OPENAI_API_KEY": "tk",
+                        "OPENAI_BASE_URL": "url",
+                        "PATH": "/bin",
+                        "BAILIAN_CODING_PLAN_API_KEY": "dyn-token",
+                    },
+                    mock_pool,
+                ),
+            ):
+                with patch.object(
+                    manager, "_find_webui_executable", return_value=("/opt/qwen-code-webui", None)
+                ):
+                    with patch.object(manager, "_get_or_select_port", return_value=3100):
+                        manager._launch_webui_process(
+                            user_id=1,
+                            system_account="target_user",
+                            openace_api_url="http://localhost",
+                        )
+
+                cmd = mock_popen.call_args[0][0]
+                # The dynamic envKey should appear as an inline env arg
+                assert any(
+                    "BAILIAN_CODING_PLAN_API_KEY" in arg for arg in cmd
+                ), "Dynamic envKey should be inlined in sudo cmd"
+
+    @patch("app.services.webui_manager.pwd")
+    @patch("app.services.webui_manager.subprocess.Popen")
+    def test_sudo_path_no_sensitive_known_keys(self, mock_popen, mock_pwd, manager):
+        """Verify known_keys does NOT contain sensitive vars that should never leak."""
+        assert "DATABASE_URL" not in _WEBUI_ENV_SUDO_KNOWN_KEYS
+        assert "TOKEN_SECRET" not in _WEBUI_ENV_SUDO_KNOWN_KEYS
+        assert "GH_TOKEN" not in _WEBUI_ENV_SUDO_KNOWN_KEYS
+        assert "ANTHROPIC_API_KEY" not in _WEBUI_ENV_SUDO_KNOWN_KEYS
