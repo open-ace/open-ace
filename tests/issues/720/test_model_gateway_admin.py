@@ -393,6 +393,30 @@ class TestApiKeyFallback:
             created_by=2,
         )
 
+    @patch("app.routes.model_gateway.get_gateway_service")
+    @patch("app.auth.decorators._load_user_from_token")
+    def test_update_without_base_url_skips_database_query(
+        self, mock_load, mock_get_service, gw_app
+    ):
+        """P1: Missing base_url should fail fast without DB query for api_key."""
+        mock_load.return_value = {"id": 2, "role": "admin"}
+
+        svc = MagicMock()
+        mock_get_service.return_value = svc
+
+        resp = gw_app.test_client().put(
+            "/api/management/model-gateway-config",
+            headers={"Authorization": "Bearer t"},
+            json={"api_key": "some-key"},  # base_url missing
+        )
+        assert resp.status_code == 400
+        data = resp.get_json()
+        assert data["success"] is False
+        assert "base_url" in data["error"]
+
+        # Verify no DB query was made for api_key fallback
+        svc.get_config_with_key.assert_not_called()
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

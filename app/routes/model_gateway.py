@@ -66,6 +66,10 @@ def update_model_gateway_config():
         base_url = data.get("base_url")
         api_key = data.get("api_key")
 
+        # Validate base_url early to avoid unnecessary DB query for api_key fallback
+        if not base_url:
+            return jsonify({"success": False, "error": "Missing required field: base_url"}), 400
+
         # Issue #2170: Frontend omits api_key field to preserve existing key.
         # Fall back to stored config when api_key is None (field not sent).
         if api_key is None:
@@ -82,9 +86,6 @@ def update_model_gateway_config():
             except Exception as e:
                 logger.error("Failed to retrieve stored gateway config: %s", e)
                 return jsonify({"success": False, "error": "Internal server error"}), 500
-
-        if not base_url:
-            return jsonify({"success": False, "error": "Missing required field: base_url"}), 400
 
         model_prefix_mode = bool(data.get("model_prefix_mode", False))
         model_prefix = data.get("model_prefix") or None
