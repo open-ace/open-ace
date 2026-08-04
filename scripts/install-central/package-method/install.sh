@@ -2247,8 +2247,15 @@ $run_user ALL=(root) NOPASSWD: $python_bin $script_path *"
 
     # 【安全加固 Issue #1262 + #2181】使用 Cmnd_Alias 引用
     # utility_rule 在用户规则中引用 OPENACE_UTILS Cmnd_Alias
-    # 【Issue #2181】限制 runas 为 root（原 ALL 改为 root）
-    local utility_rule="$run_user ALL=(root) NOPASSWD: OPENACE_UTILS"
+    # 【Issue #2280】runas 必须保留 (ALL)：github_ops 的服务端 git/gh 以
+    # `sudo -u <system_account>` 跨用户执行（#1395），无法改走
+    # openace-run-as --isolated（reject owner==target / env -i 剥凭据 /
+    # credentialless 账户模型）；fs.py/projects.py/autonomous.py 的跨用户
+    # test/ls/stat/mkdir 同理。#2181 曾把这里从 (ALL) 收紧为 (root)，部署后
+    # 所有 system_account≠openace 的工作流在 preparation `git fetch` 处全挂。
+    # 仅还 runas 目标；#2181 的 agent CLI 隔离（run-as --isolated）、移除
+    # cat/chown/useradd/rm、env_keep 收紧均保留。
+    local utility_rule="$run_user ALL=(ALL) NOPASSWD: OPENACE_UTILS"
 
     # 【安全加固 Issue #2181】删除 AI CLI 通配规则
     # 原 cli_rule 已删除，所有 AI CLI 启动必须通过 openace-run-as --isolated
