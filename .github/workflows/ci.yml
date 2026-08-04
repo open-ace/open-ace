@@ -119,13 +119,18 @@ jobs:
 
       - name: Scan test code for false-positive patterns
         run: |
-          # Issue #2189 Scope #6: fail if any broad `except Exception: pass` P0
-          # remains in core tests. Auto-generated tests/issues subtrees are
-          # excluded (raise a follow-up to cover them); the scanner is fast and
-          # version-independent, so it runs on every Python in the matrix.
+          # Issue #2189 Scope #6: semantic, 4-pattern regression gate
+          # (broad_except_swallow, no_assertion, return_true, erroneous_skip).
+          # Detection is AST-semantic so it cannot be gamed (e.g. print() instead
+          # of pass). Fails if any pattern's core count EXCEEDS the recorded
+          # baseline (.false-positive-baseline.json) — new false positives cannot
+          # slip in; ratchet the baseline down as findings are fixed
+          # (`python scripts/scan_test_false_positives.py tests --exclude-dirs
+          # tests/issues --update-baseline .false-positive-baseline.json`).
+          # Auto-generated tests/issues subtrees are excluded.
           python scripts/scan_test_false_positives.py tests \
-            --pattern broad_except_pass \
-            --exclude-dirs tests/issues
+            --exclude-dirs tests/issues \
+            --baseline .false-positive-baseline.json
 
       - name: Run tests
         run: |

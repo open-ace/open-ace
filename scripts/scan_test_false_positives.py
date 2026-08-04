@@ -1,16 +1,27 @@
 #!/usr/bin/env python3
 """
-Scan test code for false positive patterns (Issue #2189).
+Scan test code for false-positive patterns (Issue #2189, Scope #6).
 
-Detects:
-1. Broad except: pass in test functions (P0)
-2. Test functions without assertions (P0)
-3. Broad except: pass in helper functions (P1)
+Detects the four Scope #6 patterns, AST-semantically (not by literal ``pass``,
+so a ``print()`` cannot game it — round-2 review):
+
+1. ``broad_except_swallow`` — ``except Exception/BaseException`` whose body has
+   no ``raise``/``assert`` and no ``# allow-swallow: <reason>`` marker.
+2. ``no_assertion`` — test function with no assertion (``assert``,
+   ``pytest.raises``, ``pytest.fail``, unittest/mock assert*).
+3. ``return_true`` — test function with a literal ``return True`` and no
+   assertion (passes vacuously).
+4. ``erroneous_skip`` — ``pytest.skip()`` called unconditionally in a test
+   (skips that hide failures).
+
+Kept-but-reviewable instances opt out with explicit markers so the CI gate can
+fail on *unannotated* findings without false-noise:
+``# allow-swallow``, ``# allow-no-assert``, ``# allow-skip``.
 """
 
 import argparse
 import ast
-import re
+import json
 import sys
 from pathlib import Path
 from typing import NamedTuple
@@ -26,110 +37,203 @@ class Finding(NamedTuple):
     message: str
 
 
-class FalsePositiveScanner(ast.NodeVisitor):
-    """AST visitor to scan for false positive patterns."""
+ASSERT_METHODS = frozenset(
+    {
+        "assertEqual",
+        "assertEquals",
+        "assertNotEqual",
+        "assertTrue",
+        "assertFalse",
+        "assertIn",
+        "assertNotIn",
+        "assertIs",
+        "assertIsNot",
+        "assertIsNone",
+        "assertIsNotNone",
+        "assert_called",
+        "assert_called_once",
+        "assert_called_with",
+        "assert_called_once_with",
+        "assert_not_called",
+        "assertRaises",
+    }
+)
 
-    def __init__(self, filepath: str):
+
+def _func_start(node: ast.FunctionDef | ast.AsyncFunctionDef) -> int:
+    """First source line of a function, including decorators."""
+    starts = [node.lineno, *(d.lineno for d in node.decorator_list)]
+    return min(starts)
+
+
+def _src_contains(lines: list[str], start_lineno: int, end_lineno: int, needle: str) -> bool:
+    """Return True if ``needle`` appears in source lines [start_lineno, end_lineno]."""
+    start = max(start_lineno - 1, 0)
+    end = min(end_lineno, len(lines))
+    return any(needle in lines[i] for i in range(start, end))
+
+
+def _body_has_raise_or_assert(body: list[ast.stmt]) -> bool:
+    """True if the except body raises or asserts (i.e. does not swallow)."""
+    for stmt in body:
+        for n in ast.walk(stmt):
+            if isinstance(n, (ast.Raise, ast.Assert)):
+                return True
+    return False
+
+
+class FalsePositiveScanner(ast.NodeVisitor):
+    """AST visitor to scan for the four Scope #6 false-positive patterns."""
+
+    def __init__(self, filepath: str, source_lines: list[str]):
         self.filepath = filepath
+        self.source_lines = source_lines
         self.findings: list[Finding] = []
         self.current_function: str | None = None
+        self.current_func_node: ast.FunctionDef | ast.AsyncFunctionDef | None = None
         self.is_test_function = False
         self.has_assertion = False
+        self.has_return_true = False
+        self.cond_depth = 0  # >0 => inside if/try/with (conditional context)
 
-    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
-        """Visit function definition."""
-        # Track current function
-        old_function = self.current_function
-        old_is_test = self.is_test_function
-        old_has_assertion = self.has_assertion
-
+    def _visit_function(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
+        old = (
+            self.current_function,
+            self.current_func_node,
+            self.is_test_function,
+            self.has_assertion,
+            self.has_return_true,
+            self.cond_depth,
+        )
         self.current_function = node.name
+        self.current_func_node = node
         self.is_test_function = node.name.startswith("test_")
         self.has_assertion = False
+        self.has_return_true = False
+        self.cond_depth = 0
 
-        # Visit function body
         self.generic_visit(node)
 
-        # Check for test functions without assertions
-        if self.is_test_function and not self.has_assertion:
-            self.findings.append(
-                Finding(
-                    file=self.filepath,
-                    line=node.lineno,
-                    severity="P0",
-                    pattern="no_assertion",
-                    message=f"Test function '{node.name}' has no assertions",
+        if self.is_test_function:
+            start = _func_start(node)
+            end = node.end_lineno or node.lineno
+            allow_no_assert = _src_contains(self.source_lines, start, end, "allow-no-assert")
+            if not self.has_assertion and not allow_no_assert:
+                self.findings.append(
+                    Finding(
+                        file=self.filepath,
+                        line=node.lineno,
+                        severity="P0",
+                        pattern="no_assertion",
+                        message=f"Test function '{node.name}' has no assertions",
+                    )
                 )
-            )
+            if self.has_return_true and not self.has_assertion and not allow_no_assert:
+                self.findings.append(
+                    Finding(
+                        file=self.filepath,
+                        line=node.lineno,
+                        severity="P0",
+                        pattern="return_true",
+                        message=f"Test function '{node.name}' returns True without asserting",
+                    )
+                )
 
-        # Restore state
-        self.current_function = old_function
-        self.is_test_function = old_is_test
-        self.has_assertion = old_has_assertion
+        (
+            self.current_function,
+            self.current_func_node,
+            self.is_test_function,
+            self.has_assertion,
+            self.has_return_true,
+            self.cond_depth,
+        ) = old
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        self._visit_function(node)
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        self._visit_function(node)
 
     def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:
-        """Visit except handler to detect broad except: pass."""
-        # Check for broad except: pass
-        if node.type and isinstance(node.type, ast.Name):
-            if node.type.id in ("Exception", "BaseException"):
-                for child in node.body:
-                    if isinstance(child, ast.Pass):
-                        severity = "P0" if self.is_test_function else "P1"
+        broad = (
+            node.type
+            and isinstance(node.type, ast.Name)
+            and node.type.id in ("Exception", "BaseException")
+        )
+        if broad:
+            end = node.end_lineno or node.lineno
+            allow = _src_contains(self.source_lines, node.lineno, end, "allow-swallow")
+            if not _body_has_raise_or_assert(node.body) and not allow:
+                severity = "P0" if self.is_test_function else "P1"
+                self.findings.append(
+                    Finding(
+                        file=self.filepath,
+                        line=node.lineno,
+                        severity=severity,
+                        pattern="broad_except_swallow",
+                        message=(
+                            f"Broad except {node.type.id} swallows (no raise/assert) "
+                            f"in '{self.current_function}'"
+                        ),
+                    )
+                )
+        self.generic_visit(node)
+
+    def visit_Assert(self, node: ast.Assert) -> None:
+        self.has_assertion = True
+        self.generic_visit(node)
+
+    def visit_Return(self, node: ast.Return) -> None:
+        if isinstance(node.value, ast.Constant) and node.value.value is True:
+            self.has_return_true = True
+        self.generic_visit(node)
+
+    def visit_Call(self, node: ast.Call) -> None:
+        if isinstance(node.func, ast.Attribute):
+            if node.func.attr in ASSERT_METHODS:
+                self.has_assertion = True
+            if isinstance(node.func.value, ast.Name) and node.func.value.id == "pytest":
+                if node.func.attr in {"raises", "fail"}:
+                    self.has_assertion = True
+                if node.func.attr == "skip" and self.is_test_function and self.cond_depth == 0:
+                    fn = self.current_func_node
+                    allow_skip = fn is not None and _src_contains(
+                        self.source_lines,
+                        _func_start(fn),
+                        fn.end_lineno or fn.lineno,
+                        "allow-skip",
+                    )
+                    if not allow_skip:
                         self.findings.append(
                             Finding(
                                 file=self.filepath,
                                 line=node.lineno,
-                                severity=severity,
-                                pattern="broad_except_pass",
-                                message=f"Broad except {node.type.id}: pass in function '{self.current_function}'",
+                                severity="P1",
+                                pattern="erroneous_skip",
+                                message=(
+                                    f"Unconditional pytest.skip() in '{self.current_function}' "
+                                    f"hides failures"
+                                ),
                             )
                         )
-
         self.generic_visit(node)
 
-    def visit_Assert(self, node: ast.Assert) -> None:
-        """Visit assert statement."""
-        self.has_assertion = True
+    def _enter_conditional(self, node: ast.AST) -> None:
+        self.cond_depth += 1
         self.generic_visit(node)
+        self.cond_depth -= 1
 
-    def visit_Call(self, node: ast.Call) -> None:
-        """Visit function call to detect assertions."""
-        # Check for assert statements or pytest.raises
-        if isinstance(node.func, ast.Name):
-            if node.func.id == "assert":
-                self.has_assertion = True
-        elif isinstance(node.func, ast.Attribute):
-            # Check for standard assertions
-            if node.func.attr in (
-                "assert",
-                "assertEqual",
-                "assertTrue",
-                "assertFalse",
-                "assertIn",
-                "assertIs",
-                "assertIsNot",
-                "assert_called",
-                "assert_called_once",
-                "assert_called_with",
-                "assert_not_called",
-                "assert_called_once_with",
-            ):
-                self.has_assertion = True
-            # Check for pytest.raises
-            if (
-                isinstance(node.func.value, ast.Name)
-                and node.func.value.id == "pytest"
-                and node.func.attr == "raises"
-            ):
-                self.has_assertion = True
+    def visit_If(self, node: ast.If) -> None:
+        self._enter_conditional(node)
 
-        self.generic_visit(node)
+    def visit_Try(self, node: ast.Try) -> None:
+        self._enter_conditional(node)
 
+    def visit_With(self, node: ast.With) -> None:
+        self._enter_conditional(node)
 
-def has_assertion_regex(content: str) -> bool:
-    """Check if file has assertions using regex."""
-    # Check for assert statements or pytest.raises
-    return bool(re.search(r"\bassert\b|pytest\.raises", content))
+    def visit_AsyncWith(self, node: ast.AsyncWith) -> None:
+        self._enter_conditional(node)
 
 
 def scan_file(filepath: Path) -> list[Finding]:
@@ -139,20 +243,16 @@ def scan_file(filepath: Path) -> list[Finding]:
     except OSError:
         return []
 
-    # Skip files without test code
     if not ("def test_" in content or "def e2e_" in content):
         return []
 
-    # Parse AST
     try:
         tree = ast.parse(content, filename=str(filepath))
     except SyntaxError:
         return []
 
-    # Visit AST
-    visitor = FalsePositiveScanner(str(filepath))
+    visitor = FalsePositiveScanner(str(filepath), content.splitlines())
     visitor.visit(tree)
-
     return visitor.findings
 
 
@@ -180,20 +280,11 @@ def scan_tests(
     pattern: str = "all",
     exclude_dirs: list[str] | None = None,
 ) -> list[Finding]:
-    """Scan all test files for false positive patterns.
-
-    Args:
-        test_dir: Root directory to scan recursively.
-        pattern: Restrict to a single pattern (``broad_except_pass``,
-            ``no_assertion``, or ``all``).
-        exclude_dirs: Directory subtrees (relative to ``test_dir``) to skip,
-            e.g. auto-generated ``tests/issues``.
-    """
+    """Scan all test files for false positive patterns."""
     exclude_dirs = exclude_dirs or []
     all_findings: list[Finding] = []
 
     for py_file in test_dir.rglob("*.py"):
-        # Only scan test files
         if not (py_file.name.startswith(("test_", "e2e_")) or py_file.name.endswith("_test.py")):
             continue
         try:
@@ -212,14 +303,11 @@ def scan_tests(
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Main entry point.
-
-    Exit code is 1 if any P0 finding remains after pattern/exclude filtering.
-    """
+    """Main entry point. Exit code is 1 if any P0 finding remains after filtering."""
     project_root = Path(__file__).resolve().parents[1]
 
     parser = argparse.ArgumentParser(
-        description="Scan test code for false-positive patterns (Issue #2189)."
+        description="Scan test code for false-positive patterns (Issue #2189, Scope #6)."
     )
     parser.add_argument(
         "dir",
@@ -230,7 +318,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--pattern",
-        choices=["all", "broad_except_pass", "no_assertion"],
+        choices=["all", "broad_except_swallow", "no_assertion", "return_true", "erroneous_skip"],
         default="all",
         help="Restrict the scan to a single pattern (default: all).",
     )
@@ -241,26 +329,35 @@ def main(argv: list[str] | None = None) -> int:
         metavar="DIR",
         help="Directory subtrees to skip (e.g. tests/issues).",
     )
+    parser.add_argument(
+        "--baseline",
+        metavar="FILE",
+        help="Baseline JSON {pattern: count}. Exit 1 if any pattern's count "
+        "EXCEEDS the baseline (regression gate that ratchets down as findings "
+        "are fixed).",
+    )
+    parser.add_argument(
+        "--update-baseline",
+        metavar="FILE",
+        help="Write the current per-pattern counts to FILE and exit 0.",
+    )
     args = parser.parse_args(argv)
 
     test_dir = Path(args.dir)
     if not test_dir.is_absolute():
         test_dir = project_root / test_dir
 
-    print(f"Scanning {test_dir} for false positive patterns (Issue #2189)...")
+    print(f"Scanning {test_dir} for false positive patterns (Issue #2189, Scope #6)...")
     print(f"  pattern={args.pattern!r} exclude_dirs={args.exclude_dirs}")
     print("=" * 70)
 
     findings = scan_tests(test_dir, pattern=args.pattern, exclude_dirs=args.exclude_dirs)
-
-    if not findings:
-        print("No false positive patterns detected.")
-        return 0
-
-    # Sort by severity
     findings.sort(key=lambda f: (f.severity, f.file, f.line))
 
-    # Print findings
+    by_pattern: dict[str, int] = {}
+    for finding in findings:
+        by_pattern[finding.pattern] = by_pattern.get(finding.pattern, 0) + 1
+
     p0_count = sum(1 for f in findings if f.severity == "P0")
     p1_count = sum(1 for f in findings if f.severity == "P1")
     p2_count = sum(1 for f in findings if f.severity == "P2")
@@ -269,7 +366,20 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  P0 (must fix): {p0_count}")
     print(f"  P1 (review needed): {p1_count}")
     print(f"  P2 (low priority): {p2_count}")
+    print("Findings by pattern:")
+    for patt, cnt in sorted(by_pattern.items()):
+        print(f"  {patt}: {cnt}")
     print("=" * 70)
+
+    if args.update_baseline:
+        Path(args.update_baseline).write_text(
+            json.dumps(by_pattern, indent=2, sort_keys=True) + "\n"
+        )
+        print(f"Wrote baseline to {args.update_baseline}")
+        return 0
+
+    if args.baseline:
+        return _compare_baseline(Path(args.baseline), by_pattern)
 
     for finding in findings:
         print(f"\n[{finding.severity}] {finding.pattern}")
@@ -279,8 +389,28 @@ def main(argv: list[str] | None = None) -> int:
     print("\n" + "=" * 70)
     print(f"Total findings: {len(findings)}")
 
-    # Return non-zero if P0 findings exist
     return 1 if p0_count > 0 else 0
+
+
+def _compare_baseline(baseline_path: Path, by_pattern: dict[str, int]) -> int:
+    """Exit 1 if any pattern's count exceeds the recorded baseline."""
+    try:
+        baseline = json.loads(baseline_path.read_text())
+    except OSError as e:
+        print(f"::error::Cannot read baseline {baseline_path}: {e}")
+        return 1
+    regressions = []
+    for patt, current in sorted(by_pattern.items()):
+        allowed = baseline.get(patt, 0)
+        if current > allowed:
+            regressions.append((patt, current, allowed))
+        print(f"  {patt}: {current} (baseline {allowed})")
+    for patt, current, allowed in regressions:
+        print(
+            f"::error::{patt} count {current} exceeds baseline {allowed} "
+            f"(regression — fix the new finding or run --update-baseline)"
+        )
+    return 1 if regressions else 0
 
 
 if __name__ == "__main__":

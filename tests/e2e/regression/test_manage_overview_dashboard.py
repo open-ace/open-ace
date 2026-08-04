@@ -116,15 +116,10 @@ def test_refresh_functionality():
                 "button:has(.bi-arrow-clockwise)",
             ]
             if check_element_exists(page, refresh_selectors):
-                try:
-                    refresh_btn = page.locator(
-                        refresh_selectors[0] + ", " + refresh_selectors[1]
-                    ).first
-                    if refresh_btn.is_visible():
-                        refresh_btn.click()
-                        page.wait_for_timeout(1000)
-                except Exception as exc:  # Issue #2189: don't swallow
-                    print(f"(non-fatal: {exc})")
+                refresh_btn = page.locator(refresh_selectors[0] + ", " + refresh_selectors[1]).first
+                assert refresh_btn.is_visible(), "refresh_btn not visible (Issue #2189)"
+                refresh_btn.click()
+                page.wait_for_timeout(1000)
 
             save_screenshot(page, MODULE_NAME, "04_refresh")
             return True

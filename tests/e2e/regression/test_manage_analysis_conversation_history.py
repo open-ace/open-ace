@@ -96,11 +96,8 @@ def test_conversation_detail():
             conv_item = page.locator("tr, .list-item").first
 
             if conv_item.count() > 0 and conv_item.is_visible():
-                try:
-                    conv_item.click()
-                    page.wait_for_timeout(500)
-                except Exception as exc:  # Issue #2189: don't swallow
-                    print(f"(non-fatal: {exc})")
+                conv_item.click()
+                page.wait_for_timeout(500)
 
             save_screenshot(page, MODULE_NAME, "03_detail")
             return True

@@ -119,15 +119,10 @@ def test_edit_user():
             # 尝试点击编辑按钮
             edit_btn_selectors = ['button:has-text("Edit")', 'button:has-text("编辑")', ".edit-btn"]
             if check_element_exists(page, edit_btn_selectors):
-                try:
-                    edit_btn = page.locator(
-                        edit_btn_selectors[0] + ", " + edit_btn_selectors[1]
-                    ).first
-                    if edit_btn.is_visible():
-                        edit_btn.click()
-                        page.wait_for_timeout(500)
-                except Exception as exc:  # Issue #2189: don't swallow
-                    print(f"(non-fatal: {exc})")
+                edit_btn = page.locator(edit_btn_selectors[0] + ", " + edit_btn_selectors[1]).first
+                assert edit_btn.is_visible(), "edit_btn not visible (Issue #2189)"
+                edit_btn.click()
+                page.wait_for_timeout(500)
 
             save_screenshot(page, MODULE_NAME, "04_edit_user")
             return True

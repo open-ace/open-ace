@@ -136,13 +136,10 @@ def test_session_switch():
             # 尝试点击会话项
             session_item_selectors = [".session-item", ".session-card"]
             if check_element_exists(page, session_item_selectors):
-                try:
-                    session_item = page.locator(session_item_selectors[0]).first
-                    if session_item.is_visible():
-                        session_item.click()
-                        page.wait_for_timeout(500)
-                except Exception as exc:  # Issue #2189: don't swallow
-                    print(f"(non-fatal: {exc})")
+                session_item = page.locator(session_item_selectors[0]).first
+                assert session_item.is_visible(), "session_item not visible (Issue #2189)"
+                session_item.click()
+                page.wait_for_timeout(500)
 
             save_screenshot(page, MODULE_NAME, "05_session_switch")
             return True

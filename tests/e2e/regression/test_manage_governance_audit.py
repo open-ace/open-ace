@@ -143,15 +143,10 @@ def test_log_detail():
             # 尝试点击日志项查看详情
             log_item_selectors = [".audit-log-item", "tr", ".list-item"]
             if check_element_exists(page, log_item_selectors):
-                try:
-                    log_item = page.locator(
-                        log_item_selectors[0] + ", " + log_item_selectors[1]
-                    ).first
-                    if log_item.is_visible():
-                        log_item.click()
-                        page.wait_for_timeout(500)
-                except Exception as exc:  # Issue #2189: don't swallow
-                    print(f"(non-fatal: {exc})")
+                log_item = page.locator(log_item_selectors[0] + ", " + log_item_selectors[1]).first
+                assert log_item.is_visible(), "log_item not visible (Issue #2189)"
+                log_item.click()
+                page.wait_for_timeout(500)
 
             save_screenshot(page, MODULE_NAME, "05_detail")
             return True
