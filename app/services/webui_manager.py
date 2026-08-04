@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Open ACE - AI Computing Explorer - WebUI Manager Service
 
@@ -1053,7 +1052,7 @@ class WebUIManager:
         # Build command based on platform.
         # popen_env tracks whether to pass child_env to Popen; for the sudo
         # inline path env vars are already in the command, so skip it.
-        popen_env = child_env
+        popen_env: dict[str, str] | None = child_env
         if webui_dir:
             # Running from project directory using node
             cmd = [

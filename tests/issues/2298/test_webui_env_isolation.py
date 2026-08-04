@@ -13,9 +13,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from app.services.webui_manager import (
-    WebUIManager,
     _WEBUI_ENV_SUDO_KNOWN_KEYS,
     _WEBUI_LAUNCH_WRAPPER,
+    WebUIManager,
 )
 
 
