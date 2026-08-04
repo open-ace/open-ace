@@ -24,6 +24,7 @@ from app.auth.decorators import (
     enforce_password_change_requirement,
     security_annotated,
 )
+from app.models.user import User
 from app.modules.workspace.api_key_proxy import get_api_key_proxy_service
 from app.modules.workspace.collaboration import SharePermission, get_collaboration_manager
 from app.modules.workspace.llm_proxy_handler import handle_llm_proxy_request
@@ -194,7 +195,7 @@ def _check_prompt_ownership(
     user_role = g.user.get("role") if hasattr(g, "user") and g.user else None
 
     # Admin can access any template
-    if user_role == "admin":
+    if User.is_admin_role(user_role):
         return True, ""
 
     # Check if user is the author
@@ -247,7 +248,7 @@ def format_datetime(dt):
 def _tenant_scope_required() -> bool:
     """Whether workspace data should be tenant-scoped for this request."""
     current_role = g.user.get("role") if hasattr(g, "user") and g.user else None
-    return bool(current_role != "admin")
+    return not User.is_admin_role(current_role)
 
 
 def _session_lookup_tenant_id() -> int | None:
@@ -679,7 +680,9 @@ def delete_prompt(template_id):
 
         library = get_prompt_library()
         # Admin users can delete any template; others can only delete their own
-        success = library.delete_template(template_id, None if user_role == "admin" else user_id)
+        success = library.delete_template(
+            template_id, None if User.is_admin_role(user_role) else user_id
+        )
 
         if not success:
             return jsonify({"success": False, "error": "Template not found or not authorized"}), 404
@@ -1264,7 +1267,7 @@ def _check_session_access(session, *, require_owner: bool = True):
     current_user_id = g.user.get("id") if hasattr(g, "user") and g.user else None
     current_role = g.user.get("role") if hasattr(g, "user") and g.user else None
     current_tenant_id = get_current_tenant_id()
-    if current_role != "admin":
+    if not User.is_admin_role(current_role):
         if current_tenant_id is not None and session.tenant_id != current_tenant_id:
             return jsonify({"success": False, "error": "Access denied"}), 403
         if not current_user_id or not session.user_id or session.user_id != current_user_id:
@@ -1540,7 +1543,7 @@ def restore_session(session_id):
         current_role = g.user.get("role") if hasattr(g, "user") and g.user else None
         current_tenant_id = get_current_tenant_id()
         session_user_id = session_data.get("user_id")
-        if current_role != "admin":
+        if not User.is_admin_role(current_role):
             if current_tenant_id is not None and session_data.get("tenant_id") != current_tenant_id:
                 return jsonify({"success": False, "error": "Access denied"}), 403
             if not current_user_id or not session_user_id or session_user_id != current_user_id:
@@ -2185,7 +2188,7 @@ def get_knowledge(entry_id):
             author_id = getattr(entry, "author_id", None)
 
             # Only author or admin can access unpublished entries
-            if user_role != "admin" and user_id != author_id:
+            if not User.is_admin_role(user_role) and user_id != author_id:
                 logger.info(
                     f"Knowledge access denied: user={user_id}, entry={entry_id}, "
                     f"author={author_id}, is_published={is_published}"
@@ -2373,7 +2376,7 @@ def list_webui_instances():
     if not hasattr(g, "user") or not g.user:
         return jsonify({"error": "Not authenticated"}), 401
 
-    if g.user.get("role") != "admin":
+    if not User.is_admin_role(g.user.get("role")):
         return jsonify({"error": "Admin access required"}), 403
 
     try:
@@ -2394,6 +2397,7 @@ def list_webui_instances():
         return jsonify({"error": "Internal server error"}), 500
 
 
+@security_annotated(reason="Admin-only endpoint to stop user webui instances")
 @workspace_bp.route("/instances/<int:user_id>/stop", methods=["POST"])
 def stop_user_webui_instance(user_id):
     """Stop a specific user's webui instance (admin only)."""
@@ -2403,7 +2407,7 @@ def stop_user_webui_instance(user_id):
     if not hasattr(g, "user") or not g.user:
         return jsonify({"error": "Not authenticated"}), 401
 
-    if g.user.get("role") != "admin":
+    if not User.is_admin_role(g.user.get("role")):
         return jsonify({"error": "Admin access required"}), 403
 
     try:
@@ -2431,7 +2435,7 @@ def stop_all_webui_instances():
     if not hasattr(g, "user") or not g.user:
         return jsonify({"error": "Not authenticated"}), 401
 
-    if g.user.get("role") != "admin":
+    if not User.is_admin_role(g.user.get("role")):
         return jsonify({"error": "Admin access required"}), 403
 
     try:

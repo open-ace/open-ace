@@ -34,6 +34,7 @@ venv/
 # Test / coverage artifacts (coverage.py, pytest, html reports)
 .coverage
 .coverage.*
+coverage.xml
 htmlcov/
 .pytest_cache/
 
@@ -77,6 +78,10 @@ QWEN.md
 
 # Claude local settings
 .claude/
+
+# Other AI tool directories
+.workbuddy/
+.zcode/
 backups/
 
 # Git worktrees (temporary development artifacts)

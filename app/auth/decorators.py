@@ -30,6 +30,8 @@ from urllib.parse import unquote
 
 from flask import Response, g, jsonify, request
 
+from app.models.user import User
+
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
@@ -503,7 +505,7 @@ def _check_session_ownership(user_id: int, session_id: str, tenant_id: int | Non
 def _check_machine_admin(user_id: int, machine_id: str) -> bool:
     """Check if user is system admin or machine admin."""
     g_user = getattr(g, "user", {})
-    if g_user.get("role") == "admin":
+    if User.is_admin_role(g_user.get("role")):
         return True
     try:
         from app.services.remote_agent_manager import get_remote_agent_manager
@@ -612,7 +614,7 @@ def auth_required(f=None, *, ownership=None):
                 return password_change_response
 
             # Ownership checks (admin bypasses)
-            if g.user_role == "admin":
+            if User.is_admin_role(g.user_role):
                 return func(*args, **kwargs)
 
             if ownership == "session":
@@ -841,9 +843,12 @@ def resolve_tenant_scope() -> tuple[int | None, bool]:
     This helper is side-effect free; callers decide what to do when a
     non-admin has no tenant (the route layer denies with 403, see
     :func:`require_tenant_scope`).
+
+    Issue #2286: Accept legacy 'admin' role alongside 'platform_admin' for
+    backward compatibility.
     """
     user = getattr(g, "user", None) or {}
-    is_admin = user.get("role") == "admin"
+    is_admin = User.is_admin_role(user.get("role"))
     tenant_id = _normalize_user_tenant_id(user.get("tenant_id"))
     return tenant_id, is_admin
 
@@ -926,7 +931,7 @@ def platform_admin_required(f=None):
 
     Validation rules:
     1. User is authenticated
-    2. User role is 'platform_admin'
+    2. User role is 'platform_admin' (or legacy 'admin' for backward compatibility)
     3. Platform admin can have tenant_id=NULL or any tenant_id
 
     Failure responses:
@@ -934,6 +939,7 @@ def platform_admin_required(f=None):
     - 403: Not a platform admin
 
     Issue #2179: Platform admin can manage all tenants
+    Issue #2286: Accept legacy 'admin' role for backward compatibility
     """
 
     def decorator(func):
@@ -949,7 +955,9 @@ def platform_admin_required(f=None):
                 return jsonify({"error": "Invalid or expired session"}), 401
 
             # Check platform admin role
-            if user.get("role") != "platform_admin":
+            # Issue #2286: Also accept legacy 'admin' role for backward compatibility
+            # with installations that were initialized before the role model migration (#2179).
+            if user.get("role") not in ("platform_admin", "admin"):
                 return jsonify({"error": "Platform admin access required"}), 403
 
             g.user = user
@@ -1046,7 +1054,7 @@ def same_tenant_or_platform_admin(f=None):
 
     Validation rules:
     1. User is authenticated
-    2. If platform_admin: allow (log cross-tenant operation)
+    2. If platform_admin (or legacy admin): allow (log cross-tenant operation)
     3. If tenant_admin: verify tenant_id matches
     4. Other roles: deny
 
@@ -1059,6 +1067,7 @@ def same_tenant_or_platform_admin(f=None):
     - 403: Not authorized or cross-tenant access denied
 
     Issue #2179: Support both platform admin and tenant admin scenarios
+    Issue #2286: Accept legacy 'admin' role for backward compatibility
     """
 
     def decorator(func):
@@ -1077,8 +1086,9 @@ def same_tenant_or_platform_admin(f=None):
             user_tenant_id = user.get("tenant_id")
             user_id = user.get("id")
 
-            # Platform admin: allow with audit logging
-            if user_role == "platform_admin":
+            # Platform admin (or legacy admin): allow with audit logging
+            # Issue #2286: Accept legacy 'admin' role for backward compatibility
+            if user_role in ("platform_admin", "admin"):
                 g.user = user
                 g.user_id = user_id
                 g.user_role = user_role

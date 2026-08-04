@@ -20,6 +20,10 @@ class UserRole(Enum):
     READONLY = "readonly"
 
 
+# Admin roles that have system-wide access
+ADMIN_ROLES = frozenset({"admin", "platform_admin", "tenant_admin"})
+
+
 @dataclass
 class Permission:
     """Permission data model."""
@@ -103,7 +107,7 @@ class User:
 
     def has_permission(self, resource: str, action: str) -> bool:
         """Check if user has a specific permission."""
-        if self.role == "admin":
+        if self.is_admin():
             return True
         return any(
             p.resource == resource and p.action in [action, "admin"] for p in self.permissions
@@ -120,8 +124,11 @@ class User:
 
         Returns:
             bool: True if user is a platform admin
+
+        Issue #2286: Accept legacy 'admin' role alongside 'platform_admin'
+        for backward compatibility.
         """
-        return self.role == "platform_admin"
+        return self.role in ("platform_admin", "admin")
 
     def is_tenant_admin(self) -> bool:
         """Check if user is a tenant admin.
@@ -132,6 +139,21 @@ class User:
             bool: True if user is a tenant admin with tenant_id
         """
         return self.role == "tenant_admin" and self.tenant_id is not None
+
+    @staticmethod
+    def is_admin_role(role: str | None) -> bool:
+        """Check if a role string represents an admin role.
+
+        This is a utility function for checking admin status from
+        dictionary-based user data (e.g., from g.user or session).
+
+        Args:
+            role: The role string to check
+
+        Returns:
+            bool: True if the role is an admin role
+        """
+        return role in ADMIN_ROLES
 
     def can_access_tenant(self, target_tenant_id: int | None) -> bool:
         """Check if user can access the specified tenant.
