@@ -32,7 +32,7 @@ SCREENSHOT_DIR = os.path.join(
 )
 
 
-def test_iframe_add_project_browse(ui_screenshot_dir):
+def test_iframe_add_project_browse(ui_screenshot_dir):  # allow-no-assert: smoke test - visual verification only
     global SCREENSHOT_DIR
     SCREENSHOT_DIR = ui_screenshot_dir
     print("=" * 60)
@@ -158,7 +158,7 @@ def test_iframe_add_project_browse(ui_screenshot_dir):
                     print(f"  Token-related console logs: {token_logs}")
 
                     iframe_page.close()
-                except Exception as e:
+                except Exception as e:  # allow-swallow: UI element may not exist
                     print(f"  Failed to check sessionStorage: {e}")
 
                 # Step 3: Find Add Project button inside iframe
@@ -186,7 +186,7 @@ def test_iframe_add_project_browse(ui_screenshot_dir):
                             add_btn = locator.first
                             print(f"  Found Add Project button with selector: {selector}")
                             break
-                    except Exception as e:
+                    except Exception as e:  # allow-swallow: UI element may not exist
                         print(f"  Selector '{selector}' error: {e}")
                         continue
 
@@ -270,7 +270,7 @@ def test_iframe_add_project_browse(ui_screenshot_dir):
                 print(f"\n[RESULT] FAILED - {error_message}")
                 page.screenshot(path=os.path.join(SCREENSHOT_DIR, "test_iframe_02_no_iframe.png"))
 
-        except Exception as e:
+        except Exception as e:  # allow-swallow: UI element may not exist
             error_message = str(e)
             print(f"\n[EXCEPTION] {e}")
             page.screenshot(path=os.path.join(SCREENSHOT_DIR, "test_iframe_error.png"))

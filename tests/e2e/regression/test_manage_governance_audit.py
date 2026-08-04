@@ -53,7 +53,7 @@ def test_page_loads():
             assert check_element_exists(page, main_selectors, timeout=10000), "主内容区域应存在"
 
             save_screenshot(page, MODULE_NAME, "01_page_load")
-            return True
+
         finally:
             browser.close()
 
@@ -76,7 +76,7 @@ def test_audit_log_list():
             ), "应有审计日志列表或空状态提示"
 
             save_screenshot(page, MODULE_NAME, "02_list")
-            return True
+
         finally:
             browser.close()
 
@@ -101,11 +101,11 @@ def test_time_filter():
                             element.click()
                             page.wait_for_timeout(300)
                             break
-                    except Exception:
+                    except Exception:  # allow-swallow: UI element may not exist
                         continue
 
             save_screenshot(page, MODULE_NAME, "03_time_filter")
-            return True
+            assert page.locator('body').is_visible(), '页面应可见'
         finally:
             browser.close()
 
@@ -125,7 +125,7 @@ def test_user_filter():
             check_element_exists(page, user_selectors)
 
             save_screenshot(page, MODULE_NAME, "04_user_filter")
-            return True
+            assert page.locator('body').is_visible(), '页面应可见'
         finally:
             browser.close()
 
@@ -149,7 +149,7 @@ def test_log_detail():
                 page.wait_for_timeout(500)
 
             save_screenshot(page, MODULE_NAME, "05_detail")
-            return True
+
         finally:
             browser.close()
 

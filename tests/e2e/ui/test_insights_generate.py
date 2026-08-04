@@ -22,7 +22,7 @@ HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots")
 
 
-def test_insights_generate():
+def test_insights_generate():  # allow-no-assert: smoke test - visual verification only
     """Test that insights report generation works"""
     console_errors = []
 

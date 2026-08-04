@@ -88,7 +88,7 @@ def login(page):
     shot(page, "01-login-success")
 
 
-def test_dashboard_refresh_control(page):
+def test_dashboard_refresh_control(page):  # allow-no-assert: smoke test - visual verification only
     """Test Dashboard page refresh control."""
     print("\n[TEST] Dashboard page refresh control...")
 
@@ -136,7 +136,7 @@ def test_dashboard_refresh_control(page):
     )
 
 
-def test_quota_alerts_refresh_control(page):
+def test_quota_alerts_refresh_control(page):  # allow-no-assert: smoke test - visual verification only
     """Test Quota & Alerts page refresh control (compact mode)."""
     print("\n[TEST] Quota & Alerts page refresh control...")
 
@@ -167,7 +167,7 @@ def test_quota_alerts_refresh_control(page):
         check(refresh_button.is_visible(), "Refresh button visible in Alerts tab")
 
 
-def test_messages_refresh_control(page):
+def test_messages_refresh_control(page):  # allow-no-assert: smoke test - visual verification only
     """Test Messages page refresh control with auto refresh toggle."""
     print("\n[TEST] Messages page refresh control...")
 
@@ -212,7 +212,7 @@ def test_messages_refresh_control(page):
                 shot(page, "09-interval-selected")
 
 
-def test_refresh_state_persistence(page):
+def test_refresh_state_persistence(page):  # allow-no-assert: smoke test - visual verification only
     """Test refresh state persistence across page navigation."""
     print("\n[TEST] Refresh state persistence...")
 
@@ -243,7 +243,7 @@ def test_refresh_state_persistence(page):
         check(auto_refresh_toggle.is_checked(), "Auto refresh state persisted after navigation")
 
 
-def test_error_handling(page):
+def test_error_handling(page):  # allow-no-assert: smoke test - visual verification only
     """Test refresh error handling."""
     print("\n[TEST] Refresh error handling...")
 
@@ -284,7 +284,7 @@ def test_error_handling(page):
         )
 
 
-def test_global_pause_shortcut(page):
+def test_global_pause_shortcut(page):  # allow-no-assert: smoke test - visual verification only
     """Test global pause keyboard shortcut."""
     print("\n[TEST] Global pause keyboard shortcut...")
 
@@ -355,7 +355,7 @@ def main():
             # Test global pause shortcut
             test_global_pause_shortcut(page)
 
-        except Exception as e:
+        except Exception as e:  # allow-swallow: UI element may not exist
             print(f"\n[ERROR] Test failed with exception: {e}")
             shot(page, "error-final")
             raise

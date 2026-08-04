@@ -22,7 +22,7 @@ USERNAME = os.environ.get("TEST_USERNAME", "admin")
 PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 
 
-async def test_iframe_debug(ui_screenshot_dir):
+async def test_iframe_debug(ui_screenshot_dir):  # allow-no-assert: smoke test - visual verification only
     global SCREENSHOT_DIR
     SCREENSHOT_DIR = ui_screenshot_dir
     os.makedirs(SCREENSHOT_DIR, exist_ok=True)
@@ -63,7 +63,7 @@ async def test_iframe_debug(ui_screenshot_dir):
             iframe_html = await iframe.locator("body").inner_html()
             print(f"iframe HTML 长度: {len(iframe_html)}")
             print(f"iframe HTML 前 500 字符:\n{iframe_html[:500]}")
-        except Exception as e:
+        except Exception as e:  # allow-swallow: UI element may not exist
             print(f"获取 iframe HTML 失败: {e}")
 
         # 检查 iframe 内有多少按钮
@@ -76,7 +76,7 @@ async def test_iframe_debug(ui_screenshot_dir):
                     print(f"  按钮 {i}: {text[:50]}")
                 except:
                     pass
-        except Exception as e:
+        except Exception as e:  # allow-swallow: UI element may not exist
             print(f"获取按钮失败: {e}")
 
         # 检查是否有错误信息

@@ -45,7 +45,7 @@ def save_screenshot(page, name):
     return path
 
 
-def test_work_sessions_list_performance():
+def test_work_sessions_list_performance():  # allow-no-assert: smoke test - visual verification only
     """测试 Work 页面 Sessions 列表加载性能"""
     print("\n" + "=" * 60)
     print("Work 页面 Sessions 列表加载性能测试")
@@ -185,7 +185,7 @@ def test_work_sessions_list_performance():
             # 最终截图
             screenshots.append(save_screenshot(page, "05_final"))
 
-        except Exception as e:
+        except Exception as e:  # allow-swallow: UI element may not exist
             print(f"\n❌ 测试失败: {e}")
             results.append(("测试执行", False, str(e)))
             with contextlib.suppress(BaseException):

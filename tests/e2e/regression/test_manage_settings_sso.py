@@ -53,7 +53,7 @@ def test_page_loads():
             assert check_element_exists(page, main_selectors), "主内容区域应存在"
 
             save_screenshot(page, MODULE_NAME, "01_page_load")
-            return True
+
         finally:
             browser.close()
 
@@ -77,7 +77,7 @@ def test_sso_form_display():
             assert check_element_exists(page, input_selectors), "表单字段应存在"
 
             save_screenshot(page, MODULE_NAME, "02_form")
-            return True
+
         finally:
             browser.close()
 
@@ -97,7 +97,7 @@ def test_sso_toggle():
             assert check_element_exists(page, toggle_selectors), "SSO 开关应可见"
 
             save_screenshot(page, MODULE_NAME, "03_toggle")
-            return True
+
         finally:
             browser.close()
 
@@ -121,7 +121,7 @@ def test_save_button():
             assert check_element_exists(page, save_btn_selectors), "保存按钮应可见"
 
             save_screenshot(page, MODULE_NAME, "04_save")
-            return True
+
         finally:
             browser.close()
 
@@ -145,7 +145,7 @@ def test_test_connection():
             check_element_exists(page, test_btn_selectors)
 
             save_screenshot(page, MODULE_NAME, "05_test")
-            return True
+            assert page.locator('body').is_visible(), '页面应可见'
         finally:
             browser.close()
 

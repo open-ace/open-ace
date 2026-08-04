@@ -53,7 +53,7 @@ def test_page_loads():
             assert check_element_exists(page, main_selectors), "主内容区域应存在"
 
             save_screenshot(page, MODULE_NAME, "01_page_load")
-            return True
+
         finally:
             browser.close()
 
@@ -78,7 +78,7 @@ def test_session_list_display():
             assert check_element_exists(page, session_selectors), "应有会话列表或空状态提示"
 
             save_screenshot(page, MODULE_NAME, "02_session_list")
-            return True
+
         finally:
             browser.close()
 
@@ -103,7 +103,7 @@ def test_session_filter():
                 filter_input.clear()
 
             save_screenshot(page, MODULE_NAME, "03_filter")
-            return True
+
         finally:
             browser.close()
 
@@ -129,7 +129,7 @@ def test_session_detail():
                 page.wait_for_timeout(500)
 
             save_screenshot(page, MODULE_NAME, "04_detail")
-            return True
+
         finally:
             browser.close()
 
@@ -154,7 +154,7 @@ def test_session_delete():
             check_element_exists(page, delete_btn_selectors)
 
             save_screenshot(page, MODULE_NAME, "05_delete")
-            return True
+            assert page.locator('body').is_visible(), '页面应可见'
         finally:
             browser.close()
 

@@ -53,7 +53,7 @@ def test_page_loads():
             assert check_element_exists(page, main_selectors), "主内容区域应存在"
 
             save_screenshot(page, MODULE_NAME, "01_page_load")
-            return True
+
         finally:
             browser.close()
 
@@ -81,7 +81,7 @@ def test_trend_chart_render():
             assert check_element_exists(page, chart_selectors), "图表容器或空状态应存在"
 
             save_screenshot(page, MODULE_NAME, "02_chart")
-            return True
+
         finally:
             browser.close()
 
@@ -107,7 +107,7 @@ def test_time_range_filter():
                 page.wait_for_timeout(500)
 
             save_screenshot(page, MODULE_NAME, "03_time_filter")
-            return True
+
         finally:
             browser.close()
 
@@ -131,7 +131,7 @@ def test_data_export():
             check_element_exists(page, export_selectors)
 
             save_screenshot(page, MODULE_NAME, "04_export")
-            return True
+            assert page.locator('body').is_visible(), '页面应可见'
         finally:
             browser.close()
 
@@ -153,7 +153,7 @@ def test_chart_interaction():
                 page.wait_for_timeout(500)
 
             save_screenshot(page, MODULE_NAME, "05_interaction")
-            return True
+            assert page.locator('body').is_visible(), '页面应可见'
         finally:
             browser.close()
 

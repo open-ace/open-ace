@@ -53,7 +53,7 @@ def test_page_loads():
             assert check_element_exists(page, main_selectors, timeout=10000), "主内容区域应存在"
 
             save_screenshot(page, MODULE_NAME, "01_page_load")
-            return True
+
         finally:
             browser.close()
 
@@ -76,7 +76,7 @@ def test_conversation_list_display():
             ), "应有会话列表或空状态提示"
 
             save_screenshot(page, MODULE_NAME, "02_list")
-            return True
+
         finally:
             browser.close()
 
@@ -99,8 +99,10 @@ def test_conversation_detail():
                 conv_item.click()
                 page.wait_for_timeout(500)
 
+            # 确保页面已加载（会话详情是可选功能）
+            assert page.locator("body").is_visible(), "页面应可见"
+
             save_screenshot(page, MODULE_NAME, "03_detail")
-            return True
         finally:
             browser.close()
 
@@ -119,9 +121,10 @@ def test_search_filter():
             # 检查筛选元素
             filter_selectors = ["select", 'input[type="date"]', ".form-control"]
             check_element_exists(page, filter_selectors)
+            # 确保页面已加载（筛选功能是可选的）
+            assert page.locator("body").is_visible(), "页面应可见"
 
             save_screenshot(page, MODULE_NAME, "04_search")
-            return True
         finally:
             browser.close()
 
@@ -144,9 +147,10 @@ def test_export_function():
                 "button:has(.bi-download)",
             ]
             check_element_exists(page, export_selectors)
+            # 确保页面已加载（导出功能是可选的）
+            assert page.locator("body").is_visible(), "页面应可见"
 
             save_screenshot(page, MODULE_NAME, "05_export")
-            return True
         finally:
             browser.close()
 

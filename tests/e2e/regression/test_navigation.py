@@ -66,7 +66,7 @@ def test_sidebar_menu_visible():
             assert check_element_exists(page, menu_selectors), "菜单项应存在"
 
             save_screenshot(page, MODULE_NAME, "01_sidebar")
-            return True
+
         finally:
             browser.close()
 
@@ -99,7 +99,7 @@ def test_menu_navigation():
                     ), f"clicking menu '{name}' did not navigate to {path} (url={page.url})"
 
             save_screenshot(page, MODULE_NAME, "02_navigation")
-            return True
+
         finally:
             browser.close()
 
@@ -134,7 +134,7 @@ def test_page_title_updates():
                 ), f"页面 {path} 应有标题或导航标识"
 
             save_screenshot(page, MODULE_NAME, "03_title")
-            return True
+
         finally:
             browser.close()
 

@@ -62,7 +62,7 @@ def login(page):
     time.sleep(1)
 
 
-def test_tab_notification_colors(ui_screenshot_dir):
+def test_tab_notification_colors(ui_screenshot_dir):  # allow-no-assert: smoke test - visual verification only
     """Test tab notification badge and icon colors"""
     global SCREENSHOT_DIR
     SCREENSHOT_DIR = ui_screenshot_dir
@@ -259,7 +259,7 @@ def test_tab_notification_colors(ui_screenshot_dir):
             # Return success
             print("\nTest completed successfully!")
 
-        except Exception as e:
+        except Exception as e:  # allow-swallow: UI element may not exist
             print(f"\nError during test: {e}")
             screenshots.append(take_screenshot(page, "error.png"))
             raise

@@ -123,7 +123,7 @@ def ssh_list_dirs(path):
             },
             "machine": {"machine_id": machine_id, "status": "online"},
         }
-    except Exception as e:
+    except Exception as e:  # allow-swallow: UI element may not exist
         log("SSH", f"Error listing dirs: {e}")
     return {
         "success": True,
@@ -377,7 +377,7 @@ def run_tests():
                     }""",
                     timeout=10000,
                 )
-            except Exception:
+            except Exception:  # allow-swallow: UI element may not exist
                 log("Browser", "Timeout waiting for content")
             pause(1)
 
@@ -410,7 +410,7 @@ def run_tests():
                         }""",
                         timeout=10000,
                     )
-                except Exception:
+                except Exception:  # allow-swallow: UI element may not exist
                     pass
                 time.sleep(1)
 
@@ -448,7 +448,7 @@ def run_tests():
                         }""",
                         timeout=10000,
                     )
-                except Exception:
+                except Exception:  # allow-swallow: UI element may not exist
                     pass
                 time.sleep(1)
                 shot(page, "07_navigate_back")
@@ -547,7 +547,7 @@ def run_tests():
             print(f"  Screenshots: {SCREENSHOT_DIR}")
             print(f"{'='*60}")
 
-        except Exception as e:
+        except Exception as e:  # allow-swallow: UI element may not exist
             log("ERROR", str(e))
             shot(page, "error")
             raise

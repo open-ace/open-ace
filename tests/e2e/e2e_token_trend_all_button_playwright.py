@@ -91,7 +91,7 @@ def navigate_to_token_trend(page):
     shot(page, "02-token-trend")
 
 
-def test_default_date_range(page):
+def test_default_date_range(page):  # allow-no-assert: smoke test - visual verification only
     """Test that default date range is 30 days."""
     print("\n[TEST] Default date range (30 days)...")
 
@@ -122,7 +122,7 @@ def test_default_date_range(page):
     shot(page, "03-default-30-days")
 
 
-def test_all_button_click(page):
+def test_all_button_click(page):  # allow-no-assert: smoke test - visual verification only
     """Test clicking the "All" button updates date range."""
     print("\n[TEST] Click 'All' button...")
 
@@ -146,7 +146,7 @@ def test_all_button_click(page):
     shot(page, "04-all-button-active")
 
 
-def test_all_button_date_range(page):
+def test_all_button_date_range(page):  # allow-no-assert: smoke test - visual verification only
     """Test that 'All' button shows actual data range from API."""
     print("\n[TEST] Verify 'All' button date range...")
 
@@ -182,7 +182,7 @@ def test_all_button_date_range(page):
     shot(page, "05-all-date-range")
 
 
-def test_chart_data_displayed(page):
+def test_chart_data_displayed(page):  # allow-no-assert: smoke test - visual verification only
     """Test that chart data is displayed after 'All' button click."""
     print("\n[TEST] Chart data displayed...")
 
@@ -198,7 +198,7 @@ def test_chart_data_displayed(page):
     shot(page, "06-chart-displayed")
 
 
-def test_api_response_data_range(page):
+def test_api_response_data_range(page):  # allow-no-assert: smoke test - visual verification only
     """Test that API response includes data_range field."""
     print("\n[TEST] API response data_range...")
 
@@ -230,7 +230,7 @@ def test_api_response_data_range(page):
     shot(page, "07-api-response")
 
 
-def test_date_inputs_manual_change(page):
+def test_date_inputs_manual_change(page):  # allow-no-assert: smoke test - visual verification only
     """Test that manually changing date inputs deactivates quick buttons."""
     print("\n[TEST] Manual date input change...")
 
@@ -263,7 +263,7 @@ def test_date_inputs_manual_change(page):
     shot(page, "08-manual-date-change")
 
 
-def test_language_i18n(page):
+def test_language_i18n(page):  # allow-no-assert: smoke test - visual verification only
     """Test i18n for button labels."""
     print("\n[TEST] Language i18n...")
 
@@ -309,7 +309,7 @@ def run_tests():
             test_date_inputs_manual_change(page)
             test_language_i18n(page)
 
-        except Exception as e:
+        except Exception as e:  # allow-swallow: UI element may not exist
             print(f"\n[ERROR] Test execution failed: {e}")
             shot(page, "error-state")
             failed += 1

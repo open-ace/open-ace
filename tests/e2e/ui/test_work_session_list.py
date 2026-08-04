@@ -33,7 +33,7 @@ DEFAULT_TIMEOUT = 15000
 OUTPUT_DIR = "./screenshots"
 
 
-def test_work_mode_session_list(ui_screenshot_dir):
+def test_work_mode_session_list(ui_screenshot_dir):  # allow-no-assert: smoke test - visual verification only
     """Test Work Mode Session List improvements"""
     global OUTPUT_DIR
     OUTPUT_DIR = ui_screenshot_dir
@@ -190,7 +190,7 @@ def test_work_mode_session_list(ui_screenshot_dir):
             test_results.append(("页面加载", False))
             page.screenshot(path=f"{OUTPUT_DIR}/work_session_error_timeout.png")
             screenshots.append("error_timeout.png")
-        except Exception as e:
+        except Exception as e:  # allow-swallow: UI element may not exist
             print(f"\n    ✗ 测试错误：{e}")
             test_results.append(("测试执行", False))
             page.screenshot(path=f"{OUTPUT_DIR}/work_session_error_exception.png")

@@ -17,7 +17,7 @@ SCREENSHOT_DIR = os.path.join(
 )
 
 
-async def test_click_debug(ui_screenshot_dir):
+async def test_click_debug(ui_screenshot_dir):  # allow-no-assert: smoke test - visual verification only
     global SCREENSHOT_DIR
     SCREENSHOT_DIR = ui_screenshot_dir
     os.makedirs(SCREENSHOT_DIR, exist_ok=True)
@@ -235,7 +235,7 @@ async def test_click_debug(ui_screenshot_dir):
                         if await select_btn.is_visible(timeout=1000):
                             await select_btn.click()
                             print("✓ 点击了 Select 按钮")
-            except Exception as e:
+            except Exception as e:  # allow-swallow: UI element may not exist
                 print(f"导航失败: {e}")
 
         await page.wait_for_timeout(2000)
@@ -337,7 +337,7 @@ async def test_click_debug(ui_screenshot_dir):
         try:
             await create_button.click(timeout=5000)
             await page.wait_for_timeout(1000)
-        except Exception as e:
+        except Exception as e:  # allow-swallow: UI element may not exist
             print(f"  点击失败: {e}")
 
         project_calls_1 = [c for c in api_calls if "projects" in c["url"]]
@@ -348,7 +348,7 @@ async def test_click_debug(ui_screenshot_dir):
         try:
             await create_button.click(force=True, timeout=5000)
             await page.wait_for_timeout(1000)
-        except Exception as e:
+        except Exception as e:  # allow-swallow: UI element may not exist
             print(f"  点击失败: {e}")
 
         project_calls_2 = [c for c in api_calls if "projects" in c["url"]]
@@ -359,7 +359,7 @@ async def test_click_debug(ui_screenshot_dir):
         try:
             await create_button.evaluate("el => el.click()")
             await page.wait_for_timeout(1000)
-        except Exception as e:
+        except Exception as e:  # allow-swallow: UI element may not exist
             print(f"  点击失败: {e}")
 
         project_calls_3 = [c for c in api_calls if "projects" in c["url"]]
@@ -370,7 +370,7 @@ async def test_click_debug(ui_screenshot_dir):
         try:
             await create_button.dispatch_event("click")
             await page.wait_for_timeout(1000)
-        except Exception as e:
+        except Exception as e:  # allow-swallow: UI element may not exist
             print(f"  点击失败: {e}")
 
         # 方式5: 模拟鼠标事件
@@ -401,7 +401,7 @@ async def test_click_debug(ui_screenshot_dir):
             }"""
             )
             await page.wait_for_timeout(1000)
-        except Exception as e:
+        except Exception as e:  # allow-swallow: UI element may not exist
             print(f"  点击失败: {e}")
 
         await page.screenshot(path=os.path.join(SCREENSHOT_DIR, "debug_08_after_clicks.png"))

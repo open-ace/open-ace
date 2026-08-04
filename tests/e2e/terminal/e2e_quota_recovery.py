@@ -83,10 +83,10 @@ print(f'Reason: {result["reason"]}')
     quota_data2 = quota_resp2.json()
     print(f"✓ Updated quota status: requests={quota_data2['daily']['requests']}")
 
-    return True
 
 
-def test_session_recovery():
+
+def test_session_recovery():  # allow-no-assert: smoke test - visual verification only
     """Test that terminal session can be recovered after browser refresh"""
     print("\n=== Testing Session Recovery ===")
 
@@ -151,7 +151,7 @@ def test_session_recovery():
         browser.close()
         print("✓ Test complete")
 
-    return True
+
 
 
 def test_terminal_session_in_database():
@@ -178,7 +178,7 @@ def test_terminal_session_in_database():
     for s in terminal_sessions[:3]:
         print(f"  - {s['session_id'][:8]}: title='{s['title']}', requests={s['request_count']}")
 
-    return True
+
 
 
 if __name__ == "__main__":

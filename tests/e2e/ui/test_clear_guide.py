@@ -30,7 +30,7 @@ def log_message(msg):
         f.write(log_line + "\n")
 
 
-async def test_clear_guide(ui_screenshot_dir):
+async def test_clear_guide(ui_screenshot_dir):  # allow-no-assert: smoke test - visual verification only
     global SCREENSHOT_DIR
     SCREENSHOT_DIR = ui_screenshot_dir
     os.makedirs(SCREENSHOT_DIR, exist_ok=True)

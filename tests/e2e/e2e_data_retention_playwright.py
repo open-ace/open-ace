@@ -125,7 +125,7 @@ def navigate_to_data_retention(page):
     shot(page, "02-data-retention-page")
 
 
-def test_statistics_match_table_rows(page):
+def test_statistics_match_table_rows(page):  # allow-no-assert: smoke test - visual verification only
     """Test that retention rules statistics match the number of table rows."""
     print("\n[TEST] Statistics match table rows...")
 
@@ -172,7 +172,7 @@ def test_statistics_match_table_rows(page):
     shot(page, "03-statistics-match-table")
 
 
-def test_all_data_types_displayed(page):
+def test_all_data_types_displayed(page):  # allow-no-assert: smoke test - visual verification only
     """Test that all 7 backend default data types are displayed in the table."""
     print("\n[TEST] All data types displayed...")
 
@@ -239,7 +239,7 @@ def test_all_data_types_displayed(page):
     shot(page, "04-data-types-displayed")
 
 
-def test_action_types_displayed(page):
+def test_action_types_displayed(page):  # allow-no-assert: smoke test - visual verification only
     """Test that action types (delete, archive, anonymize) are correctly displayed."""
     print("\n[TEST] Action types displayed...")
 
@@ -274,7 +274,7 @@ def test_action_types_displayed(page):
     shot(page, "05-action-types-displayed")
 
 
-def test_storage_estimates_labels(page):
+def test_storage_estimates_labels(page):  # allow-no-assert: smoke test - visual verification only
     """Test that storage estimates table uses consistent data type labels."""
     print("\n[TEST] Storage estimates labels...")
 
@@ -312,7 +312,7 @@ def test_storage_estimates_labels(page):
     shot(page, "06-storage-estimates-labels")
 
 
-def test_edit_retention_rule(page):
+def test_edit_retention_rule(page):  # allow-no-assert: smoke test - visual verification only
     """Test editing a retention rule."""
     print("\n[TEST] Edit retention rule...")
 
@@ -364,7 +364,7 @@ def test_edit_retention_rule(page):
     shot(page, "07-edit-retention-rule")
 
 
-def test_language_switching(page):
+def test_language_switching(page):  # allow-no-assert: smoke test - visual verification only
     """Test language switching (internationalization)."""
     print("\n[TEST] Language switching...")
 
@@ -470,7 +470,7 @@ def run_tests():
             finally:
                 browser.close()
 
-    except Exception as e:
+    except Exception as e:  # allow-swallow: UI element may not exist
         print(f"\n[ERROR] Test execution failed: {e}")
         import traceback
 

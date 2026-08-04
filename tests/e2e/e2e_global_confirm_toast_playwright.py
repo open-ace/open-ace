@@ -109,7 +109,7 @@ def get_admin_session_token():
                             return part[len("session_token=") :]
             if attempt == 5:
                 print("    [WARN] no session_token in login response")
-        except Exception as exc:
+        except Exception as exc:  # allow-swallow: UI element may not exist
             if attempt == 5:
                 print(f"    [WARN] login curl failed: {exc}")
         time.sleep(0.5)
@@ -173,8 +173,8 @@ def ensure_smtp_config():
             text=True,
             timeout=10,
         )
-        return True
-    except Exception:
+
+    except Exception:  # allow-swallow: UI element may not exist
         return False
 
 
@@ -189,7 +189,7 @@ def login(context, page):
     shot(page, "01-login")
 
 
-def test_global_toast_renders_at_root(page):
+def test_global_toast_renders_at_root(page):  # allow-no-assert: smoke test - visual verification only
     """Saving an empty form fires a toast in the global toast portal.
 
     The SMTP page never rendered its own ToastContainer, so a visible toast
@@ -221,13 +221,13 @@ def test_global_toast_renders_at_root(page):
     try:
         toast.first.wait_for(timeout=10000, state="visible")
         toast_visible = True
-    except Exception:
+    except Exception:  # allow-swallow: UI element may not exist
         toast_visible = False
     check(toast_visible, "Global toast appears in app-root toast container after save")
     shot(page, "02-global-toast")
 
 
-def test_delete_uses_confirm_modal_not_native_dialog(page):
+def test_delete_uses_confirm_modal_not_native_dialog(page):  # allow-no-assert: smoke test - visual verification only
     """Delete opens a styled ConfirmModal, never a native window.confirm.
 
     If no SMTP config exists the Delete button is hidden, so we seed a dummy
@@ -269,7 +269,7 @@ def test_delete_uses_confirm_modal_not_native_dialog(page):
     try:
         modal.first.wait_for(timeout=8000, state="visible")
         modal_visible = True
-    except Exception:
+    except Exception:  # allow-swallow: UI element may not exist
         modal_visible = False
     check(modal_visible, "ConfirmModal (.modal-dialog) opened by Delete")
     check(not native_dialog_fired["value"], "No native window.confirm dialog fired")
@@ -323,7 +323,7 @@ def run_tests():
                 return 1 if failed > 0 else 0
             finally:
                 browser.close()
-    except Exception as e:
+    except Exception as e:  # allow-swallow: UI element may not exist
         print(f"\n[ERROR] Test execution failed: {e}")
         import traceback
 

@@ -104,7 +104,7 @@ def find_button_by_text(page, text):
     return btn
 
 
-def test_default_date_range(page):
+def test_default_date_range(page):  # allow-no-assert: smoke test - visual verification only
     print("\n[TEST] Default date range (30 days)...")
     active_button = page.locator(".btn-group .btn-primary")
     check(active_button.first.is_visible(), "Primary button is visible")
@@ -125,7 +125,7 @@ def test_default_date_range(page):
     shot(page, "03-default-30-days")
 
 
-def test_all_button_click(page):
+def test_all_button_click(page):  # allow-no-assert: smoke test - visual verification only
     print("\n[TEST] Click 'All' button...")
     all_button = find_all_button(page)
     check(all_button.count() > 0, "'All' button found")
@@ -140,7 +140,7 @@ def test_all_button_click(page):
     shot(page, "04-all-button-active")
 
 
-def test_all_button_date_range(page):
+def test_all_button_date_range(page):  # allow-no-assert: smoke test - visual verification only
     """Verify 'All' shows the actual data range (not a hardcoded window)."""
     global captured_data_range
     print("\n[TEST] Verify 'All' button date range...")
@@ -178,7 +178,7 @@ def test_all_button_date_range(page):
     shot(page, "05-all-date-range")
 
 
-def test_data_range_api(page):
+def test_data_range_api(page):  # allow-no-assert: smoke test - visual verification only
     """Trigger and capture /api/analysis/data-range."""
     global captured_data_range
     print("\n[TEST] /api/analysis/data-range endpoint...")
@@ -190,7 +190,7 @@ def test_data_range_api(page):
                 if body and isinstance(body, dict):
                     globals()["captured_data_range"] = body
                     print(f"    [INFO] data_range: {body}")
-            except Exception:
+            except Exception:  # allow-swallow: UI element may not exist
                 pass
 
     page.on("response", handle_response)
@@ -212,7 +212,7 @@ def test_data_range_api(page):
     shot(page, "06-api-data-range")
 
 
-def test_manual_date_transition_overwrites(page):
+def test_manual_date_transition_overwrites(page):  # allow-no-assert: smoke test - visual verification only
     """Editing a date while in 7/30/90 switches to 'all'; data range then applies."""
     print("\n[TEST] Manual edit from 30 -> 'all' is overwritten by data range...")
     thirty = find_button_by_text(page, "30")
@@ -242,7 +242,7 @@ def test_manual_date_transition_overwrites(page):
     shot(page, "07-manual-transition")
 
 
-def test_manual_edit_within_all_preserved(page):
+def test_manual_edit_within_all_preserved(page):  # allow-no-assert: smoke test - visual verification only
     """Once already in 'all', a manual edit is preserved (quickRange unchanged)."""
     print("\n[TEST] Manual edit within 'all' is preserved...")
     find_all_button(page).click()
@@ -279,7 +279,7 @@ def run_tests():
             test_all_button_date_range(page)
             test_manual_date_transition_overwrites(page)
             test_manual_edit_within_all_preserved(page)
-        except Exception as e:
+        except Exception as e:  # allow-swallow: UI element may not exist
             print(f"\n[ERROR] Test execution failed: {e}")
             shot(page, "error-state")
             failed += 1

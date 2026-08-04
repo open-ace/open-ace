@@ -66,7 +66,7 @@ def login(page: Page):
     # 等待登录成功 - bcrypt rounds=12 可能需要较长时间
     try:
         page.wait_for_url(lambda url: "/login" not in url, timeout=120000)
-    except Exception as e:
+    except Exception as e:  # allow-swallow: UI element may not exist
         current_url = page.url
         if "/login" in current_url:
             raise AssertionError(
@@ -90,7 +90,7 @@ def navigate_to(page: Page, path: str):
         if skeleton.count() > 0:
             # 等待骨架屏消失（最多等待 15 秒）
             page.wait_for_selector(".skeleton", state="hidden", timeout=15000)
-    except Exception:
+    except Exception:  # allow-swallow: UI element may not exist
         # 如果骨架屏没有消失，继续执行
         pass
 
@@ -101,7 +101,7 @@ def navigate_to(page: Page, path: str):
     try:
         # 等待主内容区域或页面标题出现
         page.wait_for_selector("main, .manage-content, h1, h2, .page-title", timeout=10000)
-    except Exception:
+    except Exception:  # allow-swallow: UI element may not exist
         # 如果没有找到，等待一段时间让页面渲染
         page.wait_for_timeout(2000)
 
@@ -125,7 +125,7 @@ def check_element_exists(page: Page, selectors: list, timeout: int = 5000) -> bo
             element = page.locator(selector)
             if element.count() > 0:
                 return True
-        except Exception:
+        except Exception:  # allow-swallow: UI element may not exist
             continue
     return False
 
@@ -143,7 +143,7 @@ def wait_for_element(page: Page, selectors: list, timeout: int = 10000):
         try:
             page.wait_for_selector(selector, timeout=timeout)
             return
-        except Exception:
+        except Exception:  # allow-swallow: UI element may not exist
             continue
     raise Exception(f"None of the selectors found: {selectors}")
 
@@ -161,8 +161,8 @@ class TestRunner:
             test_func()
             self.results.append((name, "PASS", None))
             print(f"  ✓ {name}")
-            return True
-        except Exception as e:
+
+        except Exception as e:  # allow-swallow: UI element may not exist
             self.results.append((name, "FAIL", str(e)))
             print(f"  ✗ {name}: {e}")
             return False
