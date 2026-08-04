@@ -127,6 +127,11 @@ _TRANSIENT_ORCHESTRATOR_KEYWORDS = [
     "unable to access",
     "rpc failed",
     "early eof",
+    # libcurl "Empty reply from server" (git emits it verbatim, in English even
+    # under a non-C locale, on a transient TLS/connection drop). Mirror the
+    # Layer-1 list in github_ops.py (#2299).
+    "empty reply",
+    "empty response",
     # --force-with-lease rejects the push when the remote auto-dev tip moved
     # between git's read of the remote-tracking ref and the actual push (a
     # concurrent push, or a freshly-fetched ref). The worktree is unchanged, so
