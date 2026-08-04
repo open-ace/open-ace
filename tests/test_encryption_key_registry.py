@@ -355,7 +355,9 @@ class TestEncryptionKeyRegistryThreadSafety:
                     assert result is not None
                     decrypted, _ = result
                     assert decrypted == plaintext
-                except Exception as e:
+                except (
+                    Exception
+                ) as e:  # allow-swallow: collect per-thread errors; the driving test asserts errors is empty
                     errors.append(e)
 
             # Run 100 concurrent operations

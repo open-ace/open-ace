@@ -73,12 +73,20 @@ def _src_contains(lines: list[str], start_lineno: int, end_lineno: int, needle: 
     return any(needle in lines[i] for i in range(start, end))
 
 
-def _body_has_raise_or_assert(body: list[ast.stmt]) -> bool:
-    """True if the except body raises or asserts (i.e. does not swallow)."""
+def _body_does_not_swallow(body: list[ast.stmt]) -> bool:
+    """True if the except body surfaces the failure (does not silently swallow).
+
+    Recognises ``raise``/``assert`` plus calls that themselves raise and thus
+    produce a visible test outcome: ``pytest.skip``, ``pytest.fail``,
+    ``pytest.raises`` (and ``sys.exit``).
+    """
     for stmt in body:
         for n in ast.walk(stmt):
             if isinstance(n, (ast.Raise, ast.Assert)):
                 return True
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute):
+                if n.func.attr in {"skip", "fail", "raises", "exit"}:
+                    return True
     return False
 
 
@@ -163,7 +171,7 @@ class FalsePositiveScanner(ast.NodeVisitor):
         if broad:
             end = node.end_lineno or node.lineno
             allow = _src_contains(self.source_lines, node.lineno, end, "allow-swallow")
-            if not _body_has_raise_or_assert(node.body) and not allow:
+            if not _body_does_not_swallow(node.body) and not allow:
                 severity = "P0" if self.is_test_function else "P1"
                 self.findings.append(
                     Finding(

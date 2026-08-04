@@ -95,7 +95,7 @@ def db():
         cursor.execute("DELETE FROM scheduler_leaders")
         conn.commit()
         conn.close()
-    except Exception:
+    except Exception:  # allow-swallow: sqlite fixture cleanup (best-effort teardown)
         pass
 
 

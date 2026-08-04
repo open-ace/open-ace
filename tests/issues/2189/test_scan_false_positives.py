@@ -73,6 +73,26 @@ def test_a():
         pass
     assert True
 """
+# deliberate test outcome (skip) in the except body -> not a swallow.
+BROAD_EXCEPT_SKIP = """\
+import pytest
+
+def test_a():
+    try:
+        do()
+    except Exception:
+        pytest.skip("db unavailable")
+"""
+# deliberate failure (pytest.fail raises) in the except body -> not a swallow.
+BROAD_EXCEPT_FAIL = """\
+import pytest
+
+def test_a():
+    try:
+        do()
+    except Exception:
+        pytest.fail("unexpected")
+"""
 NO_ASSERT = """\
 def test_b():
     do()
@@ -136,6 +156,18 @@ def test_broad_except_allows_assert(tmp_path: Path) -> None:
 def test_broad_except_allows_marker(tmp_path: Path) -> None:
     mod = _load_scanner()
     assert "broad_except_swallow" not in _patterns(mod, tmp_path, BROAD_EXCEPT_ALLOW)
+
+
+def test_broad_except_allows_pytest_skip(tmp_path: Path) -> None:
+    """except -> pytest.skip() is a deliberate outcome, not a swallow."""
+    mod = _load_scanner()
+    assert "broad_except_swallow" not in _patterns(mod, tmp_path, BROAD_EXCEPT_SKIP)
+
+
+def test_broad_except_allows_pytest_fail(tmp_path: Path) -> None:
+    """except -> pytest.fail() raises, so it is not a swallow."""
+    mod = _load_scanner()
+    assert "broad_except_swallow" not in _patterns(mod, tmp_path, BROAD_EXCEPT_FAIL)
 
 
 # ---- the other 3 Scope #6 patterns ----
