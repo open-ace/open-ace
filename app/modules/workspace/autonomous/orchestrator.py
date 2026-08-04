@@ -1254,6 +1254,20 @@ class AutonomousOrchestrator:
             "common_identity": common_identity,
         }
 
+    def recover_worktree_branch(
+        self,
+        gh: "GitHubOps",
+        expected_branch: str,
+        before_head: str,
+        before_main_head: str,
+    ) -> str | None:
+        """Public PhaseHost-facing alias for ``_recover_worktree_branch`` (#2302).
+
+        Lets the pr_review push check recover a worktree the agent left on
+        another branch, without reaching past the PhaseHost protocol.
+        """
+        return self._recover_worktree_branch(gh, expected_branch, before_head, before_main_head)
+
     def _recover_worktree_branch(
         self,
         gh: "GitHubOps",

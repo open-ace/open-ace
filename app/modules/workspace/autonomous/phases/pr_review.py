@@ -86,6 +86,42 @@ NAME = "pr_review"
 logger = logging.getLogger(__name__)
 
 
+def _ensure_branch_and_push(gh, host, branch_name, entry_feature_head, entry_main_head):
+    """Ensure the worktree is on ``branch_name`` (recovering if safe), then push.
+
+    Defense-in-depth at the pr_review push (#2302): the central guard
+    (``_validate_repo_context_after_run``) recovers a worktree the agent left on
+    another branch after each agent run, but the worktree can still be on main
+    at push time (e.g. a failure→retry→reentry sequence left it there). Try
+    recovery before failing the workflow permanently.
+
+    Raises ``RuntimeError`` if not on ``branch_name`` after the recovery attempt.
+    """
+    current_branch = gh.get_current_branch()
+    if branch_name and current_branch != branch_name:
+        recovered = None
+        try:
+            recovered = host.recover_worktree_branch(
+                gh, branch_name, entry_feature_head, entry_main_head
+            )
+        except Exception as exc:
+            logger.warning("pr_review push recovery raised for %s: %s", branch_name, exc)
+        if recovered:
+            logger.info("Workflow %s pr_review push: %s", host.workflow_id[:8], recovered)
+            current_branch = gh.get_current_branch()
+        if branch_name and current_branch != branch_name:
+            logger.error(
+                "Branch mismatch before push: workflow=%s expected=%s actual=%s",
+                host.workflow_id[:8],
+                branch_name,
+                current_branch,
+            )
+            raise RuntimeError(
+                f"Branch mismatch before push: expected {branch_name}, actual {current_branch}"
+            )
+    gh.git_push(branch=branch_name, force_with_lease=True)
+
+
 def handle(ctx, deps) -> PhaseResult:
     """Execute one PR-review-phase cycle.
 
@@ -101,6 +137,17 @@ def handle(ctx, deps) -> PhaseResult:
     force_full_rounds = host.must_run_full_review_rounds(wf)
     dev_round = wf.get("dev_round", 1)
     branch_name = wf.get("branch_name", "")
+    # Capture entry repo state for the push-check recovery (#2302). The worktree
+    # may be on main at push time (failure→retry→reentry); recover_worktree_branch
+    # needs the feature tip + main HEAD from before any in-phase switch.
+    entry_feature_head = ""
+    entry_main_head = ""
+    try:
+        if branch_name:
+            entry_feature_head = gh._run_git(["rev-parse", branch_name]).stdout.strip()
+        entry_main_head = gh._run_git(["rev-parse", "main"]).stdout.strip()
+    except Exception:
+        pass
     # Language-aware approval marker for PR review (matches what the agent,
     # writing in content_language, is asked to state).
     approval_phrase = _review_approval_phrase(wf.get("content_language"))
@@ -209,19 +256,10 @@ def handle(ctx, deps) -> PhaseResult:
     issue_number = wf.get("github_issue_number") or wf.get("github_issue_number")
     # Ensure branch is pushed to remote before PR creation
     try:
-        # P1 修复（Issue #1611）：检查当前分支是否与预期一致
-        current_branch = gh.get_current_branch()
-        if branch_name and current_branch != branch_name:
-            logger.error(
-                "Branch mismatch before push: workflow=%s expected=%s actual=%s",
-                host.workflow_id[:8],
-                branch_name,
-                current_branch,
-            )
-            raise RuntimeError(
-                f"Branch mismatch before push: expected {branch_name}, actual {current_branch}"
-            )
-        gh.git_push(branch=branch_name, force_with_lease=True)
+        # Push with defense-in-depth branch recovery (#2302): if the worktree is
+        # on main at push time (e.g. a failure→retry→reentry sequence left it),
+        # recover onto branch_name before failing. Preserves the #1611 check.
+        _ensure_branch_and_push(gh, host, branch_name, entry_feature_head, entry_main_head)
     except Exception as e:
         # Distinguish transient vs non-transient errors to enable Layer-2 retry
         # for network flakiness (Issue #1814). Failure-path raise deviation —
