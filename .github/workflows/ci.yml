@@ -81,6 +81,37 @@ jobs:
           pip install playwright
           playwright install chromium --with-deps
 
+      - name: Collect tests and validate count
+        id: collect-tests
+        run: |
+          # Issue #2189: Collect-only gate to detect zero-test collection
+          pytest tests/ --collect-only --quiet > collection.txt 2>&1 || true
+
+          # Parse collected count
+          count=$(grep -oP '\d+ tests collected' collection.txt | grep -oP '\d+' || echo "0")
+
+          echo "collected_count=$count" >> $GITHUB_OUTPUT
+
+          # Fail if 0 tests collected
+          if [ "$count" -eq 0 ]; then
+            echo "::error::Zero tests collected - this indicates a collection failure"
+            exit 1
+          fi
+
+          # Check against baseline (if exists)
+          if [ -f ".test-baseline.json" ]; then
+            baseline=$(python -c "import json; print(json.load(open('.test-baseline.json'))['layers']['default']['min_tests'])" 2>/dev/null || echo "0")
+            if [ "$baseline" -gt 0 ] && [ "$count" -lt "$baseline" ]; then
+              echo "::warning::Test count $count below baseline $baseline"
+            fi
+          fi
+
+          # Output collection manifest
+          echo "=== Test Collection Manifest ==="
+          tail -n 20 collection.txt
+          echo "Total tests collected: $count"
+          echo "================================="
+
       - name: Run tests
         run: |
           # E2E/Playwright/HTTP tests live under tests/e2e/ and are excluded via

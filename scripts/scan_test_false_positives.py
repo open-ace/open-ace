@@ -17,6 +17,7 @@ from typing import NamedTuple
 
 class Finding(NamedTuple):
     """A false positive finding."""
+
     file: str
     line: int
     severity: str  # P0, P1, P2
@@ -50,13 +51,15 @@ class FalsePositiveScanner(ast.NodeVisitor):
 
         # Check for test functions without assertions
         if self.is_test_function and not self.has_assertion:
-            self.findings.append(Finding(
-                file=self.filepath,
-                line=node.lineno,
-                severity="P0",
-                pattern="no_assertion",
-                message=f"Test function '{node.name}' has no assertions"
-            ))
+            self.findings.append(
+                Finding(
+                    file=self.filepath,
+                    line=node.lineno,
+                    severity="P0",
+                    pattern="no_assertion",
+                    message=f"Test function '{node.name}' has no assertions",
+                )
+            )
 
         # Restore state
         self.current_function = old_function
@@ -71,14 +74,21 @@ class FalsePositiveScanner(ast.NodeVisitor):
                 for child in node.body:
                     if isinstance(child, ast.Pass):
                         severity = "P0" if self.is_test_function else "P1"
-                        self.findings.append(Finding(
-                            file=self.filepath,
-                            line=node.lineno,
-                            severity=severity,
-                            pattern="broad_except_pass",
-                            message=f"Broad except {node.type.id}: pass in function '{self.current_function}'"
-                        ))
+                        self.findings.append(
+                            Finding(
+                                file=self.filepath,
+                                line=node.lineno,
+                                severity=severity,
+                                pattern="broad_except_pass",
+                                message=f"Broad except {node.type.id}: pass in function '{self.current_function}'",
+                            )
+                        )
 
+        self.generic_visit(node)
+
+    def visit_Assert(self, node: ast.Assert) -> None:
+        """Visit assert statement."""
+        self.has_assertion = True
         self.generic_visit(node)
 
     def visit_Call(self, node: ast.Call) -> None:
@@ -89,15 +99,27 @@ class FalsePositiveScanner(ast.NodeVisitor):
                 self.has_assertion = True
         elif isinstance(node.func, ast.Attribute):
             # Check for standard assertions
-            if node.func.attr in ("assert", "assertEqual", "assertTrue", "assertFalse",
-                                  "assertIn", "assertIs", "assertIsNot", "assert_called",
-                                  "assert_called_once", "assert_called_with",
-                                  "assert_not_called", "assert_called_once_with"):
+            if node.func.attr in (
+                "assert",
+                "assertEqual",
+                "assertTrue",
+                "assertFalse",
+                "assertIn",
+                "assertIs",
+                "assertIsNot",
+                "assert_called",
+                "assert_called_once",
+                "assert_called_with",
+                "assert_not_called",
+                "assert_called_once_with",
+            ):
                 self.has_assertion = True
             # Check for pytest.raises
-            if (isinstance(node.func.value, ast.Name) and
-                node.func.value.id == "pytest" and
-                node.func.attr == "raises"):
+            if (
+                isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "pytest"
+                and node.func.attr == "raises"
+            ):
                 self.has_assertion = True
 
         self.generic_visit(node)
@@ -106,7 +128,7 @@ class FalsePositiveScanner(ast.NodeVisitor):
 def has_assertion_regex(content: str) -> bool:
     """Check if file has assertions using regex."""
     # Check for assert statements or pytest.raises
-    return bool(re.search(r'\bassert\b|pytest\.raises', content))
+    return bool(re.search(r"\bassert\b|pytest\.raises", content))
 
 
 def scan_file(filepath: Path) -> list[Finding]:
@@ -139,8 +161,7 @@ def scan_tests(test_dir: Path) -> list[Finding]:
 
     for py_file in test_dir.rglob("*.py"):
         # Only scan test files
-        if not (py_file.name.startswith(("test_", "e2e_")) or
-                py_file.name.endswith("_test.py")):
+        if not (py_file.name.startswith(("test_", "e2e_")) or py_file.name.endswith("_test.py")):
             continue
 
         findings = scan_file(py_file)
@@ -171,7 +192,7 @@ def main() -> int:
     p1_count = sum(1 for f in findings if f.severity == "P1")
     p2_count = sum(1 for f in findings if f.severity == "P2")
 
-    print(f"\nFindings by severity:")
+    print("\nFindings by severity:")
     print(f"  P0 (must fix): {p0_count}")
     print(f"  P1 (review needed): {p1_count}")
     print(f"  P2 (low priority): {p2_count}")

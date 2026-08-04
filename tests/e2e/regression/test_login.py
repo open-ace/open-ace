@@ -169,7 +169,8 @@ def test_logout():
                         logout_found = True
                         logout_btn.click()
                         break
-                except Exception:
+                except TimeoutError:
+                    # Only catch timeout, other exceptions should propagate
                     continue
 
             # Issue #2189: 找不到必须失败
@@ -182,7 +183,7 @@ def test_logout():
             # Issue #2189: 等待重定向完成（使用明确条件）
             try:
                 page.wait_for_url("**/login**", timeout=10000)
-            except Exception:
+            except TimeoutError:
                 save_screenshot(page, MODULE_NAME, "04_logout_no_redirect")
                 pytest.fail(
                     f"Logout did not redirect to login page. Current URL: {page.url}"
@@ -193,7 +194,7 @@ def test_logout():
 
             save_screenshot(page, MODULE_NAME, "04_logout_success")
 
-        except Exception:
+        except Exception as e:
             # 保存失败截图
             save_screenshot(page, MODULE_NAME, "04_logout_error")
             raise  # 重新抛出，不吞掉
