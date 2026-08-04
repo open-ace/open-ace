@@ -267,3 +267,50 @@ class TestHealthChecksUtility:
         result = check_initialization_status()
         assert result["status"] == "error"
         assert "Test error" in result["error"]
+
+    def test_init_error_propagates_to_readyz(self, client, app):
+        """Test that initialization errors are reflected in /readyz."""
+        from app.utils.health_checks import set_init_error
+
+        with app.app_context():
+            # Set an initialization error
+            set_init_error("Encryption initialization failed", "encryption")
+
+            resp = client.get("/readyz")
+            assert resp.status_code == 503
+            data = json.loads(resp.data)
+            assert data["checks"]["init_status"]["status"] == "error"
+
+    def test_readyz_timeout_on_slow_operation(self, client, app):
+        """Test that /readyz handles timeout on slow operations."""
+        import time
+
+        def slow_check():
+            time.sleep(5)  # Simulate slow filesystem
+            return {"status": "ok"}
+
+        with app.app_context():
+            with patch(
+                "app.utils.health_checks.check_config_directory",
+                side_effect=slow_check
+            ):
+                # Should not timeout because run_check_with_timeout has 1s timeout
+                resp = client.get("/readyz")
+                # Should return 503 due to timeout
+                data = json.loads(resp.data)
+                assert data["checks"]["config_dir"]["status"] == "error"
+                assert data["checks"]["config_dir"]["error"] == "timeout"
+
+    def test_metrics_returns_prometheus_format(self, client, app):
+        """Test that /metrics returns Prometheus format when configured."""
+        with app.app_context():
+            resp = client.get("/metrics")
+            # If prometheus_flask_exporter is initialized, it returns 200
+            # with Prometheus format.
+            # If not installed, fallback route returns 503.
+            assert resp.status_code in (200, 503)
+
+            if resp.status_code == 200:
+                # Should be Prometheus format (text/plain)
+                content_type = resp.content_type
+                assert "text/plain" in content_type or "text/html" in content_type

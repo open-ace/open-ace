@@ -268,3 +268,31 @@ def get_current_timestamp() -> str:
         ISO format timestamp string.
     """
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def run_check_with_timeout(check_func, timeout_seconds: float = 1.0) -> dict[str, Any]:
+    """Run a health check function with timeout.
+
+    Uses ThreadPoolExecutor for cross-platform compatibility
+    (works on Windows, Linux, and with gevent).
+
+    Args:
+        check_func: The check function to run.
+        timeout_seconds: Timeout in seconds.
+
+    Returns:
+        Dict with status and optional error message.
+    """
+    from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
+
+    try:
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(check_func)
+            return future.result(timeout=timeout_seconds)
+    except FuturesTimeoutError:
+        logger.warning(f"Health check timed out after {timeout_seconds}s")
+        return {"status": "error", "error": "timeout"}
+    except Exception as e:
+        error_msg = _sanitize_error_message(e)
+        logger.warning(f"Health check failed: {error_msg}")
+        return {"status": "error", "error": error_msg}

@@ -76,6 +76,9 @@ spec:
               value: /home/open-ace
             - name: OPENACE_CONFIG_DIR
               value: /home/open-ace/.open-ace
+            # Prometheus multi-worker mode (Issue #2186)
+            - name: PROMETHEUS_MULTIPROC_DIR
+              value: /tmp/prometheus_multiproc
           resources:
             requests:
               cpu: "100m"

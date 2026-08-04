@@ -325,6 +325,44 @@ def create_app(config=None):
     # Register error handlers
     register_error_handlers(app)
 
+    # Initialize Prometheus metrics (Issue #2186)
+    # Only for web workers - scheduler has its own metrics server
+    scheduler_mode = os.environ.get("SCHEDULER_MODE", "web")
+    prometheus_initialized = False
+    if scheduler_mode != "scheduler":
+        try:
+            from prometheus_flask_exporter import PrometheusMetrics
+
+            # Initialize metrics with /metrics path
+            metrics = PrometheusMetrics(
+                app,
+                path="/metrics",
+                group_by_endpoint=True,
+                buckets=[0.01, 0.05, 0.1, 0.5, 1, 5],
+            )
+            prometheus_initialized = True
+            logger.info("Prometheus metrics initialized on /metrics")
+        except ImportError:
+            logger.warning(
+                "prometheus_flask_exporter not available - metrics endpoint will return 503. "
+                "Install with: pip install prometheus_flask_exporter"
+            )
+        except Exception as e:
+            logger.warning(f"Failed to initialize Prometheus metrics: {e}")
+
+    # Fallback /metrics endpoint if PrometheusMetrics not initialized
+    if not prometheus_initialized:
+
+        @app.route("/metrics")
+        def metrics_endpoint():
+            """Fallback metrics endpoint when prometheus_flask_exporter is not available."""
+            return jsonify(
+                {
+                    "status": "error",
+                    "message": "prometheus_flask_exporter not installed. Install with: pip install prometheus_flask_exporter",
+                }
+            ), 503
+
     # Register blueprints
     register_blueprints(app)
 
@@ -364,8 +402,20 @@ def create_app(config=None):
         ensure_all_tables()
         logger.info(f"Development schema bootstrap completed (mode={env_mode})")
 
-    # Pre-check encryption key registry (Issue #1820)
-    _precheck_encryption_registry()
+    # Pre-check encryption key registry (Issue #1820, #2186)
+    try:
+        _precheck_encryption_registry()
+    except Exception as e:
+        # Record initialization error for /readyz check
+        from app.utils.health_checks import set_init_error
+
+        set_init_error(str(e), category="encryption")
+        # Re-raise in production to prevent startup
+        from app.utils.security_mode import is_production
+
+        if is_production():
+            raise
+        logger.warning(f"Encryption pre-check failed (non-production): {e}")
 
     # Pre-check API key encryption availability
     try:
@@ -469,6 +519,7 @@ def create_app(config=None):
             check_encryption_registry,
             check_initialization_status,
             check_workspace_directory,
+            run_check_with_timeout,
         )
 
         checks: dict[str, dict[str, str | bool | None]] = {
@@ -524,20 +575,20 @@ def create_app(config=None):
             checks["schema_version"]["status"] = "skipped"
             checks["schema_version"]["compatible"] = True
 
-        # Check config directory (Issue #2186)
-        config_result = check_config_directory()
+        # Check config directory with timeout (Issue #2186)
+        config_result = run_check_with_timeout(check_config_directory, timeout_seconds=1.0)
         checks["config_dir"] = config_result
         if config_result.get("status") not in ("ok", "skipped"):
             status_code = 503
 
-        # Check workspace directory (Issue #2186)
-        workspace_result = check_workspace_directory()
+        # Check workspace directory with timeout (Issue #2186)
+        workspace_result = run_check_with_timeout(check_workspace_directory, timeout_seconds=1.0)
         checks["workspace_dir"] = workspace_result
         if workspace_result.get("status") not in ("ok", "skipped"):
             status_code = 503
 
-        # Check encryption keys (Issue #2186)
-        encryption_result = check_encryption_registry()
+        # Check encryption keys with timeout (Issue #2186)
+        encryption_result = run_check_with_timeout(check_encryption_registry, timeout_seconds=2.0)
         checks["encryption_keys"] = encryption_result
         if encryption_result.get("status") == "error":
             status_code = 503
@@ -562,23 +613,6 @@ def create_app(config=None):
             }
 
         return jsonify(response), status_code
-
-    # Metrics endpoint (Issue #2186)
-    @app.route("/metrics")
-    def metrics_endpoint():
-        """Prometheus metrics endpoint.
-
-        Returns metrics in Prometheus exposition format.
-        Requires prometheus_flask_exporter to be configured.
-        """
-        # This endpoint is handled by prometheus_flask_exporter if configured
-        # If not configured, return a helpful message
-        return jsonify(
-            {
-                "error": "Metrics not configured",
-                "message": "Set PROMETHEUS_MULTIPROC_DIR for multi-worker mode or ensure prometheus_flask_exporter is initialized",
-            }
-        ), 503
 
     # Start background services (Issue #2187)
     # Web workers should NOT start schedulers - only scheduler worker should
