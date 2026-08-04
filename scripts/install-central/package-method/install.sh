@@ -3721,6 +3721,8 @@ install_local() {
     print_info "Installation path: $target_path"
     print_info "Config directory: $config_dir"
     echo ""
+
+    # Auto-start the web server after installation
     if [ "$INSTALL_SERVICE" = "yes" ] && command -v systemctl &>/dev/null; then
         echo "Service management:"
         echo "  systemctl status open-ace"
@@ -3730,9 +3732,121 @@ install_local() {
         echo ""
         echo "View logs:"
         echo "  journalctl -u open-ace -f"
+        echo ""
+
+        # Service should already be running from install_systemd_service
+        if systemctl is-active --quiet open-ace.service 2>/dev/null; then
+            print_success "Web server is running on port ${SERVICE_PORT:-19888}"
+        else
+            print_warning "Service not running. Start with: systemctl start open-ace"
+        fi
     else
-        echo "To start the web server:"
-        echo "  cd $target_path && python3 server.py"
+        # No systemd service installed - start manually as the correct user
+        # Safety check: ensure DEPLOY_USER is set
+        if [ -z "$DEPLOY_USER" ]; then
+            print_error "DEPLOY_USER is not set. Cannot start server."
+            print_info "Please run the installer again or set DEPLOY_USER manually."
+            echo ""
+            return 1
+        fi
+
+        print_info "Starting web server as user '$DEPLOY_USER'..."
+
+        local port="${SERVICE_PORT:-19888}"
+        local host="${SERVICE_HOST:-0.0.0.0}"
+        local pid_file="$target_path/logs/server.pid"
+
+        # Check if port is already in use (use -tln instead of -tlnp to avoid root requirement)
+        if ss -tln 2>/dev/null | grep -q ":$port "; then
+            print_warning "Port $port is already in use"
+            # Try to stop existing server using PID file or pkill
+            if [ -f "$pid_file" ]; then
+                local old_pid=$(cat "$pid_file" 2>/dev/null)
+                if [ -n "$old_pid" ] && kill -0 "$old_pid" 2>/dev/null; then
+                    print_info "Stopping existing server (PID: $old_pid)..."
+                    kill "$old_pid" 2>/dev/null || true
+                    sleep 2
+                    # Check if port is now free
+                    if ! ss -tln 2>/dev/null | grep -q ":$port "; then
+                        print_success "Existing server stopped"
+                    else
+                        print_warning "Port still in use, trying pkill..."
+                        pkill -u "$DEPLOY_USER" -f 'python3.*server.py' 2>/dev/null || true
+                        sleep 2
+                    fi
+                else
+                    # PID file exists but process not running, try pkill
+                    print_info "Stopping existing server processes..."
+                    pkill -u "$DEPLOY_USER" -f 'python3.*server.py' 2>/dev/null || true
+                    sleep 2
+                fi
+            else
+                # No PID file, try pkill to stop existing server
+                print_info "Stopping existing server processes..."
+                pkill -u "$DEPLOY_USER" -f 'python3.*server.py' 2>/dev/null || true
+                sleep 2
+            fi
+
+            # Final check if port is now free
+            if ss -tln 2>/dev/null | grep -q ":$port "; then
+                print_error "Port $port is still in use after stopping attempts"
+                print_info "Please manually stop the process using this port"
+                print_info "Commands to try:"
+                echo "  ss -tlnp | grep ':$port'  # Find the process"
+                echo "  pkill -f 'python3.*server.py'  # Stop all server.py instances"
+                echo ""
+                return 1
+            fi
+        fi
+
+        # Ensure logs directory exists
+        mkdir -p "$target_path/logs" 2>/dev/null || true
+        chown "$DEPLOY_USER:$(id -gn "$DEPLOY_USER")" "$target_path/logs" 2>/dev/null || true
+
+        # Use nohup to run in background and save PID
+        print_info "Starting web server on $host:$port as user '$DEPLOY_USER'..."
+        if ! su - "$DEPLOY_USER" -c "cd '$target_path' && AI_TOKEN_WEB_PORT=$port AI_TOKEN_WEB_HOST=$host nohup python3 server.py > logs/server.log 2>&1 & echo \$! > logs/server.pid"; then
+            print_error "Failed to start server as user '$DEPLOY_USER'"
+            print_info "Check if user exists: id $DEPLOY_USER"
+            echo ""
+            return 1
+        fi
+
+        # Wait for server to start with timeout (more reliable than fixed sleep)
+        local wait_time=0
+        local max_wait=10
+        while [ $wait_time -lt $max_wait ]; do
+            if ss -tln 2>/dev/null | grep -q ":$port "; then
+                break
+            fi
+            sleep 1
+            wait_time=$((wait_time + 1))
+        done
+
+        # Check if server is listening
+        if ss -tln 2>/dev/null | grep -q ":$port "; then
+            print_success "Web server is running on port $port"
+            echo ""
+            echo "Access the web interface:"
+            echo "  http://localhost:$port"
+            if [ -n "$host" ] && [ "$host" != "127.0.0.1" ] && [ "$host" != "localhost" ]; then
+                local server_ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+                [ -n "$server_ip" ] && echo "  http://$server_ip:$port"
+            fi
+            echo ""
+            echo "Stop the server:"
+            if [ -f "$pid_file" ]; then
+                echo "  kill \$(cat $pid_file)  # Stop this instance"
+            fi
+            echo "  pkill -f 'python3.*server.py'  # Stop all instances"
+            echo "  pkill -u $DEPLOY_USER -f 'python3.*server.py'  # Stop only user instances"
+            echo ""
+            echo "View logs:"
+            echo "  tail -f $target_path/logs/server.log"
+        else
+            print_warning "Server may have failed to start after ${wait_time}s. Check logs:"
+            print_info "  tail -f $target_path/logs/server.log"
+        fi
     fi
     echo ""
 }
@@ -3814,8 +3928,63 @@ install_deploy() {
         echo "View logs on remote:"
         echo "  ssh $remote 'sudo journalctl -u open-ace -f'"
     else
-        echo "To start the web server on remote:"
-        echo "  ssh $remote 'cd $target_path && python3 server.py'"
+        # No systemd service installed - start manually on remote as the correct user
+        print_info "Starting web server on remote host..."
+
+        # Check if port is already in use on remote (use -tln to avoid root requirement)
+        local port="${SERVICE_PORT:-19888}"
+        local host="${SERVICE_HOST:-0.0.0.0}"
+
+        if ssh "$remote" "ss -tln 2>/dev/null | grep -q ':$port '" 2>/dev/null; then
+            print_warning "Port $port is already in use on remote"
+            print_info "Stop existing process on remote or change port in config"
+            echo ""
+            echo "To manually start the web server on remote:"
+            echo "  ssh $remote 'cd $target_path && python3 server.py'"
+        else
+            # Ensure logs directory exists on remote
+            ssh "$remote" "mkdir -p '$target_path/logs' && chown '$DEPLOY_USER:\$(id -gn $DEPLOY_USER)' '$target_path/logs'" 2>/dev/null || true
+
+            # Start the server in background as the correct user
+            print_info "Starting web server on $host:$port as user '$DEPLOY_USER' on remote..."
+            local pid_file="$target_path/logs/server.pid"
+            if ! ssh "$remote" "su - '$DEPLOY_USER' -c \"cd '$target_path' && AI_TOKEN_WEB_PORT=$port AI_TOKEN_WEB_HOST=$host nohup python3 server.py > logs/server.log 2>&1 & echo \\\$! > logs/server.pid\""; then
+                print_error "Failed to start server on remote as user '$DEPLOY_USER'"
+                print_info "Check if user exists on remote: ssh $remote 'id $DEPLOY_USER'"
+                echo ""
+                echo "To manually start the web server on remote:"
+                echo "  ssh $remote 'cd $target_path && python3 server.py'"
+            else
+                # Wait for server to start with timeout
+                local wait_time=0
+                local max_wait=10
+                while [ $wait_time -lt $max_wait ]; do
+                    if ssh "$remote" "ss -tln 2>/dev/null | grep -q ':$port '" 2>/dev/null; then
+                        break
+                    fi
+                    sleep 1
+                    wait_time=$((wait_time + 1))
+                done
+
+                # Check if server is listening
+                if ssh "$remote" "ss -tln 2>/dev/null | grep -q ':$port '" 2>/dev/null; then
+                    print_success "Web server is running on remote port $port"
+                    echo ""
+                    echo "Access the web interface:"
+                    echo "  http://$DEPLOY_HOST:$port"
+                    echo ""
+                    echo "Stop the server on remote:"
+                    echo "  ssh $remote 'kill \$(cat $pid_file)'"
+                    echo "  ssh $remote 'pkill -f \"python3.*server.py\"'"
+                    echo ""
+                    echo "View logs on remote:"
+                    echo "  ssh $remote 'tail -f $target_path/logs/server.log'"
+                else
+                    print_warning "Server may have failed to start on remote after ${wait_time}s"
+                    print_info "Check logs: ssh $remote 'tail -f $target_path/logs/server.log'"
+                fi
+            fi
+        fi
     fi
     echo ""
 }
