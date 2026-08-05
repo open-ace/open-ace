@@ -18,7 +18,7 @@ sys.path.insert(
     0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 )
 
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import TimeoutError, sync_playwright
 
 from tests.e2e.regression.test_helpers import (
     BASE_URL,
@@ -154,27 +154,63 @@ def test_logout():
                         f"Login did not redirect after 120s during logout test. Error: {e}"
                     ) from e
 
-            # 查找并点击登出按钮
-            logout_selectors = [
-                'a[href="/logout"]',
-                'button:has-text("Logout")',
-                '.user-menu a:has-text("Logout")',
-            ]
-            if check_element_exists(page, logout_selectors):
-                try:
-                    logout_btn = page.locator(
-                        logout_selectors[0] + ", " + logout_selectors[1]
-                    ).first
-                    if logout_btn.is_visible():
-                        logout_btn.click()
-                        page.wait_for_timeout(1000)
-                        # 验证重定向到登录页面
-                        assert "/login" in page.url, "登出后应重定向到登录页面"
-                except Exception:
-                    pass
+            # Issue #2189: Logout button is inside a dropdown menu
+            # Need to first click the user avatar to open the dropdown
+            # Header structure: div.dropdown > button.dropdown-toggle > ul.dropdown-menu > li > button.dropdown-item
+            try:
+                # Click user avatar button to open dropdown menu.
+                # Use .header-icon-btn.dropdown-toggle as primary selector (always present
+                # on the user menu button regardless of avatar vs icon).
+                # Fallback: .dropdown-toggle:has(.bi-person-circle) for icon-only mode.
+                user_menu_btn = page.wait_for_selector(
+                    ".header-icon-btn.dropdown-toggle, " ".dropdown-toggle:has(.bi-person-circle)",
+                    state="visible",
+                    timeout=5000,
+                )
+                user_menu_btn.click()
+                # Wait for Bootstrap dropdown animation to complete
+                page.wait_for_timeout(1000)
 
-            save_screenshot(page, MODULE_NAME, "04_logout")
-            return True
+                # Click the logout button in the dropdown menu.
+                # Use text-based selectors (Logout / 退出登录) plus icon-based
+                # fallback (.bi-box-arrow-right) for multi-language robustness.
+                logout_btn = page.wait_for_selector(
+                    "button.dropdown-item:has-text('Logout'), "
+                    "button.dropdown-item:has-text('退出登录'), "
+                    "button.dropdown-item:has(.bi-box-arrow-right)",
+                    state="visible",
+                    timeout=5000,
+                )
+                logout_btn.click()
+                logout_found = True
+            except TimeoutError:
+                logout_found = False
+
+            # Issue #2189: 找不到必须失败
+            if not logout_found:
+                save_screenshot(page, MODULE_NAME, "04_logout_no_button")
+                pytest.fail(
+                    "Logout button not found. Check if user menu dropdown is working. "
+                    "Expected: click user avatar -> see dropdown -> click logout button"
+                )
+
+            # Issue #2189: 等待重定向完成（使用明确条件）
+            try:
+                page.wait_for_url("**/login**", timeout=10000)
+            except TimeoutError:
+                save_screenshot(page, MODULE_NAME, "04_logout_no_redirect")
+                pytest.fail(f"Logout did not redirect to login page. Current URL: {page.url}")
+
+            # Issue #2189: 最终断言
+            assert "/login" in page.url, f"Expected login URL, got {page.url}"
+
+            save_screenshot(page, MODULE_NAME, "04_logout_success")
+
+        except Exception:
+            # 保存失败截图
+            save_screenshot(page, MODULE_NAME, "04_logout_error")
+            raise  # 重新抛出，不吞掉
+
         finally:
             browser.close()
 

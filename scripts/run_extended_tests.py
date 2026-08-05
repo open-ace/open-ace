@@ -178,10 +178,18 @@ def apply_split(targets: list[str], split_total: int, split_group: int) -> list[
         raise ValueError("--split-total must be >= 1")
     if split_group < 1 or split_group > split_total:
         raise ValueError("--split-group must be between 1 and --split-total")
-    if split_total == 1:
-        return targets
 
+    # Always expand to file list for consistency (Issue #2189)
     files = discover_test_files(targets)
+
+    if not files:
+        raise ValueError(f"No test files discovered from targets: {targets}")
+
+    if split_total == 1:
+        # Issue #2189: Return file list even for non-split mode
+        print(f"Collected {len(files)} test files")
+        return files
+
     selected = [
         file for index, file in enumerate(files) if (index % split_total) == (split_group - 1)
     ]
@@ -191,9 +199,83 @@ def apply_split(targets: list[str], split_total: int, split_group: int) -> list[
     return selected
 
 
+def load_baseline() -> dict | None:
+    """Load test baseline from .test-baseline.json (Issue #2189)."""
+    baseline_path = PROJECT_ROOT / ".test-baseline.json"
+    if not baseline_path.exists():
+        return None
+
+    import json
+
+    try:
+        with open(baseline_path) as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError) as e:
+        print(f"Warning: Failed to load baseline: {e}")
+        return None
+
+
+def check_baseline(category: str, file_count: int) -> bool:
+    """Check if test count meets baseline threshold (Issue #2189)."""
+    baseline = load_baseline()
+    if not baseline:
+        return True
+
+    # Map category to baseline layer
+    layer_map = {
+        "default": "default",
+        "critical": "critical",
+        "e2e": "e2e_pytest",
+        "issues": "issues",
+    }
+
+    layer_name = layer_map.get(category)
+    if not layer_name or layer_name not in baseline.get("layers", {}):
+        return True
+
+    layer_baseline = baseline["layers"][layer_name]
+    min_files = layer_baseline.get("min_files", 0)
+
+    if file_count < min_files:
+        tolerance = baseline.get("tolerance", {})
+        threshold = tolerance.get("require_review_threshold", 10)
+        decrease_pct = ((min_files - file_count) / min_files * 100) if min_files > 0 else 0
+
+        if decrease_pct >= threshold:
+            print(
+                f"ERROR: Test count {file_count} below baseline {min_files} "
+                f"({decrease_pct:.1f}% decrease >= {threshold}% threshold)"
+            )
+            return False
+        else:
+            print(
+                f"WARNING: Test count {file_count} below baseline {min_files} "
+                f"({decrease_pct:.1f}% decrease)"
+            )
+
+    return True
+
+
+def print_collection_manifest(files: list[str]) -> None:
+    """Print collection manifest with file list and count (Issue #2189)."""
+    print("\n=== Test Collection Manifest ===")
+    print(f"Total files: {len(files)}")
+    if files:
+        print("\nCollected files:")
+        for file in files:
+            print(f"  - {file}")
+    print("=" * 40 + "\n")
+
+
 def build_pytest_command(args: argparse.Namespace) -> list[str]:
     targets = select_targets(args)
     targets = apply_split(targets, args.split_total, args.split_group)
+
+    # Issue #2189: Print collection manifest and check baseline
+    print_collection_manifest(targets)
+    if not check_baseline(args.category, len(targets)):
+        raise ValueError(f"Test count below baseline threshold for category: {args.category}")
+
     cmd = [sys.executable, "-m", "pytest", *targets, "-m", "not postgres"]
     if args.parallel > 0:
         cmd.extend(["-n", str(args.parallel)])
