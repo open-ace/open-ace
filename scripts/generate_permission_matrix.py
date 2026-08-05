@@ -57,7 +57,9 @@ def extract_endpoint_info(file_path: Path) -> list[dict]:
             # Find route decorator
             route_line = None
             for dec_line_num, dec_line_text in current_decorators:
-                if dec_line_text.startswith("@tenant_bp.route") or dec_line_text.startswith("@bp.route"):
+                if dec_line_text.startswith("@tenant_bp.route") or dec_line_text.startswith(
+                    "@bp.route"
+                ):
                     route_line = dec_line_text
                     break
 
