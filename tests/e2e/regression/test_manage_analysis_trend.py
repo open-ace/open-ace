@@ -131,7 +131,7 @@ def test_data_export():
             check_element_exists(page, export_selectors)
 
             save_screenshot(page, MODULE_NAME, "04_export")
-            assert page.locator('body').is_visible(), '页面应可见'
+            assert page.locator("body").is_visible(), "页面应可见"
         finally:
             browser.close()
 
@@ -153,7 +153,7 @@ def test_chart_interaction():
                 page.wait_for_timeout(500)
 
             save_screenshot(page, MODULE_NAME, "05_interaction")
-            assert page.locator('body').is_visible(), '页面应可见'
+            assert page.locator("body").is_visible(), "页面应可见"
         finally:
             browser.close()
 

@@ -33,7 +33,9 @@ DEFAULT_TIMEOUT = 15000
 OUTPUT_DIR = "./screenshots"
 
 
-def test_work_mode_session_list(ui_screenshot_dir):  # allow-no-assert: smoke test - visual verification only
+def test_work_mode_session_list(
+    ui_screenshot_dir,
+):  # allow-no-assert: smoke test - visual verification only
     """Test Work Mode Session List improvements"""
     global OUTPUT_DIR
     OUTPUT_DIR = ui_screenshot_dir

@@ -64,7 +64,9 @@ def get_or_create_terminal_session():
     return None
 
 
-def test_terminal_session_restore(headless=True):  # allow-no-assert: smoke test - visual verification only
+def test_terminal_session_restore(
+    headless=True,
+):  # allow-no-assert: smoke test - visual verification only
     """Test that clicking restore on terminal session navigates to Workspace"""
     print("\n=== Testing Terminal Session Restore ===")
 

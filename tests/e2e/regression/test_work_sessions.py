@@ -154,7 +154,7 @@ def test_session_delete():
             check_element_exists(page, delete_btn_selectors)
 
             save_screenshot(page, MODULE_NAME, "05_delete")
-            assert page.locator('body').is_visible(), '页面应可见'
+            assert page.locator("body").is_visible(), "页面应可见"
         finally:
             browser.close()
 

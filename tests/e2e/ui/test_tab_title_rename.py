@@ -61,7 +61,9 @@ def login(page):
     time.sleep(1)
 
 
-def test_tab_title_rename(ui_screenshot_dir):  # allow-no-assert: smoke test - visual verification only
+def test_tab_title_rename(
+    ui_screenshot_dir,
+):  # allow-no-assert: smoke test - visual verification only
     """Test tab title default value and rename functionality"""
     global SCREENSHOT_DIR
     SCREENSHOT_DIR = ui_screenshot_dir

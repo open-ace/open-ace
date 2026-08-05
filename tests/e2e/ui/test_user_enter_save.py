@@ -49,7 +49,9 @@ async def take_screenshot(page, name):
 
 
 @pytest.mark.asyncio
-async def test_user_enter_save(ui_screenshot_dir):  # allow-no-assert: smoke test - visual verification only
+async def test_user_enter_save(
+    ui_screenshot_dir,
+):  # allow-no-assert: smoke test - visual verification only
     """Test Enter key saves user in create user dialog"""
     global SCREENSHOT_DIR
     SCREENSHOT_DIR = ui_screenshot_dir
@@ -182,8 +184,6 @@ async def test_user_enter_save(ui_screenshot_dir):  # allow-no-assert: smoke tes
             print(f"\nScreenshots saved to: {SCREENSHOT_DIR}")
             for s in screenshots:
                 print(f"  - {os.path.basename(s)}")
-
-
 
         except Exception as e:  # allow-swallow: UI element may not exist
             print(f"\n✗ Test failed: {e}")

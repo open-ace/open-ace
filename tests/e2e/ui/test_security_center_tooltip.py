@@ -38,7 +38,9 @@ SCREENSHOT_DIR = os.path.join(
 )
 
 
-def test_security_center_tooltip(ui_screenshot_dir):  # allow-no-assert: smoke test - visual verification only
+def test_security_center_tooltip(
+    ui_screenshot_dir,
+):  # allow-no-assert: smoke test - visual verification only
     """Test Security Center Tooltip functionality"""
     global SCREENSHOT_DIR
     SCREENSHOT_DIR = ui_screenshot_dir

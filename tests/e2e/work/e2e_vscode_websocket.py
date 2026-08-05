@@ -214,7 +214,6 @@ def test_vscode_websocket(headless=True):  # allow-no-assert: smoke test - visua
             print("\n=== Test PASSED: No WebSocket errors ===")
 
 
-
 if __name__ == "__main__":
     import argparse
 

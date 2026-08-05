@@ -61,7 +61,9 @@ def login(page):
     time.sleep(1)
 
 
-def test_multi_tab_notification(ui_screenshot_dir):  # allow-no-assert: smoke test - visual verification only
+def test_multi_tab_notification(
+    ui_screenshot_dir,
+):  # allow-no-assert: smoke test - visual verification only
     """Test notification with multiple tabs"""
     global SCREENSHOT_DIR
     SCREENSHOT_DIR = ui_screenshot_dir
@@ -256,8 +258,6 @@ def test_multi_tab_notification(ui_screenshot_dir):  # allow-no-assert: smoke te
             print("  - Dot content (●)")
             print("")
             print("Screenshots saved to:", SCREENSHOT_DIR)
-
-
 
         except Exception as e:  # allow-swallow: UI element may not exist
             print(f"\nError: {e}")

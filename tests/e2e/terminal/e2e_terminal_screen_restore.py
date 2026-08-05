@@ -61,12 +61,14 @@ def wait_for_terminal_running(terminal_id, timeout=30):
         data = resp.json()
         status = data.get("terminal", {}).get("status", "unknown")
         if status == "running":
-
+            return True
         time.sleep(2)
     return False
 
 
-def test_terminal_screen_restore(headless=HEADLESS):  # allow-no-assert: smoke test - visual verification only
+def test_terminal_screen_restore(
+    headless=HEADLESS,
+):  # allow-no-assert: smoke test - visual verification only
     """Test that terminal screen content is restored after tab close and restore."""
     print("\n" + "=" * 60)
     print("Terminal Screen Restore Test")

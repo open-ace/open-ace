@@ -30,7 +30,9 @@ SCREENSHOT_DIR = os.path.join(
 )
 
 
-def test_work_usage_page(ui_screenshot_dir):  # allow-no-assert: smoke test - visual verification only
+def test_work_usage_page(
+    ui_screenshot_dir,
+):  # allow-no-assert: smoke test - visual verification only
     """测试 /work/usage 页面"""
     global SCREENSHOT_DIR
     SCREENSHOT_DIR = ui_screenshot_dir

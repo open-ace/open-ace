@@ -189,7 +189,9 @@ def login(context, page):
     shot(page, "01-login")
 
 
-def test_global_toast_renders_at_root(page):  # allow-no-assert: smoke test - visual verification only
+def test_global_toast_renders_at_root(
+    page,
+):  # allow-no-assert: smoke test - visual verification only
     """Saving an empty form fires a toast in the global toast portal.
 
     The SMTP page never rendered its own ToastContainer, so a visible toast
@@ -227,7 +229,9 @@ def test_global_toast_renders_at_root(page):  # allow-no-assert: smoke test - vi
     shot(page, "02-global-toast")
 
 
-def test_delete_uses_confirm_modal_not_native_dialog(page):  # allow-no-assert: smoke test - visual verification only
+def test_delete_uses_confirm_modal_not_native_dialog(
+    page,
+):  # allow-no-assert: smoke test - visual verification only
     """Delete opens a styled ConfirmModal, never a native window.confirm.
 
     If no SMTP config exists the Delete button is hidden, so we seed a dummy

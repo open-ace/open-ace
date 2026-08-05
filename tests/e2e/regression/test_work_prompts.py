@@ -150,7 +150,7 @@ def test_prompt_use():
             check_element_exists(page, use_btn_selectors)
 
             save_screenshot(page, MODULE_NAME, "05_use")
-            assert page.locator('body').is_visible(), '页面应可见'
+            assert page.locator("body").is_visible(), "页面应可见"
         finally:
             browser.close()
 

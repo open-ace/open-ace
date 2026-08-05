@@ -17,7 +17,9 @@ SCREENSHOT_DIR = os.path.join(
 )
 
 
-async def test_click_debug(ui_screenshot_dir):  # allow-no-assert: smoke test - visual verification only
+async def test_click_debug(
+    ui_screenshot_dir,
+):  # allow-no-assert: smoke test - visual verification only
     global SCREENSHOT_DIR
     SCREENSHOT_DIR = ui_screenshot_dir
     os.makedirs(SCREENSHOT_DIR, exist_ok=True)

@@ -29,7 +29,9 @@ SCREENSHOT_DIR = os.path.join(
 )
 
 
-async def test_dashboard_first_load(ui_screenshot_dir):  # allow-no-assert: smoke test - visual verification only
+async def test_dashboard_first_load(
+    ui_screenshot_dir,
+):  # allow-no-assert: smoke test - visual verification only
     """Test dashboard first load with detailed timing."""
     global SCREENSHOT_DIR
     SCREENSHOT_DIR = ui_screenshot_dir

@@ -29,15 +29,6 @@ class Finding(NamedTuple):
 
 def scan_false_positives(test_dir: Path) -> list[Finding]:
     """扫描假阳性"""
-    import subprocess
-
-    # 运行扫描器获取假阳性列表
-    result = subprocess.run(
-        [sys.executable, "scripts/scan_test_false_positives.py", str(test_dir), "--pattern", "all"],
-        capture_output=True,
-        text=True,
-    )
-
     # 解析输出（简化版，实际应从扫描器导入函数）
     findings = []
     # 这里我们直接调用扫描器的 API
@@ -84,7 +75,9 @@ def fix_regression_file(file_path: Path, findings: list[Finding]) -> int:
                         lines[i] = ""
                     else:
                         # 无断言，添加断言
-                        lines[i] = "            assert page.locator('body').is_visible(), '页面应可见'"
+                        lines[i] = (
+                            "            assert page.locator('body').is_visible(), '页面应可见'"
+                        )
                     modified += 1
                     break
 
@@ -95,7 +88,9 @@ def fix_regression_file(file_path: Path, findings: list[Finding]) -> int:
                 if "return True" in lines[i]:
                     # 在 return True 之前添加断言
                     indent = "            "
-                    lines.insert(i, f"{indent}assert page.locator('body').is_visible(), '页面应可见'")
+                    lines.insert(
+                        i, f"{indent}assert page.locator('body').is_visible(), '页面应可见'"
+                    )
                     modified += 1
                     break
 
@@ -151,7 +146,10 @@ def annotate_ui_remote_file(file_path: Path, findings: list[Finding]) -> int:
                 for i in range(line_idx, -1, -1):
                     if re.match(r"\s*def (test_|e2e_)", lines[i]):
                         # 在函数定义行添加标注
-                        lines[i] = lines[i].rstrip() + "  # allow-no-assert: smoke test - visual verification only"
+                        lines[i] = (
+                            lines[i].rstrip()
+                            + "  # allow-no-assert: smoke test - visual verification only"
+                        )
                         modified += 1
                         break
 
@@ -189,14 +187,16 @@ def main():
 
     # 2. 分类
     regression_findings = [f for f in findings if "regression" in f.file]
-    ui_remote_findings = [f for f in findings if "ui" in f.file or "remote" in f.file or "e2e_" in f.file]
+    ui_remote_findings = [
+        f for f in findings if "ui" in f.file or "remote" in f.file or "e2e_" in f.file
+    ]
 
     print(f"   - regression/: {len(regression_findings)}")
     print(f"   - ui/remote/e2e_*.py: {len(ui_remote_findings)}")
 
     # 3. 修复 regression/
     print("\n2. 修复 regression/ 文件...")
-    regression_files = set(f.file for f in regression_findings)
+    regression_files = {f.file for f in regression_findings}
     total_modified = 0
     for file_path in regression_files:
         path = Path(file_path)
@@ -209,7 +209,7 @@ def main():
 
     # 4. 标注 ui/remote/
     print("\n3. 标注 ui/remote/ 文件...")
-    ui_remote_files = set(f.file for f in ui_remote_findings)
+    ui_remote_files = {f.file for f in ui_remote_findings}
     total_annotated = 0
     for file_path in ui_remote_files:
         path = Path(file_path)

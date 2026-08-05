@@ -34,13 +34,17 @@ def annotate_file(file_path: Path) -> int:
                 # 检查函数内是否有断言
                 func_end = find_function_end(lines, i)
                 has_assert = any(
-                    "assert " in lines[j] or "pytest.fail" in lines[j] or "pytest.raises" in lines[j]
+                    "assert " in lines[j]
+                    or "pytest.fail" in lines[j]
+                    or "pytest.raises" in lines[j]
                     for j in range(i, func_end)
                 )
 
                 if not has_assert:
                     # 添加标注
-                    lines[i] = line.rstrip() + "  # allow-no-assert: smoke test - visual verification only"
+                    lines[i] = (
+                        line.rstrip() + "  # allow-no-assert: smoke test - visual verification only"
+                    )
                     modified += 1
 
         # 3. 处理 broad_except_swallow（添加标注）
@@ -68,7 +72,9 @@ def find_function_end(lines: list[str], start_idx: int) -> int:
         line = lines[i]
         if line.strip() and not line.strip().startswith("#"):
             current_indent = len(line) - len(line.lstrip())
-            if current_indent <= func_indent and (line.strip().startswith("def ") or line.strip().startswith("class ")):
+            if current_indent <= func_indent and (
+                line.strip().startswith("def ") or line.strip().startswith("class ")
+            ):
                 return i
 
     return len(lines)

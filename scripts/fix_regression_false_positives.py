@@ -27,8 +27,7 @@ def fix_regression_file(file_path: Path) -> int:
             # 检查函数内是否有断言
             func_start = find_function_start(lines, i)
             has_assert = any(
-                "assert " in lines[j] or "pytest.fail" in lines[j]
-                for j in range(func_start, i)
+                "assert " in lines[j] or "pytest.fail" in lines[j] for j in range(func_start, i)
             )
 
             if has_assert:

@@ -125,7 +125,9 @@ def navigate_to_data_retention(page):
     shot(page, "02-data-retention-page")
 
 
-def test_statistics_match_table_rows(page):  # allow-no-assert: smoke test - visual verification only
+def test_statistics_match_table_rows(
+    page,
+):  # allow-no-assert: smoke test - visual verification only
     """Test that retention rules statistics match the number of table rows."""
     print("\n[TEST] Statistics match table rows...")
 

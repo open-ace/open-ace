@@ -153,7 +153,7 @@ def test_compliance_report():
             check_element_exists(page, report_selectors)
 
             save_screenshot(page, MODULE_NAME, "05_report")
-            assert page.locator('body').is_visible(), '页面应可见'
+            assert page.locator("body").is_visible(), "页面应可见"
         finally:
             browser.close()
 

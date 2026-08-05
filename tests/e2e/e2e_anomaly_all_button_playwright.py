@@ -212,7 +212,9 @@ def test_data_range_api(page):  # allow-no-assert: smoke test - visual verificat
     shot(page, "06-api-data-range")
 
 
-def test_manual_date_transition_overwrites(page):  # allow-no-assert: smoke test - visual verification only
+def test_manual_date_transition_overwrites(
+    page,
+):  # allow-no-assert: smoke test - visual verification only
     """Editing a date while in 7/30/90 switches to 'all'; data range then applies."""
     print("\n[TEST] Manual edit from 30 -> 'all' is overwritten by data range...")
     thirty = find_button_by_text(page, "30")
@@ -242,7 +244,9 @@ def test_manual_date_transition_overwrites(page):  # allow-no-assert: smoke test
     shot(page, "07-manual-transition")
 
 
-def test_manual_edit_within_all_preserved(page):  # allow-no-assert: smoke test - visual verification only
+def test_manual_edit_within_all_preserved(
+    page,
+):  # allow-no-assert: smoke test - visual verification only
     """Once already in 'all', a manual edit is preserved (quickRange unchanged)."""
     print("\n[TEST] Manual edit within 'all' is preserved...")
     find_all_button(page).click()

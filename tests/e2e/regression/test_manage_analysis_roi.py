@@ -125,7 +125,7 @@ def test_time_range_filter():
                         continue
 
             save_screenshot(page, MODULE_NAME, "04_time_filter")
-            assert page.locator('body').is_visible(), '页面应可见'
+            assert page.locator("body").is_visible(), "页面应可见"
         finally:
             browser.close()
 
@@ -145,7 +145,7 @@ def test_roi_summary():
             check_element_exists(page, summary_selectors)
 
             save_screenshot(page, MODULE_NAME, "05_summary")
-            assert page.locator('body').is_visible(), '页面应可见'
+            assert page.locator("body").is_visible(), "页面应可见"
         finally:
             browser.close()
 

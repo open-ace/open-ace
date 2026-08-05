@@ -67,12 +67,14 @@ def wait_for_terminal_status(terminal_id, timeout=30):
         status = data.get("terminal", {}).get("status", "unknown")
         print(f"  Terminal status: {status}")
         if data.get("success") and status == "running":
-
+            return True
         time.sleep(2)
     return False
 
 
-def test_terminal_restore_full(headless=HEADLESS):  # allow-no-assert: smoke test - visual verification only
+def test_terminal_restore_full(
+    headless=HEADLESS,
+):  # allow-no-assert: smoke test - visual verification only
     """Full test with conversation and restore"""
     print("\n" + "=" * 60)
     print("Terminal Session Restore - Full Conversation Test")

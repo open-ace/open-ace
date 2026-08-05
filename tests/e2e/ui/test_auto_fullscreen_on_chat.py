@@ -29,7 +29,9 @@ HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 SCREENSHOT_DIR = "screenshots/ui"
 
 
-async def test_auto_fullscreen_on_chat(ui_screenshot_dir):  # allow-no-assert: smoke test - visual verification only
+async def test_auto_fullscreen_on_chat(
+    ui_screenshot_dir,
+):  # allow-no-assert: smoke test - visual verification only
     """Test auto fullscreen when entering chat page in iframe."""
     global SCREENSHOT_DIR
     SCREENSHOT_DIR = ui_screenshot_dir

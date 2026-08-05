@@ -47,7 +47,9 @@ SCREENSHOT_DIR = os.path.join(
 
 
 @pytest.mark.asyncio
-async def test_work_prompts_view_all_button(ui_screenshot_dir):  # allow-no-assert: smoke test - visual verification only
+async def test_work_prompts_view_all_button(
+    ui_screenshot_dir,
+):  # allow-no-assert: smoke test - visual verification only
     """Test Work Mode Prompts Tab View All Button"""
     global SCREENSHOT_DIR
     SCREENSHOT_DIR = ui_screenshot_dir

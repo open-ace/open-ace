@@ -192,7 +192,9 @@ def register_machine_with_token(reg_token):
         return None
 
 
-def test_reuse_registration_token(reg_token):  # allow-no-assert: smoke test - visual verification only
+def test_reuse_registration_token(
+    reg_token,
+):  # allow-no-assert: smoke test - visual verification only
     """Verify one-time token cannot be reused."""
     test("Registration token is one-time use")
     try:
@@ -742,7 +744,9 @@ def usage_report_endpoint(machine_id, session_id):
 # ============================================================
 
 
-def test_session_pause_resume(auth_token, session_id, machine_id):  # allow-no-assert: smoke test - visual verification only
+def test_session_pause_resume(
+    auth_token, session_id, machine_id
+):  # allow-no-assert: smoke test - visual verification only
     """Test session pause and resume."""
     test("Pause remote session")
     try:
@@ -803,7 +807,9 @@ def test_unauthenticated_access():  # allow-no-assert: smoke test - visual verif
         return False
 
 
-def test_non_admin_registration(auth_token):  # allow-no-assert: smoke test - visual verification only
+def test_non_admin_registration(
+    auth_token,
+):  # allow-no-assert: smoke test - visual verification only
     """Test that non-admin cannot generate registration tokens."""
     test("Non-admin cannot register machines")
     # This test uses the admin token since we don't have a non-admin user
@@ -824,7 +830,9 @@ def test_non_admin_registration(auth_token):  # allow-no-assert: smoke test - vi
         return False
 
 
-def test_machine_user_assignment(auth_token, machine_id):  # allow-no-assert: smoke test - visual verification only
+def test_machine_user_assignment(
+    auth_token, machine_id
+):  # allow-no-assert: smoke test - visual verification only
     """Test user assignment to machine."""
     test("Assign user to machine")
     try:
@@ -845,7 +853,9 @@ def test_machine_user_assignment(auth_token, machine_id):  # allow-no-assert: sm
         return False
 
 
-def test_machine_users_list(auth_token, machine_id):  # allow-no-assert: smoke test - visual verification only
+def test_machine_users_list(
+    auth_token, machine_id
+):  # allow-no-assert: smoke test - visual verification only
     """Test listing users assigned to a machine."""
     test("List machine assigned users")
     try:

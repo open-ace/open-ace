@@ -33,7 +33,9 @@ def take_screenshot(page, name):
     print(f"  Saved: {path}")
 
 
-def test_quota_enter_save(ui_screenshot_dir):  # allow-no-assert: smoke test - visual verification only
+def test_quota_enter_save(
+    ui_screenshot_dir,
+):  # allow-no-assert: smoke test - visual verification only
     """Test Enter key saves quota in edit quota dialog"""
     global SCREENSHOT_DIR
     SCREENSHOT_DIR = ui_screenshot_dir
@@ -214,8 +216,6 @@ def test_quota_enter_save(ui_screenshot_dir):  # allow-no-assert: smoke test - v
             print(f"\nScreenshots saved to: {SCREENSHOT_DIR}")
 
             take_screenshot(page, "quota_enter_07_test_complete.png")
-
-
 
         except Exception as e:  # allow-swallow: UI element may not exist
             take_screenshot(page, "quota_enter_error.png")

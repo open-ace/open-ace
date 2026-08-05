@@ -105,7 +105,7 @@ def test_time_filter():
                         continue
 
             save_screenshot(page, MODULE_NAME, "03_time_filter")
-            assert page.locator('body').is_visible(), '页面应可见'
+            assert page.locator("body").is_visible(), "页面应可见"
         finally:
             browser.close()
 
@@ -125,7 +125,7 @@ def test_user_filter():
             check_element_exists(page, user_selectors)
 
             save_screenshot(page, MODULE_NAME, "04_user_filter")
-            assert page.locator('body').is_visible(), '页面应可见'
+            assert page.locator("body").is_visible(), "页面应可见"
         finally:
             browser.close()
 

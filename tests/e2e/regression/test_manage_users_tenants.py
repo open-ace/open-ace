@@ -148,7 +148,7 @@ def test_tenant_config():
             check_element_exists(page, config_selectors)
 
             save_screenshot(page, MODULE_NAME, "05_config")
-            assert page.locator('body').is_visible(), '页面应可见'
+            assert page.locator("body").is_visible(), "页面应可见"
         finally:
             browser.close()
 

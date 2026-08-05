@@ -47,7 +47,9 @@ class APITester:
         self.cookies = cookies
         self.results = []
 
-    def test_endpoint(self, name, path, method="GET", expected_status=200, data=None):  # allow-no-assert: smoke test - visual verification only
+    def test_endpoint(
+        self, name, path, method="GET", expected_status=200, data=None
+    ):  # allow-no-assert: smoke test - visual verification only
         url = f"{self.base_url}{path}"
         try:
             if method == "GET":
@@ -145,7 +147,6 @@ class UITester:
             except Exception:  # allow-swallow: UI element may not exist
                 pass
         self.results.append((name, "PASS", None))
-
 
 
 def run_all_tests():

@@ -62,12 +62,14 @@ def wait_for_terminal_status(terminal_id, timeout=30):
         status = data.get("terminal", {}).get("status", "unknown")
         print(f"  Terminal status: {status}")
         if data.get("success") and status == "running":
-
+            return True
         time.sleep(2)
     return False
 
 
-def test_terminal_restore_flow(headless=True):  # allow-no-assert: smoke test - visual verification only
+def test_terminal_restore_flow(
+    headless=True,
+):  # allow-no-assert: smoke test - visual verification only
     """Test terminal session restore flow"""
     print("\n" + "=" * 60)
     print("Terminal Session Restore Flow Test")
@@ -223,8 +225,6 @@ def test_terminal_restore_flow(headless=True):  # allow-no-assert: smoke test - 
     print("- UI flow completes successfully")
     print("=" * 60)
     print("\nScreenshots: /tmp/restore_flow_final.png")
-
-
 
 
 if __name__ == "__main__":

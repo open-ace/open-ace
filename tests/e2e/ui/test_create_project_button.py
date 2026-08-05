@@ -30,7 +30,9 @@ SCREENSHOT_DIR = os.path.join(
 )
 
 
-def test_nonadmin_create_project(ui_screenshot_dir):  # allow-no-assert: smoke test - visual verification only
+def test_nonadmin_create_project(
+    ui_screenshot_dir,
+):  # allow-no-assert: smoke test - visual verification only
     global SCREENSHOT_DIR
     SCREENSHOT_DIR = ui_screenshot_dir
     print("=" * 70)

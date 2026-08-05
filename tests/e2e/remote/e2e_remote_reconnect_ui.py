@@ -95,7 +95,7 @@ def wait_for_server(timeout=30):
         try:
             r = requests.get(f"{BASE_URL}/login", timeout=2)
             if r.status_code == 200:
-
+                return True
         except Exception:  # allow-swallow: UI element may not exist
             pass
         time.sleep(1)
@@ -130,7 +130,6 @@ def wait_for_ai_response(page, timeout=RESPONSE_TIMEOUT):
             msg_text = assistant_msg.last.text_content() or ""
             if msg_text and not msg_text.strip().startswith("{") and "Thinking" not in msg_text:
                 log("Response", f"AI replied: {msg_text[:80]}")
-
 
         elapsed = int(time.time() - start)
         if elapsed > 0 and elapsed % 15 == 0:

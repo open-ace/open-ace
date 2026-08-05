@@ -136,7 +136,9 @@ def test_dashboard_refresh_control(page):  # allow-no-assert: smoke test - visua
     )
 
 
-def test_quota_alerts_refresh_control(page):  # allow-no-assert: smoke test - visual verification only
+def test_quota_alerts_refresh_control(
+    page,
+):  # allow-no-assert: smoke test - visual verification only
     """Test Quota & Alerts page refresh control (compact mode)."""
     print("\n[TEST] Quota & Alerts page refresh control...")
 

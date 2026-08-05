@@ -62,7 +62,9 @@ def login(page):
     time.sleep(1)
 
 
-def test_tab_notification_colors(ui_screenshot_dir):  # allow-no-assert: smoke test - visual verification only
+def test_tab_notification_colors(
+    ui_screenshot_dir,
+):  # allow-no-assert: smoke test - visual verification only
     """Test tab notification badge and icon colors"""
     global SCREENSHOT_DIR
     SCREENSHOT_DIR = ui_screenshot_dir

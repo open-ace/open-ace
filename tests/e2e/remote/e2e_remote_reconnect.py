@@ -70,7 +70,7 @@ def wait_for_server(url=BASE_URL, timeout=30):
         try:
             r = requests.get(f"{url}/login", timeout=2)
             if r.status_code == 200:
-
+                return True
         except Exception:  # allow-swallow: UI element may not exist
             pass
         time.sleep(1)

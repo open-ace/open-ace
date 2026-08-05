@@ -84,8 +84,6 @@ print(f'Reason: {result["reason"]}')
     print(f"✓ Updated quota status: requests={quota_data2['daily']['requests']}")
 
 
-
-
 def test_session_recovery():  # allow-no-assert: smoke test - visual verification only
     """Test that terminal session can be recovered after browser refresh"""
     print("\n=== Testing Session Recovery ===")
@@ -152,8 +150,6 @@ def test_session_recovery():  # allow-no-assert: smoke test - visual verificatio
         print("✓ Test complete")
 
 
-
-
 def test_terminal_session_in_database():
     """Test that terminal session is properly recorded in database"""
     print("\n=== Testing Database Records ===")
@@ -177,8 +173,6 @@ def test_terminal_session_in_database():
     print(f"✓ Found {len(terminal_sessions)} terminal sessions")
     for s in terminal_sessions[:3]:
         print(f"  - {s['session_id'][:8]}: title='{s['title']}', requests={s['request_count']}")
-
-
 
 
 if __name__ == "__main__":

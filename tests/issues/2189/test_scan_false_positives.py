@@ -303,9 +303,7 @@ def test_annotation_template_validation() -> None:
     assert validate_annotation_content(
         "auto-generated test - CI app selector alignment", "allow-no-assert"
     )
-    assert validate_annotation_content(
-        "playwright script - visual verification", "allow-no-assert"
-    )
+    assert validate_annotation_content("playwright script - visual verification", "allow-no-assert")
 
     # Valid annotations for allow-swallow
     assert validate_annotation_content("UI element may not exist", "allow-swallow")

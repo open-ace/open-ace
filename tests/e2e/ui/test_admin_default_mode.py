@@ -18,7 +18,9 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots", "ui")
 
 
-async def test_admin_default_mode(ui_screenshot_dir):  # allow-no-assert: smoke test - visual verification only
+async def test_admin_default_mode(
+    ui_screenshot_dir,
+):  # allow-no-assert: smoke test - visual verification only
     """Test admin user lands on Manage mode after login."""
     global SCREENSHOT_DIR
     SCREENSHOT_DIR = ui_screenshot_dir
@@ -55,7 +57,9 @@ async def test_admin_default_mode(ui_screenshot_dir):  # allow-no-assert: smoke 
         }
 
 
-async def test_normal_user_default_mode(ui_screenshot_dir):  # allow-no-assert: smoke test - visual verification only
+async def test_normal_user_default_mode(
+    ui_screenshot_dir,
+):  # allow-no-assert: smoke test - visual verification only
     """Test normal user lands on Work mode after login."""
     global SCREENSHOT_DIR
     SCREENSHOT_DIR = ui_screenshot_dir

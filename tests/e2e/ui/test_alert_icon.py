@@ -18,7 +18,9 @@ HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 SCREENSHOT_DIR = "screenshots/issues/alert-icon"
 
 
-async def test_alert_icon(ui_screenshot_dir):  # allow-no-assert: smoke test - visual verification only
+async def test_alert_icon(
+    ui_screenshot_dir,
+):  # allow-no-assert: smoke test - visual verification only
     """Test alert management page icon display"""
     global SCREENSHOT_DIR
     SCREENSHOT_DIR = ui_screenshot_dir

@@ -232,7 +232,5 @@ def test_create_debug(ui_screenshot_dir):  # allow-no-assert: smoke test - visua
     print("=" * 70)
 
 
-
-
 if __name__ == "__main__":
     test_create_debug()

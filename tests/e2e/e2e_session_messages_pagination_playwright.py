@@ -104,7 +104,7 @@ def server_ready(timeout_s=20):
                 timeout=6,
             ).stdout.strip()
             if code == "200":
-
+                return True
         except Exception:  # allow-swallow: UI element may not exist
             pass
         time.sleep(1)

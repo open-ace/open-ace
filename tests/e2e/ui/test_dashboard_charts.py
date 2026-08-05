@@ -40,7 +40,9 @@ def take_screenshot(page, name):
     return path
 
 
-def test_dashboard_charts(ui_screenshot_dir):  # allow-no-assert: smoke test - visual verification only
+def test_dashboard_charts(
+    ui_screenshot_dir,
+):  # allow-no-assert: smoke test - visual verification only
     """Test that dashboard charts display data."""
     global SCREENSHOT_DIR
     SCREENSHOT_DIR = ui_screenshot_dir

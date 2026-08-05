@@ -180,7 +180,6 @@ async def test_page_load():  # allow-no-assert: smoke test - visual verification
         print("\n✅ TEST PASSED: No external network requests!")
 
 
-
 if __name__ == "__main__":
     result = asyncio.run(test_page_load())
     exit(0 if result else 1)

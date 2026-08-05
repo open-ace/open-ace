@@ -28,7 +28,9 @@ DEFAULT_TIMEOUT = 30000
 OUTPUT_DIR = "./screenshots/issues/639"
 
 
-def test_remote_terminal_e2e(ui_screenshot_dir):  # allow-no-assert: smoke test - visual verification only
+def test_remote_terminal_e2e(
+    ui_screenshot_dir,
+):  # allow-no-assert: smoke test - visual verification only
     """Test Remote Terminal Relay end-to-end"""
     global OUTPUT_DIR
     OUTPUT_DIR = ui_screenshot_dir

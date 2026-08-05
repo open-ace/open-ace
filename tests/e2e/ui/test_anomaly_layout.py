@@ -46,7 +46,9 @@ def take_screenshot(page, name):
     return path
 
 
-def test_anomaly_detection_layout(ui_screenshot_dir):  # allow-no-assert: smoke test - visual verification only
+def test_anomaly_detection_layout(
+    ui_screenshot_dir,
+):  # allow-no-assert: smoke test - visual verification only
     """Test that Anomaly Detection page layout is correct."""
     global SCREENSHOT_DIR
     SCREENSHOT_DIR = ui_screenshot_dir

@@ -32,7 +32,9 @@ SCREENSHOT_DIR = os.path.join(
 )
 
 
-def test_iframe_add_project_browse(ui_screenshot_dir):  # allow-no-assert: smoke test - visual verification only
+def test_iframe_add_project_browse(
+    ui_screenshot_dir,
+):  # allow-no-assert: smoke test - visual verification only
     global SCREENSHOT_DIR
     SCREENSHOT_DIR = ui_screenshot_dir
     print("=" * 60)

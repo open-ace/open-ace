@@ -145,7 +145,7 @@ def test_test_connection():
             check_element_exists(page, test_btn_selectors)
 
             save_screenshot(page, MODULE_NAME, "05_test")
-            assert page.locator('body').is_visible(), '页面应可见'
+            assert page.locator("body").is_visible(), "页面应可见"
         finally:
             browser.close()
 

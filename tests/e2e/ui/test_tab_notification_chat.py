@@ -56,7 +56,6 @@ def select_project_in_iframe(chat_frame, page, preferred_project="open-ace"):
     if textarea_locator.count() > 0:
         print("    ✓ 已在聊天界面，无需选择项目")
 
-
     # 查找项目列表
     project_rows = chat_frame.locator(
         "div[class*='rounded-lg'][class*='p-4'], div[class*='cursor-pointer']"
@@ -137,11 +136,9 @@ def send_message_and_wait(chat_frame, page, message, wait_time=15):
             if loading.count() == 0:
                 print(f"    ✓ AI 响应完成 (等待了 {i+2} 秒)")
 
-
         page.wait_for_timeout(1000)
 
     print("    ⚠ 响应可能未完全完成，继续测试...")
-
 
 
 def check_tab_notification(page, tab_index, expected_waiting=True):
@@ -193,7 +190,9 @@ def check_tab_notification(page, tab_index, expected_waiting=True):
     }
 
 
-def test_tab_notification_chat(ui_screenshot_dir):  # allow-no-assert: smoke test - visual verification only
+def test_tab_notification_chat(
+    ui_screenshot_dir,
+):  # allow-no-assert: smoke test - visual verification only
     """Test tab notification with real chat messages."""
     global OUTPUT_DIR
     OUTPUT_DIR = ui_screenshot_dir

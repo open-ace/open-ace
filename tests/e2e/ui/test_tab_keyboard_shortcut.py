@@ -28,7 +28,9 @@ HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 SCREENSHOT_DIR = "screenshots/issues/68"
 
 
-async def test_tab_keyboard_shortcut(ui_screenshot_dir):  # allow-no-assert: smoke test - visual verification only
+async def test_tab_keyboard_shortcut(
+    ui_screenshot_dir,
+):  # allow-no-assert: smoke test - visual verification only
     """Test keyboard shortcut for switching tabs."""
     global SCREENSHOT_DIR
     SCREENSHOT_DIR = ui_screenshot_dir

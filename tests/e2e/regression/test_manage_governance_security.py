@@ -118,7 +118,7 @@ def test_security_settings():
             check_element_exists(page, settings_selectors)
 
             save_screenshot(page, MODULE_NAME, "04_settings")
-            assert page.locator('body').is_visible(), '页面应可见'
+            assert page.locator("body").is_visible(), "页面应可见"
         finally:
             browser.close()
 
@@ -142,7 +142,7 @@ def test_security_report():
             check_element_exists(page, report_selectors)
 
             save_screenshot(page, MODULE_NAME, "05_report")
-            assert page.locator('body').is_visible(), '页面应可见'
+            assert page.locator("body").is_visible(), "页面应可见"
         finally:
             browser.close()
 

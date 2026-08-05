@@ -33,7 +33,9 @@ DEFAULT_TIMEOUT = 15000
 OUTPUT_DIR = "./screenshots"
 
 
-def test_remote_workspace_icon_consistency(ui_screenshot_dir):  # allow-no-assert: smoke test - visual verification only
+def test_remote_workspace_icon_consistency(
+    ui_screenshot_dir,
+):  # allow-no-assert: smoke test - visual verification only
     """Test Remote Workspace Tab Icon consistency with SessionList"""
     global OUTPUT_DIR
     OUTPUT_DIR = ui_screenshot_dir

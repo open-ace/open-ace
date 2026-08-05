@@ -152,7 +152,9 @@ def click_preview_button(page):
     return False
 
 
-def test_preview_renders_structured_content(page):  # allow-no-assert: smoke test - visual verification only
+def test_preview_renders_structured_content(
+    page,
+):  # allow-no-assert: smoke test - visual verification only
     """The preview modal must render structured content, not a raw JSON dump."""
     print("\n[TEST] Preview renders structured content (not raw JSON)...")
     if not click_preview_button(page):
@@ -192,7 +194,9 @@ def test_preview_renders_structured_content(page):  # allow-no-assert: smoke tes
     shot(page, "03-preview-structured")
 
 
-def test_execute_shows_toast_and_history(page):  # allow-no-assert: smoke test - visual verification only
+def test_execute_shows_toast_and_history(
+    page,
+):  # allow-no-assert: smoke test - visual verification only
     """Execute cleanup -> success toast + a row in cleanup history.
 
     Destructive: this runs the REAL cleanup (deletes/anonymizes expired records

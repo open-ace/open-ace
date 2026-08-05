@@ -138,7 +138,7 @@ def test_quota_adjustment():
             check_element_exists(page, quota_input_selectors)
 
             save_screenshot(page, MODULE_NAME, "04_quota_adjust")
-            assert page.locator('body').is_visible(), '页面应可见'
+            assert page.locator("body").is_visible(), "页面应可见"
         finally:
             browser.close()
 

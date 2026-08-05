@@ -98,7 +98,6 @@ def test_roi_suggestions_localized_per_language():
                 save_screenshot(page, MODULE_NAME, f"{lang}_localized")
                 print(f"  ✓ [{lang}] 优化建议本地化正确")
 
-
         finally:
             browser.close()
 

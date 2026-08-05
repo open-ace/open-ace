@@ -156,10 +156,12 @@ def _wait_for_permission_panel(page, timeout=120):
     while time.time() - start < timeout:
         panel = page.locator("text=需要权限确认").first
         if panel.is_visible(timeout=1000):
+            return True
 
         # Also check English fallback
         panel_en = page.locator("text=Permission Required").first
         if panel_en.is_visible(timeout=1000):
+            return True
 
         time.sleep(1)
     return False

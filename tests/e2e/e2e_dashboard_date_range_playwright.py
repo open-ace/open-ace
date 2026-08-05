@@ -160,7 +160,9 @@ def test_custom_mode_activation(page):  # allow-no-assert: smoke test - visual v
     shot(page, "05-custom-mode")
 
 
-def test_date_validation_invalid_range(page):  # allow-no-assert: smoke test - visual verification only
+def test_date_validation_invalid_range(
+    page,
+):  # allow-no-assert: smoke test - visual verification only
     """Test date validation - start date after end date shows error."""
     print("\n[TEST] Date validation - invalid range...")
 
@@ -199,7 +201,9 @@ def test_date_validation_invalid_range(page):  # allow-no-assert: smoke test - v
     shot(page, "06-invalid-range-error")
 
 
-def test_date_validation_future_date(page):  # allow-no-assert: smoke test - visual verification only
+def test_date_validation_future_date(
+    page,
+):  # allow-no-assert: smoke test - visual verification only
     """Test date validation - future dates shows error."""
     print("\n[TEST] Date validation - future dates...")
 
@@ -268,7 +272,9 @@ def test_accessibility_labels(page):  # allow-no-assert: smoke test - visual ver
     shot(page, "08-accessibility-labels")
 
 
-def test_accessibility_aria_describedby(page):  # allow-no-assert: smoke test - visual verification only
+def test_accessibility_aria_describedby(
+    page,
+):  # allow-no-assert: smoke test - visual verification only
     """Test accessibility - aria-describedby association."""
     print("\n[TEST] Accessibility aria-describedby...")
 

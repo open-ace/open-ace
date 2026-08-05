@@ -31,7 +31,9 @@ DEFAULT_TIMEOUT = 15000
 OUTPUT_DIR = "./screenshots"
 
 
-def test_session_search(ui_screenshot_dir):  # allow-no-assert: smoke test - visual verification only
+def test_session_search(
+    ui_screenshot_dir,
+):  # allow-no-assert: smoke test - visual verification only
     """Test Session Search Enhancement"""
     global OUTPUT_DIR
     OUTPUT_DIR = ui_screenshot_dir

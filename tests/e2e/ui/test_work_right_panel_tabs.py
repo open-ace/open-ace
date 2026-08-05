@@ -45,7 +45,9 @@ SCREENSHOT_DIR = os.path.join(
 
 
 @pytest.mark.asyncio
-async def test_work_right_panel_tabs_layout(ui_screenshot_dir):  # allow-no-assert: smoke test - visual verification only
+async def test_work_right_panel_tabs_layout(
+    ui_screenshot_dir,
+):  # allow-no-assert: smoke test - visual verification only
     """Test Work Mode Right Panel Tabs Layout"""
     global SCREENSHOT_DIR
     SCREENSHOT_DIR = ui_screenshot_dir

@@ -92,12 +92,13 @@ def change_language(page, language_code):
                 time.sleep(1)
                 print(f"  ✓ Language changed to {language_code}")
 
-
     print("  ⚠ Language change not successful")
     return False
 
 
-def test_user_segmentation_tooltip(ui_screenshot_dir):  # allow-no-assert: smoke test - visual verification only
+def test_user_segmentation_tooltip(
+    ui_screenshot_dir,
+):  # allow-no-assert: smoke test - visual verification only
     """Test tooltip enhancement for user segmentation pie chart."""
     global SCREENSHOT_DIR
     SCREENSHOT_DIR = ui_screenshot_dir
@@ -196,7 +197,9 @@ def test_user_segmentation_tooltip(ui_screenshot_dir):  # allow-no-assert: smoke
     return screenshots
 
 
-def test_user_segmentation_i18n(ui_screenshot_dir):  # allow-no-assert: smoke test - visual verification only
+def test_user_segmentation_i18n(
+    ui_screenshot_dir,
+):  # allow-no-assert: smoke test - visual verification only
     """Test internationalization for user segmentation."""
     global SCREENSHOT_DIR
     SCREENSHOT_DIR = ui_screenshot_dir
@@ -286,7 +289,9 @@ def test_user_segmentation_i18n(ui_screenshot_dir):  # allow-no-assert: smoke te
     return screenshots
 
 
-def test_user_segmentation_responsive(ui_screenshot_dir):  # allow-no-assert: smoke test - visual verification only
+def test_user_segmentation_responsive(
+    ui_screenshot_dir,
+):  # allow-no-assert: smoke test - visual verification only
     """Test responsive layout for user segmentation on small screens."""
     global SCREENSHOT_DIR
     SCREENSHOT_DIR = ui_screenshot_dir

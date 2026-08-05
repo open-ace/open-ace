@@ -51,7 +51,9 @@ def save_screenshot(page, name):
     return path
 
 
-def test_project_management_page(ui_screenshot_dir):  # allow-no-assert: smoke test - visual verification only
+def test_project_management_page(
+    ui_screenshot_dir,
+):  # allow-no-assert: smoke test - visual verification only
     """Test Project Management page is accessible."""
     global SCREENSHOT_DIR
     SCREENSHOT_DIR = ui_screenshot_dir
@@ -126,7 +128,9 @@ def test_project_management_page(ui_screenshot_dir):  # allow-no-assert: smoke t
     return all_passed
 
 
-def test_session_tracking_api(ui_screenshot_dir):  # allow-no-assert: smoke test - visual verification only
+def test_session_tracking_api(
+    ui_screenshot_dir,
+):  # allow-no-assert: smoke test - visual verification only
     """Test session creation and completion API."""
     global SCREENSHOT_DIR
     SCREENSHOT_DIR = ui_screenshot_dir
