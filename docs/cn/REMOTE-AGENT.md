@@ -58,7 +58,60 @@ curl --cacert /path/to/ca.pem -fsSL https://<server>/api/remote/agent/install.sh
 - Python 3.8+
 - websocket-client、requests、websockets（自动安装）
 
-## 配置
+## 启动与管理
+
+安装完成后，可以使用启动脚本便捷地管理 Agent 进程：
+
+### Linux / macOS
+
+```bash
+# 启动 Agent（若已在运行则跳过）
+bash ~/.open-ace-agent/start-agent.sh
+
+# 查看 Agent 运行状态
+bash ~/.open-ace-agent/start-agent.sh --status
+
+# 停止 Agent
+bash ~/.open-ace-agent/start-agent.sh --stop
+
+# 配置开机自启（需要 sudo 权限创建 systemd 服务）
+bash ~/.open-ace-agent/start-agent.sh --auto-start
+```
+
+**开机自启说明：**
+- 支持 systemd 的系统（Ubuntu 16.04+、CentOS 7+、RHEL 7+）：创建 systemd 服务，开机自启且崩溃自动重启
+- 不支持 systemd 的环境（如 WSL2）：使用 crontab `@reboot` 实现开机自启
+
+### Windows
+
+```powershell
+# 启动 Agent（若已在运行则跳过）
+powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\.open-ace-agent\start-agent.ps1"
+
+# 查看 Agent 运行状态
+powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\.open-ace-agent\start-agent.ps1" -Status
+
+# 停止 Agent
+powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\.open-ace-agent\start-agent.ps1" -Stop
+
+# 配置开机自启（Windows 计划任务，登录时自动启动）
+powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\.open-ace-agent\start-agent.ps1" -InstallAutoStart
+```
+
+**开机自启说明：**
+- 使用 Windows 计划任务实现登录时自动启动
+- 任务名称：`OpenACEAgent`
+- 可在"任务计划程序"中查看和管理
+
+### 快捷方式（Windows）
+
+Windows 用户也可以使用批处理包装器：
+
+```cmd
+%USERPROFILE%\.open-ace-agent\start-agent.cmd
+```
+
+### 配置
 
 配置文件：`~/.open-ace-agent/config.json`
 
