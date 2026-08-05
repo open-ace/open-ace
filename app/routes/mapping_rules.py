@@ -62,14 +62,7 @@ def get_all_rules():
 
     repo = ToolAccountMappingRuleRepository()
 
-    if user_role == "platform_admin":
-        # Platform admin: can see all rules
-        # Issue #2286: Accept legacy 'admin' role alongside 'platform_admin' for backward compatibility.
-        rules = repo.get_all()
-    elif user_role == "admin":
-        # Legacy admin: backward compatibility - can see all rules
-        rules = repo.get_all()
-    elif user_role == "tenant_admin":
+    if user_role == "tenant_admin":
         # Tenant admin: only see rules for users in their tenant
         if user_tenant_id is None:
             return jsonify({"error": "Tenant admin must have tenant_id"}), 403
@@ -78,15 +71,10 @@ def get_all_rules():
         tenant_user_ids = set(_get_tenant_scoped_user_ids(user_tenant_id))
         rules = [r for r in all_rules if r.user_id in tenant_user_ids]
     elif User.is_admin_role(user_role):
-        # Legacy admin: backward compatibility
-        # - With tenant_id: scoped to that tenant (like tenant_admin)
-        # - Without tenant_id: global access (like platform_admin)
-        if user_tenant_id is not None:
-            all_rules = repo.get_all()
-            tenant_user_ids = set(_get_tenant_scoped_user_ids(user_tenant_id))
-            rules = [r for r in all_rules if r.user_id in tenant_user_ids]
-        else:
-            rules = repo.get_all()
+        # Platform admin and legacy admin: can see all rules.
+        # Issue #2286: 'admin' is treated as 'platform_admin' for backward compatibility,
+        # regardless of whether tenant_id is set.
+        rules = repo.get_all()
     else:
         return jsonify({"error": "Permission denied"}), 403
 
@@ -104,17 +92,13 @@ def get_user_rules(user_id: int):
     user_role = g.user.get("role")
     user_tenant_id = g.user.get("tenant_id")
 
-    # Validate user belongs to caller's tenant (for tenant admin or scoped admin)
+    # Validate user belongs to caller's tenant (tenant admin only).
+    # Issue #2286: 'admin' and 'platform_admin' have global access regardless of tenant_id.
     if user_role == "tenant_admin":
         if user_tenant_id is None:
             return jsonify({"error": "Tenant admin must have tenant_id"}), 403
         if not _validate_user_in_tenant(user_id, user_tenant_id):
             return jsonify({"error": "User not found"}), 404
-    elif User.is_admin_role(user_role) and user_tenant_id is not None:
-        # Legacy admin with tenant_id: validate tenant scope
-        if not _validate_user_in_tenant(user_id, user_tenant_id):
-            return jsonify({"error": "User not found"}), 404
-    # Platform admin and legacy admin without tenant_id: no validation
 
     repo = ToolAccountMappingRuleRepository()
     rules = repo.get_by_user_id(user_id)
@@ -141,17 +125,13 @@ def create_rule():
     user_role = g.user.get("role")
     user_tenant_id = g.user.get("tenant_id")
 
-    # Validate user belongs to caller's tenant
+    # Validate user belongs to caller's tenant (tenant admin only).
+    # Issue #2286: 'admin' and 'platform_admin' have global access regardless of tenant_id.
     if user_role == "tenant_admin":
         if user_tenant_id is None:
             return jsonify({"error": "Tenant admin must have tenant_id"}), 403
         if not _validate_user_in_tenant(user_id, user_tenant_id):
             return jsonify({"error": "Cannot create rule for user in different tenant"}), 403
-    elif User.is_admin_role(user_role) and user_tenant_id is not None:
-        # Legacy admin with tenant_id: validate tenant scope
-        if not _validate_user_in_tenant(user_id, user_tenant_id):
-            return jsonify({"error": "Cannot create rule for user in different tenant"}), 403
-    # Platform admin and legacy admin without tenant_id: no validation
 
     repo = ToolAccountMappingRuleRepository()
     rule = repo.create(
@@ -198,17 +178,10 @@ def update_rule(id: int):
             return jsonify({"error": "Tenant admin must have tenant_id"}), 403
         if not _validate_user_in_tenant(existing_rule.user_id, user_tenant_id):
             return jsonify({"error": "Rule not found"}), 404
-    elif User.is_admin_role(user_role) and user_tenant_id is not None:
-        # Legacy admin with tenant_id: validate tenant scope
-        if not _validate_user_in_tenant(existing_rule.user_id, user_tenant_id):
-            return jsonify({"error": "Rule not found"}), 404
 
-    # If user_id is being changed, validate new user too
+    # If user_id is being changed, validate new user too (tenant admin only)
     new_user_id = data.get("user_id")
-    if new_user_id and (
-        user_role == "tenant_admin"
-        or (User.is_admin_role(user_role) and user_tenant_id is not None)
-    ):
+    if new_user_id and user_role == "tenant_admin":
         if not _validate_user_in_tenant(new_user_id, user_tenant_id):
             return jsonify({"error": "Cannot assign rule to user in different tenant"}), 403
 
@@ -253,10 +226,6 @@ def delete_rule(id: int):
             return jsonify({"error": "Tenant admin must have tenant_id"}), 403
         if not _validate_user_in_tenant(existing_rule.user_id, user_tenant_id):
             return jsonify({"error": "Rule not found"}), 404
-    elif User.is_admin_role(user_role) and user_tenant_id is not None:
-        # Legacy admin with tenant_id: validate tenant scope
-        if not _validate_user_in_tenant(existing_rule.user_id, user_tenant_id):
-            return jsonify({"error": "Rule not found"}), 404
 
     success = repo.delete(id)
     if success:
@@ -277,14 +246,11 @@ def generate_default_rules(user_id: int):
     user_role = g.user.get("role")
     user_tenant_id = g.user.get("tenant_id")
 
-    # Validate user belongs to caller's tenant
+    # Validate user belongs to caller's tenant (tenant admin only).
+    # Issue #2286: 'admin' and 'platform_admin' have global access regardless of tenant_id.
     if user_role == "tenant_admin":
         if user_tenant_id is None:
             return jsonify({"error": "Tenant admin must have tenant_id"}), 403
-        if not _validate_user_in_tenant(user_id, user_tenant_id):
-            return jsonify({"error": "User not found"}), 404
-    elif User.is_admin_role(user_role) and user_tenant_id is not None:
-        # Legacy admin with tenant_id: validate tenant scope
         if not _validate_user_in_tenant(user_id, user_tenant_id):
             return jsonify({"error": "User not found"}), 404
 
@@ -323,7 +289,7 @@ def get_mapping_stats():
 
     service = ToolAccountAutoMappingService()
 
-    if user_role in ("tenant_admin", "admin") and user_tenant_id is not None:
+    if user_role == "tenant_admin" and user_tenant_id is not None:
         # Filter stats by tenant
         stats = service.get_mapping_stats(tenant_id=user_tenant_id)
     else:
@@ -348,7 +314,7 @@ def run_auto_mapping():
 
     service = ToolAccountAutoMappingService()
 
-    if user_role in ("tenant_admin", "admin") and user_tenant_id is not None:
+    if user_role == "tenant_admin" and user_tenant_id is not None:
         # Only auto-map for tenant's users
         results, still_unmapped = service.run_auto_mapping(
             dry_run=dry_run, tenant_id=user_tenant_id
@@ -408,7 +374,7 @@ def get_unmapped_accounts():
 
     repo = UserToolAccountRepository()
 
-    if user_role in ("tenant_admin", "admin") and user_tenant_id is not None:
+    if user_role == "tenant_admin" and user_tenant_id is not None:
         unmapped = repo.get_unmapped_tool_accounts(tenant_id=user_tenant_id)
     else:
         unmapped = repo.get_unmapped_tool_accounts()
@@ -460,14 +426,11 @@ def manual_map_account(sender_name: str):
     user_role = g.user.get("role")
     user_tenant_id = g.user.get("tenant_id")
 
-    # Validate user belongs to caller's tenant
+    # Validate user belongs to caller's tenant (tenant admin only).
+    # Issue #2286: 'admin' and 'platform_admin' have global access regardless of tenant_id.
     if user_role == "tenant_admin":
         if user_tenant_id is None:
             return jsonify({"error": "Tenant admin must have tenant_id"}), 403
-        if not _validate_user_in_tenant(user_id, user_tenant_id):
-            return jsonify({"error": "Cannot map to user in different tenant"}), 403
-    elif User.is_admin_role(user_role) and user_tenant_id is not None:
-        # Legacy admin with tenant_id: validate tenant scope
         if not _validate_user_in_tenant(user_id, user_tenant_id):
             return jsonify({"error": "Cannot map to user in different tenant"}), 403
 
