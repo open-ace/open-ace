@@ -84,7 +84,7 @@ def dismiss_force_change_password_modal(page: Page, new_password: str = "Admin12
             'div[role="dialog"] input[placeholder="输入新密码"]'
         )
         confirm_pw_input = page.locator(
-            'div[role="dialog"] input[placeholder="Confirm Password"],'
+            'div[role="dialog"] input[placeholder="Confirm password"],'
             'div[role="dialog"] input[placeholder="确认密码"]'
         )
 
