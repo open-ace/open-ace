@@ -5,9 +5,10 @@ Issue #2327: API Key 管理 Tenant 授权修复。
 测试四个 API 端点的完整授权流程。
 """
 
+from unittest.mock import MagicMock, patch
+
 import pytest
 from flask import Flask, g
-from unittest.mock import patch, MagicMock
 
 
 class TestAPIKeyTenantAuthorization:

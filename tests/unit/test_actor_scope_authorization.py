@@ -5,10 +5,11 @@ Issue #2327: API Key 管理 Tenant 授权修复。
 """
 
 import pytest
+
 from app.auth.decorators import (
     ActorScope,
-    resolve_authorized_target_tenant,
     require_actor_scope,
+    resolve_authorized_target_tenant,
 )
 
 
