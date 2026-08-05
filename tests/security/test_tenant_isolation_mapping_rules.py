@@ -2,6 +2,8 @@
 Security tests for tenant isolation in mapping rules generation.
 
 Issue #2131: Verify multi-tenant permission isolation correctness.
+Issue #2286: 'admin' role treated as 'platform_admin' for backward compatibility.
+Issue #2324: Admin with tenant_id should not be tenant-scoped in mapping rules.
 """
 
 import json
@@ -395,3 +397,355 @@ class TestTenantIsolationForOtherOperations:
 
         # Should return 403 (cannot create rule for user in different tenant)
         assert response.status_code in (403, 404)
+
+
+# ---------------------------------------------------------------------------
+# Issue #2324: Admin/platform_admin with tenant_id must NOT be tenant-scoped.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def admin_with_tenant_client(app):
+    """Create test client with admin role that HAS a tenant_id.
+
+    Issue #2324: An 'admin' user with tenant_id should still have global
+    access (treated as platform_admin per Issue #2286), not be scoped
+    to their tenant.
+    """
+    test_client = app.test_client()
+
+    class AdminWithTenantAuthenticatedClient:
+        def __init__(self, client):
+            self._client = client
+
+        def _auth_patch(self):
+            return patch(
+                "app.auth.decorators._load_user_from_token",
+                return_value={
+                    "id": 1,
+                    "role": "admin",
+                    "username": "admin_with_tenant",
+                    "tenant_id": 1,  # Has tenant_id but should NOT be scoped
+                },
+            )
+
+        def _token_patch(self):
+            return patch(
+                "app.auth.decorators._extract_session_token", return_value="test-token"
+            )
+
+        def get(self, *args, **kwargs):
+            with self._token_patch():
+                with self._auth_patch():
+                    return self._client.get(*args, **kwargs)
+
+        def post(self, *args, **kwargs):
+            with self._token_patch():
+                with self._auth_patch():
+                    return self._client.post(*args, **kwargs)
+
+        def put(self, *args, **kwargs):
+            with self._token_patch():
+                with self._auth_patch():
+                    return self._client.put(*args, **kwargs)
+
+        def delete(self, *args, **kwargs):
+            with self._token_patch():
+                with self._auth_patch():
+                    return self._client.delete(*args, **kwargs)
+
+    return AdminWithTenantAuthenticatedClient(test_client)
+
+
+@pytest.fixture
+def platform_admin_with_tenant_client(app):
+    """Create test client with platform_admin role that HAS a tenant_id.
+
+    Issue #2324: A 'platform_admin' user with tenant_id should still have
+    global access, not be scoped to their tenant.
+    """
+    test_client = app.test_client()
+
+    class PlatformAdminWithTenantAuthenticatedClient:
+        def __init__(self, client):
+            self._client = client
+
+        def _auth_patch(self):
+            return patch(
+                "app.auth.decorators._load_user_from_token",
+                return_value={
+                    "id": 1,
+                    "role": "platform_admin",
+                    "username": "platform_admin_with_tenant",
+                    "tenant_id": 1,  # Has tenant_id but should NOT be scoped
+                },
+            )
+
+        def _token_patch(self):
+            return patch(
+                "app.auth.decorators._extract_session_token", return_value="test-token"
+            )
+
+        def get(self, *args, **kwargs):
+            with self._token_patch():
+                with self._auth_patch():
+                    return self._client.get(*args, **kwargs)
+
+        def post(self, *args, **kwargs):
+            with self._token_patch():
+                with self._auth_patch():
+                    return self._client.post(*args, **kwargs)
+
+        def put(self, *args, **kwargs):
+            with self._token_patch():
+                with self._auth_patch():
+                    return self._client.put(*args, **kwargs)
+
+        def delete(self, *args, **kwargs):
+            with self._token_patch():
+                with self._auth_patch():
+                    return self._client.delete(*args, **kwargs)
+
+    return PlatformAdminWithTenantAuthenticatedClient(test_client)
+
+
+class TestAdminWithTenantIdNotScoped:
+    """
+    Issue #2324: Verify that admin/platform_admin with tenant_id is NOT
+    tenant-scoped in mapping rules operations.
+
+    Per Issue #2286, 'admin' is treated as 'platform_admin' for backward
+    compatibility. Having a tenant_id should NOT restrict their access.
+    """
+
+    @patch("app.routes.mapping_rules.user_repo")
+    @patch("app.routes.mapping_rules.ToolAccountAutoMappingService")
+    def test_admin_with_tenant_can_generate_rules_for_other_tenant_user(
+        self, mock_service_class, mock_user_repo, admin_with_tenant_client
+    ):
+        """Admin with tenant_id should generate rules for cross-tenant user."""
+        from app.models.tool_account_mapping_rule import ToolAccountMappingRule
+        from app.services.tool_account_auto_mapping_service import GenerateDefaultRulesResult
+
+        # Target user belongs to different tenant (tenant_id=2)
+        mock_user_repo.get_user_by_id.return_value = {
+            "id": 5,
+            "username": "other_tenant_user",
+            "tenant_id": 2,  # Different from admin's tenant (1)
+        }
+
+        mock_service = MagicMock()
+        result = GenerateDefaultRulesResult(
+            created=[
+                ToolAccountMappingRule(
+                    id=1, user_id=5, pattern="user-*",
+                    match_type="prefix", priority=10, is_auto=True, is_active=True,
+                )
+            ],
+            skipped=[],
+            created_count=1,
+            skipped_count=0,
+        )
+        mock_service.create_default_rules_for_user.return_value = result
+        mock_service_class.return_value = mock_service
+
+        response = admin_with_tenant_client.post(
+            "/api/mapping-rules/user/5/generate-default",
+            content_type="application/json",
+        )
+
+        # Should succeed, NOT 404
+        assert response.status_code in (200, 201)
+        mock_service.create_default_rules_for_user.assert_called_once_with(5)
+
+    @patch("app.routes.mapping_rules.user_repo")
+    @patch("app.routes.mapping_rules.ToolAccountAutoMappingService")
+    def test_platform_admin_with_tenant_can_generate_rules_for_other_tenant_user(
+        self, mock_service_class, mock_user_repo, platform_admin_with_tenant_client
+    ):
+        """Platform admin with tenant_id should generate rules for cross-tenant user."""
+        from app.models.tool_account_mapping_rule import ToolAccountMappingRule
+        from app.services.tool_account_auto_mapping_service import GenerateDefaultRulesResult
+
+        mock_user_repo.get_user_by_id.return_value = {
+            "id": 5,
+            "username": "other_tenant_user",
+            "tenant_id": 2,
+        }
+
+        mock_service = MagicMock()
+        result = GenerateDefaultRulesResult(
+            created=[
+                ToolAccountMappingRule(
+                    id=1, user_id=5, pattern="user-*",
+                    match_type="prefix", priority=10, is_auto=True, is_active=True,
+                )
+            ],
+            skipped=[],
+            created_count=1,
+            skipped_count=0,
+        )
+        mock_service.create_default_rules_for_user.return_value = result
+        mock_service_class.return_value = mock_service
+
+        response = platform_admin_with_tenant_client.post(
+            "/api/mapping-rules/user/5/generate-default",
+            content_type="application/json",
+        )
+
+        assert response.status_code in (200, 201)
+        mock_service.create_default_rules_for_user.assert_called_once_with(5)
+
+    @patch("app.routes.mapping_rules.user_repo")
+    def test_admin_with_tenant_can_get_rules_for_other_tenant_user(
+        self, mock_user_repo, admin_with_tenant_client
+    ):
+        """Admin with tenant_id should get rules for cross-tenant user."""
+        mock_user_repo.get_user_by_id.return_value = {
+            "id": 5,
+            "tenant_id": 2,
+        }
+
+        with patch("app.routes.mapping_rules.ToolAccountMappingRuleRepository") as mock_repo_class:
+            mock_repo = MagicMock()
+            mock_rule = MagicMock()
+            mock_rule.to_dict.return_value = {"id": 1, "user_id": 5, "pattern": "test-*"}
+            mock_repo.get_by_user_id.return_value = [mock_rule]
+            mock_repo_class.return_value = mock_repo
+
+            response = admin_with_tenant_client.get("/api/mapping-rules/user/5")
+
+        # Should succeed, NOT 404
+        assert response.status_code == 200
+
+    @patch("app.routes.mapping_rules.user_repo")
+    def test_admin_with_tenant_can_create_rule_for_other_tenant_user(
+        self, mock_user_repo, admin_with_tenant_client
+    ):
+        """Admin with tenant_id should create rules for cross-tenant user."""
+        mock_user_repo.get_user_by_id.return_value = {
+            "id": 5,
+            "tenant_id": 2,
+        }
+
+        with patch("app.routes.mapping_rules.ToolAccountMappingRuleRepository") as mock_repo_class:
+            mock_repo = MagicMock()
+            mock_rule = MagicMock()
+            mock_rule.to_dict.return_value = {
+                "id": 1, "user_id": 5, "pattern": "test-*", "match_type": "prefix",
+            }
+            mock_repo.create.return_value = mock_rule
+            mock_repo_class.return_value = mock_repo
+
+            response = admin_with_tenant_client.post(
+                "/api/mapping-rules",
+                data=json.dumps({"user_id": 5, "pattern": "test-*", "match_type": "prefix"}),
+                content_type="application/json",
+            )
+
+        # Should succeed, NOT 403
+        assert response.status_code == 201
+
+    @patch("app.routes.mapping_rules.ToolAccountMappingRuleRepository")
+    def test_admin_with_tenant_can_delete_rule_for_other_tenant_user(
+        self, mock_repo_class, admin_with_tenant_client
+    ):
+        """Admin with tenant_id should delete rules for cross-tenant user."""
+        mock_repo = MagicMock()
+        mock_rule = MagicMock()
+        mock_rule.user_id = 5  # User in different tenant
+        mock_repo.get_by_id.return_value = mock_rule
+        mock_repo.delete.return_value = True
+        mock_repo_class.return_value = mock_repo
+
+        response = admin_with_tenant_client.delete("/api/mapping-rules/1")
+
+        # Should succeed, NOT 404
+        assert response.status_code == 200
+
+    @patch("app.routes.mapping_rules.ToolAccountMappingRuleRepository")
+    def test_admin_with_tenant_can_update_rule_for_other_tenant_user(
+        self, mock_repo_class, admin_with_tenant_client
+    ):
+        """Admin with tenant_id should update rules for cross-tenant user."""
+        mock_repo = MagicMock()
+        mock_rule = MagicMock()
+        mock_rule.user_id = 5  # User in different tenant
+        mock_repo.get_by_id.return_value = mock_rule
+        updated_rule = MagicMock()
+        updated_rule.to_dict.return_value = {"id": 1, "user_id": 5, "pattern": "updated-*"}
+        mock_repo.update.return_value = updated_rule
+        mock_repo_class.return_value = mock_repo
+
+        response = admin_with_tenant_client.put(
+            "/api/mapping-rules/1",
+            data=json.dumps({"pattern": "updated-*"}),
+            content_type="application/json",
+        )
+
+        # Should succeed, NOT 404
+        assert response.status_code == 200
+
+    @patch("app.routes.mapping_rules.user_repo")
+    def test_admin_with_tenant_can_manual_map_for_other_tenant_user(
+        self, mock_user_repo, admin_with_tenant_client
+    ):
+        """Admin with tenant_id should manually map accounts for cross-tenant user."""
+        mock_user_repo.get_user_by_id.return_value = {
+            "id": 5,
+            "tenant_id": 2,
+        }
+
+        with patch("app.routes.mapping_rules.UserToolAccountRepository") as mock_repo_class:
+            mock_repo = MagicMock()
+            mock_mapping = MagicMock()
+            mock_mapping.to_dict.return_value = {
+                "id": 1, "user_id": 5, "tool_account": "test-account",
+            }
+            mock_repo.create.return_value = mock_mapping
+            mock_repo_class.return_value = mock_repo
+
+            response = admin_with_tenant_client.post(
+                "/api/unmapped-accounts/test-account/map",
+                data=json.dumps({"user_id": 5}),
+                content_type="application/json",
+            )
+
+        # Should succeed, NOT 403
+        assert response.status_code == 201
+
+    @patch("app.routes.mapping_rules.ToolAccountAutoMappingService")
+    def test_admin_with_tenant_sees_all_stats(
+        self, mock_service_class, admin_with_tenant_client
+    ):
+        """Admin with tenant_id should see all stats, not tenant-filtered."""
+        mock_service = MagicMock()
+        mock_service.get_mapping_stats.return_value = {"total": 100}
+        mock_service_class.return_value = mock_service
+
+        admin_with_tenant_client.get("/api/mapping-stats")
+
+        # Should NOT pass tenant_id to get_mapping_stats
+        mock_service.get_mapping_stats.assert_called_once_with()
+
+    @patch("app.routes.mapping_rules.ToolAccountAutoMappingService")
+    def test_admin_with_tenant_sees_all_unmapped_accounts(
+        self, mock_service_class, admin_with_tenant_client
+    ):
+        """Admin with tenant_id should see all unmapped accounts, not tenant-filtered."""
+        mock_service = MagicMock()
+        mock_service._infer_tool_type.return_value = "qwen"
+        mock_service_class.return_value = mock_service
+
+        with patch("app.routes.mapping_rules.UserToolAccountRepository") as mock_repo_class:
+            mock_repo = MagicMock()
+            mock_repo.get_unmapped_tool_accounts.return_value = [
+                {"sender_name": "account1", "message_count": 5}
+            ]
+            mock_repo_class.return_value = mock_repo
+
+            response = admin_with_tenant_client.get("/api/unmapped-accounts")
+
+        # Should NOT pass tenant_id to get_unmapped_tool_accounts
+        mock_repo.get_unmapped_tool_accounts.assert_called_once_with()
+        assert response.status_code == 200
