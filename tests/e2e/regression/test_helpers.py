@@ -59,6 +59,8 @@ def dismiss_force_change_password_modal(page: Page, new_password: str = "Admin12
 
     无论弹窗是否出现，函数返回前都会等待页面 dashboard 元素就绪。
 
+    使用轮询机制处理懒加载 Modal（CI 环境网络慢时 Modal 可能延迟加载）。
+
     Args:
         page: Playwright 页面对象
         new_password: 新密码（需满足密码策略，默认 Admin1234!）
@@ -66,11 +68,21 @@ def dismiss_force_change_password_modal(page: Page, new_password: str = "Admin12
     global PASSWORD
     from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
-    try:
-        # 等待弹窗出现（最多 5 秒）
-        modal = page.locator('div[role="dialog"]')
-        modal.wait_for(state="visible", timeout=5000)
-    except PlaywrightTimeoutError:
+    # 使用轮询机制处理懒加载 Modal（总等待时间 15 秒 = 3 次 × 5 秒）
+    # 原因：React.lazy 组件在慢 CI 网络中可能延迟加载
+    modal = page.locator('div[role="dialog"]')
+    modal_found = False
+
+    for attempt in range(3):
+        try:
+            modal.wait_for(state="visible", timeout=5000)
+            modal_found = True
+            break
+        except PlaywrightTimeoutError:
+            # Modal 还没出现，继续等待
+            continue
+
+    if not modal_found:
         # 没有弹窗，正常情况
         pass
     else:
