@@ -1052,4 +1052,21 @@ def get_action_categories() -> dict[str, dict[str, Any]]:
                 },
             ],
         },
+        "smtp_config": {
+            "label": "SMTP Configuration",
+            "i18n_key": "categorySmtpConfig",
+            "resource_types": ["smtp_config"],
+            "actions": [
+                {
+                    "value": "smtp_config_save",
+                    "label": "SMTP Config Save",
+                    "i18n_key": "actionSmtpConfigSave",
+                },
+                {
+                    "value": "smtp_config_delete",
+                    "label": "SMTP Config Delete",
+                    "i18n_key": "actionSmtpConfigDelete",
+                },
+            ],
+        },
     }
