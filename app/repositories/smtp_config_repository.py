@@ -62,7 +62,7 @@ class SMTPConfigRepository:
             """
             )
         else:
-            # SQLite doesn't support LEFT JOIN in some versions, use subquery
+            # SQLite: use subquery for consistency with other repository patterns
             cursor.execute(
                 """
                 SELECT s.id, s.smtp_host, s.smtp_port, s.smtp_user, s.encrypted_password,
