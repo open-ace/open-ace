@@ -8,6 +8,7 @@ Verify that WebUI process receives minimal environment with:
 """
 
 import os
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -456,3 +457,143 @@ class TestSudoInlineEnvArgs:
         assert "TOKEN_SECRET" not in _WEBUI_ENV_SUDO_KNOWN_KEYS
         assert "GH_TOKEN" not in _WEBUI_ENV_SUDO_KNOWN_KEYS
         assert "ANTHROPIC_API_KEY" not in _WEBUI_ENV_SUDO_KNOWN_KEYS
+
+
+class TestSudoersSecurityRules:
+    """Test that install.sh does not generate unrestricted sudoers rules
+    for openace-webui-launch (Issue #2305 review: privilege escalation).
+
+    The openace-webui-launch wrapper execs /usr/bin/env, so an unrestricted
+    rule like ``ALL=(root) NOPASSWD: /usr/local/bin/openace-webui-launch *``
+    would allow ``sudo openace-webui-launch bash`` → root shell.
+
+    It must only appear in the restricted current_user_rules format:
+    ``ALL=(ALL) NOPASSWD: /usr/local/bin/openace-webui-launch "$webui_path" *``
+    """
+
+    @pytest.fixture
+    def package_install_sh(self):
+        """Path to package-method install.sh."""
+        return Path(__file__).parent.parent.parent.parent / (
+            "scripts/install-central/package-method/install.sh"
+        )
+
+    @pytest.fixture
+    def docker_install_sh(self):
+        """Path to docker-method install.sh."""
+        return Path(__file__).parent.parent.parent.parent / (
+            "scripts/install-central/docker-method/install.sh"
+        )
+
+    def test_package_install_no_unrestricted_webui_launch_rule(
+        self, package_install_sh
+    ):
+        """Package-method install.sh must NOT put openace-webui-launch in the
+        security_wrapper_rules loop (which generates unrestricted rules).
+
+        The wrapper must only appear in current_user_rules with the
+        ``"$webui_path"`` first-argument constraint.
+        """
+        if not package_install_sh.exists():
+            pytest.skip("package-method install.sh not found")
+
+        content = package_install_sh.read_text()
+
+        # Find the security_wrapper_rules loop
+        # It should NOT contain openace-webui-launch
+        in_wrapper_loop = False
+        loop_lines = []
+        for line in content.split("\n"):
+            stripped = line.strip()
+            if "for wrapper in" in stripped and "security_wrapper" not in stripped:
+                # Different loop, skip
+                continue
+            if "for wrapper in" in stripped:
+                in_wrapper_loop = True
+                loop_lines.append(stripped)
+                continue
+            if in_wrapper_loop:
+                loop_lines.append(stripped)
+                if stripped.startswith("done"):
+                    in_wrapper_loop = False
+                    break
+
+        loop_text = "\n".join(loop_lines)
+        assert (
+            "openace-webui-launch" not in loop_text
+        ), (
+            "openace-webui-launch must NOT be in the security_wrapper_rules loop "
+            "(generates unrestricted rule allowing privilege escalation). "
+            "It should only appear in current_user_rules with "
+            "'\"$webui_path\"' first-argument constraint."
+        )
+
+    def test_docker_install_no_unrestricted_webui_launch_rule(
+        self, docker_install_sh
+    ):
+        """Docker-method install.sh must NOT put openace-webui-launch in the
+        security_wrapper_rules loop (which generates unrestricted rules)."""
+        if not docker_install_sh.exists():
+            pytest.skip("docker-method install.sh not found")
+
+        content = docker_install_sh.read_text()
+
+        # Find the security_wrapper_rules loop
+        in_wrapper_loop = False
+        loop_lines = []
+        for line in content.split("\n"):
+            stripped = line.strip()
+            if "for wrapper in" in stripped and "security_wrapper" not in stripped:
+                continue
+            if "for wrapper in" in stripped:
+                in_wrapper_loop = True
+                loop_lines.append(stripped)
+                continue
+            if in_wrapper_loop:
+                loop_lines.append(stripped)
+                if stripped.startswith("done"):
+                    in_wrapper_loop = False
+                    break
+
+        loop_text = "\n".join(loop_lines)
+        assert (
+            "openace-webui-launch" not in loop_text
+        ), (
+            "openace-webui-launch must NOT be in the security_wrapper_rules loop "
+            "(generates unrestricted rule allowing privilege escalation)."
+        )
+
+    def test_package_install_has_restricted_webui_launch_rule(
+        self, package_install_sh
+    ):
+        """Package-method install.sh must have the restricted webui-launch rule
+        in current_user_rules with the ``"$webui_path"`` constraint."""
+        if not package_install_sh.exists():
+            pytest.skip("package-method install.sh not found")
+
+        content = package_install_sh.read_text()
+
+        # The restricted rule must exist
+        assert (
+            'openace-webui-launch "$webui_path" *' in content
+        ), (
+            "Package install.sh must contain the restricted sudoers rule "
+            "for openace-webui-launch with '$webui_path' first-argument constraint"
+        )
+
+    def test_docker_install_has_restricted_webui_launch_rule(
+        self, docker_install_sh
+    ):
+        """Docker-method install.sh must have the restricted webui-launch rule
+        with the ``"$webui_path"`` constraint."""
+        if not docker_install_sh.exists():
+            pytest.skip("docker-method install.sh not found")
+
+        content = docker_install_sh.read_text()
+
+        assert (
+            'openace-webui-launch "$webui_path" *' in content
+        ), (
+            "Docker install.sh must contain the restricted sudoers rule "
+            "for openace-webui-launch with '$webui_path' first-argument constraint"
+        )

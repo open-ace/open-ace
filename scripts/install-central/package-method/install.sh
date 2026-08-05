@@ -2331,7 +2331,7 @@ $run_user ALL=(root) NOPASSWD: $python_bin $script_path *"
     # 遍历所有安全 wrapper，为每个存在的 wrapper 生成规则
     # 注意：openace-write-as 已包含在此循环中，不再单独处理
     local security_wrapper_rules=""
-    for wrapper in openace-chown openace-useradd openace-cat openace-mkdir openace-rm openace-write-as openace-webui-launch; do
+    for wrapper in openace-chown openace-useradd openace-cat openace-mkdir openace-rm openace-write-as; do
         local wrapper_bin="/usr/local/bin/${wrapper}"
         if [ -x "$wrapper_bin" ]; then
             security_wrapper_rules="${security_wrapper_rules}
@@ -2424,7 +2424,9 @@ Cmnd_Alias OPENACE_UTILS = /usr/bin/test *, /usr/bin/ls *, /usr/bin/stat *, /usr
 # openace-rm: 替代 rm *，验证路径/用户/owner
 # openace-write-as: 跨用户文件写入
 # openace-webui-launch: WebUI 进程启动，限定首参为 webui_path 防权限提升
-# 注意：实际规则在 current_user_rules 中动态生成（仅当 wrapper 存在时）"
+# 注意：openace-webui-launch 不在 security_wrapper_rules 循环中，
+# 因为它需要受限规则（首参必须为 webui_path），不能使用通配规则。
+# 其受限规则在 current_user_rules 中动态生成（仅当 wrapper 存在时）。"
 
     # ===== Incremental update logic =====
     if [ -f "$sudoers_file" ]; then
