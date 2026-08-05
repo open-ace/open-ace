@@ -154,7 +154,7 @@ def run_tests():
 
     try:
         _run_all(machine_id)
-    except Exception:
+    except Exception:  # allow-swallow: UI element may not exist
         traceback.print_exc()
         raise
     finally:

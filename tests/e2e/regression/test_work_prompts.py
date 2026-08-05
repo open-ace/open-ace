@@ -53,7 +53,7 @@ def test_page_loads():
             assert check_element_exists(page, main_selectors), "主内容区域应存在"
 
             save_screenshot(page, MODULE_NAME, "01_page_load")
-            return True
+
         finally:
             browser.close()
 
@@ -79,7 +79,7 @@ def test_prompts_list_display():
             assert check_element_exists(page, prompts_selectors), "应有 Prompts 列表或空状态提示"
 
             save_screenshot(page, MODULE_NAME, "02_prompts_list")
-            return True
+
         finally:
             browser.close()
 
@@ -104,7 +104,7 @@ def test_prompt_search():
                 search_input.clear()
 
             save_screenshot(page, MODULE_NAME, "03_search")
-            return True
+
         finally:
             browser.close()
 
@@ -130,7 +130,7 @@ def test_prompt_detail():
                 page.wait_for_timeout(500)
 
             save_screenshot(page, MODULE_NAME, "04_detail")
-            return True
+
         finally:
             browser.close()
 
@@ -150,7 +150,7 @@ def test_prompt_use():
             check_element_exists(page, use_btn_selectors)
 
             save_screenshot(page, MODULE_NAME, "05_use")
-            return True
+            assert page.locator("body").is_visible(), "页面应可见"
         finally:
             browser.close()
 

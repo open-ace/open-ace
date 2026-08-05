@@ -1253,8 +1253,16 @@ Cmnd_Alias OPENACE_UTILS = /usr/bin/test *, /usr/bin/ls *, /usr/bin/stat *, /usr
 # 用户权限配置
 # ============================================================================
 # WebUI 启动规则：允许以任意用户运行，Python 层验证目标用户是否在数据库映射中
-open-ace ALL=(ALL) NOPASSWD: ${WEBUI_PATH} *
-openace ALL=(ALL) NOPASSWD: ${WEBUI_PATH} *
+# 使用 openace-webui-launch wrapper 限定首参为 WEBUI_PATH，防止权限提升 (Issue #2305)
+# 若 wrapper 不存在则回退到旧规则（向后兼容）
+WEBUI_LAUNCH_WRAPPER="/usr/local/bin/openace-webui-launch"
+if [ -x "$WEBUI_LAUNCH_WRAPPER" ]; then
+    open-ace ALL=(ALL) NOPASSWD: ${WEBUI_LAUNCH_WRAPPER} "${WEBUI_PATH}" *
+    openace ALL=(ALL) NOPASSWD: ${WEBUI_LAUNCH_WRAPPER} "${WEBUI_PATH}" *
+else
+    open-ace ALL=(ALL) NOPASSWD: ${WEBUI_PATH} *
+    openace ALL=(ALL) NOPASSWD: ${WEBUI_PATH} *
+fi
 # Git/GH 精确白名单：参数已限定，无法注入危险操作
 open-ace ALL=(root) NOPASSWD: GIT_SAFE
 openace ALL=(root) NOPASSWD: GIT_SAFE

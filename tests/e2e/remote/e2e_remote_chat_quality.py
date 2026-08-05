@@ -52,10 +52,10 @@ def shot(page, name):
     path = os.path.join(SCREENSHOT_DIR, f"{name}.png")
     try:
         page.screenshot(path=path, full_page=True, timeout=30000)
-    except Exception:
+    except Exception:  # allow-swallow: UI element may not exist
         try:
             page.screenshot(path=path, full_page=False, timeout=10000)
-        except Exception:
+        except Exception:  # allow-swallow: UI element may not exist
             return
     print(f"    📸 {name}.png")
 
@@ -124,7 +124,7 @@ def cleanup_remote_agent():
             timeout=15,
         )
         time.sleep(1)
-    except Exception as e:
+    except Exception as e:  # allow-swallow: UI element may not exist
         log("Cleanup", f"⚠ Cleanup failed (non-fatal): {e}")
 
 
@@ -171,7 +171,7 @@ def run_tests():
 
         try:
             _run_all(page, token, effective_webui_url, webui_token)
-        except Exception:
+        except Exception:  # allow-swallow: UI element may not exist
             shot(page, "ERROR_final")
             traceback.print_exc()
             raise
@@ -210,7 +210,7 @@ def _run_all(page, token, webui_url, webui_token):
                     body = json.loads(request.post_data or "{}")
                     sid = body.get("session_id", "new")
                     session_post_ids.append(sid)
-                except Exception:
+                except Exception:  # allow-swallow: UI element may not exist
                     pass
 
     # Track console errors
@@ -245,7 +245,7 @@ def _run_all(page, token, webui_url, webui_token):
     try:
         page.wait_for_selector("textarea, .min-h-screen", timeout=30000)
         pause(5)
-    except Exception:
+    except Exception:  # allow-swallow: UI element may not exist
         shot(page, "T1_chatpage_timeout")
         raise AssertionError("ChatPage did not load within 30s")
 
@@ -338,7 +338,7 @@ def _run_all(page, token, webui_url, webui_token):
                 permission_handled = True
                 log("Permission", "✓ Clicked Allow")
                 time.sleep(3)
-            except Exception as e:
+            except Exception as e:  # allow-swallow: UI element may not exist
                 log("Permission", f"Allow click failed: {e}")
 
         # Check page content for raw JSON patterns

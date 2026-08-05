@@ -852,8 +852,10 @@ $RUN_USER ALL=(root) NOPASSWD: $wrapper_bin *"
 # Allows the service account to run qwen-code-webui as other users
 # 【安全加固 Issue #2181】删除高风险通配规则
 
-# WebUI 启动规则：允许以任意用户运行，Python 层验证目标用户
-$RUN_USER ALL=(ALL) NOPASSWD: $webui_path *
+# WebUI 启动规则：通过 openace-webui-launch wrapper 以任意用户运行
+# Issue #2298: wrapper 内联传递 LLM 配置环境变量，绕过 sudo env_keep 过滤。
+# Issue #2313: 允许环境变量参数（KEY=VAL）出现在 webui_path 之前。
+$RUN_USER ALL=(ALL) NOPASSWD: /usr/local/bin/openace-webui-launch * "$webui_path" *
 
 # 低风险工具（Issue #2181：移除 cat/chown/rm，改用 wrapper）
 $RUN_USER ALL=(root) NOPASSWD: /usr/bin/test *, /usr/bin/ls *, /usr/bin/stat *, /usr/bin/mkdir *, /usr/bin/id *, /usr/bin/find *
@@ -872,6 +874,8 @@ ${wrapper_rule}
 # 【安全加固 Issue #2181】清理敏感变量
 # Agent 进程通过 openace-run-as --isolated 使用 env -i，不继承 env_keep
 # env_keep 主要用于 WebUI 启动，移除敏感凭据
+# 【Issue #2298】OPENAI_API_KEY/OPENAI_BASE_URL 不通过 env_keep，
+# 改由 webui_manager 通过 sudo -u user /usr/bin/env KEY=val ... 内联传递
 Defaults env_keep += \"OPENACE_PROXY_TOKEN OPENACE_PROXY_URL OPENACE_MODEL OPENACE_LOG_DIR PATH\"
 Defaults env_keep += \"GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL\"
 Defaults env_keep += \"SESSION_TIMEOUT_MS KEEPALIVE_INTERVAL_MS\"

@@ -53,7 +53,7 @@ def test_page_loads():
             assert check_element_exists(page, main_selectors), "主内容区域应存在"
 
             save_screenshot(page, MODULE_NAME, "01_page_load")
-            return True
+
         finally:
             browser.close()
 
@@ -73,7 +73,7 @@ def test_session_list_display():
             assert check_element_exists(page, session_selectors), "会话列表区域应存在"
 
             save_screenshot(page, MODULE_NAME, "02_session_list")
-            return True
+
         finally:
             browser.close()
 
@@ -93,7 +93,7 @@ def test_tools_panel_display():
             assert check_element_exists(page, tools_selectors), "工具面板区域应存在"
 
             save_screenshot(page, MODULE_NAME, "03_tools_panel")
-            return True
+
         finally:
             browser.close()
 
@@ -118,7 +118,7 @@ def test_new_session():
             assert check_element_exists(page, new_btn_selectors), "新建会话按钮应可见"
 
             save_screenshot(page, MODULE_NAME, "04_new_session")
-            return True
+
         finally:
             browser.close()
 
@@ -142,7 +142,7 @@ def test_session_switch():
                 page.wait_for_timeout(500)
 
             save_screenshot(page, MODULE_NAME, "05_session_switch")
-            return True
+
         finally:
             browser.close()
 

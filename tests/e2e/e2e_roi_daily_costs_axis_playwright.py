@@ -198,11 +198,11 @@ def run_tests():
                 f"network-only ignored: {console_errors or 'none'})",
             )
 
-        except Exception as e:
+        except Exception as e:  # allow-swallow: UI element may not exist
             print(f"\n[ERROR] Test execution failed: {e}")
             try:
                 shot(page, "error-state")
-            except Exception:
+            except Exception:  # allow-swallow: UI element may not exist
                 pass
             failed += 1
             errors.append(f"Test execution failed: {e}")

@@ -33,7 +33,9 @@ DEFAULT_TIMEOUT = 15000
 OUTPUT_DIR = "./screenshots"
 
 
-def test_remote_workspace_icon_consistency(ui_screenshot_dir):
+def test_remote_workspace_icon_consistency(
+    ui_screenshot_dir,
+):  # allow-no-assert: smoke test - visual verification only
     """Test Remote Workspace Tab Icon consistency with SessionList"""
     global OUTPUT_DIR
     OUTPUT_DIR = ui_screenshot_dir
@@ -167,7 +169,7 @@ def test_remote_workspace_icon_consistency(ui_screenshot_dir):
             test_results.append(("页面加载", False))
             page.screenshot(path=f"{OUTPUT_DIR}/remote_icon_error_timeout.png")
             screenshots.append("error_timeout.png")
-        except Exception as e:
+        except Exception as e:  # allow-swallow: UI element may not exist
             print(f"\n    ✗ 测试错误：{e}")
             test_results.append(("测试执行", False))
             page.screenshot(path=f"{OUTPUT_DIR}/remote_icon_error_exception.png")

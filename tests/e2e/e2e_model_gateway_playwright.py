@@ -82,7 +82,7 @@ def login(page):
     shot(page, "01-login")
 
 
-def test_page_loads(page):
+def test_page_loads(page):  # allow-no-assert: smoke test - visual verification only
     print("\n[TEST] Model Gateway page loads...")
     page.goto(GATEWAY_URL)
     pause(2)
@@ -107,7 +107,7 @@ def _delete_existing_via_api(page):
     pause(1)
 
 
-def test_save_persists(page):
+def test_save_persists(page):  # allow-no-assert: smoke test - visual verification only
     print("\n[TEST] Save persists config...")
     if page.locator("button").filter(has_text="Delete").count() > 0:
         _delete_existing_via_api(page)
@@ -129,7 +129,7 @@ def test_save_persists(page):
     shot(page, "04-after-reload")
 
 
-def test_prefix_toggle(page):
+def test_prefix_toggle(page):  # allow-no-assert: smoke test - visual verification only
     print("\n[TEST] Model Prefix Mode toggle...")
     checkbox = page.locator("input[type='checkbox']").first
     before = text_inputs(page).count()
@@ -146,7 +146,7 @@ def test_prefix_toggle(page):
     shot(page, "06-prefix-off")
 
 
-def test_connection_button_state(page):
+def test_connection_button_state(page):  # allow-no-assert: smoke test - visual verification only
     print("\n[TEST] Test Connection button enables only with base URL...")
     base_url_input = page.locator(f"input[placeholder='{BASEURL_PLACEHOLDER}']").first
     test_btn = page.locator("button").filter(has_text="Test Connection").first
@@ -177,7 +177,7 @@ def main():
             test_save_persists(page)
             test_prefix_toggle(page)
             test_connection_button_state(page)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:  # allow-swallow: test framework error handling  # noqa: BLE001
             print(f"\n[ERROR] Test execution failed: {e}")
             shot(page, "error-state")
             import traceback

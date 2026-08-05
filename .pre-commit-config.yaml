@@ -121,12 +121,14 @@ repos:
   # =============================================================================
   # Security Checks
   # =============================================================================
-  - repo: https://github.com/PyCQA/bandit
-    rev: 1.7.8
+  - repo: local
     hooks:
-      - id: bandit
-        args: [-c, pyproject.toml]
-        additional_dependencies: ["bandit[toml]"]
+      - id: bandit-check
+        name: bandit
+        entry: python scripts/lint/bandit_check.py
+        language: system
+        pass_filenames: false
+        files: ^(app|scripts)/
 
   # =============================================================================
   # General Checks

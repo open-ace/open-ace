@@ -266,3 +266,71 @@ def test_is_public_address_rejects_metadata_and_other_non_public(addr):
     """The predicate must use an explicit denylist, not ``is_global`` alone."""
     ip = ipaddress.ip_address(addr)
     assert not _is_public_address(ip), f"{addr} leaked through is_global-only predicate"
+
+
+# ── safe_request: proxy configuration (PR #2252) ────────────────────────
+
+
+def test_safe_request_disables_proxy_by_default(monkeypatch):
+    """safe_request must disable proxy lookup by default to avoid RecursionError in gevent.
+
+    In gevent-gunicorn workers, urllib3 proxy resolution can interact badly with
+    monkey-patched ssl, causing RecursionError. This test verifies that safe_request
+    explicitly disables proxies by default, matching llm_proxy_handler behavior.
+
+    Note: requests.sessions.merge_setting removes keys with None values, so
+    {"http": None, "https": None} becomes an empty dict, which effectively
+    disables proxy lookup.
+    """
+
+    def resolver(host, *a, **kw):  # type: ignore[no-untyped-def]
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))]
+
+    captured = {}
+
+    def fake_send(self, request, proxies=None, **kwargs):  # type: ignore[no-untyped-def]
+        captured["proxies"] = proxies
+        resp = requests.Response()
+        resp.status_code = 200
+        return resp
+
+    monkeypatch.setattr(_PinnedIPAdapter, "send", fake_send)
+
+    # Default behavior - proxies should be empty (disabled)
+    safe_request("GET", "https://example.com/test", resolver=resolver, timeout=5)
+    # After merge_setting removes None values, proxies should be empty
+    assert captured.get("proxies") == {}
+
+
+def test_safe_request_preserves_caller_provided_proxies(monkeypatch):
+    """safe_request must preserve caller-provided proxies argument.
+
+    Using setdefault ensures that if the caller explicitly provides a proxies
+    argument (including proxies=None or custom proxy settings), it is preserved.
+    """
+
+    def resolver(host, *a, **kw):  # type: ignore[no-untyped-def]
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))]
+
+    captured = {}
+
+    def fake_send(self, request, proxies=None, **kwargs):  # type: ignore[no-untyped-def]
+        captured["proxies"] = proxies
+        resp = requests.Response()
+        resp.status_code = 200
+        return resp
+
+    monkeypatch.setattr(_PinnedIPAdapter, "send", fake_send)
+
+    # Caller-provided proxies should be preserved
+    safe_request(
+        "GET",
+        "https://example.com/test",
+        resolver=resolver,
+        timeout=5,
+        proxies={"http": "http://proxy.example.com", "https": "http://proxy.example.com"},
+    )
+    assert captured.get("proxies") == {
+        "http": "http://proxy.example.com",
+        "https": "http://proxy.example.com",
+    }

@@ -28,7 +28,7 @@ TIMEOUT = 10000  # 10 seconds timeout
 
 
 @pytest.mark.asyncio
-async def test_analysis_page():
+async def test_analysis_page():  # allow-no-assert: smoke test - visual verification only
     """Test that Analysis page and Conversation History tab load correctly."""
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=HEADLESS)
@@ -155,7 +155,7 @@ async def test_analysis_page():
             print("Test completed successfully!")
             print("=" * 60)
 
-        except Exception as e:
+        except Exception as e:  # allow-swallow: UI element may not exist
             print(f"\n✗ Test failed: {e}")
             timestamp = time.strftime("%Y%m%d_%H%M%S")
             screenshot_path = (

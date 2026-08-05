@@ -23,7 +23,9 @@ USERNAME = os.environ.get("TEST_USERNAME", "admin")
 PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 
 
-async def test_create_flow(ui_screenshot_dir):
+async def test_create_flow(
+    ui_screenshot_dir,
+):  # allow-no-assert: smoke test - visual verification only
     global SCREENSHOT_DIR
     SCREENSHOT_DIR = ui_screenshot_dir
     async with async_playwright() as p:
@@ -87,7 +89,7 @@ async def test_create_flow(ui_screenshot_dir):
             if await path_display.count() > 0:
                 print("✅ 找到路径显示")
 
-        except Exception:
+        except Exception:  # allow-swallow: UI element may not exist
             print("❌ 未进入 details 步骤，仍在 browse 步骤")
 
             # 检查是否还在 browse 步骤

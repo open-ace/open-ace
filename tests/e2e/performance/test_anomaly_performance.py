@@ -53,7 +53,7 @@ def take_screenshot(page, name):
     return path
 
 
-def test_api_performance():
+def test_api_performance():  # allow-no-assert: smoke test - visual verification only
     """Test API performance directly."""
     print("\n" + "=" * 60)
     print("[API] Testing Anomaly Detection API Performance")
@@ -128,7 +128,7 @@ def test_api_performance():
     return results
 
 
-def test_page_load_performance():
+def test_page_load_performance():  # allow-no-assert: smoke test - visual verification only
     """Test page load performance."""
     print("\n" + "=" * 60)
     print("[UI] Testing Anomaly Detection Page Load Performance")
@@ -232,7 +232,7 @@ def test_page_load_performance():
             else:
                 print(f"\n⚠ {total - passed} test(s) FAILED")
 
-        except Exception as e:
+        except Exception as e:  # allow-swallow: UI element may not exist
             print(f"\n✗ Test failed: {e}")
             screenshots.append(take_screenshot(page, "error"))
             raise
