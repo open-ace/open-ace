@@ -844,4 +844,15 @@
 - **回归验证（合并后）**：问题 16（executor.py QWEN_SYSTEM_MD + entrypoint env_keep）、17（webui_manager token_secret 持久化 + TTL 86400 / decorators 常量）、18（remote_agent_manager UTC 时间戳）、19（agent.py 快照差异 6 函数）、20（agent.py:900 + remote_session_manager.py:699 allow-permanent 归一化）、8（fetch_qwen/remote_session_manager/remote.py file_change 注入）全部确认保留。
 - **测试适配**：`tests/issues/559/test_terminal_ws_handler.py::TestHandleVSCodeWs::test_invalid_proxy_ws_token_closes` 因上游 `remote_ws_handler.py` 给 `send_close` 增加 reason 参数而更新断言（`_handle_terminal_ws` 的类似断言未变）。
 - **已知失败（与同步无关，Windows 环境既有）**：`tests/issues/610::test_path_with_tilde_expansion`、`tests/unit/test_auth_decorators.py` 11 项（上游 `webui_manager.py` 新增 Unix-only `import pwd`，Windows 无此模块；生产容器为 Linux 不受影响）。
-- **提交**：`sync/upstream-20260805` 分支，merge 提交 `a15b8e96` + 测试适配 `a220ff73`。
+- **提交**：`sync/upstream-20260805` 分支，merge 提交 `a15b8e96` + 测试适配 `a220ff73`；已合入 main（`f85dc3bd`）并 push origin/main。
+
+### 部署（容器内更新，未重建镜像）
+
+- **镜像重建受阻**：上游 Dockerfile 将 code-server 安装路径改为 `--prefix=/usr/local` 使 RUN 缓存失效，需从 github 重新下载 code-server（约 150MB），实测下载速度 ~0.2MB/s（约需 14 小时），已中止。
+- **改用容器内更新**：`git archive HEAD` 生成代码包 → `docker cp` → 容器内解包到 `/app` → `pip install` 新增依赖（cachetools、prometheus_client、prometheus_flask_exporter）→ `docker restart`（entrypoint 自动执行 `alembic upgrade head`，schema 升级至 `20260805_001`）。
+- **部署中发现并修复 2 个上游 bug**：
+  1. `app/utils/health_checks.py`：PG probe 用 `conn.execute(sa.text("SELECT 1"))`，但 `PgConnectionWrapper`（psycopg2）只有 `cursor()` 没有 `execute()` → 每次 probe 抛 AttributeError → `/readyz` 恒报 `connection_failed`。修复：改用 `with conn.cursor() as cur: cur.execute("SELECT 1")`（提交 `433293cf`）。
+  2. `app/__init__.py` `/readyz` schema 检查：`current_revision < MIN_SUPPORTED_REVISION` 字符串比较，时间戳版本 `20260805_001`（数字开头）按字典序恒小于 `baseline_2026_06_23` → 永远 `incompatible` → 容器恒 unhealthy。修复：复用 `schema_guard.check_schema_compatibility`（其正确处理 baseline/时间戳比较，提交 `eccc6fa9`）。
+- **部署验证**：容器 `Up (healthy)`，`/readyz` 返回 200 `status: ready`，`schema_version.compatible: true`，6 项检查全部 ok。
+- **前端说明**：上游更新了前端源码但未提交构建产物，容器内 `static/assets` 仍为旧构建；新前端功能（RuntimeIsolationPanel 等）需镜像重建后生效，后端功能不受影响。
+- **待办**：Windows agent 端需手动更新 `C:\Users\nuc\.open-ace-agent\` 下 `agent.py`、`executor.py`、`system-prompt.md`（合并后版本，含问题 19/20 修复 + 上游更新）并重启 agent。
