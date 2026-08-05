@@ -104,14 +104,24 @@ if "app.routes.fs" not in sys.modules:
 
 
 @pytest.fixture
-def workspace(tmp_path_factory):
-    """A throwaway workspace dir under the real home (non-blacklisted)."""
-    ws = Path.home() / ".ace_fs_test_path_val"
-    if ws.exists():
+def workspace(tmp_path):
+    """A throwaway workspace dir.
+
+    Uses tmp_path on Windows (no blacklist issue). On macOS tmp_path
+    resolves under /private/var (blacklisted by is_valid_path), so we
+    fall back to a home-relative dir there.
+    """
+    if os.name == "nt":
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        yield ws
+    else:
+        ws = Path.home() / ".ace_fs_test_path_val"
+        if ws.exists():
+            shutil.rmtree(ws, ignore_errors=True)
+        ws.mkdir(parents=True, exist_ok=True)
+        yield ws
         shutil.rmtree(ws, ignore_errors=True)
-    ws.mkdir(parents=True, exist_ok=True)
-    yield ws
-    shutil.rmtree(ws, ignore_errors=True)
 
 
 @pytest.fixture
@@ -372,3 +382,47 @@ class TestFindWritableAncestor:
         )
         assert result["found"] is False
         assert "not a directory" in result["error"]
+
+    def test_ancestor_not_writable(self, workspace):
+        """Should return error when ancestor exists but is not writable."""
+        from unittest.mock import patch as _patch
+        from app.routes.fs import find_writable_ancestor
+
+        ro_dir = workspace / "readonly"
+        ro_dir.mkdir()
+
+        # Mock get_directory_info to simulate a read-only ancestor
+        def mock_get_info(path, system_account=None):
+            if str(path) == str(ro_dir):
+                return {"exists": True, "is_dir": True, "is_writable": False}
+            return {"exists": False, "is_dir": False, "is_writable": False}
+
+        with _patch("app.routes.fs.get_directory_info", side_effect=mock_get_info):
+            result = find_writable_ancestor(
+                str(ro_dir / "sub" / "new-dir"),
+                [str(workspace)],
+            )
+        assert result["found"] is False
+        assert "not writable" in result["error"]
+
+    def test_no_ancestor_found_at_root(self, workspace):
+        """Should return error when no existing ancestor is found (root fallback)."""
+        from app.routes.fs import find_writable_ancestor
+
+        # Use a path where the allowed prefix itself does not exist
+        # and the path is constructed so walking up reaches the prefix
+        # boundary without finding any existing ancestor
+        result = find_writable_ancestor(
+            str(workspace / "x" / "y" / "z"),
+            [str(workspace)],
+        )
+        # workspace exists, so this should find it
+        assert result["found"] is True
+
+        # But if we use a prefix that doesn't exist at all
+        result = find_writable_ancestor(
+            "/nonexistent_root/a/b",
+            ["/nonexistent_root"],
+        )
+        assert result["found"] is False
+        assert result["ancestor"] is None
