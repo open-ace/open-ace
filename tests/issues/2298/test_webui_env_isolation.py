@@ -323,12 +323,12 @@ class TestSudoInlineEnvArgs:
                 with patch.object(
                     manager, "_find_webui_executable", return_value=("/opt/qwen-code-webui", None)
                 ):
-                    with patch.object(manager, "_get_or_select_port", return_value=3100):
-                        process, _ = manager._launch_webui_process(
-                            user_id=1,
-                            system_account="target_user",
-                            openace_api_url="http://localhost",
-                        )
+                    process, _ = manager._launch_webui_process(
+                        user_id=1,
+                        system_account="target_user",
+                        port=3100,
+                        base_url="http://localhost",
+                    )
 
                 call_args = mock_popen.call_args
                 cmd = call_args[0][0]  # cmd list
@@ -357,12 +357,12 @@ class TestSudoInlineEnvArgs:
                 with patch.object(
                     manager, "_find_webui_executable", return_value=("/opt/qwen-code-webui", None)
                 ):
-                    with patch.object(manager, "_get_or_select_port", return_value=3100):
-                        manager._launch_webui_process(
-                            user_id=1,
-                            system_account="target_user",
-                            openace_api_url="http://localhost",
-                        )
+                    manager._launch_webui_process(
+                        user_id=1,
+                        system_account="target_user",
+                        port=3100,
+                        base_url="http://localhost",
+                    )
 
                 call_kwargs = mock_popen.call_args[1]
                 # In sudo path, env should be None (not child_env)
@@ -391,12 +391,12 @@ class TestSudoInlineEnvArgs:
                 with patch.object(
                     manager, "_find_webui_executable", return_value=("/opt/qwen-code-webui", None)
                 ):
-                    with patch.object(manager, "_get_or_select_port", return_value=3100):
-                        manager._launch_webui_process(
-                            user_id=1,
-                            system_account="same_user",
-                            openace_api_url="http://localhost",
-                        )
+                    manager._launch_webui_process(
+                        user_id=1,
+                        system_account="same_user",
+                        port=3100,
+                        base_url="http://localhost",
+                    )
 
                 call_kwargs = mock_popen.call_args[1]
                 # In same-user path, env should be child_env (not None)
@@ -435,12 +435,12 @@ class TestSudoInlineEnvArgs:
                 with patch.object(
                     manager, "_find_webui_executable", return_value=("/opt/qwen-code-webui", None)
                 ):
-                    with patch.object(manager, "_get_or_select_port", return_value=3100):
-                        manager._launch_webui_process(
-                            user_id=1,
-                            system_account="target_user",
-                            openace_api_url="http://localhost",
-                        )
+                    manager._launch_webui_process(
+                        user_id=1,
+                        system_account="target_user",
+                        port=3100,
+                        base_url="http://localhost",
+                    )
 
                 cmd = mock_popen.call_args[0][0]
                 # The dynamic envKey should appear as an inline env arg
