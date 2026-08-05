@@ -925,6 +925,12 @@ export const translations: Record<Language, Translations> = {
     confirmDeleteSmtpConfig: 'Are you sure you want to delete SMTP configuration?',
     smtpConfigDeleted: 'SMTP Configuration Deleted',
     smtpConfigDeletedDesc: 'SMTP configuration has been deleted',
+    smtpServerChangedPasswordRequired:
+      'SMTP server has changed. Please enter a new password to proceed.',
+    smtpConfigExists: 'SMTP configuration already exists',
+    createdBy: 'Created by',
+    createdAt: 'Created at',
+    confirmSaveSmtpConfig: 'Confirm SMTP Configuration Changes',
     verified: 'Verified',
     modelGatewayConfiguration: 'Model Gateway Configuration',
     modelGatewayDesc:
@@ -2668,6 +2674,11 @@ export const translations: Record<Language, Translations> = {
     confirmDeleteSmtpConfig: '确定要删除 SMTP 配置吗？',
     smtpConfigDeleted: 'SMTP 配置已删除',
     smtpConfigDeletedDesc: 'SMTP 配置已删除',
+    smtpServerChangedPasswordRequired: 'SMTP 服务器已变更，请输入新密码',
+    smtpConfigExists: '当前系统已配置 SMTP',
+    createdBy: '创建者',
+    createdAt: '创建时间',
+    confirmSaveSmtpConfig: '将保存以下变更：',
     verified: '已验证',
     modelGatewayConfiguration: '模型网关配置',
     modelGatewayDesc:

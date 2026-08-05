@@ -98,6 +98,10 @@ class AuditAction(Enum):
     WEBUI_TOKEN_IN_QUERY_USED = "webui_token_in_query_used"
     PROXY_TOKEN_IN_QUERY_USED = "proxy_token_in_query_used"
     BROWSER_TOKEN_IN_QUERY_USED = "browser_token_in_query_used"
+
+    # SMTP configuration actions
+    SMTP_CONFIG_SAVE = "smtp_config_save"
+    SMTP_CONFIG_DELETE = "smtp_config_delete"
     URL_TOKEN_PATH_VIOLATION = "url_token_path_violation"
     LEGACY_WEBUI_TOKEN_USED = "legacy_webui_token_used"
     TOKEN_LEAK_SUSPECTED = "token_leak_suspected"
