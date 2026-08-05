@@ -84,15 +84,19 @@ def login(page: Page):
     page.click('button[type="submit"]')
 
     # 等待登录成功 - bcrypt rounds=12 可能需要较长时间
+    # 使用更健壮的等待策略：等待 URL 变化或特定元素出现
     try:
+        # 等待 URL 不再包含 /login，最多 120s（bcrypt 可能很慢）
         page.wait_for_url(lambda url: "/login" not in url, timeout=120000)
-    except Exception as e:  # allow-swallow: UI element may not exist
+    except Exception as e:
         current_url = page.url
         if "/login" in current_url:
             save_screenshot(page, "login", "redirect_failed")
+            # 提供更详细的错误信息，帮助调试
             raise AssertionError(
                 f"Login did not redirect after 120s. Still on {current_url}. "
-                f"Check if credentials are correct or server is responsive. Error: {e}"
+                f"Check if credentials ({USERNAME}) are correct or server is responsive. "
+                f"Error: {e}"
             ) from e
 
 
@@ -111,7 +115,7 @@ def navigate_to(page: Page, path: str):
         if skeleton.count() > 0:
             # 等待骨架屏消失（最多等待 15 秒）
             page.wait_for_selector(".skeleton", state="hidden", timeout=15000)
-    except Exception:  # allow-swallow: UI element may not exist
+    except Exception:
         # 如果骨架屏没有消失，继续执行
         pass
 
@@ -122,7 +126,7 @@ def navigate_to(page: Page, path: str):
     try:
         # 等待主内容区域或页面标题出现
         page.wait_for_selector("main, .manage-content, h1, h2, .page-title", timeout=10000)
-    except Exception:  # allow-swallow: UI element may not exist
+    except Exception:
         # 如果没有找到，等待一段时间让页面渲染
         page.wait_for_timeout(2000)
 
@@ -146,7 +150,7 @@ def check_element_exists(page: Page, selectors: list, timeout: int = 5000) -> bo
             element = page.locator(selector)
             if element.count() > 0:
                 return True
-        except Exception:  # allow-swallow: UI element may not exist
+        except Exception:
             continue
     return False
 
@@ -164,7 +168,7 @@ def wait_for_element(page: Page, selectors: list, timeout: int = 10000):
         try:
             page.wait_for_selector(selector, timeout=timeout)
             return
-        except Exception:  # allow-swallow: UI element may not exist
+        except Exception:
             continue
     raise Exception(f"None of the selectors found: {selectors}")
 
@@ -183,7 +187,7 @@ class TestRunner:
             self.results.append((name, "PASS", None))
             print(f"  ✓ {name}")
 
-        except Exception as e:  # allow-swallow: UI element may not exist
+        except Exception as e:
             self.results.append((name, "FAIL", str(e)))
             print(f"  ✗ {name}: {e}")
             return False
