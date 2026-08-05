@@ -749,3 +749,55 @@ class TestAdminWithTenantIdNotScoped:
         # Should NOT pass tenant_id to get_unmapped_tool_accounts
         mock_repo.get_unmapped_tool_accounts.assert_called_once_with()
         assert response.status_code == 200
+
+    @patch("app.routes.mapping_rules.ToolAccountAutoMappingService")
+    def test_admin_with_tenant_run_auto_mapping_global(
+        self, mock_service_class, admin_with_tenant_client
+    ):
+        """Admin with tenant_id should run auto-mapping globally, not tenant-scoped."""
+        mock_service = MagicMock()
+        mock_service.run_auto_mapping.return_value = ([], [])
+        mock_service_class.return_value = mock_service
+
+        admin_with_tenant_client.post(
+            "/api/mapping-rules/auto-map",
+            data=json.dumps({"dry_run": True}),
+            content_type="application/json",
+        )
+
+        # Should NOT pass tenant_id to run_auto_mapping
+        mock_service.run_auto_mapping.assert_called_once_with(dry_run=True)
+
+    @patch("app.routes.mapping_rules.ToolAccountMappingRuleRepository")
+    def test_admin_with_tenant_sees_all_rules(
+        self, mock_repo_class, admin_with_tenant_client
+    ):
+        """Admin with tenant_id should see all rules, not tenant-filtered."""
+        mock_repo = MagicMock()
+        mock_rule = MagicMock()
+        mock_rule.to_dict.return_value = {"id": 1, "user_id": 5, "pattern": "test-*"}
+        mock_repo.get_all.return_value = [mock_rule]
+        mock_repo_class.return_value = mock_repo
+
+        response = admin_with_tenant_client.get("/api/mapping-rules")
+
+        # Should return all rules without tenant filtering
+        assert response.status_code == 200
+        mock_repo.get_all.assert_called_once()
+
+    @patch("app.routes.mapping_rules.ToolAccountMappingRuleRepository")
+    def test_platform_admin_with_tenant_can_delete_rule_for_other_tenant_user(
+        self, mock_repo_class, platform_admin_with_tenant_client
+    ):
+        """Platform admin with tenant_id should delete rules for cross-tenant user."""
+        mock_repo = MagicMock()
+        mock_rule = MagicMock()
+        mock_rule.user_id = 5  # User in different tenant
+        mock_repo.get_by_id.return_value = mock_rule
+        mock_repo.delete.return_value = True
+        mock_repo_class.return_value = mock_repo
+
+        response = platform_admin_with_tenant_client.delete("/api/mapping-rules/1")
+
+        # Should succeed, NOT 404
+        assert response.status_code == 200
