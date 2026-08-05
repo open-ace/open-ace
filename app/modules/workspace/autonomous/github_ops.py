@@ -1063,7 +1063,41 @@ class GitHubOps:
         base: str = "main",
         draft: bool = False,
     ) -> dict:
-        """Create a pull request and return its details."""
+        """Create a pull request and return its details.
+
+        When a bot token is configured, the PR is created via the REST API as the
+        service user (api_only) so ``GH_TOKEN`` reaches ``gh`` and the PR
+        attributes to the configured AI bot account — not the repo owner (#2340).
+        Falls back to ``gh pr create`` (owner identity) when no token is set or
+        the repo slug can't be resolved.
+        """
+        if self._get_env() is not None:
+            slug = self._repo_slug or self._resolve_owner_repo() or ""
+            if slug:
+                fields: list[tuple[str, str]] = [
+                    ("title", title),
+                    ("base", base),
+                    ("body", body or ""),
+                ]
+                if head:
+                    fields.append(("head", head))
+                if draft:
+                    fields.append(("draft", "true"))
+                api_args = ["--method", "POST", f"repos/{slug}/pulls"]
+                for key, value in fields:
+                    api_args += ["-f", f"{key}={value}"]
+                result = self._run_gh(self._gh_api_args(api_args), repo_scoped=False, api_only=True)
+                try:
+                    data = json.loads((result.stdout or "").strip() or "{}")
+                    pr_number = int(data["number"])
+                except (json.JSONDecodeError, TypeError, ValueError, KeyError):
+                    raise GitHubOpsError(
+                        f"create_pr REST API returned no PR number: {result.stdout!r}"
+                    )
+                logger.info("Created PR #%s (REST API, bot identity)", pr_number)
+                return self.get_pr(pr_number)
+
+        # Fallback: gh pr create (owner identity) — same-user / no-token path.
         args = [
             "pr",
             "create",
