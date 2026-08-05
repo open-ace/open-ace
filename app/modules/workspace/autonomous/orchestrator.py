@@ -802,6 +802,7 @@ SESSION_LINE_FIELDS = {
     "main": "main_session_id",
     "review": "review_session_id",
     "test": "test_session_id",
+    "verification": "verification_session_id",  # #2335 acceptance verifier
 }
 
 # Agent intro/closing text patterns for _clean_agent_text().
