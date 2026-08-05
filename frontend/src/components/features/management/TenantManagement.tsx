@@ -583,6 +583,7 @@ export const TenantManagement: React.FC = () => {
                           variant="outline-primary"
                           size="sm"
                           onClick={() => handleOpenEdit(tenant)}
+                          title={t('edit', language) ?? 'Edit'}
                         >
                           <i className="bi bi-pencil" />
                         </Button>
@@ -590,6 +591,7 @@ export const TenantManagement: React.FC = () => {
                           variant="outline-secondary"
                           size="sm"
                           onClick={() => handleOpenQuota(tenant)}
+                          title={t('editQuota', language) ?? 'Edit Quota'}
                         >
                           <i className="bi bi-sliders" />
                         </Button>
@@ -598,6 +600,7 @@ export const TenantManagement: React.FC = () => {
                             variant="outline-success"
                             size="sm"
                             onClick={() => handleActivate(tenant)}
+                            title={t('activate', language) ?? 'Activate'}
                           >
                             <i className="bi bi-play" />
                           </Button>
@@ -606,6 +609,7 @@ export const TenantManagement: React.FC = () => {
                             variant="outline-warning"
                             size="sm"
                             onClick={() => handleSuspend(tenant)}
+                            title={t('suspend', language) ?? 'Suspend'}
                           >
                             <i className="bi bi-pause" />
                           </Button>
@@ -614,6 +618,7 @@ export const TenantManagement: React.FC = () => {
                           variant="outline-danger"
                           size="sm"
                           onClick={() => handleDelete(tenant)}
+                          title={t('delete', language) ?? 'Delete'}
                         >
                           <i className="bi bi-trash" />
                         </Button>
