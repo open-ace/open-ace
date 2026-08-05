@@ -2206,6 +2206,29 @@ install_write_as_wrapper() {
     return 0
 }
 
+# Install the webui-launch wrapper for secure inline env-var passthrough.
+# This replaces the insecure /usr/bin/env * sudoers rule (Issue #2305 review).
+# The wrapper must be installed BEFORE configure_sudoers so the sudoers rule
+# (which keys off -x /usr/local/bin/openace-webui-launch) sees it.
+install_webui_launch_wrapper() {
+    local install_dir="$1"
+    local src="$install_dir/scripts/openace-webui-launch.sh"
+    local dst="/usr/local/bin/openace-webui-launch"
+
+    if [ ! -f "$src" ]; then
+        print_warning "openace-webui-launch.sh not found at $src; skipping"
+        return 1
+    fi
+    if ! cp "$src" "$dst" 2>/dev/null; then
+        print_warning "Failed to copy openace-webui-launch.sh to $dst (need root?)"
+        return 1
+    fi
+    chown root:root "$dst" 2>/dev/null || true
+    chmod 755 "$dst"
+    print_success "Installed webui-launch wrapper to $dst"
+    return 0
+}
+
 # Configure sudoers for multi-user workspace mode
 # Uses incremental update: only adds/modifies $run_user's rules, preserves other users' rules
 configure_sudoers() {
@@ -2318,8 +2341,10 @@ $run_user ALL=(root) NOPASSWD: $wrapper_bin *"
 
     # Build current user's complete rule block (avoid empty lines from empty variables)
     local current_user_rules="# Rules for $run_user (updated on $(date '+%Y-%m-%d %H:%M:%S'))
-# WebUI 启动规则：允许以任意用户运行，Python 层验证目标用户
-$run_user ALL=(ALL) NOPASSWD: $webui_path *"
+# WebUI 启动规则：通过 openace-webui-launch wrapper 以任意用户运行
+# Issue #2298: wrapper 内联传递 LLM 配置环境变量，绕过 sudo env_keep 过滤。
+# wrapper 限定首参为 $webui_path，防止 /usr/bin/env * 权限提升。
+$run_user ALL=(ALL) NOPASSWD: /usr/local/bin/openace-webui-launch "$webui_path" *"
 
     # Only add webui_local_rule if not empty
     if [ -n "$webui_local_rule" ]; then
@@ -2362,6 +2387,8 @@ ${fetch_rules}"
 # env_keep 主要用于 WebUI 启动（sudo -u），需要清理敏感凭据
 # 移除：OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY, OPENCLAW_TOKEN, GH_TOKEN
 # 保留：非敏感变量（proxy_token, GIT_*签名变量, PATH）
+# 【Issue #2298】OPENAI_API_KEY/OPENAI_BASE_URL 不再通过 env_keep，
+# 改由 webui_manager 通过 sudo -u user /usr/bin/env KEY=val ... 内联传递
 Defaults env_keep += \"OPENACE_PROXY_TOKEN OPENACE_PROXY_URL OPENACE_MODEL OPENACE_LOG_DIR PATH\"
 Defaults env_keep += \"GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL\"
 Defaults env_keep += \"SESSION_TIMEOUT_MS KEEPALIVE_INTERVAL_MS\"
@@ -2396,7 +2423,10 @@ Cmnd_Alias OPENACE_UTILS = /usr/bin/test *, /usr/bin/ls *, /usr/bin/stat *, /usr
 # openace-mkdir: 安全目录创建
 # openace-rm: 替代 rm *，验证路径/用户/owner
 # openace-write-as: 跨用户文件写入
-# 注意：实际规则在 current_user_rules 中动态生成（仅当 wrapper 存在时）"
+# openace-webui-launch: WebUI 进程启动，限定首参为 webui_path 防权限提升
+# 注意：openace-webui-launch 不在 security_wrapper_rules 循环中，
+# 因为它需要受限规则（首参必须为 webui_path），不能使用通配规则。
+# 其受限规则在 current_user_rules 中动态生成（仅当 wrapper 存在时）。"
 
     # ===== Incremental update logic =====
     if [ -f "$sudoers_file" ]; then
@@ -2442,7 +2472,8 @@ ${line}"
         # leaving the new run_user without sudo permission (#1197 review).
         # Rule lines look like "$run_user ALL=(ALL) NOPASSWD: $webui_path *",
         # so we grep for lines starting with "$run_user " that also contain the path.
-        if ! grep -E "^${run_user} .*(NOPASSWD: )?${webui_path}( |\*|$)" "$sudoers_file" 2>/dev/null && \
+        if ! grep -E "^${run_user} .*(NOPASSWD: )?/usr/local/bin/openace-webui-launch \"${webui_path}\"( |\*|$)" "$sudoers_file" 2>/dev/null && \
+           ! grep -E "^${run_user} .*(NOPASSWD: )?${webui_path}( |\*|$)" "$sudoers_file" 2>/dev/null && \
            ! grep -E "^${run_user} .*(NOPASSWD: )?/usr/local/bin/qwen-code-webui( |\*|$)" "$sudoers_file" 2>/dev/null; then
             print_warning "Sudoers missing webui rule for user '$run_user'"
             need_update=true
@@ -3900,6 +3931,10 @@ install_local() {
         # Install the write-as wrapper BEFORE configure_sudoers (Issue #1916):
         # the sudoers rule keys off `[ -x /usr/local/bin/openace-write-as ]`.
         install_write_as_wrapper "$sudoers_install_dir"
+
+        # Install the webui-launch wrapper BEFORE configure_sudoers (Issue #2305):
+        # the sudoers rule keys off `[ -x /usr/local/bin/openace-webui-launch ]`.
+        install_webui_launch_wrapper "$sudoers_install_dir"
 
         configure_sudoers "$sudoers_run_user" "$sudoers_install_dir"
         if [ $? -ne 0 ]; then
