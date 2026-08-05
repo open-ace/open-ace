@@ -128,7 +128,7 @@ describe('usePageRefresh', () => {
   });
 
   describe('refresh', () => {
-    it('should call refresh function', async () => {
+    it('should call onRefresh even when no React Query cache entries match', async () => {
       const wrapper = createWrapper();
       const onRefresh = vi.fn();
 
@@ -146,7 +146,34 @@ describe('usePageRefresh', () => {
         await result.current.refresh();
       });
 
-      // Note: onRefresh might not be called if there are no matching queries in cache
+      // onRefresh should be called even without matching React Query cache entries
+      expect(onRefresh).toHaveBeenCalledTimes(1);
+      expect(result.current.isRefreshing).toBe(false);
+    });
+
+    it('should call recordRefresh when onRefresh is called without matching queries', async () => {
+      const wrapper = createWrapper();
+      const onRefresh = vi.fn();
+
+      const { result } = renderHook(
+        () =>
+          usePageRefresh({
+            page: '/manage/test-record-refresh',
+            refreshKey: createMatcherConfig([['nonexistent_cache_key']], 'prefix'),
+            onRefresh,
+          }),
+        { wrapper }
+      );
+
+      await act(async () => {
+        await result.current.refresh();
+      });
+
+      // Verify lastRefreshTime is updated after manual refresh with onRefresh
+      await waitFor(() => {
+        const config = usePageRefreshStore.getState().configs['/manage/test-record-refresh'];
+        expect(config?.lastRefreshTime).not.toBeNull();
+      });
       expect(result.current.isRefreshing).toBe(false);
     });
   });

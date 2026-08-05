@@ -159,6 +159,7 @@ export const TenantManagement: React.FC = () => {
     refreshKey: createMatcherConfig([['admin', 'tenants']], 'prefix'),
     interval: 0, // No auto refresh - manual only
     enabled: false,
+    onRefresh: () => fetchTenants(),
   });
 
   // Form validation
