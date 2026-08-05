@@ -452,6 +452,7 @@ class TestTenantIsolationForOtherOperations:
 # Issue #2324: Admin/platform_admin with tenant_id must NOT be tenant-scoped.
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def admin_with_tenant_client(app):
     """Create test client with admin role that HAS a tenant_id.
@@ -478,9 +479,7 @@ def admin_with_tenant_client(app):
             )
 
         def _token_patch(self):
-            return patch(
-                "app.auth.decorators._extract_session_token", return_value="test-token"
-            )
+            return patch("app.auth.decorators._extract_session_token", return_value="test-token")
 
         def get(self, *args, **kwargs):
             with self._token_patch():
@@ -530,9 +529,7 @@ def platform_admin_with_tenant_client(app):
             )
 
         def _token_patch(self):
-            return patch(
-                "app.auth.decorators._extract_session_token", return_value="test-token"
-            )
+            return patch("app.auth.decorators._extract_session_token", return_value="test-token")
 
         def get(self, *args, **kwargs):
             with self._token_patch():
@@ -586,8 +583,13 @@ class TestAdminWithTenantIdNotScoped:
         result = GenerateDefaultRulesResult(
             created=[
                 ToolAccountMappingRule(
-                    id=1, user_id=5, pattern="user-*",
-                    match_type="prefix", priority=10, is_auto=True, is_active=True,
+                    id=1,
+                    user_id=5,
+                    pattern="user-*",
+                    match_type="prefix",
+                    priority=10,
+                    is_auto=True,
+                    is_active=True,
                 )
             ],
             skipped=[],
@@ -625,8 +627,13 @@ class TestAdminWithTenantIdNotScoped:
         result = GenerateDefaultRulesResult(
             created=[
                 ToolAccountMappingRule(
-                    id=1, user_id=5, pattern="user-*",
-                    match_type="prefix", priority=10, is_auto=True, is_active=True,
+                    id=1,
+                    user_id=5,
+                    pattern="user-*",
+                    match_type="prefix",
+                    priority=10,
+                    is_auto=True,
+                    is_active=True,
                 )
             ],
             skipped=[],
@@ -680,7 +687,10 @@ class TestAdminWithTenantIdNotScoped:
             mock_repo = MagicMock()
             mock_rule = MagicMock()
             mock_rule.to_dict.return_value = {
-                "id": 1, "user_id": 5, "pattern": "test-*", "match_type": "prefix",
+                "id": 1,
+                "user_id": 5,
+                "pattern": "test-*",
+                "match_type": "prefix",
             }
             mock_repo.create.return_value = mock_rule
             mock_repo_class.return_value = mock_repo
@@ -748,7 +758,9 @@ class TestAdminWithTenantIdNotScoped:
             mock_repo = MagicMock()
             mock_mapping = MagicMock()
             mock_mapping.to_dict.return_value = {
-                "id": 1, "user_id": 5, "tool_account": "test-account",
+                "id": 1,
+                "user_id": 5,
+                "tool_account": "test-account",
             }
             mock_repo.create.return_value = mock_mapping
             mock_repo_class.return_value = mock_repo
@@ -763,9 +775,7 @@ class TestAdminWithTenantIdNotScoped:
         assert response.status_code == 201
 
     @patch("app.routes.mapping_rules.ToolAccountAutoMappingService")
-    def test_admin_with_tenant_sees_all_stats(
-        self, mock_service_class, admin_with_tenant_client
-    ):
+    def test_admin_with_tenant_sees_all_stats(self, mock_service_class, admin_with_tenant_client):
         """Admin with tenant_id should see all stats, not tenant-filtered."""
         mock_service = MagicMock()
         mock_service.get_mapping_stats.return_value = {"total": 100}
@@ -817,9 +827,7 @@ class TestAdminWithTenantIdNotScoped:
         mock_service.run_auto_mapping.assert_called_once_with(dry_run=True)
 
     @patch("app.routes.mapping_rules.ToolAccountMappingRuleRepository")
-    def test_admin_with_tenant_sees_all_rules(
-        self, mock_repo_class, admin_with_tenant_client
-    ):
+    def test_admin_with_tenant_sees_all_rules(self, mock_repo_class, admin_with_tenant_client):
         """Admin with tenant_id should see all rules, not tenant-filtered."""
         mock_repo = MagicMock()
         mock_rule = MagicMock()
