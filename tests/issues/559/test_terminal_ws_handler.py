@@ -419,5 +419,5 @@ class TestHandleVSCodeWs:
 
         RemoteWSHandler._handle_vscode_ws(handler)
 
-        mock_send_close.assert_called_once_with(handler.socket, 4001)
+        mock_send_close.assert_called_once_with(handler.socket, 4001, "Invalid token")
         assert handler.close_connection is True
