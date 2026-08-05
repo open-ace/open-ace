@@ -574,16 +574,27 @@ REVIEW_FEEDBACK_MIN_LENGTH = 50
 REVIEW_SUGGESTIONS_MIN_LENGTH = 200
 
 # Phase ordering — used by fork to determine the next phase after the fork point.
-PHASE_ORDER = ["preparation", "planning", "development", "pr_review", "report", "merge"]
+PHASE_ORDER = [
+    "preparation",
+    "planning",
+    "development",
+    "pr_review",
+    "report",
+    "merge",
+    "acceptance_verification",  # #2335: independent post-merge verification
+]
 
 # The only legitimate current_phase values a PhaseResult(completed) may carry in
-# workflow_patch when next_phase="completed" (the terminal pseudo-phase). "merge"
-# is the default terminal real phase (a completed workflow's current_phase stays
-# "merge"); "completed" is pr_review's literal-terminal legacy path (it skips
-# report/merge and writes the literal "completed"). Any other patch-carried
-# current_phase would strand the workflow in a non-canonical phase — rejected by
-# _commit_phase_result to mirror the top-level next_phase validation. (#2044 S2)
-_COMPLETED_TERMINAL_PHASES = ("merge", "completed")
+# workflow_patch when next_phase="completed" (the terminal pseudo-phase).
+# "acceptance_verification" is the default terminal real phase for the normal
+# flow (merge -> acceptance_verification; on confirmed it returns
+# next_phase="completed", resting current_phase at "acceptance_verification");
+# "merge" covers pr_review's literal-terminal legacy path (skips report/merge and
+# writes the literal "completed"); "completed" is the literal pseudo-phase value.
+# Any other patch-carried current_phase would strand the workflow in a
+# non-canonical phase — rejected by _commit_phase_result to mirror the top-level
+# next_phase validation. (#2044 S2, #2335)
+_COMPLETED_TERMINAL_PHASES = ("acceptance_verification", "merge", "completed")
 
 # Maps phases to their corresponding workflow status values
 PHASE_STATUS_MAP = {
@@ -593,6 +604,7 @@ PHASE_STATUS_MAP = {
     "pr_review": "pr_review",
     "report": "reporting",
     "merge": "merging",
+    "acceptance_verification": "verification_pending",  # #2335
 }
 
 # CI check polling configuration.
