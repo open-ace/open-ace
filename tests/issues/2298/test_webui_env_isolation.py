@@ -73,14 +73,12 @@ class TestWebUIEnvIsolation:
                 assert "OPENACE_PROXY_URL" in env, "OPENACE_PROXY_URL should be set"
 
                 # Assert sensitive variables are NOT present
-                assert (
-                    "DATABASE_URL" not in env
-                ), "DATABASE_URL should NOT be in WebUI env"
-                assert (
-                    "TOKEN_SECRET" not in env
-                ), "TOKEN_SECRET should NOT be in WebUI env"
+                assert "DATABASE_URL" not in env, "DATABASE_URL should NOT be in WebUI env"
+                assert "TOKEN_SECRET" not in env, "TOKEN_SECRET should NOT be in WebUI env"
                 assert "GH_TOKEN" not in env, "GH_TOKEN should NOT be in WebUI env"
-                assert "ANTHROPIC_API_KEY" not in env, "ANTHROPIC_API_KEY should NOT be in WebUI env"
+                assert (
+                    "ANTHROPIC_API_KEY" not in env
+                ), "ANTHROPIC_API_KEY should NOT be in WebUI env"
 
     def test_build_webui_env_path_prepend(self, manager):
         """Verify PATH is prepended with system directories."""
@@ -127,7 +125,9 @@ class TestWebUIEnvIsolation:
                 )
 
                 # Should preserve inherited paths
-                assert "/opt/homebrew/bin" in env["PATH"], "Inherited PATH should be preserved for macOS"
+                assert (
+                    "/opt/homebrew/bin" in env["PATH"]
+                ), "Inherited PATH should be preserved for macOS"
                 assert "/custom/path" in env["PATH"], "Inherited PATH should be preserved"
 
                 # System dirs should be prepended
@@ -190,7 +190,9 @@ class TestWebUIEnvIsolation:
 
             # Dynamic envKey should be collected
             assert "BAILIAN_CODING_PLAN_API_KEY" in env, "Dynamic envKey should be in environment"
-            assert env["BAILIAN_CODING_PLAN_API_KEY"] == "test-proxy-token", "Dynamic envKey should equal proxy_token"
+            assert (
+                env["BAILIAN_CODING_PLAN_API_KEY"] == "test-proxy-token"
+            ), "Dynamic envKey should equal proxy_token"
 
     def test_build_webui_env_no_proxy_when_not_configured(self, manager):
         """Verify proxy variables are not set if not configured."""
@@ -290,7 +292,9 @@ class TestSudoInlineEnvArgs:
         """Dynamic envKeys from model pool should NOT be in KNOWN_KEYS
         (they get inlined automatically in the sudo path)."""
         dynamic_envkey = "BAILIAN_CODING_PLAN_API_KEY"
-        assert dynamic_envkey not in _WEBUI_ENV_SUDO_KNOWN_KEYS, f"{dynamic_envkey} is dynamic and should NOT be in known_keys"
+        assert (
+            dynamic_envkey not in _WEBUI_ENV_SUDO_KNOWN_KEYS
+        ), f"{dynamic_envkey} is dynamic and should NOT be in known_keys"
 
     @pytest.fixture
     def manager(self):
@@ -308,9 +312,7 @@ class TestSudoInlineEnvArgs:
         mock_pwd.getpwuid.return_value.pw_name = "service_user"
 
         mock_pool = {"proxy_token": "test-token", "provider": "openai", "models": []}
-        with patch.object(
-            manager, "_build_local_session_model_pool", return_value=mock_pool
-        ):
+        with patch.object(manager, "_build_local_session_model_pool", return_value=mock_pool):
             with patch.object(
                 manager,
                 "_build_webui_env",
@@ -335,9 +337,7 @@ class TestSudoInlineEnvArgs:
                 cmd = call_args[0][0]  # cmd list
 
                 # The command should include the launch wrapper, not raw /usr/bin/env
-                assert (
-                    _WEBUI_LAUNCH_WRAPPER in cmd
-                ), "sudo path should use openace-webui-launch"
+                assert _WEBUI_LAUNCH_WRAPPER in cmd, "sudo path should use openace-webui-launch"
                 assert "/usr/bin/env" not in cmd, "should not use raw /usr/bin/env"
 
     @patch("app.services.webui_manager.pwd")
@@ -348,9 +348,7 @@ class TestSudoInlineEnvArgs:
         mock_pwd.getpwuid.return_value.pw_name = "service_user"
 
         mock_pool = {"proxy_token": "test-token", "provider": "openai", "models": []}
-        with patch.object(
-            manager, "_build_local_session_model_pool", return_value=mock_pool
-        ):
+        with patch.object(manager, "_build_local_session_model_pool", return_value=mock_pool):
             with patch.object(
                 manager,
                 "_build_webui_env",
@@ -386,9 +384,7 @@ class TestSudoInlineEnvArgs:
         mock_pwd.getpwuid.return_value.pw_name = "same_user"
 
         mock_pool = {"proxy_token": "test-token", "provider": "openai", "models": []}
-        with patch.object(
-            manager, "_build_local_session_model_pool", return_value=mock_pool
-        ):
+        with patch.object(manager, "_build_local_session_model_pool", return_value=mock_pool):
             with patch.object(
                 manager,
                 "_build_webui_env",
@@ -411,7 +407,9 @@ class TestSudoInlineEnvArgs:
 
                 call_kwargs = mock_popen.call_args[1]
                 # In same-user path, env should be child_env (not None)
-                assert call_kwargs.get("env") is not None, "same-user path should pass child_env to Popen"
+                assert (
+                    call_kwargs.get("env") is not None
+                ), "same-user path should pass child_env to Popen"
                 assert "OPENAI_API_KEY" in call_kwargs["env"]
 
     @patch("app.services.webui_manager.pwd")
@@ -425,13 +423,9 @@ class TestSudoInlineEnvArgs:
         mock_pool = {
             "proxy_token": "test-token",
             "provider": "bailian",
-            "models": [
-                {"name": "qwen-coding", "envKey": "BAILIAN_CODING_PLAN_API_KEY"}
-            ],
+            "models": [{"name": "qwen-coding", "envKey": "BAILIAN_CODING_PLAN_API_KEY"}],
         }
-        with patch.object(
-            manager, "_build_local_session_model_pool", return_value=mock_pool
-        ):
+        with patch.object(manager, "_build_local_session_model_pool", return_value=mock_pool):
             with patch.object(
                 manager,
                 "_build_webui_env",
@@ -499,9 +493,7 @@ class TestSudoersSecurityRules:
             "scripts/install-central/docker-method/install.sh"
         )
 
-    def test_package_install_no_unrestricted_webui_launch_rule(
-        self, package_install_sh
-    ):
+    def test_package_install_no_unrestricted_webui_launch_rule(self, package_install_sh):
         """Package-method install.sh must NOT put openace-webui-launch in the
         security_wrapper_rules loop (which generates unrestricted rules).
 
