@@ -1216,6 +1216,24 @@ def retry_workflow(workflow_id):
         "error_message": "",
         "retry_count": retry_count + 1,
     }
+    # Optional per-workflow scope bump (#2309): a failed round whose only
+    # blocker was the changed-files cap can be retried with a higher limit
+    # rather than re-creating the workflow. Persisted on the row so every
+    # subsequent round/phase honors it; falls back to the global bound when
+    # absent (None).
+    data = request.get_json(silent=True) or {}
+    try:
+        new_limit = (
+            int(data.get("max_changed_files_override"))
+            if data.get("max_changed_files_override") is not None
+            else None
+        )
+    except (TypeError, ValueError):
+        return jsonify({"error": "max_changed_files_override must be a positive integer"}), 400
+    if new_limit is not None:
+        if new_limit <= 0:
+            return jsonify({"error": "max_changed_files_override must be a positive integer"}), 400
+        retry_updates["max_changed_files_override"] = new_limit
     # Restore worktree_path so _ensure_worktree recreates the worktree dir on
     # the retry pass. Terminal-failure cleanup (_cleanup_worktree_and_branch)
     # clears worktree_path after removing the dir; the canonical path survives

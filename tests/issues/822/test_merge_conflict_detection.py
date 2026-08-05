@@ -117,6 +117,11 @@ def _set_valid_merge_result(
     """Configure strict branch/index/commit-graph postconditions for a success test."""
     gh.resolve_commit.return_value = "main-head"
     gh.get_current_branch.return_value = "auto-dev/fc82f22a"
+    # Primary-fallback branch-freeing (#2307): when worktree_path is empty the
+    # workflow runs in the primary repo with the feature branch checked out
+    # there; resolve_merge_conflicts detaches primary to free the branch before
+    # creating the temp worktree. A clean primary is the valid-merge precondition.
+    gh.has_uncommitted_changes.return_value = False
     gh.get_current_commit.side_effect = (
         [original_head, original_head, resolved_head]
         if conflict

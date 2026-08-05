@@ -154,29 +154,38 @@ def test_logout():
                         f"Login did not redirect after 120s during logout test. Error: {e}"
                     ) from e
 
-            # Issue #2189: 查找并点击登出按钮 - 明确失败而非静默
-            logout_selectors = [
-                'a[href="/logout"]',
-                'button:has-text("Logout")',
-                '.user-menu a:has-text("Logout")',
-            ]
+            # Issue #2189: Logout button is inside a dropdown menu
+            # Need to first click the user avatar to open the dropdown
+            # Header structure: div.dropdown > button.dropdown-toggle > ul.dropdown-menu > li > button.dropdown-item
+            try:
+                # Click user avatar button to open dropdown menu
+                user_menu_btn = page.wait_for_selector(
+                    ".dropdown-toggle:has(.bi-person-circle), button.dropdown-toggle",
+                    state="visible",
+                    timeout=5000,
+                )
+                user_menu_btn.click()
+                # Wait for dropdown menu to open
+                page.wait_for_timeout(500)
 
-            logout_found = False
-            for selector in logout_selectors:
-                try:
-                    logout_btn = page.wait_for_selector(selector, state="visible", timeout=5000)
-                    if logout_btn:
-                        logout_found = True
-                        logout_btn.click()
-                        break
-                except TimeoutError:
-                    # Only catch timeout, other exceptions should propagate
-                    continue
+                # Now click the logout button in the dropdown menu
+                logout_btn = page.wait_for_selector(
+                    "button.dropdown-item:has-text('Logout'), button.dropdown-item:has-text('退出登录')",
+                    state="visible",
+                    timeout=5000,
+                )
+                logout_btn.click()
+                logout_found = True
+            except TimeoutError:
+                logout_found = False
 
             # Issue #2189: 找不到必须失败
             if not logout_found:
                 save_screenshot(page, MODULE_NAME, "04_logout_no_button")
-                pytest.fail(f"Logout button not found. Tried selectors: {logout_selectors}")
+                pytest.fail(
+                    "Logout button not found. Check if user menu dropdown is working. "
+                    "Expected: click user avatar -> see dropdown -> click logout button"
+                )
 
             # Issue #2189: 等待重定向完成（使用明确条件）
             try:

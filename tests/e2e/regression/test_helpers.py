@@ -49,12 +49,32 @@ def login(page: Page):
 
     避免使用 networkidle，改用 domcontentloaded 和显式等待
     """
+    from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+
     # 导航到登录页面，等待 DOM 加载完成
-    page.goto(f"{BASE_URL}/login", wait_until="domcontentloaded", timeout=PAGE_LOAD_TIMEOUT_MS)
+    try:
+        page.goto(
+            f"{BASE_URL}/login",
+            wait_until="domcontentloaded",
+            timeout=PAGE_LOAD_TIMEOUT_MS,
+        )
+    except PlaywrightTimeoutError:
+        # Save screenshot on timeout for debugging
+        save_screenshot(page, "login", "page_load_timeout")
+        raise AssertionError(
+            f"Login page failed to load within {PAGE_LOAD_TIMEOUT_MS}ms. "
+            f"Check if server is running at {BASE_URL}"
+        )
 
     # 等待登录表单元素可见
-    page.wait_for_selector("#username", state="visible", timeout=10000)
-    page.wait_for_selector("#password", state="visible", timeout=10000)
+    try:
+        page.wait_for_selector("#username", state="visible", timeout=10000)
+        page.wait_for_selector("#password", state="visible", timeout=10000)
+    except PlaywrightTimeoutError:
+        save_screenshot(page, "login", "form_not_visible")
+        raise AssertionError(
+            "Login form elements not visible within 10s. " "Check if page loaded correctly"
+        )
 
     # 填写凭据
     page.fill("#username", USERNAME)
@@ -69,6 +89,7 @@ def login(page: Page):
     except Exception as e:  # allow-swallow: UI element may not exist
         current_url = page.url
         if "/login" in current_url:
+            save_screenshot(page, "login", "redirect_failed")
             raise AssertionError(
                 f"Login did not redirect after 120s. Still on {current_url}. "
                 f"Check if credentials are correct or server is responsive. Error: {e}"
