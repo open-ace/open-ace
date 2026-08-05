@@ -24,6 +24,8 @@ import hmac
 import logging
 import os
 import time
+import uuid
+from dataclasses import dataclass
 from functools import wraps
 from typing import TYPE_CHECKING, Literal, cast
 from urllib.parse import unquote
@@ -1208,9 +1210,6 @@ def _log_cross_tenant_operation(
 
 
 # ── ActorScope and Tenant Authorization (Issue #2327) ─────────────────────
-
-import uuid
-from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
