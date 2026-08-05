@@ -368,25 +368,35 @@ class TestSudoersSecurityBaseline:
         assert "Cmnd_Alias OPENACE_CLI" not in content, "OPENACE_CLI alias should be removed"
 
     def test_docker_entrypoint_env_keep_clean(self):
-        """docker-entrypoint.sh env_keep should not contain sensitive variables."""
-        entrypoint_path = Path(
-            "/home/rhuang/open-ace/.worktrees/caade971-ac6b-4d62-921c-329d30c20162/docker-entrypoint.sh"
-        )
+        """docker-entrypoint.sh env_keep should not contain real third-party API keys.
+
+        Issue #2298: OPENAI_API_KEY may be in env_keep if it carries proxy_token
+        (not a real key), so we only forbid actual third-party credentials.
+        """
+        # Find docker-entrypoint.sh relative to this test file
+        test_dir = Path(__file__).parent
+        repo_root = test_dir.parent.parent
+        entrypoint_path = repo_root / "docker-entrypoint.sh"
+
         if not entrypoint_path.exists():
             pytest.skip("docker-entrypoint.sh not found")
 
         content = entrypoint_path.read_text()
 
-        # Find env_keep line
+        # Real third-party API keys that should NEVER be in env_keep
+        forbidden_keys = [
+            "ANTHROPIC_API_KEY",
+            "GEMINI_API_KEY",
+            "GH_TOKEN",
+            "OPENCLAW_TOKEN",
+        ]
+
+        # Find env_keep lines and check for forbidden keys
         for line in content.split("\n"):
-            if "env_keep" in line and "OPENAI_API_KEY" in line:
-                pytest.fail("env_keep should not contain OPENAI_API_KEY")
-            if "env_keep" in line and "ANTHROPIC_API_KEY" in line:
-                pytest.fail("env_keep should not contain ANTHROPIC_API_KEY")
-            if "env_keep" in line and "GH_TOKEN" in line:
-                pytest.fail("env_keep should not contain GH_TOKEN")
-            if "env_keep" in line and "OPENCLAW_TOKEN" in line:
-                pytest.fail("env_keep should not contain OPENCLAW_TOKEN")
+            if "env_keep" in line:
+                for key in forbidden_keys:
+                    if key in line:
+                        pytest.fail(f"env_keep should not contain real third-party API key: {key}")
 
 
 if __name__ == "__main__":

@@ -190,8 +190,8 @@ def test_vscode_websocket(headless=True):
                     editor = vs_frame.locator(".monaco-editor, .part.editor")
                     if editor.is_visible(timeout=3000):
                         print("  SUCCESS: Monaco editor is visible")
-                except Exception:
-                    pass
+                except Exception:  # Issue #2189: re-raise — surface failures (no swallow)
+                    raise
 
         # Also check the webui frame for error state
         try:
@@ -201,8 +201,8 @@ def test_vscode_websocket(headless=True):
             if ws_error.is_visible(timeout=2000):
                 has_error = True
                 print("  ERROR: WebSocket error found in webui frame")
-        except Exception:
-            pass
+        except Exception:  # Issue #2189: re-raise — surface failures (no swallow)
+            raise
 
         page.screenshot(path="/tmp/vscode_e2e_04_final.png")
         browser.close()

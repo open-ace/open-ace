@@ -53,6 +53,12 @@ _TRANSIENT_ERROR_KEYWORDS = [
     "unable to access",
     "rpc failed",
     "early eof",
+    # libcurl "Empty reply from server" — git emits this verbatim (in English,
+    # even under a non-C host locale) on a transient TLS/connection drop to the
+    # remote. Without it, exit-128 empty-reply permanent-fails the workflow
+    # instead of retrying (#2299).
+    "empty reply",
+    "empty response",
 ]
 
 
@@ -1424,20 +1430,36 @@ class GitHubOps:
         """Remove ANSI escape sequences from GitHub Actions logs."""
         return _ANSI_ESCAPE_RE.sub("", text or "")
 
-    def _clean_log_to_excerpt(self, raw_log: str, max_lines: int, max_chars: int) -> str:
-        """Strip ANSI, keep failure-marker lines, truncate to max_chars."""
+    def _clean_log_to_excerpt(
+        self, raw_log: str, max_lines: int, max_chars: int, *, filter_lines: bool = True
+    ) -> str:
+        """Strip ANSI; optionally keep failure-marker lines; truncate to max_chars.
+
+        ``filter_lines=True`` (default) keeps only failure-marker lines via
+        ``_extract_failure_lines`` — the historical behavior for noisy pre-commit /
+        pytest / mypy logs. ``filter_lines=False`` skips that filter (ANSI-strip +
+        truncate only) so callers that need the full log body (e.g. the schema-sync
+        byte-exact git diff, whose ``+``/``-`` lines match no failure marker) can
+        receive it verbatim.
+        """
         cleaned = self._strip_ansi(raw_log or "").strip()
         if not cleaned:
             return ""
         lines = [line.rstrip() for line in cleaned.splitlines() if line.strip()]
         if not lines:
             return ""
-        excerpt = "\n".join(_extract_failure_lines(lines, max_lines)).strip()
+        if filter_lines:
+            lines = _extract_failure_lines(lines, max_lines)
+        else:
+            lines = lines[-max_lines:] if len(lines) > max_lines else lines
+        excerpt = "\n".join(lines).strip()
         if len(excerpt) > max_chars:
             excerpt = excerpt[-max_chars:].lstrip()
         return excerpt
 
-    def _fetch_log_excerpt_via_run_list(self, check: dict, max_lines: int, max_chars: int) -> str:
+    def _fetch_log_excerpt_via_run_list(
+        self, check: dict, max_lines: int, max_chars: int, *, filter_lines: bool = True
+    ) -> str:
         """Fallback when the check link isn't a parseable Actions job URL.
 
         The REST API path (`_get_pr_checks_via_api`) populates `link` with the
@@ -1506,10 +1528,17 @@ class GitHubOps:
                 (view_result.stderr or view_result.stdout or "").strip()[:200],
             )
             return ""
-        return self._clean_log_to_excerpt(view_result.stdout or "", max_lines, max_chars)
+        return self._clean_log_to_excerpt(
+            view_result.stdout or "", max_lines, max_chars, filter_lines=filter_lines
+        )
 
     def get_check_failure_excerpt(
-        self, check: dict, max_lines: int = 80, max_chars: int = 4000
+        self,
+        check: dict,
+        max_lines: int = 80,
+        max_chars: int = 4000,
+        *,
+        filter_lines: bool = True,
     ) -> str:
         """Fetch a concise failed-log excerpt for a CI check when available.
 
@@ -1544,7 +1573,9 @@ class GitHubOps:
                     link_host,
                     repo_host,
                 )
-                return self._fetch_log_excerpt_via_run_list(check, max_lines, max_chars)
+                return self._fetch_log_excerpt_via_run_list(
+                    check, max_lines, max_chars, filter_lines=filter_lines
+                )
             elif self._repo_slug:
                 api_args = ["api"]
                 if self._repo_host and self._repo_host != "github.com":
@@ -1558,7 +1589,12 @@ class GitHubOps:
                 api_args.append("--allow-escape-sequences")
                 api_result = self._run_gh(api_args, check=False, repo_scoped=False)
                 if api_result.returncode == 0 and (api_result.stdout or "").strip():
-                    return self._clean_log_to_excerpt(api_result.stdout or "", max_lines, max_chars)
+                    return self._clean_log_to_excerpt(
+                        api_result.stdout or "",
+                        max_lines,
+                        max_chars,
+                        filter_lines=filter_lines,
+                    )
                 logger.warning(
                     "REST job-log fetch failed for check '%s' (run=%s job=%s), "
                     "falling back to gh run view: %s",
@@ -1589,12 +1625,16 @@ class GitHubOps:
                     (result.stderr or result.stdout or "").strip()[:200],
                 )
                 return ""
-            return self._clean_log_to_excerpt(result.stdout or "", max_lines, max_chars)
+            return self._clean_log_to_excerpt(
+                result.stdout or "", max_lines, max_chars, filter_lines=filter_lines
+            )
 
         # Fallback: link is not a parseable Actions job URL (e.g. REST-API
         # check-run html_url "/runs/<id>"). Try to find the workflow run by
         # the PR head sha and pull --log-failed for the whole run.
-        return self._fetch_log_excerpt_via_run_list(check, max_lines, max_chars)
+        return self._fetch_log_excerpt_via_run_list(
+            check, max_lines, max_chars, filter_lines=filter_lines
+        )
 
     def get_pr_diff(self, number: int) -> str:
         """Get the full diff of a PR (head vs base) via `gh pr diff`.

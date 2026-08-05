@@ -378,6 +378,15 @@ export const Workspace: React.FC = () => {
           if (result.success && result.token) {
             console.log('[Workspace] Token refreshed successfully');
             setUserWebUI(result);
+            // Notify all iframes about the new token
+            iframeRefs.current.forEach((iframe) => {
+              if (iframe.contentWindow) {
+                iframe.contentWindow.postMessage(
+                  { type: 'openace-token-refreshed', token: result.token },
+                  '*'
+                );
+              }
+            });
           } else {
             console.error('[Workspace] Token refresh failed:', result.error);
           }
@@ -424,6 +433,15 @@ export const Workspace: React.FC = () => {
           if (result.success && result.token) {
             console.log('[Workspace] Token refreshed on visibility change');
             setUserWebUI(result);
+            // Notify all iframes about the new token
+            iframeRefs.current.forEach((iframe) => {
+              if (iframe.contentWindow) {
+                iframe.contentWindow.postMessage(
+                  { type: 'openace-token-refreshed', token: result.token },
+                  '*'
+                );
+              }
+            });
           }
         } catch (err) {
           console.error('[Workspace] Token refresh error on visibility change:', err);
@@ -1002,10 +1020,7 @@ export const Workspace: React.FC = () => {
     const urlPermissionMode = searchParams.get('permissionMode');
     // Remote workspace params from URL
     const urlWorkspaceType = searchParams.get('workspaceType') as
-      | 'local'
-      | 'remote'
-      | 'terminal'
-      | null;
+      'local' | 'remote' | 'terminal' | null;
     const urlMachineId = searchParams.get('machineId');
     const urlMachineName = searchParams.get('machineName');
     const urlTerminalId = searchParams.get('terminalId');
@@ -1021,8 +1036,7 @@ export const Workspace: React.FC = () => {
       // Case 1: URL restore params - create a single tab with the restore session
       // Build settings from URL params
       const urlSettings:
-        | { model?: string; useWebUI?: boolean; permissionMode?: string }
-        | undefined =
+        { model?: string; useWebUI?: boolean; permissionMode?: string } | undefined =
         urlModel || urlUseWebUI !== null || urlPermissionMode
           ? {
               model: urlModel ?? undefined,

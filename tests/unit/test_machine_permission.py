@@ -24,37 +24,6 @@ os.environ.setdefault("SECRET_KEY", "test-secret-key-for-machine-permission-test
 # Use a temp DB for isolation
 TMP_DB = tempfile.mktemp(suffix=".db")
 
-RESULTS = []
-
-
-def test(name):
-    RESULTS.append({"name": name, "passed": False, "detail": ""})
-    print(f"\n--- TEST: {name} ---")
-    return RESULTS[-1]
-
-
-def ok(detail=""):
-    RESULTS[-1]["passed"] = True
-    RESULTS[-1]["detail"] = detail
-    print(f"  [PASS] {RESULTS[-1]['name']}" + (f" - {detail}" if detail else ""))
-
-
-def fail(detail=""):
-    RESULTS[-1]["detail"] = detail
-    print(f"  [FAIL] {RESULTS[-1]['name']} - {detail}")
-
-
-def print_summary():
-    passed = sum(1 for r in RESULTS if r["passed"])
-    failed = sum(1 for r in RESULTS if not r["passed"])
-    print(f"\n{'='*60}")
-    print(f"  Results: {passed} passed, {failed} failed out of {len(RESULTS)}")
-    print(f"{'='*60}")
-    for r in RESULTS:
-        status = "PASS" if r["passed"] else "FAIL"
-        print(f"  [{status}] {r['name']}" + (f" - {r['detail']}" if r["detail"] else ""))
-    return failed == 0
-
 
 # ── Setup ──
 
@@ -251,56 +220,44 @@ def setup_test_data(mgr):
 
 
 def test_check_user_access_returns_permission():
-    test("check_user_access returns permission string")
+    """check_user_access returns permission string"""
     mgr = make_manager()
     setup_test_data(mgr)
 
     # User 2 is admin on machine-a
     perm = mgr.check_user_access("mid-machine-a", 2)
-    if perm == "admin":
-        ok(f"permission={perm}")
-    else:
-        fail(f"expected 'admin', got {perm!r}")
+    assert perm == "admin", f"expected 'admin', got {perm!r}"
 
 
 def test_check_user_access_returns_none_for_unassigned():
-    test("check_user_access returns None for unassigned user")
+    """check_user_access returns None for unassigned user"""
     mgr = make_manager()
     setup_test_data(mgr)
 
     perm = mgr.check_user_access("mid-machine-a", 99)
-    if perm is None:
-        ok()
-    else:
-        fail(f"expected None, got {perm!r}")
+    assert perm is None, f"expected None, got {perm!r}"
 
 
 def test_check_user_access_returns_user_permission():
-    test("check_user_access returns 'user' for regular user")
+    """check_user_access returns 'user' for regular user"""
     mgr = make_manager()
     setup_test_data(mgr)
 
     perm = mgr.check_user_access("mid-machine-a", 3)
-    if perm == "user":
-        ok(f"permission={perm}")
-    else:
-        fail(f"expected 'user', got {perm!r}")
+    assert perm == "user", f"expected 'user', got {perm!r}"
 
 
 def test_get_user_permission():
-    test("get_user_permission delegates to check_user_access")
+    """get_user_permission delegates to check_user_access"""
     mgr = make_manager()
     setup_test_data(mgr)
 
     perm = mgr.get_user_permission("mid-machine-b", 2)
-    if perm == "user":
-        ok(f"permission={perm}")
-    else:
-        fail(f"expected 'user', got {perm!r}")
+    assert perm == "user", f"expected 'user', got {perm!r}"
 
 
 def test_list_machines_with_user_id_has_permission():
-    test("list_machines with user_id attaches current_user_permission")
+    """list_machines with user_id attaches current_user_permission"""
     mgr = make_manager()
     setup_test_data(mgr)
 
@@ -308,64 +265,52 @@ def test_list_machines_with_user_id_has_permission():
     # User 2 is assigned to machine-a (admin) and machine-b (user)
     perms = {m["machine_id"]: m.get("current_user_permission") for m in machines}
 
-    if (
+    assert (
         perms.get("mid-machine-a") == "admin"
         and perms.get("mid-machine-b") == "user"
         and perms.get("mid-machine-c") is None
-    ):
-        ok(f"permissions={perms}")
-    else:
-        fail(f"unexpected permissions: {perms}")
+    ), f"unexpected permissions: {perms}"
 
 
 def test_list_machines_without_user_id_no_permission():
-    test("list_machines without user_id has no current_user_permission")
+    """list_machines without user_id has no current_user_permission"""
     mgr = make_manager()
     setup_test_data(mgr)
 
     machines = mgr.list_machines()
     for m in machines:
-        if "current_user_permission" in m:
-            fail(f"unexpected current_user_permission in {m['machine_id']}")
-            return
-    ok("no machine has current_user_permission")
+        assert (
+            "current_user_permission" not in m
+        ), f"unexpected current_user_permission in {m['machine_id']}"
 
 
 def test_assign_user_as_machine_admin():
-    test("assign_user works for machine admin")
+    """assign_user works for machine admin"""
     mgr = make_manager()
     setup_test_data(mgr)
 
     # User 2 (machine admin on machine-a) assigns user 5
     success = mgr.assign_user("mid-machine-a", 5, granted_by=2, permission="user")
-    if success:
-        perm = mgr.check_user_access("mid-machine-a", 5)
-        if perm == "user":
-            ok("user 5 assigned with 'user' permission")
-        else:
-            fail(f"expected 'user', got {perm!r}")
-    else:
-        fail("assign_user returned False")
+    assert success, "assign_user returned False"
+    perm = mgr.check_user_access("mid-machine-a", 5)
+    assert perm == "user", f"expected 'user', got {perm!r}"
 
 
 def test_revoke_user_as_machine_admin():
-    test("revoke_user works for regular user")
+    """revoke_user works for regular user"""
     mgr = make_manager()
     setup_test_data(mgr)
 
     # Revoke user 3 from machine-a
     success = mgr.revoke_user("mid-machine-a", 3)
     perm = mgr.check_user_access("mid-machine-a", 3)
-    if success and perm is None:
-        ok("user 3 revoked successfully")
-    else:
-        fail(f"success={success}, perm={perm!r}")
+    assert success and perm is None, f"success={success}, perm={perm!r}"
 
 
 def test_revoke_admin_by_machine_admin():
     """Verify that the route-level logic prevents machine admin from revoking admin.
+
     We test the data layer here; route logic is tested separately."""
-    test("revoke_user data layer allows revoking admin (route enforces)")
     mgr = make_manager()
     setup_test_data(mgr)
 
@@ -373,28 +318,22 @@ def test_revoke_admin_by_machine_admin():
     success = mgr.revoke_user("mid-machine-a", 2)  # user 2 is admin
     perm = mgr.check_user_access("mid-machine-a", 2)
     # Data layer should succeed - route enforces the restriction
-    if success and perm is None:
-        ok("data layer revokes admin (route-level enforcement prevents this)")
-    else:
-        fail(f"success={success}, perm={perm!r}")
+    assert success and perm is None, f"success={success}, perm={perm!r}"
 
 
 def test_backwards_compat_truthiness():
-    test("check_user_access result is truthy for assigned, falsy for unassigned")
+    """check_user_access result is truthy for assigned, falsy for unassigned"""
     mgr = make_manager()
     setup_test_data(mgr)
 
     assigned = mgr.check_user_access("mid-machine-a", 2)
     unassigned = mgr.check_user_access("mid-machine-a", 99)
 
-    if assigned and not unassigned:
-        ok(f"assigned={assigned!r} (truthy), unassigned={unassigned!r} (falsy)")
-    else:
-        fail(f"assigned={assigned!r}, unassigned={unassigned!r}")
+    assert assigned and not unassigned, f"assigned={assigned!r}, unassigned={unassigned!r}"
 
 
 def test_permission_isolation_across_machines():
-    test("user permissions are isolated per machine")
+    """user permissions are isolated per machine"""
     mgr = make_manager()
     setup_test_data(mgr)
 
@@ -403,23 +342,19 @@ def test_permission_isolation_across_machines():
     perm_b = mgr.check_user_access("mid-machine-b", 2)
     perm_c = mgr.check_user_access("mid-machine-c", 2)
 
-    if perm_a == "admin" and perm_b == "user" and perm_c is None:
-        ok(f"a={perm_a}, b={perm_b}, c={perm_c}")
-    else:
-        fail(f"a={perm_a}, b={perm_b}, c={perm_c}")
+    assert (
+        perm_a == "admin" and perm_b == "user" and perm_c is None
+    ), f"a={perm_a}, b={perm_b}, c={perm_c}"
 
 
 def test_assign_user_with_admin_permission():
-    test("assign_user can assign admin permission (data layer)")
+    """assign_user can assign admin permission (data layer)"""
     mgr = make_manager()
     setup_test_data(mgr)
 
     success = mgr.assign_user("mid-machine-a", 5, granted_by=1, permission="admin")
     perm = mgr.check_user_access("mid-machine-a", 5)
-    if success and perm == "admin":
-        ok("user 5 assigned with 'admin' permission")
-    else:
-        fail(f"success={success}, perm={perm!r}")
+    assert success and perm == "admin", f"success={success}, perm={perm!r}"
 
 
 # ════════════════════════════════════════════
@@ -501,7 +436,7 @@ def _auth_delete(client, url, token, **kwargs):
 
 
 def test_route_assign_by_system_admin():
-    test("Route: system admin can assign user with admin permission")
+    """Route: system admin can assign user with admin permission"""
     mgr = make_manager()
     setup_test_data(mgr)
     app = _make_app(mgr)
@@ -513,18 +448,13 @@ def test_route_assign_by_system_admin():
             "test-token-1-admin",
             json={"user_id": 5, "permission": "admin"},
         )
-        if resp.status_code == 200:
-            perm = mgr.check_user_access("mid-machine-a", 5)
-            if perm == "admin":
-                ok(f"status=200, permission={perm}")
-            else:
-                fail(f"permission={perm!r}, expected 'admin'")
-        else:
-            fail(f"status={resp.status_code}, body={resp.get_json()}")
+        assert resp.status_code == 200, f"status={resp.status_code}, body={resp.get_json()}"
+        perm = mgr.check_user_access("mid-machine-a", 5)
+        assert perm == "admin", f"permission={perm!r}, expected 'admin'"
 
 
 def test_route_assign_by_machine_admin():
-    test("Route: machine admin can assign user (forced to 'user')")
+    """Route: machine admin can assign user (forced to 'user')"""
     mgr = make_manager()
     setup_test_data(mgr)
     app = _make_app(mgr)
@@ -536,18 +466,13 @@ def test_route_assign_by_machine_admin():
             "test-token-2-user",
             json={"user_id": 5, "permission": "admin"},
         )
-        if resp.status_code == 200:
-            perm = mgr.check_user_access("mid-machine-a", 5)
-            if perm == "user":
-                ok(f"status=200, permission forced to '{perm}'")
-            else:
-                fail(f"permission={perm!r}, expected 'user' (forced)")
-        else:
-            fail(f"status={resp.status_code}, body={resp.get_json()}")
+        assert resp.status_code == 200, f"status={resp.status_code}, body={resp.get_json()}"
+        perm = mgr.check_user_access("mid-machine-a", 5)
+        assert perm == "user", f"permission={perm!r}, expected 'user' (forced)"
 
 
 def test_route_assign_by_regular_user():
-    test("Route: regular user cannot assign users")
+    """Route: regular user cannot assign users"""
     mgr = make_manager()
     setup_test_data(mgr)
     app = _make_app(mgr)
@@ -559,14 +484,11 @@ def test_route_assign_by_regular_user():
             "test-token-3-user",
             json={"user_id": 5, "permission": "user"},
         )
-        if resp.status_code == 403:
-            ok(f"status=403, body={resp.get_json()}")
-        else:
-            fail(f"expected 403, got {resp.status_code}")
+        assert resp.status_code == 403, f"expected 403, got {resp.status_code}"
 
 
 def test_route_assign_by_unassigned_user():
-    test("Route: unassigned user cannot assign users")
+    """Route: unassigned user cannot assign users"""
     mgr = make_manager()
     setup_test_data(mgr)
     app = _make_app(mgr)
@@ -578,14 +500,11 @@ def test_route_assign_by_unassigned_user():
             "test-token-99-user",
             json={"user_id": 5, "permission": "user"},
         )
-        if resp.status_code == 403:
-            ok("status=403")
-        else:
-            fail(f"expected 403, got {resp.status_code}")
+        assert resp.status_code == 403, f"expected 403, got {resp.status_code}"
 
 
 def test_route_revoke_by_machine_admin():
-    test("Route: machine admin can revoke regular user")
+    """Route: machine admin can revoke regular user"""
     mgr = make_manager()
     setup_test_data(mgr)
     app = _make_app(mgr)
@@ -594,18 +513,13 @@ def test_route_revoke_by_machine_admin():
         resp = _auth_delete(
             client, "/api/remote/machines/mid-machine-a/assign/3", "test-token-2-user"
         )
-        if resp.status_code == 200:
-            perm = mgr.check_user_access("mid-machine-a", 3)
-            if perm is None:
-                ok("user 3 revoked successfully")
-            else:
-                fail(f"user 3 still has permission: {perm!r}")
-        else:
-            fail(f"status={resp.status_code}, body={resp.get_json()}")
+        assert resp.status_code == 200, f"status={resp.status_code}, body={resp.get_json()}"
+        perm = mgr.check_user_access("mid-machine-a", 3)
+        assert perm is None, f"user 3 still has permission: {perm!r}"
 
 
 def test_route_revoke_admin_by_machine_admin():
-    test("Route: machine admin cannot revoke admin user")
+    """Route: machine admin cannot revoke admin user"""
     mgr = make_manager()
     setup_test_data(mgr)
     app = _make_app(mgr)
@@ -615,14 +529,11 @@ def test_route_revoke_admin_by_machine_admin():
         resp = _auth_delete(
             client, "/api/remote/machines/mid-machine-a/assign/4", "test-token-2-user"
         )
-        if resp.status_code == 403:
-            ok(f"status=403, body={resp.get_json()}")
-        else:
-            fail(f"expected 403, got {resp.status_code}")
+        assert resp.status_code == 403, f"expected 403, got {resp.status_code}"
 
 
 def test_route_revoke_admin_by_system_admin():
-    test("Route: system admin can revoke admin user")
+    """Route: system admin can revoke admin user"""
     mgr = make_manager()
     setup_test_data(mgr)
     app = _make_app(mgr)
@@ -631,18 +542,13 @@ def test_route_revoke_admin_by_system_admin():
         resp = _auth_delete(
             client, "/api/remote/machines/mid-machine-a/assign/2", "test-token-1-admin"
         )
-        if resp.status_code == 200:
-            perm = mgr.check_user_access("mid-machine-a", 2)
-            if perm is None:
-                ok("admin user revoked by system admin")
-            else:
-                fail(f"admin still has permission: {perm!r}")
-        else:
-            fail(f"status={resp.status_code}, body={resp.get_json()}")
+        assert resp.status_code == 200, f"status={resp.status_code}, body={resp.get_json()}"
+        perm = mgr.check_user_access("mid-machine-a", 2)
+        assert perm is None, f"admin still has permission: {perm!r}"
 
 
 def test_route_get_users_by_machine_admin():
-    test("Route: machine admin can get machine users")
+    """Route: machine admin can get machine users"""
     mgr = make_manager()
     setup_test_data(mgr)
     app = _make_app(mgr)
@@ -650,28 +556,24 @@ def test_route_get_users_by_machine_admin():
     with app.test_client() as client:
         resp = _auth_get(client, "/api/remote/machines/mid-machine-a/users", "test-token-2-user")
         data = resp.get_json()
-        if resp.status_code == 200 and len(data.get("users", [])) >= 1:
-            ok(f"status=200, users={len(data['users'])}")
-        else:
-            fail(f"status={resp.status_code}, body={data}")
+        assert (
+            resp.status_code == 200 and len(data.get("users", [])) >= 1
+        ), f"status={resp.status_code}, body={data}"
 
 
 def test_route_get_users_by_regular_user():
-    test("Route: regular user cannot get machine users")
+    """Route: regular user cannot get machine users"""
     mgr = make_manager()
     setup_test_data(mgr)
     app = _make_app(mgr)
 
     with app.test_client() as client:
         resp = _auth_get(client, "/api/remote/machines/mid-machine-a/users", "test-token-3-user")
-        if resp.status_code == 403:
-            ok("status=403")
-        else:
-            fail(f"expected 403, got {resp.status_code}")
+        assert resp.status_code == 403, f"expected 403, got {resp.status_code}"
 
 
 def test_route_list_machines_includes_permission():
-    test("Route: list machines for non-admin includes current_user_permission")
+    """Route: list machines for non-admin includes current_user_permission"""
     mgr = make_manager()
     setup_test_data(mgr)
     app = _make_app(mgr)
@@ -681,35 +583,28 @@ def test_route_list_machines_includes_permission():
         data = resp.get_json()
         machines = data.get("machines", [])
         perms = {m["machine_id"]: m.get("current_user_permission") for m in machines}
-        if perms.get("mid-machine-a") == "admin" and perms.get("mid-machine-b") == "user":
-            ok(f"permissions={perms}")
-        else:
-            fail(f"unexpected permissions: {perms}")
+        assert (
+            perms.get("mid-machine-a") == "admin" and perms.get("mid-machine-b") == "user"
+        ), f"unexpected permissions: {perms}"
 
 
 def test_route_deregister_system_admin_only():
-    test("Route: deregister machine is system admin only")
+    """Route: deregister machine is system admin only"""
     mgr = make_manager()
     setup_test_data(mgr)
     app = _make_app(mgr)
 
     with app.test_client() as client:
         resp = _auth_delete(client, "/api/remote/machines/mid-machine-a", "test-token-2-user")
-        if resp.status_code == 403:
-            ok("machine admin gets 403")
-        else:
-            fail(f"expected 403, got {resp.status_code}")
+        assert resp.status_code == 403, f"expected 403, got {resp.status_code}"
 
     with app.test_client() as client:
         resp2 = _auth_delete(client, "/api/remote/machines/mid-machine-c", "test-token-1-admin")
-        if resp2.status_code == 200:
-            ok("system admin can deregister")
-        else:
-            fail(f"system admin got {resp2.status_code}")
+        assert resp2.status_code == 200, f"system admin got {resp2.status_code}"
 
 
 def test_route_generate_token_system_admin_only():
-    test("Route: generate token is system admin only")
+    """Route: generate token is system admin only"""
     mgr = make_manager()
     setup_test_data(mgr)
     app = _make_app(mgr)
@@ -718,10 +613,7 @@ def test_route_generate_token_system_admin_only():
         resp = _auth_post(
             client, "/api/remote/machines/register", "test-token-2-user", json={"tenant_id": 1}
         )
-        if resp.status_code == 403:
-            ok("machine admin gets 403 for token generation")
-        else:
-            fail(f"expected 403, got {resp.status_code}")
+        assert resp.status_code == 403, f"expected 403, got {resp.status_code}"
 
 
 def _create_session_for_test(mgr, user_id, machine_id):
@@ -851,92 +743,94 @@ def _patched_session_env(mgr):
         _restore_patches(patches)
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason="Issue #2189 surfacing pre-existing failure: session creation needs tenant_id absent from unit-test setup (was masked by the vacuous ok/fail framework)",
+)
 def test_route_session_access_owner():
-    test("Route: session owner can access own session")
+    """Route: session owner can access own session"""
     mgr = make_manager()
     setup_test_data(mgr)
     app = _make_app(mgr)
 
     with app.test_client() as client:
         result, session_mgr, patches = _create_session_for_test(mgr, 3, "mid-machine-a")
-        if not result:
-            fail("session creation failed")
-            _restore_patches(patches)
-            return
+        assert result, "session creation failed"
 
         sid = result["session_id"]
-        resp = _auth_get(client, f"/api/remote/sessions/{sid}", "test-token-3-user")
-        _restore_patches(patches)
-        if resp.status_code == 200:
-            ok("session owner can access session")
-        else:
-            fail(f"expected 200, got {resp.status_code}")
+        try:
+            resp = _auth_get(client, f"/api/remote/sessions/{sid}", "test-token-3-user")
+        finally:
+            _restore_patches(patches)
+        assert resp.status_code == 200, f"expected 200, got {resp.status_code}"
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason="Issue #2189 surfacing pre-existing failure: session creation needs tenant_id absent from unit-test setup (was masked by the vacuous ok/fail framework)",
+)
 def test_route_session_access_machine_admin():
-    test("Route: machine admin can access others' session")
+    """Route: machine admin can access others' session"""
     mgr = make_manager()
     setup_test_data(mgr)
     app = _make_app(mgr)
 
     with app.test_client() as client:
         result, session_mgr, patches = _create_session_for_test(mgr, 3, "mid-machine-a")
-        if not result:
-            fail("session creation failed")
-            _restore_patches(patches)
-            return
+        assert result, "session creation failed"
 
         sid = result["session_id"]
-        resp = _auth_get(client, f"/api/remote/sessions/{sid}", "test-token-2-user")
-        _restore_patches(patches)
-        if resp.status_code == 200:
-            ok("machine admin can access others' session")
-        else:
-            fail(f"expected 200, got {resp.status_code}, body={resp.get_json()}")
+        try:
+            resp = _auth_get(client, f"/api/remote/sessions/{sid}", "test-token-2-user")
+        finally:
+            _restore_patches(patches)
+        assert (
+            resp.status_code == 200
+        ), f"expected 200, got {resp.status_code}, body={resp.get_json()}"
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason="Issue #2189 surfacing pre-existing failure: session creation needs tenant_id absent from unit-test setup (was masked by the vacuous ok/fail framework)",
+)
 def test_route_session_access_denied_other_user():
-    test("Route: regular user cannot access others' session")
+    """Route: regular user cannot access others' session"""
     mgr = make_manager()
     setup_test_data(mgr)
     app = _make_app(mgr)
 
     with app.test_client() as client:
         result, session_mgr, patches = _create_session_for_test(mgr, 2, "mid-machine-a")
-        if not result:
-            fail("session creation failed")
-            _restore_patches(patches)
-            return
+        assert result, "session creation failed"
 
         sid = result["session_id"]
-        resp = _auth_get(client, f"/api/remote/sessions/{sid}", "test-token-3-user")
-        _restore_patches(patches)
-        if resp.status_code == 403:
-            ok("regular user gets 403 for others' session")
-        else:
-            fail(f"expected 403, got {resp.status_code}")
+        try:
+            resp = _auth_get(client, f"/api/remote/sessions/{sid}", "test-token-3-user")
+        finally:
+            _restore_patches(patches)
+        assert resp.status_code == 403, f"expected 403, got {resp.status_code}"
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason="Issue #2189 surfacing pre-existing failure: session creation needs tenant_id absent from unit-test setup (was masked by the vacuous ok/fail framework)",
+)
 def test_route_session_access_unassigned_user():
-    test("Route: unassigned user cannot access session")
+    """Route: unassigned user cannot access session"""
     mgr = make_manager()
     setup_test_data(mgr)
     app = _make_app(mgr)
 
     with app.test_client() as client:
         result, session_mgr, patches = _create_session_for_test(mgr, 2, "mid-machine-a")
-        if not result:
-            fail("session creation failed")
-            _restore_patches(patches)
-            return
+        assert result, "session creation failed"
 
         sid = result["session_id"]
-        resp = _auth_get(client, f"/api/remote/sessions/{sid}", "test-token-99-user")
-        _restore_patches(patches)
-        if resp.status_code == 403:
-            ok("unassigned user gets 403")
-        else:
-            fail(f"expected 403, got {resp.status_code}")
+        try:
+            resp = _auth_get(client, f"/api/remote/sessions/{sid}", "test-token-99-user")
+        finally:
+            _restore_patches(patches)
+        assert resp.status_code == 403, f"expected 403, got {resp.status_code}"
 
 
 # ════════════════════════════════════════════
@@ -946,7 +840,6 @@ def test_route_session_access_unassigned_user():
 
 def test_route_create_session_by_unassigned_user():
     """P1-1: Unassigned users cannot create sessions (security fix)."""
-    test("Route: unassigned user cannot create session")
     mgr = make_manager()
     setup_test_data(mgr)
     app = _make_app(mgr)
@@ -961,10 +854,9 @@ def test_route_create_session_by_unassigned_user():
             "test-token-99-user",  # Unassigned user
             json={"machine_id": "mid-machine-a", "project_path": "/home/test"},
         )
-        if resp.status_code == 403:
-            ok("unassigned user gets 403 for create_session")
-        else:
-            fail(f"expected 403, got {resp.status_code}, body={resp.get_json()}")
+        assert (
+            resp.status_code == 403
+        ), f"expected 403, got {resp.status_code}, body={resp.get_json()}"
 
 
 def test_route_create_session_by_assigned_user():
@@ -973,7 +865,6 @@ def test_route_create_session_by_assigned_user():
     Goes through the real Flask route + @machine_access_required decorator
     (not the manager directly), so the decorator is actually exercised.
     """
-    test("Route: assigned user can create session")
     mgr = make_manager()
     setup_test_data(mgr)
     app = _make_app(mgr)
@@ -990,10 +881,9 @@ def test_route_create_session_by_assigned_user():
             },
         )
         data = resp.get_json() or {}
-        if resp.status_code == 200 and data.get("session", {}).get("session_id"):
-            ok(f"assigned user created session: {data['session']['session_id'][:8]}...")
-        else:
-            fail(f"expected 200 with session, got status={resp.status_code}, body={data}")
+        assert resp.status_code == 200 and data.get("session", {}).get(
+            "session_id"
+        ), f"expected 200 with session, got status={resp.status_code}, body={data}"
 
 
 def test_route_create_session_by_machine_admin():
@@ -1002,7 +892,6 @@ def test_route_create_session_by_machine_admin():
     Goes through the real Flask route + @machine_access_required decorator
     (not the manager directly), so the decorator is actually exercised.
     """
-    test("Route: machine admin can create session")
     mgr = make_manager()
     setup_test_data(mgr)
     app = _make_app(mgr)
@@ -1019,15 +908,13 @@ def test_route_create_session_by_machine_admin():
             },
         )
         data = resp.get_json() or {}
-        if resp.status_code == 200 and data.get("session", {}).get("session_id"):
-            ok(f"machine admin created session: {data['session']['session_id'][:8]}...")
-        else:
-            fail(f"expected 200 with session, got status={resp.status_code}, body={data}")
+        assert resp.status_code == 200 and data.get("session", {}).get(
+            "session_id"
+        ), f"expected 200 with session, got status={resp.status_code}, body={data}"
 
 
 def test_route_browse_by_unassigned_user():
     """P1-1: Unassigned users cannot browse machine files."""
-    test("Route: unassigned user cannot browse files")
     mgr = make_manager()
     setup_test_data(mgr)
     app = _make_app(mgr)
@@ -1038,15 +925,17 @@ def test_route_browse_by_unassigned_user():
             "/api/remote/machines/mid-machine-a/browse",
             "test-token-99-user",  # Unassigned user
         )
-        if resp.status_code == 403:
-            ok("unassigned user gets 403 for browse")
-        else:
-            fail(f"expected 403, got {resp.status_code}, body={resp.get_json()}")
+        assert (
+            resp.status_code == 403
+        ), f"expected 403, got {resp.status_code}, body={resp.get_json()}"
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason="Issue #2189 surfacing pre-existing failure: /api/remote/machines returns user_role=None (was masked by the vacuous ok/fail framework)",
+)
 def test_route_list_machines_returns_user_role():
     """P1-2: API returns explicit user_role field."""
-    test("Route: list_machines returns user_role")
     mgr = make_manager()
     setup_test_data(mgr)
     app = _make_app(mgr)
@@ -1055,18 +944,16 @@ def test_route_list_machines_returns_user_role():
         # System admin
         resp = _auth_get(client, "/api/remote/machines", "test-token-1-admin")
         data = resp.get_json()
-        if data.get("user_role") == "admin":
-            ok("system admin gets user_role='admin'")
-        else:
-            fail(f"expected user_role='admin', got {data.get('user_role')}")
+        assert (
+            data.get("user_role") == "admin"
+        ), f"expected user_role='admin', got {data.get('user_role')}"
 
         # Regular user
         resp2 = _auth_get(client, "/api/remote/machines", "test-token-2-user")
         data2 = resp2.get_json()
-        if data2.get("user_role") == "user":
-            ok("regular user gets user_role='user'")
-        else:
-            fail(f"expected user_role='user', got {data2.get('user_role')}")
+        assert (
+            data2.get("user_role") == "user"
+        ), f"expected user_role='user', got {data2.get('user_role')}"
 
 
 # ════════════════════════════════════════════
@@ -1078,7 +965,6 @@ def test_route_list_machines_returns_user_role():
 def test_route_assign_path_machine_id_overrides_body():
     """Body machine_id must not let a machine-admin authorize against a
     different machine than the one in the URL path."""
-    test("Regression: body machine_id cannot override path (assign)")
     mgr = make_manager()
     setup_test_data(mgr)
     app = _make_app(mgr)
@@ -1095,18 +981,14 @@ def test_route_assign_path_machine_id_overrides_body():
         )
         # Path (B) wins: user 2 is not a machine-admin of B -> 403, and B stays unchanged.
         untouched = mgr.check_user_access("mid-machine-b", 99)
-        if resp.status_code == 403 and untouched is None:
-            ok("body machine_id ignored; path machine_id authorized (403, no mutation)")
-        else:
-            fail(
-                f"expected 403 and no mutation, got status={resp.status_code}, "
-                f"perm_on_b={untouched!r}, body={resp.get_json()}"
-            )
+        assert resp.status_code == 403 and untouched is None, (
+            f"expected 403 and no mutation, got status={resp.status_code}, "
+            f"perm_on_b={untouched!r}, body={resp.get_json()}"
+        )
 
 
 def test_route_revoke_path_machine_id_overrides_body():
     """Body machine_id must not let a machine-admin revoke on a foreign machine."""
-    test("Regression: body machine_id cannot override path (revoke)")
     mgr = make_manager()
     setup_test_data(mgr)
     app = _make_app(mgr)
@@ -1123,18 +1005,13 @@ def test_route_revoke_path_machine_id_overrides_body():
         )
         # user 3 must still be assigned to A (untouched, since the revoke was denied).
         still_assigned_on_a = mgr.check_user_access("mid-machine-a", 3)
-        if resp.status_code == 403 and still_assigned_on_a == "user":
-            ok("body machine_id ignored; path machine_id authorized (403)")
-        else:
-            fail(
-                f"expected 403, got status={resp.status_code}, "
-                f"perm_on_a={still_assigned_on_a!r}"
-            )
+        assert resp.status_code == 403 and still_assigned_on_a == "user", (
+            f"expected 403, got status={resp.status_code}, " f"perm_on_a={still_assigned_on_a!r}"
+        )
 
 
 def test_route_get_users_path_machine_id_overrides_query():
     """Query machine_id must not let a machine-admin enumerate a foreign machine's users."""
-    test("Regression: query machine_id cannot override path (get_machine_users)")
     mgr = make_manager()
     setup_test_data(mgr)
     app = _make_app(mgr)
@@ -1145,16 +1022,14 @@ def test_route_get_users_path_machine_id_overrides_query():
             "/api/remote/machines/mid-machine-b/users?machine_id=mid-machine-a",
             "test-token-2-user",  # machine-admin of A, plain user of B
         )
-        if resp.status_code == 403:
-            ok("query machine_id ignored; path machine_id authorized (403)")
-        else:
-            fail(f"expected 403, got {resp.status_code}, body={resp.get_json()}")
+        assert (
+            resp.status_code == 403
+        ), f"expected 403, got {resp.status_code}, body={resp.get_json()}"
 
 
 def test_route_create_session_body_machine_id_still_works():
     """Routes without a path machine_id (e.g. create_remote_session) must still
     resolve machine_id from the body — the path-first fix must not break them."""
-    test("Regression: body machine_id still honored for path-less routes")
     mgr = make_manager()
     setup_test_data(mgr)
     app = _make_app(mgr)
@@ -1171,17 +1046,15 @@ def test_route_create_session_body_machine_id_still_works():
                 "cli_tool": "claude-code",
             },
         )
-        if resp.status_code == 200:
-            ok("create_remote_session still reads machine_id from body")
-        else:
-            fail(f"expected 200, got {resp.status_code}, body={resp.get_json()}")
+        assert (
+            resp.status_code == 200
+        ), f"expected 200, got {resp.status_code}, body={resp.get_json()}"
 
 
 def test_route_get_machine_path_machine_id_overrides_query():
     """Query machine_id must not let a user with access to A read machine B's
     details. ``get_machine`` uses @machine_access_required + path arg, so the
     decorator must authorize by the path machine_id."""
-    test("Regression: query machine_id cannot override path (get_machine)")
     mgr = make_manager()
     setup_test_data(mgr)
     app = _make_app(mgr)
@@ -1195,16 +1068,14 @@ def test_route_get_machine_path_machine_id_overrides_query():
             "/api/remote/machines/mid-machine-b?machine_id=mid-machine-a",
             "test-token-3-user",  # user of A, no access to B
         )
-        if resp.status_code == 403:
-            ok("query machine_id ignored; path machine_id authorized (403)")
-        else:
-            fail(f"expected 403, got {resp.status_code}, body={resp.get_json()}")
+        assert (
+            resp.status_code == 403
+        ), f"expected 403, got {resp.status_code}, body={resp.get_json()}"
 
 
 def test_route_browse_path_machine_id_overrides_query():
     """Query machine_id must not let a user with access to A browse machine B's
     files. ``browse_remote_directory`` uses @machine_access_required + path arg."""
-    test("Regression: query machine_id cannot override path (browse)")
     mgr = make_manager()
     setup_test_data(mgr)
     app = _make_app(mgr)
@@ -1215,75 +1086,6 @@ def test_route_browse_path_machine_id_overrides_query():
             "/api/remote/machines/mid-machine-b/browse?machine_id=mid-machine-a",
             "test-token-3-user",  # user of A, no access to B
         )
-        if resp.status_code == 403:
-            ok("query machine_id ignored; path machine_id authorized (403)")
-        else:
-            fail(f"expected 403, got {resp.status_code}, body={resp.get_json()}")
-
-
-# ════════════════════════════════════════════
-
-
-def main():
-    print("=" * 60)
-    print("  Machine-Level Admin Permission Tests")
-    print("=" * 60)
-
-    # Data layer tests
-    test_check_user_access_returns_permission()
-    test_check_user_access_returns_none_for_unassigned()
-    test_check_user_access_returns_user_permission()
-    test_get_user_permission()
-    test_list_machines_with_user_id_has_permission()
-    test_list_machines_without_user_id_no_permission()
-    test_assign_user_as_machine_admin()
-    test_revoke_user_as_machine_admin()
-    test_revoke_admin_by_machine_admin()
-    test_backwards_compat_truthiness()
-    test_permission_isolation_across_machines()
-    test_assign_user_with_admin_permission()
-
-    # Route-level tests
-    test_route_assign_by_system_admin()
-    test_route_assign_by_machine_admin()
-    test_route_assign_by_regular_user()
-    test_route_assign_by_unassigned_user()
-    test_route_revoke_by_machine_admin()
-    test_route_revoke_admin_by_machine_admin()
-    test_route_revoke_admin_by_system_admin()
-    test_route_get_users_by_machine_admin()
-    test_route_get_users_by_regular_user()
-    test_route_list_machines_includes_permission()
-    test_route_deregister_system_admin_only()
-    test_route_generate_token_system_admin_only()
-    test_route_session_access_owner()
-    test_route_session_access_machine_admin()
-    test_route_session_access_denied_other_user()
-    test_route_session_access_unassigned_user()
-
-    # P3-2: New tests for create_session and browse permissions
-    test_route_create_session_by_unassigned_user()
-    test_route_create_session_by_assigned_user()
-    test_route_create_session_by_machine_admin()
-    test_route_browse_by_unassigned_user()
-    test_route_list_machines_returns_user_role()
-
-    # Regression: decorator must authorize the path machine_id, not body/query
-    test_route_assign_path_machine_id_overrides_body()
-    test_route_revoke_path_machine_id_overrides_body()
-    test_route_get_users_path_machine_id_overrides_query()
-    test_route_create_session_body_machine_id_still_works()
-    test_route_get_machine_path_machine_id_overrides_query()
-    test_route_browse_path_machine_id_overrides_query()
-
-    all_passed = print_summary()
-
-    # Cleanup
-    with contextlib.suppress(OSError):
-        os.unlink(TMP_DB)
-
-    sys.exit(0 if all_passed else 1)
-
-
-if __name__ == "__main__":
-    main()
+        assert (
+            resp.status_code == 403
+        ), f"expected 403, got {resp.status_code}, body={resp.get_json()}"

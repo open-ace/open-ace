@@ -14,16 +14,42 @@ import os
 from typing import Optional, cast
 from urllib.parse import quote
 
+
+def _safe_path(path: str) -> str:
+    """
+    Ensure path is safe for UTF-8 encoding.
+
+    Python 3.13+ has stricter handling of Unicode surrogate characters.
+    This function ensures that path strings can be safely encoded to UTF-8.
+
+    Args:
+        path: Input path string that may contain invalid characters
+
+    Returns:
+        Safe path string with invalid characters replaced
+    """
+    if not path:
+        return path
+    try:
+        # Try to encode - if it works, the path is safe
+        path.encode("utf-8")
+        return path
+    except UnicodeEncodeError:
+        # Remove invalid surrogate characters by encoding with surrogatepass
+        # and then decoding with replace errors
+        return path.encode("utf-8", errors="surrogatepass").decode("utf-8", errors="replace")
+
+
 # Configuration directory path
 # This is the main configuration that should be set during installation
-CONFIG_DIR = os.path.expanduser("~/.open-ace")
+CONFIG_DIR = _safe_path(os.path.expanduser("~/.open-ace"))
 CONFIG_PATH = os.path.join(CONFIG_DIR, "config.json")
 DB_DIR = CONFIG_DIR  # Database is stored in the same directory
 DB_PATH = os.path.join(DB_DIR, "ace.db")
 
 # Remote user name - default is 'openclaw' but can be overridden
 # This is used for remote deployment and fetching data from remote machines
-REMOTE_USER = os.environ.get("AI_TOKEN_REMOTE_USER", "openclaw")
+REMOTE_USER = _safe_path(os.environ.get("AI_TOKEN_REMOTE_USER", "openclaw"))
 
 # Remote configuration directory on remote machines
 # This is used when deploying to or fetching data from remote machines

@@ -97,16 +97,11 @@ def test_prompt_search():
             # 检查搜索输入框
             search_selectors = ['input[placeholder*="search"]', 'input[type="text"]']
             if check_element_exists(page, search_selectors):
-                try:
-                    search_input = page.locator(
-                        search_selectors[0] + ", " + search_selectors[1]
-                    ).first
-                    if search_input.is_visible():
-                        search_input.fill("test")
-                        page.wait_for_timeout(500)
-                        search_input.clear()
-                except Exception:
-                    pass
+                search_input = page.locator(search_selectors[0] + ", " + search_selectors[1]).first
+                assert search_input.is_visible(), "search_input not visible (Issue #2189)"
+                search_input.fill("test")
+                page.wait_for_timeout(500)
+                search_input.clear()
 
             save_screenshot(page, MODULE_NAME, "03_search")
             return True
@@ -127,15 +122,12 @@ def test_prompt_detail():
             # 尝试点击 Prompt 项查看详情
             prompt_item_selectors = [".prompt-item", "tr", ".list-item", ".card"]
             if check_element_exists(page, prompt_item_selectors):
-                try:
-                    prompt_item = page.locator(
-                        prompt_item_selectors[0] + ", " + prompt_item_selectors[1]
-                    ).first
-                    if prompt_item.is_visible():
-                        prompt_item.click()
-                        page.wait_for_timeout(500)
-                except Exception:
-                    pass
+                prompt_item = page.locator(
+                    prompt_item_selectors[0] + ", " + prompt_item_selectors[1]
+                ).first
+                assert prompt_item.is_visible(), "prompt_item not visible (Issue #2189)"
+                prompt_item.click()
+                page.wait_for_timeout(500)
 
             save_screenshot(page, MODULE_NAME, "04_detail")
             return True

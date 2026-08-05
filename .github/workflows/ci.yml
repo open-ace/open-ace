@@ -53,7 +53,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ['3.10', '3.11', '3.12']
+        python-version: ['3.10', '3.11', '3.12', '3.13', '3.14']
 
     steps:
       - uses: actions/checkout@v6
@@ -81,17 +81,70 @@ jobs:
           pip install playwright
           playwright install chromium --with-deps
 
+      - name: Collect tests and validate count
+        id: collect-tests
+        run: |
+          # Issue #2189: Collect-only gate to detect zero-test collection
+          pytest tests/ --collect-only --quiet > collection.txt 2>&1 || true
+
+          # Parse collected count
+          count=$(grep -oP '\d+ tests collected' collection.txt | grep -oP '\d+' || echo "0")
+
+          echo "collected_count=$count" >> $GITHUB_OUTPUT
+
+          # Fail if 0 tests collected
+          if [ "$count" -eq 0 ]; then
+            echo "::error::Zero tests collected - this indicates a collection failure"
+            exit 1
+          fi
+
+          # Check against baseline (if exists) — Issue #2189 Scope #4b: hard gate.
+          # A drop below the baseline (already set conservatively at ~90% of the
+          # actual collected count) fails the required test job so silent test
+          # loss cannot merge. Raise the baseline in .test-baseline.json when
+          # collection legitimately shrinks.
+          if [ -f ".test-baseline.json" ]; then
+            baseline=$(python -c "import json; print(json.load(open('.test-baseline.json'))['layers']['default']['min_tests'])" 2>/dev/null || echo "0")
+            if [ "$baseline" -gt 0 ] && [ "$count" -lt "$baseline" ]; then
+              echo "::error::Test count $count below baseline $baseline (Issue #2189 under-count hard gate). Update .test-baseline.json if the drop is intentional."
+              exit 1
+            fi
+          fi
+
+          # Output collection manifest
+          echo "=== Test Collection Manifest ==="
+          tail -n 20 collection.txt
+          echo "Total tests collected: $count"
+          echo "================================="
+
+      - name: Scan test code for false-positive patterns
+        run: |
+          # Issue #2189 Scope #6: semantic, 4-pattern regression gate
+          # (broad_except_swallow, no_assertion, return_true, erroneous_skip).
+          # Detection is AST-semantic so it cannot be gamed (e.g. print() instead
+          # of pass). Fails if any pattern's core count EXCEEDS the recorded
+          # baseline (.false-positive-baseline.json) — new false positives cannot
+          # slip in; ratchet the baseline down as findings are fixed
+          # (`python scripts/scan_test_false_positives.py tests --exclude-dirs
+          # tests/issues --update-baseline .false-positive-baseline.json`).
+          # Auto-generated tests/issues subtrees are excluded.
+          python scripts/scan_test_false_positives.py tests \
+            --exclude-dirs tests/issues \
+            --baseline .false-positive-baseline.json
+
       - name: Run tests
         run: |
           # E2E/Playwright/HTTP tests live under tests/e2e/ and are excluded via
           # pytest.ini's norecursedirs. PostgreSQL tests are marked and deselected
           # here; they run in the postgres-test job below.
           # Coverage includes scripts/shared and P0 security modules (Issue #1856)
+          # Issue #2189: Add coverage threshold to ensure failure propagates
           pytest tests/ -v \
             --cov=scripts/shared \
             --cov=app/auth \
             --cov=app/remote_ws_handler \
             --cov=app/modules/sso \
+            --cov-fail-under=30 \
             --cov-report=xml \
             --cov-report=html \
             -m "not postgres"

@@ -19,7 +19,19 @@ Environment=AI_TOKEN_WEB_PORT=__PORT__
 Environment=AI_TOKEN_WEB_HOST=__HOST__
 Environment=HOME=__HOME__
 Environment=SECRET_KEY=__SECRET_KEY__
+Environment=OPENACE_ENCRYPTION_KEY=__OPENACE_ENCRYPTION_KEY__
 Environment=WORKSPACE_BASE_DIR=__WORKSPACE_BASE_DIR__
+
+# Secrets (OPENACE_ENCRYPTION_KEY; encrypts API keys / SMTP passwords). The web
+# service must share the SAME key as the scheduler worker (openace-scheduler.
+# service) so encrypted data written by one can be read by the other. The
+# leading '-' makes the file OPTIONAL: existing deployments without it keep the
+# development-mode (ephemeral-key) behaviour; deployments that persist a key
+# there get durable encryption. See openace-scheduler.service for how to
+# generate + persist it. NOTE: SCHEDULER_MODE is intentionally unset here so
+# the web process runs NO background services (the scheduler worker owns them
+# since #2187).
+EnvironmentFile=-/etc/openace/secrets.env
 
 # Security settings
 NoNewPrivileges=true

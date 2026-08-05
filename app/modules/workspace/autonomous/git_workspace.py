@@ -694,6 +694,41 @@ class GitWorkspaceService:
                 gh = _GitHubOps(project_path, system_account=system_account)
                 self._orch._gh = gh
                 original_removed = True
+            else:
+                # Primary-repo fallback (#2307): the dedicated worktree is gone
+                # (``worktree_path`` empty) so the workflow has been operating
+                # directly in ``project_path`` with the feature branch checked
+                # out there — the supported ``_get_gh`` fallback
+                # (orchestrator.py:1043, #1395 rerun regression). Git forbids
+                # the same branch in two worktrees, so the temp merge worktree
+                # below cannot be created until the branch is freed; without
+                # this, ``add_worktree`` exits 128 ("branch already used by
+                # '<project_path>'") and merge is permanently stuck (prod 212).
+                # Detach primary's HEAD to release the branch WITHOUT switching
+                # to a possibly-stale ``main`` or touching the branch ref —
+                # never modify primary's working state beyond this release
+                # (the #822/#2041 "never touch primary" invariant).
+                # ``finally`` skips restore (``original_removed`` stays False):
+                # the workflow stays in primary-fallback until it completes the
+                # merge (a terminal phase).
+                try:
+                    primary_branch = main_gh.get_current_branch() or ""
+                except Exception:
+                    primary_branch = ""
+                if primary_branch == branch_name:
+                    if main_gh.has_uncommitted_changes():
+                        raise GitHubOpsError(
+                            f"cannot free branch {branch_name} for merge: primary repo "
+                            "has uncommitted changes (worktree_path empty, "
+                            "primary-fallback); refusing to detach over a dirty tree"
+                        )
+                    main_gh._run_git(["checkout", "--detach", "HEAD"])
+                    logger.info(
+                        "Workflow %s: detached primary HEAD to free branch %s for the "
+                        "merge worktree (primary-fallback, worktree_path empty)",
+                        self._orch._workflow_id,
+                        branch_name,
+                    )
 
             # Create an isolated worktree for the existing PR branch. Use the
             # main repo's gh so the worktree is registered against the real .git.
@@ -896,7 +931,10 @@ class GitWorkspaceService:
                             "the orchestrator. Paths: " + ", ".join(resolver_index_changes[:10])
                         )
                     resolver_changed_paths = wt_gh.get_worktree_changed_paths()
-                    resolver_scope_error = self._orch._scope_violation(resolver_changed_paths)
+                    resolver_scope_error = self._orch._scope_violation(
+                        resolver_changed_paths,
+                        limit=(wf.get("max_changed_files_override") or None),
+                    )
                     if resolver_scope_error:
                         raise RuntimeError(
                             "Conflict resolver scope rejected before staging: "
