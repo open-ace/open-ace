@@ -423,7 +423,11 @@ class GitHubOps:
         return self._owner_repo
 
     def _run_gh(
-        self, args: list[str], check: bool = True, repo_scoped: bool = True
+        self,
+        args: list[str],
+        check: bool = True,
+        repo_scoped: bool = True,
+        api_only: bool = False,
     ) -> subprocess.CompletedProcess:
         """Run a gh CLI command with transient-network-error retry.
 
@@ -436,6 +440,16 @@ class GitHubOps:
                 do not — for those the caller passes ``repo_scoped=False`` so the
                 sudo path runs plain ``gh`` without repo context (they don't need
                 an existing-repo context anyway).
+            api_only: The command is a pure GitHub API call that carries
+                ``-R owner/repo`` and needs no local repo access (e.g.
+                ``issue``/``pr comment``). When True AND a bot token is configured
+                AND the command would otherwise sudo (cross-user), run ``gh`` as
+                the *service* user instead of ``sudo -u <owner>``. This lets
+                ``GH_TOKEN`` reach ``gh`` so the action is attributed to the
+                configured AI bot account; the sudo wrapper would otherwise strip
+                ``GH_TOKEN`` via sudo ``env_reset`` and the action would post as
+                the repo owner (issue #2339). Git ops and gh commands that need
+                local repo context ignore this flag and keep the sudo path.
         """
         self._verify_trusted_git_context()
         kwargs = self._build_subprocess_kwargs()
@@ -460,7 +474,20 @@ class GitHubOps:
         env["GIT_CONFIG_VALUE_0"] = os.path.realpath(self.repo_path)
         kwargs["env"] = env
         account = self.system_account
-        if self._needs_sudo():
+        needs_sudo = self._needs_sudo()
+        # Pure-API gh subcommands (issue/pr comment with -R owner/repo) need no
+        # local repo access, so when a bot token is configured and the command
+        # would otherwise sudo, run gh as the service user directly. This lets
+        # GH_TOKEN reach gh so the action is attributed to the configured AI bot
+        # account; the sudo -u owner wrapper would otherwise strip GH_TOKEN via
+        # sudo env_reset and the action would post as the repo owner (#2339).
+        # _get_env is cached (60s TTL) so this call is cheap and matches the env
+        # _build_subprocess_kwargs already built. Note: _resolve_owner_repo may
+        # still perform a one-time sudoed git read to populate owner/repo (a read
+        # the owner is entitled to, unchanged from today); only the gh API call
+        # itself drops the sudo wrapper.
+        api_as_service = bool(api_only) and needs_sudo and self._get_env() is not None
+        if needs_sudo and not api_as_service:
             # gh has no `-C <path>` flag (that is git-only), so under a sudo
             # wrapper — where we must drop cwd to avoid a Python permission
             # check as the service user (Issue #1421) — target the repo
@@ -477,11 +504,18 @@ class GitHubOps:
                 cmd += ["gh"] + args
             kwargs.pop("cwd", None)  # cwd under sudo triggers Permission denied (Issue #1421)
         else:
-            # Same-user (or no system_account): run gh directly with cwd so it
-            # infers owner/repo from the working directory as before.
-            owner_repo = (
-                self._resolve_owner_repo() if repo_scoped and self._trusted_git_dir else None
-            )
+            # Same-user (or no system_account), OR an api_only command running as
+            # the service user (#2339): run gh directly. Same-user keeps cwd on the
+            # repo so gh infers owner/repo from the working directory as before;
+            # the api_only path drops cwd because the service user may lack access
+            # to the owner's repo, and a pure-API call carries -R anyway.
+            if api_as_service:
+                kwargs.pop("cwd", None)
+                owner_repo = self._resolve_owner_repo() if repo_scoped else None
+            else:
+                owner_repo = (
+                    self._resolve_owner_repo() if repo_scoped and self._trusted_git_dir else None
+                )
             cmd = ["gh", "-R", owner_repo, *args] if owner_repo else ["gh", *args]
         last_error: GitHubOpsError | None = None
         for attempt in range(GIT_NETWORK_RETRY_COUNT):
@@ -761,7 +795,7 @@ class GitHubOps:
 
     def add_issue_comment(self, number: int, body: str) -> dict:
         """Add a comment to an issue."""
-        self._run_gh(["issue", "comment", str(number), "--body", body])
+        self._run_gh(["issue", "comment", str(number), "--body", body], api_only=True)
         logger.info("Added comment to issue #%s", number)
         return {"number": number}
 
@@ -1162,7 +1196,7 @@ class GitHubOps:
 
     def add_pr_comment(self, number: int, body: str) -> dict:
         """Add a comment to a PR."""
-        self._run_gh(["pr", "comment", str(number), "--body", body])
+        self._run_gh(["pr", "comment", str(number), "--body", body], api_only=True)
         logger.info("Added comment to PR #%s", number)
         return {"number": number, "body": body}
 
