@@ -1418,27 +1418,6 @@ def require_actor_scope(require_write: bool = True):
 
     return decorator
 
-    def decorator(func):
-        @wraps(func)
-        def wrapper(self, scope: ActorScope, *args, **kwargs):
-            if not isinstance(scope, ActorScope):
-                raise TypeError(
-                    f"Service method {func.__name__} must receive ActorScope, "
-                    f"got {type(scope).__name__}"
-                )
-
-            # 执行验证
-            if require_write:
-                scope.validate_for_write()
-            else:
-                scope.validate_for_read()
-
-            return func(self, scope, *args, **kwargs)
-
-        return wrapper
-
-    return decorator
-
 
 def api_key_admin_required(f=None):
     """
@@ -1510,6 +1489,8 @@ def api_key_admin_required(f=None):
                     return jsonify({"error": error_message}), 400
 
             # 4. 创建 ActorScope 并设置到 Flask g
+            # assert target_tenant_id is not None: resolve_authorized_target_tenant 在错误时会提前返回
+            assert target_tenant_id is not None, "target_tenant_id must not be None after authorization"
             request_id = str(uuid.uuid4())
             actor_scope = ActorScope.from_actor_and_target(
                 actor=user,
