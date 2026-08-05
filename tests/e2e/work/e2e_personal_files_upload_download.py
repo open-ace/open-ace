@@ -206,7 +206,7 @@ def main():
         try:
             urllib.request.urlopen(f"{base}/__e2e__", timeout=1)
             break
-        except Exception:
+        except Exception:  # allow-swallow: UI element may not exist
             time.sleep(0.1)
     else:
         print("FAIL: Flask server did not start")

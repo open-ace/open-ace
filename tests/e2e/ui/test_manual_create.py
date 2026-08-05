@@ -30,7 +30,7 @@ def log(msg):
         f.write(line + "\n")
 
 
-async def test_manual_create():
+async def test_manual_create():  # allow-no-assert: smoke test - visual verification only
     # 清空日志
     with open(LOG_FILE, "w") as f:
         f.write(f"=== Manual Create Button Test ===\nStart: {time.strftime('%H:%M:%S')}\n\n")

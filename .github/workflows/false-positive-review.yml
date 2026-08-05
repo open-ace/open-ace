@@ -1,0 +1,115 @@
+name: False Positive Annotation Review
+
+on:
+  schedule:
+    # Run quarterly on the 1st of January, April, July, October at 09:00 UTC
+    - cron: '0 9 1 1,4,7,10 *'
+  workflow_dispatch:  # Allow manual triggering
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  review-annotations:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Scan for annotations
+        run: |
+          echo "## False Positive Annotation Review Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Date:** $(date '+%Y-%m-%d')" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Count annotations by type
+          allow_no_assert=$(grep -r "# allow-no-assert:" tests/ 2>/dev/null | wc -l || echo "0")
+          allow_swallow=$(grep -r "# allow-swallow:" tests/ 2>/dev/null | wc -l || echo "0")
+          allow_skip=$(grep -r "# allow-skip:" tests/ 2>/dev/null | wc -l || echo "0")
+          total=$((allow_no_assert + allow_swallow + allow_skip))
+
+          echo "### Annotation Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Pattern | Count |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| allow-no-assert | $allow_no_assert |" >> $GITHUB_STEP_SUMMARY
+          echo "| allow-swallow | $allow_swallow |" >> $GITHUB_STEP_SUMMARY
+          echo "| allow-skip | $allow_skip |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Total** | **$total** |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Find annotations with TODO review timestamps
+          echo "### Annotations with TODO Review Timestamps" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          grep -rn "TODO review" tests/ 2>/dev/null | head -20 >> $GITHUB_STEP_SUMMARY || echo "No TODO review annotations found" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Find annotations that may need review (older than 6 months)
+          echo "### Potential Review Items" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Run the following command to get a detailed list:" >> $GITHUB_STEP_SUMMARY
+          echo '```bash' >> $GITHUB_STEP_SUMMARY
+          echo 'python scripts/scan_test_false_positives.py tests --exclude-dirs tests/issues' >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Create review issue (if needed)
+        if: github.event_name == 'schedule'
+        run: |
+          # Count total annotations
+          total=$(grep -rE "# allow-(no-assert|swallow|skip):" tests/ 2>/dev/null | wc -l || echo "0")
+
+          # Only create issue if there are more than 50 annotations
+          if [ "$total" -gt 50 ]; then
+            echo "Creating quarterly review issue..."
+
+            # Create issue body using heredoc
+            cat > /tmp/issue_body.md << 'EOF'
+          ## Overview
+
+          This is a quarterly review of false positive annotations in the test suite.
+
+          ## Statistics
+
+          - Total annotations: __TOTAL__
+          - Review date: __DATE__
+
+          ## Action Items
+
+          - [ ] Review annotations older than 6 months
+          - [ ] Identify annotations that can be converted to real assertions
+          - [ ] Update TODO review timestamps
+          - [ ] Remove obsolete annotations
+
+          ## Related
+
+          - Issue #2306: False positive cleanup
+          - Issue #2189: False positive scanner implementation
+
+          ## Instructions
+
+          Run the following command to get a detailed list:
+          ```bash
+          python scripts/scan_test_false_positives.py tests --exclude-dirs tests/issues
+          ```
+          EOF
+
+            # Replace placeholders with actual values
+            sed -i "s/__TOTAL__/$total/g" /tmp/issue_body.md
+            sed -i "s/__DATE__/$(date '+%Y-%m-%d')/g" /tmp/issue_body.md
+
+            gh issue create \
+              --title "Quarterly False Positive Annotation Review - $(date '+%Y-Q%-q')" \
+              --body-file /tmp/issue_body.md \
+              --label "maintenance,testing" || echo "Issue creation failed or skipped"
+          else
+            echo "Annotation count ($total) is below threshold (50), skipping issue creation"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

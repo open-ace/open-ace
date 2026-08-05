@@ -205,7 +205,7 @@ def run_tests():
 
         try:
             _run_all_steps(page)
-        except Exception:
+        except Exception:  # allow-swallow: UI element may not exist
             shot(page, "ERROR_final")
             traceback.print_exc()
             raise

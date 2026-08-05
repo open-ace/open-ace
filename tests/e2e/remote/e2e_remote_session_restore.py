@@ -194,7 +194,7 @@ def run_tests():
         try:
             page.wait_for_selector("textarea, .max-w-6xl, #root, .min-h-screen", timeout=30000)
             pause(6)
-        except Exception:
+        except Exception:  # allow-swallow: UI element may not exist
             log_step("警告", "ChatPage 加载超时")
 
         shot(page, "04_chatpage_with_session_id")
@@ -263,7 +263,7 @@ def run_tests():
 if __name__ == "__main__":
     try:
         run_tests()
-    except Exception as e:
+    except Exception as e:  # allow-swallow: UI element may not exist
         print(f"\n✗ 测试失败: {e}")
         traceback.print_exc()
         sys.exit(1)

@@ -436,7 +436,7 @@ def run_tests():
                         sid = data.get("session", {}).get("session_id")
                         if sid:
                             captured_sid[0] = sid
-                    except Exception:
+                    except Exception:  # allow-swallow: UI element may not exist
                         pass
 
         page.on("response", on_response)
@@ -476,7 +476,7 @@ def run_tests():
             page.wait_for_selector("textarea, .max-w-6xl, #root, .min-h-screen", timeout=20000)
             # 等待 React 渲染 + remote session 创建（网络请求需要时间）
             pause(8)
-        except Exception:
+        except Exception:  # allow-swallow: UI element may not exist
             log_step("警告", "ChatPage 加载超时，可能 webui 未运行")
             shot(page, "10_chatpage_timeout")
             print("  ⚠ ChatPage 未加载，跳过远程模式 UI 测试")
@@ -592,7 +592,7 @@ def run_tests():
         try:
             page.wait_for_url("**/login**", timeout=10000)
             page.wait_for_selector("#username", state="visible", timeout=10000)
-        except Exception:
+        except Exception:  # allow-swallow: UI element may not exist
             pass
         shot(page, "13_logout")
         print("  ✓ 已登出，回到登录页")

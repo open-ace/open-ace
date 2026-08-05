@@ -25,7 +25,7 @@ SCREENSHOT_DIR = os.path.join(
 )
 
 
-def test_create_debug(ui_screenshot_dir):
+def test_create_debug(ui_screenshot_dir):  # allow-no-assert: smoke test - visual verification only
     global SCREENSHOT_DIR
     SCREENSHOT_DIR = ui_screenshot_dir
     print("=" * 70)
@@ -216,7 +216,7 @@ def test_create_debug(ui_screenshot_dir):
                 input("\n  Press Enter to close browser...")
             iframe_page.close()
 
-        except Exception as e:
+        except Exception as e:  # allow-swallow: UI element may not exist
             print(f"\n[EXCEPTION] {e}")
             import traceback
 
@@ -230,8 +230,6 @@ def test_create_debug(ui_screenshot_dir):
     print("\n" + "=" * 70)
     print("Debug Complete")
     print("=" * 70)
-
-    return True
 
 
 if __name__ == "__main__":

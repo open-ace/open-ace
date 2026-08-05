@@ -22,6 +22,7 @@ fail on *unannotated* findings without false-noise:
 import argparse
 import ast
 import json
+import re
 import sys
 from pathlib import Path
 from typing import NamedTuple
@@ -59,6 +60,53 @@ ASSERT_METHODS = frozenset(
     }
 )
 
+# Allow-reason patterns for annotation validation (Issue #2306, REQ-6)
+# These patterns define what constitutes a valid annotation reason
+ALLOW_REASON_PATTERNS = {
+    "allow-no-assert": [
+        r"smoke test.*visual verification",
+        r"screenshot regression test.*TODO review \d{4}-Q[1-4]",
+        r"auto-generated test.*selector alignment",
+        r"playwright script.*visual verification",
+    ],
+    "allow-swallow": [
+        r"UI element may not exist",
+        r"transient timeout",
+        r"screenshot failure.*non-critical",
+        r"optional UI element",
+        r"test framework error handling",
+        r"error screenshot",
+        r"best-effort",
+        r"idempotent",
+        r"cleanup",
+        r"collect.*errors",
+    ],
+    "allow-skip": [
+        r"requires external service",
+        r"manual-only test",
+    ],
+}
+
+
+def validate_annotation_content(annotation: str, pattern_type: str) -> bool:
+    """Validate that annotation content matches predefined templates.
+
+    Args:
+        annotation: The annotation text (e.g., "smoke test - visual verification only")
+        pattern_type: The type of annotation (e.g., "allow-no-assert")
+
+    Returns:
+        True if the annotation matches one of the predefined patterns, False otherwise
+
+    Example:
+        >>> validate_annotation_content("smoke test - visual verification only", "allow-no-assert")
+        True
+        >>> validate_annotation_content("just because", "allow-no-assert")
+        False
+    """
+    patterns = ALLOW_REASON_PATTERNS.get(pattern_type, [])
+    return any(re.search(p, annotation) for p in patterns)
+
 
 def _func_start(node: ast.FunctionDef | ast.AsyncFunctionDef) -> int:
     """First source line of a function, including decorators."""
@@ -71,6 +119,60 @@ def _src_contains(lines: list[str], start_lineno: int, end_lineno: int, needle: 
     start = max(start_lineno - 1, 0)
     end = min(end_lineno, len(lines))
     return any(needle in lines[i] for i in range(start, end))
+
+
+def _extract_and_validate_annotation(
+    lines: list[str], start_lineno: int, end_lineno: int, pattern_type: str, strict: bool = False
+) -> bool:
+    """Check if a valid annotation exists in the specified lines.
+
+    Args:
+        lines: Source code lines
+        start_lineno: Start line number (1-indexed)
+        end_lineno: End line number (1-indexed)
+        pattern_type: Type of annotation (e.g., "allow-no-assert")
+        strict: If True, validate annotation content; if False, just check existence
+
+    Returns:
+        True if a valid annotation is found, False otherwise
+    """
+    start = max(start_lineno - 1, 0)
+    end = min(end_lineno, len(lines))
+
+    # Find annotation marker
+    marker = f"# {pattern_type}"
+    for i in range(start, end):
+        if marker in lines[i]:
+            if not strict:
+                # Non-strict mode: just check existence
+                return True
+
+            # Strict mode: extract and validate content
+            # Extract the part after the marker
+            line = lines[i]
+            marker_pos = line.find(marker)
+            annotation_content = line[marker_pos + len(marker) :].strip()
+
+            # Remove leading colon if present
+            if annotation_content.startswith(":"):
+                annotation_content = annotation_content[1:].strip()
+
+            # Validate content
+            if validate_annotation_content(annotation_content, pattern_type):
+                return True
+            else:
+                # Invalid annotation content
+                import warnings
+
+                warnings.warn(
+                    f"Invalid annotation content at line {i+1}: '{annotation_content}' "
+                    f"does not match any template for {pattern_type}",
+                    UserWarning,
+                    stacklevel=3,
+                )
+                return False
+
+    return False
 
 
 def _body_does_not_swallow(body: list[ast.stmt]) -> bool:
@@ -125,7 +227,11 @@ class FalsePositiveScanner(ast.NodeVisitor):
         if self.is_test_function:
             start = _func_start(node)
             end = node.end_lineno or node.lineno
-            allow_no_assert = _src_contains(self.source_lines, start, end, "allow-no-assert")
+            # Check for annotation with content validation (Issue #2306)
+            # Enable strict validation to enforce annotation content quality
+            allow_no_assert = _extract_and_validate_annotation(
+                self.source_lines, start, end, "allow-no-assert", strict=True
+            )
             if not self.has_assertion and not allow_no_assert:
                 self.findings.append(
                     Finding(
@@ -170,7 +276,11 @@ class FalsePositiveScanner(ast.NodeVisitor):
         )
         if broad:
             end = node.end_lineno or node.lineno
-            allow = _src_contains(self.source_lines, node.lineno, end, "allow-swallow")
+            # Check for annotation with content validation (Issue #2306)
+            # Enable strict validation to enforce annotation content quality
+            allow = _extract_and_validate_annotation(
+                self.source_lines, node.lineno, end, "allow-swallow", strict=True
+            )
             if not _body_does_not_swallow(node.body) and not allow:
                 severity = "P0" if self.is_test_function else "P1"
                 self.findings.append(

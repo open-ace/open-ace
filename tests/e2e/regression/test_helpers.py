@@ -84,15 +84,19 @@ def login(page: Page):
     page.click('button[type="submit"]')
 
     # 等待登录成功 - bcrypt rounds=12 可能需要较长时间
+    # 使用更健壮的等待策略：等待 URL 变化或特定元素出现
     try:
+        # 等待 URL 不再包含 /login，最多 120s（bcrypt 可能很慢）
         page.wait_for_url(lambda url: "/login" not in url, timeout=120000)
     except Exception as e:
         current_url = page.url
         if "/login" in current_url:
             save_screenshot(page, "login", "redirect_failed")
+            # 提供更详细的错误信息，帮助调试
             raise AssertionError(
                 f"Login did not redirect after 120s. Still on {current_url}. "
-                f"Check if credentials are correct or server is responsive. Error: {e}"
+                f"Check if credentials ({USERNAME}) are correct or server is responsive. "
+                f"Error: {e}"
             ) from e
 
 
@@ -182,7 +186,7 @@ class TestRunner:
             test_func()
             self.results.append((name, "PASS", None))
             print(f"  ✓ {name}")
-            return True
+
         except Exception as e:
             self.results.append((name, "FAIL", str(e)))
             print(f"  ✗ {name}: {e}")

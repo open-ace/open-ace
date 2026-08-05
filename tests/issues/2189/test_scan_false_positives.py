@@ -288,3 +288,39 @@ def test_update_baseline_writes_current_counts(tmp_path: Path) -> None:
     assert proc.returncode == 0, proc.stdout + proc.stderr
     data = json.loads(baseline.read_text())
     assert data["broad_except_swallow"] >= 1
+
+
+def test_annotation_template_validation() -> None:
+    """Test annotation content validation (Issue #2306, REQ-6)."""
+    mod = _load_scanner()
+    validate_annotation_content = mod.validate_annotation_content
+
+    # Valid annotations for allow-no-assert
+    assert validate_annotation_content("smoke test - visual verification only", "allow-no-assert")
+    assert validate_annotation_content(
+        "screenshot regression test - TODO review 2026-Q4", "allow-no-assert"
+    )
+    assert validate_annotation_content(
+        "auto-generated test - CI app selector alignment", "allow-no-assert"
+    )
+    assert validate_annotation_content("playwright script - visual verification", "allow-no-assert")
+
+    # Valid annotations for allow-swallow
+    assert validate_annotation_content("UI element may not exist", "allow-swallow")
+    assert validate_annotation_content("transient timeout", "allow-swallow")
+    assert validate_annotation_content("screenshot failure, non-critical", "allow-swallow")
+    assert validate_annotation_content("optional UI element", "allow-swallow")
+    assert validate_annotation_content("test framework error handling", "allow-swallow")
+
+    # Valid annotations for allow-skip
+    assert validate_annotation_content("requires external service", "allow-skip")
+    assert validate_annotation_content("manual-only test", "allow-skip")
+
+    # Invalid annotations
+    assert not validate_annotation_content("just because", "allow-no-assert")
+    assert not validate_annotation_content("allow everything", "allow-no-assert")
+    assert not validate_annotation_content("", "allow-swallow")
+    assert not validate_annotation_content("no reason", "allow-skip")
+
+    # Unknown pattern type
+    assert not validate_annotation_content("any reason", "unknown-pattern")

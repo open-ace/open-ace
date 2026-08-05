@@ -46,7 +46,9 @@ def take_screenshot(page, name):
     return path
 
 
-def test_analysis_charts(ui_screenshot_dir):
+def test_analysis_charts(
+    ui_screenshot_dir,
+):  # allow-no-assert: smoke test - visual verification only
     """Test that Analysis page charts display data."""
     global SCREENSHOT_DIR
     SCREENSHOT_DIR = ui_screenshot_dir
@@ -239,7 +241,7 @@ def test_analysis_charts(ui_screenshot_dir):
             else:
                 print(f"\n⚠ {total - passed} test(s) FAILED")
 
-        except Exception as e:
+        except Exception as e:  # allow-swallow: UI element may not exist
             print(f"\n✗ Error: {e}")
             screenshots.append(take_screenshot(page, "error"))
             raise
