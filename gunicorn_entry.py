@@ -16,17 +16,17 @@ import sys
 # Must be the first thing before any urllib3 or related imports
 try:
     import gevent.monkey
+
     gevent.monkey.patch_all()
 except ImportError:
     pass
 
 # Now import gunicorn and run it
 import re
-import os
 
 from gunicorn.app.wsgiapp import run
 
 if __name__ == "__main__":
     # Pass remaining arguments to gunicorn
-    sys.argv[0] = re.sub(r'(-script/.*\.py|-$)', 'gunicorn', sys.argv[0])
+    sys.argv[0] = re.sub(r"(-script/.*\.py|-$)", "gunicorn", sys.argv[0])
     run()
