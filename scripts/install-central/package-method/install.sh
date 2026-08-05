@@ -2343,8 +2343,10 @@ $run_user ALL=(root) NOPASSWD: $wrapper_bin *"
     local current_user_rules="# Rules for $run_user (updated on $(date '+%Y-%m-%d %H:%M:%S'))
 # WebUI 启动规则：通过 openace-webui-launch wrapper 以任意用户运行
 # Issue #2298: wrapper 内联传递 LLM 配置环境变量，绕过 sudo env_keep 过滤。
-# wrapper 限定首参为 $webui_path，防止 /usr/bin/env * 权限提升。
-$run_user ALL=(ALL) NOPASSWD: /usr/local/bin/openace-webui-launch "$webui_path" *"
+# Issue #2313: 允许环境变量参数（KEY=VAL）出现在 webui_path 之前。
+# 安全性：wrapper 内部使用 exec /usr/bin/env，只设置环境变量并执行后续命令；
+# 第二个 * 限制 webui_path 之后只能是合法的 WebUI 参数，防止权限提升。
+$run_user ALL=(ALL) NOPASSWD: /usr/local/bin/openace-webui-launch * "$webui_path" *"
 
     # Only add webui_local_rule if not empty
     if [ -n "$webui_local_rule" ]; then
@@ -2472,7 +2474,7 @@ ${line}"
         # leaving the new run_user without sudo permission (#1197 review).
         # Rule lines look like "$run_user ALL=(ALL) NOPASSWD: $webui_path *",
         # so we grep for lines starting with "$run_user " that also contain the path.
-        if ! grep -E "^${run_user} .*(NOPASSWD: )?/usr/local/bin/openace-webui-launch \"${webui_path}\"( |\*|$)" "$sudoers_file" 2>/dev/null && \
+        if ! grep -E "^${run_user} .*(NOPASSWD: )?/usr/local/bin/openace-webui-launch * \"${webui_path}\"( |\*|$)" "$sudoers_file" 2>/dev/null && \
            ! grep -E "^${run_user} .*(NOPASSWD: )?${webui_path}( |\*|$)" "$sudoers_file" 2>/dev/null && \
            ! grep -E "^${run_user} .*(NOPASSWD: )?/usr/local/bin/qwen-code-webui( |\*|$)" "$sudoers_file" 2>/dev/null; then
             print_warning "Sudoers missing webui rule for user '$run_user'"
