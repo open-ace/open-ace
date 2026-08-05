@@ -66,7 +66,6 @@ def dismiss_force_change_password_modal(page: Page, new_password: str = "Admin12
     global PASSWORD
     from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
-    modal_dismissed = False
     try:
         # 等待弹窗出现（最多 5 秒）
         modal = page.locator('div[role="dialog"]')
@@ -113,7 +112,6 @@ def dismiss_force_change_password_modal(page: Page, new_password: str = "Admin12
 
         # 更新全局密码，后续 login() 使用新密码
         PASSWORD = new_password
-        modal_dismissed = True
 
     # 无论弹窗是否出现，等待 dashboard 元素就绪
     # 这确保页面完全渲染后再返回，避免后续交互超时
