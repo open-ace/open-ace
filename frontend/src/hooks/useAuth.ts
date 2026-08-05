@@ -115,6 +115,8 @@ export function useAuth() {
       newPassword: string;
     }) => authApi.changePassword(currentPassword, newPassword),
     onSuccess: async () => {
+      // Invalidate all queries to refetch data that may have failed with 403
+      queryClient.invalidateQueries();
       // Refetch auth to get updated must_change_password flag
       await refetchAuth();
     },
