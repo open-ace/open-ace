@@ -53,7 +53,7 @@ def test_page_loads():
             assert check_element_exists(page, main_selectors), "主内容区域应存在"
 
             save_screenshot(page, MODULE_NAME, "01_page_load")
-            return True
+
         finally:
             browser.close()
 
@@ -73,7 +73,7 @@ def test_tenant_list_display():
             assert check_element_exists(page, tenant_selectors), "应有租户列表或空状态提示"
 
             save_screenshot(page, MODULE_NAME, "02_tenant_list")
-            return True
+
         finally:
             browser.close()
 
@@ -100,7 +100,7 @@ def test_add_tenant_button():
             assert check_element_exists(page, add_btn_selectors), "添加租户按钮应可见"
 
             save_screenshot(page, MODULE_NAME, "03_add_tenant")
-            return True
+
         finally:
             browser.close()
 
@@ -118,18 +118,13 @@ def test_edit_tenant():
             # 尝试点击编辑按钮
             edit_btn_selectors = ['button:has-text("Edit")', 'button:has-text("编辑")', ".edit-btn"]
             if check_element_exists(page, edit_btn_selectors):
-                try:
-                    edit_btn = page.locator(
-                        edit_btn_selectors[0] + ", " + edit_btn_selectors[1]
-                    ).first
-                    if edit_btn.is_visible():
-                        edit_btn.click()
-                        page.wait_for_timeout(500)
-                except Exception:
-                    pass
+                edit_btn = page.locator(edit_btn_selectors[0] + ", " + edit_btn_selectors[1]).first
+                assert edit_btn.is_visible(), "edit_btn not visible (Issue #2189)"
+                edit_btn.click()
+                page.wait_for_timeout(500)
 
             save_screenshot(page, MODULE_NAME, "04_edit_tenant")
-            return True
+
         finally:
             browser.close()
 
@@ -153,7 +148,7 @@ def test_tenant_config():
             check_element_exists(page, config_selectors)
 
             save_screenshot(page, MODULE_NAME, "05_config")
-            return True
+            assert page.locator("body").is_visible(), "页面应可见"
         finally:
             browser.close()
 

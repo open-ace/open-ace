@@ -363,5 +363,99 @@ class TestGatewayFactoryEnvOverride:
             reset_gateway_planner_for_tests()
 
 
+# ── test_connection URL deduplication ───────────────────────────────────────
+
+
+class TestModelGatewayTestConnection:
+    """Tests for test_connection URL deduplication logic (Issue #2169)."""
+
+    @pytest.mark.parametrize(
+        "base_url,expected_url",
+        [
+            # 无版本后缀：应添加 /v1
+            ("http://gateway:8000", "http://gateway:8000/v1/models"),
+            # 含 /v1 后缀：应去重
+            ("http://gateway:8000/v1", "http://gateway:8000/v1/models"),
+            # 含 /v1 后缀 + 尾部斜杠：应正确处理
+            ("http://gateway:8000/v1/", "http://gateway:8000/v1/models"),
+            # 含 /v2 后缀：应去重
+            ("http://gateway:8000/v2", "http://gateway:8000/v2/models"),
+            # 含 /v2 后缀 + 尾部斜杠：应正确处理
+            ("http://gateway:8000/v2/", "http://gateway:8000/v2/models"),
+            # 含 /v3 后缀：应去重
+            ("http://gateway:8000/v3", "http://gateway:8000/v3/models"),
+            # 非版本路径：应添加 /v1
+            ("http://gateway:8000/api", "http://gateway:8000/api/v1/models"),
+            # 混合格式 v1beta：不应去重
+            ("http://gateway:8000/v1beta", "http://gateway:8000/v1beta/v1/models"),
+        ],
+    )
+    def test_test_connection_url_deduplication(self, base_url, expected_url):
+        """验证 test_connection 对各种 base_url 格式的 URL 构建逻辑"""
+        from app.modules.workspace.model_gateway.service import ModelGatewayService
+
+        service = ModelGatewayService(repository=MagicMock())
+
+        with patch("requests.request") as mock_req:
+            mock_req.return_value.status_code = 200
+
+            result = service.test_connection(base_url, "test-key")
+
+            # 验证请求的 URL
+            called_url = mock_req.call_args.kwargs["url"]
+            assert called_url == expected_url, f"Expected {expected_url}, got {called_url}"
+            assert result["ok"] is True
+
+    def test_test_connection_with_empty_base_url(self):
+        """空 base_url 应返回错误"""
+        from app.modules.workspace.model_gateway.service import ModelGatewayService
+
+        service = ModelGatewayService(repository=MagicMock())
+
+        result = service.test_connection("", "test-key")
+
+        assert result["ok"] is False
+        assert result["message"] == "Gateway base URL is required"
+
+    def test_test_connection_with_none_base_url(self):
+        """None base_url 应返回错误"""
+        from app.modules.workspace.model_gateway.service import ModelGatewayService
+
+        service = ModelGatewayService(repository=MagicMock())
+
+        result = service.test_connection(None, "test-key")
+
+        assert result["ok"] is False
+        assert result["message"] == "Gateway base URL is required"
+
+    def test_test_connection_with_404_response(self):
+        """404 响应应返回失败"""
+        from app.modules.workspace.model_gateway.service import ModelGatewayService
+
+        service = ModelGatewayService(repository=MagicMock())
+
+        with patch("requests.request") as mock_req:
+            mock_req.return_value.status_code = 404
+
+            result = service.test_connection("http://gateway:8000/v1", "test-key")
+
+            assert result["ok"] is False
+            assert result["status"] == 404
+            assert "404" in result["message"]
+
+    def test_test_connection_with_network_error(self):
+        """网络错误应返回失败"""
+        from app.modules.workspace.model_gateway.service import ModelGatewayService
+
+        service = ModelGatewayService(repository=MagicMock())
+
+        with patch("requests.request", side_effect=Exception("Network error")):
+            result = service.test_connection("http://gateway:8000", "test-key")
+
+            assert result["ok"] is False
+            assert result["status"] is None
+            assert "unreachable" in result["message"]
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

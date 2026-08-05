@@ -54,6 +54,7 @@ _RAW_KEYS = (
 def _seed_raw_env(monkeypatch):
     for key in _RAW_KEYS:
         monkeypatch.setenv(key, "raw-" + key.lower())
+    monkeypatch.delenv("OPENACE_SECURITY_MODE", raising=False)
     monkeypatch.delenv("FLASK_ENV", raising=False)
     monkeypatch.delenv("OPENACE_ALLOW_RAW_KEY_FALLBACK", raising=False)
 
@@ -81,6 +82,7 @@ def test_build_agent_env_success_scrubs_raw_keys(monkeypatch):
     from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner
 
     _seed_raw_env(monkeypatch)
+    monkeypatch.setenv("OPENACE_SECURITY_MODE", "development")
     _patch_proxy(monkeypatch, fail=False)
     _patch_config(monkeypatch)
 
@@ -102,7 +104,7 @@ def test_build_agent_env_proxy_fail_in_production_raises(monkeypatch):
     _seed_raw_env(monkeypatch)
     _patch_proxy(monkeypatch, fail=True)
     _patch_config(monkeypatch)
-    monkeypatch.setenv("FLASK_ENV", "production")
+    monkeypatch.setenv("OPENACE_SECURITY_MODE", "production")
 
     with pytest.raises(RuntimeError, match="(?i)proxy|refus|launch"):
         AutonomousAgentRunner._build_agent_env(
@@ -114,9 +116,10 @@ def test_build_agent_env_proxy_fail_in_dev_without_opt_in_raises(monkeypatch):
     from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner
 
     _seed_raw_env(monkeypatch)
+    monkeypatch.setenv("OPENACE_SECURITY_MODE", "development")
     _patch_proxy(monkeypatch, fail=True)
     _patch_config(monkeypatch)
-    # FLASK_ENV unset → dev; opt-in unset → must fail closed.
+    # OPENACE_SECURITY_MODE=development, opt-in unset → must fail closed.
     with pytest.raises(RuntimeError):
         AutonomousAgentRunner._build_agent_env(
             _FakeAdapter(), "claude-code", None, "sess-1", "model-x"
@@ -127,6 +130,7 @@ def test_build_agent_env_proxy_fail_in_dev_with_opt_in_keeps_llm_only(monkeypatc
     from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner
 
     _seed_raw_env(monkeypatch)
+    monkeypatch.setenv("OPENACE_SECURITY_MODE", "development")
     _patch_proxy(monkeypatch, fail=True)
     _patch_config(monkeypatch)
     monkeypatch.setenv("OPENACE_ALLOW_RAW_KEY_FALLBACK", "1")
@@ -150,6 +154,7 @@ def test_executor_build_env_with_token_scrubs_raw(monkeypatch):
     import executor
 
     monkeypatch.setenv("OPENAI_API_KEY", "raw-openai")
+    monkeypatch.setenv("OPENACE_SECURITY_MODE", "development")
     monkeypatch.delenv("FLASK_ENV", raising=False)
     monkeypatch.setattr(executor, "get_adapter", lambda cli: _FakeAdapter())
 
@@ -164,7 +169,7 @@ def test_executor_build_env_with_token_scrubs_raw(monkeypatch):
 def test_executor_build_env_empty_token_in_production_raises(monkeypatch):
     import executor
 
-    monkeypatch.setenv("FLASK_ENV", "production")
+    monkeypatch.setenv("OPENACE_SECURITY_MODE", "production")
     monkeypatch.delenv("OPENACE_ALLOW_RAW_KEY_FALLBACK", raising=False)
     monkeypatch.setattr(executor, "get_adapter", lambda cli: _FakeAdapter())
 
@@ -179,7 +184,7 @@ def test_executor_build_env_allow_empty_token_restores_scrubbed(monkeypatch):
     # raw creds; a fresh token is minted before use.
     import executor
 
-    monkeypatch.setenv("FLASK_ENV", "production")
+    monkeypatch.setenv("OPENACE_SECURITY_MODE", "production")
     monkeypatch.setenv("OPENAI_API_KEY", "raw-openai")
     monkeypatch.setenv("GH_TOKEN", "raw-gh")
     monkeypatch.delenv("OPENACE_ALLOW_RAW_KEY_FALLBACK", raising=False)

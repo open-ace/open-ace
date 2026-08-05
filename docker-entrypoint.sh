@@ -770,9 +770,32 @@ except Exception:
     fi
 
     echo "Running database migrations..."
-    alembic upgrade head
-    if [ $? -ne 0 ]; then
+    if ! alembic upgrade head; then
+        echo ""
         echo "ERROR: alembic upgrade head failed"
+        echo ""
+        echo "Database schema migration failed. This could indicate:"
+        echo "  - Database schema is incompatible or corrupted"
+        echo "  - Network connectivity issues"
+        echo "  - Insufficient database permissions"
+        echo ""
+        echo "Recovery steps:"
+        echo "  1. Verify database connection:"
+        echo "     pg_isready -h <host> -p <port>"
+        echo ""
+        echo "  2. Check current schema version:"
+        echo "     alembic current"
+        echo ""
+        echo "  3. Review migration history:"
+        echo "     alembic history"
+        echo ""
+        echo "  4. For fresh databases, ensure schema is initialized:"
+        echo "     alembic upgrade head"
+        echo ""
+        echo "  5. If migration is blocked, restore from backup:"
+        echo "     pg_restore -d <database> <backup_file>"
+        echo ""
+        echo "Issue #2190: Schema authority model enforcement"
         exit 1
     fi
 
@@ -922,11 +945,83 @@ def create_system_user(username):
             print(f'  Home directory ownership correct: {user_home}')
 
     # Sync SSH keys if mounted (Issue #1122)
-    sync_ssh_keys(username)
+    # 【安全加固 Issue #2182】使用独立的 Python 脚本实现安全同步
+    sync_ssh_keys_safe(username)
 
 
-def sync_ssh_keys(username):
-    \"\"\"Sync SSH keys from /root/.ssh to user's home directory.\"\"\"
+def sync_ssh_keys_safe(username):
+    \"\"\"
+    安全同步 SSH 密钥（Issue #2182）
+
+    使用独立的 Python 脚本 /usr/local/bin/openace-ssh-sync 实现：
+    - 白名单机制：默认只允许 known_hosts 等安全文件
+    - 禁止清单：明确禁止私钥、证书、socket、token 等危险文件
+    - TOCTOU 防护：使用文件描述符操作防止竞态条件
+    - 硬链接检测：防止通过硬链接绕过 symlink 检测
+    - Owner/Group 验证：确保同步文件的 owner 正确
+    - 审计日志：记录所有同步操作
+    - 升级检测：检测并处理旧版本复制的私钥
+    \"\"\"
+    root_ssh = '/root/.ssh'
+    user_ssh = f'/home/{username}/.ssh'
+
+    # Skip if SSH keys not mounted
+    if not os.path.isdir(root_ssh):
+        return
+
+    # 检查是否有新的安全同步脚本
+    ssh_sync_script = '/usr/local/bin/openace-ssh-sync'
+
+    if os.path.isfile(ssh_sync_script) and os.access(ssh_sync_script, os.X_OK):
+        # 使用新的安全同步脚本
+        print(f'  Using secure SSH key sync for {username}')
+
+        try:
+            # 检测 legacy 私钥（如果配置）
+            upgrade_action = os.environ.get('OPENACE_SSH_UPGRADE_ACTION', 'backup')
+
+            # 调用 Python 脚本进行安全同步
+            result = subprocess.run(
+                [
+                    ssh_sync_script,
+                    '--user', username,
+                    '--upgrade-action', upgrade_action,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+
+            if result.returncode == 0:
+                print(f'  SSH keys securely synced to {user_ssh}')
+                if result.stdout:
+                    print(f'    {result.stdout.strip()}')
+            else:
+                print(f'  WARNING: SSH key sync failed: {result.stderr.strip()}')
+                # 回退到旧的同步逻辑（保持兼容性）
+                _sync_ssh_keys_legacy(username)
+
+        except subprocess.TimeoutExpired:
+            print(f'  WARNING: SSH key sync timed out')
+            # 回退到旧的同步逻辑（保持兼容性）
+            _sync_ssh_keys_legacy(username)
+        except Exception as e:
+            print(f'  WARNING: SSH key sync error: {e}')
+            # 回退到旧的同步逻辑（保持兼容性）
+            _sync_ssh_keys_legacy(username)
+    else:
+        # 脚本不存在，使用旧的同步逻辑（向后兼容）
+        print(f'  WARNING: Secure SSH sync script not found, using legacy sync')
+        _sync_ssh_keys_legacy(username)
+
+
+def _sync_ssh_keys_legacy(username):
+    \"\"\"
+    旧的 SSH 密钥同步逻辑（向后兼容）
+
+    注意：这个函数存在安全问题，仅在新脚本不可用时使用
+    Issue #2182 标记为待移除
+    \"\"\"
     import shutil
     import stat
 
@@ -945,6 +1040,10 @@ def sync_ssh_keys(username):
     except OSError:
         return
 
+    # 【安全加固 Issue #2182】警告：以下逻辑存在安全风险
+    # 仅在新脚本不可用时使用，应该在后续版本移除
+    print(f'  WARNING: Using legacy SSH key sync (insecure)')
+
     # Create user's .ssh directory
     os.makedirs(user_ssh, exist_ok=True)
 
@@ -955,7 +1054,7 @@ def sync_ssh_keys(username):
 
         if os.path.isfile(src):
             shutil.copy2(src, dst)
-            # Private keys: 600, others: 644
+            # 私钥文件：600，其他：644
             if filename.startswith('id_') and not filename.endswith('.pub'):
                 os.chmod(dst, stat.S_IRUSR)
             else:
@@ -963,7 +1062,7 @@ def sync_ssh_keys(username):
 
     # Set ownership
     subprocess.run(['chown', '-R', f'{username}:{username}', user_ssh], capture_output=True)
-    print(f'  SSH keys synced to {user_ssh}')
+    print(f'  SSH keys synced to {user_ssh} (legacy mode)')
 
 try:
     conn = psycopg2.connect(os.environ['DATABASE_URL'])
@@ -1036,10 +1135,11 @@ except Exception as e:
 openace ALL=(root) NOPASSWD: ${WRAPPER_PATH} --isolated *"
         fi
 
-        # 【安全加固 Issue #1855】安全 wrapper 脚本 sudoers 规则
+        # 【安全加固 Issue #1855 + #2181】安全 wrapper 脚本 sudoers 规则
         # 使用 wrapper 替代通配命令，wrapper 内部做参数校验和审计日志
+        # Issue #2181: 添加 openace-rm wrapper 替代 rm * 通配
         SECURITY_WRAPPERS_RULE=""
-        for wrapper in openace-chown openace-useradd openace-cat openace-mkdir openace-write-as; do
+        for wrapper in openace-chown openace-useradd openace-cat openace-mkdir openace-write-as openace-rm; do
             wrapper_path="/usr/local/bin/${wrapper}"
             if [ -x "$wrapper_path" ]; then
                 SECURITY_WRAPPERS_RULE="${SECURITY_WRAPPERS_RULE}open-ace ALL=(root) NOPASSWD: ${wrapper_path} *
@@ -1143,30 +1243,40 @@ Cmnd_Alias GH_SAFE = \
     ${GH_PATH} api repos/*/pulls/*/comments --jq *, \
     ${GH_PATH} api repos/*/issues/*/comments --jq *
 
-# 【安全加固 Issue #1855】移除高风险通配命令
-# 原 cat/chown/useradd 通配已移除，改用安全 wrapper 脚本
-# 保留的低风险命令：test, ls, stat, mkdir, id, rm
+# 【安全加固 Issue #1855 + #2181】移除高风险通配命令
+# 原 cat/chown/useradd/rm 通配已移除，改用安全 wrapper 脚本
+# 保留的低风险命令：test, ls, stat, mkdir, id, find
 # 注意：mkdir 和 id 保留通配，因为参数风险较低
-# rm 通配用于个人文件页删除（Issue #1902）：sudo -u <owner> rm <path>，
-# 仅能删除目标用户有权删除的文件（DAC 充分约束）。
-Cmnd_Alias OPENACE_UTILS = /usr/bin/test *, /usr/bin/ls *, /usr/bin/stat *, /usr/bin/mkdir *, /usr/bin/id *, /usr/bin/rm *
+# find 是只读操作，DAC 已保护敏感目录
+# rm 通过 openace-rm wrapper 实现（Issue #2181）
+Cmnd_Alias OPENACE_UTILS = /usr/bin/test *, /usr/bin/ls *, /usr/bin/stat *, /usr/bin/mkdir *, /usr/bin/id *, /usr/bin/find *
 
-# 【修复 Issue #1395】autonomous 开发 CLI 工具权限
-Cmnd_Alias OPENACE_CLI = /usr/bin/qwen *, /usr/local/bin/qwen *, /usr/bin/qwen-code *, /usr/local/bin/qwen-code *, /usr/bin/codex *, /usr/local/bin/codex *, /usr/bin/claude *, /usr/local/bin/claude *, /usr/bin/openclaw *, /usr/local/bin/openclaw *, /usr/bin/zcode *, /usr/local/bin/zcode *
+# 【安全加固 Issue #2181】删除 AI CLI 通配规则
+# 原 OPENACE_CLI 已删除，所有 AI CLI 启动必须通过 openace-run-as --isolated
+# 该 wrapper 已实现目标用户验证、禁止 root 运行、环境隔离
 
 # ============================================================================
 # 用户权限配置
 # ============================================================================
-open-ace ALL=(ALL) NOPASSWD: ${WEBUI_PATH} *
-openace ALL=(ALL) NOPASSWD: ${WEBUI_PATH} *
-open-ace ALL=(ALL) NOPASSWD: GIT_SAFE
-openace ALL=(ALL) NOPASSWD: GIT_SAFE
-open-ace ALL=(ALL) NOPASSWD: GH_SAFE
-openace ALL=(ALL) NOPASSWD: GH_SAFE
-open-ace ALL=(ALL) NOPASSWD: OPENACE_UTILS
-openace ALL=(ALL) NOPASSWD: OPENACE_UTILS
-open-ace ALL=(ALL) NOPASSWD: OPENACE_CLI
-openace ALL=(ALL) NOPASSWD: OPENACE_CLI
+# WebUI 启动规则：允许以任意用户运行，Python 层验证目标用户是否在数据库映射中
+# 使用 openace-webui-launch wrapper 限定首参为 WEBUI_PATH，防止权限提升 (Issue #2305)
+# 若 wrapper 不存在则回退到旧规则（向后兼容）
+WEBUI_LAUNCH_WRAPPER="/usr/local/bin/openace-webui-launch"
+if [ -x "$WEBUI_LAUNCH_WRAPPER" ]; then
+    open-ace ALL=(ALL) NOPASSWD: ${WEBUI_LAUNCH_WRAPPER} "${WEBUI_PATH}" *
+    openace ALL=(ALL) NOPASSWD: ${WEBUI_LAUNCH_WRAPPER} "${WEBUI_PATH}" *
+else
+    open-ace ALL=(ALL) NOPASSWD: ${WEBUI_PATH} *
+    openace ALL=(ALL) NOPASSWD: ${WEBUI_PATH} *
+fi
+# Git/GH 精确白名单：参数已限定，无法注入危险操作
+open-ace ALL=(root) NOPASSWD: GIT_SAFE
+openace ALL=(root) NOPASSWD: GIT_SAFE
+open-ace ALL=(root) NOPASSWD: GH_SAFE
+openace ALL=(root) NOPASSWD: GH_SAFE
+# 低风险工具：test, ls, stat, mkdir, id, find（只读或低风险）
+open-ace ALL=(root) NOPASSWD: OPENACE_UTILS
+openace ALL=(root) NOPASSWD: OPENACE_UTILS
 ${WRAPPER_RULE}
 ${SECURITY_WRAPPERS_RULE}
 # ============================================================================
@@ -1179,12 +1289,14 @@ ${SECURITY_WRAPPERS_RULE}
 # ============================================================================
 # Preserve environment variables for sudo env_keep passing.
 # ============================================================================
-# PATH is preserved so the sudo'd qwen-code-webui subprocess can resolve the
-# node binary (Issue #1083). NODE_PATH is intentionally NOT preserved: the
-# webui_manager no longer sets it (it controls Node *module* resolution, not
-# the binary path), so keeping it here was dead config.
-# GH_TOKEN and GIT_* vars are for autonomous dev GitHub operations (Issue #1517).
-Defaults env_keep += "OPENAI_API_KEY OPENAI_BASE_URL BAILIAN_CODING_PLAN_API_KEY ANTHROPIC_API_KEY ANTHROPIC_BASE_URL GEMINI_API_KEY GEMINI_BASE_URL OPENCLAW_TOKEN OPENCLAW_GATEWAY_URL OPENACE_LOG_DIR OPENACE_PROXY_TOKEN OPENACE_PROXY_URL SESSION_TIMEOUT_MS KEEPALIVE_INTERVAL_MS PATH GH_TOKEN GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL QWEN_SYSTEM_MD"
+# 【安全加固 Issue #2181】清理敏感变量
+# Agent 进程通过 openace-run-as --isolated 使用 env -i，不继承 env_keep
+# env_keep 主要用于 WebUI 启动（sudo -u），需要清理敏感凭据
+# 移除：OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY, OPENCLAW_TOKEN, GH_TOKEN
+# 保留：非敏感变量（proxy_token, GIT_*签名变量, PATH）
+# 例外保留 QWEN_SYSTEM_MD：webui_manager 需将自定义系统提示文件路径传给
+# qwen-code-webui 子进程（本地修复，勿移除）。
+Defaults env_keep += "OPENACE_PROXY_TOKEN OPENACE_PROXY_URL OPENACE_MODEL OPENACE_LOG_DIR PATH QWEN_SYSTEM_MD"
 SUDOERS_EOF
         chmod 440 /etc/sudoers.d/open-ace-webui
 

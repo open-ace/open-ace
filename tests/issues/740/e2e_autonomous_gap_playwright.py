@@ -1690,7 +1690,8 @@ def step_test_session_and_diff_modals(page):
                 else:
                     # Might show "no diff" or loading
                     log(
-                        "MODAL-CONTENT", "  ⚠️  Diff content not visible (may be loading or no diff)"
+                        "MODAL-CONTENT",
+                        "  ⚠️  Diff content not visible (may be loading or no diff)",
                     )
 
             # Close diff modal

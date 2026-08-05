@@ -32,6 +32,7 @@ import {
 import { useConfirm } from '@/components/common';
 import {
   ssoApi,
+  systemApi,
   tenantApi,
   type SSOProvider,
   type PredefinedProvider,
@@ -69,7 +70,7 @@ export const SSOSettings: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // SSO settings state
+  // SSO settings state (sso_enabled is system-level, autoProvision is tenant-level)
   const [ssoEnabled, setSsoEnabled] = useState(false);
   const [autoProvision, setAutoProvision] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -164,6 +165,18 @@ export const SSOSettings: React.FC = () => {
     }
   }, [effectiveTenantId]);
 
+  // Fetch system-level SSO setting
+  useEffect(() => {
+    systemApi
+      .getSSOEnabled()
+      .then(({ sso_enabled }) => {
+        setSsoEnabled(sso_enabled);
+      })
+      .catch((err) => {
+        console.error('Failed to fetch system settings:', err);
+      });
+  }, []);
+
   // Fetch tenant settings
   useEffect(() => {
     if (!effectiveTenantId) return;
@@ -172,7 +185,6 @@ export const SSOSettings: React.FC = () => {
       .getTenant(effectiveTenantId)
       .then((tenant) => {
         const settings = tenant.settings as Record<string, unknown>;
-        setSsoEnabled(Boolean(settings?.sso_enabled ?? false));
         setAutoProvision(Boolean(settings?.auto_provision_users ?? false));
       })
       .catch((err) => {
@@ -217,8 +229,10 @@ export const SSOSettings: React.FC = () => {
 
     setIsSaving(true);
     try {
+      // Save system-level SSO setting
+      await systemApi.updateSystemSettings({ sso_enabled: ssoEnabled });
+      // Save tenant-level auto_provision setting
       await tenantApi.updateSettings(effectiveTenantId, {
-        sso_enabled: ssoEnabled,
         auto_provision_users: autoProvision,
       });
       success(t('settingsSaved', language));
@@ -478,6 +492,10 @@ export const SSOSettings: React.FC = () => {
                   {t('ssoEnabledDesc', language)}
                 </span>
               </div>
+              <small className="text-muted d-block mt-1">
+                <i className="bi bi-info-circle me-1" />
+                {t('ssoSystemSettingHint', language)}
+              </small>
             </div>
             <div className="col-md-6">
               <div className="form-check form-switch">
@@ -496,6 +514,10 @@ export const SSOSettings: React.FC = () => {
                   {t('autoProvisionDesc', language)}
                 </span>
               </div>
+              <small className="text-muted d-block mt-1">
+                <i className="bi bi-info-circle me-1" />
+                {t('autoProvisionHint', language)}
+              </small>
             </div>
           </div>
           <div className="mt-3">

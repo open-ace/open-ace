@@ -456,7 +456,9 @@ class TestCompiledPatternCache:
             try:
                 compiled = cf._get_compiled_pattern(pattern, re.IGNORECASE)
                 results.append(compiled is not None)
-            except Exception as e:
+            except (
+                Exception
+            ) as e:  # allow-swallow: collect per-thread errors; the driving test asserts errors is empty
                 errors.append(e)
 
         # Create multiple threads

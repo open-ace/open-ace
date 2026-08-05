@@ -119,6 +119,84 @@ class ToolAccountMappingRuleRepository:
             logger.error(f"Error creating mapping rule: {e}")
             return None
 
+    def create_or_ignore(
+        self,
+        user_id: int,
+        pattern: str,
+        match_type: str = "exact",
+        tool_type: str | None = None,
+        priority: int = 0,
+        is_auto: bool = True,
+        is_active: bool = True,
+        description: str | None = None,
+    ) -> ToolAccountMappingRule | None:
+        """
+        Create a new mapping rule using UPSERT to avoid unique constraint exceptions.
+
+        Returns:
+            ToolAccountMappingRule: Successfully inserted rule
+            None: Rule already exists (conflict), no exception raised
+
+        Note:
+            Database errors (other than unique constraint violations) are raised as exceptions.
+
+            **Database-specific behavior:**
+            - PostgreSQL: Returns None when ON CONFLICT DO NOTHING is triggered
+            - SQLite: Returns the existing rule (with full data) due to extra SELECT query
+              This difference exists because older SQLite versions don't support RETURNING.
+        """
+        from app.repositories.database import is_postgresql
+
+        params = (
+            user_id,
+            pattern,
+            match_type,
+            tool_type,
+            priority,
+            is_auto,
+            is_active,
+            description,
+        )
+
+        if is_postgresql():
+            # PostgreSQL: Use ON CONFLICT DO NOTHING with RETURNING
+            # When conflict occurs, RETURNING returns no rows (None)
+            query = """
+                INSERT INTO tool_account_mapping_rules
+                (user_id, pattern, match_type, tool_type, priority, is_auto, is_active, description)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (user_id, pattern, match_type) DO NOTHING
+                RETURNING *
+            """
+            try:
+                row = self.db.fetch_one(query, params, commit=True)
+                # row is None when ON CONFLICT DO NOTHING triggered
+                return self._row_to_model(row) if row else None
+            except Exception as e:
+                # Log and re-raise non-constraint errors
+                logger.error(f"Database error in create_or_ignore: {e}")
+                raise
+        else:
+            # SQLite: Use INSERT OR IGNORE
+            # SQLite doesn't support RETURNING in older versions, so we need to query after insert
+            query = """
+                INSERT OR IGNORE INTO tool_account_mapping_rules
+                (user_id, pattern, match_type, tool_type, priority, is_auto, is_active, description)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """
+            try:
+                self.db.execute(query, params)
+                # Query to check if the rule exists (either just inserted or already existed)
+                row = self.db.fetch_one(
+                    "SELECT * FROM tool_account_mapping_rules "
+                    "WHERE user_id = ? AND pattern = ? AND match_type = ?",
+                    (user_id, pattern, match_type),
+                )
+                return self._row_to_model(row) if row else None
+            except Exception as e:
+                logger.error(f"Database error in create_or_ignore: {e}")
+                raise
+
     def update(
         self,
         id: int,
@@ -216,10 +294,10 @@ class ToolAccountMappingRuleRepository:
     def batch_create_for_user(
         self, user_id: int, rules: list[dict]
     ) -> list[ToolAccountMappingRule]:
-        """Batch create rules for a user."""
+        """Batch create rules for a user using create_or_ignore to avoid conflicts."""
         results = []
         for rule in rules:
-            created = self.create(
+            created = self.create_or_ignore(
                 user_id=user_id,
                 pattern=rule.get("pattern", ""),
                 match_type=rule.get("match_type", "exact"),

@@ -180,7 +180,13 @@ class FeishuOrgSyncService:
         if not app_id or not app_secret:
             raise ValueError("Feishu app_id and app_secret must be configured before syncing")
 
-        effective_tenant_id = int(tenant_id or config.get("org_sync_tenant_id") or 1)
+        # Issue #2179: Fail-Closed - 必须显式配置同步目标租户
+        effective_tenant_id = tenant_id or config.get("org_sync_tenant_id")
+        if effective_tenant_id is None:
+            raise ValueError(
+                "飞书同步未配置 org_sync_tenant_id。" "请在租户设置中配置同步目标租户。"
+            )
+        effective_tenant_id = int(effective_tenant_id)
         result = FeishuOrgSyncResult(
             tenant_id=effective_tenant_id,
             started_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
@@ -488,14 +494,16 @@ class FeishuOrgSyncService:
                 "app_id": get_config_value("feishu", "app_id", ""),
                 "app_secret": get_config_value("feishu", "app_secret", ""),
                 "org_sync_enabled": bool(get_config_value("feishu", "org_sync_enabled", False)),
-                "org_sync_tenant_id": int(get_config_value("feishu", "org_sync_tenant_id", 1) or 1),
+                # Issue #2179: Fail-Closed - 不再默认为 1，必须显式配置
+                "org_sync_tenant_id": get_config_value("feishu", "org_sync_tenant_id"),
                 "org_sync_interval_minutes": int(
                     get_config_value("feishu", "org_sync_interval_minutes", 60) or 60
                 ),
             }
 
         config.setdefault("org_sync_enabled", False)
-        config.setdefault("org_sync_tenant_id", 1)
+        # Issue #2179: Fail-Closed - 不再设置默认值
+        # config.setdefault("org_sync_tenant_id", 1)
         config.setdefault("org_sync_interval_minutes", 60)
         # Watchdog ceiling for a single sync run; a run exceeding this is treated
         # as hung. Opt-in auto-recover force-releases the advisory lock so the next
@@ -846,8 +854,22 @@ class FeishuOrgSyncService:
         return team_id, True
 
     def _load_synced_teams(self) -> dict[str, dict[str, Any]]:
-        """Return existing teams that are owned by Feishu org sync."""
-        rows = self.db.fetch_all("SELECT team_id, name, settings FROM teams")
+        """Return existing teams that are owned by Feishu org sync.
+
+        Issue #2174 F1/F5: Optimized with WHERE clause and database index
+        to avoid full table scan.
+        """
+        # Use WHERE clause to filter at database level
+        # This leverages the idx_teams_feishu_sync partial index
+        # Note: Using JSON_EXTRACT for SQLite compatibility (Issue #2174)
+        # PostgreSQL supports settings->>'sync_source', but SQLite requires json_extract
+        query = """
+            SELECT team_id, name, settings
+            FROM teams
+            WHERE json_extract(settings, '$.sync_source') = ?
+        """
+        rows = self.db.fetch_all(query, (FEISHU_PROVIDER_NAME,))
+
         synced: dict[str, dict[str, Any]] = {}
         for row in rows:
             settings_raw = row.get("settings")
@@ -861,11 +883,11 @@ class FeishuOrgSyncService:
                 continue
             if not isinstance(settings, dict):
                 continue
-            if settings.get("sync_source") != FEISHU_PROVIDER_NAME:
-                continue
+            # Extract department_id (already filtered by sync_source at DB level)
             department_id = settings.get("feishu_department_id")
             if department_id:
                 synced[str(department_id)] = row
+
         return synced
 
     def _resolve_local_user(

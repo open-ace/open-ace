@@ -38,6 +38,10 @@ class FakeDingTalkOrgSyncService(DingTalkOrgSyncService):
 @pytest.fixture
 def sync_env(tmp_path, monkeypatch):
     """Create an isolated SQLite-backed sync environment."""
+    # Issue #1820: Reset EncryptionKeyRegistry before setting new key
+    from app.utils.encryption_key_registry import reset_registry
+
+    reset_registry()
     monkeypatch.setenv("OPENACE_ENCRYPTION_KEY", "test-dingtalk-org-sync-key")
     smtp_crypto._password_manager_instance = None
 
@@ -59,6 +63,8 @@ def sync_env(tmp_path, monkeypatch):
         yield db, config
     finally:
         smtp_crypto._password_manager_instance = None
+        # Issue #1820: Reset EncryptionKeyRegistry after test
+        reset_registry()
 
 
 def test_sync_creates_users_teams_memberships_and_sso_links(sync_env):

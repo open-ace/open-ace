@@ -9,6 +9,7 @@ import logging
 import os
 import secrets
 import threading
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, cast
 
@@ -22,6 +23,7 @@ from app.modules.sso.provider import (
     get_provider_config,
 )
 from app.modules.sso.saml import SAMLProvider
+from app.modules.sso.secret_holder import SecretHolder
 from app.repositories.database import Database, adapt_boolean_condition, adapt_boolean_value
 from app.utils.smtp_crypto import get_password_manager
 
@@ -41,6 +43,9 @@ AUTH_STATE_CLEANUP_INTERVAL_SECONDS = int(
 
 # Batch size for cleanup operations
 CLEANUP_BATCH_SIZE = int(os.environ.get("OPENACE_SSO_CLEANUP_BATCH_SIZE", "1000"))
+
+# Issue #1826 F1/F7: TTL for cached provider client_secret (default 5 minutes)
+PROVIDER_CACHE_TTL_SECONDS = int(os.environ.get("SSO_SECRET_CACHE_TTL_SECONDS", "300"))
 
 
 # ============================================================================
@@ -79,10 +84,23 @@ class SSOManager:
         self._providers_lock = threading.Lock()
         self._password_manager = get_password_manager()
 
+        # Issue #1826 F1/F7: Track cache timestamps for TTL
+        self._provider_cache_time: dict[str, float] = {}
+
     def serialize_provider_config(self, config_data: dict[str, Any]) -> str:
-        """Serialize provider config for storage, encrypting the client secret."""
+        """Serialize provider config for storage, encrypting the client secret.
+
+        Issue #2174 F5: Handle SecretHolder objects when serializing.
+        """
         stored = dict(config_data)
-        client_secret = cast("str", stored.pop("client_secret", "") or "")
+        client_secret_obj = stored.pop("client_secret", "")
+
+        # Issue #2174 F5: Extract plaintext from SecretHolder if needed
+        if isinstance(client_secret_obj, SecretHolder):
+            client_secret = client_secret_obj.get()
+        else:
+            client_secret = cast("str", client_secret_obj or "")
+
         stored.pop("client_secret_encrypted", None)
         stored["client_secret_encrypted"] = (
             self._password_manager.encrypt(client_secret) if client_secret else ""
@@ -103,32 +121,69 @@ class SSOManager:
 
         Raises:
             SSOConfigDecryptionError: If decryption fails (Issue #1815 Finding 1).
+
+        Issue #2174 F5: Wrap decrypted secrets in SecretHolder to prevent
+        accidental logging and implement decrypt-on-demand caching.
         """
         config_data = (
             cast("dict[str, Any]", json.loads(raw_config))
             if isinstance(raw_config, str)
             else dict(raw_config)
         )
+
+        # Issue #1826 F5: Check if encrypted field exists before popping
+        has_encrypted_field = "client_secret_encrypted" in config_data
         encrypted_secret = config_data.pop("client_secret_encrypted", "")
 
-        client_secret = cast("str", config_data.get("client_secret", "") or "")
+        # Issue #2174 F5: Wrap in SecretHolder for decrypt-on-demand
+        # SecretHolder will decrypt only when accessed and cache with TTL
         if encrypted_secret:
+            # Issue #1815 Finding 1: Validate encrypted secret by trying to decrypt
+            # This ensures we raise SSOConfigDecryptionError early (at load time)
+            # rather than later when the secret is accessed
             try:
-                client_secret = self._password_manager.decrypt(encrypted_secret)
+                # Validate by attempting decryption (result discarded)
+                _ = self._password_manager.decrypt(encrypted_secret)
             except Exception as e:
-                # Issue #1815 Finding 1: Fail-fast instead of silent fallback
-                # Determine provider name for error message
-                name = provider_name or config_data.get("name", "unknown")
-                logger.error(
-                    f"SSO provider '{name}' client_secret decryption failed: {e}",
-                    exc_info=True,
-                )
+                # Wrap in SSOConfigDecryptionError with context
                 raise SSOConfigDecryptionError(
-                    provider_name=name,
+                    provider_name=provider_name or "unknown",
                     original_error=e,
-                ) from e
+                )
+            # Wrap in SecretHolder for secure handling
+            config_data["client_secret"] = SecretHolder(
+                encrypted_blob=encrypted_secret,
+                password_manager=self._password_manager,
+                ttl_seconds=PROVIDER_CACHE_TTL_SECONDS,
+            )
+        elif has_encrypted_field:
+            # Issue #1826 F5: Field exists (possibly empty) → force empty secret
+            # Use empty SecretHolder that returns empty string
+            config_data["client_secret"] = SecretHolder(
+                encrypted_blob="",
+                password_manager=self._password_manager,
+                ttl_seconds=PROVIDER_CACHE_TTL_SECONDS,
+            )
+        else:
+            # Issue #2174 F5: Legacy plaintext secret - encrypt and wrap in SecretHolder
+            # This ensures consistent interface (all secrets accessed via .get())
+            client_secret = cast("str", config_data.get("client_secret", "") or "")
+            if client_secret:
+                # Encrypt the plaintext secret before wrapping
+                encrypted_legacy = self._password_manager.encrypt(client_secret)
+                config_data["client_secret"] = SecretHolder(
+                    encrypted_blob=encrypted_legacy,
+                    password_manager=self._password_manager,
+                    ttl_seconds=PROVIDER_CACHE_TTL_SECONDS,
+                )
+            else:
+                # Empty secret - use empty SecretHolder
+                config_data["client_secret"] = SecretHolder(
+                    encrypted_blob="",
+                    password_manager=self._password_manager,
+                    ttl_seconds=PROVIDER_CACHE_TTL_SECONDS,
+                )
 
-        config_data["client_secret"] = client_secret
         return config_data
 
     def _ensure_tables(self) -> None:
@@ -348,11 +403,23 @@ class SSOManager:
 
         Returns:
             Optional[SSOProvider]: Provider instance or None.
+
+        Issue #1826 F1/F7: Cache provider with TTL to limit exposure window.
         """
-        # Check cache
+        # Issue #1826 F1/F7: Check cache with TTL
         with self._providers_lock:
             if name in self._providers:
-                return self._providers[name]
+                # Check if cache is still valid
+                cache_time = self._provider_cache_time.get(name, 0)
+                current_time = time.time()
+
+                if current_time - cache_time < PROVIDER_CACHE_TTL_SECONDS:
+                    return self._providers[name]
+                else:
+                    # Cache expired, remove from cache
+                    logger.debug(f"Provider {name} cache expired, refreshing...")
+                    del self._providers[name]
+                    self._provider_cache_time.pop(name, None)
 
         # Load from database
         row = self.db.fetch_one(
@@ -384,9 +451,10 @@ class SSOManager:
             provider_class = get_provider_class(config.provider_type)
             provider = provider_class(config)
 
-            # Cache it
+            # Issue #1826 F1/F7: Cache it with timestamp
             with self._providers_lock:
                 self._providers[name] = provider
+                self._provider_cache_time[name] = time.time()
 
             return cast("SSOProvider | None", provider)
 
@@ -477,6 +545,9 @@ class SSOManager:
 
         Returns:
             Optional[Dict]: Dict with 'authorization_url' and 'state' or None.
+
+        Raises:
+            Exception: If auth state storage fails (Issue #1826 F2).
         """
         provider = self.get_provider(provider_name)
         if not provider:
@@ -489,6 +560,7 @@ class SSOManager:
         if provider.provider_type == "saml" and isinstance(provider, SAMLProvider):
             auth_url = provider.get_authorization_url(state=state, redirect_uri=redirect_uri)
             request_id = provider.last_request_id or ""
+            # Issue #1826 F2: Let auth state storage failure propagate
             self._store_auth_state(state, request_id, provider_name, None)
             return {
                 "authorization_url": auth_url,
@@ -512,6 +584,7 @@ class SSOManager:
         )
 
         # Store state for verification (in production, use Redis or similar)
+        # Issue #1826 F2: Let auth state storage failure propagate
         self._store_auth_state(state, code_verifier, provider_name, nonce)
 
         return {
@@ -814,21 +887,19 @@ class SSOManager:
         instead of a clear error (Issue #237 item 4, review note).
 
         Issue #1815 Finding 2: Added expires_at for TTL-based cleanup.
+        Issue #1826 Finding 2 (F2): Fail-fast instead of swallowing INSERT failure.
         """
-        try:
-            expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(
-                seconds=AUTH_STATE_TTL_SECONDS
-            )
-            self.db.execute(
-                """
-                INSERT INTO sso_auth_states (state, code_verifier, provider_name, nonce, expires_at)
-                VALUES (?, ?, ?, ?, ?)
-            """,
-                (state, code_verifier, provider_name, nonce, expires_at),
-            )
-
-        except Exception as e:
-            logger.error(f"Failed to store auth state: {e}")
+        expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(
+            seconds=AUTH_STATE_TTL_SECONDS
+        )
+        # Issue #1826 F2: Let INSERT failure propagate to caller for proper error handling
+        self.db.execute(
+            """
+            INSERT INTO sso_auth_states (state, code_verifier, provider_name, nonce, expires_at)
+            VALUES (?, ?, ?, ?, ?)
+        """,
+            (state, code_verifier, provider_name, nonce, expires_at),
+        )
 
     def _get_auth_state(self, state: str) -> dict[str, Any] | None:
         """Get authentication state, excluding expired entries.
@@ -951,22 +1022,45 @@ def _release_cleanup_lock() -> None:
 
 
 def _cleanup_tick() -> None:
-    """Single cleanup tick executed by timer."""
+    """Single cleanup tick executed by timer with distributed lock (Issue #2187)."""
+    import time
+
     global _shutdown_requested
 
     if _shutdown_requested:
         return
 
     try:
-        # Try to acquire lock (single-process guarantee)
-        if _acquire_cleanup_lock():
+        # Use database distributed lock instead of file lock (Issue #2187)
+        from app.repositories.database import Database
+        from app.services.leader_election import LeaderElectionClient
+
+        db = Database()
+        lock_client = LeaderElectionClient(
+            "sso_cleanup", db, strategy="heartbeat", lock_timeout=1800
+        )
+
+        if not lock_client.try_acquire_leadership():
+            logger.debug("SSO cleanup skipped - not leader")
+            lock_client.record_run("skipped")
+        else:
+            start_time = time.time()
+            status = "completed"
+            error_msg = None
+
             try:
                 manager = SSOManager()
                 manager.cleanup_expired_auth_states()
+            except Exception as e:
+                status = "failed"
+                error_msg = str(e)
+                logger.error(f"SSO auth state cleanup error: {e}")
             finally:
-                _release_cleanup_lock()
+                duration_ms = int((time.time() - start_time) * 1000)
+                lock_client.record_run(status, duration_ms, error_msg)
+                lock_client.release_leadership()
     except Exception as e:
-        logger.error(f"SSO auth state cleanup error: {e}")
+        logger.error(f"SSO cleanup distributed lock error: {e}")
 
     # Reschedule if not shutting down
     if not _shutdown_requested:

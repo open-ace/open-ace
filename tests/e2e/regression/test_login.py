@@ -18,14 +18,16 @@ sys.path.insert(
     0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 )
 
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import TimeoutError, sync_playwright
 
 from tests.e2e.regression.test_helpers import (
     BASE_URL,
     PAGE_LOAD_TIMEOUT_MS,
+    PASSWORD,
     TestRunner,
     check_element_exists,
     create_browser_context,
+    dismiss_force_change_password_modal,
     save_screenshot,
 )
 
@@ -56,13 +58,15 @@ def test_login_page_loads():
             assert page.locator('button[type="submit"]').is_visible(), "登录按钮应可见"
 
             save_screenshot(page, MODULE_NAME, "01_login_page")
-            return True
+
         finally:
             browser.close()
 
 
 def test_login_success():
     """测试正确凭据登录成功"""
+    import tests.e2e.regression.test_helpers as helpers
+
     with sync_playwright() as p:
         browser, context = create_browser_context(p)
         page = context.new_page()
@@ -77,13 +81,13 @@ def test_login_success():
 
             # 输入凭据
             page.fill("#username", "admin")
-            page.fill("#password", "admin123")
+            page.fill("#password", helpers.PASSWORD)
             page.click('button[type="submit"]')
 
             # 等待登录成功（bcrypt rounds=12 可能很慢）
             try:
                 page.wait_for_url(lambda url: "/login" not in url, timeout=120000)
-            except Exception as e:
+            except Exception as e:  # allow-swallow: UI element may not exist
                 if "/login" in page.url:
                     raise AssertionError(
                         f"Login did not redirect after 120s. Still on {page.url}. Error: {e}"
@@ -93,7 +97,7 @@ def test_login_success():
             assert "/login" not in page.url, "登录后应重定向到其他页面"
 
             save_screenshot(page, MODULE_NAME, "02_login_success")
-            return True
+
         finally:
             browser.close()
 
@@ -124,13 +128,15 @@ def test_login_failure():
             assert "/login" in page.url, "登录失败应停留在登录页面"
 
             save_screenshot(page, MODULE_NAME, "03_login_failure")
-            return True
+
         finally:
             browser.close()
 
 
 def test_logout():
     """测试登出功能"""
+    import tests.e2e.regression.test_helpers as helpers
+
     with sync_playwright() as p:
         browser, context = create_browser_context(p)
         page = context.new_page()
@@ -144,37 +150,88 @@ def test_logout():
             )
             page.wait_for_selector("#username", state="visible", timeout=10000)
             page.fill("#username", "admin")
-            page.fill("#password", "admin123")
+            page.fill("#password", helpers.PASSWORD)
             page.click('button[type="submit"]')
             try:
                 page.wait_for_url(lambda url: "/login" not in url, timeout=120000)
-            except Exception as e:
+            except Exception as e:  # allow-swallow: UI element may not exist
                 if "/login" in page.url:
                     raise AssertionError(
                         f"Login did not redirect after 120s during logout test. Error: {e}"
                     ) from e
 
-            # 查找并点击登出按钮
-            logout_selectors = [
-                'a[href="/logout"]',
-                'button:has-text("Logout")',
-                '.user-menu a:has-text("Logout")',
-            ]
-            if check_element_exists(page, logout_selectors):
-                try:
-                    logout_btn = page.locator(
-                        logout_selectors[0] + ", " + logout_selectors[1]
-                    ).first
-                    if logout_btn.is_visible():
-                        logout_btn.click()
-                        page.wait_for_timeout(1000)
-                        # 验证重定向到登录页面
-                        assert "/login" in page.url, "登出后应重定向到登录页面"
-                except Exception:
-                    pass
+            # Handle force change password modal (default admin has must_change_password=true)
+            dismiss_force_change_password_modal(page)
 
-            save_screenshot(page, MODULE_NAME, "04_logout")
-            return True
+            # Issue #2189: Logout button is inside a dropdown menu
+            # Need to first click the user avatar to open the dropdown
+            # Header structure: div.dropdown > button.dropdown-toggle > ul.dropdown-menu > li > button.dropdown-item
+            logout_found = False
+            try:
+                # Click user avatar button to open dropdown menu.
+                # Use .header-icon-btn.dropdown-toggle as primary selector (always present
+                # on the user menu button regardless of avatar vs icon).
+                # Fallback: .dropdown-toggle:has(.bi-person-circle) for icon-only mode.
+                user_menu_btn = page.wait_for_selector(
+                    ".header-icon-btn.dropdown-toggle, " ".dropdown-toggle:has(.bi-person-circle)",
+                    state="visible",
+                    timeout=15000,
+                )
+                user_menu_btn.click()
+
+                # Wait for dropdown menu to be visible (not just a fixed timeout)
+                page.wait_for_selector(
+                    ".dropdown-menu.show, .dropdown-menu",
+                    state="visible",
+                    timeout=3000,
+                )
+
+                # Click the logout button in the dropdown menu.
+                # Use text-based selectors (Logout / 退出登录) plus icon-based
+                # fallback (.bi-box-arrow-right) for multi-language robustness.
+                logout_btn = page.wait_for_selector(
+                    "button.dropdown-item:has-text('Logout'), "
+                    "button.dropdown-item:has-text('退出登录'), "
+                    "button.dropdown-item:has(.bi-box-arrow-right)",
+                    state="visible",
+                    timeout=5000,
+                )
+
+                # Ensure the button is still attached before clicking
+                if logout_btn and logout_btn.is_visible():
+                    # Use evaluate to click via JS to avoid "not attached" errors
+                    logout_btn.evaluate("el => el.click()")
+                    logout_found = True
+            except (TimeoutError, Exception) as e:
+                # Log the error for debugging but continue to handle failure
+                print(f"Logout button interaction failed: {e}")
+                logout_found = False
+
+            # Issue #2189: 找不到必须失败
+            if not logout_found:
+                save_screenshot(page, MODULE_NAME, "04_logout_no_button")
+                pytest.fail(
+                    "Logout button not found. Check if user menu dropdown is working. "
+                    "Expected: click user avatar -> see dropdown -> click logout button"
+                )
+
+            # Issue #2189: 等待重定向完成（使用明确条件）
+            try:
+                page.wait_for_url("**/login**", timeout=10000)
+            except TimeoutError:
+                save_screenshot(page, MODULE_NAME, "04_logout_no_redirect")
+                pytest.fail(f"Logout did not redirect to login page. Current URL: {page.url}")
+
+            # Issue #2189: 最终断言
+            assert "/login" in page.url, f"Expected login URL, got {page.url}"
+
+            save_screenshot(page, MODULE_NAME, "04_logout_success")
+
+        except Exception:
+            # 保存失败截图
+            save_screenshot(page, MODULE_NAME, "04_logout_error")
+            raise  # 重新抛出，不吞掉
+
         finally:
             browser.close()
 

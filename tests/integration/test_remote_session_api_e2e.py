@@ -23,6 +23,9 @@ from app.modules.workspace.session_manager import SessionManager, SessionType
 
 @pytest.fixture
 def sqlite_sm(tmp_path, monkeypatch):
+    import app.repositories.database as db_mod
+
+    monkeypatch.setattr(db_mod, "is_postgresql", lambda: False)
     monkeypatch.setattr(sm_mod, "is_postgresql", lambda: False)
     sm = SessionManager(db_path=str(tmp_path / "remote_api.db"))
     sm._ensure_tables()
@@ -31,8 +34,14 @@ def sqlite_sm(tmp_path, monkeypatch):
     for col in ("project_id", "project_path"):
         try:
             cur.execute(f"ALTER TABLE agent_sessions ADD COLUMN {col} TEXT")
-        except Exception:
+        except Exception:  # allow-swallow: idempotent test setup (row may already exist)
             pass
+    # Create default user with tenant_id for fail-closed tenant resolution
+    cur.execute(
+        "INSERT INTO users (id, username, email, password_hash, role, tenant_id) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (1, "test-user", "test@example.com", "hash", "user", 1),
+    )
     conn.commit()
     conn.close()
     return sm
@@ -54,6 +63,14 @@ def manager(sqlite_sm):
         ),
         patch(
             "app.modules.workspace.remote_session_manager.get_evaluator",
+            return_value=MagicMock(),
+        ),
+        patch(
+            "app.modules.workspace.remote_session_manager.UserRepository",
+            return_value=MagicMock(),
+        ),
+        patch(
+            "app.modules.workspace.remote_session_manager.MessageRepository",
             return_value=MagicMock(),
         ),
     ):

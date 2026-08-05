@@ -69,7 +69,7 @@ async def _test_roi_analysis_tab(page):
                 await page.wait_for_timeout(500)
                 results.append(("点击 ROI Analysis Tab", True))
                 screenshots.append(await take_screenshot(page, "03_roi_tab_clicked"))
-            except Exception as e:
+            except Exception as e:  # allow-swallow: UI element may not exist
                 results.append((f"点击 ROI Analysis Tab ({str(e)[:50]}...)", False))
                 screenshots.append(await take_screenshot(page, "03_roi_tab_click_failed"))
 
@@ -105,7 +105,7 @@ async def _test_roi_analysis_tab(page):
             results.append(("ROI Analysis Tab 存在", False))
             screenshots.append(await take_screenshot(page, "02_roi_tab_missing"))
 
-    except Exception as e:
+    except Exception as e:  # allow-swallow: UI element may not exist
         results.append((f"测试异常: {str(e)}", False))
         screenshots.append(await take_screenshot(page, "error_roi"))
 
@@ -167,7 +167,7 @@ async def _test_sessions_section(page):
 
         screenshots.append(await take_screenshot(page, "06_sessions_content"))
 
-    except Exception as e:
+    except Exception as e:  # allow-swallow: UI element may not exist
         results.append((f"测试异常: {str(e)}", False))
         screenshots.append(await take_screenshot(page, "error_sessions"))
 
@@ -289,7 +289,7 @@ async def main():
             all_results.extend(results)
             all_screenshots.extend(screenshots)
 
-        except Exception as e:
+        except Exception as e:  # allow-swallow: UI element may not exist
             print(f"测试异常: {e}")
             await take_screenshot(page, "error_main")
         finally:

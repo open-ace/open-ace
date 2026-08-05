@@ -18,6 +18,7 @@ from enum import Enum
 from typing import Any
 
 from app.repositories.database import DB_PATH, get_database_url, is_postgresql
+from app.utils.helpers import parse_db_datetime
 
 logger = logging.getLogger(__name__)
 
@@ -632,9 +633,8 @@ class StateSyncManager:
             event_id=row["event_id"],
             event_type=row["event_type"],
             timestamp=(
-                datetime.fromisoformat(row["timestamp"])
-                if row["timestamp"]
-                else datetime.now(timezone.utc).replace(tzinfo=None)
+                parse_db_datetime(row["timestamp"])
+                or datetime.now(timezone.utc).replace(tzinfo=None)
             ),
             source=row["source"] or "",
             session_id=row["session_id"],

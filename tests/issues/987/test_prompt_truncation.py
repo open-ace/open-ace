@@ -211,7 +211,11 @@ class TestReportNotTruncated:
 
         gh.add_issue_comment.side_effect = fake_comment
 
-        orch._do_report(wf)
+        ctx = orch._build_workflow_context(wf)
+        orch._do_report(ctx, orch._build_phase_deps())
+        # The issue comment is posted inside _do_report (not by the commit
+        # entrypoint), so this truncation test only needs to exercise the
+        # handler — no _commit_phase_result required.
 
         comment = captured["comment"]
         # plan section not truncated at [:300]

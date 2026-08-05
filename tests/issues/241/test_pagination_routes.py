@@ -144,7 +144,7 @@ class TestOwnershipAnd404:
         """Tenant mismatch must deny access even when user_id matches."""
         app, mgr = app_and_manager
         sid = _make_session(mgr, user_id=1)
-        mgr.update_session_fields(sid, {"user_id": 1})
+        mgr.update_session_fields(sid, {"user_id": 1}, require_tenant=False)
         conn = sm_module.sqlite3.connect(mgr.db_path)
         conn.execute("UPDATE agent_sessions SET tenant_id = ? WHERE session_id = ?", (9, sid))
         conn.commit()

@@ -60,6 +60,59 @@ used for short-lived testing.
 - Python 3.8+
 - websocket-client, requests, websockets (auto-installed)
 
+## Starting and Managing the Agent
+
+After installation, you can use the start scripts to manage the agent process:
+
+### Linux / macOS
+
+```bash
+# Start the agent (skips if already running)
+bash ~/.open-ace-agent/start-agent.sh
+
+# Check agent status
+bash ~/.open-ace-agent/start-agent.sh --status
+
+# Stop the agent
+bash ~/.open-ace-agent/start-agent.sh --stop
+
+# Configure auto-start on boot (requires sudo to create systemd service)
+bash ~/.open-ace-agent/start-agent.sh --auto-start
+```
+
+**Auto-start details:**
+- Systems with systemd (Ubuntu 16.04+, CentOS 7+, RHEL 7+): Creates a systemd service that starts on boot and restarts on crash
+- Environments without systemd (e.g., WSL2): Uses crontab `@reboot` for auto-start
+
+### Windows
+
+```powershell
+# Start the agent (skips if already running)
+powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\.open-ace-agent\start-agent.ps1"
+
+# Check agent status
+powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\.open-ace-agent\start-agent.ps1" -Status
+
+# Stop the agent
+powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\.open-ace-agent\start-agent.ps1" -Stop
+
+# Configure auto-start on login (Windows Task Scheduler)
+powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\.open-ace-agent\start-agent.ps1" -InstallAutoStart
+```
+
+**Auto-start details:**
+- Uses Windows Task Scheduler to start automatically on login
+- Task name: `OpenACEAgent`
+- Can be managed in Task Scheduler
+
+### Shortcut (Windows)
+
+Windows users can also use the batch wrapper:
+
+```cmd
+%USERPROFILE%\.open-ace-agent\start-agent.cmd
+```
+
 ## Configuration
 
 Config file: `~/.open-ace-agent/config.json`

@@ -72,6 +72,7 @@ export interface AutonomousWorkflow {
   max_plan_rounds: number;
   max_pr_review_rounds: number;
   require_full_review_rounds?: boolean;
+  max_changed_files_override?: number | null;
   total_tokens: number;
   total_input_tokens: number;
   total_output_tokens: number;
@@ -84,6 +85,13 @@ export interface AutonomousWorkflow {
   fork_milestone_id: string | null;
   user_feedback: string;
   original_branch_name: string;
+  /**
+   * JSON snapshot (#2020 Phase B) of the resource/isolation policy actually in
+   * effect for this workflow's sandbox at creation time — provider, declared
+   * capabilities, effective limits, and which dimensions are enforced. Null until
+   * a sandbox is created. Parsed lazily by the Runtime & Isolation panel.
+   */
+  sandbox_effective_policy?: string | null;
   created_at: string | null;
   updated_at: string | null;
   completed_at: string | null;
@@ -240,8 +248,11 @@ export const autonomousApi = {
     });
   },
 
-  async retryWorkflow(workflowId: string): Promise<{ success: boolean }> {
-    return apiClient.post(`/api/autonomous/workflows/${workflowId}/retry`);
+  async retryWorkflow(
+    workflowId: string,
+    body?: { max_changed_files_override?: number }
+  ): Promise<{ success: boolean }> {
+    return apiClient.post(`/api/autonomous/workflows/${workflowId}/retry`, body);
   },
 
   async extendPlanningTimeout(

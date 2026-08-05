@@ -44,6 +44,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
+        with:
+          submodules: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -73,6 +75,11 @@ jobs:
 
       - name: Run critical extended tests
         run: |
+          # Issue #2189: Validate collection before running
+          python scripts/run_extended_tests.py \
+            --category critical \
+            --dry-run 2>&1 | grep -E "Collected|Total files" || true
+
           python scripts/run_extended_tests.py \
             --category critical \
             --isolated-home \
@@ -105,6 +112,8 @@ jobs:
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v6
+        with:
+          submodules: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -134,6 +143,11 @@ jobs:
 
       - name: Run full E2E tests
         run: |
+          # Issue #2189: Validate collection before running
+          python scripts/run_extended_tests.py \
+            --category e2e \
+            --dry-run 2>&1 | grep -E "Collected|Total files" || true
+
           python scripts/run_extended_tests.py \
             --category e2e \
             --isolated-home \
@@ -169,6 +183,8 @@ jobs:
         group: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v6
+        with:
+          submodules: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -229,6 +245,8 @@ jobs:
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v6
+        with:
+          submodules: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v6

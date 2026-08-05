@@ -106,7 +106,7 @@ def sanitize_utf8(text: str | None) -> str | None:
     """
     Sanitize text to remove invalid UTF-8 surrogate characters and NUL characters.
 
-    Some messages may contain invalid UTF-8 surrogate pairs (e.g., \udcdd)
+    Some messages may contain invalid UTF-8 surrogate pairs (e.g., \\udcdd)
     which cannot be encoded to UTF-8. NUL characters (\\x00) are also removed
     because PostgreSQL does not support them in string literals.
 

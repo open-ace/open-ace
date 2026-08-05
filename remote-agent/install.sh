@@ -353,6 +353,9 @@ AGENT_FILES=(
     cli_settings.py
     zcode_app_server.py
     tls_config.py
+    start-agent.cmd
+    start-agent.ps1
+    start-agent.sh
     __init__.py
     start-agent.sh
     system-prompt.md

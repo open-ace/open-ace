@@ -35,7 +35,14 @@ def client(app):
 
 class TestUploadAuthConfig:
     def test_placeholder_upload_auth_key_disables_endpoint(self, client, monkeypatch):
+        # Ensure we're in development mode for this test
+        monkeypatch.setenv("OPENACE_SECURITY_MODE", "development")
         monkeypatch.setenv("UPLOAD_AUTH_KEY", "change-me-in-production")
+
+        # Reset security mode cache to pick up the new environment
+        from app.utils.security_mode import reset_security_mode_cache
+
+        reset_security_mode_cache()
 
         resp = client.post(
             "/api/upload/usage",
@@ -47,7 +54,14 @@ class TestUploadAuthConfig:
         assert resp.get_json()["error"] == "Upload service not configured"
 
     def test_strong_upload_auth_key_still_allows_upload(self, client, monkeypatch):
+        # Ensure we're in development mode for this test
+        monkeypatch.setenv("OPENACE_SECURITY_MODE", "development")
         monkeypatch.setenv("UPLOAD_AUTH_KEY", "upload-auth-key-123")
+
+        # Reset security mode cache to pick up the new environment
+        from app.utils.security_mode import reset_security_mode_cache
+
+        reset_security_mode_cache()
 
         with patch("app.routes.upload.usage_service.save_usage", return_value=True) as save_usage:
             resp = client.post(

@@ -102,8 +102,8 @@ RUN echo "deb http://mirrors.aliyun.com/debian/ trixie main" > /etc/apt/sources.
     && npm config set registry https://registry.npmmirror.com/ \
     && npm install -g qwen-code-webui@0.2.40 @qwen-code/qwen-code@0.15.10 \
     # === code-server Installation (for local workspace VS Code button) ===
-    && curl -fsSL --connect-timeout 15 --max-time 300 https://code-server.dev/install.sh | sh \
-    && test -x /usr/bin/code-server \
+    && curl -fsSL --connect-timeout 15 --max-time 300 https://code-server.dev/install.sh | sh -s -- --prefix=/usr/local \
+    && test -x /usr/local/bin/code-server \
     # === CLI Verification ===
     && test -f /usr/lib/node_modules/@qwen-code/qwen-code/cli.js \
     && test -x /usr/bin/qwen-code-webui \
@@ -205,12 +205,23 @@ RUN chmod 755 /usr/local/bin/openace-run-as \
     mkdir -p /etc/openace && \
     printf '%s\n' \
         '# Issue #2018: constraints shared by openace-run-as and its sudoers' \
-        '# rule. root:root 0640 — the openace service account cannot edit it.' \
+        '# rule. root:root 0644 — the openace service account can read but not edit it.' \
         'OPENACE_AUTONOMOUS_AGENT_ACCOUNT="openace-agent"' \
         'ALLOWED_WORKSPACE_ROOTS="/home /workspace"' \
+        '# Issue #2020: per-task isolation + resource policy (read by the' \
+        '# launcher and autonomous_scheduler). memory/pids/cpu default to 0' \
+        '# (off) — set them to enforce; cgroup_enabled=auto detects a writable' \
+        '# cgroup v2 hierarchy and otherwise falls back to prlimit.' \
+        'agent_task_root=/run/openace-agent-tasks' \
+        'agent_task_cgroup_root=/sys/fs/cgroup/openace-agent' \
+        'agent_task_cgroup_enabled=auto' \
+        'agent_task_memory_max_bytes=0' \
+        'agent_task_pids_max=0' \
+        'agent_task_cpu_max=' \
+        'agent_max_concurrent_workflows=3' \
         > /etc/openace/agent-launcher.conf && \
     chown root:root /etc/openace/agent-launcher.conf && \
-    chmod 0640 /etc/openace/agent-launcher.conf && \
+    chmod 0644 /etc/openace/agent-launcher.conf && \
     printf '%s\n' \
         '# Credentialless autonomous agent launcher' \
         'open-ace ALL=(root) NOPASSWD: /usr/local/bin/openace-run-as --isolated *' \
@@ -218,21 +229,27 @@ RUN chmod 755 /usr/local/bin/openace-run-as \
     chmod 440 /etc/sudoers.d/open-ace-autonomous-agent && \
     visudo -c -f /etc/sudoers.d/open-ace-autonomous-agent
 
-# Install security wrappers for multi-user mode (Issue #1855)
+# Install security wrappers for multi-user mode (Issue #1855 + #2181)
 # These wrappers enforce path validation, UID range checks, and audit logging
-# for privileged operations like chown, useradd, cat, mkdir.
+# for privileged operations like chown, useradd, cat, mkdir, rm.
 COPY scripts/openace-chown.sh /usr/local/bin/openace-chown
 COPY scripts/openace-useradd.sh /usr/local/bin/openace-useradd
 COPY scripts/openace-cat.sh /usr/local/bin/openace-cat
 COPY scripts/openace-mkdir.sh /usr/local/bin/openace-mkdir
+COPY scripts/openace-rm.sh /usr/local/bin/openace-rm
 COPY scripts/openace-write-as.sh /usr/local/bin/openace-write-as
 COPY scripts/openace-restore-sudoers.sh /usr/local/bin/openace-restore-sudoers
+COPY scripts/openace-webui-launch.sh /usr/local/bin/openace-webui-launch
 RUN chmod 755 /usr/local/bin/openace-chown /usr/local/bin/openace-useradd \
              /usr/local/bin/openace-cat /usr/local/bin/openace-mkdir \
-             /usr/local/bin/openace-write-as /usr/local/bin/openace-restore-sudoers && \
+             /usr/local/bin/openace-rm /usr/local/bin/openace-write-as \
+             /usr/local/bin/openace-restore-sudoers \
+             /usr/local/bin/openace-webui-launch && \
     chown root:root /usr/local/bin/openace-chown /usr/local/bin/openace-useradd \
                     /usr/local/bin/openace-cat /usr/local/bin/openace-mkdir \
-                    /usr/local/bin/openace-write-as /usr/local/bin/openace-restore-sudoers && \
+                    /usr/local/bin/openace-rm /usr/local/bin/openace-write-as \
+                    /usr/local/bin/openace-restore-sudoers \
+                    /usr/local/bin/openace-webui-launch && \
     mkdir -p /var/lock && chmod 1777 /var/lock
 
 # NOTE: The image defaults to the non-root open-ace user (uid 1000) so that
@@ -263,9 +280,9 @@ ENV PYTHONUNBUFFERED=1 \
 # Expose port
 EXPOSE 19888
 
-# Health check
+# Health check (Issue #2186: uses /readyz for actual health)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:19888/health')" || exit 1
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:19888/readyz')" || exit 1
 
 # Run the application
 # Use bash to execute the script to ensure proper shell interpretation (Issue #1988)

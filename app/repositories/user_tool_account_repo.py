@@ -44,7 +44,7 @@ class UserToolAccountRepository:
         row = self.db.fetch_one(query, (tool_account,))
         return self._row_to_model(row) if row else None
 
-    def get_unmapped_tool_accounts(self) -> list[dict]:
+    def get_unmapped_tool_accounts(self, tenant_id: int | None = None) -> list[dict]:
         """Get sender_names from daily_messages that are not mapped to any user.
 
         Also returns the ``message_source`` for each sender, resolved as the
@@ -58,36 +58,74 @@ class UserToolAccountRepository:
         identical across SQLite and PostgreSQL (avoiding ``MODE() WITH GROUP``,
         which is PostgreSQL-only). The ``message_source DESC`` tie-break picks
         the lexicographically largest source when two rows share the same date.
+
+        Issue #2180: If tenant_id is provided, only return unmapped accounts
+        for users in that tenant (via JOIN with users table).
         """
-        query = """
-            SELECT dm.sender_name,
-                   COUNT(*) as message_count,
-                   MIN(dm.date) as first_date,
-                   MAX(dm.date) as last_date,
-                   (
-                       SELECT dm2.message_source
-                       FROM daily_messages dm2
-                       WHERE dm2.sender_name = dm.sender_name
-                         AND dm2.message_source IS NOT NULL
-                         AND dm2.message_source != ''
-                       ORDER BY dm2.date DESC, dm2.message_source DESC
-                       LIMIT 1
-                   ) AS message_source
-            FROM daily_messages dm
-            WHERE dm.sender_name IS NOT NULL
-              AND dm.sender_name != ''
-              AND NOT EXISTS (
-                  SELECT 1 FROM user_tool_accounts uta
-                  WHERE uta.tool_account = dm.sender_name
-              )
-              AND NOT EXISTS (
-                  SELECT 1 FROM users u
-                  WHERE u.username = dm.sender_name
-              )
-            GROUP BY dm.sender_name
-            ORDER BY message_count DESC
-        """
-        return self.db.fetch_all(query)
+        if tenant_id is not None:
+            # Filter by tenant through users table
+            query = """
+                SELECT dm.sender_name,
+                       COUNT(*) as message_count,
+                       MIN(dm.date) as first_date,
+                       MAX(dm.date) as last_date,
+                       (
+                           SELECT dm2.message_source
+                           FROM daily_messages dm2
+                           WHERE dm2.sender_name = dm.sender_name
+                             AND dm2.message_source IS NOT NULL
+                             AND dm2.message_source != ''
+                           ORDER BY dm2.date DESC, dm2.message_source DESC
+                           LIMIT 1
+                       ) AS message_source
+                FROM daily_messages dm
+                JOIN users u ON dm.sender_name LIKE u.username || '%'
+                WHERE u.tenant_id = ?
+                  AND dm.sender_name IS NOT NULL
+                  AND dm.sender_name != ''
+                  AND NOT EXISTS (
+                      SELECT 1 FROM user_tool_accounts uta
+                      WHERE uta.tool_account = dm.sender_name
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1 FROM users u2
+                      WHERE u2.username = dm.sender_name
+                  )
+                GROUP BY dm.sender_name
+                ORDER BY message_count DESC
+            """
+            return self.db.fetch_all(query, (tenant_id,))
+        else:
+            # Original query without tenant filter
+            query = """
+                SELECT dm.sender_name,
+                       COUNT(*) as message_count,
+                       MIN(dm.date) as first_date,
+                       MAX(dm.date) as last_date,
+                       (
+                           SELECT dm2.message_source
+                           FROM daily_messages dm2
+                           WHERE dm2.sender_name = dm.sender_name
+                             AND dm2.message_source IS NOT NULL
+                             AND dm2.message_source != ''
+                           ORDER BY dm2.date DESC, dm2.message_source DESC
+                           LIMIT 1
+                       ) AS message_source
+                FROM daily_messages dm
+                WHERE dm.sender_name IS NOT NULL
+                  AND dm.sender_name != ''
+                  AND NOT EXISTS (
+                      SELECT 1 FROM user_tool_accounts uta
+                      WHERE uta.tool_account = dm.sender_name
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1 FROM users u
+                      WHERE u.username = dm.sender_name
+                  )
+                GROUP BY dm.sender_name
+                ORDER BY message_count DESC
+            """
+            return self.db.fetch_all(query)
 
     def create(
         self,

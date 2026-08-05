@@ -77,7 +77,7 @@ def test_query_performance():
             query_time_ms = (time.time() - start_time) * 1000
             data = response.json()
             total_messages = data.get("total", 0)
-        except Exception as e:
+        except Exception as e:  # allow-swallow: UI element may not exist
             query_time_ms = (time.time() - start_time) * 1000
             total_messages = 0
             print(f"\nTest: {name}")

@@ -32,7 +32,7 @@ def api_get(path, timeout=30):
     except requests.exceptions.Timeout:
         add_issue(path, f"请求超时 ({timeout}s)", "high")
         return None
-    except Exception as e:
+    except Exception as e:  # allow-swallow: UI element may not exist
         add_issue(path, f"请求错误: {str(e)[:80]}", "high")
         return None
 

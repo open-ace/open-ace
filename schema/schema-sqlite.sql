@@ -94,7 +94,10 @@ CREATE TABLE agent_sessions (
  remote_machine_id text,
  paused_at TIMESTAMP,
  cli_session_id text DEFAULT '',
- tenant_id integer DEFAULT 1 NOT NULL
+ tenant_id integer DEFAULT 1 NOT NULL,
+ tenant_version integer DEFAULT 1 NOT NULL,
+ total_cache_read_tokens integer DEFAULT 0 NOT NULL,
+ total_cache_write_tokens integer DEFAULT 0 NOT NULL
 );
 
 CREATE TABLE agent_tokens (
@@ -214,6 +217,24 @@ CREATE TABLE api_key_store (
  resolved_at TIMESTAMP
 );
 
+CREATE TABLE archive_files (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ tenant_id integer NOT NULL,
+ execution_id TEXT NOT NULL,
+ data_type TEXT NOT NULL,
+ batch_id integer NOT NULL,
+ file_path text NOT NULL,
+ file_size INTEGER,
+ checksum TEXT NOT NULL,
+ record_count integer NOT NULL,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+ expires_at TIMESTAMP,
+ deleted_at TIMESTAMP,
+ verified_at TIMESTAMP,
+ verification_status TEXT,
+ source_deleted INTEGER DEFAULT 0 NOT NULL
+);
+
 CREATE TABLE audit_logs (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  "timestamp" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -306,7 +327,53 @@ CREATE TABLE autonomous_workflows (
  transition_temp_path text,
  transition_error text,
  transition_started_at text,
- transition_updated_at text
+ transition_updated_at text,
+ expected_head_sha text,
+ cleanup_status text,
+ cleanup_attempts integer,
+ cleanup_error text,
+ cleanup_updated_at text,
+ cleanup_next_retry_at text,
+ sandbox_provider text,
+ sandbox_id text,
+ sandbox_generation integer,
+ sandbox_state text,
+ sandbox_policy_digest text,
+ sandbox_last_error text,
+ sandbox_remote_session_id text,
+ sandbox_effective_policy text,
+ ci_repair_transient_retries integer DEFAULT 0,
+ ci_repair_no_change_retries integer DEFAULT 0,
+ max_changed_files_override integer
+);
+
+CREATE TABLE command_execution_evidence (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ command_id text NOT NULL,
+ workflow_id text DEFAULT '' NOT NULL,
+ session_id text DEFAULT '' NOT NULL,
+ milestone_id text DEFAULT '' NOT NULL,
+ sandbox_id text,
+ sandbox_generation integer,
+ tool_name text DEFAULT '' NOT NULL,
+ argv text,
+ shell_command text,
+ cwd text DEFAULT '' NOT NULL,
+ execution_profile text DEFAULT '' NOT NULL,
+ started_at TIMESTAMP,
+ completed_at TIMESTAMP,
+ exit_code integer,
+ signal integer,
+ timed_out INTEGER DEFAULT 0,
+ cancelled INTEGER DEFAULT 0,
+ terminal_reason text DEFAULT '' NOT NULL,
+ stdout_digest text,
+ stderr_digest text,
+ stdout_artifact text,
+ stderr_artifact text,
+ output_excerpt text DEFAULT '' NOT NULL,
+ tenant_id integer DEFAULT 1 NOT NULL,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE compliance_reports (
@@ -476,6 +543,22 @@ CREATE TABLE knowledge_base (
  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE legal_holds (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ tenant_id integer NOT NULL,
+ hold_type TEXT NOT NULL,
+ data_type TEXT,
+ record_id text,
+ reason text NOT NULL,
+ case_reference TEXT,
+ created_by integer NOT NULL,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+ expires_at TIMESTAMP,
+ lifted_by integer,
+ lifted_at TIMESTAMP,
+ lift_reason text
+);
+
 CREATE TABLE login_attempts (
  username TEXT PRIMARY KEY NOT NULL,
  attempt_count integer DEFAULT 0 NOT NULL,
@@ -635,7 +718,9 @@ CREATE TABLE proxy_token_jtis (
  revoked_at TIMESTAMP,
  revoke_reason text,
  use_count integer DEFAULT 0 NOT NULL,
- metadata text
+ metadata text,
+ terminated_at TIMESTAMP,
+ termination_reason text
 );
 
 CREATE TABLE quota_alerts (
@@ -667,6 +752,20 @@ CREATE TABLE quota_usage (
  tool_name text,
     CONSTRAINT chk_quota_usage_requests_positive CHECK ((requests_used >= 0)),
     CONSTRAINT chk_quota_usage_tokens_positive CHECK ((tokens_used >= 0))
+);
+
+CREATE TABLE recycle_bin (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ tenant_id integer NOT NULL,
+ execution_id TEXT NOT NULL,
+ data_type TEXT NOT NULL,
+ original_id integer NOT NULL,
+ record_data text NOT NULL,
+ deleted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+ expires_at TIMESTAMP NOT NULL,
+ restored_at TIMESTAMP,
+ restored_by integer,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 
 CREATE TABLE registration_tokens (
@@ -726,16 +825,106 @@ CREATE TABLE remote_runtime_outputs (
  expires_at TIMESTAMP
 );
 
+CREATE TABLE retention_evidence (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ execution_id TEXT NOT NULL,
+ tenant_id integer NOT NULL,
+ data_type TEXT NOT NULL,
+ action TEXT NOT NULL,
+ before_count integer,
+ after_count integer,
+ records_affected integer,
+ cutoff_date TIMESTAMP NOT NULL,
+ archive_location text,
+ archive_checksum TEXT,
+ error_count integer DEFAULT 0 NOT NULL,
+ error_sample text,
+ policy_version integer,
+ policy_config text,
+ policy_source TEXT,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+CREATE TABLE retention_executions (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ execution_id TEXT NOT NULL,
+ tenant_id integer NOT NULL,
+ policy_id integer,
+ status TEXT NOT NULL,
+ dry_run INTEGER DEFAULT 0 NOT NULL,
+ started_at TIMESTAMP,
+ completed_at TIMESTAMP,
+ lock_acquired_at TIMESTAMP,
+ lock_expires_at TIMESTAMP,
+ records_scanned integer DEFAULT 0 NOT NULL,
+ records_affected integer DEFAULT 0 NOT NULL,
+ records_skipped integer DEFAULT 0 NOT NULL,
+ records_archived integer DEFAULT 0 NOT NULL,
+ records_anonymized integer DEFAULT 0 NOT NULL,
+ records_in_recycle_bin integer DEFAULT 0 NOT NULL,
+ error_message text,
+ error_details text,
+ batch_size integer DEFAULT 1000 NOT NULL,
+ last_batch_id integer,
+ total_batches integer,
+ last_batch_status TEXT,
+ max_records_override integer,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
 CREATE TABLE retention_history (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  "timestamp" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
  report_data text NOT NULL
 );
 
+CREATE TABLE retention_policies (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ tenant_id integer,
+ data_type TEXT NOT NULL,
+ retention_days integer NOT NULL,
+ action TEXT NOT NULL,
+ enabled INTEGER DEFAULT 1 NOT NULL,
+ version integer DEFAULT 1 NOT NULL,
+ archive_target TEXT,
+ archive_config text,
+ anonymize_fields text,
+ backup_before_anonymize INTEGER DEFAULT 0 NOT NULL,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+ updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+ created_by integer,
+ updated_by integer
+);
+
 CREATE TABLE role_permissions (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  role text NOT NULL,
  permission text NOT NULL
+);
+
+CREATE TABLE scheduler_leaders (
+ job_name TEXT PRIMARY KEY NOT NULL,
+ leader_id TEXT NOT NULL,
+ owner_info text,
+ acquired_at TIMESTAMP NOT NULL,
+ expires_at TIMESTAMP NOT NULL,
+ heartbeat_at TIMESTAMP NOT NULL,
+ last_run_at TIMESTAMP,
+ run_count integer DEFAULT 0 NOT NULL,
+ skip_count integer DEFAULT 0 NOT NULL,
+ fail_count integer DEFAULT 0 NOT NULL
+);
+
+CREATE TABLE scheduler_runs (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ job_name TEXT NOT NULL,
+ leader_id TEXT NOT NULL,
+ started_at TIMESTAMP NOT NULL,
+ ended_at TIMESTAMP,
+ status TEXT NOT NULL,
+ duration_ms integer,
+ error_message text,
+ metrics text
 );
 
 CREATE TABLE security_settings (
@@ -881,6 +1070,20 @@ CREATE TABLE teams (
  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE tenant_migrations (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ user_id integer NOT NULL,
+ old_tenant_id integer NOT NULL,
+ new_tenant_id integer NOT NULL,
+ migrated_by integer NOT NULL,
+ migrated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+ affected_sessions integer,
+ affected_projects integer,
+ batch_number integer,
+ total_batches integer,
+ status TEXT DEFAULT 'pending' NOT NULL
+);
+
 CREATE TABLE tenant_period_history (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  tenant_id integer NOT NULL,
@@ -981,6 +1184,28 @@ CREATE TABLE tenants (
  alert_silence_hours integer,
     CONSTRAINT chk_tenants_plan CHECK (plan IN ('free', 'standard', 'premium', 'enterprise')),
     CONSTRAINT chk_tenants_status CHECK (status IN ('active', 'suspended', 'trial', 'inactive'))
+);
+
+CREATE TABLE test_execution_evidence (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ command_id text NOT NULL,
+ command_execution_id integer,
+ framework text DEFAULT '' NOT NULL,
+ collected integer,
+ passed integer,
+ failed integer,
+ skipped integer,
+ errors integer,
+ selectors text,
+ coverage_scope text,
+ parser text DEFAULT '' NOT NULL,
+ parser_confidence text DEFAULT '' NOT NULL,
+ verdict text DEFAULT '' NOT NULL,
+ session_id text DEFAULT '' NOT NULL,
+ workflow_id text DEFAULT '' NOT NULL,
+ milestone_id text DEFAULT '' NOT NULL,
+ tenant_id integer DEFAULT 1 NOT NULL,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE tool_account_mapping_rules (
@@ -1096,7 +1321,9 @@ CREATE TABLE users (
  must_change_password INTEGER DEFAULT 0,
  avatar_url TEXT,
  auto_mapping_enabled INTEGER DEFAULT 1,
-    CONSTRAINT chk_users_role CHECK ((role IN ('admin', 'manager', 'user', 'readonly')))
+ tenant_version integer DEFAULT 1 NOT NULL,
+    CONSTRAINT chk_tenant_admin_requires_tenant CHECK ((NOT (((role) = 'tenant_admin') AND (tenant_id IS NULL)))),
+    CONSTRAINT chk_users_role CHECK ((role IN ('admin', 'platform_admin', 'tenant_admin', 'manager', 'user', 'readonly')))
 );
 
 CREATE TABLE web_user_auth_sessions (
@@ -1105,6 +1332,22 @@ CREATE TABLE web_user_auth_sessions (
  session_token text NOT NULL,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
  expires_at TIMESTAMP NOT NULL
+);
+
+CREATE TABLE webhook_deliveries (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ alert_id TEXT NOT NULL,
+ user_id integer NOT NULL,
+ webhook_url_hash TEXT,
+ status TEXT NOT NULL,
+ attempts integer DEFAULT 0 NOT NULL,
+ max_attempts integer DEFAULT 3 NOT NULL,
+ next_retry_at TIMESTAMP,
+ last_error_type TEXT,
+ last_error_at TIMESTAMP,
+ created_at TIMESTAMP NOT NULL,
+ updated_at TIMESTAMP NOT NULL,
+    CONSTRAINT ck_webhook_deliveries_status CHECK ((status IN ('pending', 'in_flight', 'delivered', 'dead')))
 );
 
 CREATE TABLE workflow_events (
@@ -1187,6 +1430,10 @@ CREATE UNIQUE INDEX remote_machines_machine_id_key ON remote_machines (machine_i
 
 CREATE UNIQUE INDEX remote_runtime_commands_command_id_key ON remote_runtime_commands (command_id);
 
+CREATE UNIQUE INDEX retention_executions_execution_id_key ON retention_executions (execution_id);
+
+CREATE UNIQUE INDEX retention_policies_tenant_id_data_type_version_key ON retention_policies (tenant_id, data_type, version);
+
 CREATE UNIQUE INDEX role_permissions_role_permission_key ON role_permissions (role, permission);
 
 CREATE UNIQUE INDEX security_settings_setting_key_key ON security_settings (setting_key);
@@ -1217,6 +1464,8 @@ CREATE UNIQUE INDEX tenant_settings_tenant_id_key ON tenant_settings (tenant_id)
 
 CREATE UNIQUE INDEX tenants_slug_key ON tenants (slug);
 
+CREATE UNIQUE INDEX uq_command_evidence_session_command ON command_execution_evidence (session_id, command_id);
+
 CREATE UNIQUE INDEX uq_daily_messages_date_tool_msg_host ON daily_messages (date, tool_name, message_id, host_name);
 
 CREATE UNIQUE INDEX uq_daily_stats_date_tool_host_sender ON daily_stats (date, tool_name, host_name, sender_name);
@@ -1232,6 +1481,8 @@ CREATE UNIQUE INDEX uq_quota_usage_user_date_period_new ON quota_usage (user_id,
 CREATE UNIQUE INDEX uq_remote_runtime_outputs_session_index ON remote_runtime_outputs (session_id, event_index);
 
 CREATE UNIQUE INDEX uq_tenant_usage_tenant_date_new ON tenant_usage (tenant_id, date);
+
+CREATE UNIQUE INDEX uq_test_evidence_session_command ON test_execution_evidence (session_id, command_id);
 
 CREATE UNIQUE INDEX uq_usage_summary_tool_host ON usage_summary (tool_name, host_name);
 
@@ -1305,7 +1556,21 @@ CREATE INDEX idx_annotations_session ON annotations (session_id);
 
 CREATE INDEX idx_api_key_store_tenant_provider ON api_key_store (tenant_id, provider);
 
+CREATE INDEX idx_archive_files_batch ON archive_files (execution_id, batch_id);
+
+CREATE INDEX idx_archive_files_checksum ON archive_files (checksum);
+
+CREATE INDEX idx_archive_files_expires ON archive_files (expires_at);
+
+CREATE INDEX idx_archive_files_tenant ON archive_files (tenant_id);
+
 CREATE INDEX idx_audit_action ON audit_logs (action);
+
+CREATE INDEX idx_audit_logs_tenant_id ON audit_logs (tenant_id);
+
+CREATE INDEX idx_audit_logs_tenant_timestamp ON audit_logs (tenant_id, "timestamp");
+
+CREATE INDEX idx_audit_logs_timestamp ON audit_logs ("timestamp");
 
 CREATE INDEX idx_audit_resource ON audit_logs (resource_type, resource_id);
 
@@ -1316,6 +1581,10 @@ CREATE INDEX idx_audit_tenant_id ON audit_logs (tenant_id);
 CREATE INDEX idx_audit_timestamp ON audit_logs ("timestamp");
 
 CREATE INDEX idx_audit_user_id ON audit_logs (user_id);
+
+CREATE INDEX idx_command_evidence_session_command ON command_execution_evidence (session_id, command_id);
+
+CREATE INDEX idx_command_evidence_workflow_milestone ON command_execution_evidence (workflow_id, milestone_id);
 
 CREATE INDEX idx_consistency_violations_detected ON consistency_violations (detected_at);
 
@@ -1374,6 +1643,12 @@ CREATE INDEX idx_hourly_stats_tenant_date ON hourly_stats (tenant_id, date);
 CREATE INDEX idx_insights_reports_user_date ON insights_reports (user_id, start_date, end_date);
 
 CREATE INDEX idx_knowledge_team ON knowledge_base (team_id);
+
+CREATE INDEX idx_legal_holds_active ON legal_holds (id) WHERE (lifted_at IS NULL);
+
+CREATE INDEX idx_legal_holds_data_type ON legal_holds (data_type);
+
+CREATE INDEX idx_legal_holds_tenant ON legal_holds (tenant_id);
 
 CREATE INDEX idx_login_attempts_locked_until ON login_attempts (locked_until);
 
@@ -1467,6 +1742,12 @@ CREATE INDEX idx_quota_usage_date ON quota_usage (date);
 
 CREATE INDEX idx_quota_usage_user ON quota_usage (user_id);
 
+CREATE INDEX idx_recycle_bin_execution ON recycle_bin (execution_id);
+
+CREATE INDEX idx_recycle_bin_expires ON recycle_bin (expires_at);
+
+CREATE INDEX idx_recycle_bin_tenant ON recycle_bin (tenant_id);
+
 CREATE INDEX idx_registration_tokens_hash ON registration_tokens (token_hash);
 
 CREATE INDEX idx_remote_machines_hostname_tenant ON remote_machines (hostname, tenant_id);
@@ -1483,6 +1764,26 @@ CREATE INDEX idx_remote_runtime_outputs_expires ON remote_runtime_outputs (expir
 
 CREATE INDEX idx_remote_runtime_outputs_session_index ON remote_runtime_outputs (session_id, event_index);
 
+CREATE INDEX idx_retention_evidence_execution ON retention_evidence (execution_id);
+
+CREATE INDEX idx_retention_evidence_tenant ON retention_evidence (tenant_id);
+
+CREATE INDEX idx_retention_evidence_timestamp ON retention_evidence (created_at);
+
+CREATE INDEX idx_retention_executions_execution_id ON retention_executions (execution_id);
+
+CREATE INDEX idx_retention_executions_lock ON retention_executions (lock_acquired_at, lock_expires_at);
+
+CREATE INDEX idx_retention_executions_status ON retention_executions (status);
+
+CREATE INDEX idx_retention_executions_tenant ON retention_executions (tenant_id);
+
+CREATE INDEX idx_retention_policies_data_type ON retention_policies (data_type);
+
+CREATE INDEX idx_retention_policies_enabled ON retention_policies (enabled);
+
+CREATE INDEX idx_retention_policies_tenant ON retention_policies (tenant_id);
+
 CREATE INDEX idx_run_events_created_at ON agent_run_events (created_at);
 
 CREATE INDEX idx_run_events_event_type ON agent_run_events (event_type);
@@ -1490,6 +1791,14 @@ CREATE INDEX idx_run_events_event_type ON agent_run_events (event_type);
 CREATE INDEX idx_run_events_run_id ON agent_run_events (run_id);
 
 CREATE INDEX idx_run_events_session_id ON agent_run_events (session_id, id);
+
+CREATE INDEX idx_scheduler_leaders_expires ON scheduler_leaders (expires_at);
+
+CREATE INDEX idx_scheduler_leaders_heartbeat ON scheduler_leaders (heartbeat_at);
+
+CREATE INDEX idx_scheduler_runs_job_time ON scheduler_runs (job_name, started_at DESC);
+
+CREATE INDEX idx_scheduler_runs_status ON scheduler_runs (status);
 
 CREATE INDEX idx_security_settings_key ON security_settings (setting_key);
 
@@ -1541,6 +1850,12 @@ CREATE INDEX idx_team_members_user ON team_members (user_id);
 
 CREATE INDEX idx_teams_owner ON teams (owner_id);
 
+CREATE INDEX idx_teams_sync_source ON teams (json_extract(settings, '$.sync_source'));
+
+CREATE INDEX idx_tenant_migrations_status ON tenant_migrations (status);
+
+CREATE INDEX idx_tenant_migrations_user ON tenant_migrations (user_id);
+
 CREATE INDEX idx_tenant_period_history_dates ON tenant_period_history (period_start, period_end);
 
 CREATE INDEX idx_tenant_period_history_tenant ON tenant_period_history (tenant_id);
@@ -1564,6 +1879,10 @@ CREATE INDEX idx_tenants_deleted ON tenants (deleted_at);
 CREATE INDEX idx_tenants_slug ON tenants (slug);
 
 CREATE INDEX idx_tenants_status ON tenants (status);
+
+CREATE INDEX idx_test_evidence_session_command ON test_execution_evidence (session_id, command_id);
+
+CREATE INDEX idx_test_evidence_workflow_milestone ON test_execution_evidence (workflow_id, milestone_id);
 
 CREATE INDEX idx_tool_accounts_tool_account ON user_tool_accounts (tool_account);
 
@@ -1610,6 +1929,12 @@ CREATE INDEX idx_users_system_account ON users (system_account) WHERE ((deleted_
 CREATE INDEX idx_users_tenant ON users (tenant_id);
 
 CREATE INDEX idx_users_username ON users (username) WHERE ((deleted_at IS NULL) AND (is_active = true));
+
+CREATE INDEX idx_webhook_deliveries_alert ON webhook_deliveries (alert_id);
+
+CREATE INDEX idx_webhook_deliveries_status_retry ON webhook_deliveries (status, next_retry_at);
+
+CREATE INDEX idx_webhook_deliveries_user ON webhook_deliveries (user_id);
 
 CREATE INDEX idx_workflows_batch_order ON autonomous_workflows (batch_id, batch_order);
 

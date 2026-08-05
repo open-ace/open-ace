@@ -34,6 +34,7 @@ venv/
 # Test / coverage artifacts (coverage.py, pytest, html reports)
 .coverage
 .coverage.*
+coverage.xml
 htmlcov/
 .pytest_cache/
 
@@ -61,6 +62,7 @@ VERSION
 
 # Secrets - NEVER commit these
 *secret*
+!app/modules/sso/secret_holder.py
 *credential*
 *password*
 *.pem
@@ -76,4 +78,11 @@ QWEN.md
 
 # Claude local settings
 .claude/
+
+# Other AI tool directories
+.workbuddy/
+.zcode/
 backups/
+
+# Git worktrees (temporary development artifacts)
+.worktrees/

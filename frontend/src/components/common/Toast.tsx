@@ -17,8 +17,10 @@ import { cn } from '@/utils';
 import { useToastStore } from '@/store/toastStore';
 import type { ToastType, ToastData, ToastStore } from '@/store/toastStore';
 
-// Re-export types for backward compatibility with existing imports.
+// Re-export types and the store hook for backward compatibility with existing
+// imports (e.g. Toast.test.tsx imports useToastStore from './Toast').
 export type { ToastType, ToastData };
+export { useToastStore } from '@/store/toastStore';
 
 interface ToastProps extends ToastData {
   onClose: (id: string) => void;

@@ -8,7 +8,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any
+from typing import Any, cast
 
 
 class ProviderType(Enum):
@@ -26,7 +26,7 @@ class SSOProviderConfig:
     name: str
     provider_type: str
     client_id: str
-    client_secret: str
+    client_secret: Any  # str | SecretHolder - use SecretHolder for security
     authorization_url: str
     token_url: str
     userinfo_url: str | None = None
@@ -43,6 +43,22 @@ class SSOProviderConfig:
 
     # Status
     is_active: bool = True
+
+    def get_client_secret(self) -> str:
+        """Get the client secret value.
+
+        If the secret is wrapped in a SecretHolder, decrypts and returns it.
+        Otherwise, returns the string value directly.
+
+        Returns:
+            Client secret value as string
+        """
+        # Import here to avoid circular dependency
+        from app.modules.sso.secret_holder import SecretHolder
+
+        if isinstance(self.client_secret, SecretHolder):
+            return cast("str", self.client_secret.get())
+        return self.client_secret or ""
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""

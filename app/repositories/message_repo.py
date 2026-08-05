@@ -620,6 +620,7 @@ class MessageRepository:
             Optional[Dict]: Conversation details or None.
         """
         # Use COALESCE to match session_id from multiple possible fields
+        # GROUP BY includes all non-aggregated columns for PostgreSQL compatibility (Issue #2105)
         query = """
             SELECT
                 COALESCE(conversation_id, feishu_conversation_id, agent_session_id) as conversation_id,
@@ -637,7 +638,8 @@ class MessageRepository:
                 MAX(timestamp) as last_message_time
             FROM daily_messages
             WHERE COALESCE(conversation_id, feishu_conversation_id, agent_session_id) = ?
-            GROUP BY COALESCE(conversation_id, feishu_conversation_id, agent_session_id)
+            GROUP BY COALESCE(conversation_id, feishu_conversation_id, agent_session_id),
+                     agent_session_id, tool_name, host_name, sender_name
         """
 
         return self.db.fetch_one(query, (session_id,))

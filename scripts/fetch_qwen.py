@@ -1314,7 +1314,7 @@ def fetch_and_save(
             return False
 
         total_files = _process_projects_dir(
-            project_dir, hostname, None, aggregated, all_messages, recent
+            project_dir, hostname, None, aggregated, all_messages, recent, None
         )
 
     print(f"\nProcessed {total_files} files, {len(all_messages)} messages")

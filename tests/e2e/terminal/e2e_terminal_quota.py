@@ -14,7 +14,7 @@ PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
 
 
-def test_terminal_session():
+def test_terminal_session():  # allow-no-assert: smoke test - visual verification only
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=HEADLESS)
         context = browser.new_context()

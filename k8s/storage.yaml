@@ -1,4 +1,59 @@
 # Open ACE - PersistentVolumeClaim
+#
+# STORAGE CONFIGURATION FOR MULTI-REPLICA DEPLOYMENT
+#
+# This deployment requires ReadWriteMany (RWX) access mode because multiple
+# replicas share the same PersistentVolume for workspace data. Each replica
+# must be able to read and write to the shared volume concurrently.
+#
+# STORAGE CLASS REQUIREMENTS:
+# The 'standard' storageClassName is a placeholder. You MUST use a storage class
+# that supports RWX (ReadWriteMany) access mode. Not all storage classes support RWX.
+#
+# CLOUD-SPECIFIC STORAGE CLASSES:
+#
+# AWS EKS:
+#   - aws-efs-csi-driver: Uses Amazon EFS (Elastic File System)
+#   - Install: https://github.com/kubernetes-sigs/aws-efs-csi-driver
+#   - storageClassName: efs-sc (or create custom)
+#
+# Azure AKS:
+#   - azurefile-csi: Uses Azure Files
+#   - Built-in with AKS, enable with: az aks update --enable-addons azurefile
+#   - storageClassName: azurefile-csi
+#
+# Google GKE:
+#   - filestore-csi: Uses Google Filestore
+#   - Create Filestore instance first, then use the storage class
+#   - storageClassName: filestore-csi
+#
+# On-premises / Self-hosted:
+#   - nfs-client: Uses NFS provisioner
+#   - rook-cephfs: Rook CephFS
+#   - longhorn: Longhorn distributed block storage (RWX via NFS export)
+#
+# VERIFICATION COMMANDS:
+# 1. Check available storage classes:
+#    kubectl get storageclass
+#
+# 2. Verify storage class supports RWX:
+#    kubectl describe storageclass <storage-class-name> | grep -A5 "AllowedTopologies\|Parameters"
+#
+# 3. Check if PVC is bound:
+#    kubectl get pvc -n open-ace
+#
+# 4. Verify volume access mode:
+#    kubectl get pv | grep open-ace
+#
+# 5. Test RWX by scaling deployment:
+#    kubectl scale deployment open-ace --replicas=3 -n open-ace
+#    kubectl get pods -n open-ace -w
+#
+# TROUBLESHOOTING:
+# - If PVC is stuck in "Pending": Storage class doesn't support RWX or doesn't exist
+# - If pods fail to start with "volume mount error": Check CSI driver is installed
+# - For single-replica development: Change accessMode to ReadWriteOnce (RWO)
+#
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -9,11 +64,11 @@ metadata:
     app.kubernetes.io/component: storage
 spec:
   accessModes:
-    - ReadWriteMany
+    - ReadWriteMany  # Required for multi-replica deployment
   resources:
     requests:
       storage: 10Gi
-  storageClassName: standard
+  storageClassName: standard  # Replace with cloud-specific RWX storage class
 
 ---
 # Open ACE - ServiceAccount

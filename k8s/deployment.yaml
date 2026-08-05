@@ -23,7 +23,7 @@ spec:
       annotations:
         prometheus.io/scrape: "true"
         prometheus.io/port: "19888"
-        prometheus.io/path: "/health"
+        prometheus.io/path: "/metrics"
       labels:
         app.kubernetes.io/name: open-ace
         app.kubernetes.io/component: web
@@ -38,7 +38,7 @@ spec:
       containers:
         - name: open-ace
           image: open-ace:latest
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           # HA Support (Issue #1851): preStop hook for graceful terminal relay handoff
           lifecycle:
             preStop:
@@ -46,10 +46,12 @@ spec:
                 command: ["sh", "-c", "sleep 30"]
           securityContext:
             allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop:
                 - ALL
+            seccompProfile:
+              type: RuntimeDefault
           ports:
             - name: http
               containerPort: 19888
@@ -60,6 +62,8 @@ spec:
             - secretRef:
                 name: open-ace-secrets
           env:
+            - name: SCHEDULER_MODE
+              value: "web"
             - name: POD_NAME
               valueFrom:
                 fieldRef:
@@ -72,6 +76,9 @@ spec:
               value: /home/open-ace
             - name: OPENACE_CONFIG_DIR
               value: /home/open-ace/.open-ace
+            # Prometheus multi-worker mode (Issue #2186)
+            - name: PROMETHEUS_MULTIPROC_DIR
+              value: /tmp/prometheus_multiproc
           resources:
             requests:
               cpu: "100m"
@@ -81,7 +88,7 @@ spec:
               memory: "512Mi"
           livenessProbe:
             httpGet:
-              path: /health
+              path: /livez
               port: http
             initialDelaySeconds: 10
             periodSeconds: 10
@@ -89,18 +96,31 @@ spec:
             failureThreshold: 3
           readinessProbe:
             httpGet:
-              path: /health
+              path: /readyz
               port: http
             initialDelaySeconds: 5
             periodSeconds: 5
-            timeoutSeconds: 3
+            timeoutSeconds: 10
             failureThreshold: 3
+          # Startup probe for slow initialization (Issue #2186)
+          startupProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 0
+            periodSeconds: 5
+            timeoutSeconds: 10
+            failureThreshold: 60  # 300s max startup time
           volumeMounts:
             - name: data
               mountPath: /workspace
               subPath: workspace
             - name: logs
               mountPath: /app/logs
+            - name: tmp
+              mountPath: /tmp
+            - name: agent-tasks
+              mountPath: /run/openace-agent-tasks
             - name: config
               mountPath: /home/open-ace/.open-ace
               subPath: config
@@ -109,6 +129,12 @@ spec:
           persistentVolumeClaim:
             claimName: open-ace-data
         - name: logs
+          emptyDir: {}
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 64Mi
+        - name: agent-tasks
           emptyDir: {}
         - name: config
           persistentVolumeClaim:

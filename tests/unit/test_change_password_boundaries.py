@@ -101,7 +101,7 @@ class TestLockoutTimeBoundary:
         """Lockout that just expired should be cleared and allow operation."""
         mock_db = MagicMock()
         # Locked_until is 1 second in the past
-        past = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(seconds=1)
+        past = datetime.now() - timedelta(seconds=1)
         mock_db.fetch_one.return_value = {
             "attempt_count": 5,
             "locked_until": past,
@@ -119,7 +119,7 @@ class TestLockoutTimeBoundary:
         """Lockout with 1 second remaining should still be locked."""
         mock_db = MagicMock()
         # Locked_until is 1 second in the future
-        future = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(seconds=1)
+        future = datetime.now() + timedelta(seconds=1)
         mock_db.fetch_one.return_value = {
             "attempt_count": 5,
             "locked_until": future,
@@ -136,7 +136,7 @@ class TestLockoutTimeBoundary:
         """Lockout exactly at expiry moment."""
         mock_db = MagicMock()
         # locked_until is exactly now (boundary case)
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        now = datetime.now()
         mock_db.fetch_one.return_value = {
             "attempt_count": 5,
             "locked_until": now,
@@ -209,7 +209,7 @@ class TestLockoutDuringSuccess:
     def test_locked_user_attempts_change(self, mock_db_cls, mock_placeholder):
         """Locked user attempting change should be rejected before service call."""
         mock_db = MagicMock()
-        future = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(minutes=5)
+        future = datetime.now() + timedelta(minutes=5)
         mock_db.fetch_one.return_value = {
             "attempt_count": 5,
             "locked_until": future,

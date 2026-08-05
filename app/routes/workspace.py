@@ -9,8 +9,10 @@ API endpoints for workspace functionality including:
 - Collaboration features
 """
 
+import base64
 import logging
 import os
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -22,6 +24,7 @@ from app.auth.decorators import (
     enforce_password_change_requirement,
     security_annotated,
 )
+from app.models.user import User
 from app.modules.workspace.api_key_proxy import get_api_key_proxy_service
 from app.modules.workspace.collaboration import SharePermission, get_collaboration_manager
 from app.modules.workspace.llm_proxy_handler import handle_llm_proxy_request
@@ -34,6 +37,7 @@ from app.modules.workspace.session_manager import (
 from app.modules.workspace.state_sync import get_state_sync_manager
 from app.modules.workspace.tool_connector import get_tool_connector
 from app.routes.fs import is_valid_path
+from app.utils.request_context import get_current_tenant_id
 from app.utils.tool_names import TOOL_NAME_ALIASES, normalize_tool_name
 from app.utils.workspace import get_workspace_base_dir, get_workspace_base_dirs
 
@@ -49,6 +53,122 @@ _SESSION_REFRESH_THRESHOLD_MINUTES = 10
 # Issue #1897: Feature flag for prompt ownership enforcement
 # Set ENFORCE_PROMPT_OWNERSHIP=false for gradual rollout (logs only, no rejection)
 _ENFORCE_PROMPT_OWNERSHIP = os.environ.get("ENFORCE_PROMPT_OWNERSHIP", "true").lower() == "true"
+
+
+# Issue #2136: Project path encoding/decoding functions
+# New format: b64:<url-safe-base64-encoded-path>
+# Old format (backward compatible): -home-user-project (replace / with -)
+_B64_PREFIX = "b64:"
+
+
+def encode_project_path(project_path: str) -> str:
+    """Encode a project path to a URL-safe string.
+
+    Args:
+        project_path: The absolute path to encode (e.g., /home/user/demo-project)
+
+    Returns:
+        Encoded string with b64: prefix for new format,
+        or legacy format for backward compatibility.
+
+    Examples:
+        >>> encode_project_path("/home/user/demo-project")
+        'b64:L2hvbWUvdXNlci9kZW1vLXByb2plY3Q'
+        >>> encode_project_path("")  # Empty path
+        ''
+    """
+    if not project_path:
+        return ""
+
+    # Normalize Windows paths: /C:/Users/... -> C:/Users/...
+    normalized_path = project_path
+    if normalized_path.startswith("/") and len(normalized_path) > 2:
+        # Check for Windows path pattern: /X:/...
+        if normalized_path[2] == ":" and normalized_path[1].isalpha():
+            normalized_path = normalized_path[1:]  # Remove leading /
+
+    # URL-safe Base64 encoding (no padding)
+    encoded = base64.urlsafe_b64encode(normalized_path.encode("utf-8")).decode("ascii")
+    # Remove padding for cleaner URLs
+    encoded = encoded.rstrip("=")
+    return f"{_B64_PREFIX}{encoded}"
+
+
+def encode_project_path_legacy(project_path: str) -> str:
+    r"""Encode a project path to the legacy CLI directory-name format.
+
+    The qwen / claude CLI stores per-project data under
+    ``~/.qwen/projects/<encoded>`` (or ``~/.claude/projects/<encoded>``) where
+    ``<encoded>`` is the project path with every path separator (``/``, ``\``)
+    and common special characters replaced by ``-``.  For example::
+
+        /home/user/demo-project  →  -home-user-demo-project
+
+    This is the format the CLI creates on disk and the format qwen-code-webui
+    expects when resolving the history directory.  Unlike ``encode_project_path``
+    (which produces the ``b64:`` URL-safe base64 form used by the file-changes
+    API and other newer endpoints), this helper must be used whenever the
+    encoded name is consumed by qwen-code-webui's history endpoints or by the
+    on-disk directory lookup (Issue #2142).
+
+    Args:
+        project_path: The absolute path to encode.
+
+    Returns:
+        The legacy encoded directory name, or empty string for empty input.
+    """
+    if not project_path:
+        return ""
+    # Strip a trailing slash so /home/user/ and /home/user encode identically.
+    normalized = project_path.rstrip("/")
+    # Replace '/', '\', ':', '.', and '_' with '-' (matches the CLI encoding
+    # used by qwen-code / claude-code when creating project directories).
+    return re.sub(r"[/\\:._]", "-", normalized)
+
+
+def decode_project_name(encoded_name: str) -> str:
+    """Decode an encoded project name back to the original path.
+
+    Supports both new (b64:) and legacy (-home-user-project) formats.
+
+    Args:
+        encoded_name: The encoded project name
+
+    Returns:
+        The original project path, or empty string if decoding fails
+
+    Examples:
+        >>> decode_project_name("b64:L2hvbWUvdXNlci9kZW1vLXByb2plY3Q")
+        '/home/user/demo-project'
+        >>> decode_project_name("-home-user-demo-project")  # Legacy format
+        '/home/user/demo-project'
+        >>> decode_project_name("")  # Empty
+        ''
+    """
+    if not encoded_name:
+        return ""
+
+    # New format: b64:<base64>
+    if encoded_name.startswith(_B64_PREFIX):
+        try:
+            b64_data = encoded_name[len(_B64_PREFIX) :]
+            # Add back padding if needed
+            padding = 4 - (len(b64_data) % 4)
+            if padding != 4:
+                b64_data += "=" * padding
+            decoded = base64.urlsafe_b64decode(b64_data).decode("utf-8")
+            return decoded
+        except Exception as e:
+            logger.warning(f"Failed to decode project name '{encoded_name}': {e}")
+            return ""
+
+    # Legacy format: -home-user-project (backward compatible)
+    # Convert back: -home-user-demo-project -> /home/user/demo-project
+    if encoded_name.startswith("-"):
+        return "/" + encoded_name[1:].replace("-", "/")
+
+    # Not encoded, return as-is
+    return encoded_name
 
 
 def _check_prompt_ownership(
@@ -75,7 +195,7 @@ def _check_prompt_ownership(
     user_role = g.user.get("role") if hasattr(g, "user") and g.user else None
 
     # Admin can access any template
-    if user_role == "admin":
+    if User.is_admin_role(user_role):
         return True, ""
 
     # Check if user is the author
@@ -125,24 +245,10 @@ def format_datetime(dt):
     return dt
 
 
-def _current_tenant_id() -> int | None:
-    """Return the current authenticated tenant id, if any."""
-    if not hasattr(g, "user") or not g.user:
-        return None
-    raw_tenant_id = g.user.get("tenant_id")
-    if raw_tenant_id in (None, ""):
-        return None
-    try:
-        tenant_id = int(raw_tenant_id)
-    except (TypeError, ValueError):
-        return None
-    return tenant_id if tenant_id > 0 else None
-
-
 def _tenant_scope_required() -> bool:
     """Whether workspace data should be tenant-scoped for this request."""
     current_role = g.user.get("role") if hasattr(g, "user") and g.user else None
-    return bool(current_role != "admin")
+    return not User.is_admin_role(current_role)
 
 
 def _session_lookup_tenant_id() -> int | None:
@@ -156,7 +262,7 @@ def _session_lookup_tenant_id() -> int | None:
     """
     if not _tenant_scope_required():
         return None
-    tenant_id = _current_tenant_id()
+    tenant_id = get_current_tenant_id()
     if tenant_id is None:
         abort(403)
     return tenant_id
@@ -305,10 +411,16 @@ def get_session_models():
     api_proxy = get_api_key_proxy_service()
 
     if workspace_type == "local":
-        # Local workspace is single-tenant; tenant_id=1 is the default tenant.
-        # This must be updated if multi-tenant local workspaces are introduced.
+        # Issue #2179: Fail-Closed - 从 g 获取 tenant_id 而不是硬编码
+        # Local workspace is single-tenant; use the authenticated user's tenant
+        tenant_id = g.get("tenant_id")
+        if tenant_id is None:
+            # 如果没有租户上下文，使用默认租户 1（单租户模式）
+            logger.warning("No tenant_id in context for local workspace, using default tenant 1")
+            tenant_id = 1
+
         pool = api_proxy.get_tool_model_pool(
-            tenant_id=1,
+            tenant_id=tenant_id,
             tool_name="qwen-code",
             scope="local",
             provider="openai",
@@ -572,7 +684,9 @@ def delete_prompt(template_id):
 
         library = get_prompt_library()
         # Admin users can delete any template; others can only delete their own
-        success = library.delete_template(template_id, None if user_role == "admin" else user_id)
+        success = library.delete_template(
+            template_id, None if User.is_admin_role(user_role) else user_id
+        )
 
         if not success:
             return jsonify({"success": False, "error": "Template not found or not authorized"}), 404
@@ -715,7 +829,7 @@ def list_sessions():
 
         # Get user_id from g.user to filter sessions
         user_id = g.user.get("id") if hasattr(g, "user") and g.user else None
-        tenant_id = _current_tenant_id()
+        tenant_id = get_current_tenant_id()
 
         # Valid values for status and session_type (whitelist validation)
         VALID_STATUS_VALUES = {"active", "paused", "completed", "error"}
@@ -999,7 +1113,7 @@ def get_remote_projects():
         p = get_param_placeholder()
 
         user_id = g.user.get("id") if hasattr(g, "user") and g.user else None
-        tenant_id = _current_tenant_id()
+        tenant_id = get_current_tenant_id()
         if not user_id:
             return jsonify({"success": False, "error": "Authentication required"}), 401
 
@@ -1046,11 +1160,8 @@ def get_remote_projects():
         for r in results:
             project_path = r.get("project_path")
             if project_path:
-                # Convert path to encoded project name format
-                # /home/user/demo-project -> -home-user-demo-project
-                encoded_name = (
-                    project_path.replace("/", "-") if project_path.startswith("/") else project_path
-                )
+                # Issue #2136: Use new encoding format (b64:<base64>)
+                encoded_name = encode_project_path(project_path)
 
                 machine_id = r.get("machine_id")
                 machine_name = machine_name_map.get(machine_id) if machine_id else None
@@ -1091,7 +1202,7 @@ def create_session():
         tool_name = normalize_tool_name(tool_name)
 
         user_id = g.user.get("id") if hasattr(g, "user") and g.user else None
-        tenant_id = _current_tenant_id()
+        tenant_id = get_current_tenant_id()
 
         # Get project info from request or look up by path
         project_id = data.get("project_id")
@@ -1159,8 +1270,8 @@ def _check_session_access(session, *, require_owner: bool = True):
         return None
     current_user_id = g.user.get("id") if hasattr(g, "user") and g.user else None
     current_role = g.user.get("role") if hasattr(g, "user") and g.user else None
-    current_tenant_id = _current_tenant_id()
-    if current_role != "admin":
+    current_tenant_id = get_current_tenant_id()
+    if not User.is_admin_role(current_role):
         if current_tenant_id is not None and session.tenant_id != current_tenant_id:
             return jsonify({"success": False, "error": "Access denied"}), 403
         if not current_user_id or not session.user_id or session.user_id != current_user_id:
@@ -1396,7 +1507,7 @@ def restore_session(session_id):
         conn = get_connection()
         cursor = conn.cursor()
         p = get_param_placeholder()
-        tenant_id = _current_tenant_id()
+        tenant_id = get_current_tenant_id()
         tenant_clause = ""
         params = [session_id]
         if tenant_id is not None and _tenant_scope_required():
@@ -1434,9 +1545,9 @@ def restore_session(session_id):
         # Ownership check: only the session owner or admin can restore
         current_user_id = g.user.get("id") if hasattr(g, "user") and g.user else None
         current_role = g.user.get("role") if hasattr(g, "user") and g.user else None
-        current_tenant_id = _current_tenant_id()
+        current_tenant_id = get_current_tenant_id()
         session_user_id = session_data.get("user_id")
-        if current_role != "admin":
+        if not User.is_admin_role(current_role):
             if current_tenant_id is not None and session_data.get("tenant_id") != current_tenant_id:
                 return jsonify({"success": False, "error": "Access denied"}), 403
             if not current_user_id or not session_user_id or session_user_id != current_user_id:
@@ -1534,16 +1645,24 @@ def restore_session(session_id):
                     )
 
         # Generate encodedProjectName based on tool
+        # Issue #2142: qwen-code-webui's history endpoints expect the legacy
+        # CLI directory-name format (-home-user-project), not the b64: format
+        # introduced by Issue #2136.  The b64: prefix contains ':' which the
+        # webui rejects as a dangerous character (400), and even if it didn't,
+        # the on-disk history directory uses the legacy encoding.  Always
+        # produce the legacy form for qwen/claude so the webui can locate the
+        # conversation JSONL files on disk.
         if normalize_tool_name(tool_name) in ["qwen", "claude"]:
-            # project_path may be actual path or encoded name
-            # Need to convert actual path to encoded name if necessary
-            # Format: /home/rhuang/open-ace -> -home-rhuang-open-ace
-            if project_path and project_path.startswith("/"):
-                # Actual path, replace / with - (first / becomes leading -)
-                encoded_project_name = project_path.replace("/", "-")
-            else:
-                # Already encoded or empty
-                encoded_project_name = project_path
+            # Resolve project_path to an actual filesystem path first.
+            actual_path = project_path or ""
+            if actual_path.startswith(_B64_PREFIX):
+                actual_path = decode_project_name(actual_path) or ""
+            elif actual_path and not actual_path.startswith("/"):
+                # Legacy encoded or other — decode to get the real path.
+                decoded = decode_project_name(actual_path)
+                if decoded:
+                    actual_path = decoded
+            encoded_project_name = encode_project_path_legacy(actual_path) if actual_path else ""
         elif tool_name == "openclaw":
             # project_path is the agent_name (e.g., "main")
             encoded_project_name = project_path
@@ -2073,7 +2192,7 @@ def get_knowledge(entry_id):
             author_id = getattr(entry, "author_id", None)
 
             # Only author or admin can access unpublished entries
-            if user_role != "admin" and user_id != author_id:
+            if not User.is_admin_role(user_role) and user_id != author_id:
                 logger.info(
                     f"Knowledge access denied: user={user_id}, entry={entry_id}, "
                     f"author={author_id}, is_published={is_published}"
@@ -2261,7 +2380,7 @@ def list_webui_instances():
     if not hasattr(g, "user") or not g.user:
         return jsonify({"error": "Not authenticated"}), 401
 
-    if g.user.get("role") != "admin":
+    if not User.is_admin_role(g.user.get("role")):
         return jsonify({"error": "Admin access required"}), 403
 
     try:
@@ -2282,6 +2401,7 @@ def list_webui_instances():
         return jsonify({"error": "Internal server error"}), 500
 
 
+@security_annotated(reason="Admin-only endpoint to stop user webui instances")
 @workspace_bp.route("/instances/<int:user_id>/stop", methods=["POST"])
 def stop_user_webui_instance(user_id):
     """Stop a specific user's webui instance (admin only)."""
@@ -2291,7 +2411,7 @@ def stop_user_webui_instance(user_id):
     if not hasattr(g, "user") or not g.user:
         return jsonify({"error": "Not authenticated"}), 401
 
-    if g.user.get("role") != "admin":
+    if not User.is_admin_role(g.user.get("role")):
         return jsonify({"error": "Admin access required"}), 403
 
     try:
@@ -2319,7 +2439,7 @@ def stop_all_webui_instances():
     if not hasattr(g, "user") or not g.user:
         return jsonify({"error": "Not authenticated"}), 401
 
-    if g.user.get("role") != "admin":
+    if not User.is_admin_role(g.user.get("role")):
         return jsonify({"error": "Admin access required"}), 403
 
     try:

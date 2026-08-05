@@ -716,6 +716,7 @@ export const APIKeyManagement: React.FC = () => {
                         size="sm"
                         onClick={() => handleOpenEdit(key)}
                         className="me-1"
+                        title={t('edit', language) ?? 'Edit'}
                       >
                         <i className="bi bi-pencil" />
                       </Button>
@@ -724,6 +725,7 @@ export const APIKeyManagement: React.FC = () => {
                         size="sm"
                         onClick={() => handleOpenDelete(key)}
                         disabled={deleteApiKey.isPending}
+                        title={t('delete', language) ?? 'Delete'}
                       >
                         <i className="bi bi-trash" />
                       </Button>

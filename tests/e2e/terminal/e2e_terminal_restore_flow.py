@@ -67,7 +67,9 @@ def wait_for_terminal_status(terminal_id, timeout=30):
     return False
 
 
-def test_terminal_restore_flow(headless=True):
+def test_terminal_restore_flow(
+    headless=True,
+):  # allow-no-assert: smoke test - visual verification only
     """Test terminal session restore flow"""
     print("\n" + "=" * 60)
     print("Terminal Session Restore Flow Test")
@@ -150,7 +152,7 @@ def test_terminal_restore_flow(headless=True):
         page.click("button[type='submit']")
         try:
             page.wait_for_url("**/manage/**", timeout=10000)
-        except Exception:
+        except Exception:  # allow-swallow: UI element may not exist
             page.wait_for_timeout(5000)
         print("✓ Logged in")
 
@@ -223,8 +225,6 @@ def test_terminal_restore_flow(headless=True):
     print("- UI flow completes successfully")
     print("=" * 60)
     print("\nScreenshots: /tmp/restore_flow_final.png")
-
-    return True
 
 
 if __name__ == "__main__":

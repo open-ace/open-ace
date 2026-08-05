@@ -44,7 +44,7 @@ def _seed_sqlite_db(db_path: Path) -> None:
     monkeypatch) before calling this so no env state leaks across tests.
     """
     from app.modules.workspace.api_key_proxy import APIKeyProxyService
-    from app.utils.smtp_crypto import SMTPPasswordManager
+    from app.utils.smtp_crypto import get_password_manager
 
     conn = sqlite3.connect(db_path)
     cur = conn.cursor()
@@ -97,7 +97,9 @@ def _seed_sqlite_db(db_path: Path) -> None:
     )
 
     api_service = APIKeyProxyService(db_path=str(db_path))
-    smtp_mgr = SMTPPasswordManager()
+    # Use get_password_manager() singleton to ensure same key is used
+    # for encryption (here) and decryption (in export script)
+    smtp_mgr = get_password_manager()
 
     cur.execute(
         """
@@ -158,6 +160,15 @@ def _seed_sqlite_db(db_path: Path) -> None:
 @pytest.fixture
 def rotation_env(tmp_path, monkeypatch):
     """Point the scripts at an isolated SQLite DB seeded with encrypted rows."""
+    # Reset singleton caches BEFORE setting environment variable
+    # to ensure fresh instances with the test key
+    import app.utils.smtp_crypto as smtp_crypto
+    from app.utils.encryption_key_registry import reset_registry
+
+    smtp_crypto._password_manager_instance = None
+    smtp_crypto.get_password_manager.cache_clear()
+    reset_registry()
+
     db_path = tmp_path / "rotation.db"
 
     # Set the key BEFORE seeding (via monkeypatch so it's restored after the
@@ -243,10 +254,13 @@ class TestImportScript:
         #    fresh, so the new key is picked up (the SMTP singleton is reset by
         #    the import-time get_password_manager() only if None; force-reset).
         import app.utils.smtp_crypto as smtp_crypto
+        from app.utils.encryption_key_registry import reset_registry
 
         new_key = "rotated-new-key-9876543210fedcba"
         monkeypatch.setenv("OPENACE_ENCRYPTION_KEY", new_key)
         smtp_crypto._password_manager_instance = None  # drop old-key singleton
+        smtp_crypto.get_password_manager.cache_clear()  # clear lru_cache
+        reset_registry()  # reset EncryptionKeyRegistry singleton
 
         conn = import_mod.get_database_connection()
         try:
@@ -260,10 +274,10 @@ class TestImportScript:
 
         # 3. Verify the DB now decrypts correctly under the NEW key.
         from app.modules.workspace.api_key_proxy import APIKeyProxyService
-        from app.utils.smtp_crypto import SMTPPasswordManager
+        from app.utils.smtp_crypto import get_password_manager
 
         api_service = APIKeyProxyService(db_path=str(db_path))
-        smtp_mgr = SMTPPasswordManager()
+        smtp_mgr = get_password_manager()  # Use singleton, not direct construction
         conn = sqlite3.connect(db_path)
         conn.row_factory = sqlite3.Row
         try:

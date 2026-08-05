@@ -22,12 +22,15 @@ from __future__ import annotations
 import hashlib
 import hmac
 import logging
+import os
 import time
 from functools import wraps
 from typing import TYPE_CHECKING, Literal, cast
 from urllib.parse import unquote
 
 from flask import Response, g, jsonify, request
+
+from app.models.user import User
 
 logger = logging.getLogger(__name__)
 
@@ -44,11 +47,27 @@ def _get_auth_service() -> AuthService:
 
 # ── URL Token Security (Issue #1896) ─────────────────────────────────────
 
-# WebUI token TTL in seconds (24 hours). qwen-code-webui caches the token in
-# sessionStorage and reuses it for the whole session without refreshing; a
-# 30-minute TTL caused the workspace to fail with "Failed to fetch projects:
-# UNAUTHORIZED" once the token aged out.
-WEBUI_TOKEN_TTL_SECONDS = 86400
+# WebUI token TTL in seconds (default 24 hours)
+# Can be configured via OPENACE_WEBUI_TOKEN_TTL_SECONDS environment variable
+# Value must be a positive integer, otherwise defaults to 86400 (24 hours)
+_DEFAULT_WEBUI_TOKEN_TTL = 86400
+_env_ttl = os.environ.get("OPENACE_WEBUI_TOKEN_TTL_SECONDS", str(_DEFAULT_WEBUI_TOKEN_TTL))
+try:
+    WEBUI_TOKEN_TTL_SECONDS = int(_env_ttl)
+    if WEBUI_TOKEN_TTL_SECONDS <= 0:
+        logger.warning(
+            "OPENACE_WEBUI_TOKEN_TTL_SECONDS must be positive, got %s. Using default: %s",
+            WEBUI_TOKEN_TTL_SECONDS,
+            _DEFAULT_WEBUI_TOKEN_TTL,
+        )
+        WEBUI_TOKEN_TTL_SECONDS = _DEFAULT_WEBUI_TOKEN_TTL
+except ValueError:
+    logger.warning(
+        "Invalid OPENACE_WEBUI_TOKEN_TTL_SECONDS value: %s. Using default: %s",
+        _env_ttl,
+        _DEFAULT_WEBUI_TOKEN_TTL,
+    )
+    WEBUI_TOKEN_TTL_SECONDS = _DEFAULT_WEBUI_TOKEN_TTL
 
 # URL token allowed path prefixes
 URL_TOKEN_ALLOWED_PATHS = [
@@ -486,7 +505,7 @@ def _check_session_ownership(user_id: int, session_id: str, tenant_id: int | Non
 def _check_machine_admin(user_id: int, machine_id: str) -> bool:
     """Check if user is system admin or machine admin."""
     g_user = getattr(g, "user", {})
-    if g_user.get("role") == "admin":
+    if User.is_admin_role(g_user.get("role")):
         return True
     try:
         from app.services.remote_agent_manager import get_remote_agent_manager
@@ -595,7 +614,7 @@ def auth_required(f=None, *, ownership=None):
                 return password_change_response
 
             # Ownership checks (admin bypasses)
-            if g.user_role == "admin":
+            if User.is_admin_role(g.user_role):
                 return func(*args, **kwargs)
 
             if ownership == "session":
@@ -640,6 +659,8 @@ def admin_required(f=None):
     Issue #1896: Query parameter session tokens are rejected.
     WebUI tokens are validated and logged for audit.
 
+    Issue #2179: Accept admin, platform_admin, and tenant_admin roles.
+
     Sets g.user, g.user_id, g.user_role on success.
     """
 
@@ -651,12 +672,14 @@ def admin_required(f=None):
             if token:
                 user = _load_user_from_token(token)
                 if user:
-                    if user.get("role") != "admin":
+                    # Issue #2179: Accept all admin variants
+                    user_role = user.get("role")
+                    if user_role not in ("admin", "platform_admin", "tenant_admin"):
                         return jsonify({"error": "Admin access required"}), 403
 
                     g.user = user
                     g.user_id = user.get("id")
-                    g.user_role = user.get("role")
+                    g.user_role = user_role
                     g.tenant_id = user.get("tenant_id")
 
                     password_change_response = enforce_password_change_requirement(user)
@@ -696,12 +719,32 @@ def admin_required(f=None):
                         user_repo = UserRepository()
                         user = user_repo.get_user_by_id(user_id)
                         if user:
-                            if user.get("role") != "admin":
+                            # Issue #1832 F1: surface a latent security
+                            # weakening without changing behavior. get_user_by_id
+                            # returns SELECT * and must carry must_change_password;
+                            # if the key is ever absent (e.g. a future SELECT
+                            # narrowing), enforce_password_change_requirement
+                            # silently treats it as falsy and the forced password
+                            # change is bypassed. Historical behavior is to
+                            # proceed, so we keep doing that but log so the silent
+                            # bypass is observable. This finding does NOT fix the
+                            # semantics — it only makes the weakening visible.
+                            if "must_change_password" not in user:
+                                logger.warning(
+                                    "WebUI-token admin path: user dict lacks "
+                                    "'must_change_password' key (user_id=%s); "
+                                    "forced password change cannot be enforced "
+                                    "— latent auth weakening, see Issue #1832 F1",
+                                    user_id,
+                                )
+                            # Issue #2179: Accept all admin variants
+                            user_role = user.get("role")
+                            if user_role not in ("admin", "platform_admin", "tenant_admin"):
                                 return jsonify({"error": "Admin access required"}), 403
 
                             g.user = user
                             g.user_id = user_id
-                            g.user_role = user.get("role")
+                            g.user_role = user_role
                             g.tenant_id = user.get("tenant_id")
 
                             password_change_response = enforce_password_change_requirement(user)
@@ -800,9 +843,12 @@ def resolve_tenant_scope() -> tuple[int | None, bool]:
     This helper is side-effect free; callers decide what to do when a
     non-admin has no tenant (the route layer denies with 403, see
     :func:`require_tenant_scope`).
+
+    Issue #2286: Accept legacy 'admin' role alongside 'platform_admin' for
+    backward compatibility.
     """
     user = getattr(g, "user", None) or {}
-    is_admin = user.get("role") == "admin"
+    is_admin = User.is_admin_role(user.get("role"))
     tenant_id = _normalize_user_tenant_id(user.get("tenant_id"))
     return tenant_id, is_admin
 
@@ -827,3 +873,335 @@ def require_tenant_scope() -> tuple[int | None, tuple[Response, int] | None]:
     if tenant_id is None:
         return None, (jsonify({"error": "Tenant scope required"}), 403)
     return tenant_id, None
+
+
+# ── Platform Admin and Tenant Admin Decorators (Issue #2179) ───────────────
+
+
+def _extract_target_tenant_id() -> int | None:
+    """
+    Extract target tenant ID from request for permission validation.
+
+    Priority: URL path parameter > Request body > Query parameter
+
+    Validates consistency across sources and fails closed if inconsistent.
+
+    Returns:
+        int | None: Target tenant ID or None if cannot determine
+    """
+    target_tenant_id = None
+    sources = []
+
+    # 1. URL path parameter (e.g., /api/tenants/123/settings)
+    if request.view_args and "tenant_id" in request.view_args:
+        target_tenant_id = request.view_args["tenant_id"]
+        sources.append(("url", target_tenant_id))
+
+    # 2. Request body (POST/PUT)
+    if request.is_json:
+        try:
+            body_tenant_id = request.json.get("tenant_id")
+            if body_tenant_id is not None:
+                sources.append(("body", int(body_tenant_id)))
+                if target_tenant_id is None:
+                    target_tenant_id = int(body_tenant_id)
+        except (TypeError, ValueError):
+            pass
+
+    # 3. Query parameter
+    query_tenant_id = request.args.get("tenant_id", type=int)
+    if query_tenant_id is not None:
+        sources.append(("query", query_tenant_id))
+        if target_tenant_id is None:
+            target_tenant_id = query_tenant_id
+
+    # Validate consistency
+    if len(sources) > 1:
+        values = {v for _, v in sources}
+        if len(values) > 1:
+            logger.warning("Tenant ID sources inconsistent: %s, rejecting request", sources)
+            return None  # Fail closed
+
+    return target_tenant_id
+
+
+def platform_admin_required(f=None):
+    """
+    Decorator: require platform admin role.
+
+    Validation rules:
+    1. User is authenticated
+    2. User role is 'platform_admin' (or legacy 'admin' for backward compatibility)
+    3. Platform admin can have tenant_id=NULL or any tenant_id
+
+    Failure responses:
+    - 401: Not authenticated
+    - 403: Not a platform admin
+
+    Issue #2179: Platform admin can manage all tenants
+    Issue #2286: Accept legacy 'admin' role for backward compatibility
+    """
+
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            # First try session token from cookie/header only
+            token = _extract_session_token()
+            if not token:
+                return jsonify({"error": "Authentication required"}), 401
+
+            user = _load_user_from_token(token)
+            if not user:
+                return jsonify({"error": "Invalid or expired session"}), 401
+
+            # Check platform admin role
+            # Issue #2286: Also accept legacy 'admin' role for backward compatibility
+            # with installations that were initialized before the role model migration (#2179).
+            if user.get("role") not in ("platform_admin", "admin"):
+                return jsonify({"error": "Platform admin access required"}), 403
+
+            g.user = user
+            g.user_id = user.get("id")
+            g.user_role = user.get("role")
+            g.tenant_id = user.get("tenant_id")
+
+            password_change_response = enforce_password_change_requirement(user)
+            if password_change_response is not None:
+                return password_change_response
+
+            return func(*args, **kwargs)
+
+        return wrapper
+
+    if f is not None:
+        return decorator(f)
+    return decorator
+
+
+def tenant_admin_required(f=None):
+    """
+    Decorator: require tenant admin role with matching tenant.
+
+    Validation rules:
+    1. User is authenticated
+    2. User role is 'tenant_admin'
+    3. User has a non-null tenant_id
+    4. Target tenant_id from URL matches user's tenant_id
+
+    Target tenant ID extraction:
+    1. URL path parameter (preferred)
+    2. Request body (for POST/PUT)
+    3. Query parameter
+
+    Failure responses:
+    - 401: Not authenticated
+    - 403: Not a tenant admin, tenant_id missing, or cross-tenant access
+
+    Issue #2179: Tenant admin can only manage own tenant
+    """
+
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            # First try session token from cookie/header only
+            token = _extract_session_token()
+            if not token:
+                return jsonify({"error": "Authentication required"}), 401
+
+            user = _load_user_from_token(token)
+            if not user:
+                return jsonify({"error": "Invalid or expired session"}), 401
+
+            # Check tenant admin role
+            if user.get("role") != "tenant_admin":
+                return jsonify({"error": "Tenant admin access required"}), 403
+
+            # Check user has tenant_id
+            user_tenant_id = user.get("tenant_id")
+            if user_tenant_id is None:
+                return jsonify({"error": "Tenant admin must have tenant_id"}), 403
+
+            # Extract and validate target tenant_id
+            target_tenant_id = _extract_target_tenant_id()
+            if target_tenant_id is None:
+                return jsonify({"error": "Cannot determine target tenant"}), 400
+
+            # Check tenant boundary
+            if user_tenant_id != target_tenant_id:
+                return jsonify({"error": "Cross-tenant access denied"}), 403
+
+            g.user = user
+            g.user_id = user.get("id")
+            g.user_role = user.get("role")
+            g.tenant_id = user_tenant_id
+
+            password_change_response = enforce_password_change_requirement(user)
+            if password_change_response is not None:
+                return password_change_response
+
+            return func(*args, **kwargs)
+
+        return wrapper
+
+    if f is not None:
+        return decorator(f)
+    return decorator
+
+
+def same_tenant_or_platform_admin(f=None):
+    """
+    Decorator: same tenant or platform admin can access.
+
+    Validation rules:
+    1. User is authenticated
+    2. If platform_admin (or legacy admin): allow (log cross-tenant operation)
+    3. If tenant_admin: verify tenant_id matches
+    4. Other roles: deny
+
+    Audit logging:
+    - Platform admin cross-tenant operations are logged
+    - Log contains: actor, actor_tenant, target_tenant, action, result
+
+    Failure responses:
+    - 401: Not authenticated
+    - 403: Not authorized or cross-tenant access denied
+
+    Issue #2179: Support both platform admin and tenant admin scenarios
+    Issue #2286: Accept legacy 'admin' role for backward compatibility
+    """
+
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            # First try session token from cookie/header only
+            token = _extract_session_token()
+            if not token:
+                return jsonify({"error": "Authentication required"}), 401
+
+            user = _load_user_from_token(token)
+            if not user:
+                return jsonify({"error": "Invalid or expired session"}), 401
+
+            user_role = user.get("role")
+            user_tenant_id = user.get("tenant_id")
+            user_id = user.get("id")
+
+            # Platform admin (or legacy admin): allow with audit logging
+            # Issue #2286: Accept legacy 'admin' role for backward compatibility
+            if user_role in ("platform_admin", "admin"):
+                g.user = user
+                g.user_id = user_id
+                g.user_role = user_role
+                g.tenant_id = user_tenant_id
+
+                # Log cross-tenant operations
+                target_tenant_id = _extract_target_tenant_id()
+                if target_tenant_id is not None and user_tenant_id != target_tenant_id:
+                    # 类型断言：user_id 在此处必定存在且为 int
+                    if user_id is None:
+                        return jsonify({"error": "User ID missing"}), 401
+                    if not isinstance(user_id, int):
+                        return jsonify({"error": "Invalid user ID type"}), 401
+
+                    _log_cross_tenant_operation(
+                        actor_user_id=user_id,
+                        actor_tenant_id=user_tenant_id,
+                        target_tenant_id=target_tenant_id,
+                        action=f"{request.method} {request.path}",
+                    )
+
+                password_change_response = enforce_password_change_requirement(user)
+                if password_change_response is not None:
+                    return password_change_response
+
+                return func(*args, **kwargs)
+
+            # Tenant admin: verify tenant boundary
+            if user_role == "tenant_admin":
+                if user_tenant_id is None:
+                    return jsonify({"error": "Tenant admin must have tenant_id"}), 403
+
+                target_tenant_id = _extract_target_tenant_id()
+                if target_tenant_id is None:
+                    return jsonify({"error": "Cannot determine target tenant"}), 400
+
+                if user_tenant_id != target_tenant_id:
+                    return jsonify({"error": "Cross-tenant access denied"}), 403
+
+                g.user = user
+                g.user_id = user.get("id")
+                g.user_role = user_role
+                g.tenant_id = user_tenant_id
+
+                password_change_response = enforce_password_change_requirement(user)
+                if password_change_response is not None:
+                    return password_change_response
+
+                return func(*args, **kwargs)
+
+            # Other roles: deny
+            return jsonify({"error": "Admin access required"}), 403
+
+        return wrapper
+
+    if f is not None:
+        return decorator(f)
+    return decorator
+
+
+def _log_cross_tenant_operation(
+    actor_user_id: int,
+    actor_tenant_id: int | None,
+    target_tenant_id: int,
+    action: str,
+) -> None:
+    """
+    Log platform admin cross-tenant operation for audit.
+
+    Args:
+        actor_user_id: Platform admin user ID
+        actor_tenant_id: Platform admin's tenant ID (can be None)
+        target_tenant_id: Target tenant ID being accessed
+        action: The action being performed (e.g., "GET /api/tenants/123")
+
+    Issue #2179: Audit logging for cross-tenant operations
+    """
+    try:
+        from flask import request
+
+        from app.modules.governance.audit_logger import AuditAction, AuditLogger
+
+        audit_logger = AuditLogger()
+
+        # Map HTTP method to audit action
+        method_action_map = {
+            "GET": AuditAction.ADMIN_CROSS_TENANT_ACCESS,
+            "PUT": AuditAction.ADMIN_CROSS_TENANT_ACCESS,
+            "POST": AuditAction.ADMIN_CROSS_TENANT_ACCESS,
+            "DELETE": AuditAction.ADMIN_CROSS_TENANT_ACCESS,
+        }
+
+        audit_action = method_action_map.get(request.method, AuditAction.ADMIN_CROSS_TENANT_ACCESS)
+
+        audit_logger.log_action(
+            audit_action,
+            user_id=actor_user_id,
+            severity="info",
+            resource_type="tenant",
+            resource_id=str(target_tenant_id),
+            tenant_id=target_tenant_id,
+            details={
+                "actor_tenant_id": actor_tenant_id,
+                "target_tenant_id": target_tenant_id,
+                "action": action,
+                "request_method": request.method,
+                "request_path": request.path,
+            },
+        )
+
+        logger.info(
+            f"Platform admin {actor_user_id} (tenant: {actor_tenant_id}) "
+            f"accessed tenant {target_tenant_id}: {action}"
+        )
+    except Exception as e:
+        logger.warning(f"Failed to log cross-tenant operation: {e}")

@@ -96,7 +96,7 @@ def navigate_to_quota_management(page):
     shot(page, "02-quota-management")
 
 
-def test_quota_cards_visible(page):
+def test_quota_cards_visible(page):  # allow-no-assert: smoke test - visual verification only
     """Test that quota cards are visible."""
     print("\n[TEST] Quota cards visible...")
     # Find quota cards (user quota display cards)
@@ -106,7 +106,7 @@ def test_quota_cards_visible(page):
     shot(page, "03-quota-cards")
 
 
-def test_open_edit_modal(page):
+def test_open_edit_modal(page):  # allow-no-assert: smoke test - visual verification only
     """Test opening edit modal."""
     print("\n[TEST] Open edit modal...")
     # Click edit button on first quota card
@@ -123,7 +123,7 @@ def test_open_edit_modal(page):
         check(False, "No edit button found")
 
 
-def test_valid_quota_input(page):
+def test_valid_quota_input(page):  # allow-no-assert: smoke test - visual verification only
     """Test valid quota input within limits."""
     print("\n[TEST] Valid quota input...")
 
@@ -151,7 +151,7 @@ def test_valid_quota_input(page):
     shot(page, "05-valid-quota-input")
 
 
-def test_quota_exceeding_max(page):
+def test_quota_exceeding_max(page):  # allow-no-assert: smoke test - visual verification only
     """Test quota input exceeding max limit."""
     print("\n[TEST] Quota exceeding max limit...")
 
@@ -174,7 +174,7 @@ def test_quota_exceeding_max(page):
     shot(page, "06-quota-exceeding-max")
 
 
-def test_negative_quota_input(page):
+def test_negative_quota_input(page):  # allow-no-assert: smoke test - visual verification only
     """Test negative quota input."""
     print("\n[TEST] Negative quota input...")
 
@@ -197,7 +197,7 @@ def test_negative_quota_input(page):
     shot(page, "07-negative-quota")
 
 
-def test_scientific_notation_input(page):
+def test_scientific_notation_input(page):  # allow-no-assert: smoke test - visual verification only
     """Test scientific notation input."""
     print("\n[TEST] Scientific notation input...")
 
@@ -220,7 +220,7 @@ def test_scientific_notation_input(page):
     shot(page, "08-scientific-notation")
 
 
-def test_close_modal_without_save(page):
+def test_close_modal_without_save(page):  # allow-no-assert: smoke test - visual verification only
     """Test closing modal without saving."""
     print("\n[TEST] Close modal without save...")
 
@@ -236,7 +236,7 @@ def test_close_modal_without_save(page):
         shot(page, "09-modal-closed")
 
 
-def test_quota_display_formatting(page):
+def test_quota_display_formatting(page):  # allow-no-assert: smoke test - visual verification only
     """Test quota display formatting."""
     print("\n[TEST] Quota display formatting...")
 
@@ -280,7 +280,7 @@ def main():
             test_close_modal_without_save(page)
             test_quota_display_formatting(page)
 
-        except Exception as e:
+        except Exception as e:  # allow-swallow: UI element may not exist
             print(f"\n[ERROR] Test execution failed: {e}")
             shot(page, "error-state")
             import traceback

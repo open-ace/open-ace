@@ -18,7 +18,9 @@ HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 SCREENSHOT_DIR = "screenshots/issues/alert-icon"
 
 
-async def test_alert_icon(ui_screenshot_dir):
+async def test_alert_icon(
+    ui_screenshot_dir,
+):  # allow-no-assert: smoke test - visual verification only
     """Test alert management page icon display"""
     global SCREENSHOT_DIR
     SCREENSHOT_DIR = ui_screenshot_dir
@@ -179,7 +181,7 @@ async def test_alert_icon(ui_screenshot_dir):
                     ("Navigate to Quota & Alerts", "Skip", "Quota & Alerts nav item not found")
                 )
 
-        except Exception as e:
+        except Exception as e:  # allow-swallow: UI element may not exist
             error_screenshot = f'{SCREENSHOT_DIR}/error_{datetime.now().strftime("%H%M%S")}.png'
             await page.screenshot(path=error_screenshot, full_page=True)
             error_detail = f"{str(e)}\n{traceback.format_exc()}"

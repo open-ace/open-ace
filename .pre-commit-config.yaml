@@ -103,6 +103,7 @@ repos:
     hooks:
       - id: ruff
         args: [--fix, --exit-non-zero-on-fix]
+        exclude: ^(remote-agent/.*\.(ps1|cmd|sh)|docker-entrypoint\.sh)$
 
   # =============================================================================
   # Type Checking
@@ -114,18 +115,21 @@ repos:
         args: [--config-file, pyproject.toml]
         additional_dependencies:
           - types-requests
+          - types-cachetools
         pass_filenames: false
         entry: mypy scripts/shared server.py cli.py
 
   # =============================================================================
   # Security Checks
   # =============================================================================
-  - repo: https://github.com/PyCQA/bandit
-    rev: 1.7.8
+  - repo: local
     hooks:
-      - id: bandit
-        args: [-c, pyproject.toml]
-        additional_dependencies: ["bandit[toml]"]
+      - id: bandit-check
+        name: bandit
+        entry: python scripts/lint/bandit_check.py
+        language: system
+        pass_filenames: false
+        files: ^(app|scripts)/
 
   # =============================================================================
   # General Checks
@@ -139,6 +143,8 @@ repos:
         exclude: ^static/|^templates/
       - id: check-yaml
         args: [--unsafe]
+        # Kubernetes manifests use multi-document YAML format which is not supported by check-yaml
+        exclude: ^k8s/
       - id: check-json
         exclude: tsconfig\.json$
       - id: check-toml
@@ -147,6 +153,8 @@ repos:
       - id: check-merge-conflict
       - id: check-case-conflict
       - id: check-executables-have-shebangs
+        # Exclude files that are incorrectly marked executable by the filesystem
+        exclude: ^frontend/|^migrations/|^tests/issues/|^tests/e2e/|^app/utils/senders\.py$
       - id: check-shebang-scripts-are-executable
         exclude: ^tests/|\.qwen/
       - id: debug-statements

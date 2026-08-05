@@ -196,17 +196,19 @@ class TestToolAccountAutoMappingService:
             "email": "alicewang@example.com",  # Different prefix from username
         }
 
-        with patch.object(self.service.rule_repo, "create") as mock_create:
+        with patch.object(self.service.rule_repo, "create_or_ignore") as mock_create:
             mock_create.side_effect = [
                 ToolAccountMappingRule(id=1, user_id=5, pattern="alice-*", match_type="prefix"),
                 ToolAccountMappingRule(id=2, user_id=5, pattern="alicewang-*", match_type="prefix"),
                 ToolAccountMappingRule(id=3, user_id=5, pattern="*alice*", match_type="contains"),
             ]
-            rules = self.service.create_default_rules_for_user(5)
+            result = self.service.create_default_rules_for_user(5)
 
             # Should create 3 rules: username prefix, email prefix (different), username contains
             assert mock_create.call_count == 3
-            assert len(rules) == 3
+            assert result.created_count == 3
+            assert len(result.created) == 3
+            assert result.skipped_count == 0
 
     def test_create_default_rules_for_user_same_prefix(self):
         """Create default rules when email prefix equals username."""
@@ -215,16 +217,18 @@ class TestToolAccountAutoMappingService:
             "email": "alice@example.com",  # Same prefix as username
         }
 
-        with patch.object(self.service.rule_repo, "create") as mock_create:
+        with patch.object(self.service.rule_repo, "create_or_ignore") as mock_create:
             mock_create.side_effect = [
                 ToolAccountMappingRule(id=1, user_id=5, pattern="alice-*", match_type="prefix"),
                 ToolAccountMappingRule(id=2, user_id=5, pattern="*alice*", match_type="contains"),
             ]
-            rules = self.service.create_default_rules_for_user(5)
+            result = self.service.create_default_rules_for_user(5)
 
             # Should create 2 rules: username prefix and username contains (email prefix skipped)
             assert mock_create.call_count == 2
-            assert len(rules) == 2
+            assert result.created_count == 2
+            assert len(result.created) == 2
+            assert result.skipped_count == 0
 
 
 class TestAutoMappingResult:

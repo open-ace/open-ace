@@ -35,3 +35,7 @@
 *.woff2 binary
 *.ttf binary
 *.eot binary
+
+# Git worktrees should not be treated as submodules
+# This is a workaround for erroneously committed .worktrees entries
+.worktrees/** -diff linguist-generated

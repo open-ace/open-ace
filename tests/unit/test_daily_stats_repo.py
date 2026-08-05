@@ -168,6 +168,78 @@ class TestDailyStatsRepository:
         assert "date <= ?" in query
 
     # -------------------------------------------------------------------------
+    # get_host_totals (Issue #2093)
+    # -------------------------------------------------------------------------
+
+    def test_get_host_totals_no_filters(self):
+        """get_host_totals returns host stats sorted by total_tokens DESC."""
+        self.db.fetch_all.return_value = [
+            {
+                "host_name": "host1",
+                "total_tokens": 1000,
+                "total_input_tokens": 600,
+                "total_output_tokens": 400,
+                "message_count": 100,
+            },
+            {
+                "host_name": "host2",
+                "total_tokens": 500,
+                "total_input_tokens": 300,
+                "total_output_tokens": 200,
+                "message_count": 50,
+            },
+        ]
+        result = self.repo.get_host_totals()
+        assert len(result) == 2
+        assert result[0]["host_name"] == "host1"
+        assert result[0]["total_tokens"] == 1000
+        assert result[1]["host_name"] == "host2"
+        self.db.fetch_all.assert_called_once()
+        query = self.db.fetch_all.call_args[0][0]
+        assert "GROUP BY host_name" in query
+        assert "ORDER BY total_tokens DESC" in query
+
+    def test_get_host_totals_with_filters(self):
+        """get_host_totals applies date and host_name filters."""
+        self.db.fetch_all.return_value = []
+        self.repo.get_host_totals(start_date="2024-01-01", end_date="2024-01-31", host_name="host1")
+        call_args = self.db.fetch_all.call_args
+        query = call_args[0][0]
+        assert "date >= ?" in query
+        assert "date <= ?" in query
+        assert "host_name = ?" in query
+        params = call_args[0][1]
+        assert params == ("2024-01-01", "2024-01-31", "host1")
+
+    def test_get_host_totals_handles_none_values(self):
+        """get_host_totals handles None values from DB."""
+        self.db.fetch_all.return_value = [
+            {
+                "host_name": "unknown",
+                "total_tokens": None,
+                "total_input_tokens": None,
+                "total_output_tokens": None,
+                "message_count": None,
+            },
+        ]
+        result = self.repo.get_host_totals()
+        assert len(result) == 1
+        assert result[0]["total_tokens"] == 0
+        assert result[0]["total_input_tokens"] == 0
+        assert result[0]["total_output_tokens"] == 0
+        assert result[0]["message_count"] == 0
+
+    def test_get_host_totals_with_tenant_id(self):
+        """get_host_totals filters by tenant_id when provided."""
+        self.db.fetch_all.return_value = []
+        self.repo.get_host_totals(tenant_id=1)
+        call_args = self.db.fetch_all.call_args
+        query = call_args[0][0]
+        assert "tenant_id = ?" in query
+        params = call_args[0][1]
+        assert params == (1,)
+
+    # -------------------------------------------------------------------------
     # get_user_totals
     # -------------------------------------------------------------------------
 
@@ -396,14 +468,23 @@ class TestDailyStatsRepository:
 
     @patch("app.repositories.daily_stats_repo.is_postgresql", return_value=True)
     def test_refresh_stats_postgresql(self, mock_pg):
+        # Mock advisory lock acquisition
+        self.db.fetch_one.return_value = {"acquired": True}
         self.db.execute.return_value = MagicMock()
         result = self.repo.refresh_stats(date="2024-01-15")
         assert result is True
-        # PostgreSQL: DELETE + INSERT (2 execute calls)
+        # Issue #2010: PostgreSQL now uses advisory lock + INSERT ON CONFLICT + unlock
+        # Calls: 1 fetch_one (lock) + 2 execute (insert + unlock)
+        assert self.db.fetch_one.call_count == 1
         assert self.db.execute.call_count == 2
-        insert_call = self.db.execute.call_args_list[1]
+        # Find the INSERT call (should be first execute call)
+        insert_call = self.db.execute.call_args_list[0]
         assert "INSERT INTO daily_stats" in insert_call[0][0]
+        assert "ON CONFLICT" in insert_call[0][0]
         assert "OR REPLACE" not in insert_call[0][0]
+        # Verify advisory lock was released
+        unlock_call = self.db.execute.call_args_list[1]
+        assert "pg_advisory_unlock" in unlock_call[0][0]
 
     def test_refresh_stats_exception(self):
         self.db.execute.side_effect = Exception("DB error")
@@ -484,14 +565,23 @@ class TestDailyStatsRepository:
 
     @patch("app.repositories.daily_stats_repo.is_postgresql", return_value=True)
     def test_refresh_hourly_stats_postgresql(self, mock_pg):
+        # Mock advisory lock acquisition
+        self.db.fetch_one.return_value = {"acquired": True}
         self.db.execute.return_value = MagicMock()
         result = self.repo.refresh_hourly_stats()
         assert result is True
-        # PostgreSQL: DELETE + INSERT (2 calls)
+        # Issue #2010: PostgreSQL now uses advisory lock + INSERT ON CONFLICT + unlock
+        # Calls: 1 fetch_one (lock) + 2 execute (insert + unlock)
+        assert self.db.fetch_one.call_count == 1
         assert self.db.execute.call_count == 2
-        insert_call = self.db.execute.call_args_list[1]
+        # Find the INSERT call (should be first execute call)
+        insert_call = self.db.execute.call_args_list[0]
         assert "INSERT INTO hourly_stats" in insert_call[0][0]
+        assert "ON CONFLICT" in insert_call[0][0]
         assert "EXTRACT" in insert_call[0][0]
+        # Verify advisory lock was released
+        unlock_call = self.db.execute.call_args_list[1]
+        assert "pg_advisory_unlock" in unlock_call[0][0]
 
     def test_refresh_hourly_stats_exception(self):
         self.db.execute.side_effect = Exception("DB error")

@@ -273,3 +273,55 @@ def test_evidence_is_frozen():
     assert isinstance(ev, Evidence)
     with pytest.raises((AttributeError, Exception)):
         ev.reason = "mutated"
+
+
+# ── Phase B incident contract tests (#2045: 事故场景迁移为 contract tests) ───
+
+
+def test_local_branch_does_not_override_verified_pr_head():
+    """Recovery must not let a local branch ref override the verified PR head.
+
+    When the fetched remote head differs from the verified expected head, the
+    probe returns INDETERMINATE — it never silently trusts the local ref or
+    picks the remote side. This is the #1999/#2042 guard: a stale local
+    ``auto-dev/*`` ref must not drive an irreversible recovery decision, and a
+    head mismatch must surface for re-derivation rather than be hidden.
+    """
+    gh = _gh_with_git({"fetch": 0})
+    gh.resolve_commit.return_value = "local-branch-head"
+    ev = EvidenceService().verify_remote_branch_state(gh, "feat", "verified-pr-head")
+    assert ev.verdict is Verdict.INDETERMINATE
+    assert "local-branch-head" in ev.commit_shas
+
+
+def test_incident_1991_pr_head_object_missing_is_indeterminate():
+    """PR head SHA from the API but absent from local object DB → indeterminate.
+
+    Reproduces the #1895/#1991 retry: ``get_pr_head_sha`` returned an API SHA
+    that was never fetched, so ``git merge-base`` failed with 'no commit'. The
+    evidence contract surfaces this as INDETERMINATE (defer) rather than
+    letting the raw SHA drive scope/merge probes.
+    """
+    gh = MagicMock()
+    gh.get_pr_head_sha.return_value = "api-sha"
+    gh._run_git.side_effect = [
+        MagicMock(returncode=1, stdout="", stderr=""),  # cat-file -e
+        MagicMock(returncode=0, stdout="", stderr=""),  # fetch origin feat
+        MagicMock(returncode=1, stdout="", stderr=""),  # cat-file -e again
+    ]
+    ev = EvidenceService().resolve_verified_pr_head(gh, 42, "feat")
+    assert ev.verdict is Verdict.INDETERMINATE
+    assert ev.commit_shas == ("api-sha",)
+
+
+def test_incident_1999_stale_local_ref_requires_remote_sync():
+    """A stale local ref (remote moved on) → indeterminate until synced (#1999).
+
+    The remote head no longer matches the locally-recorded head; the probe
+    refuses to pick either side and returns INDETERMINATE so the caller
+    re-fetches rather than merging from a stale ref.
+    """
+    gh = _gh_with_git({"fetch": 0})
+    gh.resolve_commit.return_value = "remote-head-new"
+    ev = EvidenceService().verify_remote_branch_state(gh, "feat", "stale-local-head")
+    assert ev.verdict is Verdict.INDETERMINATE

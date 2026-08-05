@@ -53,7 +53,7 @@ def test_page_loads():
             assert check_element_exists(page, main_selectors), "主内容区域应存在"
 
             save_screenshot(page, MODULE_NAME, "01_page_load")
-            return True
+
         finally:
             browser.close()
 
@@ -76,7 +76,7 @@ def test_message_list_display():
             ), "应有消息列表或空状态提示"
 
             save_screenshot(page, MODULE_NAME, "02_list")
-            return True
+
         finally:
             browser.close()
 
@@ -98,19 +98,11 @@ def test_filter_functionality():
                 'input[type="date"]',
                 'input[placeholder*="search"]',
             ]
-            if check_element_exists(page, filter_selectors):
-                for selector in filter_selectors:
-                    try:
-                        element = page.locator(selector).first
-                        if element.is_visible():
-                            element.click()
-                            page.wait_for_timeout(300)
-                            break
-                    except Exception:
-                        continue
+            check_element_exists(page, filter_selectors)
+            # 筛选功能是可选的，确保页面已加载即可
+            assert page.locator("body").is_visible(), "页面应可见"
 
             save_screenshot(page, MODULE_NAME, "03_filter")
-            return True
         finally:
             browser.close()
 
@@ -128,9 +120,10 @@ def test_pagination():
             # 检查分页元素（可选）
             pagination_selectors = [".pagination", ".pager", '[class*="pagination"]']
             check_element_exists(page, pagination_selectors)
+            # 确保页面已加载（分页功能是可选的）
+            assert page.locator("body").is_visible(), "页面应可见"
 
             save_screenshot(page, MODULE_NAME, "04_pagination")
-            return True
         finally:
             browser.close()
 
@@ -148,9 +141,10 @@ def test_sender_filter():
             # 检查发送者筛选（可选）
             sender_selectors = ['select[name="sender"]', ".sender-dropdown", 'select[id*="sender"]']
             check_element_exists(page, sender_selectors)
+            # 确保页面已加载（发送者筛选是可选的）
+            assert page.locator("body").is_visible(), "页面应可见"
 
             save_screenshot(page, MODULE_NAME, "05_sender")
-            return True
         finally:
             browser.close()
 

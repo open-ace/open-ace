@@ -251,7 +251,8 @@ def _init_dest_schema(db_path: Path) -> None:
             sender_name TEXT,
             timestamp TEXT,
             agent_session_id TEXT,
-            conversation_id TEXT
+            conversation_id TEXT,
+            user_id integer
         );
         CREATE UNIQUE INDEX idx_daily_messages_unique
         ON daily_messages (date, tool_name, host_name, message_id);

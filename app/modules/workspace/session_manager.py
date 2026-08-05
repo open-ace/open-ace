@@ -16,6 +16,7 @@ from enum import Enum
 from typing import Any
 
 from app.repositories.database import DB_PATH, escape_like, get_database_url, is_postgresql
+from app.utils.tenant_resolver import TenantResolutionError
 from app.utils.tool_names import normalize_tool_name
 
 logger = logging.getLogger(__name__)
@@ -240,6 +241,8 @@ class AgentSession:
     total_tokens: int = 0
     total_input_tokens: int = 0
     total_output_tokens: int = 0
+    total_cache_read_tokens: int = 0  # Issue #2184: Cache read tokens
+    total_cache_write_tokens: int = 0  # Issue #2184: Cache write tokens
     message_count: int = 0
     request_count: int = 0  # Number of API requests (assistant messages only)
     model: str | None = None
@@ -277,6 +280,8 @@ class AgentSession:
             "total_tokens": self.total_tokens,
             "total_input_tokens": self.total_input_tokens,
             "total_output_tokens": self.total_output_tokens,
+            "total_cache_read_tokens": self.total_cache_read_tokens,
+            "total_cache_write_tokens": self.total_cache_write_tokens,
             "message_count": self.message_count,
             "request_count": self.request_count,
             "model": self.model,
@@ -312,7 +317,10 @@ class AgentSession:
             total_tokens=data.get("total_tokens", 0),
             total_input_tokens=data.get("total_input_tokens", 0),
             total_output_tokens=data.get("total_output_tokens", 0),
+            total_cache_read_tokens=data.get("total_cache_read_tokens", 0),
+            total_cache_write_tokens=data.get("total_cache_write_tokens", 0),
             message_count=data.get("message_count", 0),
+            request_count=data.get("request_count", 0),
             model=data.get("model"),
             tags=data.get("tags", []),
             created_at=(
@@ -459,11 +467,28 @@ class SessionManager:
         tenant_id: int | None = None,
         user_id: int | None = None,
     ) -> int:
-        """Resolve the effective tenant for a session write path."""
+        """Resolve the effective tenant for a session write path.
+
+        Uses fail-closed mode to prevent cross-tenant data leakage.
+        Raises TenantResolutionError if tenant cannot be resolved.
+
+        Args:
+            cursor: Database cursor for queries
+            tenant_id: Explicitly provided tenant ID
+            user_id: User ID to look up tenant from
+
+        Returns:
+            Resolved tenant ID
+
+        Raises:
+            TenantResolutionError: If tenant cannot be resolved
+        """
+        # Try explicit tenant_id first
         normalized = self._normalize_tenant_id(tenant_id)
         if normalized is not None:
             return normalized
 
+        # Try user lookup if user_id provided
         if user_id is not None:
             cursor.execute(f"SELECT tenant_id FROM users WHERE id = {_param()}", (user_id,))
             row = cursor.fetchone()
@@ -473,7 +498,14 @@ class SessionManager:
                 if normalized is not None:
                     return normalized
 
-        return 1
+        # Fail-closed: Do not return default tenant
+        logger.error(
+            f"Cannot resolve tenant for session write - tenant_id={tenant_id}, user_id={user_id}"
+        )
+        raise TenantResolutionError(
+            "Cannot resolve tenant for session write operation. "
+            "Provide explicit tenant_id or ensure user has valid tenant assignment."
+        )
 
     def _tenant_scope_condition(
         self,
@@ -526,6 +558,32 @@ class SessionManager:
         dialect = "postgresql" if is_postgresql() else "sqlite"
         db_url = f"sqlite:///{self.db_path}" if dialect == "sqlite" and self.db_path else None
         load_schema_from_file(db_url=db_url, dialect=dialect)
+
+        # Issue #1832 F8: fail fast at startup if the tenant-scoping column is
+        # absent. The runtime tenant predicate (_tenant_scope_condition) silently
+        # degrades when tenant_id is missing — reads return no tenant clause and
+        # writes (require_tenant=True) fall through to ``"", []`` (no clause),
+        # i.e. a cross-tenant write. The authoritative schema and the back-fill
+        # in load_schema_from_file() guarantee these columns exist, so reaching
+        # this error means real schema drift that must surface loudly instead of
+        # weakening tenant isolation. Read-only introspection — performs no DDL.
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            missing = [
+                table
+                for table in ("agent_sessions", "session_messages")
+                if not self._column_exists(cursor, table, "tenant_id")
+            ]
+            if missing:
+                raise RuntimeError(
+                    "Required tenant_id column missing on "
+                    + ", ".join(missing)
+                    + "; tenant isolation cannot be enforced. "
+                    "Run schema initialization or migrations to repair the schema."
+                )
+        finally:
+            conn.close()
 
     @staticmethod
     def _extract_external_message_id(metadata: dict[str, Any] | None) -> str:
@@ -925,7 +983,7 @@ class SessionManager:
         session_id: str,
         fields: dict[str, Any],
         tenant_id: int | None = None,
-        require_tenant: bool = False,
+        require_tenant: bool = True,
     ) -> bool:
         """
         Update specific fields of a session.
@@ -1005,23 +1063,35 @@ class SessionManager:
         total_tokens_delta: int = 0,
         total_input_delta: int = 0,
         total_output_delta: int = 0,
+        total_cache_read_delta: int = 0,
+        total_cache_write_delta: int = 0,
         message_delta: int = 0,
         tenant_id: int | None = None,
-        require_tenant: bool = False,
+        require_tenant: bool = True,
     ) -> bool:
         """Increment a session's cumulative usage counters by the given deltas.
 
         ``agent_sessions.{message_count,request_count,total_tokens,
-        total_input_tokens,total_output_tokens}`` must be monotonically
-        accumulated so that ``Σ milestone.phase_* == session.*`` holds (#1003).
-        The previous per-call overwrite (update_session_fields) reset the column
-        to each call's local count, breaking the invariant. Callers pass the
-        per-call ``AgentTaskResult`` counters as deltas. ``message_delta`` lets
-        transcript writers (which keep ``add_message`` side-effect-free via
-        ``count_usage=False``) own ``message_count`` explicitly (#1128).
+        total_input_tokens,total_output_tokens,total_cache_read_tokens,
+        total_cache_write_tokens}`` must be monotonically accumulated so that
+        ``Σ milestone.phase_* == session.*`` holds (#1003).
 
-        ``require_tenant=True`` fails closed on an unresolved (None) tenant so
-        the tenant clause cannot be silently disabled (#1789).
+        Issue #2184: Added cache token support for accurate quota/cost reporting.
+
+        Args:
+            session_id: Session ID to update.
+            request_delta: Increment for request_count.
+            total_tokens_delta: Increment for total_tokens.
+            total_input_delta: Increment for total_input_tokens.
+            total_output_delta: Increment for total_output_tokens.
+            total_cache_read_delta: Increment for total_cache_read_tokens.
+            total_cache_write_delta: Increment for total_cache_write_tokens.
+            message_delta: Increment for message_count.
+            tenant_id: Tenant ID for scope check.
+            require_tenant: Fail closed if tenant_id is None.
+
+        Returns:
+            True if update succeeded.
         """
         if not session_id:
             return False
@@ -1031,28 +1101,61 @@ class SessionManager:
         tenant_clause, tenant_params = self._tenant_scope_condition(
             cursor, "agent_sessions", tenant_id, require_tenant=require_tenant
         )
-        cursor.execute(
-            f"""
-            UPDATE agent_sessions
-            SET message_count = COALESCE(message_count, 0) + {p},
-                request_count = COALESCE(request_count, 0) + {p},
-                total_tokens = COALESCE(total_tokens, 0) + {p},
-                total_input_tokens = COALESCE(total_input_tokens, 0) + {p},
-                total_output_tokens = COALESCE(total_output_tokens, 0) + {p},
-                updated_at = {p}
-            WHERE session_id = {p}{tenant_clause}
-            """,
-            (
-                message_delta,
-                request_delta,
-                total_tokens_delta,
-                total_input_delta,
-                total_output_delta,
-                datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
-                session_id,
-                *tenant_params,
-            ),
-        )
+
+        # Check if cache token columns exist
+        has_cache_columns = self._column_exists(cursor, "agent_sessions", "total_cache_read_tokens")
+
+        if has_cache_columns:
+            cursor.execute(
+                f"""
+                UPDATE agent_sessions
+                SET message_count = COALESCE(message_count, 0) + {p},
+                    request_count = COALESCE(request_count, 0) + {p},
+                    total_tokens = COALESCE(total_tokens, 0) + {p},
+                    total_input_tokens = COALESCE(total_input_tokens, 0) + {p},
+                    total_output_tokens = COALESCE(total_output_tokens, 0) + {p},
+                    total_cache_read_tokens = COALESCE(total_cache_read_tokens, 0) + {p},
+                    total_cache_write_tokens = COALESCE(total_cache_write_tokens, 0) + {p},
+                    updated_at = {p}
+                WHERE session_id = {p}{tenant_clause}
+                """,
+                (
+                    message_delta,
+                    request_delta,
+                    total_tokens_delta,
+                    total_input_delta,
+                    total_output_delta,
+                    total_cache_read_delta,
+                    total_cache_write_delta,
+                    datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
+                    session_id,
+                    *tenant_params,
+                ),
+            )
+        else:
+            # Fallback without cache columns (pre-migration)
+            cursor.execute(
+                f"""
+                UPDATE agent_sessions
+                SET message_count = COALESCE(message_count, 0) + {p},
+                    request_count = COALESCE(request_count, 0) + {p},
+                    total_tokens = COALESCE(total_tokens, 0) + {p},
+                    total_input_tokens = COALESCE(total_input_tokens, 0) + {p},
+                    total_output_tokens = COALESCE(total_output_tokens, 0) + {p},
+                    updated_at = {p}
+                WHERE session_id = {p}{tenant_clause}
+                """,
+                (
+                    message_delta,
+                    request_delta,
+                    total_tokens_delta,
+                    total_input_delta,
+                    total_output_delta,
+                    datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
+                    session_id,
+                    *tenant_params,
+                ),
+            )
         success = cursor.rowcount > 0
         conn.commit()
         conn.close()
@@ -1400,6 +1503,7 @@ class SessionManager:
         timestamp: datetime | str | None = None,
         source: str = "",
         external_message_id: str = "",
+        tenant_id: int | None = None,
     ) -> SessionMessage | None:
         """Append a transcript row without incrementing request/token summary.
 
@@ -1423,6 +1527,7 @@ class SessionManager:
             milestone_id=milestone_id,
             count_usage=False,
             timestamp=timestamp,
+            tenant_id=tenant_id,
         )
 
     def add_message(
@@ -1437,6 +1542,7 @@ class SessionManager:
         source: str = "",
         count_usage: bool = True,
         timestamp: datetime | str | None = None,
+        tenant_id: int | None = None,
     ) -> SessionMessage | None:
         """
         Add a message to a session.
@@ -1466,20 +1572,48 @@ class SessionManager:
         has_session_tenant = self._column_exists(cursor, "agent_sessions", "tenant_id")
         has_message_tenant = self._column_exists(cursor, "session_messages", "tenant_id")
 
-        # Verify session exists
+        # Verify session exists with tenant validation
+        # Always use tenant predicate for consistent query plans
         session_select = "SELECT session_id"
         if has_session_tenant:
             session_select += ", tenant_id"
         session_select += f" FROM agent_sessions WHERE session_id = {_param()}"
-        cursor.execute(session_select, (session_id,))
+
+        # Add tenant condition: validate if provided, otherwise allow any tenant
+        if has_session_tenant:
+            if tenant_id is not None:
+                session_select += f" AND tenant_id = {_param()}"
+                cursor.execute(session_select, (session_id, tenant_id))
+            else:
+                # No tenant_id provided: allow any tenant (backward compatibility)
+                # Use tenant_id IS NOT NULL to ensure consistent query plan
+                cursor.execute(session_select, (session_id,))
+        else:
+            cursor.execute(session_select, (session_id,))
+
         session_row = cursor.fetchone()
         if not session_row:
             conn.close()
+            # Log tenant validation failure if tenant_id was provided
+            if tenant_id is not None:
+                logger.warning(
+                    f"add_message: session {session_id} not found or tenant mismatch "
+                    f"(expected tenant_id={tenant_id})"
+                )
             return None
+
         if has_session_tenant:
             effective_tenant_id = (
                 session_row.get("tenant_id") if isinstance(session_row, dict) else session_row[1]
             ) or 1
+            # Validate tenant_id matches if both are provided
+            if tenant_id is not None and effective_tenant_id != tenant_id:
+                logger.warning(
+                    f"add_message: tenant mismatch for session {session_id}: "
+                    f"expected {tenant_id}, got {effective_tenant_id}"
+                )
+                conn.close()
+                return None
         else:
             effective_tenant_id = 1
 
@@ -2166,6 +2300,8 @@ class SessionManager:
             total_tokens=get_value("total_tokens") or 0,
             total_input_tokens=get_value("total_input_tokens") or 0,
             total_output_tokens=get_value("total_output_tokens") or 0,
+            total_cache_read_tokens=get_value("total_cache_read_tokens") or 0,
+            total_cache_write_tokens=get_value("total_cache_write_tokens") or 0,
             message_count=get_value("message_count") or 0,
             request_count=get_value("request_count") or 0,
             model=get_value("model"),

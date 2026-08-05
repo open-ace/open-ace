@@ -1460,27 +1460,54 @@ class RemoteAgent:
         logger.info("Creating directory: %s", dir_path)
 
         try:
-            parent = os.path.dirname(dir_path)
+            # If path already exists, return success if it's a directory
+            if os.path.exists(dir_path):
+                if os.path.isdir(dir_path):
+                    self._send_create_result(
+                        request_id,
+                        True,
+                        result={"path": dir_path, "message": "Directory already exists"},
+                    )
+                    return
+                else:
+                    self._send_create_result(
+                        request_id, False, error=f"Path exists but is not a directory: {dir_path}"
+                    )
+                    return
 
-            if not os.path.exists(parent):
+            # Find the nearest existing ancestor and check writability.
+            # This supports multi-level paths where intermediate directories
+            # don't exist yet, matching mkdir -p behaviour.
+            ancestor = os.path.dirname(dir_path)
+            while ancestor and ancestor != os.path.dirname(ancestor):
+                if os.path.exists(ancestor):
+                    if not os.path.isdir(ancestor):
+                        self._send_create_result(
+                            request_id,
+                            False,
+                            error=f"Ancestor path is not a directory: {ancestor}",
+                        )
+                        return
+                    if not os.access(ancestor, os.W_OK):
+                        self._send_create_result(
+                            request_id,
+                            False,
+                            error=f"Permission denied: cannot write to {ancestor}",
+                        )
+                        return
+                    # Found a writable ancestor — can recursively create
+                    break
+                ancestor = os.path.dirname(ancestor)
+            else:
+                # Reached root without finding an existing ancestor
                 self._send_create_result(
-                    request_id, False, error=f"Parent directory does not exist: {parent}"
+                    request_id,
+                    False,
+                    error="No existing ancestor directory found",
                 )
                 return
 
-            if not os.path.isdir(parent):
-                self._send_create_result(
-                    request_id, False, error=f"Parent path is not a directory: {parent}"
-                )
-                return
-
-            if not os.access(parent, os.W_OK):
-                self._send_create_result(
-                    request_id, False, error=f"Permission denied: cannot write to {parent}"
-                )
-                return
-
-            os.mkdir(dir_path)
+            os.makedirs(dir_path, exist_ok=True)
 
             self._send_create_result(
                 request_id,
@@ -1489,10 +1516,6 @@ class RemoteAgent:
             )
             logger.info("Created directory: %s", dir_path)
 
-        except FileExistsError:
-            self._send_create_result(
-                request_id, False, error=f"Directory already exists: {dir_path}"
-            )
         except PermissionError:
             self._send_create_result(request_id, False, error=f"Permission denied: {dir_path}")
         except OSError as e:

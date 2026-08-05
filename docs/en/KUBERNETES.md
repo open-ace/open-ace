@@ -51,15 +51,25 @@ Creates the `open-ace` namespace with standard Kubernetes labels.
 | CPU | 100m | 500m |
 | Memory | 256Mi | 512Mi |
 
-**Health Checks:**
-- Liveness: HTTP GET `/health`, initialDelay=10s, period=10s
-- Readiness: HTTP GET `/health`, initialDelay=5s, period=5s
+**Health Checks (Issue #2186):**
+- Liveness: HTTP GET `/livez`, initialDelay=10s, period=10s (process alive only)
+- Readiness: HTTP GET `/readyz`, initialDelay=5s, period=5s (database, config, dependencies)
+- Startup: HTTP GET `/readyz`, failureThreshold=60, period=5s (max 300s wait)
+- Prometheus scrape: `/metrics` endpoint (Prometheus format)
+
+**Endpoint Responsibilities:**
+- `/livez`: Process liveness check, no dependency checks to avoid restart storms
+- `/readyz`: Readiness check, validates database connection, schema compatibility, config dir, workspace
+- `/metrics`: Prometheus metrics exposition
+- `/health`: Deprecated, delegates to `/readyz`, response includes `deprecated: true`
 
 **Pod Anti-Affinity:** Preferred across nodes to preserve availability when capacity allows.
 
 **HorizontalPodAutoscaler:** The reference manifest keeps at least 3 replicas and can scale to 10 replicas based on CPU and memory utilization.
 
 **Sticky routing:** The Service uses `sessionAffinity: ClientIP`, and the nginx Ingress uses cookie affinity. Remote session HTTP control state is persisted and can cross pods, but live terminal relay WebSocket bridges still belong to one web process; sticky routing remains the safest default for active terminal sessions.
+
+**Note** (Issue #1821 F5): With a ClusterIP-type Service, `sessionAffinity: ClientIP` only sees the ingress controller's source IP, not the end-user IP. The effective sticky routing mechanism is the nginx Ingress cookie affinity (`openace_route`, max-age 10800). The Service-level ClientIP affinity provides minimal benefit in this configuration and is retained for consistency with the reference deployment.
 
 **HA Support (Issue #1851):**
 
@@ -190,7 +200,13 @@ Keys: `SECRET_KEY`, `OPENACE_ENCRYPTION_KEY`, `UPLOAD_AUTH_KEY`, `DB_USER`, `DB_
 
 ### PodDisruptionBudget
 
-- `minAvailable: 2` — Keeps at least two web pods available during voluntary disruptions
+- `minAvailable: 50%` — Keeps at least 50% of web pods available during voluntary disruptions
+
+**PDB Percentage Behavior** (Issue #1821 F6):
+- At 3 replicas: 50% = 2 available (allows 1 disruption) — **same as previous absolute value**
+- At 2 replicas: 50% = 1 available (allows 1 disruption) — **more permissive than previous**
+- At 1 replica: 50% = 1 available (allows 0 disruptions)
+- Review this behavior before scaling down the HPA floor below 3 replicas.
 
 ## Configuration
 
@@ -222,6 +238,16 @@ kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/
 ## Monitoring
 
 The `/health` endpoint returns service status and git commit hash.
+
+**Prometheus Monitoring** (Issue #1821 F1):
+The `prometheus.io/scrape` annotation currently points to `/health` which returns HTTP 200 for health checks only. No application metrics are exposed. This annotation is retained for infrastructure monitoring readiness. To enable real metrics collection, implement a `/metrics` endpoint (e.g., using prometheus_client library).
+
+**Image Registry Dependency** (Issue #1821 F3):
+With `imagePullPolicy: Always`, the container registry becomes a critical dependency. If the registry is unavailable:
+- New pods cannot start (even with cached images on nodes)
+- Pod restarts and rescheduling will fail
+- Consider implementing a registry cache (e.g., Harbor proxy cache) for production deployments
+- In Phase 2, digest pinning will reduce this dependency by allowing cached images to be reused
 
 ## Scaling
 

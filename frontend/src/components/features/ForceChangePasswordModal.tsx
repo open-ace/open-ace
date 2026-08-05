@@ -50,9 +50,7 @@ export const ForceChangePasswordModal: React.FC = () => {
 
     try {
       await changePassword(currentPassword, newPassword);
-      toast.success(
-        t('passwordChangedSuccess', language) ?? 'Password changed successfully'
-      );
+      toast.success(t('passwordChangedSuccess', language) ?? 'Password changed successfully');
     } catch (err) {
       const errorMessage =
         (err as Error)?.message ??

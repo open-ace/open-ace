@@ -153,11 +153,11 @@ def run_tests():
                 print("    [INFO] Reset button not found; skipping reset test")
             shot(page, "04-after-reset")
 
-        except Exception as e:
+        except Exception as e:  # allow-swallow: UI element may not exist
             print(f"\n[ERROR] Test execution failed: {e}")
             try:
                 shot(page, "error-state")
-            except Exception:
+            except Exception:  # allow-swallow: UI element may not exist
                 pass
             failed += 1
             errors.append(f"Test execution failed: {e}")

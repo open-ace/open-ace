@@ -28,6 +28,7 @@ from app.auth.decorators import (
     check_machine_admin_permission,
     validate_session_token,
 )
+from app.models.user import User
 from app.repositories.autonomous_repo import (
     ALLOWED_CONTENT_LANGUAGES,
     DEFAULT_CONTENT_LANGUAGE,
@@ -79,10 +80,8 @@ def _get_repo() -> AutonomousWorkflowRepository:
 
 def _is_recoverable_system_pause_reason(error_message: str) -> bool:
     """Whether resume should clear a stale system-generated pause reason."""
-    from app.modules.workspace.autonomous.orchestrator import (
-        MERGE_POLICY_PAUSE_REASON_PREFIX,
-        UPSTREAM_QUOTA_PAUSE_REASON_PREFIX,
-    )
+    from app.modules.workspace.autonomous.constants import MERGE_POLICY_PAUSE_REASON_PREFIX
+    from app.modules.workspace.autonomous.orchestrator import UPSTREAM_QUOTA_PAUSE_REASON_PREFIX
 
     return error_message.startswith(
         (UPSTREAM_QUOTA_PAUSE_REASON_PREFIX, MERGE_POLICY_PAUSE_REASON_PREFIX)
@@ -636,7 +635,7 @@ def create_workflow():
     workspace_type = data.get("workspace_type", "local")
     remote_machine_id = data.get("remote_machine_id", "")
     if workspace_type == "remote" and remote_machine_id:
-        if g.user_role != "admin":
+        if not User.is_admin_role(g.user_role):
             if not check_machine_admin_permission(user_id, remote_machine_id):
                 return (
                     jsonify({"error": "Machine admin permission required for remote workflows"}),
@@ -645,7 +644,7 @@ def create_workflow():
 
     # Validate local workspace permission
     # Admin users bypass permission validation (they have full system access)
-    if workspace_type == "local" and g.user_role != "admin":
+    if workspace_type == "local" and not User.is_admin_role(g.user_role):
         user = user_repo.get_user_by_id(user_id)
         if not user:
             return jsonify({"error": "User not found"}), 404
@@ -939,7 +938,7 @@ def create_workflow():
 def list_workflows():
     """List autonomous development workflows."""
     user_id = g.user_id
-    is_admin = g.user_role == "admin"
+    is_admin = User.is_admin_role(g.user_role)
 
     # Non-admin users can only see their own workflows
     filter_user_id = None if is_admin else user_id
@@ -985,7 +984,7 @@ def get_workflow(workflow_id):
         return jsonify({"error": "Workflow not found"}), 404
 
     # Check ownership
-    if g.user_role != "admin" and workflow.get("user_id") != g.user_id:
+    if not User.is_admin_role(g.user_role) and workflow.get("user_id") != g.user_id:
         return jsonify({"error": "Access denied"}), 403
 
     return jsonify({"success": True, "workflow": _workflow_response(workflow)})
@@ -999,7 +998,7 @@ def delete_workflow(workflow_id):
     if not workflow:
         return jsonify({"error": "Workflow not found"}), 404
 
-    if g.user_role != "admin" and workflow.get("user_id") != g.user_id:
+    if not User.is_admin_role(g.user_role) and workflow.get("user_id") != g.user_id:
         return jsonify({"error": "Access denied"}), 403
 
     try:
@@ -1018,7 +1017,7 @@ def delete_batch(batch_id):
     if not workflows:
         return jsonify({"error": "Batch not found"}), 404
 
-    if g.user_role != "admin":
+    if not User.is_admin_role(g.user_role):
         for workflow in workflows:
             if workflow.get("user_id") != g.user_id:
                 return jsonify({"error": "Access denied"}), 403
@@ -1041,7 +1040,7 @@ def pause_workflow(workflow_id):
     workflow = _get_repo().get_workflow(workflow_id)
     if not workflow:
         return jsonify({"error": "Workflow not found"}), 404
-    if g.user_role != "admin" and workflow.get("user_id") != g.user_id:
+    if not User.is_admin_role(g.user_role) and workflow.get("user_id") != g.user_id:
         return jsonify({"error": "Access denied"}), 403
 
     if workflow.get("status") == "paused":
@@ -1071,7 +1070,7 @@ def resume_workflow(workflow_id):
     workflow = _get_repo().get_workflow(workflow_id)
     if not workflow:
         return jsonify({"error": "Workflow not found"}), 404
-    if g.user_role != "admin" and workflow.get("user_id") != g.user_id:
+    if not User.is_admin_role(g.user_role) and workflow.get("user_id") != g.user_id:
         return jsonify({"error": "Access denied"}), 403
 
     if workflow.get("status") != "paused":
@@ -1104,7 +1103,7 @@ def stop_workflow(workflow_id):
     workflow = _get_repo().get_workflow(workflow_id)
     if not workflow:
         return jsonify({"error": "Workflow not found"}), 404
-    if g.user_role != "admin" and workflow.get("user_id") != g.user_id:
+    if not User.is_admin_role(g.user_role) and workflow.get("user_id") != g.user_id:
         return jsonify({"error": "Access denied"}), 403
 
     # Kill the running agent subprocess (SIGTERM → SIGKILL)
@@ -1144,7 +1143,7 @@ def extend_planning_timeout(workflow_id):
     workflow = _get_repo().get_workflow(workflow_id)
     if not workflow:
         return jsonify({"error": "Workflow not found"}), 404
-    if g.user_role != "admin" and workflow.get("user_id") != g.user_id:
+    if not User.is_admin_role(g.user_role) and workflow.get("user_id") != g.user_id:
         return jsonify({"error": "Access denied"}), 403
 
     if workflow.get("status") != "planning_timeout":
@@ -1186,7 +1185,7 @@ def retry_workflow(workflow_id):
     workflow = _get_repo().get_workflow(workflow_id)
     if not workflow:
         return jsonify({"error": "Workflow not found"}), 404
-    if g.user_role != "admin" and workflow.get("user_id") != g.user_id:
+    if not User.is_admin_role(g.user_role) and workflow.get("user_id") != g.user_id:
         return jsonify({"error": "Access denied"}), 403
 
     if workflow.get("status") not in ("failed", "planning_timeout"):
@@ -1212,14 +1211,39 @@ def retry_workflow(workflow_id):
     except Exception as e:
         logger.warning("Failed to clear in-progress state for %s: %s", workflow_id[:8], e)
 
-    _get_repo().update_workflow(
-        workflow_id,
-        {
-            "status": status,
-            "error_message": "",
-            "retry_count": retry_count + 1,
-        },
-    )
+    retry_updates = {
+        "status": status,
+        "error_message": "",
+        "retry_count": retry_count + 1,
+    }
+    # Optional per-workflow scope bump (#2309): a failed round whose only
+    # blocker was the changed-files cap can be retried with a higher limit
+    # rather than re-creating the workflow. Persisted on the row so every
+    # subsequent round/phase honors it; falls back to the global bound when
+    # absent (None).
+    data = request.get_json(silent=True) or {}
+    try:
+        new_limit = (
+            int(data.get("max_changed_files_override"))
+            if data.get("max_changed_files_override") is not None
+            else None
+        )
+    except (TypeError, ValueError):
+        return jsonify({"error": "max_changed_files_override must be a positive integer"}), 400
+    if new_limit is not None:
+        if new_limit <= 0:
+            return jsonify({"error": "max_changed_files_override must be a positive integer"}), 400
+        retry_updates["max_changed_files_override"] = new_limit
+    # Restore worktree_path so _ensure_worktree recreates the worktree dir on
+    # the retry pass. Terminal-failure cleanup (_cleanup_worktree_and_branch)
+    # clears worktree_path after removing the dir; the canonical path survives
+    # in preferred_worktree_path, so rebind it here. Without this, an empty
+    # worktree_path makes _ensure_worktree fall back to project_path and later
+    # phases run against the main checkout (review P1-1; see also #2011/#1981).
+    preferred_wt = (workflow.get("preferred_worktree_path") or "").strip()
+    if preferred_wt and workflow.get("branch_strategy") == "worktree":
+        retry_updates["worktree_path"] = preferred_wt
+    _get_repo().update_workflow(workflow_id, retry_updates)
 
     _emit_event_safe(workflow_id, "status_change", {"status": status, "phase": phase})
     return jsonify({"success": True})
@@ -1232,7 +1256,7 @@ def mark_done(workflow_id):
     workflow = _get_repo().get_workflow(workflow_id)
     if not workflow:
         return jsonify({"error": "Workflow not found"}), 404
-    if g.user_role != "admin" and workflow.get("user_id") != g.user_id:
+    if not User.is_admin_role(g.user_role) and workflow.get("user_id") != g.user_id:
         return jsonify({"error": "Access denied"}), 403
 
     data = request.get_json(silent=True) or {}
@@ -1259,7 +1283,7 @@ def get_timeline(workflow_id):
     workflow = _get_repo().get_workflow(workflow_id)
     if not workflow:
         return jsonify({"error": "Workflow not found"}), 404
-    if g.user_role != "admin" and workflow.get("user_id") != g.user_id:
+    if not User.is_admin_role(g.user_role) and workflow.get("user_id") != g.user_id:
         return jsonify({"error": "Access denied"}), 403
 
     milestones = _enrich_milestones_with_usage(
@@ -1276,7 +1300,7 @@ def cancel_milestone(workflow_id, milestone_id):
     workflow = _get_repo().get_workflow(workflow_id)
     if not workflow:
         return jsonify({"error": "Workflow not found"}), 404
-    if g.user_role != "admin" and workflow.get("user_id") != g.user_id:
+    if not User.is_admin_role(g.user_role) and workflow.get("user_id") != g.user_id:
         return jsonify({"error": "Access denied"}), 403
 
     milestone = _get_repo().get_milestone(milestone_id)
@@ -1340,7 +1364,7 @@ def fork_milestone(workflow_id, milestone_id):
     workflow = _get_repo().get_workflow(workflow_id)
     if not workflow:
         return jsonify({"error": "Workflow not found"}), 404
-    if g.user_role != "admin" and workflow.get("user_id") != g.user_id:
+    if not User.is_admin_role(g.user_role) and workflow.get("user_id") != g.user_id:
         return jsonify({"error": "Access denied"}), 403
 
     milestone = _get_repo().get_milestone(milestone_id)
@@ -1483,7 +1507,7 @@ def get_workflow_forks(workflow_id):
     workflow = _get_repo().get_workflow(workflow_id)
     if not workflow:
         return jsonify({"error": "Workflow not found"}), 404
-    if g.user_role != "admin" and workflow.get("user_id") != g.user_id:
+    if not User.is_admin_role(g.user_role) and workflow.get("user_id") != g.user_id:
         return jsonify({"error": "Access denied"}), 403
 
     forks = _get_repo().list_forks(workflow_id)
@@ -1497,7 +1521,7 @@ def resume_with_feedback(workflow_id):
     workflow = _get_repo().get_workflow(workflow_id)
     if not workflow:
         return jsonify({"error": "Workflow not found"}), 404
-    if g.user_role != "admin" and workflow.get("user_id") != g.user_id:
+    if not User.is_admin_role(g.user_role) and workflow.get("user_id") != g.user_id:
         return jsonify({"error": "Access denied"}), 403
     if workflow.get("status") not in ("waiting", "paused"):
         return jsonify({"error": "Workflow is not in a resumable state"}), 400
@@ -1534,7 +1558,7 @@ def get_milestone_session(workflow_id, milestone_id):
     workflow = _get_repo().get_workflow(workflow_id)
     if not workflow:
         return jsonify({"error": "Workflow not found"}), 404
-    if g.user_role != "admin" and workflow.get("user_id") != g.user_id:
+    if not User.is_admin_role(g.user_role) and workflow.get("user_id") != g.user_id:
         return jsonify({"error": "Access denied"}), 403
 
     milestone = _get_repo().get_milestone(milestone_id)
@@ -1579,7 +1603,7 @@ def get_milestone_diff(workflow_id, milestone_id):
     workflow = _get_repo().get_workflow(workflow_id)
     if not workflow:
         return jsonify({"error": "Workflow not found"}), 404
-    if g.user_role != "admin" and workflow.get("user_id") != g.user_id:
+    if not User.is_admin_role(g.user_role) and workflow.get("user_id") != g.user_id:
         return jsonify({"error": "Access denied"}), 403
 
     milestone = _get_repo().get_milestone(milestone_id)
@@ -1644,7 +1668,7 @@ def get_workflow_pr_diff(workflow_id):
     workflow = _get_repo().get_workflow(workflow_id)
     if not workflow:
         return jsonify({"error": "Workflow not found"}), 404
-    if g.user_role != "admin" and workflow.get("user_id") != g.user_id:
+    if not User.is_admin_role(g.user_role) and workflow.get("user_id") != g.user_id:
         return jsonify({"error": "Access denied"}), 403
 
     pr_number = workflow.get("github_pr_number")
@@ -1679,7 +1703,7 @@ def get_workflow_pr_stats(workflow_id):
     workflow = _get_repo().get_workflow(workflow_id)
     if not workflow:
         return jsonify({"error": "Workflow not found"}), 404
-    if g.user_role != "admin" and workflow.get("user_id") != g.user_id:
+    if not User.is_admin_role(g.user_role) and workflow.get("user_id") != g.user_id:
         return jsonify({"error": "Access denied"}), 403
 
     pr_number = workflow.get("github_pr_number")
@@ -1739,7 +1763,7 @@ def stream_workflow_events(workflow_id):
     workflow = _get_repo().get_workflow(workflow_id)
     if not workflow:
         return jsonify({"error": "Workflow not found"}), 404
-    if g.user_role != "admin" and workflow.get("user_id") != g.user_id:
+    if not User.is_admin_role(g.user_role) and workflow.get("user_id") != g.user_id:
         return jsonify({"error": "Access denied"}), 403
 
     emitter = _get_event_emitter()

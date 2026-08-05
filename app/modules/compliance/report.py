@@ -1194,14 +1194,63 @@ class ReportGenerator:
         checks = []
 
         # Check 1: Data retention compliance
-        checks.append(
-            {
-                "check_id": "data_retention",
-                "name": "Data Retention Policy",
-                "status": "pass",
-                "message": "Data retention policy is being followed",
-            }
-        )
+        # Issue #2188: 消除虚假合规，调用真实 evidence 检查
+        from app.modules.compliance.retention import DataRetentionManager
+
+        try:
+            retention_manager = DataRetentionManager()
+            retention_status = retention_manager.get_compliance_status()
+
+            # 根据真实状态返回结果
+            # - 无历史执行或证据不足：unknown/not_evaluated
+            # - 有成功执行：pass
+            # - 有失败执行：fail
+            if not retention_status.get("last_cleanup"):
+                # 无历史执行，返回 unknown
+                status = "unknown"
+                message = "No retention cleanup has been executed yet. Unable to determine compliance status."
+            elif retention_status.get("issues"):
+                # 存在问题，返回 fail 或 warning
+                issues = retention_status.get("issues", [])
+                if any("cleanup" in issue.lower() for issue in issues):
+                    status = "fail"
+                else:
+                    status = "warning"
+                message = "; ".join(issues)
+            else:
+                # 合规
+                status = "pass"
+                days_since = retention_status.get("days_since_cleanup", 0)
+                message = (
+                    f"Data retention policy is being followed. Last cleanup: {days_since} days ago."
+                )
+
+            checks.append(
+                {
+                    "check_id": "data_retention",
+                    "name": "Data Retention Policy",
+                    "status": status,
+                    "message": message,
+                    "details": {
+                        "compliance_score": retention_status.get("compliance_score", 0),
+                        "last_cleanup": retention_status.get("last_cleanup"),
+                        "days_since_cleanup": retention_status.get("days_since_cleanup"),
+                        "rules_configured": retention_status.get("rules_configured", 0),
+                        "rules_enabled": retention_status.get("rules_enabled", 0),
+                    },
+                }
+            )
+        except Exception as e:
+            # 如果获取状态失败，返回 unknown（而不是 pass）
+            logger.warning(f"Failed to get retention compliance status: {e}")
+            checks.append(
+                {
+                    "check_id": "data_retention",
+                    "name": "Data Retention Policy",
+                    "status": "unknown",
+                    "message": f"Unable to determine compliance status: {str(e)}",
+                }
+            )
 
         # Check 2: User access review
         if summary.get("users", {}).get("inactive_users", 0) > 10:

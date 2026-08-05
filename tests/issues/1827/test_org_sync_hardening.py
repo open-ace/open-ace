@@ -61,6 +61,10 @@ from app.services.feishu_org_sync import (
 @pytest.fixture
 def sqlite_db(tmp_path, monkeypatch):
     """An isolated SQLite Database with schema; global is_postgresql forced off."""
+    # Issue #1820: Reset EncryptionKeyRegistry before setting new key
+    from app.utils.encryption_key_registry import reset_registry
+
+    reset_registry()
     monkeypatch.setenv("OPENACE_ENCRYPTION_KEY", "test-1827-org-sync-key")
     smtp_crypto._password_manager_instance = None
     # A globally-configured Postgres URL in dev would otherwise make the
@@ -72,6 +76,8 @@ def sqlite_db(tmp_path, monkeypatch):
         yield db
     finally:
         smtp_crypto._password_manager_instance = None
+        # Issue #1820: Reset EncryptionKeyRegistry after test
+        reset_registry()
 
 
 class _FakeDingTalk(DingTalkOrgSyncService):

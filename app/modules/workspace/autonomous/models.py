@@ -48,6 +48,19 @@ class AutonomousWorkflow:
     batch_order: int | None = None
     batch_total: int | None = None
     base_commit_sha: str | None = None  # Locked SHA for batch workflows (Issue #1552)
+    expected_head_sha: str | None = None  # Last trusted workflow head (Issue #2042)
+    cleanup_status: str | None = None  # not_started|pending|completed|failed (Issue #2043)
+    cleanup_attempts: int | None = 0  # Git cleanup retry counter (Issue #2043)
+    cleanup_error: str | None = None  # Last cleanup error message (Issue #2043)
+    cleanup_updated_at: str | None = None  # ISO timestamp of last cleanup attempt
+    cleanup_next_retry_at: str | None = None  # ISO timestamp; backoff-gated
+    # SandboxProvider state (#2022 P2). NULL = never ran under a provider.
+    sandbox_provider: str | None = None  # legacy_posix | remote_machine | future
+    sandbox_id: str | None = None  # provider-minted sandbox id
+    sandbox_generation: int | None = None  # bumped on reconcile/restart (stale-handle guard)
+    sandbox_state: str | None = None  # created|running|paused|stopped|destroyed|error
+    sandbox_policy_digest: str | None = None  # digest of the SandboxSpec policy
+    sandbox_last_error: str | None = None  # last sandbox error / reconcile reason
     auto_merge: bool = True  # Auto merge PR and proceed to next workflow in batch
     definition_snapshot: dict | None = None
     current_phase: str = (
@@ -66,6 +79,8 @@ class AutonomousWorkflow:
     ci_repair_context: str = ""
     ci_repair_attempts: int = 0
     ci_diagnostics_attempts: int = 0
+    ci_repair_transient_retries: int = 0
+    ci_repair_no_change_retries: int = 0
     last_ci_failure_signature: str = ""
     last_ci_failure_head_sha: str = ""
     # Source of truth for AI-authored content language (en/zh/ja/ko). Set once
@@ -125,6 +140,18 @@ class AutonomousWorkflow:
             "batch_order": self.batch_order,
             "batch_total": self.batch_total,
             "base_commit_sha": self.base_commit_sha,
+            "expected_head_sha": self.expected_head_sha,
+            "cleanup_status": self.cleanup_status,
+            "cleanup_attempts": self.cleanup_attempts,
+            "cleanup_error": self.cleanup_error,
+            "cleanup_updated_at": self.cleanup_updated_at,
+            "cleanup_next_retry_at": self.cleanup_next_retry_at,
+            "sandbox_provider": self.sandbox_provider,
+            "sandbox_id": self.sandbox_id,
+            "sandbox_generation": self.sandbox_generation,
+            "sandbox_state": self.sandbox_state,
+            "sandbox_policy_digest": self.sandbox_policy_digest,
+            "sandbox_last_error": self.sandbox_last_error,
             "auto_merge": self.auto_merge,
             "definition_snapshot": self.definition_snapshot,
             "current_phase": self.current_phase,
@@ -141,6 +168,8 @@ class AutonomousWorkflow:
             "ci_repair_context": self.ci_repair_context,
             "ci_repair_attempts": self.ci_repair_attempts,
             "ci_diagnostics_attempts": self.ci_diagnostics_attempts,
+            "ci_repair_transient_retries": self.ci_repair_transient_retries,
+            "ci_repair_no_change_retries": self.ci_repair_no_change_retries,
             "last_ci_failure_signature": self.last_ci_failure_signature,
             "last_ci_failure_head_sha": self.last_ci_failure_head_sha,
             "content_language": self.content_language,
@@ -182,6 +211,18 @@ class AutonomousWorkflow:
             batch_order=data.get("batch_order"),
             batch_total=data.get("batch_total"),
             base_commit_sha=data.get("base_commit_sha"),
+            expected_head_sha=data.get("expected_head_sha"),
+            cleanup_status=data.get("cleanup_status"),
+            cleanup_attempts=data.get("cleanup_attempts"),
+            cleanup_error=data.get("cleanup_error"),
+            cleanup_updated_at=data.get("cleanup_updated_at"),
+            cleanup_next_retry_at=data.get("cleanup_next_retry_at"),
+            sandbox_provider=data.get("sandbox_provider"),
+            sandbox_id=data.get("sandbox_id"),
+            sandbox_generation=data.get("sandbox_generation"),
+            sandbox_state=data.get("sandbox_state"),
+            sandbox_policy_digest=data.get("sandbox_policy_digest"),
+            sandbox_last_error=data.get("sandbox_last_error"),
             auto_merge=bool(data.get("auto_merge", True)),
             definition_snapshot=data.get("definition_snapshot"),
             current_phase=data.get("current_phase", "preparation"),
@@ -198,6 +239,8 @@ class AutonomousWorkflow:
             ci_repair_context=data.get("ci_repair_context", ""),
             ci_repair_attempts=data.get("ci_repair_attempts", 0),
             ci_diagnostics_attempts=data.get("ci_diagnostics_attempts", 0),
+            ci_repair_transient_retries=data.get("ci_repair_transient_retries", 0),
+            ci_repair_no_change_retries=data.get("ci_repair_no_change_retries", 0),
             last_ci_failure_signature=data.get("last_ci_failure_signature", ""),
             last_ci_failure_head_sha=data.get("last_ci_failure_head_sha", ""),
             content_language=data.get("content_language", "en"),
@@ -392,3 +435,13 @@ class AgentTaskResult:
     error_code: str | None = None
     # Ordered event log preserving actual message interleaving
     event_log: list = field(default_factory=list)
+    # #2022 SandboxProvider attribution for evidence (#2046-A schema). Filled by
+    # the runner from the provider handle so persisted CommandExecutionEvidence
+    # rows carry sandbox_id/generation. None when no sandbox was created.
+    sandbox_id: str | None = None
+    sandbox_generation: int | None = None
+    # #2022 P5: which provider ran the task (legacy_posix / remote_machine / …)
+    # + final sandbox_state, so the orchestrator can persist sandbox identity +
+    # lifecycle state onto the workflow row. Empty/None when no sandbox ran.
+    sandbox_provider: str = ""
+    sandbox_state: str = ""

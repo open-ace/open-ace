@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from app.modules.workspace.model_gateway.planner import _resolve_target_url
 from app.modules.workspace.model_gateway.repository import get_gateway_repository
 
 logger = logging.getLogger(__name__)
@@ -54,7 +55,16 @@ class ModelGatewayService:
         return self._repo.delete_config()
 
     def test_connection(self, base_url: str, api_key: str) -> dict[str, Any]:
-        """Probe the gateway with a minimal request; never echo the key back."""
+        """Probe the gateway with a minimal request; never echo the key back.
+
+        Uses planner's _resolve_target_url to handle base_url that already
+        contains version suffix (e.g., /v1, /v2) to avoid double-versioning.
+
+        Note: .rstrip("/") is CRITICAL for correct URL construction when base_url
+        ends with a slash (e.g., "http://gateway/v1/"). Without it, _resolve_target_url
+        would produce incorrect URLs like "http://gateway/v1//v1/models".
+        """
+        # CRITICAL: Must keep .rstrip("/") to handle trailing slash correctly
         base_url = (base_url or "").strip().rstrip("/")
         if not base_url:
             return {"ok": False, "status": None, "message": "Gateway base URL is required"}
@@ -62,10 +72,16 @@ class ModelGatewayService:
         try:
             import requests as http_requests
 
+            # Use planner's URL resolution logic (handles /v1, /v2, etc. deduplication)
+            # _resolve_target_url(base_url, "models") will:
+            # - Add /v1 prefix if base_url has no version suffix
+            # - Skip /v1 prefix if base_url already ends with /v{N}
+            url, _ = _resolve_target_url(base_url, "models")
+
             headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
             resp = http_requests.request(
                 method="GET",
-                url=f"{base_url}/v1/models",
+                url=url,
                 headers=headers,
                 timeout=15,
                 proxies={"http": None, "https": None},  # type: ignore[dict-item]

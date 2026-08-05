@@ -452,6 +452,23 @@ def validate_ip_against_stored(
 
         # Check if any current IP matches stored
         if not current_set.intersection(stored_set):
+            # CDN providers (e.g. Alibaba dashscope, Cloudflare) use DNS
+            # round-robin, so the current resolution can return a disjoint
+            # set of *public* IPs that are all legitimate rotation — not a
+            # rebinding attack. The real SSRF-via-rebinding invariant is
+            # "no current IP is private/non-public": a genuine attack
+            # re-resolves a public hostname to an internal/metadata IP.
+            # Mirror the connect-time _PinnedIPAdapter leniency for public
+            # IP rotation while still blocking private-IP rebinding.
+            if current_addresses and all(_is_public_address(addr) for addr in current_addresses):
+                logger.debug(
+                    "DNS IP set changed for %s but all current IPs are public "
+                    "(stored=%s current=%s); treating as CDN rotation",
+                    host,
+                    sorted(stored_set),
+                    sorted(current_set),
+                )
+                return True, None
             return False, f"DNS rebinding detected: IPs changed from {stored_ips}"
 
         return True, None

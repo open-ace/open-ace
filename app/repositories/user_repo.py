@@ -33,7 +33,7 @@ class UserRepository:
         role: str = "user",
         is_active: bool = True,
         system_account: str | None = None,
-        tenant_id: int = 1,
+        tenant_id: int | None = None,
     ) -> int | None:
         """
         Create a new user.
@@ -45,21 +45,40 @@ class UserRepository:
             role: User role.
             is_active: Whether user is active.
             system_account: System account name for multi-user workspace mode.
-            tenant_id: Tenant ID for multi-tenant support.
+            tenant_id: Tenant ID for multi-tenant support. REQUIRED for non-platform-admin users.
 
         Returns:
             Optional[int]: User ID if successful, None otherwise.
+
+        Raises:
+            ValueError: If tenant_id is None for non-platform-admin users.
+
+        Issue #2179: 消除静默回退到 tenant_id=1，建立 Fail-Closed 机制
         """
+        # Fail-Closed: 非平台管理员用户必须指定 tenant_id
+        # 平台管理员（role='platform_admin' 或 'admin'）可以没有 tenant_id
+        if tenant_id is None and role not in ("platform_admin", "admin"):
+            raise ValueError(
+                f"创建用户必须指定 tenant_id。"
+                f"用户名: {username}, 角色: {role}。"
+                f"平台管理员用户请显式传 None。"
+            )
+
+        # 对于平台管理员，允许 tenant_id 为 None
+        effective_tenant_id = tenant_id  # 不再回退到 1
+
         try:
             # Use RETURNING for PostgreSQL, or lastrowid for SQLite
             if self.db.is_postgresql:
                 # PostgreSQL uses TRUE/FALSE for boolean columns
                 result = self.db.fetch_one(
-                    """
+                    adapt_sql(
+                        """
                     INSERT INTO users (username, email, password_hash, role, is_active, created_at, system_account, tenant_id)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     RETURNING id
-                """,
+                """
+                    ),
                     (
                         username,
                         email,
@@ -68,7 +87,7 @@ class UserRepository:
                         is_active,
                         datetime.now(timezone.utc).replace(tzinfo=None),
                         system_account,
-                        tenant_id,
+                        effective_tenant_id,
                     ),
                     commit=True,
                 )
@@ -77,10 +96,12 @@ class UserRepository:
                 # SQLite uses 1/0 for boolean columns
                 is_active_int = adapt_boolean_value(is_active)
                 cursor = self.db.execute(
-                    """
+                    adapt_sql(
+                        """
                     INSERT INTO users (username, email, password_hash, role, is_active, created_at, system_account, tenant_id)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
+                """
+                    ),
                     (
                         username,
                         email,
@@ -89,7 +110,7 @@ class UserRepository:
                         is_active_int,
                         datetime.now(timezone.utc).replace(tzinfo=None),
                         system_account,
-                        tenant_id,
+                        effective_tenant_id,
                     ),
                 )
                 return cast("int", cursor.lastrowid)
@@ -101,13 +122,26 @@ class UserRepository:
         """
         Get user by ID.
 
+        Uses ``SELECT *`` so the returned dict carries every column. The auth
+        layer depends on specific fields being present even though they are not
+        named in the SELECT list — narrowing the column set would silently
+        break these callers (Issue #1832 F1 documents this contract and guards
+        it with a regression test):
+          - ``role`` — the WebUI-token admin gate (``admin_required`` path)
+          - ``must_change_password`` — ``enforce_password_change_requirement``
+            reads this; if the key is absent, ``.get`` returns falsy and the
+            forced password change is silently bypassed (a latent auth
+            weakening, NOT fixed by this finding — only made observable)
+          - ``tenant_id`` — assigned to ``g.tenant_id``
+          - ``is_active``
+
         Args:
             user_id: User ID.
 
         Returns:
             Optional[Dict]: User data or None.
         """
-        query = "SELECT * FROM users WHERE id = ?"
+        query = adapt_sql("SELECT * FROM users WHERE id = ?")
         return self.db.fetch_one(query, (user_id,))
 
     def get_user_by_username(self, username: str) -> dict | None:
@@ -120,7 +154,7 @@ class UserRepository:
         Returns:
             Optional[Dict]: User data or None.
         """
-        query = "SELECT * FROM users WHERE username = ?"
+        query = adapt_sql("SELECT * FROM users WHERE username = ?")
         return self.db.fetch_one(query, (username,))
 
     def get_user_by_email(self, email: str) -> dict | None:
@@ -133,7 +167,7 @@ class UserRepository:
         Returns:
             Optional[Dict]: User data or None.
         """
-        query = "SELECT * FROM users WHERE email = ?"
+        query = adapt_sql("SELECT * FROM users WHERE email = ?")
         return self.db.fetch_one(query, (email,))
 
     def get_all_users(
@@ -233,7 +267,7 @@ class UserRepository:
             return False
 
         params.append(user_id)
-        query = f"UPDATE users SET {', '.join(updates)} WHERE id = ?"
+        query = adapt_sql(f"UPDATE users SET {', '.join(updates)} WHERE id = ?")
 
         try:
             cursor = self.db.execute(query, tuple(params))
@@ -296,7 +330,7 @@ class UserRepository:
         Returns:
             bool: True if successful.
         """
-        query = "UPDATE users SET last_login = ? WHERE id = ?"
+        query = adapt_sql("UPDATE users SET last_login = ? WHERE id = ?")
 
         try:
             self.db.execute(query, (datetime.now(timezone.utc).replace(tzinfo=None), user_id))
@@ -316,7 +350,7 @@ class UserRepository:
         Returns:
             bool: True if successful.
         """
-        query = "UPDATE users SET avatar_url = ? WHERE id = ?"
+        query = adapt_sql("UPDATE users SET avatar_url = ? WHERE id = ?")
 
         try:
             cursor = self.db.execute(query, (avatar_url, user_id))
@@ -340,7 +374,7 @@ class UserRepository:
             return self.hard_delete_user(user_id)
 
         # Soft delete - set deleted_at timestamp
-        query = "UPDATE users SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL"
+        query = adapt_sql("UPDATE users SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL")
 
         try:
             cursor = self.db.execute(
@@ -361,7 +395,7 @@ class UserRepository:
         Returns:
             bool: True if successful.
         """
-        query = "UPDATE users SET deleted_at = NULL WHERE id = ?"
+        query = adapt_sql("UPDATE users SET deleted_at = NULL WHERE id = ?")
 
         try:
             cursor = self.db.execute(query, (user_id,))
@@ -380,7 +414,7 @@ class UserRepository:
         Returns:
             bool: True if successful.
         """
-        query = "DELETE FROM users WHERE id = ?"
+        query = adapt_sql("DELETE FROM users WHERE id = ?")
 
         try:
             cursor = self.db.execute(query, (user_id,))
@@ -433,7 +467,7 @@ class UserRepository:
             return False
 
         params.append(user_id)
-        query = f"UPDATE users SET {', '.join(updates)} WHERE id = ?"
+        query = adapt_sql(f"UPDATE users SET {', '.join(updates)} WHERE id = ?")
 
         try:
             cursor = self.db.execute(query, tuple(params))
@@ -456,14 +490,17 @@ class UserRepository:
         Returns:
             bool: True if successful.
         """
-        query = """
+        query = adapt_sql(
+            """
             INSERT INTO sessions (user_id, token, created_at, expires_at)
             VALUES (?, ?, ?, ?)
         """
+        )
 
         try:
-            # Use local time to match database TIMESTAMP WITHOUT TIME ZONE behavior
-            self.db.execute(query, (user_id, token, datetime.now(), expires_at))
+            # Use UTC to match auth_service._utcnow() which stores expires_at in UTC
+            utcnow = datetime.now(timezone.utc).replace(tzinfo=None)
+            self.db.execute(query, (user_id, token, utcnow, expires_at))
             return True
         except Exception as e:
             logger.error(f"Error creating session: {e}")
@@ -479,15 +516,18 @@ class UserRepository:
         Returns:
             Optional[Dict]: Session data with user info or None.
         """
-        query = """
+        query = adapt_sql(
+            """
             SELECT s.*, u.username, u.email, u.role, u.tenant_id, u.must_change_password
             FROM sessions s
             JOIN users u ON s.user_id = u.id
             WHERE s.token = ? AND s.expires_at > ?
         """
+        )
 
-        # Use local time to match database TIMESTAMP WITHOUT TIME ZONE behavior
-        return self.db.fetch_one(query, (token, datetime.now()))
+        # Use UTC to match auth_service._utcnow() which stores expires_at in UTC
+        utcnow = datetime.now(timezone.utc).replace(tzinfo=None)
+        return self.db.fetch_one(query, (token, utcnow))
 
     def delete_session(self, token: str) -> bool:
         """
@@ -499,7 +539,7 @@ class UserRepository:
         Returns:
             bool: True if successful.
         """
-        query = "DELETE FROM sessions WHERE token = ?"
+        query = adapt_sql("DELETE FROM sessions WHERE token = ?")
 
         try:
             self.db.execute(query, (token,))
@@ -518,7 +558,7 @@ class UserRepository:
         Returns:
             bool: True if successful.
         """
-        query = "UPDATE sessions SET expires_at = ? WHERE token = ?"
+        query = adapt_sql("UPDATE sessions SET expires_at = ? WHERE token = ?")
 
         try:
             self.db.execute(query, (new_expires_at, token))
@@ -534,7 +574,7 @@ class UserRepository:
         Returns:
             int: Number of sessions deleted.
         """
-        query = "DELETE FROM sessions WHERE expires_at < ?"
+        query = adapt_sql("DELETE FROM sessions WHERE expires_at < ?")
 
         try:
             cursor = self.db.execute(query, (datetime.now(timezone.utc).replace(tzinfo=None),))

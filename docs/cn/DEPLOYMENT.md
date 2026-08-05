@@ -590,12 +590,18 @@ chmod -R 755 ~/.open-ace/
 
 ## 安全注意事项
 
-1. **认证**：在生产环境中启用用户认证
-2. **HTTPS**：使用反向代理（nginx/Apache）配合 SSL
-3. **防火墙**：限制对 19888 端口的访问
-4. **密钥管理**：使用环境变量或密钥管理系统存储敏感数据
-5. **独立加密密钥**：显式设置 `OPENACE_ENCRYPTION_KEY`；加密后的敏感数据不再从 `SECRET_KEY` 派生
-6. **禁止占位密钥**：不要在生产环境使用以下占位符作为密钥：
+1. **安全模式**：必须显式设置 `OPENACE_SECURITY_MODE`（Issue #2185）
+   - `production`：强制安全检查，密钥必须显式设置，禁止弱密码
+   - `pilot`：允许自动生成密钥，输出强警告，适合试用环境
+   - `development`：允许自动生成密钥，输出一般警告，适合开发环境
+   - **重要**：系统不再静默回退到默认模式，必须显式配置
+
+2. **认证**：在生产环境中启用用户认证
+3. **HTTPS**：使用反向代理（nginx/Apache）配合 SSL
+4. **防火墙**：限制对 19888 端口的访问
+5. **密钥管理**：使用环境变量或密钥管理系统存储敏感数据
+6. **独立加密密钥**：显式设置 `OPENACE_ENCRYPTION_KEY`；加密后的敏感数据不再从 `SECRET_KEY` 派生
+7. **禁止占位密钥**：不要在生产环境使用以下占位符作为密钥：
    - `change-me-in-production`
    - `replace-with-random-*`（k8s 清单占位符）
    - `dev-secret-key`、`dev-smtp-password-key`、`default-secret-key` 等开发环境占位符
@@ -632,20 +638,43 @@ sudo visudo -f /etc/sudoers.d/open-ace-webui
 ```bash
 # 允许 open-ace 服务账户以任意用户身份运行 qwen-code-webui
 # 将 'open-ace' 替换为你的实际服务账户名
+# 注意：WebUI 启动时 Python 层会验证目标用户是否在数据库映射中
 
 open-ace ALL=(ALL) NOPASSWD: /usr/local/bin/qwen-code-webui *
 open-ace ALL=(ALL) NOPASSWD: /usr/bin/qwen-code-webui *
 open-ace ALL=(ALL) NOPASSWD: /opt/qwen-code-webui/bin/qwen-code-webui *
 
-# 允许 open-ace 以其他用户身份执行文件系统操作
-# 多用户模式下目录浏览器和项目创建需要此权限
-open-ace ALL=(ALL) NOPASSWD: /usr/bin/test, /usr/bin/ls, /usr/bin/cat, /usr/bin/stat, /usr/bin/mkdir
+# 【安全加固 Issue #2181】低风险工具命令
+# 已移除 cat/chown/useradd/rm 通配，改用安全 wrapper
+open-ace ALL=(root) NOPASSWD: /usr/bin/test *, /usr/bin/ls *, /usr/bin/stat *, /usr/bin/mkdir *, /usr/bin/id *, /usr/bin/find *
+
+# 【Issue #2181】安全 wrapper 规则
+# 这些 wrapper 内部验证路径、用户和权限，替代原通配命令
+open-ace ALL=(root) NOPASSWD: /usr/local/bin/openace-chown *
+open-ace ALL=(root) NOPASSWD: /usr/local/bin/openace-useradd *
+open-ace ALL=(root) NOPASSWD: /usr/local/bin/openace-cat *
+open-ace ALL=(root) NOPASSWD: /usr/local/bin/openace-mkdir *
+open-ace ALL=(root) NOPASSWD: /usr/local/bin/openace-rm *
+
+# 【Issue #2181】跨用户 Agent 启动 wrapper
+# 所有 AI CLI 必须通过此 wrapper 启动
+open-ace ALL=(root) NOPASSWD: /usr/local/bin/openace-run-as --isolated *
+
+# 【Issue #2181】环境变量保留（仅非敏感变量）
+# Agent 进程通过 openace-run-as --isolated 使用 env -i，不继承 env_keep
+# env_keep 主要用于 WebUI 启动
+Defaults env_keep += "OPENACE_PROXY_TOKEN OPENACE_PROXY_URL OPENACE_MODEL OPENACE_LOG_DIR PATH"
+Defaults env_keep += "GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL"
+Defaults env_keep += "SESSION_TIMEOUT_MS KEEPALIVE_INTERVAL_MS"
 ```
 
 **安全注意事项：**
 - 使用完整路径以防止路径操作攻击
 - `NOPASSWD` 标志是非交互式服务运行所必需的
 - 仅限于特定的可执行文件路径，不要授予通用的 `sudo` 权限
+- **Issue #2181 加固**：cat/chown/useradd/rm 通配规则已移除，改用安全 wrapper
+- **Issue #2181 加固**：env_keep 不再包含敏感变量（API Key、GH_TOKEN 等）
+- Agent 进程通过 `openace-run-as --isolated` 启动，使用 `env -i` 完全隔离环境
 
 ### qwen-code-webui 安装
 

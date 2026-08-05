@@ -112,7 +112,7 @@ class TestLoginLockout:
     @patch("app.repositories.database.Database")
     def test_locked_account_datetime(self, mock_db_cls, mock_placeholder):
         mock_db = MagicMock()
-        future = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(minutes=10)
+        future = datetime.now() + timedelta(minutes=10)
         mock_db.fetch_one.return_value = {
             "attempt_count": 5,
             "locked_until": future,
@@ -127,9 +127,7 @@ class TestLoginLockout:
     @patch("app.repositories.database.Database")
     def test_locked_account_iso_string(self, mock_db_cls, mock_placeholder):
         mock_db = MagicMock()
-        future = (
-            datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(minutes=10)
-        ).isoformat()
+        future = (datetime.now() + timedelta(minutes=10)).isoformat()
         mock_db.fetch_one.return_value = {
             "attempt_count": 5,
             "locked_until": future,
@@ -143,6 +141,7 @@ class TestLoginLockout:
     @patch("app.repositories.database.Database")
     def test_expired_lockout_cleared(self, mock_db_cls, mock_placeholder):
         mock_db = MagicMock()
+        # Use UTC time to match database TIMESTAMP WITHOUT TIME ZONE behavior
         past = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=10)
         mock_db.fetch_one.return_value = {
             "attempt_count": 5,
@@ -241,8 +240,10 @@ class TestRecordFailedLogin:
         mock_db.fetch_one.side_effect = Exception("DB error")
         mock_db_cls.return_value = mock_db
 
-        # Should not raise
+        # Should not raise: DB error on the initial lookup is swallowed; no
+        # subsequent UPDATE/INSERT should be attempted.
         _record_failed_login("testuser")
+        mock_db.execute.assert_not_called()
 
 
 class TestClearFailedLogins:
@@ -264,8 +265,10 @@ class TestClearFailedLogins:
         mock_db.execute.side_effect = Exception("DB error")
         mock_db_cls.return_value = mock_db
 
-        # Should not raise
+        # Should not raise: the DELETE is attempted (execute called once) but the
+        # resulting DB error is swallowed rather than propagated to the caller.
         _clear_failed_logins("testuser")
+        mock_db.execute.assert_called_once()
 
 
 class TestAuthService:
@@ -526,7 +529,8 @@ class TestAuthService:
 
     def test_validate_session_valid(self):
         svc, mock_repo = self._make_service()
-        future = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=1)
+        # Use local time to match database TIMESTAMP WITHOUT TIME ZONE behavior
+        future = datetime.now() + timedelta(hours=1)
         mock_repo.get_session_by_token.return_value = {
             "token": "abc",
             "expires_at": future,
@@ -559,6 +563,7 @@ class TestAuthService:
 
     def test_validate_session_expired(self):
         svc, mock_repo = self._make_service()
+        # Use UTC time to match database TIMESTAMP WITHOUT TIME ZONE behavior
         past = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=1)
         mock_repo.get_session_by_token.return_value = {
             "token": "abc",
@@ -571,6 +576,7 @@ class TestAuthService:
 
     def test_validate_session_expired_string(self):
         svc, mock_repo = self._make_service()
+        # Use UTC time to match database TIMESTAMP WITHOUT TIME ZONE behavior
         past = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=1)).isoformat()
         mock_repo.get_session_by_token.return_value = {
             "token": "abc",
@@ -587,14 +593,20 @@ class TestAuthService:
         assert AuthService._is_session_expired({"expires_at": None}) is False
 
     def test_is_session_expired_future(self):
+        # Use UTC time to match database TIMESTAMP WITHOUT TIME ZONE behavior
+        # Database stores UTC time without timezone info
         future = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=1)
         assert AuthService._is_session_expired({"expires_at": future}) is False
 
     def test_is_session_expired_past(self):
+        # Use UTC time to match database TIMESTAMP WITHOUT TIME ZONE behavior
+        # Database stores UTC time without timezone info
         past = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=1)
         assert AuthService._is_session_expired({"expires_at": past}) is True
 
     def test_is_session_expired_string_past(self):
+        # Use UTC time to match database TIMESTAMP WITHOUT TIME ZONE behavior
+        # Database stores UTC time without timezone info
         past = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=1)).isoformat()
         assert AuthService._is_session_expired({"expires_at": past}) is True
 
@@ -637,7 +649,7 @@ class TestAuthService:
 
     def test_require_auth(self):
         svc, mock_repo = self._make_service()
-        future = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=1)
+        future = datetime.now() + timedelta(hours=1)
         mock_repo.get_session_by_token.return_value = {
             "token": "abc",
             "expires_at": future,
@@ -648,7 +660,7 @@ class TestAuthService:
 
     def test_require_admin_success(self):
         svc, mock_repo = self._make_service()
-        future = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=1)
+        future = datetime.now() + timedelta(hours=1)
         mock_repo.get_session_by_token.return_value = {
             "token": "abc",
             "role": "admin",
@@ -660,7 +672,7 @@ class TestAuthService:
 
     def test_require_admin_not_admin(self):
         svc, mock_repo = self._make_service()
-        future = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=1)
+        future = datetime.now() + timedelta(hours=1)
         mock_repo.get_session_by_token.return_value = {
             "token": "abc",
             "role": "user",

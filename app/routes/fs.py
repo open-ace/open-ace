@@ -23,6 +23,7 @@ from flask import Blueprint, Response, g, jsonify, request, stream_with_context
 from app.repositories.user_repo import UserRepository
 from app.utils.workspace import (
     OPENACE_CHOWN_WRAPPER,
+    OPENACE_RM_WRAPPER,
     OPENACE_WRITE_AS_WRAPPER,
     _is_wrapper_available,
     get_workspace_base_dir,
@@ -506,6 +507,82 @@ def get_directory_info(path: str, system_account: str | None = None):
         }
 
 
+def find_writable_ancestor(
+    path: str,
+    allowed_prefixes: list[str] | None = None,
+    system_account: str | None = None,
+) -> dict:
+    """Find the nearest existing ancestor of *path* and check writability.
+
+    Walks up the directory tree from ``path`` until an existing directory is
+    found, then verifies that it is writable.  This allows multi-level paths
+    (e.g. ``/workspace/subdir/new-project``) to be validated even when
+    intermediate directories do not yet exist, matching the recursive
+    creation behaviour of ``mkdir -p`` / ``os.makedirs``.
+
+    The search is bounded by *allowed_prefixes* — if the walk goes above all
+    allowed workspace base directories, the search stops and an error is
+    returned.  This prevents probing system directories outside the workspace.
+
+    Args:
+        path: The target path (need not exist).
+        allowed_prefixes: Workspace base directories that bound the search.
+        system_account: Optional system account for permission checks.
+
+    Returns:
+        Dict with keys ``found`` (bool), ``ancestor`` (str | None) and
+        ``error`` (str | None).
+    """
+
+    def _is_within_allowed(path_str: str, prefixes: list[str]) -> bool:
+        for prefix in prefixes:
+            prefix = prefix.rstrip(os.sep)
+            if path_str == prefix or path_str.startswith(prefix + os.sep):
+                return True
+        return False
+
+    current = Path(path)
+
+    while current != current.parent:
+        current = current.parent
+        current_str = str(current)
+
+        # Security: stop if we have walked above all allowed prefixes
+        if allowed_prefixes and not _is_within_allowed(current_str, allowed_prefixes):
+            return {
+                "found": False,
+                "ancestor": None,
+                "error": "No existing ancestor directory found within allowed workspace",
+            }
+
+        ancestor_info = get_directory_info(current_str, system_account)
+
+        if ancestor_info["exists"]:
+            if not ancestor_info["is_dir"]:
+                return {
+                    "found": False,
+                    "ancestor": current_str,
+                    "error": "Ancestor path exists but is not a directory",
+                }
+            if not ancestor_info["is_writable"]:
+                return {
+                    "found": False,
+                    "ancestor": current_str,
+                    "error": "Cannot create directory (ancestor not writable)",
+                }
+            return {
+                "found": True,
+                "ancestor": current_str,
+                "error": None,
+            }
+
+    return {
+        "found": False,
+        "ancestor": None,
+        "error": "No writable ancestor directory found",
+    }
+
+
 @fs_bp.route("/fs/browse", methods=["GET"])
 def api_browse_directory():
     """Browse a directory and list subdirectories (and optionally files)."""
@@ -852,25 +929,17 @@ def api_check_path():
             }
         )
     else:
-        # Check if parent directory is writable
-        parent = str(Path(path).parent)
-        parent_info = get_directory_info(parent, system_account)
+        # Check if the nearest existing ancestor is writable.
+        # This supports multi-level paths (e.g. /workspace/a/b/c) where
+        # intermediate directories don't exist yet, matching mkdir -p behaviour.
+        ancestor = find_writable_ancestor(path, base_dirs, system_account)
 
-        if not parent_info["exists"]:
+        if not ancestor["found"]:
             return jsonify(
                 {
                     "valid": False,
                     "exists": False,
-                    "error": "Parent directory does not exist",
-                }
-            )
-
-        if not parent_info["is_writable"]:
-            return jsonify(
-                {
-                    "valid": False,
-                    "exists": False,
-                    "error": "Cannot create directory (parent not writable)",
+                    "error": ancestor["error"],
                 }
             )
 
@@ -958,20 +1027,15 @@ def api_create_directory():
                 400,
             )
 
-    # Check if parent directory is writable
-    parent = str(Path(dir_path).parent)
-    parent_info = get_directory_info(parent, system_account)
+    # Check if the nearest existing ancestor is writable.
+    # This supports multi-level paths where intermediate directories don't
+    # exist yet, matching the recursive creation behaviour of mkdir -p.
+    ancestor = find_writable_ancestor(dir_path, base_dirs, system_account)
 
-    if not parent_info["exists"]:
+    if not ancestor["found"]:
         return (
-            jsonify({"success": False, "error": "Parent directory does not exist"}),
+            jsonify({"success": False, "error": ancestor["error"]}),
             400,
-        )
-
-    if not parent_info["is_writable"]:
-        return (
-            jsonify({"success": False, "error": "Parent directory is not writable"}),
-            403,
         )
 
     # Create the directory
@@ -1364,26 +1428,34 @@ def api_delete_file():
         else:
             effective = get_effective_system_account(system_account)
             assert effective is not None  # _is_direct_access 为 False 时 effective 必定非 None
-            result = run_as_user(effective, ["rm", "--", target_path])
+            # 【安全加固 Issue #2181】使用 openace-rm 安全 wrapper 替代 rm 通配
+            # openace-rm 验证：目标用户、路径白名单、symlink 逃逸、owner 匹配、危险选项拒绝
+            result = subprocess.run(
+                ["sudo", OPENACE_RM_WRAPPER, effective, target_path],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
             if result.returncode != 0:
                 stderr = (result.stderr or "").strip()
-                logger.warning(f"rm as {effective} failed for {target_path}: {stderr}")
-                # sudoers policy denial vs. filesystem permission error
-                if "not allowed" in stderr.lower() or "sudo" in stderr.lower():
-                    return (
-                        jsonify(
-                            {
-                                "error": "Cannot delete file as owner "
-                                "(sudoers policy missing 'rm' for this deployment)"
-                            }
-                        ),
-                        500,
-                    )
-                return jsonify({"error": "Permission denied"}), 403
+                logger.warning(f"openace-rm as {effective} failed for {target_path}: {stderr}")
+                # Parse wrapper exit codes for appropriate error messages
+                if result.returncode == 2:
+                    return jsonify({"error": "Invalid path or access denied"}), 403
+                elif result.returncode == 3:
+                    return jsonify({"error": "Invalid target user"}), 403
+                elif result.returncode == 7:
+                    return jsonify({"error": "Symlink escape detected"}), 403
+                elif result.returncode in (4, 6):
+                    logger.error(f"TOCTOU or lock error for {target_path}")
+                    return jsonify({"error": "System error, please retry"}), 500
+                return jsonify({"error": f"Delete failed: {stderr}"}), 500
         logger.info(f"Deleted file: {target_path}")
         return jsonify({"success": True, "path": target_path})
     except PermissionError:
         return jsonify({"error": "Permission denied"}), 403
+    except subprocess.TimeoutExpired:
+        return jsonify({"error": "Delete operation timeout"}), 500
     except OSError as e:
         logger.error(f"Delete failed for {target_path}: {e}")
         return jsonify({"error": f"Delete failed: {e}"}), 500

@@ -12,17 +12,23 @@ This migration:
 2. Updates the CHECK constraint to include 'readonly'
 """
 
+from __future__ import annotations
+
 import logging
+from typing import TYPE_CHECKING
 
 import sqlalchemy as sa
 from alembic import op
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 log = logging.getLogger(__name__)
 
 revision: str = "20260709_001_add_readonly_role_to_check_constraint"
 down_revision: str | None = "20260707_001_add_system_account_to_workflows"
 branch_labels: str | None = None
-depends_on: str | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
@@ -104,6 +110,7 @@ def upgrade() -> None:
             "must_change_password": "INTEGER DEFAULT 0",
             "avatar_url": "TEXT",
             "auto_mapping_enabled": "INTEGER DEFAULT 1",
+            "tenant_version": "INTEGER DEFAULT 1 NOT NULL",
         }
 
         # Build CREATE TABLE statement dynamically
@@ -213,6 +220,7 @@ def downgrade() -> None:
             "must_change_password": "INTEGER DEFAULT 0",
             "avatar_url": "TEXT",
             "auto_mapping_enabled": "INTEGER DEFAULT 1",
+            "tenant_version": "INTEGER DEFAULT 1 NOT NULL",
         }
 
         # Build CREATE TABLE statement dynamically

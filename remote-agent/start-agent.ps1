@@ -71,12 +71,29 @@ if ($cfg) {
 }
 
 # ============================================================================
-# 2. 检测 agent 进程是否已在运行
+# 2. 查找 Python 完整路径
+# ============================================================================
+function Get-PythonPath {
+    $pythonPath = (Get-Command python -ErrorAction SilentlyContinue).Source
+    if (-not $pythonPath) {
+        $pythonPath = (Get-Command python3 -ErrorAction SilentlyContinue).Source
+    }
+    if (-not $pythonPath) {
+        Write-ErrorMsg "未找到 Python，请确保 Python 在 PATH 中"
+        exit 1
+    }
+    return $pythonPath
+}
+
+# ============================================================================
+# 3. 检测 agent 进程是否已在运行
 # ============================================================================
 function Get-AgentProcess {
     $agentPyPath = $InstallDir.Replace('\', '\\')
+    # 使用更精确的正则表达式匹配，避免误匹配 myagent.py、subagent.py 等
+    # (^|[\\])agent\.py($|[\\\s]) 确保匹配独立的 agent.py 文件名
     Get-CimInstance Win32_Process -Filter "Name = 'python.exe' OR Name = 'python3.exe' OR Name = 'pythonw.exe'" -ErrorAction SilentlyContinue |
-        Where-Object { $_.CommandLine -and $_.CommandLine -match "agent\.py" -and $_.CommandLine -match $agentPyPath }
+        Where-Object { $_.CommandLine -and $_.CommandLine -match "(^|[\\])agent\.py($|[\\\s])" -and $_.CommandLine -match $agentPyPath }
 }
 
 function Show-Status {
@@ -113,17 +130,18 @@ if ($Stop) {
 }
 
 # ============================================================================
-# 3. 配置开机自启（计划任务）
+# 4. 配置开机自启（计划任务）
 # ============================================================================
 if ($InstallAutoStart) {
     Write-Info "配置开机自启 (计划任务)..."
     try {
+        $pythonPath = Get-PythonPath
         $taskName = "OpenACEAgent"
         $existingTask = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
         if ($existingTask) {
             Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
         }
-        $action = New-ScheduledTaskAction -Execute "python" -Argument "`"$InstallDir\agent.py`"" -WorkingDirectory $InstallDir
+        $action = New-ScheduledTaskAction -Execute $pythonPath -Argument "`"$InstallDir\agent.py`"" -WorkingDirectory $InstallDir
         $trigger = New-ScheduledTaskTrigger -AtLogOn
         $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Hours 0) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
         $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
@@ -137,7 +155,7 @@ if ($InstallAutoStart) {
 }
 
 # ============================================================================
-# 4. 启动 agent
+# 5. 启动 agent
 # ============================================================================
 $procs = @(Get-AgentProcess)
 if ($procs.Count -gt 0) {
@@ -146,10 +164,11 @@ if ($procs.Count -gt 0) {
 }
 
 Write-Info "启动 Open ACE Remote Agent..."
+$pythonPath = Get-PythonPath
 $logPath = "$InstallDir\agent.log"
 
 # 后台启动 agent.py，日志写入 agent.log
-$agentProc = Start-Process -FilePath "python" -ArgumentList "`"$InstallDir\agent.py`"" -WorkingDirectory $InstallDir -WindowStyle Hidden -RedirectStandardOutput $logPath -RedirectStandardError "$InstallDir\agent-error.log" -PassThru
+$agentProc = Start-Process -FilePath $pythonPath -ArgumentList "`"$InstallDir\agent.py`"" -WorkingDirectory $InstallDir -WindowStyle Hidden -RedirectStandardOutput $logPath -RedirectStandardError "$InstallDir\agent-error.log" -PassThru
 
 if ($agentProc -and $agentProc.Id) {
     Write-Ok "Agent 已启动 (PID: $($agentProc.Id))"
