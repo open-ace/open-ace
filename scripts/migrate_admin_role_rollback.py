@@ -66,7 +66,7 @@ MESSAGES = {
 class RollbackTool:
     """Admin role migration rollback tool."""
 
-    def __init__(self, batch_id: str = None, locale: str = "en_US"):
+    def __init__(self, batch_id: str | None = None, locale: str = "en_US"):
         self.batch_id = batch_id
         self.locale = locale
         self.messages = MESSAGES.get(locale, MESSAGES["en_US"])
@@ -109,7 +109,7 @@ class RollbackTool:
             logger.error(f"Failed to find backup users: {e}")
             return []
 
-    def rollback_users(self, user_ids: list = None) -> bool:
+    def rollback_users(self, user_ids: list | None = None) -> bool:
         """Rollback user roles."""
         self._print("rollback.start")
 
@@ -149,16 +149,20 @@ class RollbackTool:
                 if self.batch_id:
                     # Restore from backup
                     if db.is_postgresql():
-                        cursor.execute("""
+                        cursor.execute(
+                            """
                             UPDATE users
                             SET role = b.role, updated_at = NOW()
                             FROM admin_role_migration_backup b
                             WHERE users.id = b.id AND b.batch_id = ?
-                        """, (self.batch_id,))
+                        """,
+                            (self.batch_id,),
+                        )
                     else:
                         # SQLite doesn't support FROM clause in UPDATE
                         # Use a subquery instead
-                        cursor.execute("""
+                        cursor.execute(
+                            """
                             UPDATE users
                             SET role = (
                                 SELECT role FROM admin_role_migration_backup
@@ -168,7 +172,9 @@ class RollbackTool:
                             WHERE id IN (
                                 SELECT id FROM admin_role_migration_backup WHERE batch_id = ?
                             )
-                        """, (self.batch_id, self.batch_id))
+                        """,
+                            (self.batch_id, self.batch_id),
+                        )
 
             affected_rows = cursor.rowcount
 
@@ -203,7 +209,7 @@ class RollbackTool:
         response = input().strip().lower()
         return response == "yes"
 
-    def run(self, skip_confirm: bool = False, user_ids: list = None):
+    def run(self, skip_confirm: bool = False, user_ids: list | None = None):
         """Run rollback."""
         logger.info("Starting rollback...")
 
@@ -231,9 +237,7 @@ class RollbackTool:
 
 def main():
     """Main entry point."""
-    parser = argparse.ArgumentParser(
-        description="Admin role migration rollback tool (Issue #2276)"
-    )
+    parser = argparse.ArgumentParser(description="Admin role migration rollback tool (Issue #2276)")
     parser.add_argument(
         "--batch-id",
         help="Batch ID to rollback",

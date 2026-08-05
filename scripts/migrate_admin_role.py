@@ -97,7 +97,7 @@ MESSAGES = {
 class MigrationConfig:
     """Migration configuration."""
 
-    def __init__(self, config_path: str = None):
+    def __init__(self, config_path: str | None = None):
         self.config_path = config_path or "config/migration.yaml"
         self.config = self._load_config()
 
@@ -152,7 +152,7 @@ class MigrationTool:
         self.config = MigrationConfig()
         self.messages = MESSAGES.get(locale, MESSAGES["en_US"])
         self.batch_id = self._generate_batch_id()
-        self.start_time = None
+        self.start_time: datetime | None = None
 
     def _generate_batch_id(self) -> str:
         """Generate unique batch ID."""
@@ -226,13 +226,9 @@ class MigrationTool:
 
             # Count sessions that expire in the future
             if db.is_postgresql():
-                cursor.execute(
-                    "SELECT COUNT(*) FROM sessions WHERE expires_at > NOW()"
-                )
+                cursor.execute("SELECT COUNT(*) FROM sessions WHERE expires_at > NOW()")
             else:
-                cursor.execute(
-                    "SELECT COUNT(*) FROM sessions WHERE expires_at > datetime('now')"
-                )
+                cursor.execute("SELECT COUNT(*) FROM sessions WHERE expires_at > datetime('now')")
 
             result = cursor.fetchone()
             conn.close()
@@ -264,9 +260,7 @@ class MigrationTool:
             return False
 
         # Check active sessions
-        env_config = self.config.get_environment_config(
-            os.environ.get("OPENACE_ENV", "dev")
-        )
+        env_config = self.config.get_environment_config(os.environ.get("OPENACE_ENV", "dev"))
         threshold = env_config.get("active_session_threshold", 10)
 
         active_sessions = self.count_active_sessions()
@@ -321,12 +315,15 @@ class MigrationTool:
             )
 
             # Backup current users
-            cursor.execute("""
+            cursor.execute(
+                """
                 INSERT INTO admin_role_migration_backup (id, username, role, tenant_id, updated_at, backup_source, batch_id)
                 SELECT id, username, role, tenant_id, updated_at, 'local', ?
                 FROM users
                 WHERE role = 'admin'
-            """, (self.batch_id,))
+            """,
+                (self.batch_id,),
+            )
 
             conn.commit()
             conn.close()
@@ -437,9 +434,7 @@ class MigrationTool:
 
 def main():
     """Main entry point."""
-    parser = argparse.ArgumentParser(
-        description="Admin role migration tool (Issue #2276)"
-    )
+    parser = argparse.ArgumentParser(description="Admin role migration tool (Issue #2276)")
     parser.add_argument(
         "--locale",
         default="en_US",

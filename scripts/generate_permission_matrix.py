@@ -47,9 +47,7 @@ def extract_endpoint_info(file_path: Path) -> list[dict]:
         elif line.strip().startswith("@") and not line.strip().startswith("@tenant_bp"):
             # Other decorator, but not route decorator
             continue
-        elif line.strip().startswith("@tenant_bp.route") or line.strip().startswith(
-            "@bp.route"
-        ):
+        elif line.strip().startswith("@tenant_bp.route") or line.strip().startswith("@bp.route"):
             # Extract route information
             if current_decorator:
                 # Extract HTTP method
@@ -162,9 +160,7 @@ These endpoints require `platform_admin` or `admin` role.
     platform_admin_endpoints = [
         ep for ep in all_endpoints if ep["decorator"] == "platform_admin_required"
     ]
-    admin_required_endpoints = [
-        ep for ep in all_endpoints if ep["decorator"] == "admin_required"
-    ]
+    admin_required_endpoints = [ep for ep in all_endpoints if ep["decorator"] == "admin_required"]
     same_tenant_endpoints = [
         ep for ep in all_endpoints if ep["decorator"] == "same_tenant_or_platform_admin"
     ]
