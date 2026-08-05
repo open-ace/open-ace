@@ -856,3 +856,49 @@
 - **部署验证**：容器 `Up (healthy)`，`/readyz` 返回 200 `status: ready`，`schema_version.compatible: true`，6 项检查全部 ok。
 - **前端说明**：上游更新了前端源码但未提交构建产物，容器内 `static/assets` 仍为旧构建；新前端功能（RuntimeIsolationPanel 等）需镜像重建后生效，后端功能不受影响。
 - **待办**：Windows agent 端需手动更新 `C:\Users\nuc\.open-ace-agent\` 下 `agent.py`、`executor.py`、`system-prompt.md`（合并后版本，含问题 19/20 修复 + 上游更新）并重启 agent。
+
+---
+
+## 问题 21：工作区无法初始化（WebUI authentication failed + webui 进程起不来）
+
+- **处理时间**：2026-08-05
+- **故障现象**：
+  admin 登录后工作区无法初始化，前端报错 `WebUI authentication failed. Please refresh the page.`；容器日志反复出现 `WebUI service on port 3100 not ready after 10.0s timeout`，`ps` 无 qwen-code-webui 进程、`ss` 无 3100 端口监听，webui.log 停留在 8 月 3 日旧日志（进程在启动前即失败，未写日志）。
+- **诊断结论**（两层根因）：
+  1. **wrapper 文件缺失**：上游新启动机制（Issue #2298/#2305）通过 `sudo -u <user> /usr/local/bin/openace-webui-launch <KEY=VALUE>... /usr/bin/qwen-code-webui --port 3100 ...` 启动 webui（webui_manager.py `_launch_webui_process`）。该 wrapper 由 Dockerfile `COPY scripts/openace-webui-launch.sh /usr/local/bin/openace-webui-launch`（第 242 行）安装，但本次部署未重建镜像 → 容器内 `/usr/local/bin/openace-webui-launch` 不存在 → sudo 拒绝执行 → 进程无法启动。
+  2. **entrypoint 上游 bug（更深层）**：新 entrypoint 的 sudoers 生成逻辑把 shell `if [ -x "$WEBUI_LAUNCH_WRAPPER" ] ... fi` **误写在 `cat > /etc/sudoers.d/open-ace-webui << SUDOERS_EOF` heredoc 内部**，导致 shell 代码被逐字写入 sudoers 文件 → `visudo -c` 语法错误 → entrypoint 删除 sudoers 文件并继续（日志仅 WARNING）。即使补上 wrapper，重启后 sudoers 仍会消失。
+  3. **附带问题**：entrypoint 生成的 wrapper 规则 `${WEBUI_LAUNCH_WRAPPER} "${WEBUI_PATH}" *` 缺前置 `*`，无法匹配 webui_manager 实际调用格式 `wrapper <env...> path --port ...`（env 参数在路径前），需为 `wrapper * "path" *`（与 tests/issues/2298/test_webui_env_isolation.py 预期一致）。
+- **解决办法**：
+  1. 容器内补齐 wrapper：`cp /app/scripts/openace-webui-launch.sh /usr/local/bin/openace-webui-launch && chmod +x`
+  2. 修复 `docker-entrypoint.sh`：将 wrapper 规则计算（`WEBUI_SUDO_RULE` 变量 + if/fi 回退逻辑）移到 heredoc **之外**，heredoc 内仅引用 `${WEBUI_SUDO_RULE}`；规则格式加前置 `*` 匹配 env 参数
+  3. 同步修复后的 entrypoint 到容器 `/app/docker-entrypoint.sh` 与 `/usr/local/bin/docker-entrypoint.sh`（先备份 `.bak.20260805`）
+  4. 重启容器 → entrypoint 重新生成 sudoers 并经 `visudo -c` 校验
+- **修改的文件**：
+  - `docker-entrypoint.sh`（sudoers 规则生成逻辑重构：heredoc 外计算 + 前置 `*`）
+  - 容器内：`/usr/local/bin/openace-webui-launch`（复制自 /app/scripts/）、`/usr/local/bin/docker-entrypoint.sh`（备份 .bak.20260805）
+- **验证结果**：
+  - `sudo -u admin /usr/local/bin/openace-webui-launch TEST_VAR=hello /usr/bin/qwen-code-webui --version` 输出 `0.2.40`，sudo exit 0（env 参数前置格式被 sudoers 允许）
+  - 复刻 entrypoint 生成逻辑的 sudoers 经 `visudo -c` parsed OK
+  - 模拟 webui_manager 启动命令（sudo + wrapper + env + webui --port 3100），进程成功启动并监听 3100 端口
+  - 容器重启后 healthy，`/etc/sudoers.d/open-ace-webui` 含规则 `open-ace ALL=(ALL) NOPASSWD: /usr/local/bin/openace-webui-launch * "/usr/bin/qwen-code-webui" *`，`/readyz` 200
+- **状态**：已解决
+
+## 问题 22：admin 管理版面消失（迁移将角色改为 tenant_admin + 前端构建过旧）
+
+- **处理时间**：2026-08-05
+- **故障现象**：
+  原 admin 账号有两个版面：管理版面（远程机器管理、API Key 配置等）和开发版面（工作区等）。部署最新服务端后登录 admin，只剩开发版面，管理版面与 ModeSwitcher 切换入口消失。
+- **诊断结论**：
+  1. **角色变更**：部署时 `alembic upgrade head` 应用迁移 `20260801_001_add_platform_tenant_admin_roles.py`，将 admin 账号（有 tenant_id）角色从 `admin` 改为 `tenant_admin`（数据库已确认）。
+  2. **前端过旧**：容器内前端为 8/3 同步前构建，其 `AppContent` 判断 `isAdmin = user?.role === 'admin'`（permissions.ts 旧版仅 `canManageAllTenants` 认 `admin`），**不识别 `tenant_admin`** → 前端判定当前用户非管理员 → 默认路由 `/work`（开发版面），`/manage`（管理版面）与 ModeSwitcher 全部隐藏。
+  3. 新前端源码（提交 `e37093cd` #2285）的 `isAdmin` 已支持 `admin/platform_admin/tenant_admin`，与后端 `ADMIN_ROLES`（app/models/user.py:24）一致。
+- **解决办法**（方案 B：重建前端，DB 角色保持 tenant_admin）：
+  1. 本地 `frontend/` 执行 `npm run build`（tsc + vite，输出到 `static/js/dist`），备份旧构建为 `static/js/dist.bak.20260805`
+  2. 清空并 `docker cp` 新构建到容器 `/app/static/js/dist/`
+- **修改的文件**：
+  - `static/js/dist/`（重新构建的前端产物；`static/js/dist.bak.20260805` 为旧构建备份）
+  - 容器内 `/app/static/js/dist/`
+- **验证结果**：
+  - 新构建含 `/manage/*` 路由（index/components/utils chunk 共 17 处匹配）、`utils.*.js` 含 `tenant_admin`（isAdmin 支持三种 admin 角色）
+  - 容器根路由返回新 `index.vAKXDLiX.js`，`/static/js/dist/*` 全部 200
+- **状态**：已解决（待用户在浏览器中确认管理版面恢复）
