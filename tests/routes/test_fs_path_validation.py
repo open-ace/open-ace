@@ -31,8 +31,12 @@ if os.name == "nt":
     for _mod_name in ("pwd", "grp"):
         if _mod_name not in sys.modules:
             _stub = type(sys)(_mod_name)
-            _stub.getpwnam = lambda n: type("u", (), {"pw_uid": 0, "pw_gid": 0, "pw_name": n, "pw_dir": "/"})()
-            _stub.getpwuid = lambda u: type("u", (), {"pw_uid": u, "pw_gid": 0, "pw_name": "root", "pw_dir": "/"})()
+            _stub.getpwnam = lambda n: type(
+                "u", (), {"pw_uid": 0, "pw_gid": 0, "pw_name": n, "pw_dir": "/"}
+            )()
+            _stub.getpwuid = lambda u: type(
+                "u", (), {"pw_uid": u, "pw_gid": 0, "pw_name": "root", "pw_dir": "/"}
+            )()
             _stub.getgrnam = lambda n: type("g", (), {"gr_gid": 0, "gr_name": n})()
             _stub.getgrgid = lambda g: type("g", (), {"gr_gid": g, "gr_name": "root"})()
             sys.modules[_mod_name] = _stub
@@ -52,7 +56,7 @@ if "app.routes.fs" not in sys.modules:
     ]:
         if _pkg not in sys.modules:
             sys.modules[_pkg] = type(sys)(_pkg)
-            if "." not in _pkg[len("app"):] or _pkg.count(".") <= 1:
+            if "." not in _pkg[len("app") :] or _pkg.count(".") <= 1:
                 sys.modules[_pkg].__path__ = []  # type: ignore[attr-defined]
 
     class _UR:
@@ -155,6 +159,7 @@ def client(app):
 # check-path tests
 # ---------------------------------------------------------------------------
 
+
 class TestCheckPath:
     """Tests for /api/fs/check-path."""
 
@@ -245,6 +250,7 @@ class TestCheckPath:
 # create-directory tests
 # ---------------------------------------------------------------------------
 
+
 class TestCreateDirectory:
     """Tests for /api/fs/create-directory."""
 
@@ -321,6 +327,7 @@ class TestCreateDirectory:
 # find_writable_ancestor unit tests
 # ---------------------------------------------------------------------------
 
+
 class TestFindWritableAncestor:
     """Unit tests for the find_writable_ancestor helper."""
 
@@ -386,6 +393,7 @@ class TestFindWritableAncestor:
     def test_ancestor_not_writable(self, workspace):
         """Should return error when ancestor exists but is not writable."""
         from unittest.mock import patch as _patch
+
         from app.routes.fs import find_writable_ancestor
 
         ro_dir = workspace / "readonly"
