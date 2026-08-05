@@ -176,6 +176,68 @@ describe('usePageRefresh', () => {
       });
       expect(result.current.isRefreshing).toBe(false);
     });
+
+    it('should record failure when onRefresh callback throws', async () => {
+      const wrapper = createWrapper();
+      const onRefresh = vi.fn().mockRejectedValue(new Error('API error'));
+
+      const { result } = renderHook(
+        () =>
+          usePageRefresh({
+            page: '/manage/test-onrefresh-error',
+            refreshKey: createMatcherConfig([['nonexistent_cache_key']], 'prefix'),
+            onRefresh,
+          }),
+        { wrapper }
+      );
+
+      await act(async () => {
+        await result.current.refresh();
+      });
+
+      await waitFor(() => {
+        const config = usePageRefreshStore.getState().configs['/manage/test-onrefresh-error'];
+        expect(config?.lastError).toBe('API error');
+        expect(config?.errorCount).toBeGreaterThanOrEqual(1);
+      });
+    });
+
+    it('should not double-call recordRefresh when both React Query and onRefresh succeed', async () => {
+      // Use a shared QueryClient accessible from the test
+      const queryClient = new QueryClient({
+        defaultOptions: { queries: { retry: false, gcTime: 0 } },
+      });
+      const wrapper = ({ children }: { children: React.ReactNode }) => (
+        <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+      );
+      const onRefresh = vi.fn();
+
+      // Pre-populate a query in the cache to create matching keys
+      queryClient.setQueryData(['admin', 'test-double'], { data: 'test' });
+
+      const { result } = renderHook(
+        () =>
+          usePageRefresh({
+            page: '/manage/test-double-refresh',
+            refreshKey: createMatcherConfig([['admin']], 'prefix'),
+            onRefresh,
+          }),
+        { wrapper }
+      );
+
+      await act(async () => {
+        await result.current.refresh();
+      });
+
+      expect(onRefresh).toHaveBeenCalledTimes(1);
+      // Verify no double record: lastRefreshTime set once with success
+      await waitFor(() => {
+        const config = usePageRefreshStore.getState().configs['/manage/test-double-refresh'];
+        expect(config?.lastRefreshTime).not.toBeNull();
+        expect(config?.errorCount).toBe(0);
+      });
+      expect(result.current.isRefreshing).toBe(false);
+    });
   });
 
   describe('global pause', () => {

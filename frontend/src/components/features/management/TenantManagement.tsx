@@ -153,19 +153,7 @@ export const TenantManagement: React.FC = () => {
   const planOptions = useMemo(() => getTenantPlanOptions(language), [language]);
   const modalPlanOptions = useMemo(() => getTenantPlanOptions(language, false), [language]);
 
-  // Page refresh control - manual refresh for tenant management
-  const pageRefresh = usePageRefresh({
-    page: '/manage/tenants',
-    refreshKey: createMatcherConfig([['admin', 'tenants']], 'prefix'),
-    interval: 0, // No auto refresh - manual only
-    enabled: false,
-    onRefresh: () => fetchTenants(),
-  });
-
-  // Form validation
-  const isFormValid = formData.name.trim().length > 0;
-
-  // Fetch tenants
+  // Fetch tenants - defined before pageRefresh for onRefresh callback reference
   const fetchTenants = React.useCallback(async () => {
     setIsLoading(true);
     setError(null);
@@ -191,6 +179,18 @@ export const TenantManagement: React.FC = () => {
       setIsLoading(false);
     }
   }, [statusFilter, planFilter]);
+
+  // Page refresh control - manual refresh for tenant management
+  const pageRefresh = usePageRefresh({
+    page: '/manage/tenants',
+    refreshKey: createMatcherConfig([['admin', 'tenants']], 'prefix'),
+    interval: 0, // No auto refresh - manual only
+    enabled: false,
+    onRefresh: fetchTenants,
+  });
+
+  // Form validation
+  const isFormValid = formData.name.trim().length > 0;
 
   useEffect(() => {
     fetchTenants();
