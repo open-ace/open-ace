@@ -1,0 +1,85 @@
+# Migration Configuration
+# Issue #2276: Configuration for admin role migration tool
+
+environments:
+  dev:
+    batch_size: 10
+    timeout: 60
+    enable_notifications: false
+    active_session_threshold: 5
+
+  staging:
+    batch_size: 50
+    timeout: 300
+    enable_notifications: true
+    active_session_threshold: 10
+
+  prod:
+    batch_size: 100
+    timeout: 600
+    enable_notifications: true
+    require_confirmation: true
+    active_session_threshold: 20
+
+s3_backup:
+  # S3 bucket configuration for external backup
+  # Set these environment variables:
+  # - AWS_ACCESS_KEY_ID
+  # - AWS_SECRET_ACCESS_KEY
+  # - AWS_DEFAULT_REGION
+  bucket: "openace-migration-backup"
+  encryption: "sse-kms"
+  retention_days: 90
+  kms_key_id: null  # Set to KMS key ID if using SSE-KMS
+
+cleanup:
+  migration_log_retention_days: 90
+  backup_table_retention_days: 30
+  progress_table_retention_days: 7
+  external_backup_retention_days: 90
+
+# Migration behavior
+migration:
+  # Target role to migrate to
+  target_role: "platform_admin"
+
+  # Source roles to migrate from
+  source_roles:
+    - "admin"
+
+  # Whether to create backup before migration
+  create_backup: true
+
+  # Whether to use external backup (S3)
+  use_external_backup: false
+
+  # Whether to enforce maintenance window
+  require_maintenance_window: false
+
+  # Active session check threshold (warn if active sessions > threshold)
+  active_session_check: true
+
+  # Whether to send notifications
+  send_notifications: true
+
+  # Supported locales for i18n
+  supported_locales:
+    - "en_US"
+    - "zh_CN"
+    - "ja_JP"
+    - "ko_KR"
+
+# Logging
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+  # Whether to log to file
+  log_to_file: true
+  log_file: "logs/migration.log"
+
+  # Whether to log to console
+  log_to_console: true
+
+  # Whether to include audit logging
+  audit_logging: true

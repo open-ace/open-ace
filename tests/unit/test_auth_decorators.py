@@ -688,3 +688,144 @@ class TestQueryParamSanitizer:
 
         result = sanitize_query_string("")
         assert result == ""
+
+
+class TestPlatformAdminRequired:
+    """
+    Unit tests for @platform_admin_required decorator.
+
+    Issue #2276: Verify admin and platform_admin roles are both accepted.
+    """
+
+    def _make_app_with_platform_admin_route(self):
+        """Create a minimal Flask app with platform_admin_required route."""
+        from flask import Flask, g, jsonify
+
+        from app.auth.decorators import platform_admin_required
+
+        app = Flask(__name__)
+        app.config["TESTING"] = True
+        app.config["SECRET_KEY"] = "test-secret-key"
+
+        @app.route("/api/platform-admin-only")
+        @platform_admin_required
+        def platform_admin_route():
+            return jsonify({"user_id": g.user_id, "role": g.user_role})
+
+        return app
+
+    def test_platform_admin_can_access(self):
+        """Test that platform_admin role can access platform_admin_required routes."""
+        app = self._make_app_with_platform_admin_route()
+
+        mock_session = {
+            "user_id": 1,
+            "username": "platform_admin",
+            "email": "platform@example.com",
+            "role": "platform_admin",
+            "must_change_password": False,
+        }
+
+        with patch(
+            "app.auth.decorators._load_user_from_token",
+            return_value={
+                "id": 1,
+                "username": "platform_admin",
+                "email": "platform@example.com",
+                "role": "platform_admin",
+                "tenant_id": None,
+                "must_change_password": False,
+            },
+        ):
+            with app.test_client() as client:
+                with patch("app.auth.decorators._extract_session_token", return_value="valid-token"):
+                    response = client.get(
+                        "/api/platform-admin-only",
+                        headers={"Authorization": "Bearer valid-token"},
+                    )
+                    assert response.status_code == 200
+                    data = response.get_json()
+                    assert data["role"] == "platform_admin"
+
+    def test_admin_can_access_backward_compatible(self):
+        """
+        Test that admin role can access platform_admin_required routes.
+
+        Issue #2276: Backward compatibility for legacy admin role.
+        """
+        app = self._make_app_with_platform_admin_route()
+
+        with patch(
+            "app.auth.decorators._load_user_from_token",
+            return_value={
+                "id": 2,
+                "username": "admin",
+                "email": "admin@example.com",
+                "role": "admin",
+                "tenant_id": None,
+                "must_change_password": False,
+            },
+        ):
+            with app.test_client() as client:
+                with patch("app.auth.decorators._extract_session_token", return_value="valid-token"):
+                    response = client.get(
+                        "/api/platform-admin-only",
+                        headers={"Authorization": "Bearer valid-token"},
+                    )
+                    assert response.status_code == 200
+                    data = response.get_json()
+                    assert data["role"] == "admin"
+
+    def test_tenant_admin_cannot_access(self):
+        """Test that tenant_admin role cannot access platform_admin_required routes."""
+        app = self._make_app_with_platform_admin_route()
+
+        with patch(
+            "app.auth.decorators._load_user_from_token",
+            return_value={
+                "id": 3,
+                "username": "tenant_admin",
+                "email": "tenant@example.com",
+                "role": "tenant_admin",
+                "tenant_id": 1,
+                "must_change_password": False,
+            },
+        ):
+            with app.test_client() as client:
+                with patch("app.auth.decorators._extract_session_token", return_value="valid-token"):
+                    response = client.get(
+                        "/api/platform-admin-only",
+                        headers={"Authorization": "Bearer valid-token"},
+                    )
+                    assert response.status_code == 403
+
+    def test_regular_user_cannot_access(self):
+        """Test that regular user role cannot access platform_admin_required routes."""
+        app = self._make_app_with_platform_admin_route()
+
+        with patch(
+            "app.auth.decorators._load_user_from_token",
+            return_value={
+                "id": 4,
+                "username": "user",
+                "email": "user@example.com",
+                "role": "user",
+                "tenant_id": 1,
+                "must_change_password": False,
+            },
+        ):
+            with app.test_client() as client:
+                with patch("app.auth.decorators._extract_session_token", return_value="valid-token"):
+                    response = client.get(
+                        "/api/platform-admin-only",
+                        headers={"Authorization": "Bearer valid-token"},
+                    )
+                    assert response.status_code == 403
+
+    def test_unauthenticated_returns_401(self):
+        """Test that unauthenticated requests return 401."""
+        app = self._make_app_with_platform_admin_route()
+
+        with app.test_client() as client:
+            response = client.get("/api/platform-admin-only")
+            assert response.status_code == 401
