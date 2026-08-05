@@ -44,6 +44,7 @@ SyncResult = openace_ssh_sync.SyncResult
 LegacyKey = openace_ssh_sync.LegacyKey
 validate_and_set_owner = openace_ssh_sync.validate_and_set_owner
 detect_legacy_synced_keys = openace_ssh_sync.detect_legacy_synced_keys
+validate_security_review = openace_ssh_sync.validate_security_review
 sha256_file = openace_ssh_sync.sha256_file
 sha256_file_cached = openace_ssh_sync.sha256_file_cached
 _is_private_key_filename = openace_ssh_sync._is_private_key_filename
@@ -201,12 +202,33 @@ class TestSSHFileSyncContext(unittest.TestCase):
                 self.assertFalse(result.allowed)
                 self.assertIn("denylist", result.reason.lower())
 
-    def test_validate_socket_file_denied(self):
+    @patch("os.path.realpath")
+    def test_validate_socket_file_denied(self, mock_realpath):
         """测试 socket 文件被拒绝"""
-        # 注意：实际创建 Unix socket 需要 socket.socket
-        # 这里我们通过检查验证逻辑来测试
-        # 由于我们无法在普通文件系统上创建 socket，我们通过模拟来测试
-        pass
+
+        # 实际创建 Unix socket 在普通文件系统上不易构造且不稳定，
+        # 这里直接验证 SSHFileSyncContext.validate() 的文件类型分支：
+        # 注入一个 st_mode 为 socket 的 stat 结果，确认被拒绝。
+        def realpath_side_effect(path):
+            if "agent.sock" in path:
+                return "/root/.ssh/agent.sock"
+            elif path == "/root/.ssh":
+                return "/root/.ssh"
+            else:
+                return path
+
+        mock_realpath.side_effect = realpath_side_effect
+
+        ctx = SSHFileSyncContext("/root/.ssh/agent.sock", "testuser")
+        # 注入 socket 类型的 stat 结果（绕过真实 open/fstat）
+        mock_st = MagicMock()
+        mock_st.st_mode = stat.S_IFSOCK  # socket 文件类型
+        mock_st.st_nlink = 1
+        ctx._src_st = mock_st
+
+        result = ctx.validate()
+        self.assertFalse(result.allowed)
+        self.assertIn("socket", result.reason.lower())
 
     @patch("os.path.realpath")
     def test_validate_token_file_denied(self, mock_realpath):
@@ -613,15 +635,43 @@ class TestTOCTOUProtection(unittest.TestCase):
 class TestSecurityReviewValidation(unittest.TestCase):
     """安全评审验证测试"""
 
-    # TODO: 实现安全评审验证测试
-    # 当配置文件解析功能完成后，添加以下测试：
-    # 1. 测试授权评审人员评审的配置生效
-    # 2. 测试未授权人员评审的配置不生效
-    # 3. 测试过期评审的配置不生效
+    def test_no_approval_required_is_valid(self):
+        """approval_required=False 的条目无需安全评审即视为有效"""
+        entry = {"name": "known_hosts", "approval_required": False}
+        valid, reason = validate_security_review(entry, authorized_reviewers=set())
+        self.assertTrue(valid)
+        self.assertIn("No approval", reason)
 
-    def test_placeholder(self):
-        """占位测试（安全评审功能待实现）"""
-        pass
+    def test_missing_security_review_is_invalid(self):
+        """缺少 security_review 字段的条目应被拒绝"""
+        entry = {"name": "custom_key", "approval_required": True}
+        valid, reason = validate_security_review(entry, authorized_reviewers={"alice"})
+        self.assertFalse(valid)
+        self.assertIn("Missing security_review", reason)
+
+    def test_unauthorized_reviewer_is_invalid(self):
+        """非授权评审人员签名的条目应被拒绝"""
+        entry = {
+            "name": "custom_key",
+            "approval_required": True,
+            "security_review": {"reviewed_by": "mallory"},
+        }
+        valid, reason = validate_security_review(entry, authorized_reviewers={"alice"})
+        self.assertFalse(valid)
+        self.assertIn("not authorized", reason)
+
+    def test_authorized_reviewer_is_valid(self):
+        """授权评审人员且评审时间在有效期内的条目应通过"""
+        from datetime import datetime, timedelta
+
+        reviewed_at = (datetime.now() - timedelta(days=1)).isoformat()
+        entry = {
+            "name": "custom_key",
+            "approval_required": True,
+            "security_review": {"reviewed_by": "alice", "reviewed_at": reviewed_at},
+        }
+        valid, reason = validate_security_review(entry, authorized_reviewers={"alice"})
+        self.assertTrue(valid)
 
 
 if __name__ == "__main__":

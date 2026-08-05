@@ -82,7 +82,7 @@ def sqlite_sm(tmp_path, monkeypatch):
     for col in ("project_id", "project_path"):
         try:
             cur.execute(f"ALTER TABLE agent_sessions ADD COLUMN {col} TEXT")
-        except Exception:
+        except Exception:  # allow-swallow: idempotent test setup (row may already exist)
             pass
     # Create default user with tenant_id for fail-closed tenant resolution
     cur.execute(

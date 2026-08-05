@@ -124,7 +124,9 @@ class TestConcurrentGenerateDefaultRules:
                             "data": json.loads(response.data),
                         }
                     )
-            except Exception as e:
+            except (
+                Exception
+            ) as e:  # allow-swallow: collect per-thread errors; the driving test asserts errors is empty
                 with lock:
                     errors.append({"request_id": request_id, "error": str(e)})
 
@@ -216,7 +218,9 @@ class TestConcurrentGenerateDefaultRules:
                 )
                 with lock:
                     results["success"].append({"user_id": user_id, "status": response.status_code})
-            except Exception as e:
+            except (
+                Exception
+            ) as e:  # allow-swallow: collect per-thread errors; the driving test asserts errors is empty
                 with lock:
                     errors.append({"user_id": user_id, "error": str(e)})
 
@@ -322,7 +326,9 @@ class TestConcurrentGenerateDefaultRules:
                     results.append(
                         {"status": response.status_code, "data": json.loads(response.data)}
                     )
-            except Exception as e:
+            except (
+                Exception
+            ) as e:  # allow-swallow: collect per-thread errors; the driving test asserts errors is empty
                 with results_lock:
                     errors.append(str(e))
 

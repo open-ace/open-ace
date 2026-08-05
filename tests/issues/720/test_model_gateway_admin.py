@@ -205,5 +205,385 @@ class TestRepository:
         assert repo.get_config_with_key() is None
 
 
+# ── Issue #2170: API Key Fallback Logic ───────────────────────────────────
+
+
+class TestApiKeyFallback:
+    """Tests for Issue #2170: Preserve existing API key when not provided."""
+
+    @patch("app.routes.model_gateway.get_gateway_service")
+    @patch("app.auth.decorators._load_user_from_token")
+    def test_update_without_api_key_uses_stored_key(self, mock_load, mock_get_service, gw_app):
+        """P0: When api_key field is omitted, use stored key."""
+        mock_load.return_value = {"id": 2, "role": "admin"}
+
+        # Setup: stored config with existing key
+        stored_config = MagicMock()
+        stored_config.api_key = "stored-secret-key"
+
+        svc = MagicMock()
+        svc.get_config_with_key.return_value = stored_config
+        svc.save_config.return_value = {
+            "id": 1,
+            "base_url": "https://new-url/v1",
+            "api_key_masked": "sto****",
+        }
+        mock_get_service.return_value = svc
+
+        resp = gw_app.test_client().put(
+            "/api/management/model-gateway-config",
+            headers={"Authorization": "Bearer t"},
+            json={"base_url": "https://new-url/v1"},
+        )
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["success"] is True
+
+        # Verify fallback was called and stored key was used
+        svc.get_config_with_key.assert_called_once()
+        svc.save_config.assert_called_once_with(
+            base_url="https://new-url/v1",
+            api_key="stored-secret-key",
+            model_prefix_mode=False,
+            model_prefix=None,
+            created_by=2,
+        )
+
+    @patch("app.routes.model_gateway.get_gateway_service")
+    @patch("app.auth.decorators._load_user_from_token")
+    def test_update_without_api_key_fails_when_no_stored_config(
+        self, mock_load, mock_get_service, gw_app
+    ):
+        """P0: When no stored config exists, require api_key field."""
+        mock_load.return_value = {"id": 2, "role": "admin"}
+
+        svc = MagicMock()
+        svc.get_config_with_key.return_value = None  # No stored config
+        mock_get_service.return_value = svc
+
+        resp = gw_app.test_client().put(
+            "/api/management/model-gateway-config",
+            headers={"Authorization": "Bearer t"},
+            json={"base_url": "https://gw/v1"},
+        )
+        assert resp.status_code == 400
+        data = resp.get_json()
+        assert data["success"] is False
+        assert data["error"] == "Gateway API key is required"
+
+    @patch("app.routes.model_gateway.get_gateway_service")
+    @patch("app.auth.decorators._load_user_from_token")
+    def test_update_with_empty_api_key_clears_key(self, mock_load, mock_get_service, gw_app):
+        """P0: Empty string api_key clears the key (existing behavior)."""
+        mock_load.return_value = {"id": 2, "role": "admin"}
+
+        svc = MagicMock()
+        svc.save_config.return_value = {
+            "id": 1,
+            "base_url": "https://gw/v1",
+            "api_key_masked": "",
+        }
+        mock_get_service.return_value = svc
+
+        resp = gw_app.test_client().put(
+            "/api/management/model-gateway-config",
+            headers={"Authorization": "Bearer t"},
+            json={"base_url": "https://gw/v1", "api_key": ""},
+        )
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["success"] is True
+
+        # Verify empty string was passed through (not fallback)
+        svc.save_config.assert_called_once_with(
+            base_url="https://gw/v1",
+            api_key="",
+            model_prefix_mode=False,
+            model_prefix=None,
+            created_by=2,
+        )
+
+    @patch("app.routes.model_gateway.get_gateway_service")
+    @patch("app.auth.decorators._load_user_from_token")
+    def test_update_with_new_api_key_replaces_old_key(self, mock_load, mock_get_service, gw_app):
+        """P0: New api_key replaces old key."""
+        mock_load.return_value = {"id": 2, "role": "admin"}
+
+        svc = MagicMock()
+        svc.save_config.return_value = {
+            "id": 1,
+            "base_url": "https://gw/v1",
+            "api_key_masked": "new****",
+        }
+        mock_get_service.return_value = svc
+
+        resp = gw_app.test_client().put(
+            "/api/management/model-gateway-config",
+            headers={"Authorization": "Bearer t"},
+            json={"base_url": "https://gw/v1", "api_key": "new-secret-key"},
+        )
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["success"] is True
+
+        # Verify new key was used (not fallback)
+        svc.get_config_with_key.assert_not_called()
+        svc.save_config.assert_called_once_with(
+            base_url="https://gw/v1",
+            api_key="new-secret-key",
+            model_prefix_mode=False,
+            model_prefix=None,
+            created_by=2,
+        )
+
+    @patch("app.routes.model_gateway.get_gateway_service")
+    @patch("app.auth.decorators._load_user_from_token")
+    def test_update_fallback_handles_database_error(self, mock_load, mock_get_service, gw_app):
+        """P1: Database error during fallback returns 500."""
+        mock_load.return_value = {"id": 2, "role": "admin"}
+
+        svc = MagicMock()
+        svc.get_config_with_key.side_effect = Exception("DB connection failed")
+        mock_get_service.return_value = svc
+
+        resp = gw_app.test_client().put(
+            "/api/management/model-gateway-config",
+            headers={"Authorization": "Bearer t"},
+            json={"base_url": "https://gw/v1"},
+        )
+        assert resp.status_code == 500
+        data = resp.get_json()
+        assert data["success"] is False
+        assert data["error"] == "Internal server error"
+
+    @patch("app.routes.model_gateway.get_gateway_service")
+    @patch("app.auth.decorators._load_user_from_token")
+    def test_update_with_stored_empty_api_key(self, mock_load, mock_get_service, gw_app):
+        """P1: Stored empty api_key is passed through to Service layer."""
+        mock_load.return_value = {"id": 2, "role": "admin"}
+
+        # Setup: stored config with empty key
+        stored_config = MagicMock()
+        stored_config.api_key = ""
+
+        svc = MagicMock()
+        svc.get_config_with_key.return_value = stored_config
+        svc.save_config.return_value = {
+            "id": 1,
+            "base_url": "https://gw/v1",
+            "api_key_masked": "",
+        }
+        mock_get_service.return_value = svc
+
+        resp = gw_app.test_client().put(
+            "/api/management/model-gateway-config",
+            headers={"Authorization": "Bearer t"},
+            json={"base_url": "https://gw/v1"},
+        )
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["success"] is True
+
+        # Verify empty string was passed through
+        svc.save_config.assert_called_once_with(
+            base_url="https://gw/v1",
+            api_key="",
+            model_prefix_mode=False,
+            model_prefix=None,
+            created_by=2,
+        )
+
+    @patch("app.routes.model_gateway.get_gateway_service")
+    @patch("app.auth.decorators._load_user_from_token")
+    def test_update_without_base_url_skips_database_query(
+        self, mock_load, mock_get_service, gw_app
+    ):
+        """P1: Missing base_url should fail fast without DB query for api_key."""
+        mock_load.return_value = {"id": 2, "role": "admin"}
+
+        svc = MagicMock()
+        mock_get_service.return_value = svc
+
+        resp = gw_app.test_client().put(
+            "/api/management/model-gateway-config",
+            headers={"Authorization": "Bearer t"},
+            json={"api_key": "some-key"},  # base_url missing
+        )
+        assert resp.status_code == 400
+        data = resp.get_json()
+        assert data["success"] is False
+        assert "base_url" in data["error"]
+
+        # Verify no DB query was made for api_key fallback
+        svc.get_config_with_key.assert_not_called()
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+# ── Issue #2170: Integration Tests (Real SQLite Database) ─────────────────────
+
+
+class TestApiKeyFallbackIntegration:
+    """Integration tests for Issue #2170 on real SQLite database."""
+
+    def test_full_update_flow_preserves_api_key(self, tmp_path, monkeypatch):
+        """P1: End-to-end verification of API key preservation."""
+        from app.modules.workspace.model_gateway.repository import ModelGatewayConfigRepository
+
+        # Setup: Use real SQLite database
+        monkeypatch.setattr(
+            "app.modules.workspace.model_gateway.repository.is_postgresql",
+            lambda: False,
+        )
+
+        db_path = str(tmp_path / "gw_integration.db")
+
+        def fake_conn(self):
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            return conn
+
+        monkeypatch.setattr(ModelGatewayConfigRepository, "_get_connection", fake_conn)
+
+        # Initialize schema
+        with sqlite3.connect(db_path) as c:
+            c.execute(_DDL)
+
+        repo = ModelGatewayConfigRepository()
+
+        # Step 1: Initial save with api_key
+        initial_config = repo.save_config(
+            base_url="https://gateway.example.com/v1",
+            api_key="sk-initial-secret-key",
+            model_prefix_mode=True,
+            model_prefix="openai",
+            created_by=1,
+        )
+        assert initial_config["base_url"] == "https://gateway.example.com/v1"
+        assert initial_config["model_prefix"] == "openai"
+
+        # Step 2: Retrieve stored config (simulating fallback)
+        stored = repo.get_config_with_key()
+        assert stored is not None
+        assert stored.api_key == "sk-initial-secret-key"
+        assert stored.base_url == "https://gateway.example.com/v1"
+
+        # Step 3: Update base_url without providing api_key (use stored key)
+        updated_config = repo.save_config(
+            base_url="https://new-gateway.example.com/v1",
+            api_key=stored.api_key,  # Fallback value
+            model_prefix_mode=False,
+            model_prefix=None,
+            created_by=1,
+        )
+        assert updated_config["base_url"] == "https://new-gateway.example.com/v1"
+
+        # Step 4: Verify key is preserved
+        final_stored = repo.get_config_with_key()
+        assert final_stored is not None
+        assert final_stored.api_key == "sk-initial-secret-key"
+        assert final_stored.base_url == "https://new-gateway.example.com/v1"
+
+        # Verify old key is gone (single row replacement)
+        repo.delete_config()
+        assert repo.get_config() is None
+
+    def test_update_with_new_key_overwrites_old(self, tmp_path, monkeypatch):
+        """P1: Verify new api_key replaces old key."""
+        from app.modules.workspace.model_gateway.repository import ModelGatewayConfigRepository
+
+        monkeypatch.setattr(
+            "app.modules.workspace.model_gateway.repository.is_postgresql",
+            lambda: False,
+        )
+
+        db_path = str(tmp_path / "gw_new_key.db")
+
+        def fake_conn(self):
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            return conn
+
+        monkeypatch.setattr(ModelGatewayConfigRepository, "_get_connection", fake_conn)
+
+        with sqlite3.connect(db_path) as c:
+            c.execute(_DDL)
+
+        repo = ModelGatewayConfigRepository()
+
+        # Initial save
+        repo.save_config(
+            base_url="https://gateway.example.com/v1",
+            api_key="old-secret-key",
+            model_prefix_mode=False,
+            model_prefix=None,
+            created_by=1,
+        )
+
+        # Update with new key
+        repo.save_config(
+            base_url="https://gateway.example.com/v1",
+            api_key="new-secret-key",
+            model_prefix_mode=False,
+            model_prefix=None,
+            created_by=1,
+        )
+
+        # Verify new key is stored
+        stored = repo.get_config_with_key()
+        assert stored is not None
+        assert stored.api_key == "new-secret-key"
+
+    def test_empty_key_preservation_in_database(self, tmp_path, monkeypatch):
+        """P1: Verify empty api_key is preserved correctly."""
+        from app.modules.workspace.model_gateway.repository import ModelGatewayConfigRepository
+
+        monkeypatch.setattr(
+            "app.modules.workspace.model_gateway.repository.is_postgresql",
+            lambda: False,
+        )
+
+        db_path = str(tmp_path / "gw_empty_key.db")
+
+        def fake_conn(self):
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            return conn
+
+        monkeypatch.setattr(ModelGatewayConfigRepository, "_get_connection", fake_conn)
+
+        with sqlite3.connect(db_path) as c:
+            c.execute(_DDL)
+
+        repo = ModelGatewayConfigRepository()
+
+        # Save with empty key
+        repo.save_config(
+            base_url="https://gateway.example.com/v1",
+            api_key="",
+            model_prefix_mode=False,
+            model_prefix=None,
+            created_by=1,
+        )
+
+        # Retrieve and verify empty key is preserved
+        stored = repo.get_config_with_key()
+        assert stored is not None
+        assert stored.api_key == ""
+
+        # Update without providing api_key (use stored empty key)
+        repo.save_config(
+            base_url="https://gateway.example.com/v2",
+            api_key=stored.api_key,
+            model_prefix_mode=False,
+            model_prefix=None,
+            created_by=1,
+        )
+
+        # Verify empty key is still there
+        final = repo.get_config_with_key()
+        assert final is not None
+        assert final.api_key == ""
+        assert final.base_url == "https://gateway.example.com/v2"

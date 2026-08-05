@@ -329,7 +329,9 @@ class TestTenantIsolationForGenerateDefaultRules:
                                     "status": response.status_code,
                                 }
                             )
-            except Exception as e:
+            except (
+                Exception
+            ) as e:  # allow-swallow: collect per-thread errors; the driving test asserts errors is empty
                 errors.append(str(e))
 
         # Create threads for concurrent operations

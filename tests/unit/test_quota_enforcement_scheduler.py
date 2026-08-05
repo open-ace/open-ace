@@ -451,8 +451,14 @@ class TestQuotaEnforcementSchedulerEnforcement:
         mock_sm.get_active_sessions.return_value = []
         mock_sm_cls.return_value = mock_sm
 
-        # Should not raise
+        # Alert raises, but enforcement must still proceed to session termination
+        # and mark the user enforced (degradation: failure logged, not propagated).
         scheduler._enforce_user(row, today, "daily")
+        mock_create_alert.assert_called_once()
+        # Session termination path was still reached despite the alert failure.
+        mock_sm.get_active_sessions.assert_called_once_with(1)
+        # User marked enforced → _enforce_user ran to completion.
+        assert f"1:quota_exceeded:{today}:daily" in scheduler._enforced_users
 
     @patch("app.modules.governance.alert_transaction_manager.create_quota_alert_transactional")
     @patch("app.modules.workspace.session_manager.SessionManager")
@@ -473,8 +479,11 @@ class TestQuotaEnforcementSchedulerEnforcement:
             "daily_token_quota": 1,
         }
 
-        # Should not raise
+        # Should not raise: SM lookup fails, but enforcement degrades gracefully
+        # and still records the user as enforced (no exception propagates).
         scheduler._enforce_user(row, today, "daily")
+        mock_sm_instance.get_active_sessions.assert_called_once_with(1)
+        assert f"1:quota_exceeded:{today}:daily" in scheduler._enforced_users
 
     @patch("app.modules.governance.alert_transaction_manager.create_quota_alert_transactional")
     @patch("app.modules.workspace.session_manager.SessionManager")

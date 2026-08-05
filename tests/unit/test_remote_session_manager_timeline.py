@@ -60,8 +60,13 @@ class TestTimelineSeam:
         # not raise. This is the property that lets the feature be removed by
         # deleting the recorder without touching call sites.
         mgr = RemoteSessionManager.__new__(RemoteSessionManager)
-        mgr._run_recorder = NullRunRecorder()
-        mgr._timeline("this_method_does_not_exist", "sess-1")
+        noop = NullRunRecorder()
+        assert noop.is_noop is True  # precondition: short-circuit applies
+        # A bogus method name would raise AttributeError if getattr were reached;
+        # the noop short-circuit must prevent that.
+        assert not hasattr(noop, "this_method_does_not_exist")
+        mgr._run_recorder = noop
+        assert mgr._timeline("this_method_does_not_exist", "sess-1") is None
 
     def test_noop_recorder_is_never_called(self):
         mgr = RemoteSessionManager.__new__(RemoteSessionManager)

@@ -294,7 +294,9 @@ class TestUsageAccumulator:
                         is_final=False,
                     )
                     acc.collect(ev)
-            except Exception as e:
+            except (
+                Exception
+            ) as e:  # allow-swallow: collect per-thread errors; the driving test asserts errors is empty
                 errors.append(e)
 
         threads = [threading.Thread(target=collect_usage) for _ in range(5)]
