@@ -58,6 +58,16 @@ def test_scope_violation_default_arg_is_global():
     assert "scope exceeded" in msg.lower()
 
 
+def test_scope_violation_non_positive_limit_falls_back_to_global():
+    """A non-positive override (e.g. persisted out-of-band) must never silently
+    disable the cap — fall back to the global bound, not 'no limit'."""
+    files = [f"file_{i}.py" for i in range(MAX_AUTONOMOUS_CHANGED_FILES + 1)]
+    for bad in (-1, 0):
+        msg = AutonomousOrchestrator._scope_violation(files, limit=bad)
+        assert "scope exceeded" in msg.lower(), f"limit={bad} should fall back to global"
+        assert f"limit {MAX_AUTONOMOUS_CHANGED_FILES}" in msg
+
+
 # ── _validate_autonomous_change_scope: reads wf["max_changed_files_override"] ─
 
 

@@ -1950,10 +1950,13 @@ class AutonomousOrchestrator:
         Callers without a workflow context (e.g. the merge-conflict resolver) omit
         it and get the historical global bound.
         """
-        if limit is None:
+        # None or non-positive → global fallback. A non-positive override
+        # persisted out-of-band (e.g. DB direct write) must never silently
+        # disable the cap.
+        if limit is None or limit <= 0:
             limit = MAX_AUTONOMOUS_CHANGED_FILES
         normalized = sorted({path for path in changed_files if path})
-        if limit > 0 and len(normalized) > limit:
+        if len(normalized) > limit:
             sample = ", ".join(normalized[:8])
             return (
                 f"Autonomous change scope exceeded: {len(normalized)} files changed "
