@@ -630,6 +630,9 @@ class RemoteWSHandler(WSGIHandler):
 
         machine_id, info = found
 
+        # Get code-server password for WebSocket authentication
+        cs_password = info.get("cs_password", "")
+
         # Issue #2183: Check session status first
         if info.get("status") != "running":
             logger.warning("VSCode WS handler: session not running %s", vscode_id[:8])
@@ -712,11 +715,12 @@ class RemoteWSHandler(WSGIHandler):
             from app.modules.workspace.vscode_ws_bridge import bridge_vscode_ws_raw
 
             logger.info(
-                "VSCode WS handler: bridging %s for machine %s",
+                "VSCode WS handler: bridging %s for machine %s (has_password=%s)",
                 vscode_id[:8],
                 machine_id[:8],
+                bool(cs_password),
             )
-            bridge_vscode_ws_raw(vscode_id, self.socket, remote_ws_url)
+            bridge_vscode_ws_raw(vscode_id, self.socket, remote_ws_url, cs_password)
         except Exception:
             logger.exception("VSCode WS handler: bridge failed for vscode %s", vscode_id[:8])
             try:
