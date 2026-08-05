@@ -117,6 +117,19 @@ class AutonomousWorkflowRepository:
         "sandbox_last_error",
         "sandbox_remote_session_id",  # #2022 P6: remote-agent session id for orphan destroy
         "sandbox_effective_policy",  # #2020 Phase B: JSON snapshot of effective resource/isolation policy
+        # acceptance_verification phase (#2335 PR1): independent post-merge
+        # verification state, persisted report/snapshot, and explicit close audit.
+        "verification_status",
+        "verification_merge_sha",
+        "verification_started_at",
+        "verification_completed_at",
+        "verification_attempt",
+        "verification_report",
+        "issue_acceptance_snapshot",
+        "issue_acceptance_hash",
+        "verified_by",
+        "verification_session_id",
+        "issue_closed_by_workflow_at",
     }
     ALLOWED_MILESTONE_FIELDS = {
         "phase",

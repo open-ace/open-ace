@@ -409,6 +409,6 @@ def handle(ctx, deps) -> PhaseResult:
         )
 
     return PhaseResult.completed(
-        next_phase="completed",
+        next_phase="acceptance_verification",
         milestone_events=milestone_events,
     )

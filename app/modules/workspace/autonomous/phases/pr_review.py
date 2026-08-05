@@ -86,6 +86,19 @@ NAME = "pr_review"
 logger = logging.getLogger(__name__)
 
 
+def build_pr_body_close_ref(issue_number: int | None) -> str:
+    """Non-closing issue reference for autonomous PR bodies (#2335).
+
+    Autonomous PRs must NOT use Closes/Fixes/Resolves — GitHub would auto-close
+    the issue on merge before acceptance_verification runs. Use ``Implements #``
+    (a plain reference) and let the workflow close the issue explicitly only on
+    acceptance ``confirmed``.
+    """
+    if not issue_number:
+        return ""
+    return f"\n\nImplements #{issue_number}"
+
+
 def _ensure_branch_and_push(gh, host, branch_name, entry_feature_head, entry_main_head):
     """Ensure the worktree is on ``branch_name`` (recovering if safe), then push.
 
@@ -293,7 +306,7 @@ def handle(ctx, deps) -> PhaseResult:
             # Build PR body with issue linkage
             pr_body = f"Autonomous development for dev round {dev_round}.\n\nRequirements: {wf.get('requirements_text', '')}"
             if issue_number:
-                pr_body += f"\n\nCloses #{issue_number}"
+                pr_body += build_pr_body_close_ref(issue_number)
 
             pr_data = gh.create_pr(
                 title=f"[Auto] Dev round {dev_round}: {wf.get('title', 'Autonomous development')}",

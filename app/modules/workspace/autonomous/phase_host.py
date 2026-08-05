@@ -72,6 +72,38 @@ class PhaseHost(Protocol):
         correlation/lookup case.
         """
 
+    # ── acceptance_verification-phase helpers (#2335 PR1) ──────────────────
+    # Same duck-typed-alias pattern: the orchestrator satisfies these as bound
+    # methods so the acceptance_verification handler can call them via
+    # ``deps.host.<name>`` without a concrete orchestrator reference.
+
+    def run_verification_agent(
+        self, *, snapshot, merge_sha, base_sha, issue_number, pr_number
+    ) -> dict:
+        """Spawn the independent credentialless verifier on merged main.
+
+        Returns ``{"verdicts": [...], "snapshot": <completed snapshot or None>}``.
+        Empty/failed spawns return empty verdicts, which aggregate to
+        ``indeterminate`` (pause) — never a false ``confirmed``.
+        """
+
+    def dev_round_cap_remaining(self, wf: dict) -> int:
+        """Remaining acceptance-rejection-driven dev rounds.
+
+        After this many, a persistent rejection must fail the workflow rather
+        than loop (#2335).
+        """
+
+    def issue_is_open(self, issue_number: int) -> bool:
+        """Whether the GitHub issue is currently open.
+
+        Fails open (True) when the state can't be determined, so the reopen
+        guard doesn't spuriously fire.
+        """
+
+    def emit_audit_event(self, name: str, payload: dict) -> None:
+        """Emit a generic audit event (e.g. acceptance_reopened_issue)."""
+
     # ── Merge-phase helpers (#2044 Phase B T10) ──────────────────────────
     # These are orchestrator-private methods (each tens-to-hundreds of lines,
     # with their own transitive ``self._`` calls) that the merge handler needs

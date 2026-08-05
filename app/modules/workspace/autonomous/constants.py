@@ -59,6 +59,18 @@ REVIEW_ALLOWED_TOOLS: dict[str, list[str]] = {
     "zcode": [],
 }
 
+# Acceptance-verification tools (#2335): read-only review set + Bash for the
+# scope gate's git diff/log on merged main. No Write/Edit — the verifier must not
+# mutate the acceptance target; it runs against a throwaway checkout of main and
+# reads git state, not the working tree.
+VERIFICATION_ALLOWED_TOOLS: dict[str, list[str]] = {
+    "claude-code": REVIEW_ALLOWED_TOOLS["claude-code"] + ["Bash"],
+    "qwen-code-cli": REVIEW_ALLOWED_TOOLS["qwen-code-cli"] + ["run_shell_command"],
+    "codex": [],
+    "openclaw": [],
+    "zcode": [],
+}
+
 # OpenClaw's current single-shot adapter does not accept per-run permission or
 # tool-policy arguments.  Treating an empty allowlist as read-only would be a
 # false security boundary, so autonomous review must fail closed for this tool
