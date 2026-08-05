@@ -110,15 +110,13 @@ export const SmtpConfig: React.FC = () => {
       return;
     }
 
-    // Check if SMTP server has changed
+    // Check if SMTP server or username has changed
     const serverChanged = config && formData.smtp_host !== config.smtp_host;
+    const userChanged = config && formData.smtp_user !== (config.smtp_user ?? '');
 
-    // If server changed, require password
-    if (serverChanged && !formData.smtp_password) {
-      toast.error(
-        t('validationError', language),
-        t('smtpServerChangedPasswordRequired', language)
-      );
+    // If server or username changed, require password
+    if ((serverChanged || userChanged) && !formData.smtp_password) {
+      toast.error(t('validationError', language), t('smtpServerChangedPasswordRequired', language));
       return;
     }
 
@@ -186,6 +184,16 @@ export const SmtpConfig: React.FC = () => {
   const handleTestConnection = async () => {
     if (!formData.smtp_host || !formData.smtp_port || !formData.from_address) {
       toast.error(t('validationError', language), t('smtpRequiredFields', language));
+      return;
+    }
+
+    // Check if username exists but password is empty
+    const userChanged = config && formData.smtp_user !== (config.smtp_user ?? '');
+    const needsPassword = formData.smtp_user && !formData.smtp_password;
+
+    // If username changed or new username provided but password is empty, require password
+    if (needsPassword && (userChanged || !config?.is_verified)) {
+      toast.error(t('validationError', language), t('smtpPasswordRequiredForTest', language));
       return;
     }
 
