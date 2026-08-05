@@ -16,15 +16,14 @@ import threading
 from base64 import b64decode, b64encode
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
-from typing import Any, cast
+
+# Issue #2327: Import ActorScope for tenant authorization
+from typing import TYPE_CHECKING, Any, cast
 
 from app.modules.workspace.api_key_router import APIKeyRouter
 from app.repositories.database import DB_PATH, is_postgresql
 from app.utils.security_env import get_encryption_key_material
 from app.utils.tool_names import TOOL_NAME_ALIASES, normalize_tool_name
-
-# Issue #2327: Import ActorScope for tenant authorization
-from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from app.auth.decorators import ActorScope
