@@ -126,7 +126,10 @@ $files = @(
     "openace_cli.py",
     "cli_settings.py",
     "zcode_app_server.py",
-    "tls_config.py"
+    "tls_config.py",
+    "start-agent.cmd",
+    "start-agent.ps1",
+    "start-agent.sh"
 )
 $adapterFiles = @("__init__.py", "base.py", "qwen_code.py", "claude_code.py", "codex_cli.py", "codex_jsonl_parser.py", "openclaw.py", "usage_parser.py", "zcode.py")
 
