@@ -72,6 +72,7 @@ export interface AutonomousWorkflow {
   max_plan_rounds: number;
   max_pr_review_rounds: number;
   require_full_review_rounds?: boolean;
+  max_changed_files_override?: number | null;
   total_tokens: number;
   total_input_tokens: number;
   total_output_tokens: number;
@@ -247,8 +248,11 @@ export const autonomousApi = {
     });
   },
 
-  async retryWorkflow(workflowId: string): Promise<{ success: boolean }> {
-    return apiClient.post(`/api/autonomous/workflows/${workflowId}/retry`);
+  async retryWorkflow(
+    workflowId: string,
+    body?: { max_changed_files_override?: number }
+  ): Promise<{ success: boolean }> {
+    return apiClient.post(`/api/autonomous/workflows/${workflowId}/retry`, body);
   },
 
   async extendPlanningTimeout(
