@@ -7,6 +7,7 @@ Tests cover:
 - Error handling verification
 - Cross-platform compatibility checks
 """
+
 import os
 import re
 import stat
@@ -60,7 +61,7 @@ class TestBashStartScript:
         for i, line in enumerate(lines):
             if "find_python()" in line or "find_python()" in line:
                 # Check the next few lines for python3 check
-                next_lines = "\n".join(lines[i:i+10])
+                next_lines = "\n".join(lines[i : i + 10])
                 assert "python3" in next_lines
                 break
 
@@ -84,7 +85,7 @@ class TestBashStartScript:
         """Verify error handling when agent.py is missing."""
         content = self.script_path.read_text(encoding="utf-8")
         # Should check for agent.py existence
-        assert 'agent.py"' in content or 'agent.py\'' in content
+        assert 'agent.py"' in content or "agent.py'" in content
         # Should have error message
         assert "ERROR" in content or "error" in content.lower()
 
@@ -97,9 +98,7 @@ class TestBashStartScript:
     def test_script_syntax(self):
         """Verify bash script syntax is valid."""
         result = subprocess.run(
-            ["bash", "-n", str(self.script_path)],
-            capture_output=True,
-            text=True
+            ["bash", "-n", str(self.script_path)], capture_output=True, text=True
         )
         assert result.returncode == 0, f"Syntax error in script: {result.stderr}"
 
@@ -136,9 +135,11 @@ class TestPowerShellStartScript:
         # Should use a precise regex pattern that matches agent.py as a standalone filename
         # Look for the improved regex pattern: (^|[\\])agent\.py($|[\\\s])
         # This ensures we don't match myagent.py, subagent.py, etc.
-        assert r"(^|[\\])agent\.py($|[\\\s])" in content or \
-               r'agent\\.py"' in content or \
-               'agent\\.py' in content
+        assert (
+            r"(^|[\\])agent\.py($|[\\\s])" in content
+            or r'agent\\.py"' in content
+            or "agent\\.py" in content
+        )
 
     def test_get_python_path_function(self):
         """Verify Get-PythonPath function exists."""
@@ -157,7 +158,7 @@ class TestPowerShellStartScript:
         for i, line in enumerate(lines):
             if "Get-PythonPath" in line:
                 # Check if next uses of New-ScheduledTaskAction use $pythonPath
-                for j in range(i, min(i+20, len(lines))):
+                for j in range(i, min(i + 20, len(lines))):
                     if "New-ScheduledTaskAction" in lines[j]:
                         if "$pythonPath" in lines[j]:
                             found_python_path_before_task = True
@@ -173,7 +174,7 @@ class TestPowerShellStartScript:
         for i, line in enumerate(lines):
             if "Get-PythonPath" in line:
                 # Check if next uses of Start-Process use $pythonPath
-                for j in range(i, min(i+20, len(lines))):
+                for j in range(i, min(i + 20, len(lines))):
                     if "Start-Process" in lines[j]:
                         if "$pythonPath" in lines[j]:
                             found_python_path_before_start = True
@@ -208,7 +209,7 @@ class TestPowerShellStartScript:
         # Should include start-agent.ps1
         assert "start-agent.ps1" in content
         # Should include it in $files array
-        match = re.search(r'\$files = @\(([^)]+)\)', content, re.DOTALL)
+        match = re.search(r"\$files = @\(([^)]+)\)", content, re.DOTALL)
         assert match is not None
         files = match.group(1)
         assert "start-agent.ps1" in files
