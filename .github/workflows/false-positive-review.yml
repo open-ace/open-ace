@@ -68,36 +68,45 @@ jobs:
           # Only create issue if there are more than 50 annotations
           if [ "$total" -gt 50 ]; then
             echo "Creating quarterly review issue..."
+
+            # Create issue body using heredoc
+            cat > /tmp/issue_body.md << 'EOF'
+          ## Overview
+
+          This is a quarterly review of false positive annotations in the test suite.
+
+          ## Statistics
+
+          - Total annotations: __TOTAL__
+          - Review date: __DATE__
+
+          ## Action Items
+
+          - [ ] Review annotations older than 6 months
+          - [ ] Identify annotations that can be converted to real assertions
+          - [ ] Update TODO review timestamps
+          - [ ] Remove obsolete annotations
+
+          ## Related
+
+          - Issue #2306: False positive cleanup
+          - Issue #2189: False positive scanner implementation
+
+          ## Instructions
+
+          Run the following command to get a detailed list:
+          ```bash
+          python scripts/scan_test_false_positives.py tests --exclude-dirs tests/issues
+          ```
+          EOF
+
+            # Replace placeholders with actual values
+            sed -i "s/__TOTAL__/$total/g" /tmp/issue_body.md
+            sed -i "s/__DATE__/$(date '+%Y-%m-%d')/g" /tmp/issue_body.md
+
             gh issue create \
               --title "Quarterly False Positive Annotation Review - $(date '+%Y-Q%-q')" \
-              --body "## Overview
-
-This is a quarterly review of false positive annotations in the test suite.
-
-## Statistics
-
-- Total annotations: $total
-- Review date: $(date '+%Y-%m-%d')
-
-## Action Items
-
-- [ ] Review annotations older than 6 months
-- [ ] Identify annotations that can be converted to real assertions
-- [ ] Update TODO review timestamps
-- [ ] Remove obsolete annotations
-
-## Related
-
-- Issue #2306: False positive cleanup
-- Issue #2189: False positive scanner implementation
-
-## Instructions
-
-Run the following command to get a detailed list:
-\`\`\`bash
-python scripts/scan_test_false_positives.py tests --exclude-dirs tests/issues
-\`\`\`
-" \
+              --body-file /tmp/issue_body.md \
               --label "maintenance,testing" || echo "Issue creation failed or skipped"
           else
             echo "Annotation count ($total) is below threshold (50), skipping issue creation"
