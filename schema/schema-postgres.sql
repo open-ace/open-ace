@@ -504,7 +504,18 @@ CREATE TABLE autonomous_workflows (
     sandbox_effective_policy text,
     ci_repair_transient_retries integer DEFAULT 0,
     ci_repair_no_change_retries integer DEFAULT 0,
-    max_changed_files_override integer
+    max_changed_files_override integer,
+    verification_status text,
+    verification_merge_sha text,
+    verification_started_at timestamp with time zone,
+    verification_completed_at timestamp with time zone,
+    verification_attempt integer,
+    verification_report text,
+    issue_acceptance_snapshot text,
+    issue_acceptance_hash text,
+    verified_by text,
+    verification_session_id text,
+    issue_closed_by_workflow_at timestamp with time zone
 );
 
 CREATE SEQUENCE autonomous_workflows_id_seq
