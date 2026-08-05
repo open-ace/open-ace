@@ -59,6 +59,7 @@ from app.modules.workspace.autonomous.constants import (  # noqa: F401
     MERGE_POLICY_PAUSE_REASON_PREFIX,
     READ_ONLY_REVIEW_UNSUPPORTED_TOOLS,
     REVIEW_ALLOWED_TOOLS,
+    VERIFICATION_ALLOWED_TOOLS,
     _extract_pr_number_from_error,
     _is_transient_git_error,
     _merge_milestone_metadata,
@@ -606,6 +607,12 @@ PHASE_STATUS_MAP = {
     "merge": "merging",
     "acceptance_verification": "verification_pending",  # #2335
 }
+
+# Cap on acceptance-rejection-driven development rounds (#2335). A rejected
+# acceptance verdict starts a new dev round carrying the rejection as feedback;
+# after this many rounds a persistent rejection fails the workflow rather than
+# looping forever.
+MAX_ACCEPTANCE_DEV_ROUNDS = 3
 
 # CI check polling configuration.
 # After a PR is created or code is pushed, CI checks may still be pending.
@@ -5835,6 +5842,123 @@ class AutonomousOrchestrator:
 
     def validate_autonomous_change_scope(self, gh, wf, base_sha, head_sha) -> str:
         return self._validate_autonomous_change_scope(gh, wf, base_sha, head_sha)
+
+    # --- PhaseHost acceptance_verification-phase helpers (#2335 PR1) ---
+    # Thin public aliases over orchestrator-private impls so the
+    # acceptance_verification handler can call them via ``deps.host.<name>``
+    # without a concrete orchestrator reference. Same pattern as above.
+    def run_verification_agent(
+        self, *, snapshot, merge_sha, base_sha, issue_number, pr_number
+    ) -> dict:
+        return self._run_verification_agent(
+            snapshot=snapshot,
+            merge_sha=merge_sha,
+            base_sha=base_sha,
+            issue_number=issue_number,
+            pr_number=pr_number,
+        )
+
+    def dev_round_cap_remaining(self, wf: dict) -> int:
+        return self._dev_round_cap_remaining(wf)
+
+    def issue_is_open(self, issue_number: int) -> bool:
+        return self._issue_is_open(issue_number)
+
+    def emit_audit_event(self, name: str, payload: dict) -> None:
+        # Audit events ride the generic orchestrator emitter as a distinct type
+        # so they show up in workflow_events without colliding with phase/status.
+        self._emit(name, payload)
+
+    def _dev_round_cap_remaining(self, wf: dict) -> int:
+        # Bound the rejected -> development loop so a persistently-rejected issue
+        # eventually fails instead of looping forever. Slices may raise this.
+        used = int(wf.get("dev_round") or 0)
+        return max(0, MAX_ACCEPTANCE_DEV_ROUNDS - used)
+
+    def _issue_is_open(self, issue_number: int) -> bool:
+        try:
+            gh = self._get_gh()
+            if gh is None:
+                return True
+            res = gh.get_issue(int(issue_number))
+            return (res or {}).get("state", "open") == "open"
+        except Exception:
+            # Fail open: if we can't tell, don't spuriously reopen.
+            return True
+
+    def _run_verification_agent(
+        self, *, snapshot, merge_sha, base_sha, issue_number, pr_number
+    ) -> dict:
+        """Spawn the independent acceptance verifier (#2335).
+
+        Credentialless isolated agent (session_line="verification") with
+        VERIFICATION_ALLOWED_TOOLS (read-only + Bash). It reads the merged code
+        + the acceptance snapshot/checklist and emits a JSON verdict block. On
+        any spawn/parse failure it returns empty verdicts, which aggregate to
+        ``indeterminate`` (pause) — never a false ``confirmed``.
+        """
+        wf = self.workflow or {}
+        cli_tool = wf.get("cli_tool", "claude-code")
+        prompt = self._build_verification_prompt(snapshot, merge_sha, base_sha, issue_number)
+        try:
+            result = self._run_agent(
+                wf,
+                session_line="verification",
+                prompt=prompt,
+                allowed_tools=VERIFICATION_ALLOWED_TOOLS.get(cli_tool, []),
+                permission_mode="bypassPermissions",
+            )
+        except Exception:
+            logger.exception("acceptance verifier spawn failed for issue %s", issue_number)
+            return {"verdicts": [], "snapshot": None}
+        return self._parse_verifier_output(result)
+
+    def _build_verification_prompt(self, snapshot, merge_sha, base_sha, issue_number) -> str:
+        import json as _json
+
+        snap_dump = _json.dumps(snapshot.to_canonical(), ensure_ascii=False, indent=2)
+        return (
+            "You are an INDEPENDENT acceptance verifier. The issue must NOT be considered done "
+            "just because a PR merged. Verify the MERGED code (merge commit "
+            f"{merge_sha}, base {base_sha}) against this acceptance snapshot.\n\n"
+            f"Acceptance snapshot:\n{snap_dump}\n\n"
+            "For each required_paths entry, confirm it was actually changed (use git diff/log). "
+            "For each checklist item, determine confirmed/rejected/indeterminate against the merged "
+            "code with a concrete file:line or git-diff evidence ref. Be CONSERVATIVE: if you cannot "
+            "find concrete evidence, return indeterminate, not confirmed.\n\n"
+            "Reply with ONLY a fenced JSON block:\n"
+            "```json\n"
+            '{"verdicts": [{"item": "...", "verdict": "confirmed|rejected|indeterminate", '
+            '"evidence": [{"ref": "file:line|git-diff", "note": "..."}], "rationale": "..."}], '
+            '"snapshot": null}\n'
+            "```\n"
+            '(set "snapshot" to the completed {required_paths, checklist, non_scope, '
+            "closure_constraints} only if you had to extract them yourself because the input "
+            "snapshot was empty; otherwise null)"
+        )
+
+    def _parse_verifier_output(self, result) -> dict:
+        import json as _json
+        import re as _re
+
+        text = self._artifact_text(result) if result is not None else ""
+        if not text:
+            return {"verdicts": [], "snapshot": None}
+        # Grab the last fenced ```json ... ``` block (the agent may preface reasoning).
+        blocks = _re.findall(r"```(?:json)?\s*(\{.*?\})\s*```", text, _re.DOTALL)
+        candidate = blocks[-1] if blocks else text
+        try:
+            parsed = _json.loads(candidate)
+        except Exception:
+            logger.warning(
+                "acceptance verifier output was not valid JSON; treating as indeterminate"
+            )
+            return {"verdicts": [], "snapshot": None}
+        if not isinstance(parsed, dict):
+            return {"verdicts": [], "snapshot": None}
+        parsed.setdefault("verdicts", [])
+        parsed.setdefault("snapshot", None)
+        return parsed
 
     def apply_pr_review_fix(
         self, wf, gh, review_text, round_num, dev_round, ci_failures, pr_number

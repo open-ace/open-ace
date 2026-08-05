@@ -108,6 +108,8 @@ _NONSCOPE_KEYWORDS = ("不在 scope", "non-scope", "non scope", "out of scope")
 
 
 def parse_acceptance_snapshot(body: str) -> AcceptanceSnapshot:
+    if not isinstance(body, str):
+        body = ""
     sections = _split_sections(body or "")
     snap = AcceptanceSnapshot()
 
