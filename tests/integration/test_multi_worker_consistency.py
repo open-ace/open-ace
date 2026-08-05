@@ -27,31 +27,41 @@ class TestMultiWorkerKeyConsistency:
         """Multiple threads should see the same security mode."""
         reset_security_mode_cache()
 
-        results = []
-        errors = []
+        # Set environment variable once before concurrent access to avoid race condition
+        # with patch.dict(os.environ, clear=False) in multi-threaded context
+        original = os.environ.get("OPENACE_SECURITY_MODE")
+        os.environ["OPENACE_SECURITY_MODE"] = "production"
 
-        def detect_mode():
-            try:
-                # Simulate concurrent detection
-                with patch.dict(os.environ, {"OPENACE_SECURITY_MODE": "production"}, clear=False):
+        try:
+            results = []
+            errors = []
+
+            def detect_mode():
+                try:
                     mode = get_security_mode()
                     results.append(mode)
-            except (
-                Exception
-            ) as e:  # allow-swallow: collect per-thread errors; the driving test asserts errors is empty
-                errors.append(e)
+                except (
+                    Exception
+                ) as e:  # allow-swallow: collect per-thread errors; the driving test asserts errors is empty
+                    errors.append(e)
 
-        # Run 20 concurrent detections
-        with ThreadPoolExecutor(max_workers=20) as executor:
-            futures = [executor.submit(detect_mode) for _ in range(20)]
-            for future in as_completed(futures):
-                future.result()  # Raise any errors
+            # Run 20 concurrent detections
+            with ThreadPoolExecutor(max_workers=20) as executor:
+                futures = [executor.submit(detect_mode) for _ in range(20)]
+                for future in as_completed(futures):
+                    future.result()  # Raise any errors
 
-        assert not errors, f"Errors during concurrent detection: {errors}"
-        assert len(results) == 20, "All threads should complete"
-        assert all(
-            m == SecurityMode.PRODUCTION for m in results
-        ), "All threads should see the same mode"
+            assert not errors, f"Errors during concurrent detection: {errors}"
+            assert len(results) == 20, "All threads should complete"
+            assert all(
+                m == SecurityMode.PRODUCTION for m in results
+            ), "All threads should see the same mode"
+        finally:
+            # Restore original environment
+            if original is None:
+                os.environ.pop("OPENACE_SECURITY_MODE", None)
+            else:
+                os.environ["OPENACE_SECURITY_MODE"] = original
 
     def test_cached_security_mode_is_thread_safe(self):
         """Cached mode should be safe for concurrent access."""
