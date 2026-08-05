@@ -352,6 +352,23 @@ export function useResumeWithFeedback() {
   });
 }
 
+/**
+ * #2335 S6: admin override for an indeterminate acceptance workflow. On success
+ * the workflow detail/list queries are invalidated so the UI reflects the
+ * confirmed + completed state.
+ */
+export function useAcceptanceOverride() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ workflowId, reason }: { workflowId: string; reason?: string }) =>
+      autonomousApi.acceptanceOverride(workflowId, { reason }),
+    onSuccess: (_, { workflowId }) => {
+      queryClient.invalidateQueries({ queryKey: ['autonomous', 'workflow', workflowId] });
+      queryClient.invalidateQueries({ queryKey: ['autonomous', 'workflows'] });
+    },
+  });
+}
+
 export function useMilestoneSession(workflowId: string, milestoneId: string, enabled = true) {
   return useQuery({
     queryKey: ['autonomous', 'session', workflowId, milestoneId],
