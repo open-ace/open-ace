@@ -19,6 +19,16 @@ def extract_endpoint_info(file_path: Path) -> list[dict]:
     content = file_path.read_text()
     lines = content.split("\n")
 
+    # Extract blueprint url_prefix from file content
+    # Look for patterns like: Blueprint("name", __name__, url_prefix="/api/tenants")
+    bp_prefix_match = re.search(r'url_prefix\s*=\s*["\']([^"\']+)["\']', content)
+    if bp_prefix_match:
+        bp_prefix = bp_prefix_match.group(1)
+    else:
+        # Fallback: derive from file name
+        bp_name = file_path.stem.replace(".py", "")
+        bp_prefix = f"/api/{bp_name}"
+
     # Track current decorator
     current_decorator = None
     decorator_line = 0
@@ -49,12 +59,38 @@ def extract_endpoint_info(file_path: Path) -> list[dict]:
                 else:
                     method = "GET"
 
-                # Extract path
-                path_match = re.search(r'"(.*?)"', line)
-                if path_match:
-                    path = path_match.group(1)
+                # Extract path - first argument of route decorator
+                # Handle formats like: @tenant_bp.route("/path") or @tenant_bp.route("/path", methods=["GET"])
+                # Match the first quoted string after route(
+                route_match = re.search(r'@tenant_bp\.route\(\s*["\']([^"\']*)["\']', line)
+                if not route_match:
+                    # Try @bp.route format
+                    route_match = re.search(r'@bp\.route\(\s*["\']([^"\']*)["\']', line)
+
+                if route_match:
+                    path = route_match.group(1)
                 else:
-                    path = "unknown"
+                    # Fallback to old pattern for other formats
+                    path_match = re.search(r'"(.*?)"', line)
+                    if path_match:
+                        path = path_match.group(1)
+                    else:
+                        path = "unknown"
+
+                # Combine blueprint prefix with path
+                # Empty path "" with bp_prefix "/api/tenants" becomes "/api/tenants"
+                if path != "unknown":
+                    if path == "":
+                        # Empty path means the blueprint prefix is the full path
+                        full_path = bp_prefix
+                    elif path.startswith("/"):
+                        # Path starts with /, concatenate
+                        full_path = f"{bp_prefix}{path}"
+                    else:
+                        # Path doesn't start with /, add /
+                        full_path = f"{bp_prefix}/{path}"
+                else:
+                    full_path = path
 
                 # Extract function name (next non-empty line that starts with 'def')
                 func_name = "unknown"
@@ -70,7 +106,7 @@ def extract_endpoint_info(file_path: Path) -> list[dict]:
                 endpoints.append(
                     {
                         "method": method,
-                        "path": path,
+                        "path": full_path,
                         "decorator": current_decorator,
                         "function_name": func_name,
                         "line_number": decorator_line,

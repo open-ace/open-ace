@@ -21,15 +21,15 @@ These endpoints require `platform_admin` or `admin` role.
 
 | Method | Path | Function | File | Line |
 |--------|-----|----------|------|------|
-| POST | `` | `create_tenant` | tenant.py | 85 |
-| GET | `/<int:tenant_id>` | `get_tenant` | tenant.py | 43 |
-| PUT | `/<int:tenant_id>` | `update_tenant` | tenant.py | 101 |
-| DELETE | `/<int:tenant_id>` | `delete_tenant` | tenant.py | 372 |
-| POST | `/<int:tenant_id>/activate` | `activate_tenant` | tenant.py | 339 |
-| PUT | `/<int:tenant_id>/quota` | `update_tenant_quota` | tenant.py | 208 |
-| PUT | `/<int:tenant_id>/settings` | `update_tenant_settings` | tenant.py | 261 |
-| GET | `/<int:tenant_id>/usage` | `get_tenant_usage` | tenant.py | 400 |
-| GET | `/slug/<slug>` | `get_tenant_by_slug` | tenant.py | 69 |
+| POST | `/api/tenants` | `create_tenant` | tenant.py | 85 |
+| GET | `/api/tenants/<int:tenant_id>` | `get_tenant` | tenant.py | 43 |
+| PUT | `/api/tenants/<int:tenant_id>` | `update_tenant` | tenant.py | 101 |
+| DELETE | `/api/tenants/<int:tenant_id>` | `delete_tenant` | tenant.py | 372 |
+| POST | `/api/tenants/<int:tenant_id>/activate` | `activate_tenant` | tenant.py | 339 |
+| PUT | `/api/tenants/<int:tenant_id>/quota` | `update_tenant_quota` | tenant.py | 208 |
+| PUT | `/api/tenants/<int:tenant_id>/settings` | `update_tenant_settings` | tenant.py | 261 |
+| GET | `/api/tenants/<int:tenant_id>/usage` | `get_tenant_usage` | tenant.py | 400 |
+| GET | `/api/tenants/slug/<slug>` | `get_tenant_by_slug` | tenant.py | 69 |
 
 ## Admin Required Endpoints
 
@@ -41,10 +41,10 @@ These endpoints allow tenant_admin to access their own tenant, or platform_admin
 
 | Method | Path | Function | File | Line |
 |--------|-----|----------|------|------|
-| POST | `/<int:tenant_id>/check-quota` | `check_tenant_quota` | tenant.py | 450 |
-| GET | `/<int:tenant_id>/stats` | `get_tenant_stats` | tenant.py | 429 |
-| POST | `/<int:tenant_id>/suspend` | `suspend_tenant` | tenant.py | 296 |
-| GET | `/plans` | `get_plan_quotas` | tenant.py | 466 |
+| POST | `/api/tenants/<int:tenant_id>/check-quota` | `check_tenant_quota` | tenant.py | 450 |
+| GET | `/api/tenants/<int:tenant_id>/stats` | `get_tenant_stats` | tenant.py | 429 |
+| POST | `/api/tenants/<int:tenant_id>/suspend` | `suspend_tenant` | tenant.py | 296 |
+| GET | `/api/tenants/plans` | `get_plan_quotas` | tenant.py | 466 |
 
 ## Summary
 
