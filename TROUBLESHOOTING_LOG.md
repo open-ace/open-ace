@@ -829,3 +829,19 @@
   3. 实测：工作区让 AI 执行操作，权限对话框选"允许且不再询问"→ 操作应正常执行
 
 - **状态**：已解决（代码 + 单测完成，待部署后实测）
+
+---
+
+## 上游同步（2026-08-05）：open-eduace 与 open-ace 上游合并
+
+- **背景**：本地 fork 自 `https://github.com/open-ace/open-ace`，共同祖先 `9aeb4cde`。本地领先 4 个提交（问题 8/16/17/18/19/20 修复），上游领先 502 个提交（至 `8b823bcd`）。
+- **冲突规模**：试合并 16 个文件冲突；最终决策：
+  - 取上游版（本地修复已被上游原样采纳或更好）：`start-agent.ps1`、`start-agent.sh`、`patch-qwen-webui-permission.py`、`app/auth/decorators.py`、`api_key_proxy.py`、`vscode_ws_bridge.py`、`remote_ws_handler.py`、`app/routes/remote.py`、`webui_manager.py`、`outbound_url_guard.py`、`Toast.tsx`、`ForceChangePasswordModal.tsx`、`Dockerfile`。
+  - 手动合并（取上游 + 保留本地关键行）：
+    - `docker-entrypoint.sh`：取上游 Issue #2181 安全加固版 env_keep，**额外加回 `QWEN_SYSTEM_MD`**（问题 16 系统提示注入依赖）。
+    - `frontend/src/i18n/index.ts`：取上游全部新增（含 `passwordChangedSuccess` 四语言），**补回本地 `startCommand`/`startCommandDesc`/`copyStartCommand` 3 键（中英）**；日文译文取上游。
+    - `remote-agent/install.ps1`：文件列表 = 上游 3 个启动脚本 + 本地 `system-prompt.md`（问题 16）。
+- **回归验证（合并后）**：问题 16（executor.py QWEN_SYSTEM_MD + entrypoint env_keep）、17（webui_manager token_secret 持久化 + TTL 86400 / decorators 常量）、18（remote_agent_manager UTC 时间戳）、19（agent.py 快照差异 6 函数）、20（agent.py:900 + remote_session_manager.py:699 allow-permanent 归一化）、8（fetch_qwen/remote_session_manager/remote.py file_change 注入）全部确认保留。
+- **测试适配**：`tests/issues/559/test_terminal_ws_handler.py::TestHandleVSCodeWs::test_invalid_proxy_ws_token_closes` 因上游 `remote_ws_handler.py` 给 `send_close` 增加 reason 参数而更新断言（`_handle_terminal_ws` 的类似断言未变）。
+- **已知失败（与同步无关，Windows 环境既有）**：`tests/issues/610::test_path_with_tilde_expansion`、`tests/unit/test_auth_decorators.py` 11 项（上游 `webui_manager.py` 新增 Unix-only `import pwd`，Windows 无此模块；生产容器为 Linux 不受影响）。
+- **提交**：`sync/upstream-20260805` 分支，merge 提交 `a15b8e96` + 测试适配 `a220ff73`。
