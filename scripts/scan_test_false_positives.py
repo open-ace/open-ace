@@ -75,6 +75,11 @@ ALLOW_REASON_PATTERNS = {
         r"screenshot failure.*non-critical",
         r"optional UI element",
         r"test framework error handling",
+        r"error screenshot",
+        r"best-effort",
+        r"idempotent",
+        r"cleanup",
+        r"collect.*errors",
     ],
     "allow-skip": [
         r"requires external service",
@@ -223,8 +228,9 @@ class FalsePositiveScanner(ast.NodeVisitor):
             start = _func_start(node)
             end = node.end_lineno or node.lineno
             # Check for annotation with content validation (Issue #2306)
+            # Enable strict validation to enforce annotation content quality
             allow_no_assert = _extract_and_validate_annotation(
-                self.source_lines, start, end, "allow-no-assert", strict=False
+                self.source_lines, start, end, "allow-no-assert", strict=True
             )
             if not self.has_assertion and not allow_no_assert:
                 self.findings.append(
@@ -271,8 +277,9 @@ class FalsePositiveScanner(ast.NodeVisitor):
         if broad:
             end = node.end_lineno or node.lineno
             # Check for annotation with content validation (Issue #2306)
+            # Enable strict validation to enforce annotation content quality
             allow = _extract_and_validate_annotation(
-                self.source_lines, node.lineno, end, "allow-swallow", strict=False
+                self.source_lines, node.lineno, end, "allow-swallow", strict=True
             )
             if not _body_does_not_swallow(node.body) and not allow:
                 severity = "P0" if self.is_test_function else "P1"
