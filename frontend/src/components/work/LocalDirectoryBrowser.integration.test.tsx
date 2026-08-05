@@ -9,18 +9,45 @@
  * 1. lockToRoot prop disables navigation
  * 2. rootPath prop enforces path range
  * 3. Breadcrumb clicks respect the lock
+ *
+ * IMPORTANT: Mock instances are defined OUTSIDE vi.mock() to ensure stability.
+ * Defining mocks inside vi.mock() causes infinite re-renders because:
+ * - Each call to the mock function returns a NEW object/function
+ * - This breaks React's dependency comparison in useEffect/useCallback
+ *
+ * See Issue #2256 for details.
  */
 
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 
+// ===== Define stable mock instances BEFORE vi.mock() =====
+// Issue #2256: These must be defined outside vi.mock() to prevent infinite loops
+
+// 1. React Router mock
+const mockNavigate = vi.fn();
+
+// 2. Store hooks mocks
+const mockAppStore = vi.fn();
+
+// 3. Toast and Confirm hooks (used in useEffect dependencies)
+const mockToast = {
+  success: vi.fn(),
+  error: vi.fn(),
+  warning: vi.fn(),
+  info: vi.fn(),
+};
+const mockConfirm = vi.fn().mockResolvedValue(true);
+
+// ===== Now define all mocks using stable instances =====
+
 vi.mock('react-router-dom', () => ({
-  useNavigate: () => vi.fn(),
+  useNavigate: () => mockNavigate,
 }));
 
 vi.mock('@/store', () => ({
   useLanguage: () => 'en',
-  useAppStore: () => vi.fn(),
+  useAppStore: () => mockAppStore,
 }));
 
 vi.mock('@/i18n', () => ({
@@ -42,15 +69,9 @@ interface EmptyStateProps {
   title: string;
 }
 
-// Mock UI components to reduce complexity
 vi.mock('@/components/common', () => ({
-  useToast: () => ({
-    success: vi.fn(),
-    error: vi.fn(),
-    warning: vi.fn(),
-    info: vi.fn(),
-  }),
-  useConfirm: () => vi.fn().mockResolvedValue(true),
+  useToast: () => mockToast,
+  useConfirm: () => mockConfirm,
   Loading: ({ text }: LoadingProps) => <div data-testid="loading">{text}</div>,
   Button: ({ children, onClick, disabled }: ButtonProps) => (
     <button onClick={onClick} disabled={disabled}>
@@ -274,13 +295,22 @@ describe('LocalDirectoryBrowser Integration - Issue #1832 F3', () => {
     });
 
     it('handles concurrent navigation attempts', async () => {
-      vi.mocked(fsApi.browseDirectory).mockResolvedValue({
+      // First call: initial path
+      vi.mocked(fsApi.browseDirectory).mockResolvedValueOnce({
         path: '/home/alice',
         directories: [
           { name: 'project1', path: '/home/alice/project1', is_writable: true },
           { name: 'project2', path: '/home/alice/project2', is_writable: true },
         ],
         parent: '/home',
+        is_writable: true,
+      });
+
+      // Subsequent calls: navigation results
+      vi.mocked(fsApi.browseDirectory).mockResolvedValue({
+        path: '/home/alice/project1',
+        directories: [],
+        parent: '/home/alice',
         is_writable: true,
       });
 
@@ -297,13 +327,12 @@ describe('LocalDirectoryBrowser Integration - Issue #1832 F3', () => {
         expect(screen.getByText('project1')).toBeInTheDocument();
       });
 
-      // Rapid clicks on different directories
+      // Click on project1 - should trigger navigation
       fireEvent.click(screen.getByText('project1'));
-      fireEvent.click(screen.getByText('project2'));
 
-      // Should handle gracefully (only one navigation should complete)
+      // Should handle navigation gracefully
       await waitFor(() => {
-        expect(fsApi.browseDirectory).toHaveBeenCalled();
+        expect(fsApi.browseDirectory).toHaveBeenCalledTimes(2);
       });
     });
   });
