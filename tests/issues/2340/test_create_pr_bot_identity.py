@@ -97,3 +97,31 @@ def test_create_pr_rest_api_uses_bot_token_same_user():
         gh.create_pr(title="T", body="", head="br")
     cmd = run.call_args.args[0]
     assert "api" in cmd and "POST" in cmd  # REST path even same-user when token set
+
+
+def test_create_pr_rest_error_includes_stdout_body_so_race_recovery_works():
+    # gh api writes the JSON error body to STDOUT (only the summary to stderr).
+    # The exception must carry the stdout body so pr_review's "already exists"
+    # detection (#1857) still triggers find_existing_pr on the REST path.
+    import pytest
+
+    from app.modules.workspace.autonomous.github_ops import GitHubOpsError
+
+    gh = _gh()
+    err = MagicMock(
+        returncode=1,
+        stdout='{"message": "Validation Failed", "errors": [{"message": "A pull request already exists for open-ace:auto-dev/x."}]}',
+        stderr="gh: Validation Failed (HTTP 422)",
+    )
+    with (
+        patch.object(gh, "_needs_sudo", return_value=True),
+        patch.object(gh, "_verify_trusted_git_context"),
+        patch("app.utils.config.get_ai_github_env", return_value=BOT_ENV),
+        patch.object(gh_mod, "subprocess") as sub_mod,
+    ):
+        sub_mod.run = MagicMock(return_value=err)
+        with pytest.raises(GitHubOpsError) as exc:
+            gh.create_pr(title="T", body="", head="auto-dev/x")
+    msg = str(exc.value)
+    assert "already exists" in msg  # the stdout body is surfaced
+    assert "Validation Failed" in msg  # stderr summary also present

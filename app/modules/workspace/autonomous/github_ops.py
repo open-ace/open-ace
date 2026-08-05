@@ -1072,7 +1072,11 @@ class GitHubOps:
         the repo slug can't be resolved.
         """
         if self._get_env() is not None:
-            slug = self._repo_slug or self._resolve_owner_repo() or ""
+            # Resolve so _repo_slug (plain OWNER/REPO, never host-prefixed) is set;
+            # _resolve_owner_repo() returns _owner_repo which carries the GHES host
+            # and would malformed the REST path on GHES (#2340 review L1).
+            self._resolve_owner_repo()
+            slug = self._repo_slug
             if slug:
                 fields: list[tuple[str, str]] = [
                     ("title", title),
@@ -1086,7 +1090,20 @@ class GitHubOps:
                 api_args = ["--method", "POST", f"repos/{slug}/pulls"]
                 for key, value in fields:
                     api_args += ["-f", f"{key}={value}"]
-                result = self._run_gh(self._gh_api_args(api_args), repo_scoped=False, api_only=True)
+                # check=False: gh api writes the JSON error body to STDOUT (only the
+                # summary to stderr). Surface both in the exception so the
+                # "already exists" race recovery (#1857) in pr_review still detects
+                # it and falls back to find_existing_pr.
+                result = self._run_gh(
+                    self._gh_api_args(api_args), repo_scoped=False, api_only=True, check=False
+                )
+                if result.returncode != 0:
+                    detail = (result.stderr or "").strip()
+                    body_out = (result.stdout or "").strip()
+                    raise GitHubOpsError(
+                        f"create_pr REST API failed (exit {result.returncode}): {detail}"
+                        + (f" :: {body_out}" if body_out else "")
+                    )
                 try:
                     data = json.loads((result.stdout or "").strip() or "{}")
                     pr_number = int(data["number"])
