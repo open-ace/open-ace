@@ -503,7 +503,8 @@ CREATE TABLE autonomous_workflows (
     sandbox_remote_session_id text,
     sandbox_effective_policy text,
     ci_repair_transient_retries integer DEFAULT 0,
-    ci_repair_no_change_retries integer DEFAULT 0
+    ci_repair_no_change_retries integer DEFAULT 0,
+    max_changed_files_override integer
 );
 
 CREATE SEQUENCE autonomous_workflows_id_seq
@@ -3297,10 +3298,6 @@ CREATE INDEX idx_run_events_session_id ON agent_run_events USING btree (session_
 
 CREATE INDEX idx_scheduler_leaders_expires ON scheduler_leaders USING btree (expires_at);
 
-
---
---
-
 CREATE INDEX idx_scheduler_leaders_heartbeat ON scheduler_leaders USING btree (heartbeat_at);
 
 
@@ -3308,10 +3305,6 @@ CREATE INDEX idx_scheduler_leaders_heartbeat ON scheduler_leaders USING btree (h
 --
 
 CREATE INDEX idx_scheduler_runs_job_time ON scheduler_runs USING btree (job_name, started_at DESC);
-
-
---
---
 
 CREATE INDEX idx_scheduler_runs_status ON scheduler_runs USING btree (status);
 
