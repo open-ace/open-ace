@@ -55,6 +55,11 @@ def tenant_admin_client(app):
                 with self._auth_patch():
                     return self._client.post(*args, **kwargs)
 
+        def put(self, *args, **kwargs):
+            with self._token_patch():
+                with self._auth_patch():
+                    return self._client.put(*args, **kwargs)
+
     return TenantAdminAuthenticatedClient(test_client)
 
 
@@ -264,11 +269,20 @@ class TestTenantIsolationForGenerateDefaultRules:
         concurrently, verifying no cross-tenant rule creation occurs.
         """
         import threading
-        import time
         from collections import defaultdict
 
         from app.models.tool_account_mapping_rule import ToolAccountMappingRule
         from app.services.tool_account_auto_mapping_service import GenerateDefaultRulesResult
+
+        # Use side_effect to return correct user data per user_id (thread-safe)
+        # This avoids the race condition of shared return_value
+        tenant_user_map = {
+            11: {"id": 11, "tenant_id": 1},
+            12: {"id": 12, "tenant_id": 1},
+            21: {"id": 21, "tenant_id": 2},
+            22: {"id": 22, "tenant_id": 2},
+        }
+        mock_user_repo.get_user_by_id.side_effect = lambda uid: tenant_user_map.get(uid)
 
         results = defaultdict(list)
         errors = []
@@ -291,7 +305,6 @@ class TestTenantIsolationForGenerateDefaultRules:
                         with patch(
                             "app.routes.mapping_rules.ToolAccountAutoMappingService"
                         ) as mock_service:
-                            # Mock service to track calls
                             mock_service_instance = MagicMock()
                             result = GenerateDefaultRulesResult(
                                 created=[
@@ -313,12 +326,6 @@ class TestTenantIsolationForGenerateDefaultRules:
                                 result
                             )
                             mock_service.return_value = mock_service_instance
-
-                            # Mock user belongs to correct tenant
-                            mock_user_repo.get_user_by_id.return_value = {
-                                "id": user_id,
-                                "tenant_id": tenant_id,
-                            }
 
                             response = test_client.post(
                                 f"/api/mapping-rules/user/{user_id}/generate-default",
@@ -356,9 +363,16 @@ class TestTenantIsolationForGenerateDefaultRules:
         # Verify no errors occurred
         assert len(errors) == 0, f"Errors during concurrent execution: {errors}"
 
+        # Verify all operations succeeded (status 200 or 201)
+        for tenant_id, tenant_results in results.items():
+            for r in tenant_results:
+                assert r["status"] in (200, 201), (
+                    f"Tenant {tenant_id} operation on user {r['user_id']} "
+                    f"returned status {r['status']}"
+                )
+
         # Verify each tenant admin operated on correct users
-        # (This is a basic verification; full verification would require database inspection)
-        assert len(results) > 0, "No results from concurrent execution"
+        assert len(results) == 2, f"Expected 2 tenants in results, got {len(results)}"
 
 
 class TestTenantIsolationForOtherOperations:
@@ -396,13 +410,47 @@ class TestTenantIsolationForOtherOperations:
         )
 
         # Should return 403 (cannot create rule for user in different tenant)
-        assert response.status_code in (403, 404)
+        assert response.status_code == 403
+
+    @patch("app.routes.mapping_rules.user_repo")
+    def test_tenant_admin_cannot_update_rule_user_id_to_other_tenant(
+        self, mock_user_repo, tenant_admin_client
+    ):
+        """
+        Tenant admin should not be able to reassign a rule to a user in different tenant.
+
+        Expected: 403 Forbidden
+        """
+        # Use side_effect to return different data per user_id
+        # user_id=5 belongs to tenant 1 (same as admin), user_id=99 belongs to tenant 2
+        user_data = {
+            5: {"id": 5, "tenant_id": 1},
+            99: {"id": 99, "tenant_id": 2},
+        }
+        mock_user_repo.get_user_by_id.side_effect = lambda uid: user_data.get(uid)
+
+        with patch("app.routes.mapping_rules.ToolAccountMappingRuleRepository") as mock_repo_class:
+            mock_repo = MagicMock()
+            # Existing rule belongs to user in same tenant (user_id=5, tenant_id=1)
+            mock_rule = MagicMock()
+            mock_rule.user_id = 5
+            mock_repo.get_by_id.return_value = mock_rule
+            mock_repo_class.return_value = mock_repo
+
+            # Attempt to reassign rule to user in different tenant
+            response = tenant_admin_client.put(
+                "/api/mapping-rules/1",
+                data=json.dumps({"user_id": 99}),
+                content_type="application/json",
+            )
+
+        # Should return 403 (cannot assign rule to user in different tenant)
+        assert response.status_code == 403
 
 
 # ---------------------------------------------------------------------------
 # Issue #2324: Admin/platform_admin with tenant_id must NOT be tenant-scoped.
 # ---------------------------------------------------------------------------
-
 
 @pytest.fixture
 def admin_with_tenant_client(app):
