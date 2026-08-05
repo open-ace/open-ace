@@ -974,6 +974,19 @@ class APIKeyProxyService:
         Returns:
             Dict with key info or None if not found.
         """
+        # Issue #2327: 验证 ActorScope
+        # 运行时导入以避免循环依赖
+        from app.auth.decorators import ActorScope as ActorScopeClass
+        if not isinstance(scope, ActorScopeClass):
+            raise TypeError(
+                f"get_api_key_by_id_for_tenant must receive ActorScope, "
+                f"got {type(scope).__name__}"
+            )
+
+        # 验证 scope 包含有效的 target_tenant_id
+        if scope.target_tenant_id <= 0:
+            raise ValueError(f"Invalid target_tenant_id: {scope.target_tenant_id}")
+
         conn = self._get_connection()
         cursor = conn.cursor()
 

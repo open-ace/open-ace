@@ -1209,9 +1209,8 @@ def _log_cross_tenant_operation(
 
 # ── ActorScope and Tenant Authorization (Issue #2327) ─────────────────────
 
-
-from dataclasses import dataclass
 import uuid
+from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
@@ -1263,7 +1262,7 @@ class ActorScope:
         actor: dict,
         target_tenant_id: int,
         request_id: str | None = None,
-    ) -> "ActorScope":
+    ) -> ActorScope:
         """
         工厂方法：从 actor dict 和目标租户构造 ActorScope。
 
@@ -1397,6 +1396,27 @@ def require_actor_scope(require_write: bool = True):
     - 自动验证：调用方法前自动执行验证
     - 清晰错误：提供明确的错误消息
     """
+
+    def decorator(func):
+        @wraps(func)
+        def wrapper(self, scope: ActorScope, *args, **kwargs):
+            if not isinstance(scope, ActorScope):
+                raise TypeError(
+                    f"Service method {func.__name__} must receive ActorScope, "
+                    f"got {type(scope).__name__}"
+                )
+
+            # 执行验证
+            if require_write:
+                scope.validate_for_write()
+            else:
+                scope.validate_for_read()
+
+            return func(self, scope, *args, **kwargs)
+
+        return wrapper
+
+    return decorator
 
     def decorator(func):
         @wraps(func)
