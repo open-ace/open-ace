@@ -22,6 +22,7 @@ fail on *unannotated* findings without false-noise:
 import argparse
 import ast
 import json
+import re
 import sys
 from pathlib import Path
 from typing import NamedTuple
@@ -58,6 +59,48 @@ ASSERT_METHODS = frozenset(
         "assertRaises",
     }
 )
+
+# Allow-reason patterns for annotation validation (Issue #2306, REQ-6)
+# These patterns define what constitutes a valid annotation reason
+ALLOW_REASON_PATTERNS = {
+    "allow-no-assert": [
+        r"smoke test.*visual verification",
+        r"screenshot regression test.*TODO review \d{4}-Q[1-4]",
+        r"auto-generated test.*selector alignment",
+        r"playwright script.*visual verification",
+    ],
+    "allow-swallow": [
+        r"UI element may not exist",
+        r"transient timeout",
+        r"screenshot failure.*non-critical",
+        r"optional UI element",
+        r"test framework error handling",
+    ],
+    "allow-skip": [
+        r"requires external service",
+        r"manual-only test",
+    ],
+}
+
+
+def validate_annotation_content(annotation: str, pattern_type: str) -> bool:
+    """Validate that annotation content matches predefined templates.
+
+    Args:
+        annotation: The annotation text (e.g., "smoke test - visual verification only")
+        pattern_type: The type of annotation (e.g., "allow-no-assert")
+
+    Returns:
+        True if the annotation matches one of the predefined patterns, False otherwise
+
+    Example:
+        >>> validate_annotation_content("smoke test - visual verification only", "allow-no-assert")
+        True
+        >>> validate_annotation_content("just because", "allow-no-assert")
+        False
+    """
+    patterns = ALLOW_REASON_PATTERNS.get(pattern_type, [])
+    return any(re.search(p, annotation) for p in patterns)
 
 
 def _func_start(node: ast.FunctionDef | ast.AsyncFunctionDef) -> int:
