@@ -43,7 +43,7 @@ class TestPermissionCheckPerformance:
 
         @app.route("/api/test")
         @platform_admin_required
-        def test_route():
+        def api_test_route():
             from flask import g, jsonify
 
             return jsonify({"user_id": g.user_id, "role": g.user_role})
@@ -151,7 +151,9 @@ class TestPermissionCheckPerformance:
                     "must_change_password": False,
                 },
             ):
-                with patch("app.auth.decorators._extract_session_token", return_value="valid-token"):
+                with patch(
+                    "app.auth.decorators._extract_session_token", return_value="valid-token"
+                ):
                     with app.test_client() as client:
                         start_time = time.time()
                         for _ in range(100):

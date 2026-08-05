@@ -283,7 +283,8 @@ class MigrationTool:
 
             # Create backup table
             if db.is_postgresql():
-                cursor.execute("""
+                cursor.execute(
+                    """
                     CREATE TABLE IF NOT EXISTS admin_role_migration_backup (
                         id INT PRIMARY KEY,
                         username VARCHAR(255),
@@ -294,9 +295,11 @@ class MigrationTool:
                         backup_source VARCHAR(50),
                         batch_id VARCHAR(50)
                     )
-                """)
+                """
+                )
             else:
-                cursor.execute("""
+                cursor.execute(
+                    """
                     CREATE TABLE IF NOT EXISTS admin_role_migration_backup (
                         id INTEGER PRIMARY KEY,
                         username TEXT,
@@ -307,7 +310,8 @@ class MigrationTool:
                         backup_source TEXT,
                         batch_id TEXT
                     )
-                """)
+                """
+                )
 
             # Create index
             cursor.execute(
@@ -355,17 +359,21 @@ class MigrationTool:
 
             # Update user roles
             if db.is_postgresql():
-                cursor.execute("""
+                cursor.execute(
+                    """
                     UPDATE users
                     SET role = 'platform_admin', updated_at = NOW()
                     WHERE role = 'admin'
-                """)
+                """
+                )
             else:
-                cursor.execute("""
+                cursor.execute(
+                    """
                     UPDATE users
                     SET role = 'platform_admin', updated_at = datetime('now')
                     WHERE role = 'admin'
-                """)
+                """
+                )
 
             affected_rows = cursor.rowcount
 

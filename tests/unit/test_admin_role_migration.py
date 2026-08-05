@@ -243,7 +243,7 @@ class TestMigrationEdgeCases:
             mock_cursor.fetchone.return_value = ("admin",)
 
             # Run with specific user IDs
-            result = tool.rollback_users(user_ids=[1, 2, 3])
+            tool.rollback_users(user_ids=[1, 2, 3])
 
             # Should have executed updates
             assert mock_cursor.execute.called

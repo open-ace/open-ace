@@ -718,14 +718,6 @@ class TestPlatformAdminRequired:
         """Test that platform_admin role can access platform_admin_required routes."""
         app = self._make_app_with_platform_admin_route()
 
-        mock_session = {
-            "user_id": 1,
-            "username": "platform_admin",
-            "email": "platform@example.com",
-            "role": "platform_admin",
-            "must_change_password": False,
-        }
-
         with patch(
             "app.auth.decorators._load_user_from_token",
             return_value={
@@ -738,7 +730,9 @@ class TestPlatformAdminRequired:
             },
         ):
             with app.test_client() as client:
-                with patch("app.auth.decorators._extract_session_token", return_value="valid-token"):
+                with patch(
+                    "app.auth.decorators._extract_session_token", return_value="valid-token"
+                ):
                     response = client.get(
                         "/api/platform-admin-only",
                         headers={"Authorization": "Bearer valid-token"},
@@ -767,7 +761,9 @@ class TestPlatformAdminRequired:
             },
         ):
             with app.test_client() as client:
-                with patch("app.auth.decorators._extract_session_token", return_value="valid-token"):
+                with patch(
+                    "app.auth.decorators._extract_session_token", return_value="valid-token"
+                ):
                     response = client.get(
                         "/api/platform-admin-only",
                         headers={"Authorization": "Bearer valid-token"},
@@ -792,7 +788,9 @@ class TestPlatformAdminRequired:
             },
         ):
             with app.test_client() as client:
-                with patch("app.auth.decorators._extract_session_token", return_value="valid-token"):
+                with patch(
+                    "app.auth.decorators._extract_session_token", return_value="valid-token"
+                ):
                     response = client.get(
                         "/api/platform-admin-only",
                         headers={"Authorization": "Bearer valid-token"},
@@ -815,7 +813,9 @@ class TestPlatformAdminRequired:
             },
         ):
             with app.test_client() as client:
-                with patch("app.auth.decorators._extract_session_token", return_value="valid-token"):
+                with patch(
+                    "app.auth.decorators._extract_session_token", return_value="valid-token"
+                ):
                     response = client.get(
                         "/api/platform-admin-only",
                         headers={"Authorization": "Bearer valid-token"},

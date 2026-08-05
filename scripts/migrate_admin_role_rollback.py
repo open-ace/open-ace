@@ -93,13 +93,15 @@ class RollbackTool:
                 )
             else:
                 # Get most recent backup
-                cursor.execute("""
+                cursor.execute(
+                    """
                     SELECT id, username, role, tenant_id
                     FROM admin_role_migration_backup
                     WHERE backed_up_at = (
                         SELECT MAX(backed_up_at) FROM admin_role_migration_backup
                     )
-                """)
+                """
+                )
 
             users = cursor.fetchall()
             conn.close()
