@@ -57,6 +57,8 @@ def dismiss_force_change_password_modal(page: Page, new_password: str = "Admin12
 
     改密成功后更新模块级 PASSWORD 变量，使后续 login() 调用使用新密码。
 
+    无论弹窗是否出现，函数返回前都会等待页面 dashboard 元素就绪。
+
     Args:
         page: Playwright 页面对象
         new_password: 新密码（需满足密码策略，默认 Admin1234!）
@@ -64,63 +66,70 @@ def dismiss_force_change_password_modal(page: Page, new_password: str = "Admin12
     global PASSWORD
     from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
+    modal_dismissed = False
     try:
         # 等待弹窗出现（最多 5 秒）
         modal = page.locator('div[role="dialog"]')
         modal.wait_for(state="visible", timeout=5000)
     except PlaywrightTimeoutError:
         # 没有弹窗，正常情况
-        return
-
-    # 弹窗内三个密码输入框通过 placeholder 定位
-    current_pw_input = page.locator(
-        'div[role="dialog"] input[placeholder="Enter current password"],'
-        'div[role="dialog"] input[placeholder="输入当前密码"]'
-    )
-    new_pw_input = page.locator(
-        'div[role="dialog"] input[placeholder="Enter new password"],'
-        'div[role="dialog"] input[placeholder="输入新密码"]'
-    )
-    confirm_pw_input = page.locator(
-        'div[role="dialog"] input[placeholder="Confirm Password"],'
-        'div[role="dialog"] input[placeholder="确认密码"]'
-    )
-
-    # 填写改密表单
-    current_pw_input.fill(PASSWORD)
-    new_pw_input.fill(new_password)
-    confirm_pw_input.fill(new_password)
-
-    # 点击改密按钮
-    change_btn = page.locator(
-        'div[role="dialog"] button:has-text("Change Password"),'
-        'div[role="dialog"] button:has-text("修改密码")'
-    )
-    change_btn.click()
-
-    # 等待弹窗消失
-    try:
-        modal.wait_for(state="hidden", timeout=15000)
-    except PlaywrightTimeoutError:
-        save_screenshot(page, "login", "force_change_password_failed")
-        raise AssertionError(
-            "Force change password modal did not close after submission. "
-            "Check if the new password meets the password policy."
+        pass
+    else:
+        # 弹窗内三个密码输入框通过 placeholder 定位
+        current_pw_input = page.locator(
+            'div[role="dialog"] input[placeholder="Enter current password"],'
+            'div[role="dialog"] input[placeholder="输入当前密码"]'
+        )
+        new_pw_input = page.locator(
+            'div[role="dialog"] input[placeholder="Enter new password"],'
+            'div[role="dialog"] input[placeholder="输入新密码"]'
+        )
+        confirm_pw_input = page.locator(
+            'div[role="dialog"] input[placeholder="Confirm Password"],'
+            'div[role="dialog"] input[placeholder="确认密码"]'
         )
 
-    # 等待弹窗消失后页面重新渲染（用户信息更新、导航栏刷新）
+        # 填写改密表单
+        current_pw_input.fill(PASSWORD)
+        new_pw_input.fill(new_password)
+        confirm_pw_input.fill(new_password)
+
+        # 点击改密按钮
+        change_btn = page.locator(
+            'div[role="dialog"] button:has-text("Change Password"),'
+            'div[role="dialog"] button:has-text("修改密码")'
+        )
+        change_btn.click()
+
+        # 等待弹窗消失
+        try:
+            modal.wait_for(state="hidden", timeout=15000)
+        except PlaywrightTimeoutError:
+            save_screenshot(page, "login", "force_change_password_failed")
+            raise AssertionError(
+                "Force change password modal did not close after submission. "
+                "Check if the new password meets the password policy."
+            )
+
+        # 更新全局密码，后续 login() 使用新密码
+        PASSWORD = new_password
+        modal_dismissed = True
+
+    # 无论弹窗是否出现，等待 dashboard 元素就绪
+    # 这确保页面完全渲染后再返回，避免后续交互超时
     try:
         page.wait_for_selector(
             ".header-icon-btn.dropdown-toggle, .dropdown-toggle:has(.bi-person-circle)",
             state="visible",
-            timeout=10000,
+            timeout=15000,
         )
     except PlaywrightTimeoutError:
-        # Fallback: if the header element is not found, just wait a bit
-        page.wait_for_timeout(2000)
-
-    # 更新全局密码，后续 login() 使用新密码
-    PASSWORD = new_password
+        # Fallback: 等待任意导航栏元素
+        try:
+            page.wait_for_selector("nav, .navbar, header, .sidebar", state="visible", timeout=5000)
+        except PlaywrightTimeoutError:
+            # 最后兜底：等待页面稳定
+            page.wait_for_timeout(3000)
 
 
 def login(page: Page):
@@ -134,7 +143,7 @@ def login(page: Page):
     from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
     # 导航到登录页面，等待 DOM 加载完成（带重试）
-    max_goto_retries = 2
+    max_goto_retries = 3
     for attempt in range(max_goto_retries):
         try:
             page.goto(

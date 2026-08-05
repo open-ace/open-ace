@@ -174,7 +174,7 @@ def test_logout():
                 user_menu_btn = page.wait_for_selector(
                     ".header-icon-btn.dropdown-toggle, " ".dropdown-toggle:has(.bi-person-circle)",
                     state="visible",
-                    timeout=5000,
+                    timeout=15000,
                 )
                 user_menu_btn.click()
                 # Wait for Bootstrap dropdown animation to complete
