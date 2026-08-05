@@ -1096,6 +1096,11 @@ class WebUIManager:
                 # The wrapper execs /usr/bin/env with all supplied args; sudoers
                 # restricts it to only be called with the webui path as first
                 # non-env argument (no arbitrary command execution).
+                #
+                # SECURITY NOTE: inline KEY=VALUE args are visible in /proc/<pid>/cmdline
+                # to other processes on the same host. The values here are JWT proxy tokens
+                # (not real API keys), so the risk is acceptable. For real API keys, consider
+                # passing them via a file or other IPC mechanism.
                 env_args = []
                 # Standard keys: LLM config + locale + proxy
                 for key in [

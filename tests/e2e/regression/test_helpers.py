@@ -5,6 +5,7 @@
 提供共享的测试配置和辅助函数，优化等待策略避免超时问题。
 """
 
+import logging
 import os
 
 from playwright.sync_api import Page
@@ -34,9 +35,9 @@ def save_screenshot(page: Page, module: str, name: str):
     path = os.path.join(SCREENSHOT_DIR, f"{module}_{name}.png")
     try:
         page.screenshot(path=path, timeout=10000)
-    except Exception:
+    except Exception as e:
         # Fallback: skip screenshot on timeout (font loading may hang in CI)
-        pass
+        logging.getLogger(__name__).warning(f"Screenshot failed: {e}")
     return path
 
 
@@ -106,6 +107,17 @@ def dismiss_force_change_password_modal(page: Page, new_password: str = "Admin12
             "Force change password modal did not close after submission. "
             "Check if the new password meets the password policy."
         )
+
+    # 等待弹窗消失后页面重新渲染（用户信息更新、导航栏刷新）
+    try:
+        page.wait_for_selector(
+            ".header-icon-btn.dropdown-toggle, .dropdown-toggle:has(.bi-person-circle)",
+            state="visible",
+            timeout=10000,
+        )
+    except PlaywrightTimeoutError:
+        # Fallback: if the header element is not found, just wait a bit
+        page.wait_for_timeout(2000)
 
     # 更新全局密码，后续 login() 使用新密码
     PASSWORD = new_password
