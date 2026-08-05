@@ -100,10 +100,10 @@ RUN echo "deb http://mirrors.aliyun.com/debian/ trixie main" > /etc/apt/sources.
     && ps --version >/dev/null \
     # === npm and CLI Setup ===
     && npm config set registry https://registry.npmmirror.com/ \
-    && npm install -g qwen-code-webui @qwen-code/qwen-code \
+    && npm install -g qwen-code-webui@0.2.40 @qwen-code/qwen-code@0.15.10 \
     # === code-server Installation (for local workspace VS Code button) ===
-    && curl -fsSL --connect-timeout 15 --max-time 300 https://code-server.dev/install.sh | sh \
-    && test -x /usr/bin/code-server \
+    && curl -fsSL --connect-timeout 15 --max-time 300 https://code-server.dev/install.sh | sh -s -- --prefix=/usr/local \
+    && test -x /usr/local/bin/code-server \
     # === CLI Verification ===
     && test -f /usr/lib/node_modules/@qwen-code/qwen-code/cli.js \
     && test -x /usr/bin/qwen-code-webui \
@@ -172,6 +172,12 @@ COPY --chown=open-ace:open-ace . .
 
 # Copy frontend build output from frontend-builder stage (Issue #1260)
 COPY --from=frontend-builder --chown=open-ace:open-ace /app/static/js/dist ./static/js/dist
+
+# Patch qwen-code-webui "Allow All" permission for remote sessions:
+# the onAllowAll handler lacks the WebSocket branch, so remote-session
+# permission requests (requestId-only) never get answered and time out as
+# "denied". Script is version-pinned and fails the build on drift.
+RUN python3 /app/scripts/patch-qwen-webui-permission.py
 
 # Copy and set up entrypoint script
 COPY --chown=open-ace:open-ace docker-entrypoint.sh /usr/local/bin/
@@ -270,9 +276,9 @@ ENV PYTHONUNBUFFERED=1 \
 # Expose port
 EXPOSE 19888
 
-# Health check
+# Health check (Issue #2186: uses /readyz for actual health)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:19888/health')" || exit 1
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:19888/readyz')" || exit 1
 
 # Run the application
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
