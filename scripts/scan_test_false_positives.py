@@ -116,6 +116,60 @@ def _src_contains(lines: list[str], start_lineno: int, end_lineno: int, needle: 
     return any(needle in lines[i] for i in range(start, end))
 
 
+def _extract_and_validate_annotation(
+    lines: list[str], start_lineno: int, end_lineno: int, pattern_type: str, strict: bool = False
+) -> bool:
+    """Check if a valid annotation exists in the specified lines.
+
+    Args:
+        lines: Source code lines
+        start_lineno: Start line number (1-indexed)
+        end_lineno: End line number (1-indexed)
+        pattern_type: Type of annotation (e.g., "allow-no-assert")
+        strict: If True, validate annotation content; if False, just check existence
+
+    Returns:
+        True if a valid annotation is found, False otherwise
+    """
+    start = max(start_lineno - 1, 0)
+    end = min(end_lineno, len(lines))
+
+    # Find annotation marker
+    marker = f"# {pattern_type}"
+    for i in range(start, end):
+        if marker in lines[i]:
+            if not strict:
+                # Non-strict mode: just check existence
+                return True
+
+            # Strict mode: extract and validate content
+            # Extract the part after the marker
+            line = lines[i]
+            marker_pos = line.find(marker)
+            annotation_content = line[marker_pos + len(marker) :].strip()
+
+            # Remove leading colon if present
+            if annotation_content.startswith(":"):
+                annotation_content = annotation_content[1:].strip()
+
+            # Validate content
+            if validate_annotation_content(annotation_content, pattern_type):
+                return True
+            else:
+                # Invalid annotation content
+                import warnings
+
+                warnings.warn(
+                    f"Invalid annotation content at line {i+1}: '{annotation_content}' "
+                    f"does not match any template for {pattern_type}",
+                    UserWarning,
+                    stacklevel=3,
+                )
+                return False
+
+    return False
+
+
 def _body_does_not_swallow(body: list[ast.stmt]) -> bool:
     """True if the except body surfaces the failure (does not silently swallow).
 
