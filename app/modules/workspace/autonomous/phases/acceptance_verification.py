@@ -12,13 +12,16 @@ Transitions:
                     or failed if the dev-round cap is exhausted
   indeterminate  -> paused (issue open; human provides missing evidence)
 
-Idempotent on (verification_merge_sha, issue_acceptance_hash): a re-entry that
-already reached ``confirmed`` for the same pair is a terminal no-op (no
-re-close, no re-comment).
+Idempotent on the confirmed result: a re-entry whose ``verification_status`` is
+already ``confirmed`` is a terminal no-op (no re-close, no re-comment). A new
+merge SHA or an edited issue (new ``issue_acceptance_hash``) re-runs the
+verifier naturally because the phase re-enters; full (merge_sha, hash) dedup
+of in-flight attempts is S5 polish.
 """
 
 from __future__ import annotations
 
+import dataclasses
 import fnmatch
 import json
 import time
@@ -37,6 +40,11 @@ VERIFIED_BY = "acceptance-verifier-v1"
 
 def _now_iso() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def _snapshot_to_json(snapshot: AcceptanceSnapshot) -> str:
+    """Full snapshot (incl. source/confidence) for round-trip persistence."""
+    return json.dumps(dataclasses.asdict(snapshot), ensure_ascii=False)
 
 
 def _glob_matches(pattern: str, paths: list[str]) -> str | None:
@@ -216,9 +224,12 @@ def handle(ctx, deps) -> PhaseResult:
     common_patch = {
         "verification_status": status,
         "verification_merge_sha": merge_sha,
+        "verification_started_at": wf.get("verification_started_at") or _now_iso(),
         "verification_completed_at": _now_iso(),
         "verification_report": json.dumps(report, ensure_ascii=False),
-        "issue_acceptance_snapshot": json.dumps(snapshot.to_canonical(), ensure_ascii=False),
+        # Persist the FULL snapshot (incl. source/confidence) so a reload
+        # round-trips; only the hash is canonicalized to content-only (#2335).
+        "issue_acceptance_snapshot": _snapshot_to_json(snapshot),
         "issue_acceptance_hash": snap_hash,
         "verified_by": VERIFIED_BY,
         "verification_attempt": (wf.get("verification_attempt") or 0) + 1,

@@ -164,3 +164,22 @@ def test_closed_issue_reopened_when_not_confirmed():
     deps.host.run_verification_agent.return_value = {"verdicts": [], "snapshot": None}
     av.handle(_ctx(wf), deps)
     deps.gh.reopen_issue.assert_called_once_with(42)  # reopen guard fires before verifying
+
+
+def test_snapshot_persistence_round_trips_source_and_confidence():
+    # Regression for review finding #3: the persisted snapshot must preserve
+    # source/confidence on reload (only the hash is content-canonicalized).
+    import json
+
+    from app.modules.workspace.autonomous.acceptance_snapshot import (
+        AcceptanceSnapshot,
+        parse_acceptance_snapshot,
+    )
+    from app.modules.workspace.autonomous.phases.acceptance_verification import _snapshot_to_json
+
+    snap = parse_acceptance_snapshot("## Scope\n- `app/x.py`\n## 验收标准\n- [ ] one\n")
+    assert snap.source == "convention" and snap.confidence == "high"
+    reloaded = AcceptanceSnapshot(**json.loads(_snapshot_to_json(snap)))
+    assert reloaded.source == "convention"
+    assert reloaded.confidence == "high"
+    assert reloaded.required_paths == ["app/x.py"]
