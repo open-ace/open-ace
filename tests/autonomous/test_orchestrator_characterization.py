@@ -318,14 +318,14 @@ class TestPhaseTransitionContract:
     silently change the transition graph."""
 
     def test_phase_order_is_canonical_sequence(self):
-        assert [
+        assert PHASE_ORDER == [
             "preparation",
             "planning",
             "development",
             "pr_review",
             "report",
             "merge",
-        ] == PHASE_ORDER
+        ]
 
     def test_every_phase_has_a_status_mapping(self):
         # A phase without a status mapping would make the commit entrypoint's
