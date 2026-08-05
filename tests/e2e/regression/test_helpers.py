@@ -43,12 +43,77 @@ def create_browser_context(p):
     return browser, context
 
 
+def dismiss_force_change_password_modal(page: Page, new_password: str = "Admin1234!"):
+    """
+    处理强制修改密码弹窗（ForceChangePasswordModal）。
+
+    默认 admin 用户首次登录时 must_change_password=true，会弹出不可关闭的
+    强制改密弹窗。本函数检测该弹窗并自动完成改密流程，避免阻塞后续测试。
+
+    改密成功后更新模块级 PASSWORD 变量，使后续 login() 调用使用新密码。
+
+    Args:
+        page: Playwright 页面对象
+        new_password: 新密码（需满足密码策略，默认 Admin1234!）
+    """
+    global PASSWORD
+    from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+
+    try:
+        # 等待弹窗出现（最多 5 秒）
+        modal = page.locator('div[role="dialog"]')
+        modal.wait_for(state="visible", timeout=5000)
+    except PlaywrightTimeoutError:
+        # 没有弹窗，正常情况
+        return
+
+    # 弹窗内三个密码输入框通过 placeholder 定位
+    current_pw_input = page.locator(
+        'div[role="dialog"] input[placeholder="Enter current password"],'
+        'div[role="dialog"] input[placeholder="输入当前密码"]'
+    )
+    new_pw_input = page.locator(
+        'div[role="dialog"] input[placeholder="Enter new password"],'
+        'div[role="dialog"] input[placeholder="输入新密码"]'
+    )
+    confirm_pw_input = page.locator(
+        'div[role="dialog"] input[placeholder="Confirm password"],'
+        'div[role="dialog"] input[placeholder="确认密码"]'
+    )
+
+    # 填写改密表单
+    current_pw_input.fill(PASSWORD)
+    new_pw_input.fill(new_password)
+    confirm_pw_input.fill(new_password)
+
+    # 点击改密按钮
+    change_btn = page.locator(
+        'div[role="dialog"] button:has-text("Change Password"),'
+        'div[role="dialog"] button:has-text("修改密码")'
+    )
+    change_btn.click()
+
+    # 等待弹窗消失
+    try:
+        modal.wait_for(state="hidden", timeout=15000)
+    except PlaywrightTimeoutError:
+        save_screenshot(page, "login", "force_change_password_failed")
+        raise AssertionError(
+            "Force change password modal did not close after submission. "
+            "Check if the new password meets the password policy."
+        )
+
+    # 更新全局密码，后续 login() 使用新密码
+    PASSWORD = new_password
+
+
 def login(page: Page):
     """
     登录函数 - 使用优化的等待策略
 
     避免使用 networkidle，改用 domcontentloaded 和显式等待。
     Includes retry logic for page.goto to handle transient server slowness.
+    Handles the ForceChangePasswordModal that appears for default admin user.
     """
     from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
@@ -103,6 +168,9 @@ def login(page: Page):
                 f"Login did not redirect after 120s. Still on {current_url}. "
                 f"Check if credentials are correct or server is responsive. Error: {e}"
             ) from e
+
+    # 处理强制修改密码弹窗（默认 admin 用户首次登录后会出现）
+    dismiss_force_change_password_modal(page)
 
 
 def navigate_to(page: Page, path: str):

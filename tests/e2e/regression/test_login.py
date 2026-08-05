@@ -23,9 +23,11 @@ from playwright.sync_api import TimeoutError, sync_playwright
 from tests.e2e.regression.test_helpers import (
     BASE_URL,
     PAGE_LOAD_TIMEOUT_MS,
+    PASSWORD,
     TestRunner,
     check_element_exists,
     create_browser_context,
+    dismiss_force_change_password_modal,
     save_screenshot,
 )
 
@@ -63,6 +65,8 @@ def test_login_page_loads():
 
 def test_login_success():
     """测试正确凭据登录成功"""
+    import tests.e2e.regression.test_helpers as helpers
+
     with sync_playwright() as p:
         browser, context = create_browser_context(p)
         page = context.new_page()
@@ -77,7 +81,7 @@ def test_login_success():
 
             # 输入凭据
             page.fill("#username", "admin")
-            page.fill("#password", "admin123")
+            page.fill("#password", helpers.PASSWORD)
             page.click('button[type="submit"]')
 
             # 等待登录成功（bcrypt rounds=12 可能很慢）
@@ -131,6 +135,8 @@ def test_login_failure():
 
 def test_logout():
     """测试登出功能"""
+    import tests.e2e.regression.test_helpers as helpers
+
     with sync_playwright() as p:
         browser, context = create_browser_context(p)
         page = context.new_page()
@@ -144,7 +150,7 @@ def test_logout():
             )
             page.wait_for_selector("#username", state="visible", timeout=10000)
             page.fill("#username", "admin")
-            page.fill("#password", "admin123")
+            page.fill("#password", helpers.PASSWORD)
             page.click('button[type="submit"]')
             try:
                 page.wait_for_url(lambda url: "/login" not in url, timeout=120000)
@@ -153,6 +159,9 @@ def test_logout():
                     raise AssertionError(
                         f"Login did not redirect after 120s during logout test. Error: {e}"
                     ) from e
+
+            # Handle force change password modal (default admin has must_change_password=true)
+            dismiss_force_change_password_modal(page)
 
             # Issue #2189: Logout button is inside a dropdown menu
             # Need to first click the user avatar to open the dropdown
