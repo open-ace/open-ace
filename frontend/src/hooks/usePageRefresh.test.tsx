@@ -128,7 +128,7 @@ describe('usePageRefresh', () => {
   });
 
   describe('refresh', () => {
-    it('should call refresh function', async () => {
+    it('should call onRefresh even when no React Query cache entries match', async () => {
       const wrapper = createWrapper();
       const onRefresh = vi.fn();
 
@@ -146,7 +146,96 @@ describe('usePageRefresh', () => {
         await result.current.refresh();
       });
 
-      // Note: onRefresh might not be called if there are no matching queries in cache
+      // onRefresh should be called even without matching React Query cache entries
+      expect(onRefresh).toHaveBeenCalledTimes(1);
+      expect(result.current.isRefreshing).toBe(false);
+    });
+
+    it('should call recordRefresh when onRefresh is called without matching queries', async () => {
+      const wrapper = createWrapper();
+      const onRefresh = vi.fn();
+
+      const { result } = renderHook(
+        () =>
+          usePageRefresh({
+            page: '/manage/test-record-refresh',
+            refreshKey: createMatcherConfig([['nonexistent_cache_key']], 'prefix'),
+            onRefresh,
+          }),
+        { wrapper }
+      );
+
+      await act(async () => {
+        await result.current.refresh();
+      });
+
+      // Verify lastRefreshTime is updated after manual refresh with onRefresh
+      await waitFor(() => {
+        const config = usePageRefreshStore.getState().configs['/manage/test-record-refresh'];
+        expect(config?.lastRefreshTime).not.toBeNull();
+      });
+      expect(result.current.isRefreshing).toBe(false);
+    });
+
+    it('should record failure when onRefresh callback throws', async () => {
+      const wrapper = createWrapper();
+      const onRefresh = vi.fn().mockRejectedValue(new Error('API error'));
+
+      const { result } = renderHook(
+        () =>
+          usePageRefresh({
+            page: '/manage/test-onrefresh-error',
+            refreshKey: createMatcherConfig([['nonexistent_cache_key']], 'prefix'),
+            onRefresh,
+          }),
+        { wrapper }
+      );
+
+      await act(async () => {
+        await result.current.refresh();
+      });
+
+      await waitFor(() => {
+        const config = usePageRefreshStore.getState().configs['/manage/test-onrefresh-error'];
+        expect(config?.lastError).toBe('API error');
+        expect(config?.errorCount).toBeGreaterThanOrEqual(1);
+      });
+    });
+
+    it('should not double-call recordRefresh when both React Query and onRefresh succeed', async () => {
+      // Use a shared QueryClient accessible from the test
+      const queryClient = new QueryClient({
+        defaultOptions: { queries: { retry: false, gcTime: 0 } },
+      });
+      const wrapper = ({ children }: { children: React.ReactNode }) => (
+        <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+      );
+      const onRefresh = vi.fn();
+
+      // Pre-populate a query in the cache to create matching keys
+      queryClient.setQueryData(['admin', 'test-double'], { data: 'test' });
+
+      const { result } = renderHook(
+        () =>
+          usePageRefresh({
+            page: '/manage/test-double-refresh',
+            refreshKey: createMatcherConfig([['admin']], 'prefix'),
+            onRefresh,
+          }),
+        { wrapper }
+      );
+
+      await act(async () => {
+        await result.current.refresh();
+      });
+
+      expect(onRefresh).toHaveBeenCalledTimes(1);
+      // Verify no double record: lastRefreshTime set once with success
+      await waitFor(() => {
+        const config = usePageRefreshStore.getState().configs['/manage/test-double-refresh'];
+        expect(config?.lastRefreshTime).not.toBeNull();
+        expect(config?.errorCount).toBe(0);
+      });
       expect(result.current.isRefreshing).toBe(false);
     });
   });
