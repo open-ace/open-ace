@@ -16,6 +16,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import uuid
@@ -119,6 +120,27 @@ COMPLETION_KEYWORDS = [
 ]
 
 # ── Framework inference for test detection (Phase 1, P0) ────────────────
+
+
+def _remove_worktree_dir(gh, path: str) -> None:
+    """Best-effort removal of a (possibly registered) worktree dir (#2335 S5).
+
+    Tries ``git worktree remove --force`` when a GitHubOps handle is available
+    (unregisters the worktree from the repo's metadata), then falls back to a
+    filesystem ``shutil.rmtree``. Never raises — this runs in cleanup paths.
+    """
+    if not path:
+        return
+    if gh is not None:
+        try:
+            gh._run_git(["worktree", "remove", path, "--force"])
+        except Exception:
+            pass
+    try:
+        if os.path.isdir(path):
+            shutil.rmtree(path, ignore_errors=True)
+    except Exception:
+        pass
 
 
 def _infer_test_framework(project_path: str, cli_tool: str) -> str:
@@ -613,6 +635,10 @@ PHASE_STATUS_MAP = {
 # after this many rounds a persistent rejection fails the workflow rather than
 # looping forever.
 MAX_ACCEPTANCE_DEV_ROUNDS = 3
+
+# Acceptance verifier identity (#2335). ``verified_by`` stamps the runner
+# version + the model so a verification report records which agent produced it.
+VERIFIER_RUNNER_VERSION = "acceptance-verifier-v1"
 
 # CI check polling configuration.
 # After a PR is created or code is pushed, CI checks may still be pending.
@@ -5891,32 +5917,90 @@ class AutonomousOrchestrator:
             # Fail open: if we can't tell, don't spuriously reopen.
             return True
 
+    def _checkout_merged_main(self, merge_sha: str) -> str | None:
+        """Create a throwaway worktree of ``main`` at ``merge_sha`` (#2335 S5).
+
+        The verifier must NOT run in the workflow's dev worktree (which holds
+        the PR branch / uncommitted state). Instead it gets a fresh detached
+        checkout of the merged commit so acceptance is judged against the
+        actual merged code, not the development tree.
+
+        Returns the path to the temp worktree, or ``None`` on any failure (the
+        caller treats ``None`` as fail-safe: empty verdicts -> indeterminate).
+        """
+        if not merge_sha:
+            return None
+        gh = self._get_gh()
+        if gh is None:
+            return None
+        tmp_dir = tempfile.mkdtemp(prefix="ace-verify-")
+        try:
+            # Detached HEAD at the merge commit: a read-only throwaway view.
+            gh._run_git(["worktree", "add", "--detach", tmp_dir, merge_sha])
+        except Exception:
+            logger.exception("acceptance verifier: failed to checkout merged main @ %s", merge_sha)
+            # Clean up the empty dir so no half-created state lingers.
+            _remove_worktree_dir(gh, tmp_dir)
+            return None
+        return tmp_dir
+
+    def _remove_verification_worktree(self, path: str | None) -> None:
+        """Best-effort cleanup of the merged-main checkout (#2335 S5).
+
+        Tries ``git worktree remove`` first (unregisters the worktree); falls
+        back to deleting the directory. Never raises — cleanup is in a finally.
+        """
+        if not path:
+            return
+        gh = self._get_gh()
+        _remove_worktree_dir(gh, path)
+
     def _run_verification_agent(
         self, *, snapshot, merge_sha, base_sha, issue_number, pr_number
     ) -> dict:
         """Spawn the independent acceptance verifier (#2335).
 
-        Credentialless isolated agent (session_line="verification") with
-        VERIFICATION_ALLOWED_TOOLS (read-only + Bash). It reads the merged code
-        + the acceptance snapshot/checklist and emits a JSON verdict block. On
-        any spawn/parse failure it returns empty verdicts, which aggregate to
-        ``indeterminate`` (pause) — never a false ``confirmed``.
+        Runs in a dedicated checkout of merged main (NOT the dev worktree) with
+        ``VERIFICATION_ALLOWED_TOOLS`` (read-only + Bash) via session_line
+        ``verification``. On any checkout/spawn/parse failure it returns empty
+        verdicts, which aggregate to ``indeterminate`` (pause) — never a false
+        ``confirmed``. The temp worktree is always cleaned up (try/finally).
         """
         wf = self.workflow or {}
         cli_tool = wf.get("cli_tool", "claude-code")
+        model = wf.get("model", "")
+        verified_by = f"{VERIFIER_RUNNER_VERSION}/{model}" if model else VERIFIER_RUNNER_VERSION
         prompt = self._build_verification_prompt(snapshot, merge_sha, base_sha, issue_number)
+
+        checkout_path = self._checkout_merged_main(merge_sha)
+        if not checkout_path:
+            return {"verdicts": [], "snapshot": None, "verified_by": verified_by}
         try:
+            # Spawn the agent against the merged-main checkout, NOT the dev
+            # worktree. We override worktree_path/project_path on a shallow
+            # copy so _resolve_effective_repo_context resolves to the checkout.
+            verify_wf = dict(wf)
+            verify_wf["worktree_path"] = checkout_path
+            verify_wf["project_path"] = checkout_path
+            verify_wf["branch_strategy"] = "worktree"
             result = self._run_agent(
-                wf,
+                verify_wf,
                 session_line="verification",
                 prompt=prompt,
                 allowed_tools=VERIFICATION_ALLOWED_TOOLS.get(cli_tool, []),
                 permission_mode="bypassPermissions",
+                cli_tool=cli_tool,
+                model=model,
+                project_path=checkout_path,
             )
         except Exception:
             logger.exception("acceptance verifier spawn failed for issue %s", issue_number)
-            return {"verdicts": [], "snapshot": None}
-        return self._parse_verifier_output(result)
+            return {"verdicts": [], "snapshot": None, "verified_by": verified_by}
+        finally:
+            self._remove_verification_worktree(checkout_path)
+        parsed = self._parse_verifier_output(result)
+        parsed["verified_by"] = verified_by
+        return parsed
 
     def _build_verification_prompt(self, snapshot, merge_sha, base_sha, issue_number) -> str:
         import json as _json
