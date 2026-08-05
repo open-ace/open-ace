@@ -57,6 +57,8 @@ class AlertCompensationWorker:
         self._total_retried = 0
         self._total_success = 0
         self._total_failed = 0
+        # Issue #1831: webhook deliveries retried by the delivery-state reaper.
+        self._total_deliveries_retried = 0
         self._initialized = True
         logger.info(
             f"AlertCompensationWorker initialized (interval: {COMPENSATION_INTERVAL_MIN} min)"
@@ -121,6 +123,7 @@ class AlertCompensationWorker:
                 "total_retried": self._total_retried,
                 "total_success": self._total_success,
                 "total_failed": self._total_failed,
+                "total_deliveries_retried": self._total_deliveries_retried,
             },
         }
 
@@ -128,10 +131,33 @@ class AlertCompensationWorker:
         """Main worker loop."""
         while not self._stop_event.is_set():
             self._process_failures()
+            # Issue #1831: advance webhook delivery retries each cycle too. A
+            # failure here must never abort the compensation loop.
+            self._process_due_deliveries()
             self._stop_event.wait(timeout=self._interval)
 
     def _process_failures(self):
-        """Process failed alert creations."""
+        """Process failed alert creations with distributed lock (Issue #2187)."""
+        import time
+
+        from app.repositories.database import Database
+        from app.services.leader_election import LeaderElectionClient
+
+        # Acquire distributed lock
+        db_local = Database()
+        lock_client = LeaderElectionClient(
+            "alert_compensation", db_local, strategy="heartbeat", lock_timeout=1800
+        )
+
+        if not lock_client.try_acquire_leadership():
+            logger.debug("Alert compensation skipped - not leader")
+            lock_client.record_run("skipped")
+            return
+
+        start_time = time.time()
+        process_status = "completed"
+        process_error = None
+
         self._last_run = datetime.now(timezone.utc).replace(tzinfo=None)
 
         try:
@@ -163,7 +189,32 @@ class AlertCompensationWorker:
                     logger.error(f"Error retrying alert failure {failure.id}: {e}")
 
         except Exception as e:
+            process_status = "failed"
+            process_error = str(e)
             logger.error(f"Error processing alert failures: {e}")
+
+        # Record execution and release lock
+        duration_ms = int((time.time() - start_time) * 1000)
+        lock_client.record_run(process_status, duration_ms, process_error)
+        lock_client.release_leadership()
+
+    def _process_due_deliveries(self) -> int:
+        """Retry due webhook deliveries via the alert notifier reaper (Issue #1831).
+
+        Returns the number of deliveries attempted. Isolated from the failure
+        queue so a reaper error can't break alert-creation compensation.
+        """
+        try:
+            from app.modules.governance.alert_notifier import get_alert_notifier
+
+            attempted = get_alert_notifier().process_due_deliveries()
+            if attempted:
+                self._total_deliveries_retried += attempted
+                logger.info(f"Retried {attempted} due webhook deliveries")
+            return attempted
+        except Exception as e:
+            logger.error(f"Error processing due webhook deliveries: {e}")
+            return 0
 
     def process_now(self) -> dict:
         """Process failures immediately (for manual trigger).

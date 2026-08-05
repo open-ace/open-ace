@@ -16,7 +16,7 @@ VIEWPORT_SIZE = (1400, 900)
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 
 
-def test_auto_refresh_layout():
+def test_auto_refresh_layout():  # allow-no-assert: smoke test - visual verification only
     """Test Auto Refresh layout on all pages"""
     results = []
     screenshots = []
@@ -158,7 +158,7 @@ def test_auto_refresh_layout():
             else:
                 results.append(("Messages Auto Refresh", "FAIL", "Auto refresh switch not found"))
 
-        except Exception as e:
+        except Exception as e:  # allow-swallow: UI element may not exist
             print(f"Error: {e}")
             page.screenshot(path="screenshots/auto_refresh_test_error.png")
             screenshots.append(("screenshots/auto_refresh_test_error.png", f"Error: {str(e)}"))

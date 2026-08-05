@@ -11,7 +11,6 @@ import os
 import platform
 import pwd
 import subprocess
-from typing import Any, cast
 
 from flask import Blueprint, g, jsonify, request
 
@@ -23,27 +22,16 @@ from app.auth.decorators import (
     require_tenant_scope,
     security_annotated,
 )
+from app.models.user import User
 from app.repositories.project_repo import ProjectRepository
 from app.repositories.user_repo import UserRepository
+from app.utils.request_context import get_current_tenant_id
 
 logger = logging.getLogger(__name__)
 
 projects_bp = Blueprint("projects", __name__)
 project_repo = ProjectRepository()
 user_repo = UserRepository()
-
-
-def _current_tenant_id() -> int | None:
-    """Return the current request's tenant scope, if any."""
-    user = getattr(g, "user", None) or {}
-    raw_tenant_id = cast("Any", user.get("tenant_id"))
-    if raw_tenant_id in (None, ""):
-        return None
-    try:
-        tenant_id = int(raw_tenant_id)
-    except (TypeError, ValueError):
-        return None
-    return tenant_id if tenant_id > 0 else None
 
 
 @projects_bp.before_request
@@ -93,7 +81,7 @@ def _authenticate_user():
 def _require_tenant_scope():
     """Fail closed for non-admins with no tenant (Issue #1775).
 
-    Without this gate, ``_current_tenant_id()`` returns ``None`` and the
+    Without this gate, ``get_current_tenant_id()`` returns ``None`` and the
     project repository treats it as a wildcard/global filter, leaking
     cross-tenant projects to a no-tenant non-admin. Admins keep global
     scope; tenant-scoped non-admins keep their tenant.
@@ -140,7 +128,7 @@ def run_as_user(system_account: str, command: list) -> subprocess.CompletedProce
 def api_get_projects():
     """Get projects accessible by current user."""
     user_id = g.user_id
-    tenant_id = _current_tenant_id()
+    tenant_id = get_current_tenant_id()
 
     # Non-admin without a tenant has no accessible projects — return an
     # empty list instead of falling through to the repository with
@@ -151,7 +139,7 @@ def api_get_projects():
     # (Issue #1859)
     if tenant_id is None:
         user = getattr(g, "user", None) or {}
-        if user.get("role") != "admin":
+        if not User.is_admin_role(user.get("role")):
             return jsonify({"success": True, "projects": []})
 
     # Get user's projects
@@ -175,7 +163,7 @@ def api_get_projects():
 def api_create_project():
     """Create a new project."""
     user_id = g.user_id
-    tenant_id = _current_tenant_id()
+    tenant_id = get_current_tenant_id()
     system_account = g.user.get("system_account") if g.user else None
     data = request.get_json() or {}
 
@@ -291,7 +279,7 @@ def api_create_project():
 @security_annotated(reason="Ownership via get_user_project + is_shared flag check")
 def api_get_project(project_id):
     """Get project details."""
-    tenant_id = _current_tenant_id()
+    tenant_id = get_current_tenant_id()
     project = project_repo.get_project_by_id(project_id, tenant_id=tenant_id)
     if not project:
         return jsonify({"error": "Project not found"}), 404
@@ -318,7 +306,7 @@ def api_get_project(project_id):
 @projects_bp.route("/projects/<int:project_id>", methods=["PUT"])
 def api_update_project(project_id):
     """Update project information."""
-    tenant_id = _current_tenant_id()
+    tenant_id = get_current_tenant_id()
     project = project_repo.get_project_by_id(project_id, tenant_id=tenant_id)
     if not project:
         return jsonify({"error": "Project not found"}), 404
@@ -327,7 +315,7 @@ def api_update_project(project_id):
     user_id = g.user_id
     user_role = g.user.get("role")
 
-    if project.created_by != user_id and user_role != "admin":
+    if project.created_by != user_id and not User.is_admin_role(user_role):
         return jsonify({"error": "Only project creator or admin can update"}), 403
 
     data = request.get_json() or {}
@@ -355,7 +343,7 @@ def api_update_project(project_id):
 @projects_bp.route("/projects/<int:project_id>", methods=["DELETE"])
 def api_delete_project(project_id):
     """Delete a project (soft delete)."""
-    tenant_id = _current_tenant_id()
+    tenant_id = get_current_tenant_id()
     project = project_repo.get_project_by_id(project_id, tenant_id=tenant_id)
     if not project:
         return jsonify({"error": "Project not found"}), 404
@@ -364,7 +352,7 @@ def api_delete_project(project_id):
     user_id = g.user_id
     user_role = g.user.get("role")
 
-    if project.created_by != user_id and user_role != "admin":
+    if project.created_by != user_id and not User.is_admin_role(user_role):
         return jsonify({"error": "Only project creator or admin can delete"}), 403
 
     # Soft delete
@@ -379,10 +367,10 @@ def api_delete_project(project_id):
 @projects_bp.route("/projects/stats", methods=["GET"])
 def api_get_all_project_stats():
     """Get statistics for all projects (admin only)."""
-    if g.user.get("role") != "admin":
+    if not User.is_admin_role(g.user.get("role")):
         return jsonify({"error": "Admin access required"}), 403
 
-    stats = project_repo.get_all_project_stats(tenant_id=_current_tenant_id())
+    stats = project_repo.get_all_project_stats(tenant_id=get_current_tenant_id())
 
     return jsonify(
         {
@@ -396,7 +384,7 @@ def api_get_all_project_stats():
 @security_annotated(reason="Ownership via get_user_project + is_shared + admin check")
 def api_get_project_daily_stats(project_id):
     """Get daily statistics for a project."""
-    tenant_id = _current_tenant_id()
+    tenant_id = get_current_tenant_id()
     project = project_repo.get_project_by_id(project_id, tenant_id=tenant_id)
     if not project:
         return jsonify({"error": "Project not found"}), 404
@@ -405,7 +393,7 @@ def api_get_project_daily_stats(project_id):
     user_id = g.user_id
     user_project = project_repo.get_user_project(user_id, project_id, tenant_id=tenant_id)
 
-    if not user_project and not project.is_shared and g.user.get("role") != "admin":
+    if not user_project and not project.is_shared and not User.is_admin_role(g.user.get("role")):
         return jsonify({"error": "Access denied"}), 403
 
     start_date = request.args.get("start_date")
@@ -429,7 +417,7 @@ def api_get_project_daily_stats(project_id):
 @projects_bp.route("/projects/<int:project_id>/users", methods=["GET"])
 def api_get_project_users(project_id):
     """Get users collaborating on a project."""
-    tenant_id = _current_tenant_id()
+    tenant_id = get_current_tenant_id()
     project = project_repo.get_project_by_id(project_id, tenant_id=tenant_id)
     if not project:
         return jsonify({"error": "Project not found"}), 404
@@ -438,7 +426,7 @@ def api_get_project_users(project_id):
     user_id = g.user_id
     user_project = project_repo.get_user_project(user_id, project_id, tenant_id=tenant_id)
 
-    if not user_project and not project.is_shared and g.user.get("role") != "admin":
+    if not user_project and not project.is_shared and not User.is_admin_role(g.user.get("role")):
         return jsonify({"error": "Access denied"}), 403
 
     user_stats = project_repo.get_project_users(project_id, tenant_id=tenant_id)

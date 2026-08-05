@@ -1,0 +1,187 @@
+# Open ACE - Scheduler Deployment
+# Issue #2187: Independent scheduler deployment with leader election
+#
+# This deployment runs the background schedulers (data fetch, quota enforcement,
+# autonomous, alert compensation, health monitor, SSO cleanup) in a separate pod.
+#
+# Key features:
+# - Leader election via database (scheduler_leaders table)
+# - 2 replicas for high availability (only one is active leader)
+# - Independent from web deployment (can scale separately)
+# - Metrics exposed on port 9090
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: open-ace-scheduler
+  namespace: open-ace
+  labels:
+    app.kubernetes.io/name: open-ace
+    app.kubernetes.io/component: scheduler
+spec:
+  replicas: 2  # Main + backup, leader election ensures only one is active
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: open-ace
+      app.kubernetes.io/component: scheduler
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1  # Only one pod can be down during update
+  template:
+    metadata:
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: "/metrics"
+      labels:
+        app.kubernetes.io/name: open-ace
+        app.kubernetes.io/component: scheduler
+    spec:
+      serviceAccountName: open-ace
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+      # Prevent multiple schedulers from running on same node
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: open-ace
+                    app.kubernetes.io/component: scheduler
+                topologyKey: kubernetes.io/hostname
+      containers:
+        - name: scheduler
+          image: openace/open-ace:latest
+          imagePullPolicy: Always
+          command: ["python", "-m", "app.scheduler_worker"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
+          ports:
+            - name: metrics
+              containerPort: 9090
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: open-ace-config
+            - secretRef:
+                name: open-ace-secrets
+          env:
+            - name: SCHEDULER_MODE
+              value: "scheduler"
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: HOME
+              value: /home/open-ace
+            - name: OPENACE_CONFIG_DIR
+              value: /home/open-ace/.open-ace
+            # Scheduler-specific configuration
+            - name: SCHEDULER_HEARTBEAT_INTERVAL
+              value: "10"
+            - name: SCHEDULER_HEARTBEAT_TIMEOUT
+              value: "60"
+            - name: SCHEDULER_LOCK_TIMEOUT
+              value: "1800"
+            - name: SCHEDULER_METRICS_PORT
+              value: "9090"
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: metrics
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: metrics
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          volumeMounts:
+            - name: data
+              mountPath: /workspace
+              subPath: workspace
+            - name: logs
+              mountPath: /app/logs
+            - name: tmp
+              mountPath: /tmp
+            - name: agent-tasks
+              mountPath: /run/openace-agent-tasks
+            - name: config
+              mountPath: /home/open-ace/.open-ace
+              subPath: config
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: open-ace-data
+        - name: logs
+          emptyDir: {}
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 64Mi
+        - name: agent-tasks
+          emptyDir: {}
+        - name: config
+          persistentVolumeClaim:
+            claimName: open-ace-data
+      # Priority class to prevent eviction
+      priorityClassName: open-ace-scheduler
+      tolerations:
+        - key: "node-role.kubernetes.io/master"
+          operator: "Exists"
+          effect: "NoSchedule"
+
+---
+# PriorityClass for scheduler (prevents eviction)
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: open-ace-scheduler
+  namespace: open-ace
+value: 1000000
+globalDefault: false
+description: "High priority for scheduler pods to prevent eviction"
+
+---
+# PodDisruptionBudget for scheduler (ensures availability during node maintenance)
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: open-ace-scheduler
+  namespace: open-ace
+spec:
+  minAvailable: 1  # At least one scheduler must be running
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: open-ace
+      app.kubernetes.io/component: scheduler

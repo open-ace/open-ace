@@ -53,7 +53,7 @@ def test_page_loads():
             assert check_element_exists(page, main_selectors), "主内容区域应存在"
 
             save_screenshot(page, MODULE_NAME, "01_page_load")
-            return True
+
         finally:
             browser.close()
 
@@ -73,7 +73,7 @@ def test_stat_cards_display():
             assert check_element_exists(page, card_selectors), "统计卡片应存在"
 
             save_screenshot(page, MODULE_NAME, "02_stat_cards")
-            return True
+
         finally:
             browser.close()
 
@@ -94,7 +94,7 @@ def test_trend_chart_render():
             assert check_element_exists(page, chart_selectors), "图表应存在"
 
             save_screenshot(page, MODULE_NAME, "03_trend_chart")
-            return True
+
         finally:
             browser.close()
 
@@ -116,18 +116,13 @@ def test_refresh_functionality():
                 "button:has(.bi-arrow-clockwise)",
             ]
             if check_element_exists(page, refresh_selectors):
-                try:
-                    refresh_btn = page.locator(
-                        refresh_selectors[0] + ", " + refresh_selectors[1]
-                    ).first
-                    if refresh_btn.is_visible():
-                        refresh_btn.click()
-                        page.wait_for_timeout(1000)
-                except Exception:
-                    pass
+                refresh_btn = page.locator(refresh_selectors[0] + ", " + refresh_selectors[1]).first
+                assert refresh_btn.is_visible(), "refresh_btn not visible (Issue #2189)"
+                refresh_btn.click()
+                page.wait_for_timeout(1000)
 
             save_screenshot(page, MODULE_NAME, "04_refresh")
-            return True
+
         finally:
             browser.close()
 
@@ -152,7 +147,7 @@ def test_today_usage_section():
             assert check_element_exists(page, today_selectors), "今日用量区域应存在"
 
             save_screenshot(page, MODULE_NAME, "05_today_usage")
-            return True
+
         finally:
             browser.close()
 

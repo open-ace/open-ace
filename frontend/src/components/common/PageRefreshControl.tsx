@@ -266,7 +266,8 @@ export const PageRefreshControl: React.FC<PageRefreshControlProps> = ({
           /* Static clock icon when no dropdown content - shows last refresh time tooltip */
           <i
             className={cn('bi bi-clock-history', 'text-muted')}
-            title={buildTooltip()}
+            style={{ fontSize: '0.875rem' }}
+            title={buildTooltip() || undefined}
             data-testid="refresh-clock-icon"
           />
         )}

@@ -1,0 +1,113 @@
+# SSH 密钥同步白名单配置
+# 路径：/etc/openace/ssh_sync_allowlist.yaml
+#
+# 该配置文件定义允许从 /root/.ssh 同步到用户 ~/.ssh 的文件。
+# 默认情况下，只有 known_hosts 等安全文件会被同步。
+#
+# 关联 Issue: #2182
+
+# 允许同步的文件列表
+allowlist:
+  # 默认白名单（已知主机列表）
+  - name: "known_hosts"
+    type: "known_hosts"
+    content_check: false
+    description: "已知主机列表"
+
+  - name: "known_hosts.old"
+    type: "known_hosts"
+    content_check: false
+    description: "known_hosts 备份"
+
+  - name: "known_hosts.old.*"
+    type: "known_hosts"
+    content_check: false
+    description: "known_hosts 历史备份"
+
+  # 示例：允许公司公钥同步（需要安全评审）
+  # - name: "company_*.pub"
+  #   type: "public_key"
+  #   content_check: true
+  #   max_size: 1MB
+  #   approval_required: true
+  #   security_review:
+  #     reviewed_by: "security-team"  # 必须在授权列表中
+  #     reviewed_at: "2024-01-15"
+  #     review_notes: "允许公司公钥同步"
+
+  # 示例：允许安全的 SSH 配置片段（需要安全评审）
+  # - name: "safe_config_fragment"
+  #   type: "config_fragment"
+  #   content_check: true
+  #   approval_required: true
+  #   allowed_patterns:
+  #     - "Host *.example.com"
+  #     - "User *"
+  #   denied_patterns:
+  #     - "IdentityFile"
+  #     - "PrivateKey"
+  #   security_review:
+  #     reviewed_by: "security-team"
+  #     reviewed_at: "2024-01-15"
+  #     review_notes: "仅允许非敏感配置片段"
+
+# 禁止清单（强制，不可配置）
+# 以下文件类型绝对禁止同步，即使在 allowlist 中配置也会被拒绝
+denylist_patterns:
+  # 私钥文件
+  - "id_rsa"
+  - "id_dsa"
+  - "id_ecdsa"
+  - "id_ed25519"
+  - "id_*"
+  - "*_rsa"
+  - "*_dsa"
+  - "*_ecdsa"
+  - "*_ed25519"
+
+  # 证书/密钥文件
+  - "*.pem"
+  - "*.key"
+  - "*.p12"
+  - "*.pfx"
+
+  # Socket 文件
+  - "*.socket"
+  - "agent.*"
+  - "control_*"
+
+  # Token 文件
+  - "token_*"
+  - "*.token"
+
+  # SSH 配置文件（默认禁止）
+  - "config"
+  - "config_*"
+
+# 升级处理策略
+# warn: 仅告警，不删除 legacy 私钥
+# backup: 备份到 ~/.ssh/legacy_backup_YYYYMMDD_HHMMSS/，然后删除
+# delete: 直接删除（仅删除内容指纹匹配的文件）
+upgrade_action: "backup"
+
+# 审计日志配置
+audit_log:
+  path: "/var/log/openace/ssh-sync.log"
+  max_size: 100MB
+  retention_days: 30
+  rotation: "daily"
+  compression: true
+
+# 可选：审计日志远程备份
+# backup:
+#   enabled: true
+#   remote_url: "s3://logs-bucket/ssh-sync/"
+#   sync_interval: "5m"
+
+# 安全评审配置
+security_review:
+  # 评审有效期（天）
+  validity_days: 365
+
+  # 授权评审人员列表（从另一个文件加载）
+  # authorized_reviewers_file: "/etc/openace/authorized_reviewers.yaml"

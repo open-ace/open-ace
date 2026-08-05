@@ -27,13 +27,19 @@ class TestFailClosedBehavior:
     @pytest.fixture
     def mock_service(self):
         """Create mock APIKeyProxyService."""
+        # Issue #1820: Reset EncryptionKeyRegistry before setting new key
+        from app.utils.encryption_key_registry import reset_registry
+
+        reset_registry()
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = os.path.join(tmpdir, "test.db")
             with patch.dict(
-                os.environ, {"OPENACE_ENCRYPTION_KEY": "test-key-12345678901234567890"}
+                os.environ, {"OPENACE_ENCRYPTION_KEY": "test-key-12345678901234567890123"}
             ):
                 service = APIKeyProxyService(db_path=db_path)
                 yield service
+        # Issue #1820: Reset EncryptionKeyRegistry after test
+        reset_registry()
 
     def test_session_allows_proxy_token_db_connection_error_returns_false(self, mock_service):
         """Test that DB connection error causes token rejection (fail-closed)."""
@@ -113,13 +119,19 @@ class TestConnectionPool:
     @pytest.fixture
     def mock_service(self):
         """Create mock APIKeyProxyService."""
+        # Issue #1820: Reset EncryptionKeyRegistry before setting new key
+        from app.utils.encryption_key_registry import reset_registry
+
+        reset_registry()
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = os.path.join(tmpdir, "test.db")
             with patch.dict(
-                os.environ, {"OPENACE_ENCRYPTION_KEY": "test-key-12345678901234567890"}
+                os.environ, {"OPENACE_ENCRYPTION_KEY": "test-key-12345678901234567890123"}
             ):
                 service = APIKeyProxyService(db_path=db_path)
                 yield service
+        # Issue #1820: Reset EncryptionKeyRegistry after test
+        reset_registry()
 
     def test_validate_proxy_token_uses_single_connection(self, mock_service):
         """Test that validate_proxy_token uses single connection for all queries."""
@@ -155,13 +167,19 @@ class TestProxyTokenCleanup:
     @pytest.fixture
     def mock_service(self):
         """Create mock APIKeyProxyService."""
+        # Issue #1820: Reset EncryptionKeyRegistry before setting new key
+        from app.utils.encryption_key_registry import reset_registry
+
+        reset_registry()
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = os.path.join(tmpdir, "test.db")
             with patch.dict(
-                os.environ, {"OPENACE_ENCRYPTION_KEY": "test-key-12345678901234567890"}
+                os.environ, {"OPENACE_ENCRYPTION_KEY": "test-key-12345678901234567890123"}
             ):
                 service = APIKeyProxyService(db_path=db_path)
                 yield service
+        # Issue #1820: Reset EncryptionKeyRegistry after test
+        reset_registry()
 
     def test_cleanup_deletes_expired_records(self, mock_service):
         """Test that cleanup deletes expired records."""
@@ -367,13 +385,19 @@ class TestTTLConfiguration:
     @pytest.fixture
     def mock_service(self):
         """Create mock APIKeyProxyService."""
+        # Issue #1820: Reset EncryptionKeyRegistry before setting new key
+        from app.utils.encryption_key_registry import reset_registry
+
+        reset_registry()
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = os.path.join(tmpdir, "test.db")
             with patch.dict(
-                os.environ, {"OPENACE_ENCRYPTION_KEY": "test-key-12345678901234567890"}
+                os.environ, {"OPENACE_ENCRYPTION_KEY": "test-key-12345678901234567890123"}
             ):
                 service = APIKeyProxyService(db_path=db_path)
                 yield service
+        # Issue #1820: Reset EncryptionKeyRegistry after test
+        reset_registry()
 
     def test_ha_pool_ttl_respects_env_variable(self, mock_service):
         """Test that ha_pool TTL respects environment variable."""
@@ -393,7 +417,8 @@ class TestTTLConfiguration:
             payload = json.loads(b64decode(payload_b64))
 
             exp_time = datetime.fromisoformat(payload["exp"])
-            now = datetime.now(timezone.utc).replace(tzinfo=None)
+            # Use local time to match generate_proxy_token behavior
+            now = datetime.now()
 
             # Should be approximately 60 minutes from now (allow 1 minute tolerance)
             ttl_minutes = (exp_time - now).total_seconds() / 60
@@ -423,7 +448,8 @@ class TestTTLConfiguration:
             payload = json.loads(b64decode(payload_b64))
 
             exp_time = datetime.fromisoformat(payload["exp"])
-            now = datetime.now(timezone.utc).replace(tzinfo=None)
+            # Use local time to match generate_proxy_token behavior
+            now = datetime.now()
 
             # Should use default 240 minutes
             ttl_minutes = (exp_time - now).total_seconds() / 60

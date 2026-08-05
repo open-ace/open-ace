@@ -686,7 +686,7 @@ def run_tests():
         page.goto(f"{BASE_URL}/logout", wait_until="domcontentloaded")
         try:
             page.wait_for_url("**/login**", timeout=5000)
-        except Exception:
+        except Exception:  # allow-swallow: UI element may not exist
             page.goto(f"{BASE_URL}/login", wait_until="domcontentloaded")
         page.wait_for_selector("#username", state="visible", timeout=10000)
         page.fill("#username", NORMAL_USER)

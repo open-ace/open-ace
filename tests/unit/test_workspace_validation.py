@@ -50,7 +50,7 @@ class TestProjectPathValidation:
         with self._mock_auth(mock_user):
             with app.test_client() as client:
                 with patch("app.routes.workspace.get_session_manager") as mock_manager:
-                    with patch("app.routes.workspace._current_tenant_id", return_value=1):
+                    with patch("app.routes.workspace.get_current_tenant_id", return_value=1):
                         mock_session = MagicMock()
                         mock_session.to_dict.return_value = {"id": "test-session-id"}
                         mock_manager.return_value.create_session.return_value = mock_session
@@ -83,7 +83,7 @@ class TestProjectPathValidation:
 
         with self._mock_auth(mock_user):
             with app.test_client() as client:
-                with patch("app.routes.workspace._current_tenant_id", return_value=1):
+                with patch("app.routes.workspace.get_current_tenant_id", return_value=1):
                     for path in blacklisted_paths:
                         response = client.post(
                             "/api/workspace/sessions",
@@ -107,7 +107,7 @@ class TestProjectPathValidation:
 
         with self._mock_auth(mock_user):
             with app.test_client() as client:
-                with patch("app.routes.workspace._current_tenant_id", return_value=1):
+                with patch("app.routes.workspace.get_current_tenant_id", return_value=1):
                     for path in traversal_paths:
                         response = client.post(
                             "/api/workspace/sessions",
@@ -129,7 +129,7 @@ class TestProjectPathValidation:
 
         with self._mock_auth(mock_user):
             with app.test_client() as client:
-                with patch("app.routes.workspace._current_tenant_id", return_value=1):
+                with patch("app.routes.workspace.get_current_tenant_id", return_value=1):
                     for path in relative_paths:
                         response = client.post(
                             "/api/workspace/sessions",
@@ -146,7 +146,7 @@ class TestProjectPathValidation:
         with self._mock_auth(mock_user):
             with app.test_client() as client:
                 with patch("app.routes.workspace.get_session_manager") as mock_manager:
-                    with patch("app.routes.workspace._current_tenant_id", return_value=1):
+                    with patch("app.routes.workspace.get_current_tenant_id", return_value=1):
                         mock_session = MagicMock()
                         mock_session.to_dict.return_value = {"id": "test-session-id"}
                         mock_manager.return_value.create_session.return_value = mock_session
@@ -172,7 +172,7 @@ class TestProjectPathValidation:
         """Error message should not disclose system path list."""
         with self._mock_auth(mock_user):
             with app.test_client() as client:
-                with patch("app.routes.workspace._current_tenant_id", return_value=1):
+                with patch("app.routes.workspace.get_current_tenant_id", return_value=1):
                     response = client.post(
                         "/api/workspace/sessions",
                         json={"tool_name": "test-tool", "project_path": "/etc/passwd"},
@@ -197,7 +197,7 @@ class TestProjectPathValidation:
         # Simulate URL with query parameter injection attempt
         with self._mock_auth(mock_user):
             with app.test_client() as client:
-                with patch("app.routes.workspace._current_tenant_id", return_value=1):
+                with patch("app.routes.workspace.get_current_tenant_id", return_value=1):
                     # Attempt to inject path via JSON body
                     response = client.post(
                         "/api/workspace/sessions?projectPath=/etc",

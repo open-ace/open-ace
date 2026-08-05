@@ -592,12 +592,18 @@ chmod -R 755 ~/.open-ace/
 
 ## Security Considerations
 
-1. **Authentication**: Enable user authentication in production
-2. **HTTPS**: Use reverse proxy (nginx/Apache) with SSL
-3. **Firewall**: Restrict access to port 19888
-4. **Secrets**: Use environment variables or a secret manager for sensitive data
-5. **Dedicated encryption key**: Set `OPENACE_ENCRYPTION_KEY` explicitly; encrypted secret storage no longer derives from `SECRET_KEY`
-6. **No placeholder secrets**: Do not use the following placeholder values in production:
+1. **Security Mode**: Must explicitly set `OPENACE_SECURITY_MODE` (Issue #2185)
+   - `production`: Enforce security checks. Secrets must be explicitly set. Weak passwords forbidden.
+   - `pilot`: Allow auto-generated secrets with strong warnings. Suitable for trial environments.
+   - `development`: Allow auto-generated secrets with general warnings. Suitable for development.
+   - **Important**: The system no longer silently falls back to a default mode. Explicit configuration required.
+
+2. **Authentication**: Enable user authentication in production
+3. **HTTPS**: Use reverse proxy (nginx/Apache) with SSL
+4. **Firewall**: Restrict access to port 19888
+5. **Secrets**: Use environment variables or a secret manager for sensitive data
+6. **Dedicated encryption key**: Set `OPENACE_ENCRYPTION_KEY` explicitly; encrypted secret storage no longer derives from `SECRET_KEY`
+7. **No placeholder secrets**: Do not use the following placeholder values in production:
    - `change-me-in-production`
    - `replace-with-random-*` (k8s manifest placeholders)
    - Development placeholders like `dev-secret-key`, `dev-smtp-password-key`, `default-secret-key`
@@ -634,20 +640,43 @@ Add the following content:
 ```bash
 # Allow open-ace service account to run qwen-code-webui as any user
 # Replace 'open-ace' with your actual service account name
+# Note: Python layer validates target user is in database mapping at WebUI startup
 
 open-ace ALL=(ALL) NOPASSWD: /usr/local/bin/qwen-code-webui *
 open-ace ALL=(ALL) NOPASSWD: /usr/bin/qwen-code-webui *
 open-ace ALL=(ALL) NOPASSWD: /opt/qwen-code-webui/bin/qwen-code-webui *
 
-# Allow open-ace to perform file system operations as other users
-# Required for directory browser and project creation in multi-user mode
-open-ace ALL=(ALL) NOPASSWD: /usr/bin/test, /usr/bin/ls, /usr/bin/cat, /usr/bin/stat, /usr/bin/mkdir
+# 【Issue #2181 Security Hardening】Low-risk utility commands
+# Removed cat/chown/useradd/rm wildcards, replaced with secure wrappers
+open-ace ALL=(root) NOPASSWD: /usr/bin/test *, /usr/bin/ls *, /usr/bin/stat *, /usr/bin/mkdir *, /usr/bin/id *, /usr/bin/find *
+
+# 【Issue #2181】Secure wrapper rules
+# These wrappers validate paths, users, and permissions internally
+open-ace ALL=(root) NOPASSWD: /usr/local/bin/openace-chown *
+open-ace ALL=(root) NOPASSWD: /usr/local/bin/openace-useradd *
+open-ace ALL=(root) NOPASSWD: /usr/local/bin/openace-cat *
+open-ace ALL=(root) NOPASSWD: /usr/local/bin/openace-mkdir *
+open-ace ALL=(root) NOPASSWD: /usr/local/bin/openace-rm *
+
+# 【Issue #2181】Cross-user Agent launch wrapper
+# All AI CLI must be launched through this wrapper
+open-ace ALL=(root) NOPASSWD: /usr/local/bin/openace-run-as --isolated *
+
+# 【Issue #2181】Environment variable preservation (non-sensitive only)
+# Agent processes use env -i via openace-run-as --isolated, not inheriting env_keep
+# env_keep is mainly for WebUI startup
+Defaults env_keep += "OPENACE_PROXY_TOKEN OPENACE_PROXY_URL OPENACE_MODEL OPENACE_LOG_DIR PATH"
+Defaults env_keep += "GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL"
+Defaults env_keep += "SESSION_TIMEOUT_MS KEEPALIVE_INTERVAL_MS"
 ```
 
 **Security notes:**
 - Use full paths to prevent path manipulation attacks
 - The `NOPASSWD` flag is required for non-interactive service operation
 - Limit to specific executable paths, not generic `sudo` access
+- **Issue #2181 Hardening**: cat/chown/useradd/rm wildcards removed, replaced with secure wrappers
+- **Issue #2181 Hardening**: env_keep no longer contains sensitive variables (API Keys, GH_TOKEN, etc.)
+- Agent processes launched via `openace-run-as --isolated` use `env -i` for complete environment isolation
 
 ### qwen-code-webui Installation
 

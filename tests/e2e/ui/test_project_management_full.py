@@ -46,7 +46,9 @@ def save_screenshot(page, name):
     return path
 
 
-def test_project_management(ui_screenshot_dir):
+def test_project_management(
+    ui_screenshot_dir,
+):  # allow-no-assert: smoke test - visual verification only
     """Test Project Management page with all features."""
     global SCREENSHOT_DIR
     SCREENSHOT_DIR = ui_screenshot_dir
@@ -92,8 +94,8 @@ def test_project_management(ui_screenshot_dir):
             error_visible = False
             try:
                 error_visible = error_elem.is_visible(timeout=3000)
-            except Exception:
-                pass
+            except Exception:  # Issue #2189: re-raise — surface failures (no swallow)
+                raise
             if error_visible:
                 error_text = error_elem.text_content()
                 print(f"    ERROR: {error_text}")
@@ -133,8 +135,8 @@ def test_project_management(ui_screenshot_dir):
                 view_visible = False
                 try:
                     view_visible = view_btn.is_visible(timeout=3000)
-                except Exception:
-                    pass
+                except Exception:  # Issue #2189: re-raise — surface failures (no swallow)
+                    raise
                 if view_visible:
                     view_btn.click()
                     time.sleep(2)
@@ -144,8 +146,8 @@ def test_project_management(ui_screenshot_dir):
                     modal_visible = False
                     try:
                         modal_visible = modal.is_visible(timeout=3000)
-                    except Exception:
-                        pass
+                    except Exception:  # Issue #2189: re-raise — surface failures (no swallow)
+                        raise
                     if modal_visible:
                         print("    Modal opened successfully")
                         save_screenshot(page, "05_detail_modal")
@@ -158,7 +160,7 @@ def test_project_management(ui_screenshot_dir):
                                 close_btn.click()
                                 time.sleep(1)
                                 print("    Modal closed")
-                        except Exception:
+                        except Exception:  # allow-swallow: UI element may not exist
                             page.keyboard.press("Escape")
                             time.sleep(1)
                             print("    Modal closed via Escape")
@@ -171,8 +173,8 @@ def test_project_management(ui_screenshot_dir):
                 delete_visible = False
                 try:
                     delete_visible = delete_btn.is_visible(timeout=3000)
-                except Exception:
-                    pass
+                except Exception:  # Issue #2189: re-raise — surface failures (no swallow)
+                    raise
                 if delete_visible:
                     delete_btn.click()
                     time.sleep(1)
@@ -182,8 +184,8 @@ def test_project_management(ui_screenshot_dir):
                     confirm_visible = False
                     try:
                         confirm_visible = confirm_modal.is_visible(timeout=3000)
-                    except Exception:
-                        pass
+                    except Exception:  # Issue #2189: re-raise — surface failures (no swallow)
+                        raise
                     if confirm_visible:
                         print("    Delete confirmation modal shown")
                         save_screenshot(page, "06_delete_modal")
@@ -196,7 +198,7 @@ def test_project_management(ui_screenshot_dir):
                                 cancel_btn.click()
                                 time.sleep(1)
                                 print("    Modal closed without deleting")
-                        except Exception:
+                        except Exception:  # allow-swallow: UI element may not exist
                             page.keyboard.press("Escape")
                             time.sleep(1)
                             print("    Modal closed via Escape")
@@ -215,7 +217,7 @@ def test_project_management(ui_screenshot_dir):
             save_screenshot(page, "07_final_state")
             screenshots.append(("07_final_state", "Final page state"))
 
-        except Exception as e:
+        except Exception as e:  # allow-swallow: UI element may not exist
             print(f"  Error: {e}")
             save_screenshot(page, "error")
             screenshots.append(("error", "Error state"))

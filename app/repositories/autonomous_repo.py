@@ -50,6 +50,7 @@ class AutonomousWorkflowRepository:
         "batch_order",
         "batch_total",
         "base_commit_sha",
+        "expected_head_sha",
         "auto_merge",
         "definition_snapshot",
         "current_phase",
@@ -58,6 +59,7 @@ class AutonomousWorkflowRepository:
         "max_plan_rounds",
         "max_pr_review_rounds",
         "require_full_review_rounds",
+        "max_changed_files_override",
         "total_tokens",
         "total_input_tokens",
         "total_output_tokens",
@@ -89,6 +91,8 @@ class AutonomousWorkflowRepository:
         "ci_repair_context",
         "ci_repair_attempts",
         "ci_diagnostics_attempts",
+        "ci_repair_transient_retries",
+        "ci_repair_no_change_retries",
         "last_ci_failure_signature",
         "last_ci_failure_head_sha",
         # Worktree transition journal for SIGKILL-resilient recovery (#2050).
@@ -98,6 +102,21 @@ class AutonomousWorkflowRepository:
         "transition_error",
         "transition_started_at",
         "transition_updated_at",
+        # Post-merge Git cleanup tracking (#2043).
+        "cleanup_status",
+        "cleanup_attempts",
+        "cleanup_error",
+        "cleanup_updated_at",
+        "cleanup_next_retry_at",
+        # SandboxProvider state (#2022 P2).
+        "sandbox_provider",
+        "sandbox_id",
+        "sandbox_generation",
+        "sandbox_state",
+        "sandbox_policy_digest",
+        "sandbox_last_error",
+        "sandbox_remote_session_id",  # #2022 P6: remote-agent session id for orphan destroy
+        "sandbox_effective_policy",  # #2020 Phase B: JSON snapshot of effective resource/isolation policy
     }
     ALLOWED_MILESTONE_FIELDS = {
         "phase",
@@ -168,8 +187,11 @@ class AutonomousWorkflowRepository:
                 ),
                 list(active_statuses),
             )
-            cols = [d[0] for d in cursor.description]
-            return [dict(zip(cols, row)) for row in cursor.fetchall()]
+            # RealDictRow (PG) and sqlite3.Row both convert via dict(row).
+            # Do NOT use dict(zip(cols, row)): a RealDictRow iterates as its
+            # KEYS (column names), so zip yields {column_name: column_name}
+            # and every value becomes a string — see #2259.
+            return [dict(row) for row in cursor.fetchall()]
         finally:
             conn.close()
 
@@ -192,8 +214,41 @@ class AutonomousWorkflowRepository:
                     """
                 )
             )
-            cols = [d[0] for d in cursor.description]
-            return [dict(zip(cols, row)) for row in cursor.fetchall()]
+            # RealDictRow (PG) and sqlite3.Row both convert via dict(row).
+            # Do NOT use dict(zip(cols, row)): a RealDictRow iterates as its
+            # KEYS (column names), so zip yields {column_name: column_name}
+            # and every value becomes a string — see #2259.
+            return [dict(row) for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
+    def get_workflows_with_active_sandbox(self) -> list[dict]:
+        """Find workflows whose sandbox claims to be active (#2022 P2).
+
+        A non-NULL ``sandbox_state`` in the active set (created/running/paused)
+        means a SandboxProvider created a sandbox that was never destroyed —
+        e.g. the server crashed/restarted mid-task. The startup reconciliation
+        sweep walks these to reset the state and bump the generation so a stale
+        handle cannot operate on a future sandbox. ``destroyed``/``error`` and
+        NULL rows are not active orphans.
+        """
+        conn = self.db.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                adapt_sql(
+                    """
+                    SELECT * FROM autonomous_workflows
+                    WHERE sandbox_state IS NOT NULL
+                      AND sandbox_state IN ('created', 'running', 'paused')
+                    """
+                )
+            )
+            # RealDictRow (PG) and sqlite3.Row both convert via dict(row).
+            # Do NOT use dict(zip(cols, row)): a RealDictRow iterates as its
+            # KEYS (column names), so zip yields {column_name: column_name}
+            # and every value becomes a string — see #2259.
+            return [dict(row) for row in cursor.fetchall()]
         finally:
             conn.close()
 
@@ -247,9 +302,9 @@ class AutonomousWorkflowRepository:
                      max_plan_rounds, max_pr_review_rounds, require_full_review_rounds,
                      parent_workflow_id, fork_milestone_id, user_feedback,
                      original_branch_name, content_language, system_account,
-                     ci_repair_context, ci_repair_attempts, ci_diagnostics_attempts, last_ci_failure_signature,
+                     ci_repair_context, ci_repair_attempts, ci_diagnostics_attempts, ci_repair_transient_retries, ci_repair_no_change_retries, last_ci_failure_signature,
                      last_ci_failure_head_sha, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 RETURNING *
                 """,
                 (
@@ -292,6 +347,8 @@ class AutonomousWorkflowRepository:
                     data.get("ci_repair_context", ""),
                     data.get("ci_repair_attempts", 0),
                     data.get("ci_diagnostics_attempts", 0),
+                    data.get("ci_repair_transient_retries", 0),
+                    data.get("ci_repair_no_change_retries", 0),
                     data.get("last_ci_failure_signature", ""),
                     data.get("last_ci_failure_head_sha", ""),
                     now,
@@ -314,9 +371,9 @@ class AutonomousWorkflowRepository:
                      max_plan_rounds, max_pr_review_rounds, require_full_review_rounds,
                      parent_workflow_id, fork_milestone_id, user_feedback,
                      original_branch_name, content_language, system_account,
-                     ci_repair_context, ci_repair_attempts, ci_diagnostics_attempts, last_ci_failure_signature,
+                     ci_repair_context, ci_repair_attempts, ci_diagnostics_attempts, ci_repair_transient_retries, ci_repair_no_change_retries, last_ci_failure_signature,
                      last_ci_failure_head_sha, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     workflow_id,
@@ -358,6 +415,8 @@ class AutonomousWorkflowRepository:
                     data.get("ci_repair_context", ""),
                     data.get("ci_repair_attempts", 0),
                     data.get("ci_diagnostics_attempts", 0),
+                    data.get("ci_repair_transient_retries", 0),
+                    data.get("ci_repair_no_change_retries", 0),
                     data.get("last_ci_failure_signature", ""),
                     data.get("last_ci_failure_head_sha", ""),
                     now,
@@ -485,6 +544,22 @@ class AutonomousWorkflowRepository:
             WHERE status IN ('pending', 'preparing', 'planning', 'developing',
                              'pr_review', 'reporting', 'waiting', 'merging')
             ORDER BY created_at ASC
+            """
+        )
+
+    def get_workflows_pending_cleanup(self) -> list:
+        """Get delivered workflows whose Git cleanup is still pending (#2043).
+
+        Returns ``status='completed'`` rows with ``cleanup_status='pending'`` so
+        the startup sweep and scheduler retry pass can re-attempt worktree/branch
+        removal. Ordered by ``cleanup_updated_at`` so the oldest failures retry
+        first. Legacy rows (NULL cleanup_status) are excluded.
+        """
+        return self.db.fetch_all(
+            """
+            SELECT * FROM autonomous_workflows
+            WHERE status = 'completed' AND cleanup_status = 'pending'
+            ORDER BY cleanup_updated_at ASC NULLS LAST, created_at ASC
             """
         )
 

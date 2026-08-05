@@ -28,6 +28,7 @@ import { useAuth, useTheme } from '@/hooks';
 import { useAppStore } from '@/store';
 import { t } from '@/i18n';
 import { initializeQueryKeyRegistry } from '@/utils';
+import { isAdmin } from '@/utils/permissions';
 
 // Initialize query key registry on app load
 initializeQueryKeyRegistry();
@@ -371,7 +372,7 @@ const ManageRoutes: React.FC = () => {
 // Main App Content (requires auth)
 const AppContent: React.FC = () => {
   const { user } = useAuth();
-  const isAdmin = user?.role === 'admin';
+  const userIsAdmin = isAdmin(user);
 
   // Sync app mode with URL on mount
   useEffect(() => {
@@ -397,38 +398,54 @@ const AppContent: React.FC = () => {
         {/* Manage Mode Routes - Admin only */}
         <Route
           path="/manage/*"
-          element={isAdmin ? <ManageRoutes /> : <Navigate to="/work" replace />}
+          element={userIsAdmin ? <ManageRoutes /> : <Navigate to="/work" replace />}
         />
 
         {/* Legacy Routes - redirect based on user role */}
         <Route
           path="/dashboard"
           element={
-            isAdmin ? <Navigate to="/manage/dashboard" replace /> : <Navigate to="/work" replace />
+            userIsAdmin ? (
+              <Navigate to="/manage/dashboard" replace />
+            ) : (
+              <Navigate to="/work" replace />
+            )
           }
         />
         <Route
           path="/messages"
           element={
-            isAdmin ? <Navigate to="/manage/messages" replace /> : <Navigate to="/work" replace />
+            userIsAdmin ? (
+              <Navigate to="/manage/messages" replace />
+            ) : (
+              <Navigate to="/work" replace />
+            )
           }
         />
         <Route
           path="/analysis"
           element={
-            isAdmin ? <Navigate to="/manage/analysis" replace /> : <Navigate to="/work" replace />
+            userIsAdmin ? (
+              <Navigate to="/manage/analysis" replace />
+            ) : (
+              <Navigate to="/work" replace />
+            )
           }
         />
         <Route
           path="/management"
           element={
-            isAdmin ? <Navigate to="/manage/users" replace /> : <Navigate to="/work" replace />
+            userIsAdmin ? <Navigate to="/manage/users" replace /> : <Navigate to="/work" replace />
           }
         />
         <Route
           path="/security"
           element={
-            isAdmin ? <Navigate to="/manage/security" replace /> : <Navigate to="/work" replace />
+            userIsAdmin ? (
+              <Navigate to="/manage/security" replace />
+            ) : (
+              <Navigate to="/work" replace />
+            )
           }
         />
         <Route path="/workspace" element={<Navigate to="/work" replace />} />
@@ -442,13 +459,21 @@ const AppContent: React.FC = () => {
         <Route
           path="/"
           element={
-            isAdmin ? <Navigate to="/manage/dashboard" replace /> : <Navigate to="/work" replace />
+            userIsAdmin ? (
+              <Navigate to="/manage/dashboard" replace />
+            ) : (
+              <Navigate to="/work" replace />
+            )
           }
         />
         <Route
           path="*"
           element={
-            isAdmin ? <Navigate to="/manage/dashboard" replace /> : <Navigate to="/work" replace />
+            userIsAdmin ? (
+              <Navigate to="/manage/dashboard" replace />
+            ) : (
+              <Navigate to="/work" replace />
+            )
           }
         />
       </Routes>

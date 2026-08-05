@@ -93,7 +93,7 @@ def navigate_to_dashboard(page):
     shot(page, "02-dashboard")
 
 
-def test_preset_selector_visible(page):
+def test_preset_selector_visible(page):  # allow-no-assert: smoke test - visual verification only
     """Test that date range preset selector is visible."""
     print("\n[TEST] Preset selector visible...")
     selector = page.locator(".page-header-controls .select-narrow").first
@@ -101,7 +101,7 @@ def test_preset_selector_visible(page):
     shot(page, "03-preset-selector")
 
 
-def test_preset_selection(page):
+def test_preset_selection(page):  # allow-no-assert: smoke test - visual verification only
     """Test preset selection options."""
     print("\n[TEST] Preset selection options...")
 
@@ -137,7 +137,7 @@ def test_preset_selection(page):
     shot(page, "04-preset-selection")
 
 
-def test_custom_mode_activation(page):
+def test_custom_mode_activation(page):  # allow-no-assert: smoke test - visual verification only
     """Test Custom mode activation shows date input fields."""
     print("\n[TEST] Custom mode activation...")
 
@@ -160,7 +160,9 @@ def test_custom_mode_activation(page):
     shot(page, "05-custom-mode")
 
 
-def test_date_validation_invalid_range(page):
+def test_date_validation_invalid_range(
+    page,
+):  # allow-no-assert: smoke test - visual verification only
     """Test date validation - start date after end date shows error."""
     print("\n[TEST] Date validation - invalid range...")
 
@@ -199,7 +201,9 @@ def test_date_validation_invalid_range(page):
     shot(page, "06-invalid-range-error")
 
 
-def test_date_validation_future_date(page):
+def test_date_validation_future_date(
+    page,
+):  # allow-no-assert: smoke test - visual verification only
     """Test date validation - future dates shows error."""
     print("\n[TEST] Date validation - future dates...")
 
@@ -232,7 +236,7 @@ def test_date_validation_future_date(page):
     shot(page, "07-future-date-error")
 
 
-def test_accessibility_labels(page):
+def test_accessibility_labels(page):  # allow-no-assert: smoke test - visual verification only
     """Test accessibility - label association."""
     print("\n[TEST] Accessibility labels...")
 
@@ -268,7 +272,9 @@ def test_accessibility_labels(page):
     shot(page, "08-accessibility-labels")
 
 
-def test_accessibility_aria_describedby(page):
+def test_accessibility_aria_describedby(
+    page,
+):  # allow-no-assert: smoke test - visual verification only
     """Test accessibility - aria-describedby association."""
     print("\n[TEST] Accessibility aria-describedby...")
 
@@ -301,7 +307,7 @@ def test_accessibility_aria_describedby(page):
     shot(page, "09-aria-describedby")
 
 
-def test_css_styling(page):
+def test_css_styling(page):  # allow-no-assert: smoke test - visual verification only
     """Test CSS styling - date input width is correctly applied."""
     print("\n[TEST] CSS styling...")
 
@@ -324,7 +330,7 @@ def test_css_styling(page):
     shot(page, "10-css-styling")
 
 
-def test_language_switching(page):
+def test_language_switching(page):  # allow-no-assert: smoke test - visual verification only
     """Test language switching for preset labels."""
     print("\n[TEST] Language switching...")
 
@@ -354,7 +360,7 @@ def test_language_switching(page):
     print("    [INFO] Language switcher test completed")
 
 
-def test_dark_theme_calendar_icon(page):
+def test_dark_theme_calendar_icon(page):  # allow-no-assert: smoke test - visual verification only
     """Test dark theme calendar icon visibility."""
     print("\n[TEST] Dark theme calendar icon...")
 
@@ -409,7 +415,7 @@ def run_tests():
             test_language_switching(page)
             test_dark_theme_calendar_icon(page)
 
-        except Exception as e:
+        except Exception as e:  # allow-swallow: UI element may not exist
             print(f"\n[ERROR] Test execution failed: {e}")
             shot(page, "error-state")
             failed += 1

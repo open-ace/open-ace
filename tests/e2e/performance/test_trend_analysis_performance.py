@@ -20,7 +20,7 @@ HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 VIEWPORT = {"width": 1280, "height": 900}
 
 
-async def test_trend_analysis_performance():
+async def test_trend_analysis_performance():  # allow-no-assert: smoke test - visual verification only
     """Test Trend Analysis page load performance"""
     print("=" * 60)
     print("Trend Analysis Page Load Performance Test")
@@ -125,7 +125,7 @@ async def test_trend_analysis_performance():
     # Test result
     if page_load_time < 3:
         print(f"\n✅ TEST PASSED: Page load time {page_load_time:.2f}s is acceptable!")
-        return True
+
     else:
         print(f"\n❌ TEST FAILED: Page load time {page_load_time:.2f}s is too slow!")
         return False

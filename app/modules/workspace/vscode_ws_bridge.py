@@ -142,7 +142,9 @@ def bridge_vscode_ws(browser_ws: Any, remote_ws_url: str, vscode_id: str) -> Non
         _unregister_bridge(state)
 
 
-def bridge_vscode_ws_raw(vscode_id: str, browser_sock, remote_ws_url: str, cs_password: str = "") -> None:
+def bridge_vscode_ws_raw(
+    vscode_id: str, browser_sock, remote_ws_url: str, cs_password: str = ""
+) -> None:
     """Bridge a raw browser socket (via RemoteWSHandler) to a remote code-server.
 
     Uses ``ws_frame`` for browser-side I/O and ``websockets.sync`` for the

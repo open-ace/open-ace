@@ -174,3 +174,88 @@ def invalidate_ai_github_env_cache():
     global _ai_github_env_data, _ai_github_env_ts
     with _cache_lock:
         _ai_github_env_ts = 0.0
+
+
+# ── System Settings ──────────────────────────────────────────────────
+# Global system settings stored in config.json under "system_settings" key.
+# Used for settings that affect the entire system (e.g., SSO enabled flag).
+
+
+def get_system_setting(key: str, default: Any = None) -> Any:
+    """Read a system setting from config.json.
+
+    System settings are stored under the "system_settings" section.
+    Results are cached for up to 60 seconds.
+
+    Args:
+        key: Setting key (e.g., "sso_enabled").
+        default: Fallback value if the setting is not configured.
+
+    Returns:
+        The setting value, or ``default``.
+    """
+    return get_config_value("system_settings", key, default)
+
+
+def set_system_setting(key: str, value: Any) -> bool:
+    """Write a system setting to config.json.
+
+    Args:
+        key: Setting key (e.g., "sso_enabled").
+        value: Setting value.
+
+    Returns:
+        True if successful, False otherwise.
+    """
+    from app.repositories.database import CONFIG_DIR
+
+    config_path = os.path.join(CONFIG_DIR, "config.json")
+
+    try:
+        # Read existing config
+        config = {}
+        if os.path.exists(config_path):
+            with open(config_path) as f:
+                config = json.load(f)
+
+        # Update system_settings
+        if "system_settings" not in config:
+            config["system_settings"] = {}
+        config["system_settings"][key] = value
+
+        # Write back
+        with open(config_path, "w") as f:
+            json.dump(config, f, indent=2)
+
+        # Invalidate cache
+        with _cache_lock:
+            _cache.pop("_root", None)
+
+        return True
+
+    except Exception as e:
+        logger.error(f"Failed to write system setting {key}: {e}")
+        return False
+
+
+def get_all_system_settings() -> dict[str, Any]:
+    """Read all system settings from config.json.
+
+    Returns:
+        Dict of all system settings, or empty dict if not configured.
+    """
+    config = _read_config()
+    settings: dict[str, Any] = config.get("system_settings", {})
+    return settings
+
+
+def is_sso_enabled() -> bool:
+    """Check whether SSO is enabled at the system level.
+
+    This is the global SSO switch that controls whether SSO login
+    buttons appear on the login page.
+
+    Returns:
+        True if SSO is enabled, False otherwise.
+    """
+    return bool(get_system_setting("sso_enabled", False))

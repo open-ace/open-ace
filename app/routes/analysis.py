@@ -9,6 +9,7 @@ from __future__ import annotations
 from flask import Blueprint, g, jsonify, request
 
 from app.auth.decorators import auth_required
+from app.models.user import User
 from app.services.analysis_service import AnalysisService
 
 analysis_bp = Blueprint("analysis", __name__)
@@ -28,9 +29,11 @@ def _get_tenant_filter() -> tuple[bool, int | None]:
         tuple: (is_admin, tenant_id)
         - is_admin: True if user is admin (global scope)
         - tenant_id: The tenant_id to filter by, or None for admin/invalid
+
+    Issue #2286: Accept legacy 'admin' role alongside 'platform_admin'.
     """
     user = getattr(g, "user", None) or {}
-    is_admin = user.get("role") == "admin"
+    is_admin = User.is_admin_role(user.get("role"))
     tenant_id = user.get("tenant_id")
 
     # Fail closed: non-admin without tenant_id cannot access tenant-scoped data
@@ -53,7 +56,7 @@ def _check_tenant_access():
     - Non-admins without tenant_id: 403 (fail closed)
     """
     user = getattr(g, "user", None) or {}
-    is_admin = user.get("role") == "admin"
+    is_admin = User.is_admin_role(user.get("role"))
     tenant_id = user.get("tenant_id")
 
     # Admin has global access

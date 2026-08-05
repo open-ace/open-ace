@@ -113,7 +113,7 @@ def run_tests():
                 print("  ✗ Projects navigation not found")
                 results.append(("Projects page loaded", False))
 
-        except Exception as e:
+        except Exception as e:  # allow-swallow: UI element may not exist
             print(f"  Error: {e}")
             results.append(("Browser test", False))
             save_screenshot(page, "error")

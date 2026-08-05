@@ -21,6 +21,7 @@ from app.repositories.database import (
     get_database_url,
     is_postgresql,
 )
+from app.utils.helpers import parse_db_datetime
 
 logger = logging.getLogger(__name__)
 
@@ -500,7 +501,7 @@ class CollaborationManager:
                 user_id=m["user_id"],
                 username=m["username"] or "",
                 role=m["role"],
-                joined_at=datetime.fromisoformat(m["joined_at"]) if m["joined_at"] else None,
+                joined_at=parse_db_datetime(m["joined_at"]),
             )
             for m in member_rows
         ]
@@ -513,8 +514,8 @@ class CollaborationManager:
             owner_id=row["owner_id"],
             members=members,
             settings=json.loads(row["settings"]) if row["settings"] else {},
-            created_at=datetime.fromisoformat(row["created_at"]) if row["created_at"] else None,
-            updated_at=datetime.fromisoformat(row["updated_at"]) if row["updated_at"] else None,
+            created_at=parse_db_datetime(row["created_at"]),
+            updated_at=parse_db_datetime(row["updated_at"]),
         )
 
     def add_team_member(
@@ -1145,14 +1146,12 @@ class CollaborationManager:
             share_type=row["share_type"] or "user",
             target_id=row["target_id"],
             target_name=row["target_name"] or "",
-            expires_at=datetime.fromisoformat(row["expires_at"]) if row["expires_at"] else None,
+            expires_at=parse_db_datetime(row["expires_at"]),
             allow_comments=bool(row["allow_comments"]),
             allow_copy=bool(row["allow_copy"]),
-            created_at=datetime.fromisoformat(row["created_at"]) if row["created_at"] else None,
+            created_at=parse_db_datetime(row["created_at"]),
             access_count=row["access_count"] or 0,
-            last_accessed=(
-                datetime.fromisoformat(row["last_accessed"]) if row["last_accessed"] else None
-            ),
+            last_accessed=parse_db_datetime(row["last_accessed"]),
         )
 
     def _row_to_annotation(self, row: sqlite3.Row) -> Annotation:
@@ -1168,8 +1167,8 @@ class CollaborationManager:
             annotation_type=row["annotation_type"] or "comment",
             position=json.loads(row["position"]) if row["position"] else {},
             parent_id=row["parent_id"],
-            created_at=datetime.fromisoformat(row["created_at"]) if row["created_at"] else None,
-            updated_at=datetime.fromisoformat(row["updated_at"]) if row["updated_at"] else None,
+            created_at=parse_db_datetime(row["created_at"]),
+            updated_at=parse_db_datetime(row["updated_at"]),
         )
 
     def _row_to_knowledge_entry(self, row: sqlite3.Row) -> KnowledgeEntry:
@@ -1186,8 +1185,8 @@ class CollaborationManager:
             author_name=row["author_name"] or "",
             is_published=bool(row["is_published"]),
             view_count=row["view_count"] or 0,
-            created_at=datetime.fromisoformat(row["created_at"]) if row["created_at"] else None,
-            updated_at=datetime.fromisoformat(row["updated_at"]) if row["updated_at"] else None,
+            created_at=parse_db_datetime(row["created_at"]),
+            updated_at=parse_db_datetime(row["updated_at"]),
         )
 
 

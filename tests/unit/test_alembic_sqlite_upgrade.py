@@ -324,3 +324,94 @@ def test_alembic_upgrade_head_after_schema_sql_bootstrap_catches_duplicate_table
     version = conn.execute("SELECT version_num FROM alembic_version").fetchone()
     conn.close()
     assert version[0] == ScriptDirectory.from_config(alembic_cfg).get_current_head()
+
+
+def test_env_honors_config_url_without_database_url_env(tmp_path, monkeypatch):
+    """migrations/env.py must honor a sqlalchemy.url pinned on the Alembic Config.
+
+    Regression for issue #2101: ``run_migrations_online`` used to overwrite
+    ``configuration["sqlalchemy.url"]`` unconditionally with the project's
+    canonical URL (``scripts.shared.db._get_db_url``), ignoring any URL the
+    caller set on the ``Config``. That made ``cfg.set_main_option(
+    "sqlalchemy.url", "sqlite:////tmp/x.db")`` silently target the operator's
+    configured project database instead — so a stale ``alembic_version`` row on
+    that DB masqueraded as a broken migration graph.
+
+    This test reproduces the issue's exact invocation (URL on the Config, no
+    ``DATABASE_URL`` env var) and asserts the upgrade lands on the configured
+    temp database and nowhere else.
+    """
+    # Ensure the env-var override path is NOT taken, so the only URL signal is
+    # the one pinned on the Config below. Also clear the cached project URL so
+    # a previously-imported cache cannot leak into the assertion. setattr (not
+    # a bare assignment) so the cache is restored after the test.
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.setattr(shared_db, "_db_url_cache", None)
+
+    db_path = tmp_path / "from_config_url.db"
+    project_root = Path(__file__).resolve().parents[2]
+    alembic_cfg = Config(str(project_root / "alembic.ini"))
+    alembic_cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
+
+    command.upgrade(alembic_cfg, "head")
+
+    # The configured temp DB must now be stamped at head.
+    conn = sqlite3.connect(db_path)
+    try:
+        version = conn.execute("SELECT version_num FROM alembic_version").fetchone()
+        has_tables = (
+            conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='agent_sessions'"
+            ).fetchone()
+            is not None
+        )
+    finally:
+        conn.close()
+
+    assert version is not None
+    assert version[0] == ScriptDirectory.from_config(alembic_cfg).get_current_head()
+    assert has_tables is True
+
+
+def test_check_migration_heads_catches_dangling_down_revision(tmp_path, monkeypatch):
+    """The single-head gate must fail on an unresolvable down_revision.
+
+    A dangling parent (a ``down_revision`` pointing at a revision id no file
+    defines) makes ``ScriptDirectory`` raise ``KeyError`` while building the
+    revision map. The check must convert that into a clean non-zero exit with
+    a helpful message instead of an unhandled traceback. This guards the
+    source-graph case; the DB-stamp case from issue #2101 is covered by the
+    schema-sync CI job's real ``alembic upgrade head`` step.
+    """
+    from scripts import check_migration_heads as cmh
+
+    tree = tmp_path / "tree"
+    (tree / "migrations" / "versions").mkdir(parents=True)
+
+    # Minimal alembic.ini pointing script_location at our temp tree.
+    (tree / "alembic.ini").write_text(f"[alembic]\nscript_location = {tree / 'migrations'}\n")
+    # env.py is required by ScriptDirectory.from_config even though the check
+    # never runs migrations; an empty module suffices.
+    (tree / "migrations" / "env.py").write_text("")
+
+    (tree / "migrations" / "versions" / "0001_base.py").write_text(
+        "revision = '0001_base'\n"
+        "down_revision = None\n"
+        "branch_labels = None\n"
+        "depends_on = None\n\n"
+        "def upgrade():\n    pass\n\n"
+        "def downgrade():\n    pass\n"
+    )
+    (tree / "migrations" / "versions" / "0002_child.py").write_text(
+        "# down_revision points at an id no file defines -> dangling parent.\n"
+        "revision = '0002_child'\n"
+        "down_revision = 'phantom_0001_does_not_exist'\n"
+        "branch_labels = None\n"
+        "depends_on = None\n\n"
+        "def upgrade():\n    pass\n\n"
+        "def downgrade():\n    pass\n"
+    )
+
+    # The check resolves ./alembic.ini from cwd, so run it from the temp tree.
+    monkeypatch.chdir(tree)
+    assert cmh.main() == 1, "dangling down_revision must fail the single-head gate"

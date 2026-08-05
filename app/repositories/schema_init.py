@@ -1,8 +1,15 @@
-"""Centralized schema initialization for all modules.
+"""Centralized schema initialization for SQLite development environments.
 
-Called once at app startup via create_app() to ensure all tables exist,
-replacing the per-request _ensure_tables() pattern that caused ShareLock
-contention on PostgreSQL.
+This module is ONLY for SQLite development/test databases. Production PostgreSQL
+databases must use Alembic migrations (Issue #2190).
+
+DO NOT use this module for production deployments. Production schema changes
+must go through Alembic migrations only.
+
+For production databases, use:
+    alembic upgrade head
+
+For SQLite development databases, this module provides bootstrap functionality.
 """
 
 from __future__ import annotations
@@ -176,16 +183,29 @@ def load_schema_from_file(db_url: str | None = None, dialect: str | None = None)
 
 
 def ensure_all_tables() -> None:
-    """Ensure all application tables and indexes exist (single source of truth).
+    """Ensure all application tables and indexes exist (SQLite development only).
 
-    Loads the authoritative schema files (schema-sqlite.sql / schema-postgres.sql)
-    via load_schema_from_file(). This replaces the former per-module
-    get_ddl_statements() aggregation, which had drifted from the authoritative
-    schema (each module hand-maintained a parallel DDL that lost columns like
-    project_id/project_path/request_count — #1273).
+    DEPRECATED for production PostgreSQL: Use Alembic migrations instead.
 
-    Schema is now driven solely by the .sql files + Alembic migrations.
+    This function is ONLY for SQLite development/test databases.
+    For production PostgreSQL databases, use:
+        alembic upgrade head
+
+    Calling this on a production PostgreSQL database will log a warning
+    and may cause schema drift from the official migration path.
+
+    Issue: #2190 - Schema authority model enforcement
     """
+    from app.repositories.database import is_postgresql
+
+    if is_postgresql():
+        logger.warning(
+            "ensure_all_tables() called on PostgreSQL database. "
+            "This is DEPRECATED for production. "
+            "Use 'alembic upgrade head' instead. "
+            "Set OPENACE_PRODUCTION_MODE=1 to enforce production mode."
+        )
+
     load_schema_from_file()
     logger.info("Schema initialization complete (loaded from authoritative schema.sql)")
 
@@ -258,6 +278,11 @@ def _backfill_missing_columns(conn, dialect: str) -> None:
             ("workspace_type", "TEXT", "'local'"),
             ("remote_machine_id", "TEXT", None),
             ("paused_at", "TIMESTAMP" if not is_postgres else "timestamp without time zone", None),
+            # tenant_id is in the authoritative CREATE TABLE, so fresh DBs always
+            # have it; legacy pre-tenant DBs need it back-filled (DEFAULT 1, the
+            # default tenant) so the runtime tenant predicate does not silently
+            # degrade to global scope (Issue #1832 F8).
+            ("tenant_id", "INTEGER", "1"),
         ]
         for col_name, col_type, default in agent_sessions_columns:
             if not _column_exists(conn, "agent_sessions", col_name, dialect):
@@ -282,6 +307,10 @@ def _backfill_missing_columns(conn, dialect: str) -> None:
             ("external_message_id", "TEXT", "''"),
             ("content_blocks", "TEXT", None),
             ("milestone_id", "TEXT", "''"),
+            # See agent_sessions above: back-fill tenant_id on legacy DBs so the
+            # write-path tenant predicate does not silently match all tenants
+            # (Issue #1832 F8).
+            ("tenant_id", "INTEGER", "1"),
         ]
         for col_name, col_type, default in session_messages_columns:
             if not _column_exists(conn, "session_messages", col_name, dialect):

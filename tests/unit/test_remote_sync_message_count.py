@@ -34,8 +34,14 @@ def sqlite_sm(tmp_path, monkeypatch):
     for col in ("project_id", "project_path"):
         try:
             cur.execute(f"ALTER TABLE agent_sessions ADD COLUMN {col} TEXT")
-        except Exception:
+        except Exception:  # allow-swallow: idempotent test setup (row may already exist)
             pass
+    # Create default user with tenant_id for fail-closed tenant resolution
+    cur.execute(
+        "INSERT INTO users (id, username, email, password_hash, role, tenant_id) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (1, "test-user", "test@example.com", "hash", "user", 1),
+    )
     conn.commit()
     conn.close()
     return sm
@@ -64,7 +70,9 @@ def _import_like_remote_sync(sm: SessionManager, session_id: str, messages: list
         if getattr(stored, "_was_inserted", False):
             synced_message_delta += 1
     if synced_message_delta:
-        sm.increment_session_usage(session_id, message_delta=synced_message_delta)
+        sm.increment_session_usage(
+            session_id, message_delta=synced_message_delta, require_tenant=False
+        )
     return synced_message_delta
 
 
@@ -150,6 +158,7 @@ def _import_with_tokens(sm: SessionManager, session_id: str, messages: list) -> 
             total_tokens_delta=synced_input_tokens + synced_output_tokens,
             total_input_delta=synced_input_tokens,
             total_output_delta=synced_output_tokens,
+            require_tenant=False,
         )
     return {
         "message_delta": synced_message_delta,

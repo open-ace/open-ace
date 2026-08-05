@@ -37,8 +37,11 @@ vi.mock('@/i18n', () => ({
       ssoConfiguration: 'SSO Configuration',
       enableSSO: 'Enable SSO',
       ssoEnabledDesc: 'Enable SSO login for users through configured providers',
+      ssoSystemSettingHint:
+        'SSO enable switch has been moved to System Settings. Please configure SSO providers here.',
       autoProvisionUsers: 'Auto Provision Users',
       autoProvisionDesc: 'Automatically create user accounts on first SSO login',
+      autoProvisionHint: 'Automatically create user accounts for this tenant on first SSO login',
       refresh: 'Refresh',
       addProvider: 'Add Provider',
       save: 'Save',
@@ -67,6 +70,10 @@ vi.mock('@/api', () => ({
     }),
     registerProvider: vi.fn(),
     disableProvider: vi.fn(),
+  },
+  systemApi: {
+    getSSOEnabled: vi.fn().mockResolvedValue({ sso_enabled: false }),
+    updateSystemSettings: vi.fn().mockResolvedValue({ success: true, updated: ['sso_enabled'] }),
   },
   tenantApi: {
     getTenant: vi.fn().mockResolvedValue({

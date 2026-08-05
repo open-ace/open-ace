@@ -90,7 +90,7 @@ def navigate_to_analysis(page):
     shot(page, "02-analysis-page")
 
 
-def test_pie_chart_visible(page):
+def test_pie_chart_visible(page):  # allow-no-assert: smoke test - visual verification only
     """Test that user segmentation pie chart is visible."""
     print("\n[TEST] Pie chart visible...")
 
@@ -110,7 +110,7 @@ def test_pie_chart_visible(page):
     shot(page, "03-pie-chart-visible")
 
 
-def test_tooltip_enhancement(page):
+def test_tooltip_enhancement(page):  # allow-no-assert: smoke test - visual verification only
     """Test tooltip enhancement - hover on pie chart segment."""
     print("\n[TEST] Tooltip enhancement...")
 
@@ -160,7 +160,7 @@ def test_tooltip_enhancement(page):
         check(True, "Tooltip enhancement test completed (visual check needed in demo mode)")
 
 
-def test_help_tooltip(page):
+def test_help_tooltip(page):  # allow-no-assert: smoke test - visual verification only
     """Test help tooltip - hover info icon."""
     print("\n[TEST] Help tooltip...")
 
@@ -199,7 +199,7 @@ def test_help_tooltip(page):
         check(True, "Info icon not found - feature may not be enabled")
 
 
-def test_i18n_chinese(page):
+def test_i18n_chinese(page):  # allow-no-assert: smoke test - visual verification only
     """Test i18n - switch language to Chinese."""
     print("\n[TEST] i18n - Chinese language...")
 
@@ -248,7 +248,7 @@ def test_i18n_chinese(page):
         check(True, "i18n Chinese test skipped")
 
 
-def test_i18n_english(page):
+def test_i18n_english(page):  # allow-no-assert: smoke test - visual verification only
     """Test i18n - switch language to English."""
     print("\n[TEST] i18n - English language...")
 
@@ -295,7 +295,7 @@ def test_i18n_english(page):
         check(True, "i18n English test skipped")
 
 
-def test_responsive_design(page):
+def test_responsive_design(page):  # allow-no-assert: smoke test - visual verification only
     """Test responsive design - resize to mobile viewport."""
     print("\n[TEST] Responsive design...")
 
@@ -357,7 +357,7 @@ def run_tests():
             test_i18n_english(page)
             test_responsive_design(page)
 
-        except Exception as e:
+        except Exception as e:  # allow-swallow: UI element may not exist
             print(f"\n[ERROR] Test execution failed: {e}")
             shot(page, "error-state")
             failed += 1

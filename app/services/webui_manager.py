@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Open ACE - AI Computing Explorer - WebUI Manager Service
 
@@ -31,6 +30,34 @@ from app.utils.workspace import ensure_system_user as _ensure_user_shared
 from app.utils.workspace import run_as_root_if_needed
 
 logger = logging.getLogger(__name__)
+
+# Environment variable keys that are handled by sudoers env_keep
+# (preserved automatically) and should NOT be inlined via
+# openace-webui-launch. Everything else (dynamic envKeys from model
+# pools, etc.) gets inlined automatically.
+_WEBUI_ENV_SUDO_KNOWN_KEYS = frozenset(
+    {
+        "PATH",
+        "OPENACE_PROXY_TOKEN",
+        "OPENACE_PROXY_URL",
+        "OPENACE_MODEL",
+        "OPENACE_LOG_DIR",
+        "SESSION_TIMEOUT_MS",
+        "KEEPALIVE_INTERVAL_MS",
+        "OPENAI_API_KEY",
+        "OPENAI_BASE_URL",
+        "LANG",
+        "LC_ALL",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "NO_PROXY",
+    }
+)
+
+# Path to the secure launch wrapper that enables inline env-var
+# passthrough via /usr/bin/env without granting unrestricted env access
+# in sudoers (Issue #2305 review).
+_WEBUI_LAUNCH_WRAPPER = "/usr/local/bin/openace-webui-launch"
 
 
 @dataclass
@@ -143,7 +170,9 @@ class WorkspaceConfig:
     idle_timeout_minutes: int = 30
     cleanup_interval_minutes: int = 5
     token_secret: str = ""
-    webui_path: str = ""  # Path to qwen-code-webui project directory
+    webui_path: str = (
+        ""  # Path to qwen-code-webui executable or project directory (leave empty for auto-detect)
+    )
     # Optional explicit URL for the webui to reach the LLM proxy (e.g. behind an
     # HTTPS reverse proxy). When set, :web_port is NOT appended. See issue #1730.
     webui_callback_url: str = ""
@@ -179,15 +208,9 @@ class WebUIManager:
         self._cleanup_greenlet: gevent.Greenlet | None = None
         self._running = False
 
-        # Generate token secret if not configured. The value is persisted back
-        # to config.json so every process/container restart shares the same
-        # secret; without persistence a fresh random secret per restart
-        # invalidates all outstanding WebUI tokens and the workspace iframe
-        # reports "Failed to fetch projects: UNAUTHORIZED" until the secret is
-        # regenerated. (Issue #8 regression)
+        # Generate token secret if not configured
         if not self.config.token_secret:
             self.config.token_secret = secrets.token_hex(32)
-            self._persist_token_secret()
 
         # Platform detection
         self._platform = platform.system().lower()
@@ -236,32 +259,6 @@ class WebUIManager:
         except Exception as e:
             logger.error(f"Error loading config: {e}")
             return WorkspaceConfig()
-
-    def _persist_token_secret(self) -> None:
-        """Persist ``workspace.token_secret`` back to config.json.
-
-        Called once when a secret was auto-generated (config.json did not
-        contain one). Persisting makes the secret stable across process and
-        container restarts; otherwise a fresh random secret per restart
-        invalidates every outstanding WebUI token and the workspace iframe
-        reports "Failed to fetch projects: UNAUTHORIZED".
-        """
-        from app.repositories.database import CONFIG_DIR
-
-        config_path = os.path.join(CONFIG_DIR, "config.json")
-        try:
-            with open(config_path, encoding="utf-8") as f:
-                config = json.load(f)
-        except (OSError, json.JSONDecodeError) as e:
-            logger.warning(f"Failed to read config.json for token_secret persistence: {e}")
-            return
-        config.setdefault("workspace", {})["token_secret"] = self.config.token_secret
-        try:
-            with open(config_path, "w", encoding="utf-8") as f:
-                json.dump(config, f, ensure_ascii=False, indent=2)
-            logger.info("Persisted generated workspace.token_secret to config.json")
-        except OSError as e:
-            logger.warning(f"Failed to write token_secret to config.json: {e}")
 
     def _remove_port_from_url(self, url: str) -> str:
         """Remove any existing port from URL, keeping only scheme and host.
@@ -481,7 +478,7 @@ class WebUIManager:
         v2:{user_id}:{port}:{timestamp}:{random}:{signature}
 
         The v2 format is supported by qwen-code-webui PR #210.
-        Tokens expire after TOKEN_TTL_SECONDS (1800s = 30 minutes).
+        Token TTL is configurable via OPENACE_WEBUI_TOKEN_TTL_SECONDS (default 24 hours).
 
         Args:
             user_id: User ID.
@@ -500,12 +497,104 @@ class WebUIManager:
         ]
         return f"{payload}:{signature}"
 
+    def refresh_token(self, old_token: str) -> tuple[bool, str | None, str | None]:
+        """
+        Refresh an expired or expiring token with a new one.
+
+        This method allows refreshing a token even if it has expired,
+        as long as the signature is valid. This enables seamless token
+        renewal without requiring user re-authentication.
+
+        Supports both v2 format (with TTL) and v1 format (legacy).
+
+        Args:
+            old_token: The token to refresh (can be expired).
+
+        Returns:
+            Tuple of (success, new_token, error_message).
+            On success: (True, new_token, None)
+            On failure: (False, None, error_message)
+        """
+        if not old_token:
+            return False, None, "Empty token"
+
+        # v2 format
+        if old_token.startswith("v2:"):
+            return self._refresh_token_v2(old_token)
+
+        # v1 format (legacy) - refresh to v2
+        return self._refresh_token_v1(old_token)
+
+    def _refresh_token_v2(self, old_token: str) -> tuple[bool, str | None, str | None]:
+        """Refresh a v2 format token.
+
+        Validates signature (ignoring TTL), then generates a fresh token.
+
+        v2 format: v2:{user_id}:{port}:{timestamp}:{random}:{signature}
+        """
+        try:
+            parts = old_token.split(":")
+            if len(parts) != 6:
+                return False, None, "Invalid v2 token format"
+
+            _, user_id_str, port_str, timestamp_str, random_part, signature = parts
+            user_id: int = int(user_id_str)
+            port: int = int(port_str)
+            timestamp: int = int(timestamp_str)
+
+            # Verify signature (even if expired)
+            payload = f"v2:{user_id}:{port}:{timestamp}:{random_part}"
+            expected_signature = hashlib.sha256(
+                f"{payload}:{self.config.token_secret}".encode()
+            ).hexdigest()[:16]
+
+            if not hmac.compare_digest(signature, expected_signature):
+                return False, None, "Invalid signature"
+
+            # Generate new token with fresh timestamp
+            new_token = self.generate_token(user_id, port)
+            logger.info(f"Refreshed token for user {user_id}, port {port}")
+            return True, new_token, None
+
+        except (ValueError, TypeError) as e:
+            return False, None, f"Token parse error: {e}"
+
+    def _refresh_token_v1(self, old_token: str) -> tuple[bool, str | None, str | None]:
+        """Refresh a v1 format token to v2 format.
+
+        v1 format: {user_id}:{port}:{random}:{signature}
+        """
+        try:
+            parts = old_token.split(":")
+            if len(parts) != 4:
+                return False, None, "Invalid v1 token format"
+
+            user_id_str, port_str, random_part, signature = parts
+            user_id: int = int(user_id_str)
+            port: int = int(port_str)
+
+            # Verify signature
+            expected_signature = hashlib.sha256(
+                f"{user_id}:{port}:{random_part}:{self.config.token_secret}".encode()
+            ).hexdigest()[:16]
+
+            if not hmac.compare_digest(signature, expected_signature):
+                return False, None, "Invalid signature"
+
+            # Generate new v2 token
+            new_token = self.generate_token(user_id, port)
+            logger.info(f"Refreshed v1 token to v2 for user {user_id}, port {port}")
+            return True, new_token, None
+
+        except (ValueError, TypeError) as e:
+            return False, None, f"Token parse error: {e}"
+
     def validate_token(self, token: str) -> tuple[bool, int | None, str | None]:
         """
         Validate an authentication token.
 
         Supports both v2 format (with TTL) and v1 format (legacy, no TTL).
-        Issue #1896: v2 tokens have 30-minute TTL by default.
+        Issue #1896: v2 tokens have configurable TTL (default 24 hours).
 
         v2 format: v2:{user_id}:{port}:{timestamp}:{random}:{signature}
         v1 format: {user_id}:{port}:{random}:{signature}
@@ -531,11 +620,7 @@ class WebUIManager:
 
         v2 format: v2:{user_id}:{port}:{timestamp}:{random}:{signature}
         """
-        # TTL in seconds (24 hours). qwen-code-webui caches the token in
-        # sessionStorage and reuses it for the whole session without
-        # refreshing; a 30-minute TTL made the workspace fail with
-        # "Failed to fetch projects: UNAUTHORIZED" once the token aged out.
-        TTL_SECONDS = 86400
+        from app.auth.decorators import WEBUI_TOKEN_TTL_SECONDS
 
         try:
             parts = token.split(":")
@@ -560,8 +645,12 @@ class WebUIManager:
             current_time = int(time.time())
             age_seconds = current_time - timestamp
 
-            if age_seconds > TTL_SECONDS:
-                return False, None, f"Token expired (age: {age_seconds}s, TTL: {TTL_SECONDS}s)"
+            if age_seconds > WEBUI_TOKEN_TTL_SECONDS:
+                return (
+                    False,
+                    None,
+                    f"Token expired (age: {age_seconds}s, TTL: {WEBUI_TOKEN_TTL_SECONDS}s)",
+                )
 
             if age_seconds < 0:
                 return False, None, "Token timestamp is in the future"
@@ -831,6 +920,45 @@ class WebUIManager:
                 "proxy_token": "",
             }
 
+    def _build_webui_env(
+        self,
+        user_id: int,
+        system_account: str,
+        openace_api_url: str,
+    ) -> tuple[dict[str, str], dict[str, Any]]:
+        """
+        Build minimal environment for WebUI process.
+
+        Issue #2298: Use explicit environment instead of os.environ.copy()
+        to prevent leaking sensitive variables (DATABASE_URL, TOKEN_SECRET,
+        GH_TOKEN, ANTHROPIC_API_KEY, etc.) to WebUI child process.
+
+        Returns:
+            Tuple of (environment dict, model pool dict).
+        """
+        # Start with minimal base environment
+        # Issue #1141: Prepend system dirs, but preserve inherited PATH for macOS etc.
+        # macOS Apple Silicon has node in /opt/homebrew/bin, which is not in the hardcoded PATH.
+        # Preserving inherited PATH ensures custom node installations are found.
+        _system_dirs = "/usr/local/bin:/usr/bin:/bin"
+        _inherited_path = os.environ.get("PATH", "")
+        child_env = {
+            "PATH": _system_dirs + (":" + _inherited_path if _inherited_path else ""),
+            # Language/encoding
+            "LANG": os.environ.get("LANG", "C.UTF-8"),
+            "LC_ALL": os.environ.get("LC_ALL", ""),
+        }
+
+        # Configure LLM proxy (includes dynamic envKey collection)
+        model_pool = self._configure_local_openai_proxy(user_id, child_env, openace_api_url)
+
+        # Optional: HTTP proxy settings (if configured in service environment)
+        for proxy_var in ["HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY"]:
+            if proxy_var in os.environ:
+                child_env[proxy_var] = os.environ[proxy_var]
+
+        return child_env, model_pool
+
     def _launch_webui_process(
         self, user_id: int, system_account: str, port: int, base_url: str
     ) -> tuple[subprocess.Popen | None, dict[str, Any]]:
@@ -883,9 +1011,10 @@ class WebUIManager:
             server_port = server_config.get("web_port", 19888)
             openace_api_url = f"{openace_api_url}:{server_port}"
 
-        # Build child environment first (needed for sudo env passing)
-        child_env = os.environ.copy()
-        model_pool = self._configure_local_openai_proxy(user_id, child_env, openace_api_url)
+        # Issue #2298: Build minimal environment for WebUI process
+        # Do NOT use os.environ.copy() to avoid leaking sensitive variables
+        # (DATABASE_URL, TOKEN_SECRET, GH_TOKEN, etc.)
+        child_env, model_pool = self._build_webui_env(user_id, system_account, openace_api_url)
 
         # Set OPENACE_LOG_DIR to /tmp to avoid HOME permission issues
         webui_log_dir = f"/tmp/qwen-code-webui-{user_id}"
@@ -898,17 +1027,6 @@ class WebUIManager:
         # These prevent premature session termination during long-running tasks.
         child_env["SESSION_TIMEOUT_MS"] = "86400000"  # 24 hours
         child_env["KEEPALIVE_INTERVAL_MS"] = "10000"  # 10 seconds (more frequent)
-
-        # Custom system prompt for Qwen Code CLI
-        # QWEN_SYSTEM_MD points to a markdown file whose content replaces the
-        # default English system prompt. Default path; override via
-        # OPENACE_SYSTEM_PROMPT_PATH env or workspace config for tenant/user
-        # customization.
-        _system_prompt_path = os.environ.get(
-            "OPENACE_SYSTEM_PROMPT_PATH", "/app/system-prompt.md"
-        )
-        if os.path.isfile(_system_prompt_path):
-            child_env["QWEN_SYSTEM_MD"] = _system_prompt_path
 
         # Change log directory ownership to system_account (Linux/macOS only)
         # This allows webui to create additional log files if needed
@@ -931,22 +1049,10 @@ class WebUIManager:
                 except OSError as e:
                     logger.warning(f"Failed to chown log dir: {e}")
 
-        # Ensure PATH can resolve the `node` binary while preserving the host's
-        # inherited PATH. Prepend the standard system directories so Docker
-        # (node in /usr/bin) keeps resolving (Issue #1083), then append the
-        # inherited PATH so host-installed binaries are still found — e.g.
-        # /opt/homebrew/bin on Apple Silicon macOS, where Homebrew installs
-        # node. NODE_PATH is intentionally NOT set: it controls Node *module*
-        # resolution (a list of directories, not a binary path), so pointing it
-        # at an executable was semantically wrong and could only interfere with
-        # module lookup.
-        _system_dirs = "/usr/local/bin:/usr/bin:/bin"
-        _inherited_path = child_env.get("PATH", "")
-        child_env["PATH"] = (
-            _system_dirs + ":" + _inherited_path if _inherited_path else _system_dirs
-        )
-
-        # Build command based on platform
+        # Build command based on platform.
+        # popen_env tracks whether to pass child_env to Popen; for the sudo
+        # inline path env vars are already in the command, so skip it.
+        popen_env: dict[str, str] | None = child_env
         if webui_dir:
             # Running from project directory using node
             cmd = [
@@ -983,24 +1089,60 @@ class WebUIManager:
                 ]
                 cwd = None
             else:
-                # Different user: use sudo -u for global executable
-                # Environment variables are passed via sudoers env_keep configuration
-                cmd = [
-                    "sudo",
-                    "-u",
-                    system_account,
-                    webui_cmd,
-                    "--port",
-                    str(port),
-                    "--host",
-                    "0.0.0.0",
-                    "--token-secret",
-                    self.config.token_secret,
-                    "--quota-check-enabled",
-                    "--openace-api-url",
-                    openace_api_url,
-                ]
+                # Different user: use sudo -u with openace-webui-launch wrapper
+                # to pass environment variables inline.
+                # Issue #2298: Popen(env=child_env) is filtered by sudo env_keep,
+                # so we inline env vars as arguments to the launch wrapper.
+                # The wrapper execs /usr/bin/env with all supplied args; sudoers
+                # restricts it to only be called with the webui path as first
+                # non-env argument (no arbitrary command execution).
+                #
+                # SECURITY NOTE: inline KEY=VALUE args are visible in /proc/<pid>/cmdline
+                # to other processes on the same host. The values here are JWT proxy tokens
+                # (not real API keys), so the risk is acceptable. For real API keys, consider
+                # passing them via a file or other IPC mechanism.
+                env_args = []
+                # Standard keys: LLM config + locale + proxy
+                for key in [
+                    "OPENAI_API_KEY",
+                    "OPENAI_BASE_URL",
+                    "LANG",
+                    "LC_ALL",
+                    "HTTP_PROXY",
+                    "HTTPS_PROXY",
+                    "NO_PROXY",
+                ]:
+                    if child_env.get(key):
+                        env_args.append(f"{key}={child_env[key]}")
+                # Dynamic envKeys from model pool (e.g., BAILIAN_CODING_PLAN_API_KEY)
+                for key, value in child_env.items():
+                    if key not in _WEBUI_ENV_SUDO_KNOWN_KEYS and value:
+                        env_args.append(f"{key}={value}")
+
+                cmd = (
+                    [
+                        "sudo",
+                        "-u",
+                        system_account,
+                        _WEBUI_LAUNCH_WRAPPER,
+                    ]
+                    + env_args
+                    + [
+                        webui_cmd,
+                        "--port",
+                        str(port),
+                        "--host",
+                        "0.0.0.0",
+                        "--token-secret",
+                        self.config.token_secret,
+                        "--quota-check-enabled",
+                        "--openace-api-url",
+                        openace_api_url,
+                    ]
+                )
                 cwd = None
+                # Env vars already inlined via launch wrapper; skip Popen env param.
+                popen_env = None
         else:
             # Other platforms: direct execution (no user switching)
             cmd = [
@@ -1032,7 +1174,7 @@ class WebUIManager:
                 cmd,
                 start_new_session=True,  # Detach from parent process group
                 cwd=cwd,
-                env=child_env,  # Passed to sudo; preserved via sudoers env_keep
+                env=popen_env,  # None for sudo-inline path (vars already in cmd)
                 stdout=subprocess.DEVNULL,  # WebUI handles its own logging via OPENACE_LOG_DIR
                 stderr=subprocess.DEVNULL,
             )
@@ -1051,8 +1193,19 @@ class WebUIManager:
             and working_directory is the backend directory.
             If running global executable, working_directory is None.
         """
-        # Check webui_path from config (project directory mode)
+        # Check webui_path from config
         if self.config.webui_path:
+            # First, check if webui_path is an executable file (global install mode)
+            # This supports users who configured webui_path as the executable path
+            # (e.g., /usr/bin/qwen-code-webui) instead of project directory.
+            # See Issue #2151 for context.
+            if os.path.isfile(self.config.webui_path) and os.access(
+                self.config.webui_path, os.X_OK
+            ):
+                logger.info(f"Using webui executable from config: {self.config.webui_path}")
+                return self.config.webui_path, None
+
+            # Then, check if webui_path is a project directory (development mode)
             webui_backend = os.path.join(self.config.webui_path, "backend")
             node_entry = os.path.join(webui_backend, "dist", "cli", "node.js")
 

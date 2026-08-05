@@ -92,7 +92,12 @@ def test_actions_job_log_prefers_rest_api_without_run_cache():
         )
 
     assert "app/x.py" in excerpt
-    assert calls == [(["api", "repos/open-ace/open-ace/actions/jobs/456/logs"], False)]
+    assert calls == [
+        (
+            ["api", "repos/open-ace/open-ace/actions/jobs/456/logs", "--allow-escape-sequences"],
+            False,
+        )
+    ]
 
 
 def test_actions_job_log_uses_ghes_hostname_without_run_cache():
@@ -120,7 +125,13 @@ def test_actions_job_log_uses_ghes_hostname_without_run_cache():
     assert "failed" in excerpt
     assert calls == [
         (
-            ["api", "--hostname", "gh.example.com", "repos/team/project/actions/jobs/34/logs"],
+            [
+                "api",
+                "--hostname",
+                "gh.example.com",
+                "repos/team/project/actions/jobs/34/logs",
+                "--allow-escape-sequences",
+            ],
             False,
         )
     ]
@@ -185,7 +196,10 @@ def test_cumulative_scope_guard_derives_immutable_base_when_main_moved(monkeypat
         ["app/a.py", "app/b.py"],
     ]
 
-    reason = orch._validate_autonomous_change_scope(gh, {}, "round-base", "head")
+    # Mock _is_merge_commit to return False (not a merge commit)
+    # so the test focuses on cumulative scope guard logic
+    with patch.object(orch, "_is_merge_commit", return_value=False):
+        reason = orch._validate_autonomous_change_scope(gh, {}, "round-base", "head")
 
     assert reason == ""
     gh._run_git.assert_called_once_with(["merge-base", "head", "origin/main"], check=False)
@@ -201,7 +215,9 @@ def test_cumulative_scope_guard_fails_closed_when_base_cannot_be_derived():
     gh = MagicMock()
     gh._run_git.return_value = MagicMock(returncode=1, stdout="")
 
-    reason = orch._validate_autonomous_change_scope(gh, {}, "round-base", "head")
+    # Mock _is_merge_commit to return False (not a merge commit)
+    with patch.object(orch, "_is_merge_commit", return_value=False):
+        reason = orch._validate_autonomous_change_scope(gh, {}, "round-base", "head")
 
     assert "missing immutable base commit" in reason
     gh.get_changed_files.assert_not_called()
@@ -495,9 +511,12 @@ def test_cross_user_guard_accepts_root_owned_world_executable_install(monkeypatc
 
     monkeypatch.setattr(agent_runner.os, "stat", root_owned)
 
-    agent_runner.AutonomousAgentRunner._validate_cross_user_guard_bin(
+    # Root-owned, world-executable guard install is the accepted state: the
+    # validator must return None without raising RuntimeError.
+    result = agent_runner.AutonomousAgentRunner._validate_cross_user_guard_bin(
         {"PATH": f"{guard_dir}:/usr/bin"}
     )
+    assert result is None
 
 
 def test_local_agent_fails_closed_without_trusted_repo_snapshot():
@@ -2226,11 +2245,12 @@ def test_review_fix_commits_dirty_worktree_instead_of_refusing():
     # Fix agent must actually have been invoked (proves we proceeded past guard)
     orch._run_agent_with_context_recovery.assert_called_once()
     # Must NOT have failed with the old "worktree already had uncommitted
-    # changes" refusal message
+    # changes" refusal message. repo.update_workflow(workflow_id, updates) →
+    # args[1] is the updates dict (args[0] is the workflow_id string).
     failed_updates = [
-        call.args[0]
+        call.args[1]
         for call in orch.repo.update_workflow.call_args_list
-        if call.args[0].get("status") == "failed"
+        if len(call.args) > 1 and call.args[1].get("status") == "failed"
     ]
     for update in failed_updates:
         assert "worktree already had uncommitted changes" not in update.get("error_message", "")

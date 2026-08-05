@@ -12,6 +12,7 @@ import { useAppStore } from '@/store';
 import { useAuth } from '@/hooks';
 import { t } from '@/i18n';
 import type { AppMode } from '@/types';
+import { isAdmin } from '@/utils/permissions';
 
 interface ModeSwitcherProps {
   className?: string;
@@ -22,10 +23,10 @@ export const ModeSwitcher: React.FC<ModeSwitcherProps> = ({ className }) => {
   const language = useLanguage();
   const { user } = useAuth();
 
-  const isAdmin = user?.role === 'admin';
+  const userIsAdmin = isAdmin(user);
 
   // Don't render for non-admin users
-  if (!isAdmin) {
+  if (!userIsAdmin) {
     return null;
   }
 

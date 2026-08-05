@@ -53,7 +53,16 @@ jobs:
           --health-retries 5
 
     steps:
+      - name: Configure Git for checkout
+        run: |
+          # Configure Git to ignore submodule issues during checkout
+          # Work around erroneously committed .worktrees submodule entries
+          git config --global submodule.ignore all
+          git config --global submodule.active false
+
       - uses: actions/checkout@v6
+        with:
+          submodules: false
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -77,4 +86,38 @@ jobs:
           python scripts/rebuild_schema_snapshots.py --postgres-url "$SCHEMA_SYNC_DATABASE_URL"
           python scripts/check_schema_sync.py --postgres-url "$SCHEMA_SYNC_DATABASE_URL"
           python scripts/validate_schema.py
-          git diff --exit-code -- schema/schema-postgres.sql schema/schema-sqlite.sql
+          if ! git diff --exit-code -- schema/schema-postgres.sql schema/schema-sqlite.sql; then
+            echo "::error::Schema snapshots are out of sync with migrations (byte-exact)."
+            echo "===== FULL DIFF (committed  <  vs  >  regenerated) ====="
+            git diff -- schema/schema-postgres.sql schema/schema-sqlite.sql
+            echo "===== END DIFF ====="
+            echo "Fix: the '+' lines above ARE the correct regenerated content — apply them verbatim."
+            echo "Or run locally with a disposable Postgres:"
+            echo "  python scripts/rebuild_schema_snapshots.py --postgres-url <disposable-pg-url>"
+            echo "then commit both schema/schema-postgres.sql and schema/schema-sqlite.sql. Do NOT hand-edit."
+            exit 1
+          fi
+
+      # Guard the real upgrade path: run `alembic upgrade head` end-to-end on a
+      # throwaway database so a failure that only surfaces at upgrade time (e.g.
+      # a revision id renamed after a DB was stamped, as in issue #2101) fails
+      # the gate. The single-head check is database-free and cannot catch this.
+      - name: Run alembic upgrade head on a throwaway DB
+        env:
+          UPGRADE_DATABASE_URL: postgresql://ace:ace@127.0.0.1:5432/ace_upgrade_check
+        run: |
+          # Dedicated DB so the schema-sync snapshots above are untouched.
+          PGPASSWORD=ace psql -h 127.0.0.1 -U ace -d postgres -c \
+            "DROP DATABASE IF EXISTS ace_upgrade_check;" >/dev/null
+          PGPASSWORD=ace psql -h 127.0.0.1 -U ace -d postgres -c \
+            "CREATE DATABASE ace_upgrade_check;" >/dev/null
+          # Pin the URL on the Alembic config directly; migrations/env.py honors
+          # a caller-set sqlalchemy.url over the project's configured DB.
+          python -c "
+          from alembic.config import Config
+          from alembic import command
+          cfg = Config('alembic.ini')
+          cfg.set_main_option('sqlalchemy.url', '$UPGRADE_DATABASE_URL')
+          command.upgrade(cfg, 'head')
+          print('alembic upgrade head OK on throwaway DB')
+          "

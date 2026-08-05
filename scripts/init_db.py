@@ -138,11 +138,13 @@ def create_default_admin(
         return (True, False)
 
     # Create admin user with must_change_password = True (force password change on first login)
+    # Issue #2286: Use platform_admin role to match the new multi-tenant role model (#2179).
+    # The legacy 'admin' role is not recognized by @platform_admin_required decorator.
     result = db.create_user_with_is_active(
         username=username,
         password_hash=password_hash,
         email=email,
-        role="admin",
+        role="platform_admin",
         daily_token_quota=10,  # 10M tokens (stored in M units)
         daily_request_quota=10000,
         is_active=True,

@@ -53,7 +53,7 @@ def test_page_loads():
             assert check_element_exists(page, main_selectors, timeout=10000), "主内容区域应存在"
 
             save_screenshot(page, MODULE_NAME, "01_page_load")
-            return True
+
         finally:
             browser.close()
 
@@ -74,7 +74,7 @@ def test_quota_settings_display():
             assert check_element_exists(page, quota_selectors, timeout=10000), "配额设置区域应存在"
 
             save_screenshot(page, MODULE_NAME, "02_quota_settings")
-            return True
+
         finally:
             browser.close()
 
@@ -118,7 +118,7 @@ def test_alert_rules_list():
             ), "告警管理 Tab 应有告警统计或告警列表/空状态提示"
 
             save_screenshot(page, MODULE_NAME, "03_alert_list")
-            return True
+
         finally:
             browser.close()
 
@@ -138,7 +138,7 @@ def test_quota_adjustment():
             check_element_exists(page, quota_input_selectors)
 
             save_screenshot(page, MODULE_NAME, "04_quota_adjust")
-            return True
+            assert page.locator("body").is_visible(), "页面应可见"
         finally:
             browser.close()
 
@@ -158,7 +158,7 @@ def test_alert_toggle():
             assert check_element_exists(page, toggle_selectors), "告警开关应可见"
 
             save_screenshot(page, MODULE_NAME, "05_alert_toggle")
-            return True
+
         finally:
             browser.close()
 

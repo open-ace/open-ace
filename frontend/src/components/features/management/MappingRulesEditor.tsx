@@ -7,6 +7,7 @@ import { useLanguage } from '@/store';
 import { t } from '@/i18n';
 import { Button, TextInput, Modal, Badge, useToast, useConfirm } from '@/components/common';
 import { mappingRulesApi, type MappingRule } from '@/api/mappingRules';
+import type { ApiError } from '@/types';
 
 // Match types with display names
 const MATCH_TYPES = [
@@ -63,17 +64,44 @@ export const MappingRulesEditor: React.FC<MappingRulesEditorProps> = ({
   const handleGenerateDefaultRules = async () => {
     setIsGenerating(true);
     try {
-      const generated = await mappingRulesApi.generateDefaultRules(userId);
-      setRules(generated);
-      toast.success(
-        language === 'zh'
-          ? `已生成 ${generated.length} 条默认规则`
-          : `Generated ${generated.length} default rules`
-      );
+      const result = await mappingRulesApi.generateDefaultRules(userId);
+
+      // Update rules list with created rules
+      setRules(result.created);
+
+      // Show appropriate message based on result
+      if (result.created_count > 0 && result.skipped_count > 0) {
+        // Partial success: some created, some skipped
+        toast.success(
+          language === 'zh'
+            ? `已生成 ${result.created_count} 条新规则，跳过 ${result.skipped_count} 条已存在规则`
+            : `Generated ${result.created_count} new rules, skipped ${result.skipped_count} existing rules`
+        );
+      } else if (result.created_count > 0) {
+        // All new rules created
+        toast.success(
+          language === 'zh'
+            ? `已生成 ${result.created_count} 条默认规则`
+            : `Generated ${result.created_count} default rules`
+        );
+      } else if (result.skipped_count > 0) {
+        // All rules already existed
+        toast.info(
+          language === 'zh'
+            ? '用户已有默认规则，无需重复生成'
+            : 'Default rules already exist, no need to regenerate'
+        );
+      }
+
       onChange?.();
     } catch (err) {
       console.error('Failed to generate default rules:', err);
-      toast.error(language === 'zh' ? '生成默认规则失败' : 'Failed to generate default rules');
+      const apiError = err as ApiError;
+      if (apiError.status === 401) {
+        toast.error(language === 'zh' ? '请先登录' : 'Please log in first');
+      } else {
+        toast.error(language === 'zh' ? '生成默认规则失败' : 'Failed to generate default rules');
+      }
     } finally {
       setIsGenerating(false);
     }
@@ -110,7 +138,12 @@ export const MappingRulesEditor: React.FC<MappingRulesEditorProps> = ({
       toast.success(language === 'zh' ? '规则添加成功' : 'Rule added successfully');
     } catch (err) {
       console.error('Failed to add rule:', err);
-      toast.error(language === 'zh' ? '规则添加失败' : 'Failed to add rule');
+      const apiError = err as ApiError;
+      if (apiError.status === 401) {
+        toast.error(language === 'zh' ? '请先登录' : 'Please log in first');
+      } else {
+        toast.error(language === 'zh' ? '规则添加失败' : 'Failed to add rule');
+      }
     } finally {
       setIsAdding(false);
     }

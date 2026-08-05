@@ -233,7 +233,7 @@ def run_tests():
             title_loc.first.wait_for(state="visible", timeout=10000)
             title_loc.first.click()
             clicked = True
-        except Exception:
+        except Exception:  # allow-swallow: UI element may not exist
             # 兜底：点第一个看起来是会话行的元素
             row = page.locator("[onclick], li.session-item, .list-group-item, tr").first
             if row.count() > 0:

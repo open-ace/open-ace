@@ -125,6 +125,7 @@ def test_global_sentinel_still_allows_admin_global_write(sqlite_db):
         "tenant-two-session",
         {"title": "admin override"},
         tenant_id=sm_mod.GLOBAL_TENANT_SENTINEL,
+        require_tenant=False,
     )
     assert mutated is True, "explicit global sentinel should permit cross-tenant admin write"
 

@@ -13,7 +13,6 @@ import logging
 import os
 import pwd
 import re
-import shlex
 import shutil
 import subprocess
 import sys
@@ -21,6 +20,13 @@ import threading
 import time
 import uuid
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    # Import only under TYPE_CHECKING to avoid a runtime cycle: the git_workspace
+    # module imports orchestrator at module top, so a runtime import here would
+    # recurse. The string annotation below resolves via this name under mypy.
+    from app.modules.workspace.autonomous.git_workspace import GitWorkspaceService
 
 from app.modules.workspace.autonomous.agent_runner import (
     DEFAULT_TASK_TIMEOUT,
@@ -31,11 +37,43 @@ from app.modules.workspace.autonomous.artifact_text import (
     pick_best_artifact_text,
     sanitize_artifact_text,
 )
+from app.modules.workspace.autonomous.command_evidence.recorder import emit_command_evidence
+from app.modules.workspace.autonomous.command_evidence.scope import (  # noqa: E402,F401; Re-imported for the legacy heuristic (_has_passing_test_tool_result) and; any in-module callers; the structured verdict (test_verdict) imports them; directly from scope to avoid a circular import (#2046 Phase B).
+    _normalize_test_command,
+    _pytest_scope_covers,
+    _pytest_test_scope,
+    _PytestScope,
+)
+from app.modules.workspace.autonomous.command_evidence.types import ExecutionVerdict
+
+# Re-exported here for backward compatibility: tests and other modules import
+# these symbols from ``orchestrator`` (they lived here before T11 moved them to
+# constants.py to break the circular import with phases/*.py). The
+# ``noqa: F401`` keeps the unused-in-orchestrator names exported even though
+# the migrated phase bodies no longer reference them here.
+from app.modules.workspace.autonomous.constants import (  # noqa: F401
+    _REVIEW_APPROVAL_PHRASES,
+    _TRANSIENT_ORCHESTRATOR_KEYWORDS,
+    AUTONOMOUS_CONTEXT,
+    AUTONOMOUS_DEV_ALLOWED_TOOLS,
+    MERGE_POLICY_PAUSE_REASON_PREFIX,
+    READ_ONLY_REVIEW_UNSUPPORTED_TOOLS,
+    REVIEW_ALLOWED_TOOLS,
+    _extract_pr_number_from_error,
+    _is_transient_git_error,
+    _merge_milestone_metadata,
+    _parse_metadata,
+    _review_approval_phrase,
+    _zcode_planning_mode,
+)
 from app.modules.workspace.autonomous.event_emitter import AutonomousEventEmitter
 from app.modules.workspace.autonomous.evidence import Verdict
 from app.modules.workspace.autonomous.evidence_service import EvidenceService
 from app.modules.workspace.autonomous.github_ops import _FAILURE_LINE_RE, GitHubOps, GitHubOpsError
 from app.modules.workspace.autonomous.models import AgentTaskResult
+from app.modules.workspace.autonomous.phase_contract import PhaseResult, WorkflowContext
+from app.modules.workspace.autonomous.phase_host import PhaseDeps
+from app.modules.workspace.autonomous.phases import resolve_phase_handler
 from app.modules.workspace.autonomous.progress_report_i18n import (
     build_progress_payload,
     render_progress_report,
@@ -47,7 +85,6 @@ from app.repositories.user_repo import UserRepository
 logger = logging.getLogger(__name__)
 
 UPSTREAM_QUOTA_PAUSE_REASON_PREFIX = "Upstream provider quota exhausted:"
-MERGE_POLICY_PAUSE_REASON_PREFIX = "Merge blocked by repository policy:"
 
 
 class WorkflowPaused(RuntimeError):
@@ -308,192 +345,6 @@ def _has_test_tool_call(tool_calls: list, framework_type: str) -> bool:
     return False
 
 
-_TEST_OUTPUT_FILTER_RE = re.compile(
-    r"(?:\s+2>\&1)?\s*\|\s*(?:head|tail)(?:\s+-[^\s]+|\s+\d+)*\s*$",
-    re.IGNORECASE,
-)
-
-
-def _normalize_test_command(command: str) -> str:
-    """Return a stable identity for a test command across output-only filters.
-
-    Autonomous agents commonly run ``pytest ... | head -100`` while exploring
-    a failure and rerun the same target as ``pytest ... | tail -20`` after the
-    fix.  Those filters change only which output is displayed, not the tests
-    executed.  Treating the two strings as distinct left the truncated first
-    run permanently inconclusive even when the later rerun passed.
-
-    Strip only trailing ``head``/``tail`` pipelines (and their adjacent stderr
-    merge).  Execution-affecting shell operators such as ``&&``/``||`` and
-    pytest selectors/options remain part of the identity.
-    """
-    normalized = " ".join(str(command or "").split())
-    while True:
-        stripped = _TEST_OUTPUT_FILTER_RE.sub("", normalized).strip()
-        if stripped == normalized:
-            break
-        normalized = stripped
-    return re.sub(r"\s+2>\&1\s*$", "", normalized).strip()
-
-
-_PytestScope = tuple[str, frozenset[str]]
-
-
-def _pytest_test_scope(command: str) -> _PytestScope | None:
-    """Return the pytest execution context and selectors when safely comparable.
-
-    ``None`` means the command is too complex for safe scope comparison.  An
-    empty selector set means a full-suite invocation.  This lets a later
-    passing superset rerun clear earlier failures for the same files while
-    ensuring a targeted pass or a different Python environment can never clear
-    a failed full-suite command.
-    """
-    normalized = _normalize_test_command(command)
-    if any(operator in normalized for operator in ("&&", "||", ";", "|")):
-        return None
-    try:
-        tokens = shlex.split(normalized)
-    except ValueError:
-        return None
-
-    pytest_index = -1
-    for index, token in enumerate(tokens):
-        if os.path.basename(token) in {"pytest", "py.test"}:
-            pytest_index = index
-            break
-    if pytest_index < 0:
-        return None
-
-    # Only compare scopes when the invocation prefix has ordinary pytest
-    # semantics.  Environment assignments and wrappers can change collection
-    # even when the visible selectors are identical.
-    prefix = tokens[:pytest_index]
-    if prefix:
-        python_name = os.path.basename(prefix[0])
-        if (
-            len(prefix) != 2
-            or prefix[1] != "-m"
-            or re.fullmatch(r"python(?:\d+(?:\.\d+)*)?", python_name) is None
-        ):
-            return None
-        execution_context = f"{prefix[0]} -m {tokens[pytest_index]}"
-    else:
-        execution_context = tokens[pytest_index]
-
-    scope_narrowing_options = {
-        "-k",
-        "-m",
-        "--ignore",
-        "--ignore-glob",
-        "--deselect",
-        "--lf",
-        "--last-failed",
-        "--ff",
-        "--failed-first",
-        "--nf",
-        "--new-first",
-        "--sw",
-        "--stepwise",
-        "--stepwise-skip",
-    }
-    safe_flags = {
-        "-q",
-        "--quiet",
-        "-v",
-        "-vv",
-        "--verbose",
-        "-s",
-        "-x",
-        "--exitfirst",
-        "--disable-warnings",
-        "--strict-config",
-        "--strict-markers",
-        "--continue-on-collection-errors",
-        "--full-trace",
-        "--showlocals",
-        "-l",
-        "--no-header",
-        "--no-summary",
-    }
-    safe_value_options = {
-        "--tb",
-        "--color",
-        "--capture",
-        "--durations",
-        "--durations-min",
-        "--junitxml",
-        "--junit-prefix",
-        "--basetemp",
-        "--verbosity",
-        "--maxfail",
-    }
-
-    selectors: set[str] = set()
-    args = tokens[pytest_index + 1 :]
-    index = 0
-    selectors_only = False
-    while index < len(args):
-        token = args[index]
-        if token == "--":
-            selectors_only = True
-            index += 1
-            continue
-        if not selectors_only and token.startswith("-"):
-            option_name = token.split("=", 1)[0]
-            if option_name in scope_narrowing_options:
-                return None
-            if token in safe_flags:
-                index += 1
-                continue
-            if option_name in safe_value_options:
-                if "=" not in token:
-                    index += 1
-                    if index >= len(args):
-                        return None
-                index += 1
-                continue
-            # Plugin and future pytest options are unknown here.  Exact-command
-            # retries remain supported, but cross-command scope coverage is not.
-            return None
-        selectors.add(token.rstrip("/") or ".")
-        index += 1
-
-    return execution_context, frozenset(selectors)
-
-
-def _pytest_scope_covers(
-    passing_scope: _PytestScope | None,
-    earlier_scope: _PytestScope | None,
-) -> bool:
-    """Whether a passing pytest command covers an earlier command's scope."""
-    if passing_scope is None or earlier_scope is None:
-        return False
-    passing_context, passing_selectors = passing_scope
-    earlier_context, earlier_selectors = earlier_scope
-    if passing_context != earlier_context:
-        return False
-    if not passing_selectors:
-        return True
-    if not earlier_selectors:
-        return False
-
-    def _selector_covers(passing: str, earlier: str) -> bool:
-        if passing == earlier:
-            return True
-        if passing in {".", "./"}:
-            return True
-        passing_path = passing.split("::", 1)[0].rstrip("/")
-        earlier_path = earlier.split("::", 1)[0].rstrip("/")
-        if "::" not in passing and passing_path == earlier_path:
-            return True
-        return "::" not in passing and earlier_path.startswith(f"{passing_path}/")
-
-    return all(
-        any(_selector_covers(passing, earlier) for passing in passing_selectors)
-        for earlier in earlier_selectors
-    )
-
-
 def _has_passing_test_tool_result(event_log: list, framework_type: str) -> bool:
     """Require conclusive success for every distinct test command in this run.
 
@@ -501,6 +352,12 @@ def _has_passing_test_tool_result(event_log: list, framework_type: str) -> bool:
     reruns the same normalized command or a safely comparable pytest superset.
     Every new invocation resets its command to pending, so stale success from
     before a code change cannot satisfy an interrupted rerun.
+
+    #2046 Phase B — NON-AUTHORITATIVE FALLBACK: the gate now drives
+    PASSED/FAILED from ``compute_run_verdict`` over ``TestExecutionEvidence``.
+    This heuristic is retained only as the INCONCLUSIVE/NOT_RUN fallback (when
+    ``structured_verdict`` deferred). Do not extend it as a source of truth;
+    new frameworks belong in ``test_evidence.parse_test_evidence``.
     """
     _CommandInfo = tuple[str, _PytestScope | None]
     _Invocation = tuple[_CommandInfo, int]
@@ -641,15 +498,9 @@ def _has_passing_test_tool_result(event_log: list, framework_type: str) -> bool:
     return True
 
 
-# Prefix added to all prompts to inform the agent it is running autonomously
-AUTONOMOUS_CONTEXT = (
-    "## 重要提示\n"
-    "你正在无人值守的自动化工作流中运行。请遵守以下规则：\n"
-    "1. 不要请求人类确认或等待权限批准，如果操作被阻止请跳过并继续\n"
-    "2. 不要使用需要交互式确认的 gh CLI 命令（如 gh pr create）\n"
-    "3. 直接执行文件修改和验证，不要仅输出方案文本；不要执行 git add/commit/push，编排器负责提交和推送\n"
-    "4. 遇到权限问题时跳过该步骤继续执行其他任务\n\n"
-)
+# Prefix added to all prompts to inform the agent it is running autonomously.
+# Moved to constants.py (shared with phases/*.py to avoid a circular import);
+# re-imported above as AUTONOMOUS_CONTEXT.
 
 # Prefix for planning phase — restricts agent to read-only analysis only.
 # Rule #3 overrides AUTONOMOUS_CONTEXT's "直接执行文件修改" to prevent
@@ -696,79 +547,6 @@ PLANNING_ALLOWED_TOOLS: dict[str, list[str]] = {
     "zcode": [],
 }
 
-# PR review is an independent, read-only gate.  In particular, do not expose
-# Write/Edit/Bash or Agent here: a reviewer that edits the shared worktree can
-# accidentally make its own findings appear resolved without the main session
-# committing or testing those changes.  The main session applies findings in
-# ``_apply_pr_review_fix`` with ``AUTONOMOUS_DEV_ALLOWED_TOOLS`` instead.
-REVIEW_ALLOWED_TOOLS: dict[str, list[str]] = {
-    "claude-code": [
-        "Read",
-        "Glob",
-        "Grep",
-        "WebSearch",
-        "WebFetch",
-        "TaskRead",
-        "TaskGet",
-        "TaskList",
-    ],
-    "qwen-code-cli": [
-        "read_file",
-        "list_files",
-        "search_files",
-        "code_search",
-        "web_search",
-        "web_fetch",
-    ],
-    "codex": [],
-    "openclaw": [],
-    "zcode": [],
-}
-
-# OpenClaw's current single-shot adapter does not accept per-run permission or
-# tool-policy arguments.  Treating an empty allowlist as read-only would be a
-# false security boundary, so autonomous review must fail closed for this tool
-# until the adapter can provide an enforceable per-run sandbox.
-READ_ONLY_REVIEW_UNSUPPORTED_TOOLS = frozenset({"openclaw"})
-
-# Development-phase tools: planning read-only set + Write/Edit/Bash so the agent
-# can implement, run tests, and commit. Bash is allowed wholesale (test / git /
-# build commands vary by language and can't be enumerated). This bounds where
-# commits land (worktree + feature branch); bash itself is NOT sandboxed —
-# cd /, rm -rf, sudo, network egress are all reachable from the worktree cwd,
-# same trust model as any dev agent. plan phases stay read-only via
-# PLANNING_ALLOWED_TOOLS above. See #996.
-AUTONOMOUS_DEV_ALLOWED_TOOLS: dict[str, list[str]] = {
-    "claude-code": [
-        "Read",
-        "Glob",
-        "Grep",
-        "WebSearch",
-        "WebFetch",
-        "Agent",
-        "TaskRead",
-        "TaskGet",
-        "TaskList",
-        "Write",
-        "Edit",
-        "Bash",
-    ],
-    "qwen-code-cli": [
-        "read_file",
-        "list_files",
-        "search_files",
-        "code_search",
-        "web_search",
-        "web_fetch",
-        "write_file",
-        "edit_file",
-        "run_shell_command",
-    ],
-    "codex": [],
-    "openclaw": [],
-    "zcode": [],
-}
-
 # Maximum time (seconds) for a single planning agent call.
 # ZCode+GLM planning involves multiple model round-trips and subagent spawns
 # that can take 10-15 min for complex issues. 600s was too tight — planning
@@ -777,18 +555,8 @@ AUTONOMOUS_DEV_ALLOWED_TOOLS: dict[str, list[str]] = {
 PLANNING_TIMEOUT = 1800
 
 
-def _zcode_planning_mode(wf: dict) -> str:
-    """Return the ZCode --mode for planning-phase calls.
-
-    ZCode planning must stay read-only (plan mode, #761). For all other CLI
-    tools, pass through the workflow's permission_mode unchanged. For ZCode,
-    force "plan" so the agent can't write files or run commands during
-    planning — allowed_tools is [] for both planning and dev (zcode uses its
-    own built-in toolset), so the mode is the only reliable read-only signal.
-    """
-    if wf.get("cli_tool") in ("zcode", "zcode-code"):
-        return "plan"
-    return wf.get("permission_mode", "auto-edit")
+# _zcode_planning_mode moved to constants.py (shared with phases/pr_review.py);
+# re-imported above.
 
 
 # Minimum review text length (chars) to be considered substantive feedback.
@@ -807,6 +575,15 @@ REVIEW_SUGGESTIONS_MIN_LENGTH = 200
 
 # Phase ordering — used by fork to determine the next phase after the fork point.
 PHASE_ORDER = ["preparation", "planning", "development", "pr_review", "report", "merge"]
+
+# The only legitimate current_phase values a PhaseResult(completed) may carry in
+# workflow_patch when next_phase="completed" (the terminal pseudo-phase). "merge"
+# is the default terminal real phase (a completed workflow's current_phase stays
+# "merge"); "completed" is pr_review's literal-terminal legacy path (it skips
+# report/merge and writes the literal "completed"). Any other patch-carried
+# current_phase would strand the workflow in a non-canonical phase — rejected by
+# _commit_phase_result to mirror the top-level next_phase validation. (#2044 S2)
+_COMPLETED_TERMINAL_PHASES = ("merge", "completed")
 
 # Maps phases to their corresponding workflow status values
 PHASE_STATUS_MAP = {
@@ -831,53 +608,8 @@ CI_POLL_MAX_WAIT = 300  # maximum seconds to wait (5 minutes)
 # the workflow is marked failed for manual intervention.
 TRANSIENT_RETRY_MAX = 6
 
-# Keywords identifying transient network errors at the orchestrator level
-# (the error_message stored by advance's except block). Mirrors the
-# _TRANSIENT_ERROR_KEYWORDS in github_ops.py but checks the wrapped message.
-_TRANSIENT_ORCHESTRATOR_KEYWORDS = [
-    "libressl",
-    "openssl",
-    "ssl",
-    "tls",
-    "connection reset",
-    "connection refused",
-    "connection timed out",
-    "timed out",
-    "could not resolve host",
-    "network is unreachable",
-    "unable to access",
-    "rpc failed",
-    "early eof",
-    # --force-with-lease rejects the push when the remote auto-dev tip moved
-    # between git's read of the remote-tracking ref and the actual push (a
-    # concurrent push, or a freshly-fetched ref). The worktree is unchanged, so
-    # a Layer-2 retry that re-reads the remote ref succeeds; treating it as
-    # non-transient strands the workflow on a recoverable race.
-    "stale info",
-    "fetch first",
-    "non-fast-forward",
-    "[rejected]",
-]
-
-
-def _is_transient_git_error(e: Exception) -> bool:
-    """Check if an exception is a transient git push error.
-
-    Used by git_push exception handlers to decide whether to propagate
-    the error (triggering Layer-2 orchestrator retry) or handle it locally.
-
-    Args:
-        e: The caught exception.
-
-    Returns:
-        True if the error is transient and should trigger retry.
-    """
-    from app.modules.workspace.autonomous.github_ops import GitHubOpsError
-
-    if not isinstance(e, GitHubOpsError):
-        return False
-    err_str = str(e).lower()
-    return any(kw in err_str for kw in _TRANSIENT_ORCHESTRATOR_KEYWORDS)
+# _TRANSIENT_ORCHESTRATOR_KEYWORDS + _is_transient_git_error moved to
+# constants.py (shared with phases/pr_review.py); re-imported above.
 
 
 # GitHub rejects comment bodies longer than 65536 chars. Agent output (plan /
@@ -947,19 +679,8 @@ def build_language_instruction(content_language: str | None) -> str:
 
 _TLDR_RE = re.compile(r"TL;DR:\s*(.+?)\s*$", re.MULTILINE | re.IGNORECASE)
 
-# Approval marker the PR reviewer is asked to state when there are no major
-# issues, per content_language. Used in BOTH the review prompt and approval
-# detection — the agent writes its review in content_language, so a zh-only
-# marker would miss en/ja/ko approvals. The structured verdict written to
-# metadata.review_verdict removes progress_reported's dependency on this
-# substring entirely. (Plan-review approval "方案通过审查" is still zh-locked
-# and out of scope for the progress_reported i18n work.)
-_REVIEW_APPROVAL_PHRASES = {
-    "en": "Code review passed",
-    "zh": "代码审查通过",
-    "ja": "コードレビュー合格",
-    "ko": "코드 리뷰 통과",
-}
+# _REVIEW_APPROVAL_PHRASES + _review_approval_phrase moved to constants.py
+# (shared with phases/pr_review.py); re-imported above.
 
 _REVIEW_RESULT_LINE_RE = re.compile(r"^REVIEW_RESULT\s*:\s*(\{.*\})$")
 
@@ -1032,53 +753,8 @@ def _parse_review_result(review_text: str) -> dict | None:
     return {"verdict": verdict, "blocking_findings": blockers}
 
 
-def _extract_pr_number_from_error(error_text: str) -> int | None:
-    """Extract a PR number from a gh "already exists" error message.
-
-    gh's already-exists message includes the PR URL, e.g.:
-      "a pull request for branch X into branch main already exists:
-       https://github.com/owner/repo/pull/1877"
-    Parsing the /pull/<n> URL gives the PR number directly — this avoids
-    coupling recovery to the exact "already exists" wording, skips the
-    eventually-consistent find_existing_pr API call, and proves the error
-    really is the already-exists case (no URL → not recoverable here).
-    Returns the PR number or None.
-    """
-    if not error_text:
-        return None
-    m = re.search(r"/pull/(\d+)", error_text)
-    return int(m.group(1)) if m else None
-
-
-def _review_approval_phrase(content_language: str | None) -> str:
-    """Approval marker for PR review in the given content language."""
-    return _REVIEW_APPROVAL_PHRASES.get(
-        content_language, _REVIEW_APPROVAL_PHRASES[DEFAULT_CONTENT_LANGUAGE]
-    )
-
-
-def _parse_metadata(raw) -> dict:
-    """Parse a milestone metadata JSON string/dict into a dict (empty on failure)."""
-    if not raw:
-        return {}
-    if isinstance(raw, dict):
-        return dict(raw)
-    try:
-        return json.loads(raw)
-    except (ValueError, TypeError):
-        return {}
-
-
-def _merge_milestone_metadata(milestone, updates: dict) -> str:
-    """Merge ``updates`` into a milestone's metadata, returning the JSON string.
-
-    ``milestone`` may be a milestone dict (read from the repo) or a raw metadata
-    JSON string. Existing keys are preserved; ``updates`` keys overwrite.
-    """
-    raw = milestone.get("metadata") if isinstance(milestone, dict) else milestone
-    merged = _parse_metadata(raw)
-    merged.update(updates)
-    return json.dumps(merged, ensure_ascii=False)
+# _extract_pr_number_from_error / _parse_metadata / _merge_milestone_metadata
+# moved to constants.py (shared with phases/pr_review.py); re-imported above.
 
 
 # Localized "comment truncated" notice appended when a GitHub comment body
@@ -1209,11 +885,33 @@ _CONTEXT_OVERFLOW_RE = re.compile(
 # Test failure retry configuration.
 MAX_TEST_RETRIES = 2  # max retries when test agent itself fails
 MAX_DEV_RETRIES_ON_TEST_FAIL = 2  # max dev round retries for unfixable test failures
-MAX_CI_REPAIR_ATTEMPTS = 3  # max automatic dev-round retries for merge-phase CI failures
+MAX_CI_REPAIR_ATTEMPTS = 5  # max automatic dev-round retries for merge-phase CI failures
+# Separate cap for transient-API deferrals during CI repair: a 503/429 must
+# not loop forever, but must allow more retries than the 5-attempt budget
+# (which is consumed only by real agent repair attempts, not infra glitches).
+MAX_CI_REPAIR_TRANSIENT_RETRIES = 6
+# Separate cap for genuine no-code-change deferrals during CI repair: an agent
+# that runs cleanly but commits nothing must not loop forever, and the bound is
+# deliberately smaller than the transient budget (6) because no-change is
+# closer to "agent is stuck" than "infra glitch". No-change rounds do NOT
+# consume a real ci_repair_attempts slot, so MAX_CI_REPAIR_ATTEMPTS=5 is
+# preserved for rounds that produce changes (#2187).
+MAX_CI_REPAIR_NO_CHANGE_RETRIES = 2  # consecutive genuine no-change rounds before giving up
 MAX_PRE_COMMIT_CONVERGENCE_PASSES = 3
 PRE_COMMIT_CONVERGENCE_TIMEOUT = 600
 CI_PRE_COMMIT_SKIP = "bandit,no-commit-to-branch"
 MAX_CI_DIAGNOSTICS_ATTEMPTS = 6  # bound scheduler polls when failed job logs stay unavailable
+MAX_CLEANUP_ATTEMPTS = 10  # post-merge Git cleanup retries before giving up (#2043)
+
+
+def _cleanup_backoff_time(attempts: int) -> str:
+    """ISO timestamp for the next cleanup retry; exponential backoff capped at 1h (#2043)."""
+    from datetime import timedelta
+
+    delay = min(60 * (2 ** max(attempts - 1, 0)), 3600)
+    return (datetime.now(timezone.utc) + timedelta(seconds=delay)).strftime("%Y-%m-%d %H:%M:%S")
+
+
 try:
     MAX_AUTONOMOUS_CHANGED_FILES = int(os.environ.get("AUTONOMOUS_MAX_CHANGED_FILES", "60"))
 except ValueError:
@@ -1271,8 +969,58 @@ class AutonomousOrchestrator:
             activity_callback=self._on_agent_activity,
             on_pid_registered=self._on_pid_registered,
             on_pid_cleared=self._on_pid_cleared,
+            on_sandbox_created=self._on_sandbox_created,
         )
         self._gh: GitHubOps | None = None
+
+    @property
+    def _sandbox_provider(self):
+        """The default SandboxProvider the runner spawns local tasks through (#2044 T13).
+
+        ``AutonomousAgentRunner`` owns the per-task provider selection
+        (``_select_sandbox_provider`` branches on workspace_type: local → the
+        ``LegacyPosixProvider`` injected at construction, remote → a fresh
+        ``RemoteMachineProvider``). Phase handlers that need a provider handle
+        to introspect (capabilities, build a spec, etc.) receive this default
+        via ``PhaseDeps.sandbox``. It is the same instance the runner uses for
+        local spawns, so handler-built specs and the runner's spawn path agree
+        on the declared capabilities. Per-task remote providers are NOT visible
+        here on purpose — they are minted from ``remote_session_manager`` at
+        run time and are not a stable orchestrator-level dependency.
+
+        Tests that bypass ``__init__`` (``__new__`` + stubbed runner) get a
+        ``LegacyPosixProvider`` fallback. This is a data-descriptor property,
+        so a test cannot shadow it by stuffing ``self._sandbox_provider =
+        ...`` into ``__dict__`` (assignment would invoke this getter's
+        ``__set__`` and raise ``AttributeError`` — there is no setter). To
+        override in a test, either (a) inject ``runner._sandbox_provider`` and
+        let the getter read it, or (b) ``del type(o)._sandbox_provider`` to
+        remove the property before assigning the instance attribute.
+        """
+        runner_provider = getattr(self._runner, "_sandbox_provider", None)
+        if runner_provider is not None:
+            return runner_provider
+        from app.modules.workspace.autonomous.sandbox.legacy_posix import LegacyPosixProvider
+
+        return LegacyPosixProvider()
+
+    @property
+    def _git_workspace(self) -> "GitWorkspaceService":
+        """Lazily attach the git-workspace service (#2044 Phase B T5).
+
+        Mirrors ``_evidence``: unit tests that build the orchestrator via
+        ``__new__`` (bypassing ``__init__``) and stub individual methods still
+        get a service instance on first wrapper call instead of an
+        ``AttributeError``. A test that supplies its own ``_git_workspace`` mock
+        takes precedence via ``__dict__``.
+        """
+        cached = self.__dict__.get("_git_workspace_instance")
+        if cached is None:
+            from app.modules.workspace.autonomous.git_workspace import GitWorkspaceService
+
+            cached = GitWorkspaceService(self)
+            self.__dict__["_git_workspace_instance"] = cached
+        return cached
 
     @property
     def _evidence(self) -> EvidenceService:
@@ -1482,6 +1230,7 @@ class AutonomousOrchestrator:
         branch = gh.get_current_branch()
         head = gh.get_current_commit()
         origin = gh._run_git(["remote", "get-url", "origin"], check=False).stdout.strip()
+        main_head = gh._run_git(["rev-parse", "origin/main"], check=False).stdout.strip()
         git_dir = gh._run_git(["rev-parse", "--absolute-git-dir"]).stdout.strip()
         common_dir = gh._run_git(
             ["rev-parse", "--path-format=absolute", "--git-common-dir"]
@@ -1497,12 +1246,88 @@ class AutonomousOrchestrator:
             "top_level": os.path.realpath(top_level) if top_level else "",
             "branch": branch,
             "head": head,
+            "main_head": main_head,
             "origin": origin,
             "git_dir": os.path.realpath(git_dir),
             "common_dir": os.path.realpath(common_dir),
             "git_identity": git_identity,
             "common_identity": common_identity,
         }
+
+    def recover_worktree_branch(
+        self,
+        gh: "GitHubOps",
+        expected_branch: str,
+        before_head: str,
+        before_main_head: str,
+    ) -> str | None:
+        """Public PhaseHost-facing alias for ``_recover_worktree_branch`` (#2302).
+
+        Lets the pr_review push check recover a worktree the agent left on
+        another branch, without reaching past the PhaseHost protocol.
+        """
+        return self._recover_worktree_branch(gh, expected_branch, before_head, before_main_head)
+
+    def _recover_worktree_branch(
+        self,
+        gh: "GitHubOps",
+        expected_branch: str,
+        before_head: str,
+        before_main_head: str,
+    ) -> str | None:
+        """Recover the worktree onto ``expected_branch`` after an agent left it
+        on another branch (e.g. a read-only ``git checkout main``). Returns a
+        non-empty reason when recovery was safe and performed (worktree is now
+        on ``expected_branch``); None when the change is NOT safely recoverable
+        and the caller must fail closed (#2271, prod 212/208).
+
+        Recovery runs only when the agent's branch switch was provably
+        read-only:
+
+        * ``expected_branch`` ref is unchanged (``== before_head``) — the agent
+          did not move the feature branch.
+        * The worktree is clean (``git status --porcelain`` empty) — staged or
+          untracked changes would otherwise ride the checkout into the feature
+          branch and get pushed.
+        * The wrong branch's HEAD still equals ``before_main_head`` (the main
+          HEAD captured before the agent ran) — the agent committed nothing to
+          / fetched no advance of the wrong branch. Live ``origin/main`` is
+          intentionally NOT trusted: an agent can ``update-ref`` it.
+
+        Anything else returns None so the caller keeps the #1611 fail-closed
+        guard.
+        """
+        if not expected_branch or not before_head or not before_main_head:
+            return None
+        try:
+            feature_ref = gh._run_git(["rev-parse", expected_branch], check=False).stdout.strip()
+        except Exception:
+            return None
+        if not feature_ref or feature_ref != before_head:
+            return None
+        try:
+            porcelain = gh._run_git(["status", "--porcelain"], check=False).stdout.strip()
+        except Exception:
+            return None
+        if porcelain:
+            return None
+        try:
+            wrong_branch_head = gh.get_current_commit()
+        except Exception:
+            return None
+        if not wrong_branch_head or wrong_branch_head != before_main_head:
+            return None
+        try:
+            gh._run_git(["checkout", expected_branch], check=True)
+        except Exception:
+            return None
+        logger.warning(
+            "Recovered worktree onto %s after an agent left it on another "
+            "branch (read-only checkout); feature ref %s unchanged, worktree clean.",
+            expected_branch,
+            before_head,
+        )
+        return f"recovered worktree onto {expected_branch} after read-only agent branch switch"
 
     def _ancestor_check(self, gh: "GitHubOps", a: str, b: str) -> bool | None:
         """Return True if ``a`` is an ancestor of ``b``, False if not, None on
@@ -1643,10 +1468,33 @@ class AutonomousOrchestrator:
                 f"expected repo root {expected_root}, actual {actual_root}"
             )
         if expected_branch and after_effective.get("branch") != expected_branch:
-            return (
-                "Agent changed the workflow branch unexpectedly: "
-                f"expected {expected_branch}, actual {after_effective.get('branch', '')}"
-            )
+            # #2271 (prod 212/208): an agent may leave the worktree on another
+            # branch via a read-only checkout (e.g. ``git checkout main`` to
+            # read a file). When that switch is provably read-only (feature
+            # branch ref unchanged, worktree clean, wrong-branch HEAD == the
+            # pre-run main HEAD), recover onto expected_branch instead of
+            # permanently failing the workflow. Anything else stays fail-closed.
+            recovered = None
+            try:
+                recover_gh = GitHubOps(repo_path, system_account=system_account)
+                recovered = self._recover_worktree_branch(
+                    recover_gh,
+                    expected_branch,
+                    before_state.get("effective", {}).get("head", ""),
+                    before_state.get("effective", {}).get("main_head", ""),
+                )
+            except Exception:
+                recovered = None
+            if recovered:
+                logger.info("Workflow %s: %s", self._workflow_id[:8], recovered)
+                # Worktree is back on expected_branch; fall through (no
+                # violation). origin/git_dir/common_dir below are unaffected by
+                # a branch-only checkout and remain valid.
+            else:
+                return (
+                    "Agent changed the workflow branch unexpectedly: "
+                    f"expected {expected_branch}, actual {after_effective.get('branch', '')}"
+                )
         before_origin = before_state.get("effective", {}).get("origin", "")
         after_origin = after_effective.get("origin", "")
         if before_origin != after_origin:
@@ -1778,189 +1626,20 @@ class AutonomousOrchestrator:
         return ""
 
     def _ensure_worktree(self, wf: dict) -> str:
-        """Guarantee the worktree dir + branch exist before a phase runs.
+        return self._git_workspace.ensure_worktree(wf)
 
-        Retrying/resuming a ``worktree``-strategy workflow after its dir was
-        cleaned up (e.g. a previous failure removed it, or the machine
-        rebooted) used to silently launch the agent against an empty path and
-        fail with a JSONL-detection error (#814). Every downstream phase now
-        calls this at entry so the environment self-heals:
-
-        - normalizes a stale ``worktree_path`` still containing ``..`` so the
-          DB and the on-disk dir agree;
-        - recreates the worktree dir (reusing the branch if it still exists)
-          when it is gone.
-
-        Issue #1573: Added branch consistency verification when worktree exists.
-        If the actual branch doesn't match expected branch_name, we attempt to
-        recreate the worktree (after safety check for uncommitted changes).
-
-        Returns the canonical worktree path. For non-worktree strategies, or
-        when ``worktree_path`` is intentionally empty (merge cleanup / conflict
-        resolution clears it), this is a no-op returning ``project_path``.
-        """
-        strategy = wf.get("branch_strategy", "new-branch")
-        project_path = wf.get("project_path", "")
-        worktree_path = wf.get("worktree_path", "")
-
-        # An empty worktree_path is NOT the "dir gone, recreate it" case — it
-        # is set deliberately by _do_merge final cleanup when the PR is merged
-        # and the worktree is no longer needed. (_resolve_merge_conflicts
-        # restores worktree_path in its finally block, so it no longer leaves
-        # the field empty.) Treating an empty path as missing would fall back
-        # to project_path as canonical and try `git worktree add <main_repo>`,
-        # which fails and turns a retried merge into a hard failure. Only a
-        # non-empty path whose dir is gone represents external loss (#814).
-        if strategy != "worktree" or not project_path or not worktree_path:
-            # Hard guard (#2050): a transition still in progress (anything other
-            # than recovery_failed) must NOT fall back to project_path — that
-            # would run a phase against the main checkout (HEAD=main). The
-            # caller is required to reconcile first.
-            ts = wf.get("worktree_transition_state")
-            if ts and ts != "recovery_failed":
-                raise RuntimeError(
-                    "worktree transition in progress " f"(state={ts!r}); reconcile before execution"
-                )
-            return worktree_path or project_path
-
-        canonical = os.path.realpath(worktree_path)
-        # Resolve system_account up front so the validity check below can use
-        # it: os.path.isfile() stats as the service user and raises
-        # PermissionError under a user-private parent (700 home, Issue #1395).
-        # Get system_account for multi-user permission isolation (Issue #1395)
-        system_account = None
-        user_id = wf.get("user_id")
-        if user_id:
-            user_repo = UserRepository()
-            user = user_repo.get_user_by_id(user_id)
-            if user:
-                system_account = user.get("system_account")
-        main_gh = GitHubOps(project_path, system_account=system_account)
-        # Valid worktree: a .git FILE inside means git set it up (a plain
-        # clone has a .git directory instead). If the stored path was
-        # unnormalized (legacy ".."), persist the canonical form so JSONL
-        # session detection matches Claude's encoding. file_only keeps the
-        # original os.path.isfile() semantics (Issue #1395 review).
-        if worktree_path and main_gh.path_exists_as_user(
-            os.path.join(canonical, ".git"), file_only=True
-        ):
-            if canonical != worktree_path:
-                self._update_workflow({"worktree_path": canonical})
-
-            # Issue #1573: Verify branch consistency when worktree exists.
-            # Check that the worktree's actual branch matches the expected branch_name.
-            expected_branch = wf.get("branch_name", "")
-            if expected_branch:
-                try:
-                    wt_gh = GitHubOps(canonical, system_account=system_account)
-                    actual_branch = wt_gh.get_current_branch()
-                    if actual_branch != expected_branch:
-                        logger.error(
-                            "Branch mismatch detected for workflow %s: expected=%s, actual=%s, worktree_path=%s",
-                            self._workflow_id[:8],
-                            expected_branch,
-                            actual_branch,
-                            canonical,
-                        )
-                        # Safety check: refuse to delete worktree with uncommitted changes
-                        if wt_gh.has_uncommitted_changes():
-                            logger.error(
-                                "Worktree %s has uncommitted changes, refusing to delete",
-                                canonical,
-                            )
-                            self._create_milestone(
-                                phase=wf.get("current_phase", "preparation"),
-                                milestone_type="branch_mismatch",
-                                status="failed",
-                                title=f"Branch mismatch with uncommitted changes: expected {expected_branch}, actual {actual_branch}",
-                                error_message=f"Cannot recreate worktree: uncommitted changes detected on branch {actual_branch}",
-                            )
-                            raise GitHubOpsError(
-                                f"Worktree branch mismatch ({actual_branch} != {expected_branch}) "
-                                f"with uncommitted changes. Manual intervention required."
-                            )
-                        # Safe to delete - recreate worktree with correct branch
-                        logger.warning(
-                            "Attempting to recreate worktree %s on correct branch %s",
-                            canonical,
-                            expected_branch,
-                        )
-                        main_gh.remove_worktree(canonical)
-                        # Recreate with correct branch
-                        branch_check = main_gh._run_git(
-                            ["show-ref", "--verify", "--quiet", f"refs/heads/{expected_branch}"],
-                            check=False,
-                        )
-                        remote_check = main_gh._run_git(
-                            [
-                                "show-ref",
-                                "--verify",
-                                "--quiet",
-                                f"refs/remotes/origin/{expected_branch}",
-                            ],
-                            check=False,
-                        )
-                        if branch_check.returncode == 0 or remote_check.returncode == 0:
-                            main_gh._run_git(["worktree", "add", canonical, expected_branch])
-                        else:
-                            main_gh._run_git(
-                                ["worktree", "add", "-b", expected_branch, canonical, "origin/main"]
-                            )
-                        self._create_milestone(
-                            phase=wf.get("current_phase", "preparation"),
-                            milestone_type="worktree_restored",
-                            status="completed",
-                            title=f"Worktree recreated on correct branch {expected_branch}",
-                        )
-                        logger.info(
-                            "Worktree %s recreated on correct branch %s",
-                            canonical,
-                            expected_branch,
-                        )
-                        # Reset cached gh so it picks up the new worktree
-                        self._gh = None
-                except GitHubOpsError:
-                    raise
-                except Exception as e:
-                    logger.warning("Branch verification failed: %s", e)
-            return canonical
-
-        # Worktree missing — recreate from the main repo.
-        branch_name = wf.get("branch_name") or f"auto-dev/{self._workflow_id[:12]}"
-        try:
-            main_gh._run_git(["fetch", "origin", "main"])
-            # Does the branch still exist locally or on origin?
-            branch_check = main_gh._run_git(
-                ["show-ref", "--verify", "--quiet", f"refs/heads/{branch_name}"],
-                check=False,
-            )
-            remote_check = main_gh._run_git(
-                ["show-ref", "--verify", "--quiet", f"refs/remotes/origin/{branch_name}"],
-                check=False,
-            )
-            if branch_check.returncode == 0 or remote_check.returncode == 0:
-                # Branch survives (local or remote) — attach a worktree to it
-                # without recreating the branch. For a remote-only branch, git
-                # auto-creates a local tracking branch in this step.
-                main_gh._run_git(["worktree", "add", canonical, branch_name])
-            else:
-                # Neither worktree nor branch — start fresh from origin/main.
-                main_gh._run_git(["worktree", "add", "-b", branch_name, canonical, "origin/main"])
-        except GitHubOpsError as e:
-            logger.error("Failed to recreate worktree at %s: %s", canonical, e)
-            raise
-
-        self._update_workflow({"worktree_path": canonical, "branch_name": branch_name})
-        self._create_milestone(
-            phase=wf.get("current_phase", "preparation"),
-            milestone_type="worktree_restored",
-            status="completed",
-            title=f"Worktree restored at {os.path.basename(canonical)}",
+    def _fail_recovery_closed(
+        self,
+        wf: dict,
+        canonical: str,
+        decision: str,
+        evidence_meta: dict,
+        local_sha: str,
+        expected_sha: str,
+    ) -> None:
+        return self._git_workspace.fail_recovery_closed(
+            wf, canonical, decision, evidence_meta, local_sha, expected_sha
         )
-        logger.info("Restored worktree at %s on branch %s", canonical, branch_name)
-        # Reset cached gh so it picks up the restored worktree path.
-        self._gh = None
-        return canonical
 
     def _emit(self, event_type: str, data: dict):
         """Emit a timeline event."""
@@ -2062,18 +1741,7 @@ class AutonomousOrchestrator:
         return "\n".join(lines)
 
     def _get_preferred_worktree_path(self, wf: dict) -> str:
-        """Return the canonical worktree path the workflow should reuse."""
-        preferred = (wf.get("preferred_worktree_path") or "").strip()
-        if preferred:
-            return preferred
-        current = (wf.get("worktree_path") or "").strip()
-        if current:
-            return current
-        project_path = (wf.get("project_path") or "").strip()
-        workflow_id = (wf.get("workflow_id") or self._workflow_id or "").strip()
-        if not project_path or not workflow_id:
-            return ""
-        return os.path.join(project_path, ".worktrees", workflow_id)
+        return self._git_workspace.get_preferred_worktree_path(wf)
 
     def _build_ci_repair_context(
         self, wf: dict, gh: GitHubOps, pr_number: int, failed_checks: list[dict]
@@ -2115,6 +1783,22 @@ class AutonomousOrchestrator:
                 lines.append("```text")
                 lines.append(excerpt)
                 lines.append("```")
+            lines.append("")
+        if self._ci_failure_uses_schema_sync(failed_checks):
+            lines.append("## schema-sync 专项规则")
+            lines.append(
+                "上面的 schema-sync 失败摘录包含完整 diff（若未见 diff，说明本轮未取到日志，请用 "
+                "`gh run view <run-id> --log-failed` 自行取）。schema/*.sql 由迁移重新生成（byte-exact），"
+                "**绝不要手编**。"
+            )
+            lines.append(
+                "- diff 的 `+` 行就是重新生成后的正确内容——照搬应用到提交的文件即可（无需本地起 Postgres）。"
+            )
+            lines.append(
+                "- 若本地有可用临时 Postgres：`python scripts/rebuild_schema_snapshots.py --postgres-url <一次性-pg-url>`，"
+                "然后提交生成的 schema/schema-postgres.sql 和 schema/schema-sqlite.sql。"
+            )
+            lines.append("- 手编（括号、缩进、列序、类型大小写）几乎必定与重新生成结果不一致。")
             lines.append("")
         lines.extend(
             [
@@ -2258,17 +1942,40 @@ class AutonomousOrchestrator:
         )
 
     @staticmethod
-    def _scope_violation(changed_files: list[str]) -> str:
-        """Return a blocking reason when one autonomous round explodes in scope."""
-        limit = MAX_AUTONOMOUS_CHANGED_FILES
+    def _scope_violation(changed_files: list[str], limit: int | None = None) -> str:
+        """Return a blocking reason when one autonomous round explodes in scope.
+
+        ``limit`` is the per-workflow override when set (``wf["max_changed_files_override"]``),
+        else ``None`` → fall back to the global ``MAX_AUTONOMOUS_CHANGED_FILES``.
+        Callers without a workflow context (e.g. the merge-conflict resolver) omit
+        it and get the historical global bound.
+        """
+        # None or non-positive → global fallback. A non-positive override
+        # persisted out-of-band (e.g. DB direct write) must never silently
+        # disable the cap.
+        if limit is None or limit <= 0:
+            limit = MAX_AUTONOMOUS_CHANGED_FILES
         normalized = sorted({path for path in changed_files if path})
-        if limit > 0 and len(normalized) > limit:
+        if len(normalized) > limit:
             sample = ", ".join(normalized[:8])
             return (
                 f"Autonomous change scope exceeded: {len(normalized)} files changed "
                 f"(limit {limit}). Sample: {sample}"
             )
         return ""
+
+    @staticmethod
+    def _is_merge_commit(gh: GitHubOps, commit_sha: str) -> bool:
+        """Check if a commit is a merge commit (has two parents).
+
+        A merge commit has at least two parent commits (SHA^1 and SHA^2).
+        Regular commits have only one parent (SHA^1).
+        """
+        try:
+            result = gh._run_git(["rev-parse", f"{commit_sha}^2"], check=False)
+            return result.returncode == 0
+        except Exception:
+            return False
 
     def _validate_autonomous_change_scope(
         self,
@@ -2280,6 +1987,33 @@ class AutonomousOrchestrator:
         """Fail closed on both per-round and cumulative branch scope."""
         if not commit_before or not commit_after:
             return "Autonomous change scope could not be verified: missing commit boundary"
+
+        # If commit_after is a merge commit, use merge-base to find effective base.
+        # This excludes changes introduced by merging upstream main, which should not
+        # count as autonomous changes. This mirrors the logic in
+        # _validate_pre_merge_change_scope for consistent scope validation.
+        if self._is_merge_commit(gh, commit_after):
+            try:
+                gh._run_git(["fetch", "origin", "main"])
+                fetched_main_head = gh.resolve_commit("FETCH_HEAD")
+                merge_base_result = gh._run_git(
+                    ["merge-base", commit_after, fetched_main_head], check=False
+                )
+                effective_base = merge_base_result.stdout.strip()
+                if merge_base_result.returncode == 0 and effective_base:
+                    # Use merge-base as the effective round base for scope validation.
+                    # This only counts changes in the PR branch, not merge-introduced changes.
+                    commit_before = effective_base
+                    logger.info(
+                        "Merge commit detected: using merge-base %s as effective round base",
+                        effective_base[:12],
+                    )
+            except Exception as exc:
+                # Fallback to original logic if merge-base derivation fails
+                logger.warning(
+                    "Failed to derive merge-base for merge commit scope validation: %s", exc
+                )
+
         ranges = [("current round", commit_before)]
         cumulative_base = (wf.get("base_commit_sha") or "").strip()
         if not cumulative_base:
@@ -2305,12 +2039,16 @@ class AutonomousOrchestrator:
             self._update_workflow({"base_commit_sha": cumulative_base})
         if cumulative_base != commit_before:
             ranges.append(("cumulative branch", cumulative_base))
+        # Per-workflow override (#2309): a large legit issue can widen its own
+        # cap without weakening the global bound. None/0 → global fallback
+        # inside _scope_violation.
+        override_limit = wf.get("max_changed_files_override") or None
         for label, base in ranges:
             try:
                 changed_files = gh.get_changed_files(base, commit_after)
             except Exception as exc:
                 return f"Autonomous {label} scope could not be verified; refusing to push: {exc}"
-            violation = self._scope_violation(changed_files)
+            violation = self._scope_violation(changed_files, limit=override_limit)
             if violation:
                 return f"{label.capitalize()} {violation}"
         return ""
@@ -2514,6 +2252,21 @@ class AutonomousOrchestrator:
                 "files were modified by this hook",
             )
         )
+
+    @staticmethod
+    def _ci_failure_uses_schema_sync(failed_checks: list[dict]) -> bool:
+        """Whether collected CI evidence identifies a schema-sync failure.
+
+        The check name is the Actions JOB name ('schema-sync', per
+        .github/workflows/schema-sync.yml), so a name match is reliable; the
+        excerpt fallback covers log-text mentions.
+        """
+        evidence = "\n".join(
+            str(check.get("name") or "") + " " + str(check.get("failure_excerpt") or "")
+            for check in failed_checks
+            if check.get("bucket") == "fail"
+        ).lower()
+        return "schema-sync" in evidence or "schema sync" in evidence
 
     def _converge_pre_commit_fixes(
         self,
@@ -2864,6 +2617,11 @@ class AutonomousOrchestrator:
             ),
         )
 
+        # Record the trusted head only after a successful commit+push (the
+        # static helper has no `self`; this is the caller that owns state).
+        if sha_changed and not push_error:
+            self._record_trusted_head(gh, pushed=True, sha=commit_sha)
+
         try:
             diff_stats = gh.get_commit_diff_stats(commit_sha) if commit_sha else {}
         except Exception:
@@ -2901,6 +2659,22 @@ class AutonomousOrchestrator:
             return
 
         if not sha_changed:
+            # Transient API errors (429/5xx/overload) may cause the agent to
+            # produce no code changes without consuming a real repair attempt.
+            # Defer to the next scheduler cycle instead of wasting a bounded
+            # attempt on an infra glitch (#1820: 2/3 attempts burned — 1 by a
+            # 503 — then failed). The retry budget is bounded separately by
+            # MAX_CI_REPAIR_TRANSIENT_RETRIES in _start_ci_repair_round.
+            if self._should_retry_transient_api_failure(repair_result):
+                message = (
+                    "CI repair deferred: transient API error - "
+                    f"{repair_result.error or repair_result.response_text}"
+                )
+                milestone_updates["status"] = "failed"
+                milestone_updates["error_message"] = message
+                self.repo.update_milestone(repair_ms.get("milestone_id", ""), milestone_updates)
+                self._update_workflow({"status": "merging", "error_message": message})
+                return
             # Preserve the context-overflow signal in the error message so the
             # next round's _collect_prior_ci_repair_failures filters it out
             # (an overflow failure has no actionable signal — the agent never
@@ -2909,14 +2683,23 @@ class AutonomousOrchestrator:
             # the next fresh prompt. (#1816 review suggestion)
             if self._is_context_overflow(repair_result):
                 message = f"CI repair failed: context overflow - {repair_result.error}"
+                terminal = True
             elif primary_error := self._primary_result_error(repair_result):
                 message = f"CI repair agent failed before producing code changes: {primary_error}"
+                terminal = True
             else:
-                message = "CI repair failed: agent produced no code changes"
+                # Genuine no-change: the agent ran cleanly but committed nothing.
+                # Defer (don't terminal-fail) so it gets a bounded retry — see
+                # MAX_CI_REPAIR_NO_CHANGE_RETRIES in _start_ci_repair_round (#2187).
+                message = "CI repair deferred: agent produced no code changes"
+                terminal = False
             milestone_updates["status"] = "failed"
             milestone_updates["error_message"] = message
             self.repo.update_milestone(repair_ms.get("milestone_id", ""), milestone_updates)
-            self._update_workflow({"status": "failed", "error_message": message})
+            if terminal:
+                self._update_workflow({"status": "failed", "error_message": message})
+            else:
+                self._update_workflow({"status": "merging", "error_message": message})
             return
 
         if not repair_result.success and not salvaged:
@@ -3136,7 +2919,11 @@ class AutonomousOrchestrator:
         """Prefer agent summary, but synthesize a concise fallback when it is noisy/empty."""
         cleaned = artifact_text.strip()
         if cleaned:
-            return cleaned[:300]
+            # Keep the agent's full repair summary; the PR comment body is
+            # capped later by GITHUB_COMMENT_MAX_CHARS (65000) in
+            # _post_github_comment. The previous hard [:300] cut repair
+            # summaries mid-sentence (PR #2198 attempts 2-N).
+            return cleaned
 
         status = "Development completed" if success else "Development failed"
         parts = [status]
@@ -3509,13 +3296,27 @@ class AutonomousOrchestrator:
             )
 
     def _find_existing_milestone(
-        self, phase: str, milestone_type: str, dev_round: int = None, round_number: int = None
+        self,
+        phase: str,
+        milestone_type: str,
+        dev_round: int = None,
+        round_number: int = None,
+        completed: bool = True,
     ) -> dict | None:
-        """Check if a milestone of this type already exists (idempotency guard)."""
+        """Check if a milestone of this type already exists (idempotency guard).
+
+        ``completed=False`` skips completed milestones — used for ci_repair_*
+        milestones so a prior cycle's completed milestone (same dev_round +
+        round_number, since cycle restarts don't bump dev_round) doesn't block a
+        new cycle's attempt. Only a still-in_progress milestone (a true
+        concurrent duplicate) blocks in that case.
+        """
         existing = self.repo.list_milestones(self._workflow_id, phase=phase, status="in_progress")
-        # Also check completed ones
-        completed = self.repo.list_milestones(self._workflow_id, phase=phase, status="completed")
-        candidates = existing + completed
+        candidates = existing
+        if completed:
+            candidates = candidates + self.repo.list_milestones(
+                self._workflow_id, phase=phase, status="completed"
+            )
 
         for ms in candidates:
             if ms.get("milestone_type") != milestone_type:
@@ -3531,12 +3332,18 @@ class AutonomousOrchestrator:
         """Create a milestone and emit event. Idempotent — returns existing if found."""
         kwargs.setdefault("workflow_id", self._workflow_id)
 
+        milestone_type = kwargs.get("milestone_type", "")
+        # ci_repair_* milestones are one-per-attempt; a prior cycle's completed
+        # ci_repair milestone (same dev_round + round_number, since cycle restarts
+        # don't bump dev_round) must not block a new cycle's attempt.
+        match_completed = not milestone_type.startswith("ci_repair_")
         # Idempotency guard: skip creation if matching milestone already exists
         existing = self._find_existing_milestone(
             phase=kwargs.get("phase", ""),
-            milestone_type=kwargs.get("milestone_type", ""),
+            milestone_type=milestone_type,
             dev_round=kwargs.get("dev_round"),
             round_number=kwargs.get("round_number"),
+            completed=match_completed,
         )
         if existing:
             logger.info(
@@ -3556,6 +3363,180 @@ class AutonomousOrchestrator:
             },
         )
         return ms
+
+    # ── Phase A (#2044): unified phase/status commit entrypoint ──────────────
+    #
+    # The single authoritative path for phase/status transition. Phase handlers
+    # migrated onto the PhaseResult contract return a structured outcome instead
+    # of calling _update_workflow / _create_milestone inline; this method
+    # validates and applies it. Crucially, a failed/paused/retrying phase can
+    # no longer write the NEXT phase's state — only outcome="completed" advances
+    # current_phase, which prevents the partial-commit hazard #2044 targets.
+    #
+    # Legacy _do_* methods that still return None keep their inline commits
+    # (see _dispatch_phase / advance). This method is additive and does not
+    # change existing behaviour until a phase opts in.
+
+    def _commit_phase_result(self, result: PhaseResult) -> None:
+        """Validate and persist a ``PhaseResult`` atomically-ish.
+
+        Order matters: workflow patch + phase/status first, then milestones,
+        then usage. Each DB call is individual (no transaction across repos),
+        but routing every transition through here makes phase/status mutation a
+        single auditable path — the property Phase A requires.
+        """
+        patch: dict[str, object] = dict(result.workflow_patch)
+
+        if result.outcome == "completed":
+            # Only a successful phase may advance current_phase. An unknown
+            # next_phase is rejected rather than silently stored, so a buggy
+            # handler cannot strand the workflow in a non-canonical phase.
+            if result.next_phase is None:
+                raise ValueError("PhaseResult(completed) requires next_phase")
+            # "wait" is a pseudo-phase the orchestrator dispatches (advance() has
+            # ``elif phase == "wait":`` routing to _do_wait) but it is NOT in
+            # PHASE_ORDER because it is not part of the canonical linear sequence
+            # — it is a park state report/wait transitions into. Admit it here
+            # alongside "completed" (the terminal pseudo-phase) so _do_report's
+            # legitimate next_phase="wait" return is not rejected as unknown.
+            if result.next_phase not in PHASE_ORDER and result.next_phase not in (
+                "completed",
+                "wait",
+            ):
+                raise ValueError(
+                    f"PhaseResult(completed) next_phase={result.next_phase!r} "
+                    f"is not in PHASE_ORDER={PHASE_ORDER}"
+                )
+            # The "completed" pseudo-phase is a terminal workflow status, not a
+            # real phase. A handler signals it by next_phase="completed" (the
+            # sentinel mirrors how _do_merge writes status="completed" +
+            # completed_at + emits phase_change{"phase":"completed"}).
+            #
+            # completed_at is written here, symmetric with paused_at on the
+            # pause branch, so a migrated merge handler cannot silently drop
+            # the completion timestamp (review feedback on #2065).
+            #
+            # phase_change events are NOT emitted by this entrypoint: the legacy
+            # _do_* methods emit them inline with phase-specific payloads (e.g.
+            # {"phase":"merge","auto_merge":True}), which the entrypoint cannot
+            # reconstruct. A migrated handler must emit its own phase_change.
+            #
+            # The terminal current_phase value is phase-specific: merge completes
+            # with current_phase="merge" (the workflow is already there and the
+            # legacy merge kept it), while pr_review's no-changes/timing-issue
+            # terminal path writes the literal "completed" (it skips report/
+            # merge entirely). A handler signals the literal terminal
+            # current_phase by including it in workflow_patch (the T3 guard
+            # scans phases/*.py for direct _update_workflow({...}) calls and
+            # patch[...] assignments, NOT for PhaseResult(workflow_patch=...)
+            # construction, so this is the sanctioned escape hatch). When the
+            # patch carries current_phase, honour it; otherwise default to
+            # "merge" (the merge-phase terminal semantics).
+            if result.next_phase == "completed":
+                if "current_phase" in patch:
+                    # Whitelist the patch-carried current_phase to known terminal
+                    # values. Without this a buggy handler could strand the
+                    # workflow in a non-canonical phase (e.g. current_phase=
+                    # "development" + status="completed") by stuffing it into
+                    # workflow_patch — the T3 AST guard cannot see it because
+                    # PhaseResult.workflow_patch is the sanctioned escape hatch.
+                    # Mirror the top-level next_phase rejection. (#2044 S2)
+                    if patch["current_phase"] not in _COMPLETED_TERMINAL_PHASES:
+                        raise ValueError(
+                            f"PhaseResult(completed) workflow_patch.current_phase="
+                            f"{patch['current_phase']!r} is not a valid terminal phase "
+                            f"(allowed: {_COMPLETED_TERMINAL_PHASES})"
+                        )
+                    patch.setdefault("status", "completed")
+                else:
+                    patch["current_phase"] = "merge"
+                    patch["status"] = "completed"
+                patch["completed_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+            elif result.next_phase == "wait":
+                # The wait pseudo-phase: park the workflow at current_phase="wait"
+                # so advance() routes the next cycle to _do_wait. The handler
+                # supplies next_status (typically "waiting"); default to it so a
+                # bare next_phase="wait" still lands in a visible park state.
+                patch["current_phase"] = "wait"
+                patch["status"] = result.next_status or "waiting"
+            else:
+                patch["current_phase"] = result.next_phase
+                patch["status"] = result.next_status or PHASE_STATUS_MAP.get(
+                    result.next_phase, "planning"
+                )
+        elif result.outcome == "wait":
+            # Wait parks the workflow without advancing the phase.
+            patch["status"] = result.next_status or "waiting"
+        elif result.outcome == "retry":
+            # Retry leaves phase/status untouched; only the patch (if any)
+            # applies — e.g. a transient_retry_count bump.
+            pass
+        elif result.outcome == "pause":
+            patch["status"] = "paused"
+            patch["paused_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        elif result.outcome == "failed":
+            patch["status"] = "failed"
+            if isinstance(result.structured_error, dict) and result.structured_error.get("message"):
+                patch["error_message"] = str(result.structured_error["message"])
+        else:  # pragma: no cover - defensive, outcome is a Literal
+            raise ValueError(f"Unknown PhaseResult outcome: {result.outcome!r}")
+
+        if patch:
+            self._update_workflow(patch)
+
+        # Milestones are committed after the workflow patch so an observer
+        # reading the timeline sees the phase advance first. _create_milestone
+        # is idempotent, so replaying a partially-applied result is safe.
+        for ms_kwargs in result.milestone_events:
+            self._create_milestone(**ms_kwargs)
+
+        if result.usage_delta is not None:
+            # Refresh workflow totals from linked sessions. The delta value is
+            # currently unused — _accumulate_tokens ignores its argument and
+            # recomputes from sessions — so passing it is a no-op today.
+            #
+            # TODO(#2044 Phase B): when an evidence service (#2046) produces a
+            # real structured delta, either teach _accumulate_tokens to apply
+            # it (fixing its unused _result param / the object-vs-AgentTaskResult
+            # type smell) or route usage updates through a dedicated method.
+            # review feedback on #2065.
+            self._accumulate_tokens(result.usage_delta)  # type: ignore[arg-type]
+
+    def _build_workflow_context(self, wf: dict) -> WorkflowContext:
+        """Assemble the read-only snapshot a phase handler receives.
+
+        Phases migrated onto the contract take this instead of the raw ``wf``
+        dict, so they cannot accidentally read mutable workflow fields that a
+        user may edit mid-run (model, permission_mode). The cancellation event
+        is the orchestrator's own shutdown signal — phases observe it instead
+        of the scheduler aborting them externally.
+
+        ``repository_context`` snapshots the persisted git/worktree binding so
+        migrated phases read branch/HEAD via ``ctx.repository_context`` rather
+        than ad hoc (Phase B / #2044).
+        """
+        return WorkflowContext(
+            workflow=wf,
+            definition_snapshot=wf.get("definition_snapshot"),
+            repository_context=self._build_repository_context(wf),
+            session_bindings=self._session_usage_offsets,
+            cancellation=self._shutdown_requested,
+        )
+
+    def _build_repository_context(self, wf: dict) -> dict:
+        """Snapshot of the git/worktree binding a phase reads via ctx.
+
+        Phase B (#2044): replaces the Phase-A ``repository_context=None`` TODO.
+        Task 5 will move the underlying helpers into GitWorkspaceService and
+        this becomes a thin delegate; for now it snapshots the persisted
+        binding fields.
+        """
+        return {
+            "branch_name": wf.get("branch_name"),
+            "worktree_path": wf.get("worktree_path"),
+            "expected_head_sha": wf.get("expected_head_sha"),
+            "base_branch": wf.get("original_branch_name") or "main",
+        }
 
     def _poll_ci_status(self, gh: GitHubOps, pr_number: int) -> list:
         """Poll CI checks until all are non-pending or timeout is reached.
@@ -3682,11 +3663,82 @@ class AutonomousOrchestrator:
         evidence = self._evidence.verify_commit_available(gh, pr_head_sha, ref)
         return evidence.verdict is Verdict.CONFIRMED
 
+    def _record_trusted_head(
+        self, gh: GitHubOps, *, pushed: bool = False, sha: str | None = None
+    ) -> str | None:
+        return self._git_workspace.record_trusted_head(gh, pushed=pushed, sha=sha)
+
+    def _resolve_recovery_head(self, main_gh: GitHubOps, wf: dict) -> tuple[str | None, str, dict]:
+        return self._git_workspace.resolve_recovery_head(main_gh, wf)
+
     def _start_ci_repair_round(self, wf: dict, pr_number: int, failed_checks: list[dict]) -> None:
         """Repair merge-phase CI failures in-place on the existing PR branch."""
         dev_round = int(wf.get("dev_round", 1) or 1)
         previous_attempts = int(wf.get("ci_repair_attempts", 0) or 0)
-        next_attempt = previous_attempts + 1
+        # If the previous round was deferred by a transient API error (503/429),
+        # re-enter the same attempt instead of consuming a new one. Bound the
+        # total transient deferrals so a sustained outage cannot loop forever.
+        prev_error = wf.get("error_message", "") or ""
+        is_transient_deferred = prev_error.startswith("CI repair deferred: transient API error")
+        is_no_change_deferred = prev_error.startswith(
+            "CI repair deferred: agent produced no code changes"
+        )
+        transient_retries = int(wf.get("ci_repair_transient_retries", 0) or 0)
+        no_change_retries = int(wf.get("ci_repair_no_change_retries", 0) or 0)
+        if is_transient_deferred:
+            if transient_retries >= MAX_CI_REPAIR_TRANSIENT_RETRIES:
+                message = (
+                    f"CI repair failed: transient API errors persisted across "
+                    f"{MAX_CI_REPAIR_TRANSIENT_RETRIES} retries"
+                )
+                self._create_milestone(
+                    phase="merge",
+                    dev_round=dev_round,
+                    round_number=previous_attempts,
+                    milestone_type="ci_repair_transient_exhausted",
+                    status="failed",
+                    title="CI repair transient retry limit reached",
+                    error_message=message,
+                )
+                self._update_workflow({"status": "failed", "error_message": message})
+                return
+            # Don't increment ci_repair_attempts; bump ci_repair_transient_retries
+            # as a transient-retry counter (reset to 0 on a successful round).
+            next_attempt = previous_attempts
+            transient_retries += 1
+        elif is_no_change_deferred:
+            # Genuine no-code-change deferral: the agent ran cleanly but
+            # committed nothing. Defer to a bounded retry budget that does NOT
+            # consume a real ci_repair_attempts slot (same separation transient
+            # enjoys), so a single empty round no longer terminal-fails the
+            # workflow (#2187). Bound: see MAX_CI_REPAIR_NO_CHANGE_RETRIES.
+            if no_change_retries >= MAX_CI_REPAIR_NO_CHANGE_RETRIES:
+                message = (
+                    f"CI repair failed: agent produced no code changes across "
+                    f"{MAX_CI_REPAIR_NO_CHANGE_RETRIES} consecutive retries"
+                )
+                self._create_milestone(
+                    phase="merge",
+                    dev_round=dev_round,
+                    round_number=previous_attempts,
+                    milestone_type="ci_repair_no_change_exhausted",
+                    status="failed",
+                    title=(
+                        f"CI repair abandoned: agent produced no changes across "
+                        f"{MAX_CI_REPAIR_NO_CHANGE_RETRIES} retries"
+                    ),
+                    error_message=message,
+                )
+                self._update_workflow({"status": "failed", "error_message": message})
+                return
+            # Don't increment ci_repair_attempts; bump the no-change counter
+            # (reset to 0 on a change-producing round).
+            next_attempt = previous_attempts
+            no_change_retries += 1
+        else:
+            next_attempt = previous_attempts + 1
+            transient_retries = 0
+            no_change_retries = 0
         preferred_worktree_path = self._get_preferred_worktree_path(wf)
         gh = self._get_gh()
         current_head_sha = ""
@@ -3738,7 +3790,7 @@ class AutonomousOrchestrator:
 
         # Resolve log evidence before consuming an attempt.  A repair agent
         # that only knows "lint failed" can at best guess and historically
-        # burned all three rounds fixing one superficial layer at a time.
+        # burned all its repair rounds fixing one superficial layer at a time.
         # Keep completed/cancelled jobs out of the actionable set and cache the
         # excerpts on the check dict so fingerprint/context construction does
         # not download each log twice.
@@ -3753,7 +3805,16 @@ class AutonomousOrchestrator:
             }:
                 actionable_count += 1
                 try:
-                    check["failure_excerpt"] = gh.get_check_failure_excerpt(check)
+                    if self._ci_failure_uses_schema_sync([check]):
+                        # schema-sync's byte-exact git-diff body has no failure-marker
+                        # lines, so the default _extract_failure_lines filter strips it.
+                        # Fetch unfiltered so the diff reaches the agent context AND the
+                        # failure fingerprint (#2216; PR #2255 review B1).
+                        check["failure_excerpt"] = gh.get_check_failure_excerpt(
+                            check, filter_lines=False, max_chars=8000
+                        )
+                    else:
+                        check["failure_excerpt"] = gh.get_check_failure_excerpt(check)
                 except Exception as exc:
                     logger.warning(
                         "Failed to collect CI diagnostics for PR #%s check '%s': %s",
@@ -3768,11 +3829,34 @@ class AutonomousOrchestrator:
 
         if actionable_count and excerpt_count < actionable_count:
             diagnostics_attempt = int(wf.get("ci_diagnostics_attempts", 0) or 0) + 1
-            message = (
-                f"PR #{pr_number} CI diagnostics incomplete "
-                f"({excerpt_count}/{actionable_count} failed checks have logs; "
-                f"poll {diagnostics_attempt}/{MAX_CI_DIAGNOSTICS_ATTEMPTS})"
-            )
+            # When re-entering a transient-deferred round, preserve the
+            # "CI repair deferred: transient API error" prefix so the next
+            # _start_ci_repair_round call still detects the transient state
+            # and does NOT consume a real ci_repair_attempts slot. Otherwise
+            # the diagnostics-incomplete message would overwrite the signal
+            # and the transient retry budget would be lost (#1820).
+            if is_transient_deferred:
+                message = (
+                    "CI repair deferred: transient API error "
+                    f"(awaiting CI diagnostics: {excerpt_count}/{actionable_count} "
+                    f"logs; poll {diagnostics_attempt}/{MAX_CI_DIAGNOSTICS_ATTEMPTS})"
+                )
+            elif is_no_change_deferred:
+                # Preserve the no-change signal so the next _start_ci_repair_round
+                # call still classifies this as a no-change retry (mirrors the
+                # transient guard above; without this the diagnostics-incomplete
+                # message would clobber the prefix and lose the retry budget).
+                message = (
+                    "CI repair deferred: agent produced no code changes "
+                    f"(awaiting CI diagnostics: {excerpt_count}/{actionable_count} "
+                    f"logs; poll {diagnostics_attempt}/{MAX_CI_DIAGNOSTICS_ATTEMPTS})"
+                )
+            else:
+                message = (
+                    f"PR #{pr_number} CI diagnostics incomplete "
+                    f"({excerpt_count}/{actionable_count} failed checks have logs; "
+                    f"poll {diagnostics_attempt}/{MAX_CI_DIAGNOSTICS_ATTEMPTS})"
+                )
             pending_ms = self._create_milestone(
                 phase="merge",
                 dev_round=dev_round,
@@ -3797,6 +3881,8 @@ class AutonomousOrchestrator:
                         "status": "failed",
                         "error_message": terminal,
                         "ci_diagnostics_attempts": diagnostics_attempt,
+                        "ci_repair_transient_retries": transient_retries,
+                        "ci_repair_no_change_retries": no_change_retries,
                     }
                 )
                 return
@@ -3806,6 +3892,10 @@ class AutonomousOrchestrator:
                     "status": "merging",
                     "error_message": message,
                     "ci_diagnostics_attempts": diagnostics_attempt,
+                    # Persist the in-memory counters so they survive across
+                    # diagnostics polling cycles (#1820, #2187).
+                    "ci_repair_transient_retries": transient_retries,
+                    "ci_repair_no_change_retries": no_change_retries,
                 }
             )
             return
@@ -3911,6 +4001,12 @@ class AutonomousOrchestrator:
             "agent_session_id": "",
             "error_message": "",
             "ci_repair_attempts": next_attempt,
+            "ci_repair_transient_retries": transient_retries,
+            "ci_repair_no_change_retries": no_change_retries,
+            # Reset the diagnostics poll counter: each (re-)entry into a CI
+            # repair round gets a fresh log-fetch budget (MAX_CI_DIAGNOSTICS_ATTEMPTS).
+            # This was previously a side effect of reusing ci_diagnostics_attempts
+            # for transient tracking; the fields are now separate (#1820).
             "ci_diagnostics_attempts": 0,
             "ci_repair_context": context,
             "last_ci_failure_signature": signature,
@@ -3930,9 +4026,323 @@ class AutonomousOrchestrator:
         self.repo.update_workflow(self._workflow_id, updates)
         self._emit("workflow_updated", updates)
 
+    def _cleanup_worktree_and_branch(
+        self,
+        reason: str = "failed",
+        *,
+        remove_worktree: bool = True,
+        remove_branch: bool = False,
+    ) -> bool:
+        return self._git_workspace.cleanup_worktree_and_branch(
+            reason, remove_worktree=remove_worktree, remove_branch=remove_branch
+        )
+
+    def _perform_git_cleanup(self) -> tuple[str, str]:
+        """Retry entry point for post-merge Git cleanup (#2043).
+
+        Wraps :meth:`_cleanup_worktree_and_branch` and persists the
+        ``cleanup_*`` tracking fields so delivery completion and resource
+        convergence stay independent. Idempotent: a workflow whose worktree and
+        branch are already gone reports ``completed``. Returns
+        ``(status, error)`` where status is ``completed`` or ``failed``.
+        """
+        wf = self.workflow or {}
+        attempts = int(wf.get("cleanup_attempts") or 0) + 1
+        now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        ok = self._cleanup_worktree_and_branch(
+            reason="completed", remove_worktree=True, remove_branch=True
+        )
+        if ok:
+            self._update_workflow(
+                {
+                    "cleanup_status": "completed",
+                    "cleanup_attempts": attempts,
+                    "cleanup_error": "",
+                    "cleanup_updated_at": now_iso,
+                    "cleanup_next_retry_at": "",
+                }
+            )
+            # Record a cleaned_up milestone when a retry converges, so the audit
+            # trail shows the eventual success (not just the prior cleanup_pending
+            # failure). The immediate-success path in _do_merge records its own
+            # cleaned_up milestone; this covers the retry-recovered case.
+            if attempts > 1:
+                self._create_milestone(
+                    phase="merge",
+                    milestone_type="cleaned_up",
+                    status="completed",
+                    title=f"Git cleanup recovered after {attempts} attempt(s)",
+                )
+            return "completed", ""
+        # Transient/partial failure — schedule a backoff retry unless exhausted.
+        error = wf.get("error_message") or "Git cleanup failed (worktree or branch)"
+        status = "pending" if attempts < MAX_CLEANUP_ATTEMPTS else "failed"
+        self._update_workflow(
+            {
+                "cleanup_status": status,
+                "cleanup_attempts": attempts,
+                "cleanup_error": error[:500],
+                "cleanup_updated_at": now_iso,
+                "cleanup_next_retry_at": _cleanup_backoff_time(attempts),
+            }
+        )
+        return status, error
+
+    def _mark_failed(self, error_message: str, *, phase: str | None = None) -> None:
+        """Record a terminal workflow failure (status + error event) only.
+
+        Sets ``status=failed`` and emits the error event. Worktree reclamation
+        is NOT performed here: ``advance``'s post-phase convergence point (which
+        runs after this AND after inline ``status=failed`` returns) is the
+        SINGLE place terminal-failure worktree cleanup happens. Doing cleanup in
+        both ``_mark_failed`` and the convergence point doubled the dirty-
+        worktree retention note and re-ran the git-status check on every pass
+        (review P2), so this method now records state only and lets the
+        convergence point own the cleanup.
+
+        #1112 timing dimension: the transient-retry path in ``advance`` returns
+        before reaching here, so transient (retryable) failures keep their
+        worktree for the next cycle; only terminal failures reach the
+        convergence cleanup. The branch is kept (``keep_for_debug``).
+        """
+        self._update_workflow(
+            {
+                "status": "failed",
+                "error_message": error_message,
+                "transient_retry_count": 0,
+            }
+        )
+        self._emit("error", {"phase": phase or "unknown", "error": error_message})
+
     def _accumulate_tokens(self, _result: AgentTaskResult):
         """Refresh workflow totals from the sessions linked to milestones."""
         self.repo.refresh_workflow_usage_from_sessions(self._workflow_id)
+
+    def _persist_sandbox_attribution(self, result: AgentTaskResult) -> None:
+        """Write the task's sandbox identity + final state to the workflow row.
+
+        #2022 P5: records which SandboxProvider ran the task (provider/id/
+        generation/state) so the workflow carries sandbox attribution for audit,
+        the (deferred) UI, and P6 reconciliation. Best-effort: never raises to
+        the caller (runs on the result path).
+        """
+        provider = getattr(result, "sandbox_provider", "") or ""
+        sandbox_id = getattr(result, "sandbox_id", None)
+        if not provider and not sandbox_id:
+            return  # no sandbox ran (e.g. CLI not found before create)
+        try:
+            self.repo.update_workflow(
+                self._workflow_id,
+                {
+                    "sandbox_provider": provider,
+                    "sandbox_id": sandbox_id,
+                    "sandbox_generation": getattr(result, "sandbox_generation", None),
+                    "sandbox_state": getattr(result, "sandbox_state", "") or None,
+                },
+            )
+        except Exception as e:  # pragma: no cover - best-effort attribution
+            logger.warning(
+                "Failed to persist sandbox attribution for %s: %s", self._workflow_id[:8], e
+            )
+
+    def _shadow_compare_evidence(
+        self,
+        *,
+        test_result: AgentTaskResult,
+        milestone_id: str,
+        heuristic_passed: bool,
+        structured_verdict: ExecutionVerdict | None = None,
+    ) -> None:
+        """Compare the heuristic test verdict against structured evidence (#2046).
+
+        Two divergence layers are recorded as ``evidence_shadow_divergence``
+        workflow events:
+
+        - Command-level (Phase A): ``compare_verdicts`` over
+          ``CommandExecutionEvidence`` rows — whether every recorded command
+          passed. Catches missing evidence (a heuristic pass with no commands).
+        - Run-level (Phase B): the structured ``ExecutionVerdict`` (from
+          ``compute_run_verdict`` over ``TestExecutionEvidence``) vs the
+          heuristic. This verdict now drives the gate; divergence here is the
+          signal for whether the heuristic fallback (#2046 §4) can be retired.
+        """
+        try:
+            import json
+
+            from app.modules.workspace.autonomous.command_evidence.recorder import (
+                compare_verdicts,
+                get_command_evidence_recorder,
+            )
+
+            recorder = get_command_evidence_recorder()
+            evidence_rows = []
+            if not recorder.is_noop:
+                recorder.flush(timeout=1.0)
+                session_id = test_result.session_id or test_result.tracking_session_id or ""
+                if session_id:
+                    evidence_rows = recorder.repo.query_by_session(session_id)
+            comparison = compare_verdicts(
+                heuristic_passed=heuristic_passed, evidence_rows=evidence_rows
+            )
+
+            structured_value = (
+                structured_verdict.value
+                if structured_verdict is not None
+                else comparison.get("structured_verdict")
+            )
+            # Run-level divergence: structured PASSED/FAILED disagrees with the
+            # heuristic. NOT_RUN/INCONCLUSIVE means the structured layer deferred
+            # — only a divergence if the heuristic nonetheless claimed a pass.
+            structured_pass = structured_value == ExecutionVerdict.PASSED.value
+            run_level_divergence = (
+                structured_verdict is not None and structured_pass != heuristic_passed
+            )
+
+            if not comparison.get("divergence") and not run_level_divergence:
+                return
+
+            self.repo.create_event(
+                {
+                    "workflow_id": self._workflow_id,
+                    "milestone_id": milestone_id,
+                    "event_type": "evidence_shadow_divergence",
+                    "event_data": json.dumps(
+                        {
+                            "heuristic_verdict": comparison.get("heuristic_verdict"),
+                            "structured_command_verdict": comparison.get("structured_verdict"),
+                            "structured_run_verdict": structured_value,
+                            "reason": comparison.get("reason"),
+                            "command_verdicts": comparison.get("command_verdicts", []),
+                            "evidence_count": len(evidence_rows),
+                        },
+                        ensure_ascii=False,
+                    ),
+                }
+            )
+            logger.warning(
+                "evidence shadow divergence for %s: heuristic=%s structured_run=%s (%s)",
+                self._workflow_id,
+                comparison.get("heuristic_verdict"),
+                structured_value,
+                comparison.get("reason", ""),
+            )
+        except Exception as e:
+            logger.debug("evidence shadow comparison failed: %s", e)
+
+    def _compute_structured_test_verdict(
+        self,
+        test_result: AgentTaskResult,
+        framework_type: str,
+        test_ms: dict,
+    ) -> tuple[ExecutionVerdict, list, str]:
+        """Parse command evidence into TestExecutionEvidence and compute the run verdict.
+
+        #2046 Phase B authoritative path: reads the ``CommandExecutionEvidence``
+        rows dual-written in Phase A, parses each test command's output into a
+        ``TestExecutionEvidence`` row (persisted), and aggregates them via
+        ``compute_run_verdict``. Returns ``(verdict, evidences, reason)``.
+
+        Best-effort: any failure returns ``NOT_RUN`` with a reason so the gate
+        falls back to the legacy heuristic — the structured layer never raises
+        into the gate path.
+        """
+        try:
+            from app.modules.workspace.autonomous.command_evidence.recorder import (
+                get_command_evidence_recorder,
+            )
+            from app.modules.workspace.autonomous.command_evidence.test_evidence import (
+                parse_test_evidence,
+            )
+            from app.modules.workspace.autonomous.command_evidence.test_verdict import (
+                compute_run_verdict,
+            )
+            from app.repositories.command_evidence_repo import CommandExecutionEvidenceRepository
+            from app.repositories.test_evidence_repo import TestExecutionEvidenceRepository
+
+            recorder = get_command_evidence_recorder()
+            if not recorder.is_noop:
+                recorder.flush(timeout=1.0)
+
+            session_id = test_result.session_id or test_result.tracking_session_id or ""
+            if not session_id:
+                return ExecutionVerdict.NOT_RUN, [], "no session id on test result"
+
+            command_evidences = CommandExecutionEvidenceRepository().query_by_session(session_id)
+            if not command_evidences:
+                return ExecutionVerdict.NOT_RUN, [], "no command execution evidence"
+
+            # Only parse commands that look like test invocations; an ``echo``
+            # or ``ls`` must not be fed to the generic parser as if it were a
+            # test run (#2046 — agent prose / non-test commands cannot judge).
+            test_command_evidences = [
+                ce
+                for ce in command_evidences
+                if _has_test_tool_call(
+                    [
+                        {
+                            "tool": {
+                                "name": ce.tool_name or "",
+                                "input": {"command": ce.shell_command or ""},
+                            }
+                        }
+                    ],
+                    framework_type,
+                )
+            ]
+            if not test_command_evidences:
+                return ExecutionVerdict.NOT_RUN, [], "no test command evidence"
+
+            test_repo = TestExecutionEvidenceRepository()
+            test_evidences: list = []
+            for command_evidence in test_command_evidences:
+                parsed = parse_test_evidence(command_evidence, framework_hint=framework_type)
+                test_repo.upsert(parsed)
+                test_evidences.append(parsed)
+
+            verdict = compute_run_verdict(test_evidences, framework_type)
+            return verdict, test_evidences, f"parsed {len(test_evidences)} test command(s)"
+        except Exception as e:
+            logger.debug("structured test verdict computation failed: %s", e)
+            return ExecutionVerdict.NOT_RUN, [], f"compute failed: {e}"
+
+    def _emit_structured_test_fallback(
+        self,
+        verdict: ExecutionVerdict,
+        reason: str,
+        milestone_id: str,
+    ) -> None:
+        """Record that the structured verdict deferred to the heuristic.
+
+        Emitted whenever ``compute_run_verdict`` returns NOT_RUN/INCONCLUSIVE
+        and the gate falls back to ``_has_passing_test_tool_result`` (#2046 §4
+        降级). Tracked so parser coverage gaps are visible and the fallback can
+        be retired once shadow data proves the structured layer is sufficient.
+        """
+        try:
+            import json
+
+            self.repo.create_event(
+                {
+                    "workflow_id": self._workflow_id,
+                    "milestone_id": milestone_id,
+                    "event_type": "structured_test_fallback",
+                    "event_data": json.dumps(
+                        {
+                            "structured_verdict": verdict.value,
+                            "reason": reason,
+                        },
+                        ensure_ascii=False,
+                    ),
+                }
+            )
+            logger.info(
+                "structured test verdict deferred to heuristic for %s: verdict=%s (%s)",
+                self._workflow_id,
+                verdict.value,
+                reason,
+            )
+        except Exception as e:
+            logger.debug("structured fallback event emit failed: %s", e)
 
     def _on_pid_registered(self, session_id: str, pid: int):
         """Persist agent subprocess PID to database for reliable cancel/pause."""
@@ -3952,6 +4362,48 @@ class AutonomousOrchestrator:
             )
         except Exception as e:
             logger.warning("Failed to persist agent PID: %s", e)
+
+    def _on_sandbox_created(
+        self,
+        session_id: str,
+        sandbox_id: str,
+        provider_name: str,
+        remote_session_id: str | None,
+        effective_policy: dict | None = None,
+    ) -> None:
+        """Persist mid-run sandbox identity so a crash leaves a reconcilable row (#2022 P6).
+
+        Sandbox-lifecycle mirror of ``_on_pid_registered``: write
+        ``sandbox_state='running'`` + sandbox_id/provider between exec and task
+        completion. A crash here leaves an orphan the startup/periodic reconciler
+        destroys by ``sandbox_remote_session_id`` (remote) or DB-resets (local).
+        The remote id is written only when present so a local row never carries a
+        stale/NULL remote id. ``effective_policy`` (#2020 Phase B) is the
+        JSON-serializable resource/isolation snapshot built by the runner; when
+        present it is persisted as ``sandbox_effective_policy`` so the workflow
+        detail UI shows what was actually in effect for the run. Best-effort:
+        never raises to the run path.
+        """
+        try:
+            updates: dict[str, object] = {
+                "sandbox_state": "running",
+                "sandbox_id": sandbox_id,
+                "sandbox_provider": provider_name,
+            }
+            if remote_session_id is not None:
+                updates["sandbox_remote_session_id"] = remote_session_id
+            if effective_policy is not None:
+                updates["sandbox_effective_policy"] = json.dumps(effective_policy)
+            self.repo.update_workflow(self._workflow_id, updates)
+            logger.info(
+                "Registered sandbox %s (provider=%s) for workflow %s%s",
+                sandbox_id[:8],
+                provider_name,
+                self._workflow_id[:8],
+                f" remote_session={remote_session_id[:8]}" if remote_session_id else "",
+            )
+        except Exception as e:
+            logger.warning("Failed to persist mid-run sandbox state: %s", e)
 
     def _on_pid_cleared(self, session_id: str):
         """Clear agent subprocess PID from database after process exits."""
@@ -4350,6 +4802,7 @@ class AutonomousOrchestrator:
                         "context": context,
                         "status": "active",
                     },
+                    require_tenant=False,
                 ):
                     raise RuntimeError("tracking session row was not updated")
             except Exception as exc:
@@ -4860,7 +5313,7 @@ class AutonomousOrchestrator:
                     and tracking_session_id
                 ):
                     self._runner.session_manager.update_session_fields(
-                        tracking_session_id, {"cli_session_id": ""}
+                        tracking_session_id, {"cli_session_id": ""}, require_tenant=False
                     )
             except Exception:
                 logger.warning(
@@ -5223,6 +5676,188 @@ class AutonomousOrchestrator:
                     e,
                 )
 
+    def _dispatch_phase(self, phase: str, wf: dict, handler) -> PhaseResult | None:
+        """Run a phase handler and return its structured result, if any.
+
+        Phase B (#2044): builds ``WorkflowContext`` + ``PhaseDeps`` and invokes
+        the handler as ``handler(ctx, deps)``. Migrated handlers return a
+        ``PhaseResult`` (committed via ``_commit_phase_result``); thin phases are
+        wrapped by ``advance()`` in a legacy adapter and return ``None`` until
+        they migrate (T6-T9).
+        """
+        logger.debug("Dispatching phase=%s for workflow %s", phase, self._workflow_id[:8])
+        ctx = self._build_workflow_context(wf)
+        deps = self._build_phase_deps()
+        return handler(ctx, deps)
+
+    def _build_phase_deps(self) -> PhaseDeps:
+        """Assemble the service bundle injected into a phase handler.
+
+        ``git_workspace`` (T5) and ``sandbox`` (T13) are wired via lazy
+        properties so a handler that needs them always gets a live instance.
+        ``gh`` is bound here too: ``__init__`` leaves ``self._gh = None`` and
+        the scheduler builds a fresh orchestrator each tick, so the registry
+        production path (advance → resolve_phase_handler → _dispatch_phase →
+        here) would otherwise hand a migrated handler (phases/*.handle) a
+        ``None`` gh. The thin test-compat shims (_do_development/_do_pr_review)
+        used to bind their own ``self._gh`` first, masking the gap, but the
+        registry handlers read ``deps.gh`` directly. ``_get_gh`` is the same
+        lazy binder those shims call; it's safe whenever ``self.workflow`` is
+        truthy (it is during advance) and falls back to ``project_path`` when
+        the worktree doesn't exist yet, so it's correct for preparation too
+        (#2044 Phase B review P1-a).
+        """
+        if self._gh is None and self.repo is not None:
+            self._gh = self._get_gh()
+        return PhaseDeps(
+            host=self,
+            gh=self._gh,
+            git_workspace=self._git_workspace,
+            evidence=self._evidence,
+            sandbox=self._sandbox_provider,
+            repo=self.repo,
+            agent_runner=self._runner,
+        )
+
+    # --- PhaseHost implementation (#2044 Phase B) ---
+    def emit_phase_change(self, payload: dict) -> None:
+        # _emit(event_type, data) is the orchestrator's emitter (L1897); real
+        # phase_change emission is self._emit("phase_change", {...}) (e.g. L6100).
+        self._emit("phase_change", payload)
+
+    def emit_status_change(self, payload: dict) -> None:
+        # Domain event distinct from phase_change; the merge handler emits this
+        # on the policy-pause branch (legacy inline ``_emit("status_change", ...)``).
+        self._emit("status_change", payload)
+
+    def session_offsets(self):
+        return self._session_usage_offsets
+
+    def cancellation(self):
+        return self._shutdown_requested
+
+    def create_milestone_idempotent(self, **kwargs):
+        # Returns the milestone dict — _create_milestone is idempotent (returns
+        # the existing record if found). Phase A declared this ``-> None`` but
+        # the pr_review handler (#2044 Phase B T11) reads the returned
+        # milestone_id for agent-run correlation, so the return value is now
+        # surfaced (the merge handler ignores it, so this is backward-
+        # compatible).
+        return self._create_milestone(**kwargs)
+
+    # --- PhaseHost merge-phase helpers (#2044 Phase B T10) ---
+    # Thin public aliases over the orchestrator-private underscore helpers so
+    # the migrated merge handler (phases/merge.py) can call them via
+    # ``deps.host.<name>`` without a concrete orchestrator reference. The
+    # helpers themselves stay underscore-prefixed (their existing internal
+    # callers are unchanged); these aliases are the PhaseHost surface only.
+    def validate_pre_merge_change_scope(self, gh, wf, pr_head_sha):
+        return self._validate_pre_merge_change_scope(gh, wf, pr_head_sha)
+
+    def sync_failed_pr_with_main(self, gh, branch_name, pr_number, pr_head_sha):
+        return self._sync_failed_pr_with_main(gh, branch_name, pr_number, pr_head_sha)
+
+    def branch_contains_main(self, gh, pr_head_sha, branch_name=""):
+        return self._branch_contains_main(gh, pr_head_sha, branch_name)
+
+    def start_ci_repair_round(self, wf, pr_number, failed_checks):
+        return self._start_ci_repair_round(wf, pr_number, failed_checks)
+
+    def perform_git_cleanup(self):
+        return self._perform_git_cleanup()
+
+    def resolve_merge_conflicts(self, gh, branch_name, pr_number):
+        return self._resolve_merge_conflicts(gh, branch_name, pr_number)
+
+    # --- PhaseHost pr_review-phase helpers (#2044 Phase B T11) ---
+    # Thin public aliases over the orchestrator-private underscore helpers so
+    # the migrated pr_review handler (phases/pr_review.py) can call them via
+    # ``deps.host.<name>`` without a concrete orchestrator reference. Same
+    # pattern as the merge helpers above. See phase_host.py docstring.
+    def get_workflow_field(self, field: str):
+        wf = self.workflow or {}
+        return wf.get(field)
+
+    def refresh_workflow_snapshot(self) -> dict:
+        return self.workflow or {}
+
+    def post_github_comment(self, gh, number, body, *, is_pr=False, context="") -> None:
+        return self._post_github_comment(gh, number, body, is_pr=is_pr, context=context)
+
+    def must_run_full_review_rounds(self, wf: dict) -> bool:
+        return self._must_run_full_review_rounds(wf)
+
+    def get_pr_review_diff(self, gh, pr_number, branch_name) -> str:
+        return self._get_pr_review_diff(gh, pr_number, branch_name)
+
+    def smart_truncate_diff(self, diff_text: str) -> str:
+        return self._smart_truncate_diff(diff_text)
+
+    def clean_agent_text(self, text: str) -> str:
+        return self._clean_agent_text(text)
+
+    def poll_ci_status(self, gh, pr_number) -> list:
+        return self._poll_ci_status(gh, pr_number)
+
+    def run_agent_with_context_recovery(self, **kwargs):
+        return self._run_agent_with_context_recovery(**kwargs)
+
+    def accumulate_tokens(self, result) -> None:
+        return self._accumulate_tokens(result)
+
+    def abort_on_repo_integrity_violation(self, result, milestone_id: str) -> bool:
+        return self._abort_on_repo_integrity_violation(result, milestone_id)
+
+    def is_context_overflow(self, result) -> bool:
+        return self._is_context_overflow(result)
+
+    def artifact_text(self, result) -> str:
+        return self._artifact_text(result)
+
+    def artifact_tldr(self, result) -> str:
+        return self._artifact_tldr(result)
+
+    def review_is_approved(self, review_text: str, approval_phrase: str) -> bool:
+        return self._review_is_approved(review_text, approval_phrase)
+
+    def validate_autonomous_change_scope(self, gh, wf, base_sha, head_sha) -> str:
+        return self._validate_autonomous_change_scope(gh, wf, base_sha, head_sha)
+
+    def apply_pr_review_fix(
+        self, wf, gh, review_text, round_num, dev_round, ci_failures, pr_number
+    ) -> bool:
+        return self._apply_pr_review_fix(
+            wf, gh, review_text, round_num, dev_round, ci_failures, pr_number
+        )
+
+    def cancel_milestone_for_shutdown(self, milestone_id: str) -> None:
+        return self._cancel_milestone_for_shutdown(milestone_id)
+
+    # --- PhaseHost development-phase helpers (#2044 Phase B T12) ---
+    # Thin public aliases over the orchestrator-private sub-methods so the
+    # migrated development handler (phases/development.py) can call them via
+    # ``deps.host.<name>`` without a concrete orchestrator reference. Same
+    # pattern as the merge/pr_review helpers above. The sub-methods themselves
+    # stay underscore-prefixed (their existing internal callers and the
+    # direct-call/static-source tests under tests/issues/1140,1897,1647,1520,
+    # 1277,1574,1547,1829 + tests/unit/test_autonomous_ci_guardrails.py are
+    # unchanged); these aliases are the PhaseHost surface only.
+    def run_development_agent(self, wf, dev_round, gh) -> None:
+        return self._run_development_agent(wf, dev_round, gh)
+
+    def post_dev_completion_comment(self, wf, dev_round, gh) -> None:
+        return self._post_dev_completion_comment(wf, dev_round, gh)
+
+    def run_test_phase(self, wf, dev_round, gh) -> None:
+        return self._run_test_phase(wf, dev_round, gh)
+
+    @property
+    def workflow_id(self) -> str:
+        # PhaseHost protocol declares ``workflow_id``; the internal field is the
+        # underscore-prefixed ``self._workflow_id``. Expose it read-only so the
+        # narrow interface is satisfied without migrating every internal reader.
+        return self._workflow_id
+
     def advance(self):
         """Advance the workflow one step. Called by the scheduler."""
         wf = self.workflow
@@ -5257,23 +5892,93 @@ class AutonomousOrchestrator:
                 # Re-read so downstream phases see the healed worktree_path /
                 # branch_name in wf rather than the pre-heal snapshot.
                 wf = self.workflow
-            if phase == "preparation":
-                self._do_preparation(wf)
+
+            def _legacy(method):
+                """Adapter: a not-yet-migrated _do_*(self, wf) is invoked with its
+                original (wf) signature; the (ctx, deps) from _dispatch_phase are
+                ignored until it migrates onto the contract (T6-T9).
+                """
+
+                def wrapped(ctx, deps):
+                    return method(ctx.workflow)
+
+                return wrapped
+
+            migrated = resolve_phase_handler(phase)
+            if migrated is not None:
+                handler = migrated
+            elif phase == "preparation":
+                # Phase B #2044 T8: migrated onto the (ctx, deps) contract —
+                # no longer wrapped by _legacy (it returns a PhaseResult and is
+                # committed via _commit_phase_result).
+                handler = self._do_preparation
             elif phase == "planning":
-                self._do_planning(wf)
+                # Phase B #2044 T9: migrated onto the (ctx, deps) contract —
+                # no longer wrapped by _legacy (it returns a PhaseResult and is
+                # committed via _commit_phase_result).
+                handler = self._do_planning
             elif phase == "development":
-                self._do_development(wf)
+                # Phase B #2044 T12: migrated to phases/development.py and
+                # registered in PHASE_HANDLERS; the registry branch above
+                # resolves it. This branch is retained only as a defensive
+                # fallback in case the registry is queried before the import
+                # side-effect registers the handler (it should never fire in
+                # practice).
+                handler = _legacy(self._do_development)
             elif phase == "pr_review":
-                self._do_pr_review(wf)
+                # Phase B #2044 T11: migrated to phases/pr_review.py and
+                # registered in PHASE_HANDLERS; the registry branch above
+                # resolves it. This branch is retained only as a defensive
+                # fallback in case the registry is queried before the import
+                # side-effect registers the handler (it should never fire).
+                handler = _legacy(self._do_pr_review)
             elif phase == "report":
-                self._do_report(wf)
+                # Phase B #2044 T6: migrated onto the (ctx, deps) contract —
+                # no longer wrapped by _legacy (it returns a PhaseResult and is
+                # committed via _commit_phase_result).
+                handler = self._do_report
             elif phase == "wait":
-                self._do_wait(wf)
+                # Phase B #2044 T7: migrated onto the (ctx, deps) contract —
+                # no longer wrapped by _legacy (it returns a PhaseResult and is
+                # committed via _commit_phase_result).
+                handler = self._do_wait
             elif phase == "merge":
-                self._do_merge(wf)
-            # Success — reset the transient retry counter so the next network
-            # blip starts fresh.
-            if wf.get("transient_retry_count", 0):
+                # Phase B #2044 T10: migrated to phases/merge.py and registered
+                # in PHASE_HANDLERS; the registry branch above resolves it. This
+                # branch is retained only as a defensive fallback in case the
+                # registry is queried before the import side-effect registers
+                # the handler (it should never fire in practice).
+                handler = _legacy(self._do_merge)
+            else:
+                handler = None
+
+            result = self._dispatch_phase(phase, wf, handler) if handler is not None else None
+            # Phase A (#2044): a phase migrated onto the PhaseResult contract
+            # returns a structured outcome, which is committed through the
+            # single authoritative entrypoint. Legacy _do_* methods return None
+            # and have already committed inline — leave them be. Either way the
+            # transient-retry reset below applies only on a clean return.
+            if isinstance(result, PhaseResult):
+                self._commit_phase_result(result)
+                # A pause result persists a user-facing pause reason in
+                # error_message (e.g. merge-policy rejection). Skip the
+                # transient-retry reset on a pause — its ``error_message=""
+                # clear would wipe that reason (#2044 Phase B T10). Legacy
+                # merge short-circuited this by raising WorkflowPaused after
+                # the inline status=paused write; the migrated handler returns
+                # PhaseResult.pause instead, so the reset must be gated here.
+                if result.outcome == "pause":
+                    return
+            # Success/clean advance — reset the transient retry counter so the
+            # next network blip starts fresh. Skip on ``failed``:
+            # _commit_phase_result just wrote status=failed + error_message,
+            # and this reset's ``error_message=""`` would wipe the failure
+            # reason, leaving an undiagnosable terminal status. ``result is
+            # None`` is the legacy inline-commit path which still resets.
+            # (#2044 Phase B review P2.)
+            if (result is None or result.outcome != "failed") and wf.get(
+                "transient_retry_count", 0
+            ):
                 self._update_workflow({"transient_retry_count": 0, "error_message": ""})
         except WorkflowPaused as e:
             logger.info(
@@ -5316,26 +6021,75 @@ class AutonomousOrchestrator:
                     transient_count - 1,
                 )
             # Non-transient error, or transient retries exhausted → fail.
+            # _mark_failed records the terminal failure and reclaims the
+            # worktree for THIS path (advance's exception handler). The
+            # transient path above returned already, so this only runs for
+            # terminal failures — the worktree survives retries, not terminal
+            # failures (#1112).
             logger.error("Orchestrator error in %s: %s", phase, e, exc_info=True)
-            self._update_workflow(
-                {
-                    "status": "failed",
-                    "error_message": str(e),
-                    "transient_retry_count": 0,
-                }
+            self._mark_failed(str(e), phase=phase)
+        # Convergence point for terminal-failure worktree reclamation (Issue
+        # #1831 finding #1). After the phase runs, if the workflow is now
+        # terminally failed — whether via _mark_failed just above (an unhandled
+        # exception) OR via a phase that recorded status=failed inline and
+        # returned normally (which bypasses _mark_failed) — reclaim the worktree
+        # dir. Many phase-internal failure paths set status=failed and return;
+        # without this check each would leak the worktree. Idempotent: on the
+        # exception path _mark_failed already cleared worktree_path, so the
+        # ``worktree_path`` guard makes this a no-op there and it only acts on
+        # the inline-failure paths. Best-effort + branch kept (#1112).
+        wf = self.workflow
+        if wf and wf.get("status") == "failed" and wf.get("worktree_path"):
+            self._cleanup_worktree_and_branch(
+                reason="failed", remove_worktree=True, remove_branch=False
             )
-            self._emit("error", {"phase": phase, "error": str(e)})
 
     # ── Phase: Preparation ────────────────────────────────────────
 
-    def _do_preparation(self, wf: dict):
+    def _do_preparation(self, ctx: WorkflowContext, deps: PhaseDeps) -> PhaseResult:
         """Set up project, create/read issue, create branch.
 
         For fork workflows (parent_workflow_id set):
         - Skip repo/issue creation (already exist from parent)
         - Force worktree strategy for parallel execution
         - Jump to the next phase after the fork milestone's phase
+
+        Phase B #2044 T8: migrated onto the PhaseResult contract. Same
+        decisions as the legacy inline-commit method, only the recording
+        mechanism changes: the phase/status transition (preparation → planning,
+        or preparation → fork's next phase) travels on the returned
+        ``PhaseResult``; bookkeeping workflow-field writes (worktree_path,
+        branch_name, github_pr_number, repo_url, requirements_text, etc.) and
+        ``current_round`` travel in ``workflow_patch``; the branch/repo/issue
+        milestones travel in ``milestone_events``; the phase_change event is
+        emitted through ``deps.host`` so the commit entrypoint stays the sole
+        phase/status authority. The four forbidden fields (current_phase/status/
+        completed_at/paused_at) are no longer written inline by this handler.
+
+        Failure paths (GitHubOpsError on repo/issue/branch creation) keep their
+        legacy semantics: they record the failed milestone inline then re-raise
+        so ``advance()``'s exception handler runs ``_mark_failed`` (writing
+        status=failed + error_message + the ``error`` event). Returning
+        PhaseResult.failed here instead would skip that handler and drop the
+        ``error`` event — a behaviour change. Re-raising preserves it exactly.
+
+        Irreversible external-resource ids (``project_repo_url`` after
+        create_repo, ``github_issue_number`` after create_issue) and their
+        milestones are immediate-checkpointed via ``_update_workflow`` /
+        ``_create_milestone`` right after each creation succeeds, NOT deferred
+        into ``workflow_patch`` / ``milestone_events``. A later raise (e.g.
+        branch/worktree creation) must not lose them, or re-entry would call
+        create_repo/create_issue again — minting a duplicate repo / issue. The
+        #2044 invariant allows immediate bookkeeping-field writes (only
+        phase/status must travel through PhaseResult), so this is the correct
+        split. Branch/worktree ids DO stay deferred — their creation is
+        idempotent on re-entry (the fork fast-path / _ensure_worktree probes for
+        a surviving branch). (#2044 Phase B review P1-b.)
+
+        Until T10-T12 extract phases into phases/*.py, gh/repo stay on self;
+        deps here carries the host (emit_phase_change) for this thin phase.
         """
+        wf = ctx.workflow
         project_path = wf.get("project_path", "")
         system_account = None
         user_id = wf.get("user_id")
@@ -5344,6 +6098,12 @@ class AutonomousOrchestrator:
             user = user_repo.get_user_by_id(user_id)
             if user:
                 system_account = user.get("system_account")
+
+        # Bookkeeping workflow-field writes collected here (non-forbidden fields
+        # only); the phase/status transition is supplied by the PhaseResult.
+        workflow_patch: dict[str, object] = {}
+        # Milestones accumulated for unified commit by _commit_phase_result.
+        milestone_events: list[dict] = []
 
         # --- Fork workflow fast path ---
         if self._is_fork_workflow(wf):
@@ -5397,7 +6157,7 @@ class AutonomousOrchestrator:
                     gh.add_worktree(path=wt_path, branch=branch_name)
                 else:
                     gh.create_worktree(path=wt_path, branch=branch_name, base=base_ref)
-                self._update_workflow(
+                workflow_patch.update(
                     {
                         "worktree_path": wt_path,
                         "branch_name": branch_name,
@@ -5407,13 +6167,18 @@ class AutonomousOrchestrator:
                 # Worktree now exists; drop the cached gh (bound to the main
                 # repo) so the next _get_gh() rebinds to the worktree path.
                 self._gh = None
-                self._create_milestone(
-                    phase="preparation",
-                    milestone_type="branch_created",
-                    status="completed",
-                    title=f"Fork branch '{branch_name}' created (worktree)",
+                milestone_events.append(
+                    {
+                        "phase": "preparation",
+                        "milestone_type": "branch_created",
+                        "status": "completed",
+                        "title": f"Fork branch '{branch_name}' created (worktree)",
+                    }
                 )
             except GitHubOpsError as e:
+                # Failure path preserves legacy semantics: record the failed
+                # milestone inline then re-raise so advance()'s exception
+                # handler runs _mark_failed. See method docstring.
                 self._create_milestone(
                     phase="preparation",
                     milestone_type="branch_created",
@@ -5426,47 +6191,85 @@ class AutonomousOrchestrator:
             # Jump to the next phase after the fork point's phase
             fork_phase = fork_ms.get("phase", "planning") if fork_ms else "planning"
             next_phase = _next_phase(fork_phase)
-            self._update_workflow(
-                {
-                    "current_phase": next_phase,
-                    "status": PHASE_STATUS_MAP.get(next_phase, "planning"),
-                    "current_round": 0,
-                }
+            workflow_patch["current_round"] = 0
+            # Emit the phase_change event through the host (the commit entrypoint
+            # does NOT emit phase_change — Phase A contract — so the handler emits
+            # its own). Payload is identical to the legacy inline _emit call.
+            deps.host.emit_phase_change({"phase": next_phase, "fork": True})
+            # Advance via PhaseResult rather than an inline current_phase/status
+            # write. Same decision the legacy method made.
+            return PhaseResult.completed(
+                next_phase=next_phase,
+                next_status=PHASE_STATUS_MAP.get(next_phase, "planning"),
+                workflow_patch=workflow_patch,
+                milestone_events=milestone_events,
             )
-            self._emit("phase_change", {"phase": next_phase, "fork": True})
-            return
 
         # --- Normal workflow path ---
 
-        # New project: create GitHub repo
+        # New project: create GitHub repo. Re-entry is gated on the persisted
+        # RESOLVED repo URL (project_repo_url shape) — NOT the repo_setup
+        # milestone — so a single _update_workflow({"project_repo_url": ...})
+        # write below is BOTH the persisted identity AND the retry guard.
+        # Gating on the milestone instead leaves a between-writes window: the
+        # milestone is written AFTER the URL checkpoint, so a crash (or a DB
+        # write failure) between the two writes persists the resolved URL with
+        # no milestone → re-entry sees no gate → create_repo(name=<URL>) AGAIN
+        # (fails or mints a duplicate). is_new_project stays True across
+        # re-entry, so the gate must be on a durable field. Mirrors the
+        # issue-side github_issue_number gate below. (#2044 Phase B P1-b,
+        # 5th-round review.)
         if wf.get("is_new_project"):
-            try:
-                gh = GitHubOps(project_path or ".", system_account=system_account)
-                repo_data = gh.create_repo(
-                    name=wf.get("project_repo_url", f"auto-project-{uuid.uuid4().hex[:8]}"),
-                    private=wf.get("is_private", True),
-                    description=wf.get("title", ""),
+            existing_repo = wf.get("project_repo_url", "") or ""
+            # A resolved GitHub repo URL starts with http(s)://; a bare
+            # creation-request name (user input or auto-project-<hex>) does
+            # not. project_repo_url is overloaded (input name OR resolved
+            # URL — routes/autonomous.py accepts it as input), so the URL
+            # shape is the reliable "repo already created" signal.
+            if existing_repo.startswith(("http://", "https://")):
+                logger.info(
+                    "Workflow %s: project_repo_url already a resolved repo URL "
+                    "(%s); skipping create_repo",
+                    self._workflow_id[:8],
+                    existing_repo,
                 )
-                repo_url = repo_data.get("url", "")
-                self._create_milestone(
-                    phase="preparation",
-                    milestone_type="repo_setup",
-                    status="completed",
-                    title="Repository created",
-                    result_summary=f"Created repo: {repo_url}",
-                )
-                self._update_workflow({"project_repo_url": repo_url})
-                project_path = project_path or "."
-                self._gh = GitHubOps(project_path, system_account=system_account)
-            except GitHubOpsError as e:
-                self._create_milestone(
-                    phase="preparation",
-                    milestone_type="repo_setup",
-                    status="failed",
-                    title="Repo creation failed",
-                    error_message=str(e),
-                )
-                raise
+            else:
+                try:
+                    gh = GitHubOps(project_path or ".", system_account=system_account)
+                    repo_data = gh.create_repo(
+                        name=existing_repo or f"auto-project-{uuid.uuid4().hex[:8]}",
+                        private=wf.get("is_private", True),
+                        description=wf.get("title", ""),
+                    )
+                    repo_url = repo_data.get("url", "")
+                    project_path = project_path or "."
+                    self._gh = GitHubOps(project_path, system_account=system_account)
+                    # Single durable checkpoint: this ONE write persists the
+                    # resolved URL (the retry guard above) AND the repo
+                    # identity. The repo_setup milestone below is informational
+                    # (timeline/audit), NOT the re-entry gate, so a crash
+                    # between this write and the milestone still gates
+                    # re-entry correctly. (#2044 Phase B P1-b.)
+                    self._update_workflow({"project_repo_url": repo_url})
+                    self._create_milestone(
+                        phase="preparation",
+                        milestone_type="repo_setup",
+                        status="completed",
+                        title="Repository created",
+                        result_summary=f"Created repo: {repo_url}",
+                    )
+                except GitHubOpsError as e:
+                    # Failure path preserves legacy semantics: record the failed
+                    # milestone inline then re-raise so advance()'s exception
+                    # handler runs _mark_failed. See method docstring.
+                    self._create_milestone(
+                        phase="preparation",
+                        milestone_type="repo_setup",
+                        status="failed",
+                        title="Repo creation failed",
+                        error_message=str(e),
+                    )
+                    raise
 
         gh = self._get_gh()
 
@@ -5485,14 +6288,16 @@ class AutonomousOrchestrator:
 
             # Persist parsed issue number to workflow and record milestone
             if issue_number:
-                self._update_workflow({"github_issue_number": issue_number})
-                self._create_milestone(
-                    phase="preparation",
-                    milestone_type="issue_linked",
-                    status="completed",
-                    title=f"Linked to issue #{issue_number}",
-                    github_issue_number=issue_number,
-                    result_summary=issue_url,
+                workflow_patch["github_issue_number"] = issue_number
+                milestone_events.append(
+                    {
+                        "phase": "preparation",
+                        "milestone_type": "issue_linked",
+                        "status": "completed",
+                        "title": f"Linked to issue #{issue_number}",
+                        "github_issue_number": issue_number,
+                        "result_summary": issue_url,
+                    }
                 )
 
         if not issue_number and requirements_text:
@@ -5503,11 +6308,13 @@ class AutonomousOrchestrator:
                     body=requirements_text,
                 )
                 issue_number = issue_data.get("number")
-                # Persist the created issue number to the workflow so downstream
-                # phases (comment posting, timeline header badge, PR body "Closes
-                # #N") can resolve it. Mirrors the parsed-issue branch above.
-                # Without this, wf.github_issue_number stays NULL and every
-                # `wf.get("github_issue_number")` gate silently no-ops (#1194).
+                # The issue number is an irreversible external-resource id: a
+                # later raise (e.g. branch creation) must not lose it, or
+                # re-entry would call create_issue again and open a DUPLICATE
+                # issue. #2044 allows immediate bookkeeping-field writes (only
+                # phase/status must travel through PhaseResult), so checkpoint
+                # the number + its milestone here rather than deferring into
+                # workflow_patch / milestone_events. (#2044 Phase B review P1-b.)
                 self._update_workflow({"github_issue_number": issue_number})
                 self._create_milestone(
                     phase="preparation",
@@ -5518,6 +6325,9 @@ class AutonomousOrchestrator:
                     result_summary=issue_data.get("url", ""),
                 )
             except GitHubOpsError as e:
+                # Failure path preserves legacy semantics: record the failed
+                # milestone inline then re-raise so advance()'s exception
+                # handler runs _mark_failed. See method docstring.
                 self._create_milestone(
                     phase="preparation",
                     milestone_type="issue_created",
@@ -5554,16 +6364,21 @@ class AutonomousOrchestrator:
                     requirements_text += "\n\n---\n\n## Issue 评论（补充信息）\n\n" + "\n\n".join(
                         formatted
                     )
-                self._create_milestone(
-                    phase="preparation",
-                    milestone_type="issue_linked",
-                    status="completed",
-                    title=f"Linked to issue #{issue_number}",
-                    github_issue_number=issue_number,
-                    result_summary=issue_data.get("title", ""),
+                milestone_events.append(
+                    {
+                        "phase": "preparation",
+                        "milestone_type": "issue_linked",
+                        "status": "completed",
+                        "title": f"Linked to issue #{issue_number}",
+                        "github_issue_number": issue_number,
+                        "result_summary": issue_data.get("title", ""),
+                    }
                 )
-                self._update_workflow({"requirements_text": requirements_text})
+                workflow_patch["requirements_text"] = requirements_text
             except GitHubOpsError as e:
+                # Failure path preserves legacy semantics: record the failed
+                # milestone inline then re-raise so advance()'s exception
+                # handler runs _mark_failed. See method docstring.
                 self._create_milestone(
                     phase="preparation",
                     milestone_type="issue_linked",
@@ -5667,7 +6482,6 @@ class AutonomousOrchestrator:
                         wt_data = gh.add_worktree(path=worktree_path, branch=branch_name)
                     else:
                         # Use locked base_commit_sha for batch workflows (Issue #1552)
-                        wf = self.workflow
                         base_commit_sha = wf.get("base_commit_sha")
                         base_ref = base_commit_sha if base_commit_sha else "origin/main"
                         # Resolve the symbolic ref before branch creation and
@@ -5677,7 +6491,7 @@ class AutonomousOrchestrator:
                         if not resolved_base:
                             raise GitHubOpsError(f"Unable to resolve branch base {base_ref}")
                         if not base_commit_sha:
-                            self._update_workflow({"base_commit_sha": resolved_base})
+                            workflow_patch["base_commit_sha"] = resolved_base
                         wt_data = gh.create_worktree(
                             path=worktree_path,
                             branch=branch_name,
@@ -5710,8 +6524,11 @@ class AutonomousOrchestrator:
                         except Exception as e:
                             logger.warning("Failed to verify worktree branch: %s", e)
 
-                    # Update workflow with worktree_path and branch_name in single transaction
-                    self._update_workflow(
+                    # Collect worktree_path/branch_name into workflow_patch (the
+                    # legacy method wrote them as a single _update_workflow call;
+                    # they are non-forbidden fields so they travel in the patch
+                    # applied by _commit_phase_result).
+                    workflow_patch.update(
                         {
                             "worktree_path": actual_worktree_path,
                             "preferred_worktree_path": actual_worktree_path,
@@ -5724,25 +6541,28 @@ class AutonomousOrchestrator:
                     self._gh = None
                 else:
                     # Use locked base_commit_sha for batch workflows (Issue #1552)
-                    wf = self.workflow
                     base_commit_sha = wf.get("base_commit_sha")
                     base_ref = base_commit_sha if base_commit_sha else "origin/main"
                     resolved_base = gh._run_git(["rev-parse", base_ref]).stdout.strip()
                     if not resolved_base:
                         raise GitHubOpsError(f"Unable to resolve branch base {base_ref}")
                     gh.create_branch(branch_name, base=resolved_base)
-                    updates = {"branch_name": branch_name}
+                    workflow_patch["branch_name"] = branch_name
                     if not base_commit_sha:
-                        updates["base_commit_sha"] = resolved_base
-                    self._update_workflow(updates)
+                        workflow_patch["base_commit_sha"] = resolved_base
 
-                self._create_milestone(
-                    phase="preparation",
-                    milestone_type="branch_created",
-                    status="completed",
-                    title=f"Branch '{branch_name}' created",
+                milestone_events.append(
+                    {
+                        "phase": "preparation",
+                        "milestone_type": "branch_created",
+                        "status": "completed",
+                        "title": f"Branch '{branch_name}' created",
+                    }
                 )
             except GitHubOpsError as e:
+                # Failure path preserves legacy semantics: record the failed
+                # milestone inline then re-raise so advance()'s exception
+                # handler runs _mark_failed. See method docstring.
                 self._create_milestone(
                     phase="preparation",
                     milestone_type="branch_created",
@@ -5754,9 +6574,11 @@ class AutonomousOrchestrator:
         elif strategy == "current":
             try:
                 current_branch = gh.get_current_branch()
-                self._update_workflow({"branch_name": current_branch})
-                wf["branch_name"] = current_branch
+                workflow_patch["branch_name"] = current_branch
             except GitHubOpsError as e:
+                # Failure path preserves legacy semantics: record the failed
+                # milestone inline then re-raise so advance()'s exception
+                # handler runs _mark_failed. See method docstring.
                 self._create_milestone(
                     phase="preparation",
                     milestone_type="branch_created",
@@ -5766,21 +6588,65 @@ class AutonomousOrchestrator:
                 )
                 raise
 
-        # Transition to planning
-        self._update_workflow(
-            {
-                "current_phase": "planning",
-                "status": "planning",
-                "current_round": 0,
-            }
+        # Transition to planning — advance via PhaseResult rather than an inline
+        # current_phase/status write. current_round is a non-forbidden workflow
+        # field and travels in workflow_patch. Same decision the legacy method
+        # made.
+        workflow_patch["current_round"] = 0
+        # Emit the phase_change event through the host (the commit entrypoint
+        # does NOT emit phase_change — Phase A contract — so the handler emits
+        # its own). Payload is identical to the legacy inline _emit call.
+        deps.host.emit_phase_change({"phase": "planning"})
+        return PhaseResult.completed(
+            next_phase="planning",
+            next_status="planning",
+            workflow_patch=workflow_patch,
+            milestone_events=milestone_events,
         )
-        self._emit("phase_change", {"phase": "planning"})
 
     # ── Phase: Planning ────────────────────────────────────────────
 
-    def _do_planning(self, wf: dict):
-        """Execute one planning + review round."""
-        wf = self.workflow  # Re-read for latest state
+    def _do_planning(self, ctx: WorkflowContext, deps: PhaseDeps) -> PhaseResult:
+        """Execute one planning + review round.
+
+        Phase B #2044 T9: migrated onto the PhaseResult contract. Same
+        decisions as the legacy inline-commit method, only the recording
+        mechanism changes: the phase/status transition (planning → development)
+        travels on the returned ``PhaseResult``; bookkeeping workflow-field
+        writes (current_round, user_feedback) travel in ``workflow_patch``; the
+        plan-finalization phase_change event is emitted through ``deps.host`` so
+        the commit entrypoint stays the sole phase/status authority. The four
+        forbidden fields (current_phase/status/completed_at/paused_at) are no
+        longer written inline by this handler on the success path.
+
+        This phase's milestones are NOT collected into ``milestone_events`` for
+        unified commit, unlike _do_preparation. Each plan/review/refine
+        milestone is created inline as status=in_progress, the agent runs, then
+        ``repo.update_milestone`` flips it to completed/failed with the agent
+        output — and the next round reads prior milestones via
+        ``repo.list_milestones`` to refine. Deferring creation to the end would
+        break that create→run→update→re-read interleaving. So the in-progress
+        anchors stay inline (they are durable work records, not terminal
+        markers); only the terminal phase/status transition uses PhaseResult.
+
+        Failure paths (plan/refine timeout or agent failure) keep their legacy
+        semantics: they were normal control-flow returns (not raises) that wrote
+        status inline and returned None, bypassing advance()'s _mark_failed. The
+        migration preserves that exactly — a timeout returns
+        ``PhaseResult(outcome="wait", next_status="planning_timeout", ...)`` (the
+        wait outcome parks the workflow without advancing the phase; constructed
+        directly because the wait() factory hardcodes next_status="waiting"),
+        and a hard failure returns ``PhaseResult.failed(structured_error=
+        {"message": ...})`` so _commit_phase_result writes status=failed +
+        error_message. Both also keep their inline ``_emit("planning_timeout",
+        ...)`` because it is a domain event (not a phase_change) and PhaseHost
+        only proxies phase_change. The non-phase_change round_end emit on the
+        continue-round branch likewise stays inline.
+
+        Until T10-T12 extract phases into phases/*.py, gh/repo/agent stay on
+        self; deps here carries the host (emit_phase_change) for this phase.
+        """
+        wf = ctx.workflow
         round_num = wf.get("current_round", 0) + 1
         max_rounds = wf.get("max_plan_rounds", 3)
         force_full_rounds = self._must_run_full_review_rounds(wf)
@@ -5887,9 +6753,13 @@ class AutonomousOrchestrator:
             milestone_id=ms.get("milestone_id", ""),
         )
 
+        # Bookkeeping workflow-field writes collected here (non-forbidden fields
+        # only); the phase/status transition is supplied by the PhaseResult.
+        workflow_patch: dict[str, object] = {}
+
         # Clear user feedback after it has been injected into the prompt
         if wf.get("user_feedback", "").strip():
-            self._update_workflow({"user_feedback": ""})
+            workflow_patch["user_feedback"] = ""
 
         self._accumulate_tokens(result)
 
@@ -5909,15 +6779,16 @@ class AutonomousOrchestrator:
 
         if not result.success:
             if "timed out" in (result.error or ""):
-                # Timeout → allow user to extend instead of hard failure
-                self._update_workflow(
-                    {
-                        "status": "planning_timeout",
-                        "error_message": (
-                            f"Planning timed out after {planning_timeout}s. "
-                            "You can extend the timeout and retry."
-                        ),
-                    }
+                # Timeout → allow user to extend instead of hard failure.
+                # ``wait`` parks the workflow without advancing the phase; the
+                # custom planning_timeout status travels on next_status (the
+                # wait outcome writes ``next_status or "waiting"``), and the
+                # error_message travels in workflow_patch (non-forbidden). The
+                # inline planning_timeout event stays — it is a domain event,
+                # not a phase_change, so PhaseHost does not proxy it.
+                error_message = (
+                    f"Planning timed out after {planning_timeout}s. "
+                    "You can extend the timeout and retry."
                 )
                 self._emit(
                     "planning_timeout",
@@ -5927,11 +6798,27 @@ class AutonomousOrchestrator:
                         "partial_plan": (self._artifact_visible_text(result) or plan_text)[:500],
                     },
                 )
-            else:
-                self._update_workflow(
-                    {"status": "failed", "error_message": f"Planning failed: {result.error}"}
+                # The wait() factory hardcodes next_status="waiting", but
+                # planning_timeout is a distinct park status the user can extend
+                # via the planning-timeout API. Construct directly so the custom
+                # status rides on outcome="wait" (which parks the phase) while
+                # next_status overrides the parked status — exactly what the
+                # _commit_phase_result wait branch already supports
+                # (patch["status"] = result.next_status or "waiting").
+                return PhaseResult(
+                    outcome="wait",
+                    next_phase=None,
+                    next_status="planning_timeout",
+                    workflow_patch={**workflow_patch, "error_message": error_message},
                 )
-            return
+            else:
+                # Hard failure: PhaseResult.failed writes status=failed +
+                # error_message (from structured_error.message) in the commit
+                # entrypoint. Same decision as the legacy inline write.
+                return PhaseResult.failed(
+                    structured_error={"message": f"Planning failed: {result.error}"},
+                    workflow_patch=workflow_patch,
+                )
 
         # Post plan as issue comment
         if issue_number:
@@ -6030,7 +6917,7 @@ class AutonomousOrchestrator:
         # max_plan_rounds is the cap for plan review rounds. In the default
         # mode we continue only when the review has substantive feedback; in
         # force-full mode we continue until the cap even after approval.
-        self._update_workflow({"current_round": round_num})
+        workflow_patch["current_round"] = round_num
 
         review_has_feedback = bool(
             review_text
@@ -6127,14 +7014,13 @@ class AutonomousOrchestrator:
                     # block for retry, mirroring the plan-agent failure path.
                     # Otherwise the last review would be dropped quietly (#1200).
                     if "timed out" in (refine_result.error or ""):
-                        self._update_workflow(
-                            {
-                                "status": "planning_timeout",
-                                "error_message": (
-                                    f"Plan refine timed out after {PLANNING_TIMEOUT}s. "
-                                    "You can extend the timeout and retry."
-                                ),
-                            }
+                        # Same mapping as the plan-agent timeout branch above:
+                        # outcome="wait" parks the phase; the wait() factory
+                        # hardcodes "waiting" so construct directly to carry the
+                        # custom planning_timeout park status.
+                        error_message = (
+                            f"Plan refine timed out after {PLANNING_TIMEOUT}s. "
+                            "You can extend the timeout and retry."
                         )
                         self._emit(
                             "planning_timeout",
@@ -6144,14 +7030,19 @@ class AutonomousOrchestrator:
                                 "partial_plan": final_plan[:500],
                             },
                         )
-                    else:
-                        self._update_workflow(
-                            {
-                                "status": "failed",
-                                "error_message": f"Plan refine failed: {refine_result.error}",
-                            }
+                        return PhaseResult(
+                            outcome="wait",
+                            next_phase=None,
+                            next_status="planning_timeout",
+                            workflow_patch={**workflow_patch, "error_message": error_message},
                         )
-                    return
+                    else:
+                        return PhaseResult.failed(
+                            structured_error={
+                                "message": f"Plan refine failed: {refine_result.error}"
+                            },
+                            workflow_patch=workflow_patch,
+                        )
 
             final_plan = self._sanitize_artifact_text(final_plan)
 
@@ -6187,58 +7078,75 @@ class AutonomousOrchestrator:
                 )
                 self._post_github_comment(gh, issue_number, final_comment, context="final-plan")
 
-            # Plan finalized, move to development
-            self._update_workflow(
-                {
-                    "current_phase": "development",
-                    "status": "developing",
-                }
+            # Plan finalized, move to development — advance via PhaseResult
+            # rather than an inline current_phase/status write. Same decision
+            # the legacy method made.
+            #
+            # Emit the phase_change event through the host (the commit
+            # entrypoint does NOT emit phase_change — Phase A contract — so the
+            # handler emits its own). Payload is identical to the legacy inline
+            # _emit call.
+            deps.host.emit_phase_change({"phase": "development"})
+            return PhaseResult.completed(
+                next_phase="development",
+                next_status="developing",
+                workflow_patch=workflow_patch,
             )
-            self._emit("phase_change", {"phase": "development"})
         else:
-            # Continue to next planning round
+            # Continue to next planning round. round_end is a domain event (not
+            # a phase_change) so it stays inline. Phase/status are unchanged —
+            # the workflow stays in planning for the next round, so a ``retry``
+            # outcome carries only the current_round bump (and any user_feedback
+            # clear) without touching the forbidden fields.
             self._emit("round_end", {"round": round_num, "approved": False})
+            return PhaseResult.retry(workflow_patch=workflow_patch)
 
     # ── Phase: Development ────────────────────────────────────────
 
     def _do_development(self, wf: dict):
-        """Execute development based on finalized plan.
+        """Test-compat shim (#2044 Phase B T12).
 
-        When ``test_retries > 0``, the dev phase was already completed and
-        only the test step needs to be re-run (e.g. the test agent itself
-        timed out or hit an API error on the previous attempt).
+        The development phase lives in ``phases/development.py`` (registered in
+        ``PHASE_HANDLERS``); advance()'s production path resolves it via the
+        registry, NOT through this method. This thin wrapper exists only so the
+        many ``o._do_development(wf)`` direct callers in tests/ (and any
+        ``patch('AutonomousOrchestrator._do_development')`` sites that influence
+        a direct call rather than advance()) keep working with zero per-test
+        edits. It builds the (ctx, deps) bundle, delegates to
+        ``phases.development.handle``, and commits the returned PhaseResult
+        through the single authoritative entrypoint — same behaviour as
+        advance()'s dispatch.
+
+        ACCEPTED DEBT (#2044 T14): kept rather than removed. Migrating the
+        ~60+ direct-caller tests to invoke the registry handler (or advance())
+        is out of scope for #2044 — these are test helpers, production
+        advance() uses the registry. Remove in a follow-up that retires the
+        direct-call test pattern wholesale.
+
+        Behaviour note: the development sub-methods (``_run_development_agent``
+        / ``_post_dev_completion_comment`` / ``_run_test_phase``) stay on the
+        orchestrator and continue to commit forbidden fields inline
+        (status=failed on dev/test failure, status=pr_review +
+        current_phase=pr_review on test-phase success) exactly as the legacy
+        ``_do_development`` did. The migrated handler is a thin top-level
+        orchestrator that calls them via host aliases and returns a PhaseResult
+        mirroring the committed transition; the re-write by
+        ``_commit_phase_result`` is idempotent (values match).
         """
-        dev_round = wf.get("dev_round", 1)
-        gh = self._get_gh()
-        test_retries = wf.get("test_retries", 0)
-        skip_retries = wf.get("skip_retries", 0)
+        from app.modules.workspace.autonomous import phases as _phases
 
-        # ── Development phase (skipped on test-only/skip retry) ──
-        if test_retries > 0 or skip_retries > 0:
-            logger.info(
-                "Test/skip retry (test=%d, skip=%d) for dev round %d, skipping development phase",
-                test_retries,
-                skip_retries,
-                dev_round,
-            )
-        else:
-            self._run_development_agent(wf, dev_round, gh)
-            wf = self.workflow or {}
-            if wf.get("status") == "failed":
-                logger.info(
-                    "Development round %d failed, skipping test phase for workflow %s",
-                    dev_round,
-                    self._workflow_id[:8],
-                )
-                return
-            # Post development completion comment — but only if dev succeeded.
-            # _run_development_agent sets status="failed" on failure; without
-            # this guard, a "✅ Completed" comment is posted with a stale
-            # commit that isn't the agent's work (#525).
-            self._post_dev_completion_comment(wf, dev_round, gh)
-
-        # ── Test phase (always runs) ──
-        self._run_test_phase(wf, dev_round, gh)
+        # Legacy ``_do_development`` called ``gh = self._get_gh()`` first (the
+        # lazy initializer populates ``self._gh``); many direct-call tests stub
+        # ``orch._get_gh.return_value`` rather than ``orch._gh``. Resolve the gh
+        # binding through the same lazy path AND assign it to ``self._gh`` so
+        # ``deps.gh`` (which reads ``self._gh`` via _build_phase_deps) sees the
+        # same mock the legacy method did.
+        self._gh = self._get_gh()
+        ctx = self._build_workflow_context(wf)
+        deps = self._build_phase_deps()
+        result = _phases.development.handle(ctx, deps)
+        if result is not None:
+            self._commit_phase_result(result)
 
     def _run_development_agent(self, wf: dict, dev_round: int, gh: GitHubOps):
         """Run the development agent, verify code changes, and return.
@@ -6474,6 +7382,7 @@ class AutonomousOrchestrator:
                         no_verify=True,
                     )
                     commit_sha = gh.get_current_commit()
+                    self._record_trusted_head(gh, sha=commit_sha)
                     sha_changed = True
                     try:
                         diff_stats = (
@@ -6515,50 +7424,91 @@ class AutonomousOrchestrator:
                     except Exception:
                         pass
             elif branch_has_changes_vs_base and commit_sha == commit_before:
-                # Branch has pre-existing divergence (e.g. it was created
-                # behind main), but the agent produced NO new commit this
-                # session. The diff is NOT the agent's work — treat as failure.
-                logger.warning(
-                    "Branch has %d commits vs origin/main but HEAD unchanged "
-                    "this session (commit_sha == commit_before) — not agent work",
-                    base_diff_stats.get("commits", 0),
-                )
-                if primary_error:
-                    logger.warning(
-                        "Agent failed before producing a new commit; preserving primary error: %s",
-                        primary_error,
+                # Branch has pre-existing divergence, but the agent produced
+                # NO new commit this session. Before declaring failure, check
+                # whether the branch divergence is the agent's own work from a
+                # prior dev round (resume scenario): when a workflow is reset
+                # after an infra failure, the development phase resumes the
+                # prior session; the agent finds the task already done and
+                # correctly produces no new commit. The branch's existing
+                # commits (e.g. "auto: development changes") ARE the work.
+                branch_has_agent_commits = False
+                try:
+                    if branch_name:
+                        log_result = gh._run_git(
+                            ["log", "--oneline", "origin/main..HEAD"], check=False
+                        )
+                        commits_log = log_result.stdout or ""
+                        if log_result.returncode != 0 and not commits_log:
+                            logger.debug(
+                                "git log origin/main..HEAD failed (rc=%s); "
+                                "treating as no agent commits",
+                                log_result.returncode,
+                            )
+                        # Agent-authored auto-dev commits indicate prior work
+                        branch_has_agent_commits = any(
+                            "auto:" in line.lower() or "dev round" in line.lower()
+                            for line in commits_log.splitlines()
+                        )
+                except Exception:
+                    pass
+
+                if branch_has_agent_commits and not primary_error:
+                    # The branch carries the agent's own prior development
+                    # work; the resume correctly produced no duplicate commit.
+                    logger.info(
+                        "Branch '%s' has %d agent-authored commits vs "
+                        "origin/main; accepting as prior work on resume",
+                        branch_name,
+                        base_diff_stats.get("commits", 0),
                     )
+                    diff_stats = base_diff_stats
+                    sha_changed = True  # treat existing branch work as valid
                 else:
+                    # Genuinely no agent work: either no auto-dev commits in
+                    # the divergence (e.g. branch created behind main) or the
+                    # agent reported an error before producing any commit.
                     logger.warning(
-                        "Agent reported success but no new commits detected (SHA unchanged)"
+                        "Branch has %d commits vs origin/main but HEAD unchanged "
+                        "this session (commit_sha == commit_before) — not agent work",
+                        base_diff_stats.get("commits", 0),
                     )
-                milestone_error = (
-                    primary_error
-                    if primary_error
-                    else "Agent produced no code changes (commit SHA unchanged)"
-                )
-                workflow_error = (
-                    f"Development failed: {primary_error}"
-                    if primary_error
-                    else "Development failed: agent produced no code changes"
-                )
-                self.repo.update_milestone(
-                    ms.get("milestone_id", ""),
-                    {
-                        "status": "failed",
-                        "session_id": result.session_id,
-                        "result_summary": self._artifact_text(result)[:300],
-                        "tldr": self._artifact_tldr(result),
-                        "error_message": milestone_error,
-                    },
-                )
-                self._update_workflow(
-                    {
-                        "status": "failed",
-                        "error_message": workflow_error,
-                    }
-                )
-                return
+                    if primary_error:
+                        logger.warning(
+                            "Agent failed before producing a new commit; preserving primary error: %s",
+                            primary_error,
+                        )
+                    else:
+                        logger.warning(
+                            "Agent reported success but no new commits detected (SHA unchanged)"
+                        )
+                    milestone_error = (
+                        primary_error
+                        if primary_error
+                        else "Agent produced no code changes (commit SHA unchanged)"
+                    )
+                    workflow_error = (
+                        f"Development failed: {primary_error}"
+                        if primary_error
+                        else "Development failed: agent produced no code changes"
+                    )
+                    self.repo.update_milestone(
+                        ms.get("milestone_id", ""),
+                        {
+                            "status": "failed",
+                            "session_id": result.session_id,
+                            "result_summary": self._artifact_text(result)[:300],
+                            "tldr": self._artifact_tldr(result),
+                            "error_message": milestone_error,
+                        },
+                    )
+                    self._update_workflow(
+                        {
+                            "status": "failed",
+                            "error_message": workflow_error,
+                        }
+                    )
+                    return
 
         # Block accidental repository-wide rewrites before they can proceed to
         # tests/PR creation.  The threshold is intentionally configurable for
@@ -6869,6 +7819,22 @@ class AutonomousOrchestrator:
 
         self._accumulate_tokens(test_result)
 
+        # #2046 Phase A dual-write: persist structured CommandExecutionEvidence
+        # from the same event_log the heuristics below consume. Shadow-only —
+        # does not influence the verdict (Phase B migrates the gate to this).
+        emit_command_evidence(
+            session_id=test_result.session_id or test_result.tracking_session_id or "",
+            workflow_id=self._workflow_id,
+            milestone_id=test_ms.get("milestone_id", ""),
+            event_log=test_result.event_log or [],
+            sandbox_id=getattr(test_result, "sandbox_id", None),
+            sandbox_generation=getattr(test_result, "sandbox_generation", None),
+        )
+        # #2022 P5: persist sandbox identity + final state onto the workflow row
+        # (provider/id/generation/state) so the workflow records which sandbox ran
+        # each task and reconciliation (#2022 P6) can probe/clean orphans.
+        self._persist_sandbox_attribution(test_result)
+
         if self._abort_on_repo_integrity_violation(test_result, test_ms.get("milestone_id", "")):
             return
 
@@ -7112,13 +8078,47 @@ class AutonomousOrchestrator:
         has_text_pass_evidence = has_test_result and bool(
             re.search(r"\b[1-9]\d*\s+passed\b", test_response_text, re.IGNORECASE)
         )
-        tests_actually_run = has_passing_tool_result or (
-            has_test_tool_call and has_text_pass_evidence
+        # #2046 Phase B: structured evidence is authoritative for PASSED/FAILED;
+        # the legacy heuristic stays as the INCONCLUSIVE/NOT_RUN fallback
+        # (#2046 §4 降级). Agent prose / TEST_STATUS can no longer promote a
+        # run to PASSED on its own (#1967 invariant).
+        structured_verdict, _structured_evidences, structured_reason = (
+            self._compute_structured_test_verdict(test_result, framework_type, test_ms)
         )
+        structured_authoritative = structured_verdict in (
+            ExecutionVerdict.PASSED,
+            ExecutionVerdict.FAILED,
+        )
+        if structured_verdict == ExecutionVerdict.PASSED:
+            tests_actually_run = True
+        elif structured_verdict == ExecutionVerdict.FAILED:
+            tests_actually_run = False
+        else:  # NOT_RUN / INCONCLUSIVE — fall back to the legacy heuristic.
+            tests_actually_run = has_passing_tool_result or (
+                has_test_tool_call and has_text_pass_evidence
+            )
+            self._emit_structured_test_fallback(
+                structured_verdict, structured_reason, test_ms.get("milestone_id", "")
+            )
+        # test_result_inconclusive only applies when the structured layer could
+        # not judge authoritatively; a structured FAILED is a real failure,
+        # not an inconclusive run.
         test_result_inconclusive = (
-            test_result.success
+            not structured_authoritative
+            and test_result.success
             and (has_test_tool_call or has_test_result or test_status_tag in ("passed", "failed"))
             and not tests_actually_run
+        )
+
+        # #2046 shadow comparison: record divergence between the structured
+        # test verdict and the heuristic. Phase A compared at command level;
+        # Phase B compares the run-level verdict that now drives the gate.
+        self._shadow_compare_evidence(
+            test_result=test_result,
+            milestone_id=test_ms.get("milestone_id", ""),
+            heuristic_passed=has_passing_tool_result
+            or (has_test_tool_call and has_text_pass_evidence),
+            structured_verdict=structured_verdict,
         )
 
         # Issue #1547: Validate test report format
@@ -7126,7 +8126,10 @@ class AutonomousOrchestrator:
         format_valid, format_reason = self._validate_test_report_format(test_response_text)
         has_non_standard_format = not format_valid and tests_actually_run
 
-        tests_actually_skipped = (
+        # A structured PASSED/FAILED means tests really ran (and passed or
+        # failed) — that is never a "skipped" outcome. Skip detection only
+        # applies when the structured layer deferred to the heuristic.
+        tests_actually_skipped = not structured_authoritative and (
             test_status_tag == "skipped"
             or has_skip_tag
             or (test_result.success and has_skip_keyword and not tests_actually_run)
@@ -7353,634 +8356,47 @@ class AutonomousOrchestrator:
     # ── Phase: PR Review ────────────────────────────────────────────
 
     def _do_pr_review(self, wf: dict):
-        """Create PR and handle code review rounds."""
-        wf = self.workflow
-        round_num = wf.get("current_round", 0) + 1
-        max_rounds = wf.get("max_pr_review_rounds", 5)
-        force_full_rounds = self._must_run_full_review_rounds(wf)
-        dev_round = wf.get("dev_round", 1)
-        branch_name = wf.get("branch_name", "")
-        gh = self._get_gh()
-        # Language-aware approval marker for PR review (matches what the agent,
-        # writing in content_language, is asked to state).
-        approval_phrase = _review_approval_phrase(wf.get("content_language"))
+        """Test-compat shim (#2044 Phase B T11).
 
-        # Check if branch has any changes vs main
-        # Distinguish "branch behind main (timing issue)" from "no actual changes" (Issue #1552)
-        has_changes = False
-        is_timing_issue = False
-        try:
-            branch_sha = gh._run_git(["rev-parse", branch_name]).stdout.strip()
-            main_sha = gh._run_git(["rev-parse", "main"]).stdout.strip()
+        The pr_review phase lives in ``phases/pr_review.py`` (registered in
+        ``PHASE_HANDLERS``); advance()'s production path resolves it via the
+        registry, NOT through this method. This thin wrapper exists only so the
+        many ``o._do_pr_review(wf)`` direct callers in tests/ (and any
+        ``patch('AutonomousOrchestrator._do_pr_review')`` sites that influence a
+        direct call rather than advance()) keep working with zero per-test
+        edits. It builds the (ctx, deps) bundle, delegates to
+        ``phases.pr_review.handle``, and commits the returned PhaseResult
+        through the single authoritative entrypoint — same behaviour as
+        advance()'s dispatch.
 
-            # Check if branch is an ancestor of main (behind main)
-            is_ancestor = (
-                gh._run_git(
-                    ["merge-base", "--is-ancestor", branch_sha, main_sha], check=False
-                ).returncode
-                == 0
-            )
+        ACCEPTED DEBT (#2044 T14): kept rather than removed. Migrating the
+        ~60+ direct-caller tests to invoke the registry handler (or advance())
+        is out of scope for #2044 — these are test helpers, production
+        advance() uses the registry. Remove in a follow-up that retires the
+        direct-call test pattern wholesale.
 
-            if is_ancestor:
-                # Branch is behind main → timing issue
-                is_timing_issue = True
-                has_changes = False
-                logger.warning(
-                    "Branch %s is behind main (timing issue). base_commit_sha=%s",
-                    branch_name,
-                    wf.get("base_commit_sha", "none"),
-                )
-            else:
-                # Branch is ahead or parallel → normal diff check
-                diff_stats = gh.get_diff_stats("main", branch_name)
-                has_changes = diff_stats.get("commits", 0) > 0
-                if has_changes:
-                    scope_error = self._validate_autonomous_change_scope(
-                        gh,
-                        wf,
-                        (wf.get("base_commit_sha") or branch_sha),
-                        branch_sha,
-                    )
-                    if scope_error:
-                        self._update_workflow({"status": "failed", "error_message": scope_error})
-                        return
-        except Exception as e:
-            logger.warning("Failed to check branch status: %s", e)
-            pass
+        Behaviour note: the legacy ``_do_pr_review`` raised ``WorkflowPaused``
+        when ``_poll_ci_status`` was interrupted by shutdown (the
+        ``except WorkflowPaused: cancel + raise`` branch). The migrated handler
+        preserves that raise (it re-raises after cancelling the in-progress
+        milestone), so direct-call tests that assert the raise keep working
+        without a shim-level re-raise — the handler's own raise propagates
+        through here unchanged.
+        """
+        from app.modules.workspace.autonomous import phases as _phases
 
-        if not has_changes:
-            # No code changes produced — skip PR, post to issue, and mark completed
-            issue_number = wf.get("github_issue_number")
-
-            # Distinguish timing issue from no changes (Issue #1552)
-            if is_timing_issue:
-                no_change_msg = (
-                    f"## ⚠️ Timing Issue Detected\n\n"
-                    f"Branch `{branch_name}` is behind main (created from an older commit that was merged).\n"
-                    f"This indicates a race condition during workflow creation.\n\n"
-                    f"**Recommendation**: This issue should be fixed by locking base commit during batch creation.\n"
-                )
-            else:
-                no_change_msg = (
-                    f"## ℹ️ No Changes Detected\n\n"
-                    f"Agent completed dev round {dev_round} without producing code changes.\n"
-                    f"Skipping PR creation."
-                )
-
-            if issue_number:
-                self._post_github_comment(gh, issue_number, no_change_msg, context="no-changes")
-            self._create_milestone(
-                phase="pr_review",
-                dev_round=dev_round,
-                milestone_type="timing_issue" if is_timing_issue else "no_changes",
-                status="completed",
-                title=(
-                    "Branch behind main (timing issue)"
-                    if is_timing_issue
-                    else "No code changes produced"
-                ),
-                result_summary=(
-                    "Branch behind main: possible timing issue during workflow creation"
-                    if is_timing_issue
-                    else "Agent did not produce any code changes. Skipping PR creation."
-                ),
-            )
-            self._update_workflow(
-                {
-                    "status": "completed",
-                    "current_phase": "completed",
-                    "error_message": "",
-                }
-            )
-            self._emit("phase_change", {"phase": "completed"})
-            return
-
-        issue_number = wf.get("github_issue_number") or self.workflow.get("github_issue_number")
-        # Ensure branch is pushed to remote before PR creation
-        try:
-            # P1 修复（Issue #1611）：检查当前分支是否与预期一致
-            current_branch = gh.get_current_branch()
-            if branch_name and current_branch != branch_name:
-                logger.error(
-                    "Branch mismatch before push: workflow=%s expected=%s actual=%s",
-                    self._workflow_id[:8],
-                    branch_name,
-                    current_branch,
-                )
-                raise RuntimeError(
-                    f"Branch mismatch before push: expected {branch_name}, actual {current_branch}"
-                )
-            gh.git_push(branch=branch_name, force_with_lease=True)
-        except Exception as e:
-            # Distinguish transient vs non-transient errors to enable Layer-2 retry
-            # for network flakiness (Issue #1814).
-            if _is_transient_git_error(e):
-                # Transient: propagate GitHubOpsError to trigger Layer-2 retry
-                logger.warning("Transient push failure for branch %s: %s", branch_name, e)
-                raise
-            else:
-                # Non-transient: wrap as RuntimeError to signal permanent failure
-                logger.error("Failed to push branch %s: %s", branch_name, e, exc_info=True)
-                # 推送失败必须阻止后续 PR 创建，避免 "No commits" 错误 (Issue #1736)
-                raise RuntimeError(f"Branch push failed before PR creation: {e}") from e
-
-        # Create PR on first round (idempotent: skip if a PR already exists for
-        # this workflow). advance() is reentrant — the scheduler may call it
-        # again while a review agent is still running and current_round hasn't
-        # been persisted yet (it's written at the end of the review round). On
-        # re-entry round_num is still 1, so without this guard the workflow
-        # would call gh pr create again and hit "a pull request ... already
-        # exists", failing the whole workflow (#1857). Checking github_pr_number
-        # covers both re-entry and process-restart resume.
-        #
-        # Reads from both the passed-in wf dict AND self.workflow: self.workflow
-        # is a @property that re-queries the repo on every access, so once an
-        # earlier advance() persisted github_pr_number, a later advance()'s
-        # fallback (self.workflow.get) sees the fresh value even though the
-        # caller's wf snapshot is stale. This is what makes the guard reliable
-        # across re-entries (the test suite mocks get_workflow statically, so
-        # this property-refresh path is exercised in production but not in the
-        # PR-creation unit tests — see test_create_pr_already_exists_recovers).
-        existing_pr_number = wf.get("github_pr_number") or self.workflow.get("github_pr_number")
-        if round_num == 1 and not existing_pr_number:
-            try:
-                # Build PR body with issue linkage
-                pr_body = f"Autonomous development for dev round {dev_round}.\n\nRequirements: {wf.get('requirements_text', '')}"
-                if issue_number:
-                    pr_body += f"\n\nCloses #{issue_number}"
-
-                pr_data = gh.create_pr(
-                    title=f"[Auto] Dev round {dev_round}: {wf.get('title', 'Autonomous development')}",
-                    body=pr_body,
-                    head=branch_name,
-                    base="main",
-                )
-                pr_number = pr_data.get("number")
-                pr_url = pr_data.get("url", "")
-                self._create_milestone(
-                    phase="pr_review",
-                    dev_round=dev_round,
-                    milestone_type="pr_created",
-                    status="completed",
-                    title=f"PR #{pr_number} created",
-                    github_pr_number=pr_number,
-                    result_summary=pr_url,
-                )
-                self._update_workflow(
-                    {
-                        "github_pr_number": pr_number,
-                        "github_pr_url": pr_url,
-                    }
-                )
-            except GitHubOpsError as e:
-                # Graceful recovery ONLY for the "already exists" case (race
-                # between the github_pr_number guard above and the API call, or
-                # a re-entrant advance()). Other GitHubOpsError causes (network
-                # / auth / body-too-long) must NOT be masked by reusing an
-                # unrelated leftover open PR on this branch — those still raise.
-                #
-                # Prefer parsing the PR URL out of gh's error text (gh's
-                # already-exists message includes the PR URL, e.g.
-                # "... already exists: https://github.com/o/r/pull/1877").
-                # This avoids coupling to the exact "already exists" wording
-                # AND skips the eventually-consistent find_existing_pr race
-                # AND saves an API call. find_existing_pr is the fallback when
-                # the error text has no parseable URL.
-                pr_number_reused = _extract_pr_number_from_error(str(e))
-                if pr_number_reused:
-                    existing = {"number": pr_number_reused}
-                else:
-                    # Only treat as recoverable if it really is the
-                    # already-exists case (no PR URL to prove it). Other
-                    # errors have no PR URL and fall through to raise below.
-                    if "already exists" not in str(e).lower():
-                        self._create_milestone(
-                            phase="pr_review",
-                            milestone_type="pr_created",
-                            status="failed",
-                            title="PR creation failed",
-                            error_message=str(e),
-                        )
-                        raise
-                    existing = gh.find_existing_pr(branch_name)
-                    if not existing:
-                        # GitHub's PR list API is eventually consistent — the
-                        # PR that "already exists" may not be indexed yet right
-                        # after a concurrent create. One short retry covers it.
-                        time.sleep(2)
-                        existing = gh.find_existing_pr(branch_name)
-                if existing:
-                    pr_number = existing.get("number")
-                    pr_url = existing.get("url", "")
-                    logger.warning(
-                        "PR create for %s returned 'already exists'; reusing PR #%s",
-                        branch_name,
-                        pr_number,
-                    )
-                    self._create_milestone(
-                        phase="pr_review",
-                        dev_round=dev_round,
-                        milestone_type="pr_created",
-                        status="completed",
-                        title=f"PR #{pr_number} already exists (reused)",
-                        github_pr_number=pr_number,
-                        result_summary=pr_url,
-                    )
-                    self._update_workflow(
-                        {
-                            "github_pr_number": pr_number,
-                            "github_pr_url": pr_url,
-                        }
-                    )
-                else:
-                    self._create_milestone(
-                        phase="pr_review",
-                        milestone_type="pr_created",
-                        status="failed",
-                        title="PR creation failed",
-                        error_message=str(e),
-                    )
-                    raise
-
-            # Check CI status after PR creation — poll until finished or timeout
-            if pr_number:
-                try:
-                    ci_checks_post = self._poll_ci_status(gh, pr_number)
-                except WorkflowPaused:
-                    raise
-                except Exception:
-                    ci_checks_post = []
-                ci_fails_post = [c for c in ci_checks_post if c.get("bucket") == "fail"]
-                if ci_fails_post:
-                    ci_summary = "\n".join(
-                        f"- **{c['name']}**: {c.get('state', 'unknown')}" for c in ci_fails_post
-                    )
-                    self._post_github_comment(
-                        gh,
-                        pr_number,
-                        "## ⚠️ CI 检查状态\n\n"
-                        f"以下 CI 检查未通过：\n{ci_summary}\n\n"
-                        "将在后续代码审查轮次中分析这些失败是否由本 PR 引入。",
-                        is_pr=True,
-                        context="ci-fails",
-                    )
-
-        pr_number = wf.get("github_pr_number")
-        if not pr_number:
-            pr_number = self.workflow.get("github_pr_number")
-
-        # Code review
-        review_ms = self._create_milestone(
-            phase="pr_review",
-            dev_round=dev_round,
-            round_number=round_num,
-            milestone_type="pr_reviewed",
-            status="in_progress",
-            title=f"PR review round {round_num}",
-        )
-
-        # Get diff for review
-        diff_text = self._get_pr_review_diff(gh, pr_number, branch_name)
-
-        # Check CI status for the PR — poll until checks finish or timeout
-        ci_checks: list = []
-        ci_failures: list = []
-        if pr_number:
-            try:
-                ci_checks = self._poll_ci_status(gh, pr_number)
-                ci_failures = [c for c in ci_checks if c.get("bucket") == "fail"]
-            except WorkflowPaused:
-                self._cancel_milestone_for_shutdown(review_ms.get("milestone_id", ""))
-                raise
-            except Exception:
-                pass
-
-        review_prompt = (
-            AUTONOMOUS_CONTEXT + f"你是一位资深代码审查专家。请审查以下 PR 的代码变更。\n\n"
-            f"## 代码变更\n{self._smart_truncate_diff(diff_text)}\n\n"
-        )
-
-        # Add Issue reference
-        if issue_number:
-            review_prompt += (
-                f"## 关联 Issue\n"
-                f"本 PR 关联 GitHub Issue #{issue_number}。\n"
-                f"审查时请确保代码变更满足 Issue #{issue_number} 的所有需求。\n\n"
-            )
-
-        # For rounds > 1, the previous round's review is already in this review
-        # session's resumed history (--resume). Ask the reviewer to revisit it
-        # and confirm whether each point was addressed.
-        if round_num > 1:
-            review_prompt += (
-                "## 上一轮审查\n"
-                "请回顾你上一轮的审查意见（在本会话历史中），逐条确认是否已落实："
-                "已落实（说明如何修改）/ 未落实（说明原因）/ 不适用（说明理由）。\n\n"
-            )
-
-        review_prompt += (
-            "请检查：\n"
-            "1. 代码质量和可读性\n"
-            "2. 潜在 bug 和安全问题\n"
-            "3. 测试覆盖率\n"
-            "4. 性能影响\n"
-            "5. 与需求的对齐程度\n"
-            "6. 上一轮审查意见的落实情况(如有)\n\n"
-            "本阶段是只读审查：不要修改文件、不要创建提交，也不要执行任何会改变仓库状态的命令。\n"
-            "只有在所有 Issue 验收标准均已满足、没有 P0/P1 阻塞项或未落实项时才能批准；"
-            "只要仍有阻塞项，即使核心功能已基本完成，也必须要求修改。\n"
-            f"如果没有重大问题，请在审查结论中明确写出批准标记：{approval_phrase}。\n"
-            "必须把下面的机器可读单行 JSON 作为 TL;DR 摘要之前的最后一个非摘要行"
-            "（不要放进代码块）。所有未解决的 P0/P1 都必须逐项放入 blocking_findings；"
-            "只有数组为空时 verdict 才能是 APPROVE：\n"
-            'REVIEW_RESULT: {"verdict":"APPROVE","blocking_findings":[]}\n'
-            'REVIEW_RESULT: {"verdict":"REQUEST_CHANGES",'
-            '"blocking_findings":["finding 1"]}\n\n'
-            "重要：直接输出审查结果，不要添加引导文字(如'我来审查...'、'让我...'等)"
-            "或结尾引导(如'下一步是否...'等)。"
-        )
-
-        review_tool = wf.get("cli_tool", "claude-code")
-        if review_tool in READ_ONLY_REVIEW_UNSUPPORTED_TOOLS:
-            message = (
-                f"PR review cannot run safely with {review_tool}: its single-shot adapter "
-                "does not provide an enforceable per-run read-only sandbox. Configure a "
-                "review-capable CLI and retry the workflow."
-            )
-            self.repo.update_milestone(
-                review_ms.get("milestone_id", ""),
-                {"status": "failed", "error_message": message},
-            )
-            self._update_workflow({"status": "failed", "error_message": message})
-            if pr_number:
-                self._post_github_comment(
-                    gh,
-                    pr_number,
-                    f"## ⛔ PR Review Blocked\n\n{message}",
-                    is_pr=True,
-                    context="code-review",
-                )
-            return
-
-        # Include CI failures in review prompt if any
-        if ci_failures:
-            ci_summary = "\n".join(
-                f"- **{c['name']}**: {c.get('state', 'unknown')}" for c in ci_failures
-            )
-            review_prompt += (
-                f"\n\n## ⚠️ CI 检查失败\n\n以下 CI 检查未通过：\n{ci_summary}\n\n"
-                "请在审查时分析这些 CI 失败是否由本 PR 的代码变更引入。\n"
-                "如果是预先存在的问题，在审查结论中明确说明。"
-            )
-
-        review_result = self._run_agent_with_context_recovery(
-            wf=wf,
-            workflow_id=self._workflow_id,
-            cli_tool=review_tool,
-            model=wf.get("model", ""),
-            project_path=wf.get("worktree_path") or wf.get("project_path", ""),
-            prompt=review_prompt,
-            workspace_type=wf.get("workspace_type", "local"),
-            remote_machine_id=wf.get("remote_machine_id"),
-            permission_mode=_zcode_planning_mode(wf),
-            allowed_tools=REVIEW_ALLOWED_TOOLS.get(review_tool, []),
-            session_line="review",
-            milestone_id=review_ms.get("milestone_id", ""),
-        )
-
-        self._accumulate_tokens(review_result)
-
-        if self._abort_on_repo_integrity_violation(
-            review_result, review_ms.get("milestone_id", "")
-        ):
-            return
-
-        if not review_result.success or self._is_context_overflow(review_result):
-            message = (
-                "PR review agent failed: "
-                f"{review_result.error or self._artifact_text(review_result) or 'no result'}"
-            )
-            self.repo.update_milestone(
-                review_ms.get("milestone_id", ""),
-                {
-                    "status": "failed",
-                    "review_session_id": review_result.session_id,
-                    "error_message": message,
-                },
-            )
-            self._update_workflow({"status": "failed", "error_message": message})
-            return
-
-        review_text = self._artifact_text(review_result)
-        if not review_text.strip():
-            message = "PR review agent returned no result"
-            self.repo.update_milestone(
-                review_ms.get("milestone_id", ""),
-                {
-                    "status": "failed",
-                    "review_content": "",
-                    "review_session_id": review_result.session_id,
-                    "error_message": message,
-                },
-            )
-            self._update_workflow({"status": "failed", "error_message": message})
-            return
-        # Detect approval using the language-aware marker, then persist a
-        # structured verdict so progress_reported doesn't re-scan review text.
-        # The legacy zh marker is accepted too, for workflows whose content
-        # language predates this field (mirrors _derive_review_passed).
-        review_passed = self._review_is_approved(review_text, approval_phrase)
-        review_metadata = _merge_milestone_metadata(
-            self.repo.get_milestone(review_ms.get("milestone_id", "")),
-            {"review_verdict": {"passed": review_passed, "round": round_num}},
-        )
-        self.repo.update_milestone(
-            review_ms.get("milestone_id", ""),
-            {
-                "status": "completed" if review_result.success else "failed",
-                "review_content": review_text,
-                "review_session_id": review_result.session_id,
-                "tldr": self._artifact_tldr(review_result),
-                "metadata": review_metadata,
-            },
-        )
-
-        # Post review as PR comment
-        if pr_number:
-            self._post_github_comment(
-                gh,
-                pr_number,
-                f"## 🔍 Code Review (Round {round_num})\n\n{review_text}",
-                is_pr=True,
-                context="code-review",
-            )
-
-        # Check if all rounds done
-        self._update_workflow({"current_round": round_num})
-
-        # Every review with findings gets a fix — including the cap round — so
-        # the last review's feedback is never silently dropped. Total reviews are
-        # capped at max_pr_review_rounds (matches the "PR 审查最大轮次" label):
-        # after the cap-round fix we go straight to summary/report instead of
-        # scheduling another review. In the default mode, an approved review can
-        # also end PR review early; with require_full_review_rounds enabled, only
-        # the cap ends the loop. There is never an (N+1)-th review.
-        at_cap = round_num >= max_rounds
-        if not review_passed:
-            fix_succeeded = self._apply_pr_review_fix(
-                wf, gh, review_text, round_num, dev_round, ci_failures, pr_number
-            )
-            if not fix_succeeded:
-                return
-            # Context recovery may have rotated the main session line during
-            # the fix. The cap-round summary runs in this same scheduler call,
-            # so refresh before it resumes main again.
-            wf = self.workflow
-
-        if (review_passed and not force_full_rounds) or at_cap:
-            # All PR review rounds completed — summarize via the main session,
-            # then move to report. The main session resumes with the development
-            # history (incl. fixes) and is given the last review round's feedback
-            # (review runs on the review session, so it must be injected), then
-            # asked whether all review points were addressed and the PR is ready.
-            #
-            # The ENTIRE summary block (create milestone → run agent → fill
-            # review_content → post comment) must run BEFORE the CI check.
-            # Otherwise a CI failure redirects to the CI repair loop and
-            # returns, leaving the milestone with status="in_progress" and
-            # empty review_content — the frontend "PR Review Summary" button
-            # checks review_content?.trim() and stays disabled (#1813).
-            last_pr_review = ""
-            pr_milestones = self.repo.list_milestones(self._workflow_id, phase="pr_review")
-            for ms in reversed(pr_milestones):
-                if ms.get("milestone_type") == "pr_reviewed" and ms.get("review_content"):
-                    last_pr_review = ms["review_content"]
-                    break
-
-            summary_ms = self._create_milestone(
-                phase="pr_review",
-                dev_round=dev_round,
-                round_number=round_num,
-                milestone_type="pr_review_summary",
-                status="in_progress",
-                title="PR Review Summary",
-            )
-
-            summary_prompt = (
-                AUTONOMOUS_CONTEXT + "代码审查已全部完成。请根据最后一轮审查意见，"
-                "并结合本会话历史中开发环节的修复记录，"
-                "输出一份 PR 评审总结，明确：\n"
-                "1. 最后一轮审查意见是否已全部落实\n"
-                "2. 是否还有遗留问题需要处理\n"
-                "3. 当前 PR 是否可以合并\n\n"
-            )
-            if issue_number:
-                summary_prompt += (
-                    f"## 关联 Issue\n"
-                    f"本 PR 关联 GitHub Issue #{issue_number}。\n"
-                    f"总结中请确认修改是否满足 Issue #{issue_number} 的所有需求。\n\n"
-                )
-            summary_prompt += (
-                f"## 最后一轮审查意见\n{self._clean_agent_text(last_pr_review)}\n\n"
-                "如果审查意见已全部落实、无遗留问题，请明确说明'可以合并'。"
-                "直接输出总结，不要添加引导文字。"
-            )
-            summary_result = self._run_agent_with_context_recovery(
-                wf=wf,
-                workflow_id=self._workflow_id,
-                cli_tool=wf.get("cli_tool", "claude-code"),
-                model=wf.get("model", ""),
-                project_path=wf.get("worktree_path") or wf.get("project_path", ""),
-                prompt=summary_prompt,
-                workspace_type=wf.get("workspace_type", "local"),
-                remote_machine_id=wf.get("remote_machine_id"),
-                permission_mode=wf.get("permission_mode", "auto-edit"),
-                allowed_tools=AUTONOMOUS_DEV_ALLOWED_TOOLS.get(
-                    wf.get("cli_tool", "claude-code"), []
-                ),
-                session_line="main",
-                milestone_id=summary_ms.get("milestone_id", ""),
-            )
-            self._accumulate_tokens(summary_result)
-            if self._abort_on_repo_integrity_violation(
-                summary_result, summary_ms.get("milestone_id", "")
-            ):
-                return
-            if not summary_result.success or self._is_context_overflow(summary_result):
-                message = (
-                    "PR review summary agent failed: "
-                    f"{summary_result.error or self._artifact_text(summary_result) or 'no result'}"
-                )
-                self.repo.update_milestone(
-                    summary_ms.get("milestone_id", ""),
-                    {
-                        "status": "failed",
-                        "review_content": "",
-                        "error_message": message,
-                    },
-                )
-                self._update_workflow({"status": "failed", "error_message": message})
-                return
-            summary_text = self._artifact_text(summary_result)
-            if not summary_text.strip():
-                message = "PR review summary agent returned no result"
-                self.repo.update_milestone(
-                    summary_ms.get("milestone_id", ""),
-                    {
-                        "status": "failed",
-                        "review_content": "",
-                        "error_message": message,
-                    },
-                )
-                self._update_workflow({"status": "failed", "error_message": message})
-                return
-            self.repo.update_milestone(
-                summary_ms.get("milestone_id", ""),
-                {
-                    "status": "completed" if summary_result.success else "failed",
-                    "review_content": summary_text,
-                    "result_summary": summary_text[:200],
-                    "tldr": self._artifact_tldr(summary_result),
-                },
-            )
-
-            if pr_number and summary_text:
-                self._post_github_comment(
-                    gh,
-                    pr_number,
-                    f"## ✅ PR Review Summary\n\n{summary_text}",
-                    is_pr=True,
-                    context="review-summary",
-                )
-
-            # Check CI status before proceeding to report phase (Issue #1662)
-            # If CI failed, enter CI repair loop instead of reporting
-            if ci_failures:
-                self._create_milestone(
-                    phase="pr_review",
-                    dev_round=dev_round,
-                    round_number=round_num,
-                    milestone_type="ci_failed_before_report",
-                    status="completed",
-                    title=f"CI failed after review passed: {len(ci_failures)} checks",
-                    result_summary=", ".join(c.get("name", "unknown") for c in ci_failures),
-                )
-                # Reuse merge-phase CI repair loop
-                self._start_ci_repair_round(wf, pr_number, ci_failures)
-                return
-
-            # Move to report
-            self._update_workflow(
-                {
-                    "current_phase": "report",
-                    "status": "reporting",
-                }
-            )
-            self._emit("phase_change", {"phase": "report"})
-        # Under cap, the scheduler re-enters _do_pr_review for the next review
-        # round. In the default mode this path means "not approved and the fix
-        # above already ran"; with force-full enabled it also covers "approved
-        # early, but keep reviewing until the configured cap".
+        # Legacy ``_do_pr_review`` called ``gh = self._get_gh()`` first (the
+        # lazy initializer populates ``self._gh``); many direct-call tests stub
+        # ``orch._get_gh.return_value`` rather than ``orch._gh``. Resolve the gh
+        # binding through the same lazy path AND assign it to ``self._gh`` so
+        # ``deps.gh`` (which reads ``self._gh`` via _build_phase_deps) sees the
+        # same mock the legacy method did.
+        self._gh = self._get_gh()
+        ctx = self._build_workflow_context(wf)
+        deps = self._build_phase_deps()
+        result = _phases.pr_review.handle(ctx, deps)
+        if result is not None:
+            self._commit_phase_result(result)
 
     def _apply_pr_review_fix(
         self,
@@ -8079,6 +8495,7 @@ class AutonomousOrchestrator:
                     no_verify=True,
                 )
                 staged_sha = gh.get_current_commit()
+                self._record_trusted_head(gh, sha=staged_sha)
                 # Validate the pre-existing changes against the autonomous
                 # scope guard. If they touch files outside the allowed scope
                 # (e.g. unrelated test/manual edits), refuse — do NOT push
@@ -8165,7 +8582,7 @@ class AutonomousOrchestrator:
         # changes the way dev does, else the fix never reaches the PR (#960
         # symptom). A no-op fix is genuinely empty, not a failed dev round.
         commit_sha = ""
-        diff_stats = {}
+        diff_stats: dict[str, int] = {}
         try:
             commit_sha = gh.get_current_commit()
         except Exception as exc:
@@ -8180,6 +8597,7 @@ class AutonomousOrchestrator:
                         no_verify=True,
                     )
                     commit_sha = gh.get_current_commit()
+                    self._record_trusted_head(gh, sha=commit_sha)
                     if not commit_sha or commit_sha == commit_before:
                         raise RuntimeError("review-fix commit did not advance branch HEAD")
                     sha_changed = True
@@ -8282,8 +8700,22 @@ class AutonomousOrchestrator:
 
     # ── Phase: Report ───────────────────────────────────────────────
 
-    def _do_report(self, wf: dict):
-        """Generate progress report and update issue."""
+    def _do_report(self, ctx: WorkflowContext, deps: PhaseDeps) -> PhaseResult:
+        """Generate progress report and update issue.
+
+        Phase B #2044 T6: migrated onto the PhaseResult contract. Builds the
+        report (no business-logic change), then returns a PhaseResult advancing
+        to ``wait`` instead of writing ``current_phase``/``status`` inline. The
+        three milestones it emits (progress_reported / round_completed /
+        wait_started) travel in ``milestone_events`` and are committed by
+        ``_commit_phase_result``; the phase_change event is emitted through
+        ``deps.host`` so the commit entrypoint stays the sole phase/status
+        authority.
+
+        Until T10-T12 extract phases into phases/*.py, gh/repo stay on self;
+        deps here carries the host (emit_phase_change) for this thin phase.
+        """
+        wf = ctx.workflow
         dev_round = wf.get("dev_round", 1)
         gh = self._get_gh()
         issue_number = wf.get("github_issue_number")
@@ -8349,50 +8781,60 @@ class AutonomousOrchestrator:
         report_metadata = json.dumps({"report": payload}, ensure_ascii=False)
         report_markdown = render_progress_report(payload, content_language)
 
-        self._create_milestone(
-            phase="report",
-            dev_round=dev_round,
-            milestone_type="progress_reported",
-            status="completed",
-            title=f"Progress report for round {dev_round}",
-            metadata=report_metadata,
-        )
+        milestone_events = [
+            {
+                "phase": "report",
+                "dev_round": dev_round,
+                "milestone_type": "progress_reported",
+                "status": "completed",
+                "title": f"Progress report for round {dev_round}",
+                "metadata": report_metadata,
+            },
+        ]
 
         # Post report to issue
         if issue_number:
             self._post_github_comment(gh, issue_number, report_markdown, context="progress-report")
 
         # Mark round completed
-        self._create_milestone(
-            phase="report",
-            dev_round=dev_round,
-            milestone_type="round_completed",
-            status="completed",
-            title=f"Dev round {dev_round} completed",
+        milestone_events.append(
+            {
+                "phase": "report",
+                "dev_round": dev_round,
+                "milestone_type": "round_completed",
+                "status": "completed",
+                "title": f"Dev round {dev_round} completed",
+            }
         )
 
         # Record wait phase start time for comment filtering
-        self._create_milestone(
-            phase="report",
-            dev_round=dev_round,
-            milestone_type="wait_started",
-            status="completed",
-            title="Wait phase starting",
-            metadata=json.dumps({"wait_started_at": datetime.now(timezone.utc).isoformat()}),
-        )
-
-        # Move to wait phase
-        self._update_workflow(
+        milestone_events.append(
             {
-                "current_phase": "wait",
-                "status": "waiting",
+                "phase": "report",
+                "dev_round": dev_round,
+                "milestone_type": "wait_started",
+                "status": "completed",
+                "title": "Wait phase starting",
+                "metadata": json.dumps({"wait_started_at": datetime.now(timezone.utc).isoformat()}),
             }
         )
-        self._emit("phase_change", {"phase": "wait"})
+
+        # Emit the phase_change event through the host (the commit entrypoint
+        # does NOT emit phase_change — Phase A contract — so the handler emits
+        # its own). Payload is identical to the legacy inline _emit call.
+        deps.host.emit_phase_change({"phase": "wait"})
+
+        # Move to wait phase — advance via PhaseResult rather than an inline
+        # current_phase/status write. Same decision the legacy method made.
+        return PhaseResult.completed(
+            next_phase="wait",
+            next_status="waiting",
+            milestone_events=milestone_events,
+        )
 
     # ── Phase: Wait ─────────────────────────────────────────────────
 
-    def _do_wait(self, wf: dict):
+    def _do_wait(self, ctx: WorkflowContext, deps: PhaseDeps) -> PhaseResult:
         """Poll for new requirements or completion signal.
 
         If user_feedback is stored on the workflow (from cancel-with-feedback),
@@ -8406,7 +8848,21 @@ class AutonomousOrchestrator:
         workflows on the assumption that this phase only touches DB/API state.
         Any git or agent work must happen in a later phase, after the workflow
         has left ``waiting``.
+
+        Phase B #2044 T7: migrated onto the PhaseResult contract. Same
+        decisions as the legacy inline-commit method, only the recording
+        mechanism changes: phase/status transitions travel on the returned
+        ``PhaseResult`` (``completed`` advances ``current_phase``; ``wait``
+        parks the workflow), the ``requirement_received`` milestone travels in
+        ``milestone_events``, and the phase_change event is emitted through
+        ``deps.host`` so the commit entrypoint stays the sole phase/status
+        authority. The four forbidden fields (current_phase/status/completed_at/
+        paused_at) are no longer written inline by this handler.
+
+        Until T10-T12 extract phases into phases/*.py, gh/repo stay on self;
+        deps here carries the host (emit_phase_change) for this thin phase.
         """
+        wf = ctx.workflow
         # Check for stored user feedback (from cancel-with-feedback)
         user_feedback = wf.get("user_feedback", "")
         if user_feedback and user_feedback.strip():
@@ -8428,19 +8884,21 @@ class AutonomousOrchestrator:
                     break
 
             new_dev_round = wf.get("dev_round", 1) + 1
-            self._update_workflow(
-                {
-                    "current_phase": cancelled_phase,
-                    "status": PHASE_STATUS_MAP.get(cancelled_phase, "developing"),
-                    "dev_round": new_dev_round,
-                    "current_round": 0,
-                }
+            # Emit the phase_change event through the host (the commit entrypoint
+            # does NOT emit phase_change — Phase A contract — so the handler emits
+            # its own). Payload is identical to the legacy inline _emit call.
+            deps.host.emit_phase_change(
+                {"phase": cancelled_phase, "dev_round": new_dev_round, "resumed": True}
             )
-            self._emit(
-                "phase_change",
-                {"phase": cancelled_phase, "dev_round": new_dev_round, "resumed": True},
+            # Resume from the cancelled phase — advance via PhaseResult rather
+            # than an inline current_phase/status write. Same decision the legacy
+            # method made; dev_round/current_round are non-forbidden workflow
+            # fields and travel in workflow_patch.
+            return PhaseResult.completed(
+                next_phase=cancelled_phase,
+                next_status=PHASE_STATUS_MAP.get(cancelled_phase, "developing"),
+                workflow_patch={"dev_round": new_dev_round, "current_round": 0},
             )
-            return
 
         # Auto merge check for batch workflows
         auto_merge = wf.get("auto_merge", True)
@@ -8451,24 +8909,18 @@ class AutonomousOrchestrator:
                 "Auto merge enabled for workflow %s, proceeding to merge phase",
                 self._workflow_id[:8],
             )
-            self._update_workflow(
-                {
-                    "current_phase": "merge",
-                    "status": "merging",
-                }
+            deps.host.emit_phase_change({"phase": "merge", "auto_merge": True})
+            return PhaseResult.completed(
+                next_phase="merge",
+                next_status="merging",
             )
-            self._emit(
-                "phase_change",
-                {"phase": "merge", "auto_merge": True},
-            )
-            return
 
         # Original behavior: poll GitHub issue comments
         issue_number = wf.get("github_issue_number")
         gh = self._get_gh()
 
         if not issue_number:
-            return  # No issue to check
+            return PhaseResult.wait()  # No issue to check
 
         # Get the time when wait phase started (set by _do_report)
         # This ensures only user comments AFTER the report are considered
@@ -8488,10 +8940,10 @@ class AutonomousOrchestrator:
                 issue_number, since=wait_start if wait_start else None
             )
         except GitHubOpsError:
-            return
+            return PhaseResult.wait()
 
         if not comments:
-            return  # No new comments
+            return PhaseResult.wait()  # No new comments
 
         # Filter out bot's own comments (comments authored by the automation)
         user_comments = [c for c in comments if not _is_bot_comment(c)]
@@ -8501,18 +8953,15 @@ class AutonomousOrchestrator:
             body = comment.get("body", "")
             for pattern in _COMPLETION_PATTERNS:
                 if pattern.search(body):
-                    self._update_workflow(
-                        {
-                            "current_phase": "merge",
-                            "status": "merging",
-                        }
+                    deps.host.emit_phase_change({"phase": "merge"})
+                    return PhaseResult.completed(
+                        next_phase="merge",
+                        next_status="merging",
                     )
-                    self._emit("phase_change", {"phase": "merge"})
-                    return
 
         # No user comments left after filtering
         if not user_comments:
-            return
+            return PhaseResult.wait()
 
         # New requirements detected
         new_req_comment = user_comments[-1]  # Latest user comment
@@ -8520,800 +8969,85 @@ class AutonomousOrchestrator:
         # Use correct field name from gh CLI (camelCase)
         comment_time = new_req_comment.get("createdAt", "")
 
-        self._create_milestone(
-            phase="wait",
-            milestone_type="requirement_received",
-            status="completed",
-            title="New requirements detected",
-            result_summary=new_requirements[:200],
-            metadata=json.dumps({"last_comment_time": comment_time}),
-        )
-
-        # Start new dev round
-        self._update_workflow(
+        milestone_events = [
             {
-                "current_phase": "planning",
-                "status": "planning",
-                "current_round": 0,
-                "dev_round": wf.get("dev_round", 1) + 1,
-                "requirements_text": new_requirements,
+                "phase": "wait",
+                "milestone_type": "requirement_received",
+                "status": "completed",
+                "title": "New requirements detected",
+                "result_summary": new_requirements[:200],
+                "metadata": json.dumps({"last_comment_time": comment_time}),
             }
+        ]
+
+        new_dev_round = wf.get("dev_round", 1) + 1
+        deps.host.emit_phase_change({"phase": "planning", "dev_round": new_dev_round})
+        # Start a new dev round — advance via PhaseResult. current_phase/status
+        # come from next_phase/next_status; dev_round/current_round/
+        # requirements_text are non-forbidden workflow fields in workflow_patch.
+        return PhaseResult.completed(
+            next_phase="planning",
+            next_status="planning",
+            workflow_patch={
+                "current_round": 0,
+                "dev_round": new_dev_round,
+                "requirements_text": new_requirements,
+            },
+            milestone_events=milestone_events,
         )
-        self._emit("phase_change", {"phase": "planning", "dev_round": wf.get("dev_round", 1) + 1})
 
     # ── Phase: Merge ────────────────────────────────────────────────
 
     def _do_merge(self, wf: dict):
-        """Merge PR and clean up. Resolves merge conflicts automatically.
+        """Test-compat shim (#2044 Phase B T10).
 
-        Merge is retried across scheduler cycles instead of blocking on CI:
-        if CI is still running we return (staying in 'merging') and the
-        scheduler retries in ~10s. This avoids hogging a workflow thread for
-        the full CI duration (10+ min for Python 3.10) and naturally adapts
-        to variable CI times without --admin bypass or long polls.
+        The merge phase lives in ``phases/merge.py`` (registered in
+        ``PHASE_HANDLERS``); advance()'s production path resolves it via the
+        registry, NOT through this method. This thin wrapper exists only so the
+        many ``o._do_merge(wf)`` direct callers in tests/ (and any
+        ``patch('AutonomousOrchestrator._do_merge')`` sites that influence a
+        direct call rather than advance()) keep working with zero per-test
+        edits. It builds the (ctx, deps) bundle, delegates to
+        ``phases.merge.handle``, and commits the returned PhaseResult through
+        the single authoritative entrypoint — same behaviour as advance()'s
+        dispatch.
 
-        Note: an automatic CI repair attempt runs synchronously in this phase
-        on the existing PR branch. That intentionally spends one merge worker
-        for the repair task, but avoids bouncing the workflow back through the
-        full development/test/review/report loop.
+        ACCEPTED DEBT (#2044 T14): kept rather than removed. Migrating the
+        ~60+ direct-caller tests to invoke the registry handler (or advance())
+        is out of scope for #2044 — these are test helpers, production
+        advance() uses the registry. Remove in a follow-up that retires the
+        direct-call test pattern wholesale.
+
+        Behaviour note: the legacy ``_do_merge`` raised ``WorkflowPaused`` on
+        the merge-policy-pause branch, and direct-call tests assert that raise.
+        The migrated handler returns ``PhaseResult.pause`` instead (advance()
+        honours it by skipping the transient-retry reset). This shim re-raises
+        ``WorkflowPaused`` after committing a pause result so those direct-call
+        tests see the same exception they did before — production advance()
+        never goes through this shim (it uses the registry), so the re-raise is
+        test-compat only.
         """
-        gh = self._get_gh()
-        pr_number = wf.get("github_pr_number")
-        branch_name = wf.get("branch_name", "")
+        from app.modules.workspace.autonomous import phases as _phases
 
-        if pr_number:
-            try:
-                pr_head_sha = gh.get_pr_head_sha(pr_number)
-                scope_error = self._validate_pre_merge_change_scope(gh, wf, pr_head_sha)
-            except Exception as exc:
-                scope_error = f"Pre-merge change scope could not be verified: {exc}"
-            if scope_error:
-                self._update_workflow({"status": "failed", "error_message": scope_error})
-                return
-
-            # Before syncing or repairing, check whether the PR is already
-            # mergeable despite non-required check failures
-            # (mergeable_state=unstable). If so, skip branch sync and CI
-            # repair — attempt merge directly. Syncing/repairing such PRs is
-            # wasteful and can fail (the agent can't fix dependency
-            # vulnerabilities like Security Audit Gate), causing the workflow
-            # to fail unnecessarily (#2034).
-            try:
-                pre_merge_state = gh.get_pr_merge_state(pr_number)
-                pre_mergeable_state = str(pre_merge_state.get("mergeable_state") or "").lower()
-            except Exception as state_err:
-                logger.warning(
-                    "PR #%s: failed to query merge state before merge: %s",
-                    pr_number,
-                    state_err,
-                )
-                pre_mergeable_state = ""
-
-            checks: list[dict] = []
-            if pre_mergeable_state != "unstable":
-                # PR is not mergeable-as-is; sync branch and check CI.
-                # Required-branch-update rules reject an immediate merge with
-                # the same generic "repository rule violations" error used for
-                # pending checks. Synchronize a stale PR explicitly before
-                # querying the new head's CI. This reuses the trusted
-                # clean/conflict merge path and returns without consuming a
-                # CI-repair attempt.
-                if (
-                    branch_name
-                    and pr_head_sha
-                    and self._sync_failed_pr_with_main(gh, branch_name, pr_number, pr_head_sha)
-                ):
-                    return
-
-                try:
-                    checks = gh.get_pr_checks(pr_number)
-                except Exception as e:
-                    raise GitHubOpsError(
-                        f"Unable to query CI checks before merging PR #{pr_number}: {e}"
-                    ) from e
-                failed = [c for c in checks if c.get("bucket") == "fail"]
-                if failed:
-                    self._start_ci_repair_round(wf, pr_number, failed)
-                    return
-            else:
-                logger.info(
-                    "PR #%s: mergeable_state=unstable; skipping branch sync "
-                    "and CI repair, attempting merge directly",
-                    pr_number,
-                )
-            # If CI is still running, defer this merge to the next scheduler
-            # cycle instead of blocking (synchronous poll) or failing. The
-            # scheduler re-enters _do_merge every ~10s.
-            # (checks is empty for unstable PRs — no deferral needed.)
-            pending = [c for c in checks if c.get("bucket") == "pending"]
-            if pending:
-                logger.info(
-                    "PR #%s: %d CI checks pending, deferring merge to next cycle",
-                    pr_number,
-                    len(pending),
-                )
-                return
-
-            try:
-                gh.merge_pr(pr_number, strategy="merge")
-                self._create_milestone(
-                    phase="merge",
-                    milestone_type="merged",
-                    status="completed",
-                    title=f"PR #{pr_number} merged",
-                )
-            except GitHubOpsError as e:
-                err_msg = str(e)
-
-                # Merge readiness can change after the pre-merge check query:
-                # a newly-pushed head may acquire required checks between these
-                # two calls. Refresh both CI and GitHub's merge classification
-                # before deciding whether this is policy lag or a real conflict.
-                try:
-                    refreshed_checks = gh.get_pr_checks(pr_number)
-                except Exception as checks_err:
-                    logger.warning(
-                        "PR #%s: failed to refresh checks after merge rejection: %s",
-                        pr_number,
-                        checks_err,
-                    )
-                    refreshed_checks = checks
-                failed = [c for c in refreshed_checks if c.get("bucket") == "fail"]
-                if failed:
-                    self._start_ci_repair_round(wf, pr_number, failed)
-                    return
-                pending = [c for c in refreshed_checks if c.get("bucket") == "pending"]
-
-                try:
-                    merge_state = gh.get_pr_merge_state(pr_number)
-                except Exception as state_err:
-                    logger.warning(
-                        "PR #%s: failed to refresh merge state after rejection: %s",
-                        pr_number,
-                        state_err,
-                    )
-                    merge_state = {}
-                mergeable = merge_state.get("mergeable")
-                mergeable_state = str(merge_state.get("mergeable_state") or "").lower()
-                lowered_error = err_msg.lower()
-                is_policy_rejection = any(
-                    marker in lowered_error
-                    for marker in (
-                        "base branch policy prohibits",
-                        "repository rule violations",
-                        "required status check",
-                        "review required",
-                        "review is required",
-                        "branch protection",
-                        "protected branch",
-                        "pull request is in draft",
-                    )
-                )
-                is_conflict_rejection = any(
-                    marker in lowered_error
-                    for marker in (
-                        "merge commit cannot be cleanly created",
-                        "merge conflict",
-                        "conflicting files",
-                    )
-                )
-
-                # Pending checks are confirmed transient state. Keep polling
-                # without consuming an AI repair attempt, even when GitHub's
-                # mergeability cache concurrently reports ``dirty``.
-                if pending:
-                    logger.info(
-                        "PR #%s: merge blocked with %d checks pending " "(state=%s), deferring",
-                        pr_number,
-                        len(pending),
-                        mergeable_state or "unknown",
-                    )
-                    return
-
-                is_real_conflict = (
-                    mergeable_state == "dirty"
-                    or is_conflict_rejection
-                    or (mergeable is False and not mergeable_state)
-                )
-                # GitHub's mergeability cache can report a stale "dirty"
-                # immediately after a synchronization push, before the
-                # synthetic merge commit is recomputed. The PR branch already
-                # contains main in that case, so verifying ancestry avoids a
-                # no-op merge that fails with "made no commit". Only the
-                # cache-derived "dirty" path needs the probe; text evidence
-                # and a definitive non-mergeable branch are authoritative.
-                if (
-                    is_real_conflict
-                    and mergeable_state == "dirty"
-                    and not is_conflict_rejection
-                    and mergeable is not False
-                    and pr_head_sha
-                    and self._branch_contains_main(gh, pr_head_sha, branch_name) is True
-                ):
-                    logger.info(
-                        "PR #%s mergeable_state=dirty is stale (branch has main); "
-                        "deferring to policy/check path",
-                        pr_number,
-                    )
-                    is_real_conflict = False
-                if is_real_conflict:
-                    try:
-                        # Authoritative conflict evidence wins over generic
-                        # repository-rule text. GitHub can return both for the
-                        # same rejected merge.
-                        logger.info(
-                            "PR #%s has a real merge conflict (state=%s), resolving",
-                            pr_number,
-                            mergeable_state or "unknown",
-                        )
-                        self._resolve_merge_conflicts(gh, branch_name, pr_number)
-                        # Conflicts resolved + pushed, but NOT merged yet — the push
-                        # triggered a fresh CI run. Return here (staying in 'merging')
-                        # so _do_merge's CI-pending deferral handles the wait on the
-                        # next cycle. Falling through to cleanup would delete the
-                        # branch before the PR is merged (#1112 P1).
-                        return
-                    except Exception as resolve_err:
-                        self._create_milestone(
-                            phase="merge",
-                            milestone_type="merged",
-                            status="failed",
-                            title="PR merge failed",
-                            error_message=f"Merge conflict resolution failed: {resolve_err}",
-                        )
-                        raise
-
-                if is_policy_rejection:
-                    # With no failed/pending checks and no conflict evidence,
-                    # repository policy requires external action (approval,
-                    # marking ready, or a rule change). Persist a manually
-                    # recoverable pause instead of retrying forever.
-                    state_label = mergeable_state or "unknown"
-                    message = (
-                        f"{MERGE_POLICY_PAUSE_REASON_PREFIX} PR #{pr_number} "
-                        f"is not merge-ready (state={state_label}). Satisfy the "
-                        f"repository requirement, then resume the workflow. {err_msg}"
-                    )
-                    self._update_workflow(
-                        {
-                            "status": "paused",
-                            "paused_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
-                            "error_message": message,
-                            "agent_pid": None,
-                        }
-                    )
-                    self._emit(
-                        "status_change",
-                        {
-                            "status": "paused",
-                            "reason": "merge_policy",
-                            "message": message,
-                        },
-                    )
-                    # Stop advance() before its success cleanup can clear the
-                    # persisted pause reason along with an older transient
-                    # retry counter.
-                    raise WorkflowPaused(message)
-
-                # A mergeable/blocked/unknown PR is not by itself evidence of
-                # either a Git conflict or a recognized policy rejection.
-                # Preserve the original permission, API, or infrastructure
-                # error so the workflow fails visibly instead of spinning.
-                raise
-
-        # Clean up branch/worktree. Re-read wf because _resolve_merge_conflicts
-        # restores worktree_path in its finally block (so the restored value
-        # may differ from the caller's stale snapshot); using the stale snapshot
-        # would retry the removal and fail, skipping branch deletion (#1107).
-        wf = self.workflow
-        branch_name = wf.get("branch_name", "")
-        worktree_path = wf.get("worktree_path", "")
-        project_path = wf.get("project_path", "")
-        # Get system_account for multi-user permission isolation (Issue #1395)
-        system_account = None
-        user_id = wf.get("user_id")
-        if user_id:
-            user_repo = UserRepository()
-            user = user_repo.get_user_by_id(user_id)
-            if user:
-                system_account = user.get("system_account")
-        try:
-            if worktree_path:
-                # Must use main repo's gh to remove worktree
-                # (can't remove a worktree from within itself)
-                main_gh = GitHubOps(project_path, system_account=system_account)
-                main_gh.remove_worktree(worktree_path)
-                self._update_workflow({"worktree_path": ""})
-                # Reinitialize gh to point at main repo for branch deletion
-                self._gh = GitHubOps(project_path, system_account=system_account)
-                gh = self._gh
-            if branch_name:
-                gh.delete_branch(branch_name)
-            self._create_milestone(
-                phase="merge",
-                milestone_type="cleaned_up",
-                status="completed",
-                title="Branch/worktree cleaned up",
-            )
-        except GitHubOpsError as e:
-            logger.warning("Cleanup failed: %s", e)
-
-        # Mark workflow completed
-        self._update_workflow(
-            {
-                "status": "completed",
-                "completed_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
-            }
-        )
-        self._emit("phase_change", {"phase": "completed"})
+        ctx = self._build_workflow_context(wf)
+        deps = self._build_phase_deps()
+        result = _phases.merge.handle(ctx, deps)
+        if result is not None:
+            self._commit_phase_result(result)
+            if result.outcome == "pause":
+                # Re-raise so direct-call tests observe the legacy
+                # WorkflowPaused (production advance() does NOT go through this
+                # shim — it routes via the registry and the result path).
+                message = ""
+                if isinstance(result.structured_error, dict):
+                    message = str(result.structured_error.get("message") or "")
+                raise WorkflowPaused(message)
 
     def _sync_worktree_to_pr_remote_head(self, wt_gh: "GitHubOps", branch_name: str) -> None:
-        """Sync a merge worktree to the PR branch's authoritative remote head.
-
-        ``add_worktree`` checks out the *local* ``auto-dev/*`` ref, which can
-        drift ahead of the remote tip: a prior merge/repair attempt may have
-        advanced it locally (e.g. a merge commit that already contains main)
-        without ever pushing. A later cycle then re-checks out that stale local
-        branch, the merge into main becomes a no-op ("Already up to date"), and
-        the resolver fails with "made no commit" even though the remote PR head
-        is still behind main and genuinely needs the sync (workflow 1895).
-        Fetch the remote branch and reset the local ref/HEAD to it so the merge
-        starts from the real PR state. Failure is non-fatal: a fetch/reset error
-        leaves the worktree at the local ref, preserving prior behavior.
-        """
-        try:
-            wt_gh._run_git(["fetch", "origin", branch_name])
-            remote_head = wt_gh.resolve_commit("FETCH_HEAD")
-            wt_gh._run_git(["reset", "--hard", remote_head])
-        except Exception as sync_exc:
-            logger.warning(
-                "Could not sync merge worktree to remote head of %s: %s",
-                branch_name,
-                sync_exc,
-            )
+        return self._git_workspace.sync_worktree_to_pr_remote_head(wt_gh, branch_name)
 
     def _resolve_merge_conflicts(self, gh: GitHubOps, branch_name: str, pr_number: int):
-        """Resolve merge conflicts in an isolated worktree, push, and merge the PR.
-
-        Previously this checked out the PR branch directly in the main repo,
-        which polluted the shared working tree (``index.lock`` races with
-        concurrent workflows, ``reset --hard`` clobbered in-flight resolution
-        on scheduler re-entry). Now a throwaway worktree is created for the
-        branch, all merge/resolve/push happens inside it, and it is removed in
-        a ``finally`` — the main repo's index and HEAD are never touched.
-
-        The workflow's own worktree is temporarily removed to free the branch
-        for the temp worktree (git forbids the same branch in two worktrees),
-        then **restored** in the ``finally`` block. Without restoration,
-        subsequent phases (PR review push, CI repair re-entry) operate on the
-        main repo (HEAD=main) and fail with a branch mismatch.
-        """
-        wf = self.workflow
-        project_path = wf.get("project_path", "")
-        worktree_path = wf.get("worktree_path", "")
-        # Get system_account for multi-user permission isolation (Issue #1395)
-        system_account = None
-        user_id = wf.get("user_id")
-        if user_id:
-            user_repo = UserRepository()
-            user = user_repo.get_user_by_id(user_id)
-            if user:
-                system_account = user.get("system_account")
-
-        # Git forbids checking out the same branch in two worktrees, so the
-        # workflow's own worktree (if still present) must be removed first to
-        # free the branch for the temp worktree below.
-        #
-        # Issue #2041: the whole transition (remove original → create temp →
-        # resolve → remove temp → restore original) is one outer try/finally so
-        # no step can leave the workflow operating on the main checkout. The DB
-        # is cleared only AFTER git confirms removal, temp creation lives inside
-        # the try, and a restore failure fails closed.
-        main_gh = GitHubOps(project_path, system_account=system_account)
-        # Place the temp merge worktree inside the project's .worktrees/ dir
-        # (the same convention as normal workflow worktrees — see
-        # _get_preferred_worktree_path). The previous ../merge-{id} sibling
-        # path failed on macOS with EPERM "could not create leading
-        # directories" because the server process lacks TCC/write permission
-        # to create new directories directly under ~/workspace (#1827).
-        temp_wt_path = os.path.normpath(
-            os.path.join(project_path, ".worktrees", f"merge-{self._workflow_id[:8]}")
-        )
-        original_removed = False
-        temp_created = False
-        # The path to restore at the end. Prefer the live worktree_path, fall
-        # back to preferred_worktree_path (it is what _ensure_worktree recreates
-        # from if worktree_path is empty). Captured up front so the journal can
-        # restore even if the process is SIGKILLed mid-transition (#2050).
-        original_path_for_journal = worktree_path or wf.get("preferred_worktree_path") or ""
-        try:
-            if worktree_path:
-                # Persist the removal intent BEFORE the git side effect so a
-                # SIGKILL anywhere in this block leaves the journal able to
-                # reconcile (#2050). transition_original_path records the path
-                # to restore; transition_temp_path records the temp to tear down.
-                self._set_transition_state(
-                    "removing_original",
-                    original_path=original_path_for_journal,
-                    temp_path=temp_wt_path,
-                )
-                # Fail closed on removal failure: only clear the DB once git has
-                # actually freed the branch, and never assume removal succeeded.
-                self._remove_worktree_idempotent(main_gh, worktree_path)
-                # One atomic write: clear worktree_path AND advance state so the
-                # empty path is never observable without its transition context.
-                self._update_workflow(
-                    {"worktree_path": "", "worktree_transition_state": "original_removed"}
-                )
-                # The caller's gh still points at the now-deleted worktree dir
-                # as its cwd. Rebind it (and cached self._gh) to the main repo
-                # so later cleanup doesn't run subprocess with a gone cwd (#1107).
-                gh = GitHubOps(project_path, system_account=system_account)
-                self._gh = gh
-                original_removed = True
-
-            # Create an isolated worktree for the existing PR branch. Use the
-            # main repo's gh so the worktree is registered against the real .git.
-            # Lives inside the try so a creation failure still triggers restore.
-            main_gh.add_worktree(temp_wt_path, branch_name)
-            logger.info("Created temporary merge worktree at %s", temp_wt_path)
-            temp_created = True
-            # Advance the journal: a successful add_worktree is the proof the
-            # temp is attached. If the process dies here, reconcile re-queries
-            # the registry to observe the temp and tear it down (#2050).
-            self._set_transition_state("temp_attached")
-
-            # All subsequent git ops run inside the temp worktree.
-            wt_gh = GitHubOps(temp_wt_path, system_account=system_account)
-            # Sync the checked-out branch to the PR's authoritative remote head
-            # before merging main (see _sync_worktree_to_pr_remote_head).
-            self._sync_worktree_to_pr_remote_head(wt_gh, branch_name)
-            original_pr_head = wt_gh.get_current_commit()
-            conflict_ms_id = ""
-            milestone_result = {}
-            # Fetch latest main and merge into the branch.
-            wt_gh._run_git(["fetch", "origin", "main"])
-            # Worktrees share their common git dir, so another workflow can
-            # move origin/main while this resolver spends minutes editing and
-            # testing. FETCH_HEAD is the object guaranteed by the command
-            # above; pin it for the merge and every later graph/scope gate.
-            fetched_main_head = wt_gh.resolve_commit("FETCH_HEAD")
-            merge_result = wt_gh._run_git(["merge", fetched_main_head], check=False)
-            # git writes conflict summaries to STDOUT (not stderr), so we must
-            # check both streams. Checking only stderr left stderr empty on a
-            # real conflict and the code misclassified it as a "non-conflict"
-            # failure, abandoning merge without ever invoking the AI resolver.
-            combined_output = f"{merge_result.stdout}\n{merge_result.stderr}"
-            if merge_result.returncode != 0:
-                # Locale-dependent git builds may print "CONFLICT" translated.
-                # The index is authoritative: any unmerged path has a U-stage
-                # entry regardless of stdout/stderr language.
-                has_conflict_marker = "CONFLICT" in combined_output
-                unmerged_query_error = ""
-                if not has_conflict_marker:
-                    try:
-                        unmerged_result = wt_gh._run_git(
-                            ["diff", "--name-only", "--diff-filter=U"], check=False
-                        )
-                        unmerged_output = getattr(unmerged_result, "stdout", "")
-                        has_conflict_marker = isinstance(unmerged_output, str) and bool(
-                            unmerged_output.strip()
-                        )
-                    except Exception as exc:
-                        unmerged_query_error = str(exc)
-                if not has_conflict_marker:
-                    detail = combined_output.strip() or f"exit code {merge_result.returncode}"
-                    if unmerged_query_error:
-                        detail += f"; unable to inspect unmerged index: {unmerged_query_error}"
-                    raise GitHubOpsError(f"git merge failed (non-conflict): {detail}")
-
-                initial_unmerged_paths = wt_gh.get_unmerged_paths()
-                if not initial_unmerged_paths:
-                    raise GitHubOpsError(
-                        "git merge reported a conflict but the index has no unmerged paths"
-                    )
-                # Snapshot the complete conflicted index before exposing the
-                # worktree to the agent. PATH wrappers are policy guidance,
-                # not a security boundary: an agent or repository script can
-                # invoke an absolute git binary or write the index indirectly.
-                resolver_index_before = wt_gh.get_index_snapshot()
-
-                # Ask AI agent to resolve conflicts inside the temp worktree.
-                conflict_prompt = (
-                    AUTONOMOUS_CONTEXT
-                    + "当前分支与 main 存在合并冲突。请解决所有冲突文件中的冲突标记，"
-                    "保留两边的有效修改。\n\n"
-                    f"编排器已经把你放在唯一允许操作的临时 worktree：`{temp_wt_path}`。\n"
-                    f"该 worktree 已检出目标分支 `{branch_name}` 并处于 merge conflict 状态。\n"
-                    "禁止切换/checkout 其他分支，禁止调用 EnterWorktree，禁止到主仓或其他"
-                    " worktree 查找冲突；直接处理当前目录的 U-stage 文件。\n\n"
-                )
-                # Issue reference is available in this method's scope
-                issue_number = wf.get("github_issue_number") or self.workflow.get(
-                    "github_issue_number"
-                )
-                if issue_number:
-                    conflict_prompt += (
-                        f"## 关联 Issue\n"
-                        f"本任务关联 GitHub Issue #{issue_number}。\n"
-                        f"冲突解决时请确保修改满足 Issue #{issue_number} 的所有需求。\n\n"
-                    )
-                conflict_prompt += (
-                    "步骤：\n"
-                    "1. 查看所有冲突文件：git diff --name-only --diff-filter=U\n"
-                    "2. 逐个解决冲突标记（<<<<<<, ======, >>>>>>）\n"
-                    "3. 运行测试验证冲突解决没有破坏功能（不能跳过）：\n"
-                    "   - python -m pytest 或 python3 -m pytest\n"
-                    "   - 如果有测试失败，分析原因并修复，然后重新测试\n"
-                    "   - 特别注意：main 上的改动可能修改了函数签名/SQL/接口，\n"
-                    "     冲突文件相关的测试也需要同步更新\n"
-                    "   - 重复直到所有测试通过\n"
-                    "4. 测试全部通过后直接返回总结；不要执行 git add、git commit 或 git push，\n"
-                    "   暂存、提交与推送由编排器在校验冲突标记和提交图后完成。\n\n"
-                    "## 总结报告（必须）\n"
-                    "在回复末尾简要总结：\n"
-                    "- 解决了哪些文件的冲突\n"
-                    "- 是否执行了测试，测试结果如何（如 42 passed, 0 failed）\n"
-                    "- 如果跳过了测试，说明原因\n"
-                    "- 这个总结会显示在工作流的 timeline 中，供用户查看"
-                )
-
-                wf = self.workflow
-                # _run_agent derives its authoritative repository path and the
-                # prompt execution contract from ``wf``. Passing project_path
-                # alone is insufficient: the workflow's cleared worktree_path
-                # would otherwise override it back to the shared main repo.
-                # Bind a per-call workflow snapshot to the isolated resolver
-                # worktree without changing the persisted workflow row.
-                conflict_wf = dict(wf)
-                conflict_wf.update(
-                    {
-                        "branch_strategy": "worktree",
-                        "worktree_path": temp_wt_path,
-                        "branch_name": branch_name,
-                    }
-                )
-                # Track this as its own milestone so conflict-resolution usage is
-                # captured in phase_* (and thus workflow totals = SUM(phase_*)).
-                conflict_ms = self._create_milestone(
-                    phase="merge",
-                    dev_round=wf.get("dev_round", 1),
-                    milestone_type="conflicts_resolved",
-                    status="in_progress",
-                    title=f"Resolving merge conflicts (PR #{pr_number})",
-                )
-                result = self._run_agent(
-                    wf=conflict_wf,
-                    workflow_id=self._workflow_id,
-                    cli_tool=wf.get("cli_tool", "claude-code"),
-                    model=wf.get("model", ""),
-                    project_path=temp_wt_path,
-                    prompt=conflict_prompt,
-                    workspace_type=wf.get("workspace_type", "local"),
-                    remote_machine_id=wf.get("remote_machine_id"),
-                    permission_mode=wf.get("permission_mode", "auto-edit"),
-                    allowed_tools=AUTONOMOUS_DEV_ALLOWED_TOOLS.get(
-                        wf.get("cli_tool", "claude-code"), []
-                    ),
-                    session_line="fresh",
-                    milestone_id=conflict_ms.get("milestone_id", ""),
-                )
-                self._accumulate_tokens(result)
-                response_text = self._artifact_text(result)
-                conflict_ms_id = conflict_ms.get("milestone_id", "")
-                milestone_result = {
-                    "session_id": result.session_id,
-                    "result_summary": response_text,
-                    "tldr": self._artifact_tldr(result),
-                }
-                if not result.success:
-                    self.repo.update_milestone(
-                        conflict_ms_id,
-                        {
-                            **milestone_result,
-                            "status": "failed",
-                            "error_message": result.error or "Conflict resolution failed",
-                        },
-                    )
-                    raise RuntimeError(f"Conflict resolution failed: {result.error}")
-
-                try:
-                    # The agent is intentionally edit/test-only: its command
-                    # guard denies mutating git operations.  The trusted
-                    # orchestrator owns staging and the merge commit after
-                    # verifying both the working tree and branch identity.
-                    current_branch = wt_gh.get_current_branch()
-                    if not isinstance(current_branch, str) or current_branch != branch_name:
-                        raise RuntimeError(
-                            "Conflict resolution branch mismatch before commit: "
-                            f"expected={branch_name!r}, actual={current_branch!r}"
-                        )
-                    unmerged_paths = wt_gh.get_unmerged_paths()
-                    marker_paths = wt_gh.get_conflict_marker_paths(
-                        sorted(set(initial_unmerged_paths) | set(unmerged_paths))
-                    )
-                    if marker_paths:
-                        raise RuntimeError(
-                            "Conflict resolver left conflict markers in: "
-                            + ", ".join(marker_paths[:10])
-                        )
-                    agent_head = wt_gh.get_current_commit()
-                    if agent_head != original_pr_head:
-                        raise RuntimeError(
-                            "Conflict resolver changed HEAD; commits and merge-state changes "
-                            "are reserved for the orchestrator"
-                        )
-                    resolver_index_after = wt_gh.get_index_snapshot()
-                    resolver_index_changes = wt_gh.get_index_changed_paths(
-                        resolver_index_before, resolver_index_after
-                    )
-                    if resolver_index_changes:
-                        raise RuntimeError(
-                            "Conflict resolver changed the Git index; staging is reserved for "
-                            "the orchestrator. Paths: " + ", ".join(resolver_index_changes[:10])
-                        )
-                    resolver_changed_paths = wt_gh.get_worktree_changed_paths()
-                    resolver_scope_error = self._scope_violation(resolver_changed_paths)
-                    if resolver_scope_error:
-                        raise RuntimeError(
-                            "Conflict resolver scope rejected before staging: "
-                            f"{resolver_scope_error}"
-                        )
-                    wt_gh.git_add_all()
-                    remaining_unmerged = wt_gh.get_unmerged_paths()
-                    if remaining_unmerged:
-                        raise RuntimeError(
-                            "Conflict resolver left unmerged paths after staging: "
-                            + ", ".join(remaining_unmerged[:10])
-                        )
-                    wt_gh.git_commit(
-                        f"merge: resolve conflicts for PR #{pr_number}", no_verify=True
-                    )
-                except Exception as exc:
-                    self.repo.update_milestone(
-                        conflict_ms_id,
-                        {
-                            **milestone_result,
-                            "status": "failed",
-                            "error_message": str(exc),
-                        },
-                    )
-                    raise
-
-                # Do not mark the milestone complete until the shared
-                # pre-push commit-graph postconditions below have passed.
-
-            try:
-                # Push the resolved branch. The new merge commit triggers a
-                # fresh CI run, so _do_merge retries on the next scheduler
-                # cycle once checks are green.
-                # Fail closed on branch drift. Rewriting branch_name from the
-                # current checkout could push an unrelated branch.
-                current_branch = wt_gh.get_current_branch()
-                if not isinstance(current_branch, str) or current_branch != branch_name:
-                    raise RuntimeError(
-                        "Conflict resolution branch mismatch before push: "
-                        f"expected={branch_name!r}, actual={current_branch!r}"
-                    )
-                resolved_head = wt_gh.get_current_commit()
-                if (
-                    not isinstance(original_pr_head, str)
-                    or not original_pr_head
-                    or not isinstance(resolved_head, str)
-                    or not resolved_head
-                ):
-                    raise RuntimeError("Unable to verify merge commit identity before push")
-                if resolved_head == original_pr_head:
-                    raise RuntimeError("Merge resolution made no commit; refusing unchanged push")
-
-                pr_head_in_result = self._ancestor_check(wt_gh, original_pr_head, resolved_head)
-                main_head_in_result = self._ancestor_check(wt_gh, fetched_main_head, resolved_head)
-                if pr_head_in_result is not True or main_head_in_result is not True:
-                    raise RuntimeError(
-                        "Merge commit ancestry verification failed before push: "
-                        f"pr_head={pr_head_in_result!r}, origin_main={main_head_in_result!r}"
-                    )
-                merge_scope_wf = dict(wf)
-                merge_scope_wf["base_commit_sha"] = fetched_main_head
-                # original_pr_head..resolved_head includes every upstream file
-                # brought in by the merge.  That is not autonomous resolver
-                # scope and can exceed the file cap on an old PR even when the
-                # agent touched one conflict.  The resolver's actual edit set
-                # was checked before staging above; this common gate now checks
-                # the cumulative PR delta relative to the fetched main.
-                scope_error = self._validate_autonomous_change_scope(
-                    wt_gh, merge_scope_wf, fetched_main_head, resolved_head
-                )
-                if scope_error:
-                    raise RuntimeError(
-                        f"Conflict resolution scope rejected before push: {scope_error}"
-                    )
-                wt_gh.git_push(branch=branch_name, force_with_lease=True)
-            except Exception as exc:
-                if conflict_ms_id:
-                    self.repo.update_milestone(
-                        conflict_ms_id,
-                        {
-                            **milestone_result,
-                            "status": "failed",
-                            "error_message": str(exc),
-                        },
-                    )
-                raise
-
-            if conflict_ms_id:
-                self.repo.update_milestone(
-                    conflict_ms_id,
-                    {
-                        **milestone_result,
-                        "status": "completed",
-                        "error_message": "",
-                    },
-                )
-            self._create_milestone(
-                phase="merge",
-                milestone_type="conflicts_pushed",
-                status="completed",
-                title=(
-                    f"PR #{pr_number} conflicts resolved, waiting for CI to merge"
-                    if conflict_ms_id
-                    else f"PR #{pr_number} synchronized with main, waiting for CI"
-                ),
-            )
-        finally:
-            # Tear down the temp worktree if it was actually created, so it does
-            # not leak and block future runs. Use the main repo's gh because a
-            # worktree cannot remove itself. Skip when it was never created
-            # (e.g. the original worktree removal failed first) to avoid a
-            # spurious "failed to remove" warning on a path that doesn't exist.
-            if temp_created:
-                try:
-                    main_gh.remove_worktree(temp_wt_path)
-                    logger.info("Removed temporary merge worktree at %s", temp_wt_path)
-                except GitHubOpsError as e:
-                    logger.warning("Failed to remove temp worktree %s: %s", temp_wt_path, e)
-
-            # Restore the workflow's original worktree so subsequent phases
-            # (PR review push, CI repair, _do_merge re-entry) operate on the
-            # isolated branch, not the main repo (HEAD=main). Without this,
-            # _do_pr_review's pre-push branch check fails with
-            # "expected auto-dev/xxx, actual main" and the workflow is stuck.
-            #
-            # Only restore if we actually removed it (Issue #2041): a failed
-            # removal leaves the original worktree live in git, and an attempted
-            # restore would error. A restore failure fails CLOSED — never let a
-            # later phase run on the main checkout.
-            if original_removed:
-                # Mark the restore intent before doing git work, so a SIGKILL
-                # during restore converges on the `restoring` state and the
-                # reconcile resumes idempotently (#2050).
-                self._set_transition_state("restoring")
-                try:
-                    # If remove_worktree succeeded earlier, the dir is gone
-                    # and we recreate it. If it failed, the dir is still
-                    # there and add_worktree would error — check first.
-                    git_file = os.path.join(worktree_path, ".git")
-                    if not main_gh.path_exists_as_user(git_file, file_only=True):
-                        main_gh.add_worktree(worktree_path, branch_name)
-                    self._verify_worktree_restored(main_gh, worktree_path, branch_name)
-                    # Converge in a single write: restore worktree_path AND clear
-                    # the journal together so they can never disagree (#2050).
-                    self._clear_transition_journal(worktree_path=worktree_path)
-                    self._gh = GitHubOps(worktree_path, system_account=system_account)
-                    logger.info("Restored workflow worktree at %s", worktree_path)
-                except Exception as e:
-                    logger.error(
-                        "Failed to restore worktree %s after merge resolution: %s",
-                        worktree_path,
-                        e,
-                        exc_info=True,
-                    )
-                    # Fail CLOSED and keep the journal + metadata for diagnosis.
-                    self._fail_transition_closed(
-                        f"worktree restore failed after merge resolution: {e}",
-                        error_message=(f"worktree restore failed after merge resolution: {e}"),
-                    )
-                    raise
+        return self._git_workspace.resolve_merge_conflicts(gh, branch_name, pr_number)
 
     # ── Worktree transition journal (Issue #2050) ───────────────────
     # These helpers persist a minimal crash-recovery journal so a SIGKILL at
@@ -9351,23 +9085,7 @@ class AutonomousOrchestrator:
         self._update_workflow(updates)
 
     def _clear_transition_journal(self, *, worktree_path: str | None = None) -> None:
-        """Converge the journal to the stable state (#2050).
-
-        Clears every journal field and optionally restores ``worktree_path`` in
-        the SAME write, so the cleared path and the cleared state can never be
-        observed separately.
-        """
-        updates: dict = {
-            "worktree_transition_state": None,
-            "transition_original_path": None,
-            "transition_temp_path": None,
-            "transition_error": None,
-            "transition_started_at": None,
-            "transition_updated_at": datetime.now(timezone.utc).isoformat(),
-        }
-        if worktree_path is not None:
-            updates["worktree_path"] = worktree_path
-        self._update_workflow(updates)
+        return self._git_workspace.clear_transition_journal(worktree_path=worktree_path)
 
     def _fail_transition_closed(self, reason: str, *, error_message: str | None = None) -> None:
         """Mark the transition unrecoverable and fail the workflow closed (#2050).
@@ -9395,171 +9113,13 @@ class AutonomousOrchestrator:
         return False
 
     def _verify_worktree_registered(self, gh: GitHubOps, path: str, branch: str) -> None:
-        """Confirm ``path`` is registered in ``git worktree list`` on ``branch``.
-
-        Distinct from ``_verify_worktree_restored`` only in naming; both check
-        the registry, but this one is used to confirm the temp was actually
-        attached before advancing the journal (#2050).
-        """
-        entries = gh.list_worktrees()
-        if not self._is_registered_on_branch(entries, path, branch):
-            raise RuntimeError(
-                f"worktree {path} not registered on branch {branch!r} " f"(registry: {entries!r})"
-            )
+        return self._git_workspace.verify_worktree_registered(gh, path, branch)
 
     def _path_within_worktrees_root(self, path: str, project_path: str) -> bool:
-        """True if ``path`` lives under ``<project_path>/.worktrees`` (#2050).
-
-        Used by reconcile to refuse operating on foreign / out-of-root paths
-        (fail closed instead of touching worktrees we cannot prove we own).
-        """
-        if not path or not project_path:
-            return False
-        try:
-            root = os.path.normpath(os.path.join(project_path, ".worktrees"))
-            return os.path.commonpath([root, os.path.normpath(path)]) == root
-        except ValueError:
-            # commonpath raises on different drives (Windows) / absolute mismatches.
-            return False
+        return self._git_workspace.path_within_worktrees_root(path, project_path)
 
     def _reconcile_worktree_transition(self, wf: dict) -> None:
-        """Recover an interrupted merge-conflict worktree transition (#2050).
-
-        Single idempotent entry point. Combines the persisted transition intent
-        (``worktree_transition_state`` + path fields) with the OBSERVED git
-        registry / disk state to either restore the original worktree to a
-        stable state, or fail the workflow closed. Never resets/deletes/recreates
-        branch refs — that is #2042's head-authority job.
-
-        Goal is to discard any half-finished temp worktree and get back to the
-        stable original worktree so the next round can re-run merge/conflict from
-        a known-good state. A SIGKILL cannot prove the temp's edits/commits/push
-        were complete or trustworthy.
-        """
-        state = (wf.get("worktree_transition_state") or "").strip()
-        if not state:
-            return  # stable, nothing to reconcile
-        if state == "recovery_failed":
-            # Already failed closed; do not start an agent or touch git.
-            logger.warning(
-                "Workflow %s is in recovery_failed; skipping reconcile",
-                self._workflow_id[:8],
-            )
-            return
-
-        project_path = wf.get("project_path", "") or ""
-        branch_name = wf.get("branch_name", "") or ""
-        original_path = (
-            wf.get("transition_original_path")
-            or wf.get("preferred_worktree_path")
-            or wf.get("worktree_path")
-            or ""
-        )
-        temp_path = wf.get("transition_temp_path") or ""
-
-        # Fail closed if we cannot confirm the original path or its root. We
-        # must know what to restore before touching git.
-        if not original_path:
-            self._fail_transition_closed(
-                "cannot reconcile: transition_original_path is empty "
-                "and no preferred/worktree path is available"
-            )
-            return
-        if not branch_name:
-            self._fail_transition_closed(
-                "cannot reconcile: branch_name is empty, cannot verify worktree"
-            )
-            return
-        # Refuse foreign roots: only operate inside the project's .worktrees dir.
-        if not self._path_within_worktrees_root(original_path, project_path):
-            self._fail_transition_closed(
-                f"cannot reconcile: original_path {original_path!r} is outside "
-                f"the project worktrees root"
-            )
-            return
-        if temp_path and not self._path_within_worktrees_root(temp_path, project_path):
-            self._fail_transition_closed(
-                f"cannot reconcile: temp_path {temp_path!r} is outside "
-                f"the project worktrees root"
-            )
-            return
-
-        system_account = None
-        user_id = wf.get("user_id")
-        if user_id:
-            try:
-                from app.repositories.user_repo import UserRepository
-
-                user = UserRepository().get_user_by_id(user_id)
-                if user:
-                    system_account = user.get("system_account")
-            except Exception as e:  # noqa: BLE001
-                logger.warning("Could not resolve system_account for reconcile: %s", e)
-        main_gh = GitHubOps(project_path, system_account=system_account)
-
-        try:
-            entries = main_gh.list_worktrees()
-        except Exception as e:  # noqa: BLE001
-            # Cannot safely judge ownership without the registry → fail closed.
-            self._fail_transition_closed(f"git worktree list failed: {e}")
-            return
-
-        def _registered(path: str) -> bool:
-            return any(w.get("path") == path for w in entries)
-
-        def _on_branch(path: str) -> bool:
-            return self._is_registered_on_branch(entries, path, branch_name)
-
-        try:
-            if state == "removing_original":
-                if _registered(original_path):
-                    if _on_branch(original_path):
-                        # Original never actually removed — nothing to undo.
-                        self._clear_transition_journal(worktree_path=original_path)
-                        logger.info(
-                            "Reconcile %s: original still registered; cleared journal",
-                            state,
-                        )
-                        return
-                    # Registered but wrong branch → ambiguous, fail closed.
-                    self._fail_transition_closed(
-                        f"original worktree {original_path!r} registered on "
-                        f"unexpected branch (expected {branch_name!r})"
-                    )
-                    return
-                # Original gone → removal happened. Clean any temp, then restore.
-                self._reconcile_cleanup_temp_and_restore(
-                    main_gh, entries, temp_path, original_path, branch_name, system_account
-                )
-                return
-
-            if state in ("original_removed", "temp_attached"):
-                # Either way: tear down any temp, then restore the original.
-                self._reconcile_cleanup_temp_and_restore(
-                    main_gh, entries, temp_path, original_path, branch_name, system_account
-                )
-                return
-
-            if state == "restoring":
-                if _on_branch(original_path):
-                    # Restore already completed before the SIGKILL; converge.
-                    self._clear_transition_journal(worktree_path=original_path)
-                    self._gh = GitHubOps(original_path, system_account=system_account)
-                    logger.info("Reconcile restoring: original already restored; converged")
-                    return
-                # Otherwise resume the idempotent restore (also cleans temp).
-                self._reconcile_cleanup_temp_and_restore(
-                    main_gh, entries, temp_path, original_path, branch_name, system_account
-                )
-                return
-
-            # Unknown state → fail closed rather than guess.
-            self._fail_transition_closed(f"cannot reconcile: unknown transition state {state!r}")
-        except _ReconcileFailed as e:
-            self._fail_transition_closed(str(e))
-        except Exception as e:  # noqa: BLE001
-            logger.error("Reconcile failed for %s: %s", self._workflow_id[:8], e, exc_info=True)
-            self._fail_transition_closed(f"reconcile raised: {e}")
+        return self._git_workspace.reconcile_worktree_transition(wf)
 
     def _reconcile_cleanup_temp_and_restore(
         self,
@@ -9581,6 +9141,10 @@ class AutonomousOrchestrator:
             temp_entry = next((w for w in entries if w.get("path") == temp_path), None)
             if temp_entry is not None:
                 actual_branch = temp_entry.get("branch")
+                # APFS transient lag: branch field may be missing right after
+                # add_worktree. Fall back to symbolic-ref before rejecting.
+                if actual_branch is None and not temp_entry.get("detached"):
+                    actual_branch = main_gh.resolve_worktree_branch(temp_path)
                 if actual_branch not in (branch_name, f"refs/heads/{branch_name}"):
                     # A temp registered on the wrong branch is not ours to remove.
                     raise _ReconcileFailed(
@@ -9600,6 +9164,9 @@ class AutonomousOrchestrator:
         original_entry = next((w for w in entries if w.get("path") == original_path), None)
         if original_entry is not None:
             actual_branch = original_entry.get("branch")
+            # APFS transient lag: same fallback as temp above.
+            if actual_branch is None and not original_entry.get("detached"):
+                actual_branch = main_gh.resolve_worktree_branch(original_path)
             if actual_branch not in (branch_name, f"refs/heads/{branch_name}"):
                 raise _ReconcileFailed(
                     f"original worktree {original_path!r} registered on unexpected "
@@ -9627,43 +9194,7 @@ class AutonomousOrchestrator:
         logger.info("Reconcile restored original worktree at %s", original_path)
 
     def _remove_worktree_idempotent(self, gh: GitHubOps, path: str) -> None:
-        """Remove a worktree, treating "already absent" as success (Issue #2041).
-
-        ``git worktree remove`` errors if the worktree is already gone (e.g. it
-        was cleaned up externally or by a previous partial run). That is not a
-        failure: the branch is already free. Only re-raise if the worktree is
-        still registered, which means the removal genuinely failed and the
-        branch is still occupied.
-        """
-        try:
-            gh.remove_worktree(path)
-        except GitHubOpsError as exc:
-            # Probe the registry to distinguish "already gone" from a real
-            # failure. If the probe itself errors, re-raise the ORIGINAL
-            # removal error so it isn't masked by a less actionable one.
-            try:
-                still_registered = any(w.get("path") == path for w in gh.list_worktrees())
-            except Exception:
-                raise exc
-            if still_registered:
-                raise
-            logger.info("Worktree %s already absent (treated as removed): %s", path, exc)
+        return self._git_workspace.remove_worktree_idempotent(gh, path)
 
     def _verify_worktree_restored(self, gh: GitHubOps, path: str, branch: str) -> None:
-        """Post-restore verification (Issue #2041 acceptance #6).
-
-        Confirms the restored worktree is registered in ``git worktree list`` on
-        the expected branch. (The restore gate above already ensured the linked
-        ``.git`` pointer exists before reaching here.) Any failure propagates so
-        the caller can fail closed.
-        """
-        entries = [w for w in gh.list_worktrees() if w.get("path") == path]
-        if not entries:
-            raise RuntimeError(f"restored worktree {path} missing from `git worktree list`")
-        actual = entries[0].get("branch")
-        # git may report either "branch" or "refs/heads/branch" depending on version.
-        if actual not in (branch, f"refs/heads/{branch}"):
-            raise RuntimeError(
-                f"restored worktree {path} on wrong branch: "
-                f"expected={branch!r}, actual={actual!r}"
-            )
+        return self._git_workspace.verify_worktree_restored(gh, path, branch)

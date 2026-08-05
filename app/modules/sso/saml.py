@@ -226,9 +226,24 @@ class SAMLProvider(SSOProvider):
             ),
         )
 
-    def get_service_provider_metadata(self, acs_url: str | None = None) -> str:
-        """Return SP metadata XML for configuring an enterprise IdP."""
+    def get_service_provider_metadata(
+        self, acs_url: str | None = None, slo_url: str | None = None
+    ) -> str:
+        """Return SP metadata XML for configuring an enterprise IdP.
+
+        Issue #2174 F7: Include SingleLogoutService endpoint in metadata.
+
+        Args:
+            acs_url: Assertion Consumer Service URL (required).
+            slo_url: Single Logout Service URL (optional, derived from acs_url if not provided).
+        """
         location = acs_url or self.acs_url
+        # Derive SLO URL from ACS URL if not provided (same host, different path)
+        slo_location = slo_url
+        if not slo_location and location:
+            # Replace /acs/ with /slo/ in the URL path
+            slo_location = location.replace("/acs/", "/slo/")
+
         entity_descriptor = etree.Element(
             "{urn:oasis:names:tc:SAML:2.0:metadata}EntityDescriptor",
             nsmap={
@@ -256,6 +271,22 @@ class SAMLProvider(SSOProvider):
             index="0",
             isDefault="true",
         )
+        # Issue #2174 F7: Add SingleLogoutService endpoints
+        if slo_location:
+            # HTTP-POST binding
+            etree.SubElement(
+                sp_sso,
+                "{urn:oasis:names:tc:SAML:2.0:metadata}SingleLogoutService",
+                Binding=SAML_POST_BINDING,
+                Location=slo_location,
+            )
+            # HTTP-Redirect binding
+            etree.SubElement(
+                sp_sso,
+                "{urn:oasis:names:tc:SAML:2.0:metadata}SingleLogoutService",
+                Binding=SAML_REDIRECT_BINDING,
+                Location=slo_location.replace("/slo/", "/slo-redirect/"),
+            )
         return cast(
             "str",
             etree.tostring(
@@ -710,3 +741,172 @@ class SAMLProvider(SSOProvider):
     @staticmethod
     def generate_request_id() -> str:
         return "_" + secrets.token_urlsafe(32)
+
+    # ========================================================================
+    # Issue #2174 F7: SAML Single Logout (SLO) Support
+    # ========================================================================
+
+    @property
+    def idp_slo_url(self) -> str | None:
+        """Return the IdP Single Logout URL if configured.
+
+        Looks for the SLO endpoint in order:
+        1. Extra params (idp_slo_url)
+        2. Loaded from IdP metadata
+        Returns None if not found.
+        """
+        configured = self.config.extra_params.get("idp_slo_url")
+        if configured:
+            return str(configured)
+        metadata = self._load_idp_metadata()
+        if metadata is None:
+            return None
+        services = metadata.findall(
+            ".//md:IDPSSODescriptor/md:SingleLogoutService",
+            namespaces=NSMAP,
+        )
+        # Prefer HTTP-Redirect binding for logout
+        redirect_service = next(
+            (service for service in services if service.get("Binding") == SAML_REDIRECT_BINDING),
+            None,
+        )
+        service = (
+            redirect_service
+            if redirect_service is not None
+            else (services[0] if services else None)
+        )
+        return str(service.get("Location") or "") if service is not None else None
+
+    def build_logout_request(
+        self,
+        name_id: str,
+        session_index: str | None = None,
+        relay_state: str | None = None,
+    ) -> tuple[str, str]:
+        """Build a SAML LogoutRequest for SP-initiated logout.
+
+        Issue #2174 F7: SAML SLO protocol layer.
+
+        Args:
+            name_id: The NameID from the original SAML assertion.
+            session_index: Optional SessionIndex from the assertion.
+            relay_state: Optional state to round-trip through the IdP.
+
+        Returns:
+            tuple: (logout_url, logout_request_id) where logout_url is the
+            complete URL to redirect the user to, and logout_request_id is
+            the ID of the generated LogoutRequest for validation.
+
+        Raises:
+            ValueError: If IdP SLO URL is not configured.
+        """
+        slo_url = self.idp_slo_url
+        if not slo_url:
+            raise ValueError("SAML IdP Single Logout URL is not configured")
+
+        assert_public_http_url(slo_url)
+
+        request_id = self.generate_request_id()
+        now = self._now().isoformat(timespec="seconds").replace("+00:00", "Z")
+
+        # Build LogoutRequest XML
+        root = etree.Element(
+            f"{{{SAML_PROTOCOL_NS}}}LogoutRequest",
+            nsmap=NSMAP,
+            ID=request_id,
+            Version="2.0",
+            IssueInstant=now,
+            Destination=slo_url,
+        )
+        etree.SubElement(root, f"{{{SAML_ASSERTION_NS}}}Issuer").text = self.sp_entity_id
+
+        # Add NameID
+        name_id_elem = etree.SubElement(
+            root,
+            f"{{{SAML_ASSERTION_NS}}}NameID",
+            Format=self.nameid_format,
+        )
+        name_id_elem.text = name_id
+
+        # Add SessionIndex if available
+        if session_index:
+            etree.SubElement(
+                root,
+                f"{{{SAML_PROTOCOL_NS}}}SessionIndex",
+            ).text = session_index
+
+        request_xml = etree.tostring(root, xml_declaration=False, encoding="UTF-8")
+        encoded_request = self._deflate_and_base64(request_xml)
+
+        # Build redirect URL
+        params = {"SAMLRequest": encoded_request}
+        if relay_state:
+            params["RelayState"] = relay_state
+
+        separator = "&" if urllib.parse.urlparse(slo_url).query else "?"
+        logout_url = f"{slo_url}{separator}{urllib.parse.urlencode(params)}"
+
+        return logout_url, request_id
+
+    def validate_logout_response(
+        self,
+        saml_response: str,
+        request_id: str | None = None,
+    ) -> tuple[bool, str | None]:
+        """Validate a SAML LogoutResponse from the IdP.
+
+        Issue #2174 F7: SAML SLO protocol layer.
+
+        Args:
+            saml_response: Base64-encoded LogoutResponse XML.
+            request_id: The ID of the original LogoutRequest (for InResponseTo check).
+
+        Returns:
+            tuple: (success, error_message) where success is True if the logout
+            was successful, and error_message contains the error if not.
+        """
+        try:
+            response_xml = base64.b64decode(saml_response, validate=True)
+        except Exception as e:
+            return False, f"LogoutResponse is not valid Base64: {e}"
+
+        try:
+            root = self._parse_xml(response_xml)
+
+            # Verify signature if present
+            if root.find(".//ds:Signature", namespaces=NSMAP) is not None:
+                self._verify_signature(root)
+
+            # Check status code
+            status = root.find(".//samlp:StatusCode", namespaces=NSMAP)
+            if status is None or status.get("Value") != SAML_SUCCESS_STATUS:
+                status_msg = "logout_failed"
+                if status is not None:
+                    status_msg = status.get("Value", "logout_failed")
+                return False, status_msg
+
+            # Validate InResponseTo if we have a request_id
+            if request_id:
+                in_response_to = root.get("InResponseTo")
+                if in_response_to != request_id:
+                    logger.warning(
+                        "SAML LogoutResponse InResponseTo mismatch: " "expected %s, got %s",
+                        request_id,
+                        in_response_to,
+                    )
+                    return False, "invalid_in_response_to"
+
+            # Validate issuer
+            issuer = root.find("./saml:Issuer", namespaces=NSMAP)
+            if issuer is not None and issuer.text:
+                expected_issuer = self.idp_entity_id
+                if expected_issuer and issuer.text.strip() != expected_issuer:
+                    return False, "invalid_issuer"
+
+            return True, None
+
+        except ValueError as e:
+            return False, str(e)
+        except Exception as e:
+            logger.exception("Unexpected SAML LogoutResponse validation error")
+            return False, f"validation_error: {e}"

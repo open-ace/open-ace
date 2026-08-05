@@ -53,6 +53,12 @@ _TRANSIENT_ERROR_KEYWORDS = [
     "unable to access",
     "rpc failed",
     "early eof",
+    # libcurl "Empty reply from server" — git emits this verbatim (in English,
+    # even under a non-C host locale) on a transient TLS/connection drop to the
+    # remote. Without it, exit-128 empty-reply permanent-fails the workflow
+    # instead of retrying (#2299).
+    "empty reply",
+    "empty response",
 ]
 
 
@@ -190,13 +196,35 @@ class GitHubOps:
             raise GitHubOpsError("Cannot register an invalid trusted Git context")
         if not git_identity or not common_identity:
             raise GitHubOpsError("Cannot register Git context without filesystem identity")
-        # Containment: the common git dir must live under the canonical repo
-        # root. For a main repo common_dir == <repo>/.git; for a linked
-        # worktree common_dir also points at <repo>/.git. This rejects a
-        # common_dir that escapes the repo (e.g. via a symlink or a malicious
-        # /repo-evil-style prefix) before we pin it as trusted.
+        # Containment: the repo_path must live under the main repo root, i.e.
+        # the parent directory of common_dir. For a main repo common_dir ==
+        # <repo>/.git so its parent is <repo> == repo_path. For a linked
+        # worktree common_dir points at the MAIN repo's <repo>/.git (not under
+        # the worktree path), so we verify the worktree (repo_path) lives under
+        # the main repo root (common_dir's parent) instead. The basename check
+        # confines common_dir to a real git metadata directory named ".git",
+        # preventing an arbitrary subdir from being pinned; the root guard
+        # rejects a common_dir directly under "/" (e.g. /.git) which would
+        # otherwise contain any repo_path. Prefix confusion (/repo vs
+        # /repo-evil) and symlink escapes are rejected by _assert_path_contained
+        # via os.path.realpath + os.path.commonpath on both sides.
+        # NOTE: bare repos (basename "repo.git") are not supported here; open-ace
+        # only uses regular repos + linked worktrees.
+        # NOTE: the root guard (common_parent == os.sep) is Unix-specific; this
+        # matches the orchestrator's os.sep assumption (Linux/macOS only).
         real_common_dir = os.path.realpath(common_dir)
-        _assert_path_contained(real_common_dir, real_repo, label="trusted common_dir")
+        if os.path.basename(real_common_dir) != ".git":
+            raise GitHubOpsError(f"trusted common_dir is not a .git directory: {real_common_dir}")
+        common_parent = os.path.dirname(real_common_dir)
+        if common_parent == os.sep:
+            raise GitHubOpsError(f"trusted common_dir root escape: {real_common_dir}")
+        _assert_path_contained(real_repo, common_parent, label="trusted repo_path")
+        # Defense-in-depth: git_dir must live under common_dir. For a main repo
+        # git_dir == common_dir == <repo>/.git; for a linked worktree git_dir is
+        # <common_dir>/worktrees/<name>. An out-of-tree git_dir is rejected even
+        # though device:inode identity pinning is the primary defense.
+        if real_git_dir != real_common_dir:
+            _assert_path_contained(real_git_dir, real_common_dir, label="trusted git_dir")
         cls._trusted_git_contexts[real_repo] = {
             "git_dir": real_git_dir,
             "work_tree": real_repo,
@@ -395,7 +423,11 @@ class GitHubOps:
         return self._owner_repo
 
     def _run_gh(
-        self, args: list[str], check: bool = True, repo_scoped: bool = True
+        self,
+        args: list[str],
+        check: bool = True,
+        repo_scoped: bool = True,
+        api_only: bool = False,
     ) -> subprocess.CompletedProcess:
         """Run a gh CLI command with transient-network-error retry.
 
@@ -408,6 +440,16 @@ class GitHubOps:
                 do not — for those the caller passes ``repo_scoped=False`` so the
                 sudo path runs plain ``gh`` without repo context (they don't need
                 an existing-repo context anyway).
+            api_only: The command is a pure GitHub API call that carries
+                ``-R owner/repo`` and needs no local repo access (e.g.
+                ``issue``/``pr comment``). When True AND a bot token is configured
+                AND the command would otherwise sudo (cross-user), run ``gh`` as
+                the *service* user instead of ``sudo -u <owner>``. This lets
+                ``GH_TOKEN`` reach ``gh`` so the action is attributed to the
+                configured AI bot account; the sudo wrapper would otherwise strip
+                ``GH_TOKEN`` via sudo ``env_reset`` and the action would post as
+                the repo owner (issue #2339). Git ops and gh commands that need
+                local repo context ignore this flag and keep the sudo path.
         """
         self._verify_trusted_git_context()
         kwargs = self._build_subprocess_kwargs()
@@ -432,7 +474,20 @@ class GitHubOps:
         env["GIT_CONFIG_VALUE_0"] = os.path.realpath(self.repo_path)
         kwargs["env"] = env
         account = self.system_account
-        if self._needs_sudo():
+        needs_sudo = self._needs_sudo()
+        # Pure-API gh subcommands (issue/pr comment with -R owner/repo) need no
+        # local repo access, so when a bot token is configured and the command
+        # would otherwise sudo, run gh as the service user directly. This lets
+        # GH_TOKEN reach gh so the action is attributed to the configured AI bot
+        # account; the sudo -u owner wrapper would otherwise strip GH_TOKEN via
+        # sudo env_reset and the action would post as the repo owner (#2339).
+        # _get_env is cached (60s TTL) so this call is cheap and matches the env
+        # _build_subprocess_kwargs already built. Note: _resolve_owner_repo may
+        # still perform a one-time sudoed git read to populate owner/repo (a read
+        # the owner is entitled to, unchanged from today); only the gh API call
+        # itself drops the sudo wrapper.
+        api_as_service = bool(api_only) and needs_sudo and self._get_env() is not None
+        if needs_sudo and not api_as_service:
             # gh has no `-C <path>` flag (that is git-only), so under a sudo
             # wrapper — where we must drop cwd to avoid a Python permission
             # check as the service user (Issue #1421) — target the repo
@@ -449,11 +504,18 @@ class GitHubOps:
                 cmd += ["gh"] + args
             kwargs.pop("cwd", None)  # cwd under sudo triggers Permission denied (Issue #1421)
         else:
-            # Same-user (or no system_account): run gh directly with cwd so it
-            # infers owner/repo from the working directory as before.
-            owner_repo = (
-                self._resolve_owner_repo() if repo_scoped and self._trusted_git_dir else None
-            )
+            # Same-user (or no system_account), OR an api_only command running as
+            # the service user (#2339): run gh directly. Same-user keeps cwd on the
+            # repo so gh infers owner/repo from the working directory as before;
+            # the api_only path drops cwd because the service user may lack access
+            # to the owner's repo, and a pure-API call carries -R anyway.
+            if api_as_service:
+                kwargs.pop("cwd", None)
+                owner_repo = self._resolve_owner_repo() if repo_scoped else None
+            else:
+                owner_repo = (
+                    self._resolve_owner_repo() if repo_scoped and self._trusted_git_dir else None
+                )
             cmd = ["gh", "-R", owner_repo, *args] if owner_repo else ["gh", *args]
         last_error: GitHubOpsError | None = None
         for attempt in range(GIT_NETWORK_RETRY_COUNT):
@@ -733,7 +795,7 @@ class GitHubOps:
 
     def add_issue_comment(self, number: int, body: str) -> dict:
         """Add a comment to an issue."""
-        self._run_gh(["issue", "comment", str(number), "--body", body])
+        self._run_gh(["issue", "comment", str(number), "--body", body], api_only=True)
         logger.info("Added comment to issue #%s", number)
         return {"number": number}
 
@@ -805,11 +867,61 @@ class GitHubOps:
         """Discard local CI-repair state and reset to a trusted immutable ref."""
         self._run_git(["reset", "--hard", ref])
 
-    def delete_branch(self, name: str, remote: bool = True) -> None:
-        """Delete a branch locally and optionally remotely."""
-        self._run_git(["branch", "-D", name], check=False)
+    def delete_branch(self, name: str, remote: bool = True) -> dict:
+        """Delete a branch locally and optionally remotely.
+
+        Returns a structured result so callers can distinguish a real failure
+        from an already-absent branch (#2043). Previously both commands used
+        ``check=False`` and returned ``None``, silently swallowing failures —
+        the caller could not tell whether deletion succeeded.
+
+        Result shape::
+
+            {"local": "deleted"|"absent"|"failed",
+             "remote": "deleted"|"absent"|"failed"|"skipped",
+             "errors": [str, ...]}
+
+        ``absent`` is success-equivalent (the resource was already gone).
+        ``failed`` means a real error warranting retry; ``errors`` carries the
+        truncated stderr for diagnostics.
+
+        Existence is checked via returncode-based probes (``show-ref`` locally,
+        ``ls-remote`` remotely) rather than parsing stderr text, which varies
+        across git versions and server implementations (GitHub.com / GitLab /
+        GHES). A non-zero delete that follows a confirmed-existing resource is a
+        real failure; a delete of an already-absent resource is reported absent.
+        """
+        # Local existence check: show-ref returncode is stable across git versions.
+        local_exists = (
+            self._run_git(
+                ["show-ref", "--verify", "--quiet", f"refs/heads/{name}"], check=False
+            ).returncode
+            == 0
+        )
+        local_res = self._run_git(["branch", "-D", name], check=False)
+        if local_res.returncode == 0:
+            local = "deleted"
+        elif not local_exists:
+            local = "absent"
+        else:
+            local = "failed"
+        result: dict = {"local": local, "remote": "skipped", "errors": []}
+        if local == "failed":
+            result["errors"].append((local_res.stderr or "").strip()[:500])
         if remote:
-            self._run_git(["push", "origin", "--delete", name], check=False)
+            # Remote existence check: ls-remote returncode is stable; an empty
+            # stdout means the ref does not exist on the remote.
+            ls_res = self._run_git(["ls-remote", "origin", name], check=False)
+            remote_exists = ls_res.returncode == 0 and bool((ls_res.stdout or "").strip())
+            remote_res = self._run_git(["push", "origin", "--delete", name], check=False)
+            if remote_res.returncode == 0:
+                result["remote"] = "deleted"
+            elif not remote_exists:
+                result["remote"] = "absent"
+            else:
+                result["remote"] = "failed"
+                result["errors"].append((remote_res.stderr or "").strip()[:500])
+        return result
 
     # ── Worktree Operations ─────────────────────────────────────────
 
@@ -854,9 +966,10 @@ class GitHubOps:
         """List all worktrees.
 
         Returns entries as ``{"path": …, "branch": "refs/heads/<name>"}`` (no
-        ``branch`` key when detached). The ``refs/heads/`` branch format is a
-        contract: ``AutonomousOrchestrator._verify_worktree_restored`` matches
-        against both ``<name>`` and ``refs/heads/<name>``. Parsing is locked by
+        ``branch`` key when detached, but ``detached=True`` is set instead). The
+        ``refs/heads/`` branch format is a contract:
+        ``AutonomousOrchestrator._verify_worktree_restored`` matches against
+        both ``<name>`` and ``refs/heads/<name>``. Parsing is locked by
         ``tests/issues/716/test_github_ops.py::test_list_worktrees``.
 
         Uses ``--porcelain -z`` so paths containing spaces or newlines are
@@ -881,10 +994,43 @@ class GitHubOps:
                     current["branch"] = line[len("branch ") :]
                 elif line == "bare":
                     current["bare"] = True
+                elif line == "detached":
+                    # Record detached HEAD explicitly so callers can distinguish
+                    # "detached" from "branch field transiently missing after a
+                    # fresh `git worktree add` on APFS" (the latter has neither
+                    # ``branch`` nor ``detached`` in the porcelain output).
+                    current["detached"] = True
             if current:
                 worktrees.append(current)
                 current = {}
         return worktrees
+
+    def resolve_worktree_branch(self, path: str) -> str | None:
+        """Return the branch checked out in the worktree at ``path``.
+
+        Reads the worktree's own HEAD via a fresh GitHubOps instance for
+        ``path`` (the worktree's ``.git`` file redirects to the main repo's
+        worktree metadata, so git resolves HEAD from the worktree's private
+        gitdir, not the main repo's). This is the authoritative source,
+        unaffected by the APFS registry-cache lag that can make
+        ``git worktree list --porcelain`` transiently omit the ``branch``
+        field right after ``git worktree add``.
+
+        Returns the short branch name (e.g. ``main``), or ``None`` when the
+        worktree is in detached HEAD state (``symbolic-ref`` exits non-zero)
+        or git itself fails. Callers must fail closed on ``None``.
+        """
+        self._assert_worktree_contained(path)
+        wt_gh = GitHubOps(path, system_account=self.system_account)
+        try:
+            result = wt_gh._run_git(["symbolic-ref", "--short", "HEAD"], check=False)
+        except GitHubOpsError:
+            # git binary not found / timeout — treat as "cannot resolve".
+            return None
+        if result.returncode != 0:
+            # Non-zero exit = detached HEAD (symbolic-ref refuses non-symref HEAD).
+            return None
+        return result.stdout.strip() or None
 
     # ── PR Operations ───────────────────────────────────────────────
 
@@ -961,6 +1107,57 @@ class GitHubOps:
             "mergeable_state": str(data.get("mergeable_state") or "").strip().lower(),
         }
 
+    def get_branch_protection(self, branch: str = "main") -> dict:
+        """Return the branch-protection rules for ``branch`` (issue #2045 Phase B).
+
+        Used by the merge-readiness classifier to distinguish required from
+        optional CI checks. Only ``required_status_checks`` is unpacked — that
+        is the only field the classifier consumes, so the rest of the protection
+        payload (required_reviews, enforce_admins, restrictions, ...) is ignored.
+
+        A 404 (branch has no protection rules) returns an empty required-contexts
+        list rather than raising: "no required checks" is a valid classification
+        — every failing check is optional — not a probe failure.
+
+        Any other non-zero exit (403 permission, 5xx, network) raises
+        :class:`GitHubOpsError` so the classifier fails closed to
+        ``indeterminate`` instead of guessing required/optional semantics it
+        cannot observe. This is the Phase B guard for #1989-class incidents
+        where an un-verifiable signal must never silently drive an irreversible
+        merge/repair decision.
+        """
+        repo = self.get_repo_name()
+        result = self._run_gh(
+            self._gh_api_args([f"repos/{repo}/branches/{branch}/protection"]),
+            repo_scoped=False,
+            check=False,
+        )
+        if result.returncode != 0:
+            stderr = (result.stderr or "").strip().lower()
+            # gh api surfaces HTTP 404 for an unprotected branch; that is a
+            # valid "no required checks" answer, not a probe failure.
+            if "404" in stderr or "not found" in stderr or "not protected" in stderr:
+                return {"required_status_checks": {"contexts": []}}
+            raise GitHubOpsError(
+                f"get_branch_protection({branch}) failed (exit {result.returncode}): "
+                f"{(result.stderr or '').strip()}"
+            )
+        data = json.loads((result.stdout or "").strip() or "{}")
+        rsc = data.get("required_status_checks") or {}
+        # GitHub returns the legacy string ``contexts`` array and/or the newer
+        # ``checks`` array of {context, integration_id, ...} objects. Merge both
+        # into a flat, de-duplicated required-check-name list.
+        contexts: list[str] = []
+        for ctx in rsc.get("contexts", []) or []:
+            name = ctx.get("context") if isinstance(ctx, dict) else ctx
+            if name and name not in contexts:
+                contexts.append(name)
+        for chk in rsc.get("checks", []) or []:
+            name = chk.get("context") if isinstance(chk, dict) else chk
+            if name and name not in contexts:
+                contexts.append(name)
+        return {"required_status_checks": {"contexts": contexts}}
+
     def find_existing_pr(self, head_branch: str) -> dict | None:
         """Find an existing open PR for a head branch (scoped to base=main).
 
@@ -999,7 +1196,7 @@ class GitHubOps:
 
     def add_pr_comment(self, number: int, body: str) -> dict:
         """Add a comment to a PR."""
-        self._run_gh(["pr", "comment", str(number), "--body", body])
+        self._run_gh(["pr", "comment", str(number), "--body", body], api_only=True)
         logger.info("Added comment to PR #%s", number)
         return {"number": number, "body": body}
 
@@ -1267,20 +1464,36 @@ class GitHubOps:
         """Remove ANSI escape sequences from GitHub Actions logs."""
         return _ANSI_ESCAPE_RE.sub("", text or "")
 
-    def _clean_log_to_excerpt(self, raw_log: str, max_lines: int, max_chars: int) -> str:
-        """Strip ANSI, keep failure-marker lines, truncate to max_chars."""
+    def _clean_log_to_excerpt(
+        self, raw_log: str, max_lines: int, max_chars: int, *, filter_lines: bool = True
+    ) -> str:
+        """Strip ANSI; optionally keep failure-marker lines; truncate to max_chars.
+
+        ``filter_lines=True`` (default) keeps only failure-marker lines via
+        ``_extract_failure_lines`` — the historical behavior for noisy pre-commit /
+        pytest / mypy logs. ``filter_lines=False`` skips that filter (ANSI-strip +
+        truncate only) so callers that need the full log body (e.g. the schema-sync
+        byte-exact git diff, whose ``+``/``-`` lines match no failure marker) can
+        receive it verbatim.
+        """
         cleaned = self._strip_ansi(raw_log or "").strip()
         if not cleaned:
             return ""
         lines = [line.rstrip() for line in cleaned.splitlines() if line.strip()]
         if not lines:
             return ""
-        excerpt = "\n".join(_extract_failure_lines(lines, max_lines)).strip()
+        if filter_lines:
+            lines = _extract_failure_lines(lines, max_lines)
+        else:
+            lines = lines[-max_lines:] if len(lines) > max_lines else lines
+        excerpt = "\n".join(lines).strip()
         if len(excerpt) > max_chars:
             excerpt = excerpt[-max_chars:].lstrip()
         return excerpt
 
-    def _fetch_log_excerpt_via_run_list(self, check: dict, max_lines: int, max_chars: int) -> str:
+    def _fetch_log_excerpt_via_run_list(
+        self, check: dict, max_lines: int, max_chars: int, *, filter_lines: bool = True
+    ) -> str:
         """Fallback when the check link isn't a parseable Actions job URL.
 
         The REST API path (`_get_pr_checks_via_api`) populates `link` with the
@@ -1338,7 +1551,7 @@ class GitHubOps:
             return ""
 
         view_result = self._run_gh(
-            ["run", "view", run_id, "--log-failed"],
+            ["run", "view", run_id, "--log-failed", "--allow-escape-sequences"],
             check=False,
         )
         if view_result.returncode != 0:
@@ -1349,10 +1562,17 @@ class GitHubOps:
                 (view_result.stderr or view_result.stdout or "").strip()[:200],
             )
             return ""
-        return self._clean_log_to_excerpt(view_result.stdout or "", max_lines, max_chars)
+        return self._clean_log_to_excerpt(
+            view_result.stdout or "", max_lines, max_chars, filter_lines=filter_lines
+        )
 
     def get_check_failure_excerpt(
-        self, check: dict, max_lines: int = 80, max_chars: int = 4000
+        self,
+        check: dict,
+        max_lines: int = 80,
+        max_chars: int = 4000,
+        *,
+        filter_lines: bool = True,
     ) -> str:
         """Fetch a concise failed-log excerpt for a CI check when available.
 
@@ -1387,15 +1607,28 @@ class GitHubOps:
                     link_host,
                     repo_host,
                 )
-                return self._fetch_log_excerpt_via_run_list(check, max_lines, max_chars)
+                return self._fetch_log_excerpt_via_run_list(
+                    check, max_lines, max_chars, filter_lines=filter_lines
+                )
             elif self._repo_slug:
                 api_args = ["api"]
                 if self._repo_host and self._repo_host != "github.com":
                     api_args += ["--hostname", self._repo_host]
                 api_args.append(f"repos/{self._repo_slug}/actions/jobs/{job_id}/logs")
+                # Recent gh (verified on server's 2.97.0) refuses to emit log
+                # text containing ANSI escape sequences unless this flag is
+                # passed; without it the job-log REST endpoint always fails and
+                # CI repair can never read failure logs. The sequences are
+                # stripped afterward by _clean_log_to_excerpt / _strip_ansi.
+                api_args.append("--allow-escape-sequences")
                 api_result = self._run_gh(api_args, check=False, repo_scoped=False)
                 if api_result.returncode == 0 and (api_result.stdout or "").strip():
-                    return self._clean_log_to_excerpt(api_result.stdout or "", max_lines, max_chars)
+                    return self._clean_log_to_excerpt(
+                        api_result.stdout or "",
+                        max_lines,
+                        max_chars,
+                        filter_lines=filter_lines,
+                    )
                 logger.warning(
                     "REST job-log fetch failed for check '%s' (run=%s job=%s), "
                     "falling back to gh run view: %s",
@@ -1406,7 +1639,15 @@ class GitHubOps:
                 )
 
             result = self._run_gh(
-                ["run", "view", run_id, "--job", job_id, "--log-failed"],
+                [
+                    "run",
+                    "view",
+                    run_id,
+                    "--job",
+                    job_id,
+                    "--log-failed",
+                    "--allow-escape-sequences",
+                ],
                 check=False,
             )
             if result.returncode != 0:
@@ -1418,12 +1659,16 @@ class GitHubOps:
                     (result.stderr or result.stdout or "").strip()[:200],
                 )
                 return ""
-            return self._clean_log_to_excerpt(result.stdout or "", max_lines, max_chars)
+            return self._clean_log_to_excerpt(
+                result.stdout or "", max_lines, max_chars, filter_lines=filter_lines
+            )
 
         # Fallback: link is not a parseable Actions job URL (e.g. REST-API
         # check-run html_url "/runs/<id>"). Try to find the workflow run by
         # the PR head sha and pull --log-failed for the whole run.
-        return self._fetch_log_excerpt_via_run_list(check, max_lines, max_chars)
+        return self._fetch_log_excerpt_via_run_list(
+            check, max_lines, max_chars, filter_lines=filter_lines
+        )
 
     def get_pr_diff(self, number: int) -> str:
         """Get the full diff of a PR (head vs base) via `gh pr diff`.
@@ -1637,8 +1882,22 @@ class GitHubOps:
         return [line.strip() for line in result.stdout.splitlines() if line.strip()]
 
     def git_add_all(self) -> None:
-        """Stage all changes."""
+        """Stage all changes.
+
+        After staging, remove any ``.worktrees/`` gitlinks that ``git add -A``
+        may have picked up from nested worktree directories. These appear as
+        160000-mode submodule references but have no ``.gitmodules`` entry,
+        which breaks CI (``git submodule foreach`` fails with "No url found
+        for submodule path") and pollutes schema-sync diffs.
+        """
         self._run_git(["add", "-A"])
+        try:
+            self._run_git(
+                ["rm", "-r", "--cached", "--ignore-unmatch", ".worktrees"],
+                check=False,
+            )
+        except Exception:
+            pass
 
     def git_commit(self, message: str, no_verify: bool = False) -> dict:
         """Create a git commit.

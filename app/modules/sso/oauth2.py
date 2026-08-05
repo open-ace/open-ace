@@ -102,7 +102,7 @@ class OAuth2Provider(SSOProvider):
         """
         data = {
             "client_id": self.config.client_id,
-            "client_secret": self.config.client_secret,
+            "client_secret": self.config.get_client_secret(),
             "code": code,
             "grant_type": "authorization_code",
             "redirect_uri": redirect_uri or self.config.redirect_uri,
@@ -238,7 +238,7 @@ class OAuth2Provider(SSOProvider):
         """
         data = {
             "client_id": self.config.client_id,
-            "client_secret": self.config.client_secret,
+            "client_secret": self.config.get_client_secret(),
             "refresh_token": refresh_token,
             "grant_type": "refresh_token",
         }

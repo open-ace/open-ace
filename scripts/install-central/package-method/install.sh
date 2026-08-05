@@ -94,6 +94,32 @@ check_python_version() {
     print_success "Python version: $actual_version (OK)"
 }
 
+# Check Python version compatibility for offline installation
+# Warns if current Python version may not be in vendor wheels
+check_python_version_for_offline() {
+    # Only check when vendor directory exists (offline installation scenario)
+    if [ ! -d "$SOURCE_DIR/vendor" ] || [ ! "$(ls -A "$SOURCE_DIR/vendor" 2>/dev/null)" ]; then
+        return 0
+    fi
+
+    local current_minor=$(python3 -c "import sys; print(sys.version_info.minor)" 2>/dev/null)
+
+    # Infer supported versions from vendor directory
+    # Note: tr '\n' ' ' converts newlines to spaces for exact grep match
+    local supported_versions=$(ls "$SOURCE_DIR/vendor"/*.whl 2>/dev/null \
+        | grep -o 'cp3[0-9][0-9]*' \
+        | sort -u \
+        | sed 's/cp3/3./' \
+        | tr '\n' ' ')
+
+    # Exact match: add spaces around version string to avoid partial matches
+    if [ -n "$supported_versions" ] && ! echo " $supported_versions " | grep -q " 3\.$current_minor "; then
+        print_warning "当前 Python 版本 3.$current_minor 可能不在离线包支持范围内"
+        print_info "离线包支持的版本: $supported_versions"
+        print_info "安装时将从 PyPI 在线下载缺失的依赖包"
+    fi
+}
+
 # Check Python version on remote system
 check_python_version_remote() {
     local remote="$1"
@@ -1261,6 +1287,42 @@ with open('$config_file', 'w') as f:
     return 0
 }
 
+# Update config.json with SQLite database settings
+update_config_database_sqlite() {
+    local config_file="$1"
+    local db_path="$2"
+
+    if [ ! -f "$config_file" ]; then
+        print_warning "Config file not found: $config_file"
+        return 1
+    fi
+
+    print_info "Updating SQLite database configuration in $config_file..."
+
+    # Use Python to update JSON
+    if command -v python3 &>/dev/null; then
+        python3 -c "
+import json
+with open('$config_file', 'r') as f:
+    config = json.load(f)
+config['database'] = {
+    'type': 'sqlite',
+    'path': '$db_path'
+}
+with open('$config_file', 'w') as f:
+    json.dump(config, f, indent=2)
+" 2>/dev/null && print_success "SQLite database configuration updated" || {
+            print_warning "Failed to update SQLite configuration"
+            return 1
+        }
+    else
+        print_warning "Python3 not available, cannot update SQLite configuration"
+        return 1
+    fi
+
+    return 0
+}
+
 # Update config.json with workspace settings
 update_config_workspace() {
     local config_file="$1"
@@ -1385,6 +1447,41 @@ with open('$config_file', 'w') as f:
         }
     else
         print_warning "Python3 not available, cannot update secret_key config"
+        return 1
+    fi
+
+    return 0
+}
+
+# Update config.json with server_url for OAuth callbacks
+update_config_server_url() {
+    local config_file="$1"
+    local server_url="$2"
+
+    if [ ! -f "$config_file" ]; then
+        print_warning "Config file not found: $config_file"
+        return 1
+    fi
+
+    print_info "Updating server_url in $config_file..."
+
+    # Use Python to update JSON
+    if command -v python3 &>/dev/null; then
+        python3 -c "
+import json
+with open('$config_file', 'r') as f:
+    config = json.load(f)
+if 'server' not in config:
+    config['server'] = {}
+config['server']['server_url'] = '$server_url'
+with open('$config_file', 'w') as f:
+    json.dump(config, f, indent=2)
+" 2>/dev/null && print_success "server_url configuration updated: $server_url" || {
+            print_warning "Failed to update server_url in config"
+            return 1
+        }
+    else
+        print_warning "Python3 not available, cannot update server_url config"
         return 1
     fi
 
@@ -1879,20 +1976,40 @@ install_run_as_wrapper() {
     install -o root -g root -m 755 "$validate_src" "$validate_dst" || return 1
 
     # Single source of truth for the account pin + workspace roots, shared by
-    # the wrapper and its sudoers provisioning. root:root 0640 so the openace
-    # service account cannot alter the constraints.
+    # the wrapper and its sudoers provisioning. root:root 0644 so the openace
+    # service account can read but not alter the constraints.
     local agent_account="${OPENACE_AUTONOMOUS_AGENT_ACCOUNT:-openace-agent}"
     install -d -o root -g root -m 755 /etc/openace || return 1
     cat > /etc/openace/agent-launcher.conf <<CONF_EOF
 # Issue #2018: constraints for openace-run-as --isolated.
-# root:root 0640 — the openace service account cannot edit this file.
+# root:root 0644 — the openace service account can read but not edit this file.
 OPENACE_AUTONOMOUS_AGENT_ACCOUNT="${agent_account}"
 ALLOWED_WORKSPACE_ROOTS="/home /workspace"
 CONF_EOF
     chown root:root /etc/openace/agent-launcher.conf 2>/dev/null || true
-    chmod 0640 /etc/openace/agent-launcher.conf
+    chmod 0644 /etc/openace/agent-launcher.conf
     print_success "Installed run-as wrapper to $dst"
     return 0
+}
+
+# Find visudo command with fallback and validation.
+# Returns the visudo command path on success, or returns 1 on failure.
+_find_visudo() {
+    # Expand PATH to include standard sbin directories for fallback scenarios
+    export PATH="/usr/sbin:/usr/local/sbin:$PATH"
+
+    local visudo_cmd="/usr/sbin/visudo"
+    if [ ! -x "$visudo_cmd" ]; then
+        visudo_cmd="visudo"  # fallback to PATH lookup
+    fi
+
+    # Verify the command exists and is executable
+    if ! command -v "$visudo_cmd" &>/dev/null; then
+        print_error "visudo command not found. Please ensure sudo is properly installed."
+        return 1
+    fi
+
+    echo "$visudo_cmd"
 }
 
 # Configure the minimal privilege required by every local autonomous workflow,
@@ -1910,7 +2027,14 @@ configure_autonomous_agent_sudoers() {
 $run_user ALL=(root) NOPASSWD: $wrapper_path --isolated *
 SUDOERS_EOF
     chmod 440 "$sudoers_file"
-    if ! visudo -c -f "$sudoers_file" >/dev/null 2>&1; then
+
+    # Validate sudoers syntax
+    local visudo_cmd
+    if ! visudo_cmd="$(_find_visudo)"; then
+        unlink "$sudoers_file" 2>/dev/null || true
+        return 1
+    fi
+    if ! $visudo_cmd -c -f "$sudoers_file" >/dev/null 2>&1; then
         unlink "$sudoers_file" 2>/dev/null || true
         print_warning "Invalid autonomous agent sudoers configuration"
         return 1
@@ -2000,12 +2124,12 @@ agent_account="${OPENACE_AUTONOMOUS_AGENT_ACCOUNT:-openace-agent}"
 conf_tmp="$(mktemp)"
 cat > "$conf_tmp" <<CONF_EOF
 # Issue #2018: constraints for openace-run-as --isolated.
-# root:root 0640 — the openace service account cannot edit this file.
+# root:root 0644 — the openace service account can read but not edit this file.
 OPENACE_AUTONOMOUS_AGENT_ACCOUNT="${agent_account}"
 ALLOWED_WORKSPACE_ROOTS="/home /workspace"
 CONF_EOF
 as_root install -d -o root -g root -m 755 /etc/openace
-as_root install -o root -g root -m 640 "$conf_tmp" /etc/openace/.agent-launcher.conf.new
+as_root install -o root -g root -m 644 "$conf_tmp" /etc/openace/.agent-launcher.conf.new
 as_root mv /etc/openace/.agent-launcher.conf.new /etc/openace/agent-launcher.conf
 
 service_user="$(systemctl show open-ace.service -p User --value 2>/dev/null || true)"
@@ -2022,7 +2146,12 @@ printf '%s\n' \
 # Validate before touching the active sudoers include. Install to an ignored
 # dot-file first, then rename atomically so interruption cannot leave a partial
 # rule that locks out subsequent sudo recovery.
-as_root visudo -c -f "$rule_tmp" >/dev/null
+local visudo_cmd
+if ! visudo_cmd="$(_find_visudo)"; then
+    rm -f "$rule_tmp"
+    exit 1
+fi
+as_root "$visudo_cmd" -c -f "$rule_tmp" >/dev/null
 as_root install -o root -g root -m 440 "$rule_tmp" \
     /etc/sudoers.d/.open-ace-autonomous-agent.new
 as_root mv /etc/sudoers.d/.open-ace-autonomous-agent.new \
@@ -2074,6 +2203,29 @@ install_write_as_wrapper() {
     chown root:root "$dst" 2>/dev/null || true
     chmod 755 "$dst"
     print_success "Installed write-as wrapper to $dst"
+    return 0
+}
+
+# Install the webui-launch wrapper for secure inline env-var passthrough.
+# This replaces the insecure /usr/bin/env * sudoers rule (Issue #2305 review).
+# The wrapper must be installed BEFORE configure_sudoers so the sudoers rule
+# (which keys off -x /usr/local/bin/openace-webui-launch) sees it.
+install_webui_launch_wrapper() {
+    local install_dir="$1"
+    local src="$install_dir/scripts/openace-webui-launch.sh"
+    local dst="/usr/local/bin/openace-webui-launch"
+
+    if [ ! -f "$src" ]; then
+        print_warning "openace-webui-launch.sh not found at $src; skipping"
+        return 1
+    fi
+    if ! cp "$src" "$dst" 2>/dev/null; then
+        print_warning "Failed to copy openace-webui-launch.sh to $dst (need root?)"
+        return 1
+    fi
+    chown root:root "$dst" 2>/dev/null || true
+    chmod 755 "$dst"
+    print_success "Installed webui-launch wrapper to $dst"
     return 0
 }
 
@@ -2148,36 +2300,53 @@ $run_user ALL=(root) NOPASSWD: $python_bin $script_path *"
         webui_local_rule="$run_user ALL=(ALL) NOPASSWD: $webui_local_path *"
     fi
 
-    # 【修复 Issue #1262】使用 Cmnd_Alias 引用，避免重复定义命令列表
+    # 【安全加固 Issue #1262 + #2181】使用 Cmnd_Alias 引用
     # utility_rule 在用户规则中引用 OPENACE_UTILS Cmnd_Alias
+    # 【Issue #2280】runas 必须保留 (ALL)：github_ops 的服务端 git/gh 以
+    # `sudo -u <system_account>` 跨用户执行（#1395），无法改走
+    # openace-run-as --isolated（reject owner==target / env -i 剥凭据 /
+    # credentialless 账户模型）；fs.py/projects.py/autonomous.py 的跨用户
+    # test/ls/stat/mkdir 同理。#2181 曾把这里从 (ALL) 收紧为 (root)，部署后
+    # 所有 system_account≠openace 的工作流在 preparation `git fetch` 处全挂。
+    # 仅还 runas 目标；#2181 的 agent CLI 隔离（run-as --isolated）、移除
+    # cat/chown/useradd/rm、env_keep 收紧均保留。
     local utility_rule="$run_user ALL=(ALL) NOPASSWD: OPENACE_UTILS"
 
-    # 【修复 Issue #1395】autonomous 开发 CLI 工具权限
-    local cli_rule="$run_user ALL=(ALL) NOPASSWD: OPENACE_CLI"
+    # 【安全加固 Issue #2181】删除 AI CLI 通配规则
+    # 原 cli_rule 已删除，所有 AI CLI 启动必须通过 openace-run-as --isolated
+    # 不再需要 cli_rule 变量
 
     # 【修复 Issue #1395】跨用户启动 agent CLI 的 run-as wrapper 权限。
     # wrapper 以 root 身份 cd 到项目目录，再用 runuser 切换到目标用户 exec CLI，
     # 解决 Popen(cwd=用户私有目录) 的 [Errno 13]。只授权 wrapper 本身，不放开
     # bash/node/claude。wrapper 路径必须与 scripts/openace-run-as.sh 安装位置一致。
+    # 【Issue #2181】保留此规则，openace-run-as 是特殊的需要 --isolated 参数
     local wrapper_path="/usr/local/bin/openace-run-as"
     local wrapper_rule=""
     if [ -x "$wrapper_path" ]; then
         wrapper_rule="$run_user ALL=(root) NOPASSWD: $wrapper_path --isolated *"
     fi
 
-    # 【修复 Issue #1916】跨用户文件写入 wrapper 权限。
-    # Package 非 root 多用户模式下，服务账号无法写入用户 0700 家目录，
-    # 且 cp/tee/mv 不在 OPENACE_UTILS 白名单。该 wrapper 以 root 身份运行，
-    # 内部用 runuser 切换到目标用户写文件。只授权 wrapper 本身。
-    local write_as_wrapper_path="/usr/local/bin/openace-write-as"
-    local write_as_wrapper_rule=""
-    if [ -x "$write_as_wrapper_path" ]; then
-        write_as_wrapper_rule="$run_user ALL=(root) NOPASSWD: $write_as_wrapper_path *"
-    fi
+    # 【安全加固 Issue #2181】安全 wrapper 规则生成
+    # 遍历所有安全 wrapper，为每个存在的 wrapper 生成规则
+    # 注意：openace-write-as 已包含在此循环中，不再单独处理
+    local security_wrapper_rules=""
+    for wrapper in openace-chown openace-useradd openace-cat openace-mkdir openace-rm openace-write-as; do
+        local wrapper_bin="/usr/local/bin/${wrapper}"
+        if [ -x "$wrapper_bin" ]; then
+            security_wrapper_rules="${security_wrapper_rules}
+$run_user ALL=(root) NOPASSWD: $wrapper_bin *"
+        fi
+    done
 
     # Build current user's complete rule block (avoid empty lines from empty variables)
     local current_user_rules="# Rules for $run_user (updated on $(date '+%Y-%m-%d %H:%M:%S'))
-$run_user ALL=(ALL) NOPASSWD: $webui_path *"
+# WebUI 启动规则：通过 openace-webui-launch wrapper 以任意用户运行
+# Issue #2298: wrapper 内联传递 LLM 配置环境变量，绕过 sudo env_keep 过滤。
+# Issue #2313: 允许环境变量参数（KEY=VAL）出现在 webui_path 之前。
+# 安全性：wrapper 内部使用 exec /usr/bin/env，只设置环境变量并执行后续命令；
+# 第二个 * 限制 webui_path 之后只能是合法的 WebUI 参数，防止权限提升。
+$run_user ALL=(ALL) NOPASSWD: /usr/local/bin/openace-webui-launch * "$webui_path" *"
 
     # Only add webui_local_rule if not empty
     if [ -n "$webui_local_rule" ]; then
@@ -2185,21 +2354,21 @@ $run_user ALL=(ALL) NOPASSWD: $webui_path *"
 ${webui_local_rule}"
     fi
 
-    # Always add utility and CLI rules (they reference Cmnd_Alias, never empty)
+    # Add utility rule (references Cmnd_Alias)
     current_user_rules="${current_user_rules}
-${utility_rule}
-${cli_rule}"
+${utility_rule}"
+
+    # Add security wrapper rules if any
+    if [ -n "$security_wrapper_rules" ]; then
+        current_user_rules="${current_user_rules}
+${security_wrapper_rules}"
+    fi
 
     # Add run-as wrapper rule if the wrapper is installed (Issue #1395)
+    # 【Issue #2181】openace-run-as 是特殊的，需要 --isolated 参数
     if [ -n "$wrapper_rule" ]; then
         current_user_rules="${current_user_rules}
 ${wrapper_rule}"
-    fi
-
-    # Add write-as wrapper rule if the wrapper is installed (Issue #1916)
-    if [ -n "$write_as_wrapper_rule" ]; then
-        current_user_rules="${current_user_rules}
-${write_as_wrapper_rule}"
     fi
 
     # Only add fetch_rules if not empty
@@ -2214,10 +2383,17 @@ ${fetch_rules}"
 # Allows the service account to run qwen-code-webui as other users
 # and perform file system operations as other users"
 
-    local defaults_section="# Preserve auth environment variables for qwen CLI authentication
-# and webui environment variables for sudo env_keep passing
-# GH_TOKEN and GIT_* vars are for autonomous dev GitHub operations (Issue #1517).
-Defaults env_keep += \"OPENAI_API_KEY OPENAI_BASE_URL BAILIAN_CODING_PLAN_API_KEY ANTHROPIC_API_KEY ANTHROPIC_BASE_URL GEMINI_API_KEY GEMINI_BASE_URL OPENCLAW_TOKEN OPENCLAW_GATEWAY_URL OPENACE_LOG_DIR OPENACE_PROXY_TOKEN OPENACE_PROXY_URL SESSION_TIMEOUT_MS KEEPALIVE_INTERVAL_MS PATH GH_TOKEN GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL\"
+    local defaults_section="# Preserve environment variables for sudo env_keep passing
+# 【安全加固 Issue #2181】清理敏感变量
+# Agent 进程通过 openace-run-as --isolated 使用 env -i，不继承 env_keep
+# env_keep 主要用于 WebUI 启动（sudo -u），需要清理敏感凭据
+# 移除：OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY, OPENCLAW_TOKEN, GH_TOKEN
+# 保留：非敏感变量（proxy_token, GIT_*签名变量, PATH）
+# 【Issue #2298】OPENAI_API_KEY/OPENAI_BASE_URL 不再通过 env_keep，
+# 改由 webui_manager 通过 sudo -u user /usr/bin/env KEY=val ... 内联传递
+Defaults env_keep += \"OPENACE_PROXY_TOKEN OPENACE_PROXY_URL OPENACE_MODEL OPENACE_LOG_DIR PATH\"
+Defaults env_keep += \"GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL\"
+Defaults env_keep += \"SESSION_TIMEOUT_MS KEEPALIVE_INTERVAL_MS\"
 
 # Fix: Add /usr/local/bin to secure_path for Node.js v20+ compatibility
 # qwen-code-webui requires Node.js >= 20, which may be installed in /usr/local/bin
@@ -2231,18 +2407,28 @@ Defaults secure_path = /usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin"
     # 【修复 Issue #1395】添加 autonomous 开发所需的 CLI 工具和 git/gh 命令
     # CLI 工具路径可能是 /usr/bin/qwen-code 或 /usr/local/bin/qwen-code（取决于 npm 安装方式）
     # 使用通配符覆盖所有可能的 CLI 工具路径
-    local cmnd_alias_section="# Utility commands for multi-user workspace operations
+    local cmnd_alias_section="# 【安全加固 Issue #1855 + #2181】安全命令别名定义
+# Utility commands for multi-user workspace operations
 # Commands must have '*' suffix to allow arguments (Issue #1262)
 # useradd/id: for creating system users in Package multi-user mode (uid >= 1000 validated in code)
 # git/gh: for autonomous development workflows (Issue #1395)
-# cat/rm: for personal-files download/delete as the file owner (Issue #1902).
-#   sudo -u <owner> cat|rm <path> — DAC constrains operations to files the
-#   target user already owns/can access.
-Cmnd_Alias OPENACE_UTILS = /usr/bin/test *, /usr/bin/ls *, /usr/bin/cat *, /usr/bin/stat *, /usr/bin/mkdir *, /usr/bin/chown *, /usr/bin/useradd *, /usr/bin/id *, /usr/bin/rm *, /usr/bin/find *, /usr/bin/git *, /usr/bin/gh *, /usr/local/bin/git *, /usr/local/bin/gh *
+# 【Issue #2181】移除高风险通配命令 cat/chown/useradd/rm，改用安全 wrapper
+# 保留：test, ls, stat, mkdir, id, find（低风险或只读）
+# find 是只读操作，DAC 已保护敏感目录
+Cmnd_Alias OPENACE_UTILS = /usr/bin/test *, /usr/bin/ls *, /usr/bin/stat *, /usr/bin/mkdir *, /usr/bin/id *, /usr/bin/find *, /usr/bin/git *, /usr/bin/gh *, /usr/local/bin/git *, /usr/local/bin/gh *
 
-# Autonomous development CLI tools (Issue #1395)
-# Allow running qwen-code/codex/etc. as target user for permission isolation
-Cmnd_Alias OPENACE_CLI = /usr/bin/qwen-code *, /usr/local/bin/qwen-code *, /usr/bin/codex *, /usr/local/bin/codex *, /usr/bin/qwen *, /usr/local/bin/qwen *, /usr/bin/claude *, /usr/local/bin/claude *, /usr/bin/openclaw *, /usr/local/bin/openclaw *, /usr/bin/zcode *, /usr/local/bin/zcode *"
+# 【安全加固 Issue #2181】安全 wrapper 规则
+# 以下 wrapper 替代原通配命令，内部验证参数安全性
+# openace-chown: 替代 chown *
+# openace-useradd: 替代 useradd *
+# openace-cat: 替代 cat *
+# openace-mkdir: 安全目录创建
+# openace-rm: 替代 rm *，验证路径/用户/owner
+# openace-write-as: 跨用户文件写入
+# openace-webui-launch: WebUI 进程启动，限定首参为 webui_path 防权限提升
+# 注意：openace-webui-launch 不在 security_wrapper_rules 循环中，
+# 因为它需要受限规则（首参必须为 webui_path），不能使用通配规则。
+# 其受限规则在 current_user_rules 中动态生成（仅当 wrapper 存在时）。"
 
     # ===== Incremental update logic =====
     if [ -f "$sudoers_file" ]; then
@@ -2288,7 +2474,8 @@ ${line}"
         # leaving the new run_user without sudo permission (#1197 review).
         # Rule lines look like "$run_user ALL=(ALL) NOPASSWD: $webui_path *",
         # so we grep for lines starting with "$run_user " that also contain the path.
-        if ! grep -E "^${run_user} .*(NOPASSWD: )?${webui_path}( |\*|$)" "$sudoers_file" 2>/dev/null && \
+        if ! grep -E "^${run_user} .*(NOPASSWD: )?/usr/local/bin/openace-webui-launch * \"${webui_path}\"( |\*|$)" "$sudoers_file" 2>/dev/null && \
+           ! grep -E "^${run_user} .*(NOPASSWD: )?${webui_path}( |\*|$)" "$sudoers_file" 2>/dev/null && \
            ! grep -E "^${run_user} .*(NOPASSWD: )?/usr/local/bin/qwen-code-webui( |\*|$)" "$sudoers_file" 2>/dev/null; then
             print_warning "Sudoers missing webui rule for user '$run_user'"
             need_update=true
@@ -2351,42 +2538,35 @@ ${line}"
             need_update=true
         fi
 
-        # 【修复 Issue #1395】Check OPENACE_CLI Cmnd_Alias completeness.
-        # The CLI list grew over time (qwen-code/codex/qwen → +claude/openclaw/
-        # zcode). Without this probe a pre-existing sudoers file whose other
-        # checks all pass would skip the rewrite, leaving the stale short CLI
-        # list in place — claude/openclaw/zcode would lack direct-sudo fallback
-        # authorization. Check the Cmnd_Alias definition line for each newer
-        # CLI path; any missing one trips a rewrite.
-        local cli_alias_line=""
-        cli_alias_line=$(grep "Cmnd_Alias OPENACE_CLI" "$sudoers_file" 2>/dev/null || true)
-        if [ -n "$cli_alias_line" ]; then
-            for cli in claude openclaw zcode; do
-                if ! echo "$cli_alias_line" | grep -qE "/${cli} \*"; then
-                    print_warning "Sudoers OPENACE_CLI missing '$cli' (CLI list incomplete)"
-                    need_update=true
-                    break
-                fi
-            done
-        fi
+        # 【安全加固 Issue #2181】检查安全 wrapper 规则完整性
+        # 确保所有已安装的安全 wrapper 都有对应的 sudoers 规则
+        for wrapper in openace-chown openace-useradd openace-cat openace-mkdir openace-rm; do
+            local wrapper_bin="/usr/local/bin/${wrapper}"
+            if [ -x "$wrapper_bin" ] && \
+               ! grep -E "^${run_user} .*(NOPASSWD: )?${wrapper_bin}( |\*|$)" "$sudoers_file" 2>/dev/null; then
+                print_warning "Sudoers missing $wrapper rule for user '$run_user'"
+                need_update=true
+                break
+            fi
+        done
 
-        # 【修复 Issue #1522】Check env_keep contains GH_TOKEN and GIT_* vars.
-        # The env_keep list grew over time (Issue #1517 added GH_TOKEN/GIT_* vars).
-        # Without this check, incremental upgrades skip the rewrite when other
-        # checks pass, leaving GH_TOKEN missing and breaking autonomous dev
-        # workflows (gh issue view fails with "exit 4: populate the GH_TOKEN").
-        if ! grep -q "GH_TOKEN" "$sudoers_file" 2>/dev/null; then
-            print_warning "Sudoers env_keep missing GH_TOKEN (autonomous dev will fail)"
+        # 【安全加固 Issue #2181】检查是否存在已废弃的 OPENACE_CLI 规则
+        # 如果存在，触发更新以删除这些规则
+        if grep -q "Cmnd_Alias OPENACE_CLI" "$sudoers_file" 2>/dev/null; then
+            print_warning "Sudoers contains deprecated OPENACE_CLI rule (removed in Issue #2181)"
             need_update=true
         fi
 
-        if ! grep -q "GIT_AUTHOR_NAME" "$sudoers_file" 2>/dev/null; then
-            print_warning "Sudoers env_keep missing GIT_* vars (git commits may have wrong author)"
+        # 【安全加固 Issue #2181】检查 env_keep 是否包含敏感变量
+        # 如果包含 API_KEY 或 GH_TOKEN，触发更新以清理
+        if grep -E "env_keep.*(OPENAI_API_KEY|ANTHROPIC_API_KEY|GEMINI_API_KEY|OPENCLAW_TOKEN|GH_TOKEN)" "$sudoers_file" 2>/dev/null | grep -q "."; then
+            print_warning "Sudoers env_keep contains sensitive variables (triggering cleanup per Issue #2181)"
             need_update=true
         fi
 
-        # 【新增】Warn about sudoers vs systemd service user mismatch
-        if command -v systemctl &>/dev/null && systemctl is-enabled --quiet open-ace.service 2>/dev/null; then
+        # Warn about sudoers vs systemd service user mismatch
+        # Check if systemd unit exists (not is-enabled, which fails for disabled services)
+        if command -v systemctl &>/dev/null && systemctl cat open-ace.service &>/dev/null 2>&1; then
             local svc_file=$(systemctl show open-ace.service -p FragmentPath 2>/dev/null | cut -d= -f2)
             if [ -z "$svc_file" ] || [ ! -f "$svc_file" ]; then
                 svc_file="/etc/systemd/system/open-ace.service"
@@ -2448,7 +2628,19 @@ ${current_user_rules}
     chmod 440 "$sudoers_file"
 
     # Validate sudoers syntax
-    if visudo -c -f "$sudoers_file" &>/dev/null; then
+    local visudo_cmd
+    if ! visudo_cmd="$(_find_visudo)"; then
+        # Restore backup on failure
+        if [ -n "$sudoers_backup" ] && [ -f "$sudoers_backup" ]; then
+            cp -p "$sudoers_backup" "$sudoers_file"
+            chmod 440 "$sudoers_file"
+            print_warning "Restored previous sudoers from $sudoers_backup"
+        else
+            rm -f "$sudoers_file"
+        fi
+        return 1
+    fi
+    if $visudo_cmd -c -f "$sudoers_file" &>/dev/null; then
         print_success "Sudoers configured successfully: $sudoers_file"
         print_info "Service account '$run_user' can execute:"
         print_info "  sudo -u <username> $webui_path --port <port>"
@@ -2521,6 +2713,95 @@ run_pip_as_user() {
     fi
 }
 
+# Install/upgrade the standalone scheduler worker service (openace-scheduler.service).
+# Since the #2187 scheduler split, background schedulers run here — NOT in the web
+# process. install.sh must manage this unit the same way it manages open-ace.service,
+# else (a) a fresh install has no scheduler → no autonomous workflows, and (b) every
+# upgrade redeployed scheduler_worker.py but never restarted the unit, so the scheduler
+# kept running pre-deploy code (Python doesn't hot-reload). #2293.
+#
+# Self-contained: derives User/Group/WorkingDirectory/Python/HOME/SECRET_KEY/
+# WORKSPACE_BASE_DIR from the installed open-ace.service unit so the same call works
+# for fresh install (open-ace.service was just written) and upgrade (it pre-exists).
+configure_scheduler_service() {
+    local scheduler_template="$SOURCE_DIR/scripts/openace-scheduler.service"
+    local scheduler_file="/etc/systemd/system/openace-scheduler.service"
+
+    # Only where the template ships (post-#2187) and systemd is available.
+    if [ ! -f "$scheduler_template" ]; then
+        return 0
+    fi
+    if ! command -v systemctl >/dev/null 2>&1; then
+        print_warning "systemctl not found; skipping scheduler service setup"
+        return 0
+    fi
+    # The scheduler mirrors open-ace.service's identity. Derive from the web unit.
+    if ! systemctl cat open-ace.service >/dev/null 2>&1; then
+        print_warning "open-ace.service not installed; cannot derive scheduler identity"
+        return 0
+    fi
+    local web_unit
+    web_unit=$(systemctl show open-ace.service -p FragmentPath --value 2>/dev/null)
+    [ -n "$web_unit" ] && [ -f "$web_unit" ] || web_unit="/etc/systemd/system/open-ace.service"
+
+    local cs_user cs_group cs_path cs_python cs_home cs_secret cs_workspace
+    cs_user=$(grep '^User=' "$web_unit" | tail -1 | cut -d= -f2)
+    cs_group=$(grep '^Group=' "$web_unit" | tail -1 | cut -d= -f2)
+    cs_path=$(grep '^WorkingDirectory=' "$web_unit" | tail -1 | cut -d= -f2)
+    # ExecStart is the python binary followed by server.py; take the first token.
+    cs_python=$(grep '^ExecStart=' "$web_unit" | tail -1 | sed -E 's/^ExecStart=([^ ]+) .*/\1/')
+    # Environment=SECRET_KEY=<value> → 3rd '='-delimited field.
+    cs_secret=$(grep '^Environment=SECRET_KEY=' "$web_unit" | tail -1 | cut -d= -f3)
+    cs_workspace=$(grep '^Environment=WORKSPACE_BASE_DIR=' "$web_unit" | tail -1 | cut -d= -f3)
+    cs_home=$(grep '^Environment=HOME=' "$web_unit" | tail -1 | cut -d= -f3)
+    [ -n "$cs_group" ] || cs_group=$(id -gn "$cs_user" 2>/dev/null || echo "$cs_user")
+    [ -n "$cs_home" ] || cs_home=$(getent passwd "$cs_user" | cut -d: -f6)
+    [ -n "$cs_workspace" ] || cs_workspace="/home"
+
+    print_info "Installing scheduler service (openace-scheduler.service)..."
+    sed -e "s|__USER__|$cs_user|g" \
+        -e "s|__GROUP__|$cs_group|g" \
+        -e "s|__INSTALL_PATH__|$cs_path|g" \
+        -e "s|__PYTHON__|$cs_python|g" \
+        -e "s|__HOME__|$cs_home|g" \
+        -e "s|__SECRET_KEY__|$cs_secret|g" \
+        -e "s|__WORKSPACE_BASE_DIR__|$cs_workspace|g" \
+        "$scheduler_template" > "$scheduler_file" || {
+        print_warning "Failed to render $scheduler_file; scheduler service not updated"
+        return 1
+    }
+
+    # The scheduler process runs the autonomous scheduler that launches agents via
+    # openace-run-as (sudo) AND drives cross-user git/fs ops (sudo -u <account>).
+    # Both need NoNewPrivileges=false regardless of multi-user mode — same as the
+    # unconditional handling open-ace.service gets in the autonomous-isolation block.
+    if grep -q '^NoNewPrivileges=' "$scheduler_file"; then
+        sed -i 's/NoNewPrivileges=.*/NoNewPrivileges=false/' "$scheduler_file"
+    else
+        sed -i '/^\[Service\]/a NoNewPrivileges=false' "$scheduler_file"
+    fi
+
+    systemctl daemon-reload
+    systemctl enable openace-scheduler.service >/dev/null 2>&1
+
+    # restart picks up redeployed code on upgrade; start covers fresh install.
+    if systemctl is-active --quiet openace-scheduler.service; then
+        print_info "Restarting openace-scheduler service..."
+        systemctl restart openace-scheduler.service
+    else
+        print_info "Starting openace-scheduler service..."
+        systemctl start openace-scheduler.service
+    fi
+    sleep 2
+    if systemctl is-active --quiet openace-scheduler.service; then
+        print_success "Scheduler service active (background autonomous schedulers)"
+    else
+        print_warning "Scheduler service failed to start; background autonomous workflows won't run"
+        print_info "Check: systemctl status openace-scheduler, journalctl -u openace-scheduler"
+    fi
+    return 0
+}
+
 install_systemd_service() {
     local target_path="$1"
     local user="$2"
@@ -2574,9 +2855,14 @@ install_systemd_service() {
     fi
     print_info "Using Python: $python_path"
 
-    # Generate SECRET_KEY for Flask session and API key encryption
+    # Generate SECRET_KEY for Flask session
     local secret_key="${SECRET_KEY:-$(openssl rand -hex 32)}"
     print_info "Generated SECRET_KEY for Flask encryption"
+
+    # Generate OPENACE_ENCRYPTION_KEY for API key and SMTP password encryption
+    # This key is separate from SECRET_KEY per PR #1871 security hardening
+    local enc_key="${OPENACE_ENCRYPTION_KEY:-$(openssl rand -hex 16)}"
+    print_info "Generated OPENACE_ENCRYPTION_KEY for sensitive data encryption"
 
     # Create service file from template
     print_info "Creating systemd service file..."
@@ -2588,6 +2874,7 @@ install_systemd_service() {
         -e "s|__PYTHON__|$python_path|g" \
         -e "s|__HOME__|$home_dir|g" \
         -e "s|__SECRET_KEY__|$secret_key|g" \
+        -e "s|__OPENACE_ENCRYPTION_KEY__|$enc_key|g" \
         -e "s|__WORKSPACE_BASE_DIR__|$WORKSPACE_BASE_DIR|g" \
         "$service_template" > "$service_file"
 
@@ -2636,6 +2923,11 @@ install_systemd_service() {
         return 1
     fi
 
+    # Install/restart the standalone scheduler worker so background autonomous
+    # schedulers run (#2293). Non-fatal: web is up; failure just means no
+    # background autonomous workflows until the scheduler is started manually.
+    configure_scheduler_service || print_warning "Scheduler service setup failed; run journalctl -u openace-scheduler"
+
     return 0
 }
 
@@ -2683,9 +2975,14 @@ install_systemd_service_remote() {
     fi
     print_info "Using Python on remote: $python_path"
 
-    # Generate SECRET_KEY for Flask session and API key encryption
+    # Generate SECRET_KEY for Flask session
     local secret_key="${SECRET_KEY:-$(openssl rand -hex 32)}"
     print_info "Generated SECRET_KEY for Flask encryption"
+
+    # Generate OPENACE_ENCRYPTION_KEY for API key and SMTP password encryption
+    # This key is separate from SECRET_KEY per PR #1871 security hardening
+    local enc_key="${OPENACE_ENCRYPTION_KEY:-$(openssl rand -hex 16)}"
+    print_info "Generated OPENACE_ENCRYPTION_KEY for sensitive data encryption"
 
     # Generate service file content locally using sed
     local service_content=$(sed -e "s|__USER__|$user|g" \
@@ -2696,6 +2993,7 @@ install_systemd_service_remote() {
         -e "s|__PYTHON__|$python_path|g" \
         -e "s|__HOME__|$home_dir|g" \
         -e "s|__SECRET_KEY__|$secret_key|g" \
+        -e "s|__OPENACE_ENCRYPTION_KEY__|$enc_key|g" \
         -e "s|__WORKSPACE_BASE_DIR__|$WORKSPACE_BASE_DIR|g" \
         "$service_template")
 
@@ -2811,7 +3109,8 @@ verify_upgrade_systemd_config() {
         return 0
     fi
 
-    if ! systemctl is-enabled --quiet open-ace.service 2>/dev/null; then
+    # Check if systemd unit exists (not is-enabled, which fails for disabled services)
+    if ! systemctl cat open-ace.service &>/dev/null 2>&1; then
         return 0
     fi
 
@@ -2872,7 +3171,8 @@ detect_and_load_local_upgrade() {
 
     # Priority 1: From systemd service file (highest priority - matches running service)
     # Use systemctl show to get actual service file path (not hardcoded)
-    if command -v systemctl &>/dev/null && systemctl is-enabled --quiet open-ace.service 2>/dev/null; then
+    # Check unit existence (not is-enabled, which fails for disabled services)
+    if command -v systemctl &>/dev/null && systemctl cat open-ace.service &>/dev/null 2>&1; then
         local service_file=$(systemctl show open-ace.service -p FragmentPath 2>/dev/null | cut -d= -f2)
         if [ -z "$service_file" ] || [ ! -f "$service_file" ]; then
             service_file="/etc/systemd/system/open-ace.service"
@@ -3391,6 +3691,7 @@ install_local() {
 
     # Check Python version first (Open ACE requires Python >= 3.10)
     check_python_version
+    check_python_version_for_offline
 
     # Validate source directory first
     validate_source_dir
@@ -3447,15 +3748,63 @@ install_local() {
     fi
 
     # For upgrade mode: handle systemd service configuration
-    # This ensures new code takes effect after upgrade
+    # This ensures new code takes effect after upgrade.
+    #
+    # Issue #2290: WORKSPACE_BASE_DIR and SECRET_KEY checks must run
+    # regardless of service status (enabled/disabled/active/inactive).
+    # Previously these checks were inside the is-enabled block, which
+    # meant a disabled-but-active service never got its config fixed.
+    # We now resolve the service file via `systemctl cat` (checks unit
+    # file existence, not run-state) and run the fix-ups unconditionally.
+    #
+    # Issue #2283: use is-active (not is-enabled) so that a
+    # disabled-but-running service still gets restarted after upgrade.
+    # is-enabled only reflects the auto-start-at-boot setting, not the
+    # current run-state.
     if [ "$DO_UPGRADE" = "yes" ] && command -v systemctl &>/dev/null; then
-        if systemctl is-enabled --quiet open-ace.service 2>/dev/null; then
-            # Get actual service file path (not hardcoded)
-            local service_file=$(systemctl show open-ace.service -p FragmentPath 2>/dev/null | cut -d= -f2)
+        # Resolve service file path via systemctl cat (detects unit file
+        # existence regardless of enabled/disabled/active state)
+        local service_file=""
+        if systemctl cat open-ace.service &>/dev/null 2>&1; then
+            service_file=$(systemctl show open-ace.service -p FragmentPath 2>/dev/null | cut -d= -f2)
             if [ -z "$service_file" ] || [ ! -f "$service_file" ]; then
                 service_file="/etc/systemd/system/open-ace.service"
             fi
+        fi
 
+        # -- Phase 1: Fix missing config in service file (runs always) --
+        if [ -n "$service_file" ] && [ -f "$service_file" ]; then
+            # Check if systemd service is missing SECRET_KEY (upgrade from older version)
+            local current_secret=$(grep "^Environment=SECRET_KEY=" "$service_file" 2>/dev/null | cut -d'=' -f3)
+            if [ -z "$current_secret" ]; then
+                print_warning "Adding missing SECRET_KEY to systemd service..."
+                local secret_key="${SECRET_KEY:-$(openssl rand -hex 32)}"
+                sed -i "/^Environment=HOME=/a Environment=SECRET_KEY=$secret_key" "$service_file"
+                print_info "Generated SECRET_KEY for Flask encryption"
+            fi
+
+            # Check and fix WORKSPACE_BASE_DIR (Issue #1217, #1308, #2290)
+            # WORKSPACE_BASE_DIR should always be /home for Package version.
+            # This ensures user paths are /home/{username} instead of
+            # /home/{service_user}/{username}.  Without this env var, the
+            # app falls back to str(Path.home()) which is the service user's
+            # home (e.g. /home/ivyent), producing incorrect workspace paths.
+            local current_workspace_base=$(grep "^Environment=WORKSPACE_BASE_DIR=" "$service_file" 2>/dev/null | cut -d'=' -f3)
+            if [ -z "$current_workspace_base" ]; then
+                print_warning "Adding missing WORKSPACE_BASE_DIR to systemd service..."
+                sed -i "/^Environment=SECRET_KEY=/a Environment=WORKSPACE_BASE_DIR=/home" "$service_file"
+                print_info "Set WORKSPACE_BASE_DIR=/home (Issue #1217, #1308, #2290)"
+            elif [ "$current_workspace_base" != "/home" ]; then
+                print_warning "Fixing incorrect WORKSPACE_BASE_DIR (was: $current_workspace_base)..."
+                sed -i "s|^Environment=WORKSPACE_BASE_DIR=.*|Environment=WORKSPACE_BASE_DIR=/home|" "$service_file"
+                print_info "Fixed WORKSPACE_BASE_DIR=/home (Issue #1308, #2290)"
+            fi
+        fi
+
+        # -- Phase 2: Update service config if user chose to switch --
+        # Issue #2283: use is-active (not is-enabled) so that a
+        # disabled-but-running service still gets restarted after upgrade.
+        if systemctl is-active --quiet open-ace.service 2>/dev/null; then
             # If user chose to switch service to this installation, update service config via sed
             # (Preserves SECRET_KEY, avoids double restart, avoids overwriting custom modifications)
             if [ "$UPGRADE_SWITCH_SERVICE" = "yes" ]; then
@@ -3494,29 +3843,6 @@ install_local() {
                 print_success "Service configuration updated (SECRET_KEY preserved)"
             fi
 
-            # Check if systemd service is missing SECRET_KEY (upgrade from older version)
-            local current_secret=$(grep "^Environment=SECRET_KEY=" "$service_file" 2>/dev/null | cut -d'=' -f3)
-            if [ -z "$current_secret" ]; then
-                print_warning "Adding missing SECRET_KEY to systemd service..."
-                local secret_key="${SECRET_KEY:-$(openssl rand -hex 32)}"
-                sed -i "/^Environment=HOME=/a Environment=SECRET_KEY=$secret_key" "$service_file"
-                print_info "Generated SECRET_KEY for Flask encryption"
-            fi
-
-            # Check and fix WORKSPACE_BASE_DIR (Issue #1217, #1308)
-            # WORKSPACE_BASE_DIR should always be /home for Package version
-            # This ensures user paths are /home/{username} instead of /home/{service_user}/{username}
-            local current_workspace_base=$(grep "^Environment=WORKSPACE_BASE_DIR=" "$service_file" 2>/dev/null | cut -d'=' -f3)
-            if [ -z "$current_workspace_base" ]; then
-                print_warning "Adding missing WORKSPACE_BASE_DIR to systemd service..."
-                sed -i "/^Environment=SECRET_KEY=/a Environment=WORKSPACE_BASE_DIR=/home" "$service_file"
-                print_info "Set WORKSPACE_BASE_DIR=/home (Issue #1217, #1308)"
-            elif [ "$current_workspace_base" != "/home" ]; then
-                print_warning "Fixing incorrect WORKSPACE_BASE_DIR (was: $current_workspace_base)..."
-                sed -i "s|^Environment=WORKSPACE_BASE_DIR=.*|Environment=WORKSPACE_BASE_DIR=/home|" "$service_file"
-                print_info "Fixed WORKSPACE_BASE_DIR=/home (Issue #1308)"
-            fi
-
             print_info "Restarting open-ace service..."
             systemctl daemon-reload
             systemctl restart open-ace.service
@@ -3536,7 +3862,8 @@ install_local() {
     local autonomous_run_user="$DEPLOY_USER"
     local autonomous_install_dir="$target_path"
     local autonomous_service_file=""
-    if command -v systemctl &>/dev/null && systemctl is-enabled --quiet open-ace.service 2>/dev/null; then
+    # Check if systemd unit exists (not is-enabled, which fails for disabled services)
+    if command -v systemctl &>/dev/null && systemctl cat open-ace.service &>/dev/null 2>&1; then
         autonomous_service_file=$(systemctl show open-ace.service -p FragmentPath 2>/dev/null | cut -d= -f2)
         [ -n "$autonomous_service_file" ] && [ -f "$autonomous_service_file" ] || autonomous_service_file="/etc/systemd/system/open-ace.service"
         local detected_service_user
@@ -3561,6 +3888,10 @@ install_local() {
             print_warning "Restart open-ace manually to activate autonomous agent isolation"
     fi
 
+    # Re-render + restart the scheduler so it picks up redeployed code (#2293).
+    # Without this the scheduler keeps running pre-upgrade scheduler_worker.py.
+    configure_scheduler_service || print_warning "Scheduler service upgrade failed; restart openace-scheduler manually"
+
     # Configure sudoers for multi-user workspace mode
     # sudoers run_user should match the systemd service's actual running user
     if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
@@ -3572,7 +3903,8 @@ install_local() {
         local sudoers_run_user="$DEPLOY_USER"
         local sudoers_install_dir="$target_path"
 
-        if command -v systemctl &>/dev/null && systemctl is-enabled --quiet open-ace.service 2>/dev/null; then
+        # Check if systemd unit exists (not is-enabled, which fails for disabled services)
+        if command -v systemctl &>/dev/null && systemctl cat open-ace.service &>/dev/null 2>&1; then
             local svc_file=$(systemctl show open-ace.service -p FragmentPath 2>/dev/null | cut -d= -f2)
             if [ -z "$svc_file" ] || [ ! -f "$svc_file" ]; then
                 svc_file="/etc/systemd/system/open-ace.service"
@@ -3602,6 +3934,10 @@ install_local() {
         # the sudoers rule keys off `[ -x /usr/local/bin/openace-write-as ]`.
         install_write_as_wrapper "$sudoers_install_dir"
 
+        # Install the webui-launch wrapper BEFORE configure_sudoers (Issue #2305):
+        # the sudoers rule keys off `[ -x /usr/local/bin/openace-webui-launch ]`.
+        install_webui_launch_wrapper "$sudoers_install_dir"
+
         configure_sudoers "$sudoers_run_user" "$sudoers_install_dir"
         if [ $? -ne 0 ]; then
             print_warning "Sudoers configuration failed, multi-user mode may not work properly"
@@ -3613,6 +3949,8 @@ install_local() {
     print_info "Installation path: $target_path"
     print_info "Config directory: $config_dir"
     echo ""
+
+    # Auto-start the web server after installation
     if [ "$INSTALL_SERVICE" = "yes" ] && command -v systemctl &>/dev/null; then
         echo "Service management:"
         echo "  systemctl status open-ace"
@@ -3622,9 +3960,121 @@ install_local() {
         echo ""
         echo "View logs:"
         echo "  journalctl -u open-ace -f"
+        echo ""
+
+        # Service should already be running from install_systemd_service
+        if systemctl is-active --quiet open-ace.service 2>/dev/null; then
+            print_success "Web server is running on port ${SERVICE_PORT:-19888}"
+        else
+            print_warning "Service not running. Start with: systemctl start open-ace"
+        fi
     else
-        echo "To start the web server:"
-        echo "  cd $target_path && python3 server.py"
+        # No systemd service installed - start manually as the correct user
+        # Safety check: ensure DEPLOY_USER is set
+        if [ -z "$DEPLOY_USER" ]; then
+            print_error "DEPLOY_USER is not set. Cannot start server."
+            print_info "Please run the installer again or set DEPLOY_USER manually."
+            echo ""
+            return 1
+        fi
+
+        print_info "Starting web server as user '$DEPLOY_USER'..."
+
+        local port="${SERVICE_PORT:-19888}"
+        local host="${SERVICE_HOST:-0.0.0.0}"
+        local pid_file="$target_path/logs/server.pid"
+
+        # Check if port is already in use (use -tln instead of -tlnp to avoid root requirement)
+        if ss -tln 2>/dev/null | grep -q ":$port "; then
+            print_warning "Port $port is already in use"
+            # Try to stop existing server using PID file or pkill
+            if [ -f "$pid_file" ]; then
+                local old_pid=$(cat "$pid_file" 2>/dev/null)
+                if [ -n "$old_pid" ] && kill -0 "$old_pid" 2>/dev/null; then
+                    print_info "Stopping existing server (PID: $old_pid)..."
+                    kill "$old_pid" 2>/dev/null || true
+                    sleep 2
+                    # Check if port is now free
+                    if ! ss -tln 2>/dev/null | grep -q ":$port "; then
+                        print_success "Existing server stopped"
+                    else
+                        print_warning "Port still in use, trying pkill..."
+                        pkill -u "$DEPLOY_USER" -f 'python3.*server.py' 2>/dev/null || true
+                        sleep 2
+                    fi
+                else
+                    # PID file exists but process not running, try pkill
+                    print_info "Stopping existing server processes..."
+                    pkill -u "$DEPLOY_USER" -f 'python3.*server.py' 2>/dev/null || true
+                    sleep 2
+                fi
+            else
+                # No PID file, try pkill to stop existing server
+                print_info "Stopping existing server processes..."
+                pkill -u "$DEPLOY_USER" -f 'python3.*server.py' 2>/dev/null || true
+                sleep 2
+            fi
+
+            # Final check if port is now free
+            if ss -tln 2>/dev/null | grep -q ":$port "; then
+                print_error "Port $port is still in use after stopping attempts"
+                print_info "Please manually stop the process using this port"
+                print_info "Commands to try:"
+                echo "  ss -tlnp | grep ':$port'  # Find the process"
+                echo "  pkill -f 'python3.*server.py'  # Stop all server.py instances"
+                echo ""
+                return 1
+            fi
+        fi
+
+        # Ensure logs directory exists
+        mkdir -p "$target_path/logs" 2>/dev/null || true
+        chown "$DEPLOY_USER:$(id -gn "$DEPLOY_USER")" "$target_path/logs" 2>/dev/null || true
+
+        # Use nohup to run in background and save PID
+        print_info "Starting web server on $host:$port as user '$DEPLOY_USER'..."
+        if ! su - "$DEPLOY_USER" -c "cd '$target_path' && AI_TOKEN_WEB_PORT=$port AI_TOKEN_WEB_HOST=$host nohup python3 server.py > logs/server.log 2>&1 & echo \$! > logs/server.pid"; then
+            print_error "Failed to start server as user '$DEPLOY_USER'"
+            print_info "Check if user exists: id $DEPLOY_USER"
+            echo ""
+            return 1
+        fi
+
+        # Wait for server to start with timeout (more reliable than fixed sleep)
+        local wait_time=0
+        local max_wait=10
+        while [ $wait_time -lt $max_wait ]; do
+            if ss -tln 2>/dev/null | grep -q ":$port "; then
+                break
+            fi
+            sleep 1
+            wait_time=$((wait_time + 1))
+        done
+
+        # Check if server is listening
+        if ss -tln 2>/dev/null | grep -q ":$port "; then
+            print_success "Web server is running on port $port"
+            echo ""
+            echo "Access the web interface:"
+            echo "  http://localhost:$port"
+            if [ -n "$host" ] && [ "$host" != "127.0.0.1" ] && [ "$host" != "localhost" ]; then
+                local server_ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+                [ -n "$server_ip" ] && echo "  http://$server_ip:$port"
+            fi
+            echo ""
+            echo "Stop the server:"
+            if [ -f "$pid_file" ]; then
+                echo "  kill \$(cat $pid_file)  # Stop this instance"
+            fi
+            echo "  pkill -f 'python3.*server.py'  # Stop all instances"
+            echo "  pkill -u $DEPLOY_USER -f 'python3.*server.py'  # Stop only user instances"
+            echo ""
+            echo "View logs:"
+            echo "  tail -f $target_path/logs/server.log"
+        else
+            print_warning "Server may have failed to start after ${wait_time}s. Check logs:"
+            print_info "  tail -f $target_path/logs/server.log"
+        fi
     fi
     echo ""
 }
@@ -3706,8 +4156,63 @@ install_deploy() {
         echo "View logs on remote:"
         echo "  ssh $remote 'sudo journalctl -u open-ace -f'"
     else
-        echo "To start the web server on remote:"
-        echo "  ssh $remote 'cd $target_path && python3 server.py'"
+        # No systemd service installed - start manually on remote as the correct user
+        print_info "Starting web server on remote host..."
+
+        # Check if port is already in use on remote (use -tln to avoid root requirement)
+        local port="${SERVICE_PORT:-19888}"
+        local host="${SERVICE_HOST:-0.0.0.0}"
+
+        if ssh "$remote" "ss -tln 2>/dev/null | grep -q ':$port '" 2>/dev/null; then
+            print_warning "Port $port is already in use on remote"
+            print_info "Stop existing process on remote or change port in config"
+            echo ""
+            echo "To manually start the web server on remote:"
+            echo "  ssh $remote 'cd $target_path && python3 server.py'"
+        else
+            # Ensure logs directory exists on remote
+            ssh "$remote" "mkdir -p '$target_path/logs' && chown '$DEPLOY_USER:\$(id -gn $DEPLOY_USER)' '$target_path/logs'" 2>/dev/null || true
+
+            # Start the server in background as the correct user
+            print_info "Starting web server on $host:$port as user '$DEPLOY_USER' on remote..."
+            local pid_file="$target_path/logs/server.pid"
+            if ! ssh "$remote" "su - '$DEPLOY_USER' -c \"cd '$target_path' && AI_TOKEN_WEB_PORT=$port AI_TOKEN_WEB_HOST=$host nohup python3 server.py > logs/server.log 2>&1 & echo \\\$! > logs/server.pid\""; then
+                print_error "Failed to start server on remote as user '$DEPLOY_USER'"
+                print_info "Check if user exists on remote: ssh $remote 'id $DEPLOY_USER'"
+                echo ""
+                echo "To manually start the web server on remote:"
+                echo "  ssh $remote 'cd $target_path && python3 server.py'"
+            else
+                # Wait for server to start with timeout
+                local wait_time=0
+                local max_wait=10
+                while [ $wait_time -lt $max_wait ]; do
+                    if ssh "$remote" "ss -tln 2>/dev/null | grep -q ':$port '" 2>/dev/null; then
+                        break
+                    fi
+                    sleep 1
+                    wait_time=$((wait_time + 1))
+                done
+
+                # Check if server is listening
+                if ssh "$remote" "ss -tln 2>/dev/null | grep -q ':$port '" 2>/dev/null; then
+                    print_success "Web server is running on remote port $port"
+                    echo ""
+                    echo "Access the web interface:"
+                    echo "  http://$DEPLOY_HOST:$port"
+                    echo ""
+                    echo "Stop the server on remote:"
+                    echo "  ssh $remote 'kill \$(cat $pid_file)'"
+                    echo "  ssh $remote 'pkill -f \"python3.*server.py\"'"
+                    echo ""
+                    echo "View logs on remote:"
+                    echo "  ssh $remote 'tail -f $target_path/logs/server.log'"
+                else
+                    print_warning "Server may have failed to start on remote after ${wait_time}s"
+                    print_info "Check logs: ssh $remote 'tail -f $target_path/logs/server.log'"
+                fi
+            fi
+        fi
     fi
     echo ""
 }
@@ -3753,32 +4258,39 @@ do_fresh_install() {
         if [ -f "$target_path/config/config.json.sample" ]; then
             cp "$target_path/config/config.json.sample" "$config_dir/config.json"
             print_info "Created config file: $config_dir/config.json"
-            # Update database configuration if PostgreSQL was set up
+            # Update database configuration based on whether PostgreSQL is configured
             if [ -n "$DB_PASSWORD" ] && [ "$DB_INSTALL_METHOD" != "" ]; then
+                # PostgreSQL is configured
                 update_config_database "$config_dir/config.json"
             else
-                print_warning "Please edit the config file with your database settings."
+                # No PostgreSQL configured, use SQLite as default
+                update_config_database_sqlite "$config_dir/config.json" "$config_dir/ace.db"
             fi
             # Update workspace configuration with webui path
             # First ensure symlinks are created (if running as root)
             if [ "$EUID" -eq 0 ]; then
                 create_webui_symlinks
             fi
-            # Use /usr/bin/qwen-code-webui as preferred path (symlink created above)
-            # Fallback to find_webui_executable if symlink doesn't exist
-            local webui_path="/usr/bin/qwen-code-webui"
-            if [ ! -x "$webui_path" ]; then
-                if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
-                    webui_path=$(find_webui_executable)
-                else
-                    webui_path=$(find_webui_executable 2>/dev/null)
-                fi
-            fi
-            update_config_workspace "$config_dir/config.json" "$webui_path"
+            # Configure webui_path for config.json
+            # Issue #2151: Leave webui_path empty for auto-detection.
+            # The _find_webui_executable method in webui_manager.py will find
+            # the executable from common paths (/usr/bin/qwen-code-webui, etc.)
+            # sudoers configuration still uses the actual path for permission rules.
+            update_config_workspace "$config_dir/config.json" ""
 
             # Generate and set secret_key for Flask session and API key encryption
             local secret_key="${SECRET_KEY:-$(openssl rand -hex 32)}"
             update_config_secret_key "$config_dir/config.json" "$secret_key"
+
+            # Update server_url for OAuth callbacks
+            # Get server IP address
+            local server_ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+            if [ -z "$server_ip" ]; then
+                server_ip=$(hostname -f 2>/dev/null || hostname 2>/dev/null || echo "localhost")
+            fi
+            # Get web_port from config or use default
+            local web_port=$(python3 -c "import json; c=json.load(open('$config_dir/config.json')); print(c.get('server', {}).get('web_port', 19888))" 2>/dev/null || echo "19888")
+            update_config_server_url "$config_dir/config.json" "http://${server_ip}:${web_port}"
         fi
     fi
 
@@ -3869,6 +4381,15 @@ do_fresh_install() {
 
         if [ -d "$target_path/vendor" ] && [ "$(ls -A "$target_path/vendor" 2>/dev/null)" ]; then
             print_info "Installing from vendor directory (offline mode)..."
+            # VERSION-CHECK-BEGIN: Check version compatibility before offline install
+            local current_minor=$(python3 -c "import sys; print(sys.version_info.minor)" 2>/dev/null)
+            local supported_versions=$(ls "$target_path/vendor"/*.whl 2>/dev/null | grep -o "cp3[0-9][0-9]*" | sort -u | sed "s/cp3/3./" | tr "\n" " ")
+            if [ -n "$supported_versions" ] && ! echo " $supported_versions " | grep -q " 3\.$current_minor "; then
+                print_warning "当前 Python 版本 3.$current_minor 可能不在离线包支持范围内"
+                print_info "离线包支持的版本: $supported_versions"
+                print_info "安装时将从 PyPI 在线下载缺失的依赖包"
+            fi
+            # VERSION-CHECK-END
             # Pre-install setuptools + wheel for building source distributions
             if ls "$target_path/vendor"/setuptools*.whl 1>/dev/null 2>&1 || ls "$target_path/vendor"/wheel*.whl 1>/dev/null 2>&1; then
                 print_info "Installing build tools (setuptools, wheel)..."
@@ -4010,7 +4531,7 @@ do_fresh_install() {
         cd "$target_path"
         if [ -f "$schema_file" ]; then
             print_info "Executing SQLite schema..."
-            python3 -c "import sqlite3; c=sqlite3.connect('$config_dir/openace.db'); c.executescript(open('$schema_file').read())" && print_success "SQLite schema created" || print_warning "Failed to execute SQLite schema"
+            python3 -c "import sqlite3; c=sqlite3.connect('$config_dir/ace.db'); c.executescript(open('$schema_file').read())" && print_success "SQLite schema created" || print_warning "Failed to execute SQLite schema"
             print_info "Marking database version..."
             python3 -m alembic stamp head && print_success "Database version marked" || print_warning "Failed to stamp version"
         else
@@ -4073,6 +4594,21 @@ do_upgrade() {
         if [ -d "$config_dir" ]; then
             print_info "Backing up config directory..."
             cp -r "$config_dir" "$backup_dir/"
+
+            # Migrate database file from openace.db to ace.db (Issue #2109)
+            if [ -f "$config_dir/openace.db" ] && [ ! -f "$config_dir/ace.db" ]; then
+                print_info "Migrating database file from openace.db to ace.db..."
+                mv "$config_dir/openace.db" "$config_dir/ace.db"
+                print_success "Database file migrated successfully"
+
+                # Update config.json if database type is sqlite
+                local db_type=$(python3 -c "import json; c=json.load(open('$config_dir/config.json')); print(c.get('database', {}).get('type', 'postgresql'))" 2>/dev/null || echo "postgresql")
+                if [ "$db_type" != "postgresql" ]; then
+                    update_config_database_sqlite "$config_dir/config.json" "$config_dir/ace.db"
+                fi
+            elif [ -f "$config_dir/openace.db" ] && [ -f "$config_dir/ace.db" ]; then
+                print_warning "Both openace.db and ace.db exist. Keeping ace.db, please manually remove openace.db if not needed."
+            fi
         fi
 
         # Backup database in target path (if any)
@@ -4200,6 +4736,13 @@ with open('$config_dir/config.json', 'w') as f:
                     print_info "Restored database URL from backup"
                 fi
             fi
+            # Update server_url for OAuth callbacks
+            local server_ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+            if [ -z "$server_ip" ]; then
+                server_ip=$(hostname -f 2>/dev/null || hostname 2>/dev/null || echo "localhost")
+            fi
+            local web_port=$(python3 -c "import json; c=json.load(open('$config_dir/config.json')); print(c.get('server', {}).get('web_port', 19888))" 2>/dev/null || echo "19888")
+            update_config_server_url "$config_dir/config.json" "http://${server_ip}:${web_port}"
         else
             print_warning "Cannot create config file. Manual setup required."
         fi
@@ -4215,17 +4758,11 @@ with open('$config_dir/config.json', 'w') as f:
         if [ "$EUID" -eq 0 ]; then
             create_webui_symlinks
         fi
-        # Use /usr/bin/qwen-code-webui as preferred path (symlink created above)
-        # Fallback to find_webui_executable if symlink doesn't exist
-        local webui_path="/usr/bin/qwen-code-webui"
-        if [ ! -x "$webui_path" ]; then
-            if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
-                webui_path=$(find_webui_executable)
-            else
-                webui_path=$(find_webui_executable 2>/dev/null)
-            fi
-        fi
-        update_config_workspace "$config_dir/config.json" "$webui_path"
+        # Configure webui_path for config.json
+        # Issue #2151: Leave webui_path empty for auto-detection.
+        # The _find_webui_executable method in webui_manager.py will find
+        # the executable from common paths (/usr/bin/qwen-code-webui, etc.)
+        update_config_workspace "$config_dir/config.json" ""
 
         # Check and set secret_key if missing (upgrade from older version)
         local current_secret=$(python3 -c "import json; c=json.load(open('$config_dir/config.json')); print(c.get('secret_key', ''))" 2>/dev/null)
@@ -4233,6 +4770,21 @@ with open('$config_dir/config.json', 'w') as f:
             print_warning "Adding missing secret_key to config.json..."
             local secret_key="${SECRET_KEY:-$(openssl rand -hex 32)}"
             update_config_secret_key "$config_dir/config.json" "$secret_key"
+        fi
+    fi
+
+    # Check and update server_url if it's still localhost (for OAuth callbacks)
+    # This check runs for both fresh install and upgrade scenarios
+    if [ -f "$config_dir/config.json" ]; then
+        local current_server_url=$(python3 -c "import json; c=json.load(open('$config_dir/config.json')); print(c.get('server', {}).get('server_url', ''))" 2>/dev/null)
+        if [ -n "$current_server_url" ] && echo "$current_server_url" | grep -q "localhost"; then
+            print_info "Updating server_url from localhost to server IP..."
+            local server_ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+            if [ -z "$server_ip" ]; then
+                server_ip=$(hostname -f 2>/dev/null || hostname 2>/dev/null || echo "localhost")
+            fi
+            local web_port=$(python3 -c "import json; c=json.load(open('$config_dir/config.json')); print(c.get('server', {}).get('web_port', 19888))" 2>/dev/null || echo "19888")
+            update_config_server_url "$config_dir/config.json" "http://${server_ip}:${web_port}"
         fi
     fi
 
@@ -4292,6 +4844,15 @@ with open('$config_dir/config.json', 'w') as f:
 
         if [ -d "$target_path/vendor" ] && [ "$(ls -A "$target_path/vendor" 2>/dev/null)" ]; then
             print_info "Installing from vendor directory (offline mode)..."
+            # VERSION-CHECK-BEGIN: Check version compatibility before offline install
+            local current_minor=$(python3 -c "import sys; print(sys.version_info.minor)" 2>/dev/null)
+            local supported_versions=$(ls "$target_path/vendor"/*.whl 2>/dev/null | grep -o "cp3[0-9][0-9]*" | sort -u | sed "s/cp3/3./" | tr "\n" " ")
+            if [ -n "$supported_versions" ] && ! echo " $supported_versions " | grep -q " 3\.$current_minor "; then
+                print_warning "当前 Python 版本 3.$current_minor 可能不在离线包支持范围内"
+                print_info "离线包支持的版本: $supported_versions"
+                print_info "安装时将从 PyPI 在线下载缺失的依赖包"
+            fi
+            # VERSION-CHECK-END
             # Pre-install setuptools + wheel for building source distributions
             if ls "$target_path/vendor"/setuptools*.whl 1>/dev/null 2>&1 || ls "$target_path/vendor"/wheel*.whl 1>/dev/null 2>&1; then
                 print_info "Installing build tools (setuptools, wheel)..."
@@ -4344,35 +4905,7 @@ with open('$config_dir/config.json', 'w') as f:
         rm -f "$TEMP_REQ"
     fi
 
-    # Create default admin user (if not exists)
-    print_info "Ensuring default admin user exists..."
-    if [ -f "$target_path/scripts/init_db.py" ]; then
-        # Run init_db.py as the install user to ensure it can access installed packages
-        # Pass install_user as system_account for multi-user workspace mode
-        if [ "$EUID" -eq 0 ] && [ -n "$install_user" ] && [ "$install_user" != "root" ]; then
-            # Running as root, but need to run as install_user to access their pip packages
-            cd "$target_path"
-            if su - "$install_user" -c "cd '$target_path' && OPENACE_SYSTEM_ACCOUNT='$install_user' python3 scripts/init_db.py"; then
-                print_success "Default admin user ready (system_account=$install_user)"
-            else
-                print_warning "Failed to create default admin user. You may need to run scripts/init_db.py manually."
-            fi
-            cd - > /dev/null
-        else
-            # Running as the target user already
-            cd "$target_path"
-            if OPENACE_SYSTEM_ACCOUNT="$install_user" python3 scripts/init_db.py; then
-                print_success "Default admin user ready (system_account=$install_user)"
-            else
-                print_warning "Failed to create default admin user. You may need to run scripts/init_db.py manually."
-            fi
-            cd - > /dev/null
-        fi
-    else
-        print_warning "init_db.py not found, skipping default user creation"
-    fi
-
-    # Run database migrations (alembic upgrade head)
+    # Run database migrations FIRST (init_db.py depends on tables created by migrations)
     print_info "Running database migrations..."
     if [ "$EUID" -eq 0 ] && [ -n "$install_user" ] && [ "$install_user" != "root" ]; then
         su - "$install_user" -c "cd '$target_path' && python3 scripts/check_min_revision.py" || {
@@ -4408,6 +4941,34 @@ with open('$config_dir/config.json', 'w') as f:
         fi
     else
         print_warning "Alembic not found, skipping database migrations"
+    fi
+
+    # Create default admin user AFTER migrations (init_db.py queries tables created by migrations)
+    print_info "Ensuring default admin user exists..."
+    if [ -f "$target_path/scripts/init_db.py" ]; then
+        # Run init_db.py as the install user to ensure it can access installed packages
+        # Pass install_user as system_account for multi-user workspace mode
+        if [ "$EUID" -eq 0 ] && [ -n "$install_user" ] && [ "$install_user" != "root" ]; then
+            # Running as root, but need to run as install_user to access their pip packages
+            cd "$target_path"
+            if su - "$install_user" -c "cd '$target_path' && OPENACE_SYSTEM_ACCOUNT='$install_user' python3 scripts/init_db.py"; then
+                print_success "Default admin user ready (system_account=$install_user)"
+            else
+                print_warning "Failed to create default admin user. You may need to run scripts/init_db.py manually."
+            fi
+            cd - > /dev/null
+        else
+            # Running as the target user already
+            cd "$target_path"
+            if OPENACE_SYSTEM_ACCOUNT="$install_user" python3 scripts/init_db.py; then
+                print_success "Default admin user ready (system_account=$install_user)"
+            else
+                print_warning "Failed to create default admin user. You may need to run scripts/init_db.py manually."
+            fi
+            cd - > /dev/null
+        fi
+    else
+        print_warning "init_db.py not found, skipping default user creation"
     fi
 
     print_success "Upgrade completed"
@@ -4464,6 +5025,15 @@ do_fresh_install_remote() {
         offline_install_failed=false
         if [ -d 'vendor' ] && [ \"\$(ls -A vendor 2>/dev/null)\" ]; then
             echo 'Installing from vendor directory (offline mode)...'
+            # VERSION-CHECK-BEGIN: Check version compatibility before offline install
+            current_minor=\$(python3 -c 'import sys; print(sys.version_info.minor)' 2>/dev/null)
+            supported_versions=\$(ls vendor/*.whl 2>/dev/null | grep -o 'cp3[0-9][0-9]*' | sort -u | sed 's/cp3/3./' | tr '\\n' ' ')
+            if [ -n \"\$supported_versions\" ] && ! echo \" \$supported_versions \" | grep -q \" 3.\$current_minor \"; then
+                echo -e \"\\033[1;33mWarning: Current Python 3.\$current_minor may not be in offline package support list\\033[0m\"
+                echo -e \"\\033[0;34mSupported versions: \${supported_versions}\\033[0m\"
+                echo -e \"\\033[0;34mAttempting online download from PyPI...\\033[0m\"
+            fi
+            # VERSION-CHECK-END
             # Pre-install setuptools + wheel for building source distributions
             if ls vendor/setuptools*.whl 1>/dev/null 2>&1 || ls vendor/wheel*.whl 1>/dev/null 2>&1; then
                 echo 'Installing build tools (setuptools, wheel)...'
@@ -4709,6 +5279,15 @@ do_upgrade_remote() {
         offline_install_failed=false
         if [ -d 'vendor' ] && [ \"\$(ls -A vendor 2>/dev/null)\" ]; then
             echo 'Installing from vendor directory (offline mode)...'
+            # VERSION-CHECK-BEGIN: Check version compatibility before offline install
+            current_minor=\$(python3 -c 'import sys; print(sys.version_info.minor)' 2>/dev/null)
+            supported_versions=\$(ls vendor/*.whl 2>/dev/null | grep -o 'cp3[0-9][0-9]*' | sort -u | sed 's/cp3/3./' | tr '\\n' ' ')
+            if [ -n \"\$supported_versions\" ] && ! echo \" \$supported_versions \" | grep -q \" 3.\$current_minor \"; then
+                echo -e \"\\033[1;33mWarning: Current Python 3.\$current_minor may not be in offline package support list\\033[0m\"
+                echo -e \"\\033[0;34mSupported versions: \${supported_versions}\\033[0m\"
+                echo -e \"\\033[0;34mAttempting online download from PyPI...\\033[0m\"
+            fi
+            # VERSION-CHECK-END
             # Pre-install setuptools + wheel for building source distributions
             if ls vendor/setuptools*.whl 1>/dev/null 2>&1 || ls vendor/wheel*.whl 1>/dev/null 2>&1; then
                 echo 'Installing build tools (setuptools, wheel)...'
@@ -4771,22 +5350,7 @@ do_upgrade_remote() {
         exit 1
     }
 
-    # Create default admin user (if not exists)
-    print_info "Ensuring default admin user exists on remote..."
-    ssh "$remote" "
-        cd '$target_path'
-        if [ -f 'scripts/init_db.py' ]; then
-            if OPENACE_SYSTEM_ACCOUNT='$DEPLOY_USER' python3 scripts/init_db.py; then
-                echo 'Default admin user ready (system_account=$DEPLOY_USER)'
-            else
-                echo 'Warning: Failed to create default admin user. You may need to run scripts/init_db.py manually.'
-            fi
-        else
-            echo 'Warning: init_db.py not found, skipping default user creation'
-        fi
-    "
-
-    # Run database migrations (alembic upgrade head)
+    # Run database migrations FIRST (init_db.py depends on tables created by migrations)
     print_info "Running database migrations on remote..."
     ssh "$remote" "
         cd '$target_path'
@@ -4806,11 +5370,30 @@ do_upgrade_remote() {
         fi
     "
 
+    # Create default admin user AFTER migrations (init_db.py queries tables created by migrations)
+    print_info "Ensuring default admin user exists on remote..."
+    ssh "$remote" "
+        cd '$target_path'
+        if [ -f 'scripts/init_db.py' ]; then
+            if OPENACE_SYSTEM_ACCOUNT='$DEPLOY_USER' python3 scripts/init_db.py; then
+                echo 'Default admin user ready (system_account=$DEPLOY_USER)'
+            else
+                echo 'Warning: Failed to create default admin user. You may need to run scripts/init_db.py manually.'
+            fi
+        else
+            echo 'Warning: init_db.py not found, skipping default user creation'
+        fi
+    "
+
     print_success "Remote upgrade completed"
     print_info "Backup saved to: $backup_dir on $DEPLOY_HOST"
 
-    # Check if systemd service exists on remote and update SECRET_KEY if missing
-    if ssh "$remote" "command -v systemctl &>/dev/null && systemctl is-enabled --quiet open-ace.service 2>/dev/null"; then
+    # Check if systemd service exists on remote and update SECRET_KEY if missing.
+    # Issue #2290: use `systemctl cat` instead of `is-enabled` so the check
+    # passes for disabled-but-active services (same root cause as #2283).
+    # Use systemctl cat to check unit existence, not is-enabled (which fails for
+    # disabled services, skipping the restart entirely — same issue as local upgrade).
+    if ssh "$remote" "command -v systemctl &>/dev/null && systemctl cat open-ace.service &>/dev/null 2>&1"; then
         print_info "Checking systemd service on remote..."
         local service_file="/etc/systemd/system/open-ace.service"
         local current_secret=$(ssh "$remote" "grep '^Environment=SECRET_KEY=' $service_file 2>/dev/null | cut -d'=' -f3")
@@ -4821,7 +5404,7 @@ do_upgrade_remote() {
             print_info "Generated SECRET_KEY for Flask encryption"
         else
             print_info "Restarting systemd service on remote..."
-            ssh "$remote" "sudo systemctl restart open-ace.service"
+            ssh "$remote" "sudo systemctl daemon-reload && sudo systemctl restart open-ace.service"
         fi
 
         # Check if systemd service is missing WORKSPACE_BASE_DIR (Issue #1217)

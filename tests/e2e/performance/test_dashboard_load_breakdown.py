@@ -33,7 +33,7 @@ SCREENSHOT_DIR = os.path.join(
 os.makedirs(SCREENSHOT_DIR, exist_ok=True)
 
 
-async def test_dashboard_load_breakdown():
+async def test_dashboard_load_breakdown():  # allow-no-assert: smoke test - visual verification only
     """Analyze dashboard load time breakdown."""
 
     print("=" * 70)
@@ -240,7 +240,7 @@ async def test_dashboard_load_breakdown():
                 f"  - Rendering overhead:    ~{overall_time - sum(static_times) - sum(api_times):.3f}s"
             )
 
-        except Exception as e:
+        except Exception as e:  # allow-swallow: UI element may not exist
             print(f"\n✗ Error: {e}")
             raise
         finally:

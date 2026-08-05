@@ -24,6 +24,8 @@ jobs:
       has_vulnerabilities: ${{ steps.audit.outputs.has_vulnerabilities }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          submodules: false
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -72,6 +74,8 @@ jobs:
         working-directory: frontend
     steps:
       - uses: actions/checkout@v6
+        with:
+          submodules: false
 
       - name: Set up Node
         uses: actions/setup-node@v5
@@ -116,6 +120,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          submodules: false
 
       - name: Set up Python
         uses: actions/setup-python@v6

@@ -158,7 +158,9 @@ export function usePageRefresh(options: UsePageRefreshOptions): UsePageRefreshRe
         return !shouldDedupe(hash);
       });
 
-      if (keysToRefresh.length > 0) {
+      const performedRefresh = keysToRefresh.length > 0;
+
+      if (performedRefresh) {
         // Invalidate matching queries
         await Promise.all(
           keysToRefresh.map((key) => {
@@ -167,10 +169,15 @@ export function usePageRefresh(options: UsePageRefreshOptions): UsePageRefreshRe
             return queryClient.invalidateQueries({ queryKey: key });
           })
         );
-
-        // Record success
         recordRefresh(page, true);
-        onRefresh?.();
+      }
+
+      // Call onRefresh callback for pages using direct API calls instead of React Query
+      if (onRefresh) {
+        await onRefresh();
+        if (!performedRefresh) {
+          recordRefresh(page, true);
+        }
       }
     } catch (err) {
       const errorObj = err instanceof Error ? err : new Error('Refresh failed');

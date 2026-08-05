@@ -149,14 +149,16 @@ class TestValidateLlmProxyUrl:
 
         llm_proxy_url_validator._DNS_CACHE.clear()
 
-        # Allowlist bypass should work even if DNS resolution would fail
-        validate_llm_proxy_url(
+        # Allowlisted hostname resolves to a private IP → entry validates and the
+        # host is allowed via allowlist match (bypassing the public-IP SSRF check).
+        result = validate_llm_proxy_url(
             "https://internal-llm.example.com/v1/chat",
             tenant_id=1,
             provider="openai",
+            resolver=_resolver("10.0.1.50"),
         )
-        # Note: actual DNS resolution would fail, but allowlist bypass should work
-        # This tests that the allowlist is consulted
+        assert result.allowed
+        assert result.is_allowlist_match
 
     def test_tenant_allowlist(self, monkeypatch):
         """Test that tenant-specific allowlist works."""
@@ -231,6 +233,36 @@ class TestIpPinning:
             "https://api.custom.com/v1",
             "93.184.216.34",
             resolver=_resolver("10.0.0.1"),  # Different IP
+        )
+        assert not is_valid
+        assert "rebinding" in error.lower() or "changed" in error.lower()
+
+    def test_validate_ip_against_stored_cdn_rotation_all_public(self):
+        """CDN round-robin: disjoint *public* IP sets should pass.
+
+        Providers like Alibaba dashscope use DNS round-robin, so the
+        current resolution can return IPs not seen at config time. As long
+        as every current IP is public, it is legitimate rotation, not a
+        rebinding attack.
+        """
+        is_valid, error = validate_ip_against_stored(
+            "https://coding.dashscope.aliyuncs.com/v1",
+            "47.93.100.126,47.94.106.9",  # stored at config time
+            resolver=_resolver("47.93.100.200", "47.94.106.50"),  # disjoint, all public
+        )
+        assert is_valid
+        assert error is None
+
+    def test_validate_ip_against_stored_mixed_public_private_blocked(self):
+        """Even one private IP among current IPs must be blocked.
+
+        The all-public relaxation must not mask a genuine rebinding attack
+        where one resolved IP is private (the actual SSRF vector).
+        """
+        is_valid, error = validate_ip_against_stored(
+            "https://api.custom.com/v1",
+            "93.184.216.34",
+            resolver=_resolver("47.93.100.200", "169.254.169.254"),  # one metadata IP
         )
         assert not is_valid
         assert "rebinding" in error.lower() or "changed" in error.lower()
@@ -349,7 +381,11 @@ class TestIsAllowedHost:
             tenant_id=1,
             resolver=_resolver("10.0.1.100"),
         )
-        # Note: validation may fail due to DNS, but allowlist should be checked
+        # Host is in the global allowlist and resolves to a private 10.x IP,
+        # so the allowlist entry validates and the host is allowed.
+        assert is_allowed is True
+        assert result is not None
+        assert result.valid
 
     def test_host_not_in_allowlist(self, monkeypatch):
         """Test host not in any allowlist."""

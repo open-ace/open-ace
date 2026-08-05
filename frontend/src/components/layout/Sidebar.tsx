@@ -9,6 +9,7 @@ import { useSidebarCollapsed, useLanguage } from '@/store';
 import { useAppStore } from '@/store';
 import { useAuth } from '@/hooks';
 import { t } from '@/i18n';
+import { isAdmin } from '@/utils/permissions';
 
 interface NavItem {
   id: string;
@@ -39,7 +40,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeSection, mobileOpen }) =
   const language = useLanguage();
   const { user } = useAuth();
 
-  const isAdmin = user?.role === 'admin';
+  const userIsAdmin = isAdmin(user);
 
   const handleNavClick = (e: React.MouseEvent<HTMLAnchorElement>, disabled?: boolean) => {
     if (disabled) {
@@ -54,7 +55,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeSection, mobileOpen }) =
   };
 
   const renderNavItem = (item: NavItem) => {
-    const isDisabled = item.adminOnly && !isAdmin;
+    const isDisabled = item.adminOnly && !userIsAdmin;
     const commonProps = {
       className: cn(
         'nav-link text-white text-start w-100 d-flex align-items-center',

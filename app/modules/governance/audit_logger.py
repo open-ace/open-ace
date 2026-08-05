@@ -102,6 +102,10 @@ class AuditAction(Enum):
     LEGACY_WEBUI_TOKEN_USED = "legacy_webui_token_used"
     TOKEN_LEAK_SUSPECTED = "token_leak_suspected"
 
+    # Admin cross-tenant access actions (Issue #1824)
+    ADMIN_CROSS_TENANT_ACCESS = "admin_cross_tenant_access"
+    ADMIN_GLOBAL_SESSION_LIST = "admin_global_session_list"
+
 
 class AuditSeverity(Enum):
     """Severity levels for audit events."""
@@ -254,19 +258,41 @@ class AuditLogger:
     def _resolve_tenant_id(
         self, tenant_id: int | None = None, user_id: int | None = None
     ) -> int | None:
-        """Resolve tenant scope from an explicit tenant_id or a user record."""
+        """Resolve tenant scope from an explicit tenant_id or a user record.
+
+        Uses fail-open mode for audit logging to ensure all events are recorded.
+        Logs a warning when tenant cannot be resolved.
+
+        Args:
+            tenant_id: Explicitly provided tenant ID
+            user_id: User ID to look up tenant from
+
+        Returns:
+            Resolved tenant ID or None if cannot resolve
+        """
+        # Try explicit tenant_id first
         normalized = self._normalize_tenant_id(tenant_id)
-        if normalized is not None or not user_id:
+        if normalized is not None:
             return normalized
 
-        try:
-            row = self.db.fetch_one("SELECT tenant_id FROM users WHERE id = ?", (user_id,))
-        except Exception:
-            return None
+        # Try user lookup if user_id provided
+        if user_id is not None:
+            try:
+                row = self.db.fetch_one("SELECT tenant_id FROM users WHERE id = ?", (user_id,))
+                if row:
+                    user_tenant = self._normalize_tenant_id(row.get("tenant_id"))
+                    if user_tenant is not None:
+                        return user_tenant
+            except Exception as e:
+                logger.warning(f"Failed to look up tenant for user {user_id}: {e}")
 
-        if not row:
-            return None
-        return self._normalize_tenant_id(row.get("tenant_id"))
+        # Fail-open: Log warning and return None
+        if user_id is not None:
+            logger.warning(
+                f"Cannot resolve tenant for audit log - tenant_id={tenant_id}, user_id={user_id}. "
+                "Recording audit event with tenant_id=NULL."
+            )
+        return None
 
     def log(
         self,
@@ -1002,6 +1028,23 @@ def get_action_categories() -> dict[str, dict[str, Any]]:
                     "value": "token_leak_suspected",
                     "label": "Token Leak Suspected",
                     "i18n_key": "actionTokenLeakSuspected",
+                },
+            ],
+        },
+        "admin_access": {
+            "label": "Admin Access",
+            "i18n_key": "categoryAdminAccess",
+            "resource_types": ["session", "user"],
+            "actions": [
+                {
+                    "value": "admin_cross_tenant_access",
+                    "label": "Admin Cross-Tenant Access",
+                    "i18n_key": "actionAdminCrossTenantAccess",
+                },
+                {
+                    "value": "admin_global_session_list",
+                    "label": "Admin Global Session List",
+                    "i18n_key": "actionAdminGlobalSessionList",
                 },
             ],
         },

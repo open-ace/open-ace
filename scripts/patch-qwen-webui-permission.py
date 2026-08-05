@@ -25,9 +25,7 @@ import sys
 BUNDLE = "/usr/lib/node_modules/qwen-code-webui/dist/static/assets/index-DO2hmkKX.js"
 
 # Exact minified fragments (verified against qwen-code-webui@0.2.40).
-OLD_BODY = (
-    "Ut=(0,M.useCallback)(async()=>{if(z){if(vt(),H(),!z.permissionId){B();return}"
-)
+OLD_BODY = "Ut=(0,M.useCallback)(async()=>{if(z){if(vt(),H(),!z.permissionId){B();return}"
 NEW_BODY = (
     "Ut=(0,M.useCallback)(async()=>{if(z){if(vt(),H(),A){"
     "L.sendPermissionResponse(z.requestId||``,`allow`,void 0,z.toolName);B();return}"
@@ -47,7 +45,10 @@ def main() -> int:
         return 1
 
     if OLD_BODY not in data:
-        print("[patch-qwen-webui] BODY pattern not found — already patched or version drift", file=sys.stderr)
+        print(
+            "[patch-qwen-webui] BODY pattern not found — already patched or version drift",
+            file=sys.stderr,
+        )
         # Already patched (NEW_BODY present) counts as success; drift fails.
         if NEW_BODY in data:
             print("[patch-qwen-webui] bundle already patched, skipping", file=sys.stderr)
@@ -55,7 +56,10 @@ def main() -> int:
         return 1
 
     if data.count(OLD_BODY) != 1 or data.count(OLD_DEPS) != 1:
-        print("[patch-qwen-webui] pattern not unique — aborting to avoid corrupting the bundle", file=sys.stderr)
+        print(
+            "[patch-qwen-webui] pattern not unique — aborting to avoid corrupting the bundle",
+            file=sys.stderr,
+        )
         return 1
 
     data = data.replace(OLD_BODY, NEW_BODY)

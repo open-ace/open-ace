@@ -25,7 +25,14 @@ def list_api_keys():
     """List all encrypted API keys (without revealing actual keys). Admin only."""
 
     data = request.args
-    tenant_id = int(data.get("tenant_id", 1))
+    # Issue #2179: Fail-Closed - 必须显式指定 tenant_id
+    tenant_id = data.get("tenant_id")
+    if tenant_id is None:
+        # 尝试从 Flask g 获取
+        tenant_id = g.get("tenant_id")
+        if tenant_id is None:
+            return jsonify({"error": "tenant_id is required"}), 400
+    tenant_id = int(tenant_id)
 
     api_proxy = get_api_key_proxy_service()
     keys = api_proxy.list_api_keys(tenant_id)
@@ -48,7 +55,14 @@ def store_api_key():
     key_name = data.get("key_name")
     api_key = data.get("api_key")
     base_url = data.get("base_url")
-    tenant_id = int(data.get("tenant_id", 1))
+    # Issue #2179: Fail-Closed - 必须显式指定 tenant_id
+    tenant_id = data.get("tenant_id")
+    if tenant_id is None:
+        # 尝试从 Flask g 获取
+        tenant_id = g.get("tenant_id")
+        if tenant_id is None:
+            return jsonify({"error": "tenant_id is required"}), 400
+    tenant_id = int(tenant_id)
     cli_tools = data.get("cli_tools")
     cli_settings = data.get("cli_settings")
     scope = data.get("scope", "shared")
@@ -103,7 +117,14 @@ def update_api_key(key_id):
         return jsonify({"error": "scope must be 'local', 'remote', or 'shared'"}), 400
     priority = data.get("priority")
     weight = data.get("weight")
-    tenant_id = int(data.get("tenant_id", 1))
+    # Issue #2179: Fail-Closed - 必须显式指定 tenant_id
+    tenant_id = data.get("tenant_id")
+    if tenant_id is None:
+        # 尝试从 Flask g 获取
+        tenant_id = g.get("tenant_id")
+        if tenant_id is None:
+            return jsonify({"error": "tenant_id is required"}), 400
+    tenant_id = int(tenant_id)
 
     validation_error = validate_cli_settings_payload(cli_settings)
     if validation_error:
@@ -134,7 +155,14 @@ def delete_api_key(key_id):
     """Delete an API key by ID. Admin only."""
 
     data = request.get_json() or {}
-    tenant_id = int(data.get("tenant_id", 1))
+    # Issue #2179: Fail-Closed - 必须显式指定 tenant_id
+    tenant_id = data.get("tenant_id")
+    if tenant_id is None:
+        # 尝试从 Flask g 获取
+        tenant_id = g.get("tenant_id")
+        if tenant_id is None:
+            return jsonify({"error": "tenant_id is required"}), 400
+    tenant_id = int(tenant_id)
 
     api_proxy = get_api_key_proxy_service()
     success = api_proxy.delete_api_key_by_id(key_id, tenant_id)

@@ -218,7 +218,7 @@ PR 审查由 `review` 会话执行。审查结论是结构化信号，而不是�
 ### 9.2 诊断与重试边界
 
 - CI 日志暂不可用时最多轮询 6 次，不让 Agent 盲猜；
-- 自动 CI 修复最多 3 次；
+- 自动 CI 修复最多 5 次；
 - pre-commit 最多收敛 3 轮；
 - 同一失败指纹在代码已变化后仍完全不变，会提前停止；
 - 没有日志时的降级指纹不能触发“失败未变化”误判；
@@ -359,13 +359,68 @@ AI Activity 只挂在真正运行 Agent 的 planning、development、pr_review�
 | 常量 | 默认值 | 来源 | 用途 |
 |------|--------|------|------|
 | `MAX_CONCURRENT_WORKFLOWS` | `3` | `app/services/autonomous_scheduler.py` | 调度器同时推进的工作流数（另见 §6） |
-| `MAX_CI_REPAIR_ATTEMPTS` | `3` | `app/modules/workspace/autonomous/orchestrator.py` | 合并阶段自动 CI 修复次数（§9.2） |
+| `MAX_CI_REPAIR_ATTEMPTS` | `5` | `app/modules/workspace/autonomous/orchestrator.py` | 合并阶段自动 CI 修复次数（§9.2） |
 | `MAX_CI_DIAGNOSTICS_ATTEMPTS` | `6` | `app/modules/workspace/autonomous/orchestrator.py` | 失败日志暂不可用时的调度轮询上限（§9.2） |
 | `MAX_PRE_COMMIT_CONVERGENCE_PASSES` | `3` | `app/modules/workspace/autonomous/orchestrator.py` | 隔离 `pre-commit` 收敛轮数（§9.2） |
 | `API_RETRY_TOTAL_TIMEOUT` | `1800` 秒 | `app/modules/workspace/autonomous/orchestrator.py` | 瞬时 API 错误的最大退避总时长，约 30 分钟（§10） |
 | `PLANNING_TIMEOUT` | `1800` 秒 | `app/modules/workspace/autonomous/orchestrator.py` | 规划阶段超时 |
 
 升级旧安装时，应运行安装脚本的校验/升级流程，确保旧的宽权限 `openace-run-as` sudoers 文件已禁用。
+
+### 14.1 启用 cgroup v2 资源限制（裸机 / VM 部署）
+
+标准安装脚本和 Dockerfile 默认不启用 cgroup 资源限制——容器内 cgroupfs 通常只读，会回退到 `prlimit`。在裸机或 VM 部署上，可以通过 `scripts/setup-cgroup-v2.sh` 一键启用 per-task 内存、PID 和 CPU 限制：
+
+```bash
+sudo bash scripts/setup-cgroup-v2.sh
+```
+
+该脚本会：
+
+1. 在根 cgroup 委托 `memory`/`pids`/`cpu` 控制器
+2. 创建父 cgroup `/sys/fs/cgroup/openace-agent`
+3. 写入默认资源限制（内存 2 GiB、PID 512、CPU 2 核）
+4. 更新 `/etc/openace/agent-launcher.conf`，设置 `agent_task_cgroup_enabled=on`
+5. 创建 systemd 服务 `openace-cgroup-setup.service`，开机自动恢复设置
+
+**自定义限制值：**
+
+```bash
+sudo bash scripts/setup-cgroup-v2.sh --memory 4G --pids 1024 --cpu 4
+```
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `--memory` | `2147483648`（2 GiB） | 每个 agent 任务内存上限，支持 `512M`/`2G`/`4G` 后缀 |
+| `--pids` | `512` | 每个 agent 任务最大进程数 |
+| `--cpu` | `2` | 每个 agent 任务可用 CPU 核数 |
+| `--cgroup-enabled` | `on` | 强制启用；`auto` 仅在 cgroup 可写时启用；`off` 禁用 |
+| `--concurrency` | `3` | 调度器同时推进的工作流数 |
+| `--wall-clock` | `3600` | 单次任务墙钟超时（秒） |
+| `--conf` | `/etc/openace/agent-launcher.conf` | 配置文件路径 |
+| `--cgroup-root` | `/sys/fs/cgroup/openace-agent` | 父 cgroup 路径 |
+| `--dry-run` | — | 预览动作但不执行 |
+
+**前置条件：** 内核必须启用 cgroup v2（Rocky/RHEL/CentOS 9+ 默认满足）。脚本会在缺Controller 或 cgroupfs 不可写时 fail-closed 并返回非零退出码。
+
+**与运行时隔离的关系：**
+
+| 资源 | 强制者 | 机制 |
+|------|--------|------|
+| 内存 | kernel（cgroup v2） | OOM kill |
+| PID | kernel（cgroup v2） | fork 失败 |
+| CPU | kernel（cgroup v2） | CPU throttling |
+| 墙钟超时 | Python runner | `Event.wait` 超时 + 进程终止（暂停时间不计入） |
+
+**关闭 cgroup 限制：**
+
+```bash
+sudo systemctl disable --now openace-cgroup-setup.service
+sudo rm /etc/systemd/system/openace-cgroup-setup.service
+# 然后编辑 /etc/openace/agent-launcher.conf，设置 agent_task_cgroup_enabled=off
+```
+
+容器部署请勿运行此脚本——容器内 `/sys/fs/cgroup` 通常只读。如需在特权容器中启用，需要 `--cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw` 运行容器。
 
 ## 15. API 概览
 

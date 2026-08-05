@@ -36,7 +36,7 @@ const STATUS_CONFIG: Record<string, { variant: string; icon: string; labelKey: s
   pr_review: { variant: 'warning', icon: 'bi-eye', labelKey: 'autoStatusPRReview' },
   reporting: { variant: 'info', icon: 'bi-file-text', labelKey: 'autoStatusReporting' },
   waiting: { variant: 'secondary', icon: 'bi-clock', labelKey: 'autoStatusWaiting' },
-  merging: { variant: 'info', icon: 'bi-git-merge', labelKey: 'autoStatusMerging' },
+  merging: { variant: 'info', icon: 'bi-sign-merge-right', labelKey: 'autoStatusMerging' },
   completed: { variant: 'success', icon: 'bi-check-circle', labelKey: 'autoStatusCompleted' },
   failed: { variant: 'danger', icon: 'bi-x-circle', labelKey: 'autoStatusFailed' },
   cancelled: { variant: 'secondary', icon: 'bi-slash-circle', labelKey: 'autoStatusCancelled' },
@@ -217,18 +217,24 @@ export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
     const shouldReconcileSelection = !preserveInitialSelection || hasUserChangedView || !selectedId;
 
     if (workflows.length === 0) {
-      if (selectedId && shouldReconcileSelection) {
+      if (selectedId && shouldReconcileSelection && !hasActiveFilters) {
         onClearSelection();
       }
       return;
     }
 
     const selectedIsVisible = workflows.some((wf) => wf.workflow_id === selectedId);
-    if (!selectedId || (shouldReconcileSelection && !selectedIsVisible)) {
+    if (!selectedId) {
+      onSelect(workflows[0]);
+      return;
+    }
+
+    if (shouldReconcileSelection && !selectedIsVisible && !hasActiveFilters) {
       onSelect(workflows[0]);
     }
   }, [
     data,
+    hasActiveFilters,
     hasUserChangedView,
     isLoading,
     onClearSelection,
@@ -506,12 +512,7 @@ export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
                   <Badge
                     variant={
                       statusCfg.variant as
-                        | 'secondary'
-                        | 'info'
-                        | 'primary'
-                        | 'warning'
-                        | 'success'
-                        | 'danger'
+                        'secondary' | 'info' | 'primary' | 'warning' | 'success' | 'danger'
                     }
                   >
                     <i className={`bi ${statusCfg.icon} me-1`}></i>
@@ -539,12 +540,7 @@ export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
                 <Badge
                   variant={
                     statusCfg.variant as
-                      | 'secondary'
-                      | 'info'
-                      | 'primary'
-                      | 'warning'
-                      | 'success'
-                      | 'danger'
+                      'secondary' | 'info' | 'primary' | 'warning' | 'success' | 'danger'
                   }
                 >
                   <i className={`bi ${statusCfg.icon} me-1`}></i>
@@ -679,12 +675,7 @@ export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
                       key={status}
                       variant={
                         cfg.variant as
-                          | 'secondary'
-                          | 'info'
-                          | 'primary'
-                          | 'warning'
-                          | 'success'
-                          | 'danger'
+                          'secondary' | 'info' | 'primary' | 'warning' | 'success' | 'danger'
                       }
                     >
                       {t(cfg.labelKey, language)} {count}

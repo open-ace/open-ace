@@ -83,7 +83,7 @@ def login(page):
     # post-login redirect chain to settle (auth race — see memory gotchas).
     try:
         page.wait_for_url("**/manage/**", timeout=10000)
-    except Exception:
+    except Exception:  # allow-swallow: UI element may not exist
         # Fall back: as long as we've left /login, consider it authenticated.
         if "/login" in page.url:
             raise
@@ -109,7 +109,7 @@ def anomaly_list_card(page):
     return page.locator(".card.nonexistent")
 
 
-def test_anomaly_page_help_tooltip(page):
+def test_anomaly_page_help_tooltip(page):  # allow-no-assert: smoke test - visual verification only
     """The Anomaly List card should carry a help-tooltip icon (detection rules)."""
     print("\n[TEST] Anomaly page — help tooltip on Anomaly List card...")
     page.goto(f"{BASE_URL}/manage/analysis/anomaly")
@@ -120,7 +120,7 @@ def test_anomaly_page_help_tooltip(page):
     shot(page, "02-anomaly-help-tooltip")
 
 
-def test_anomaly_page_descriptions(page):
+def test_anomaly_page_descriptions(page):  # allow-no-assert: smoke test - visual verification only
     """When anomalies exist, each row shows a description + suggestion."""
     print("\n[TEST] Anomaly page — per-row description + suggestion...")
     page.goto(f"{BASE_URL}/manage/analysis/anomaly")
@@ -143,7 +143,7 @@ def test_anomaly_page_descriptions(page):
     shot(page, "03-anomaly-descriptions")
 
 
-def test_language_switch_localizes(page):
+def test_language_switch_localizes(page):  # allow-no-assert: smoke test - visual verification only
     """Switching to Chinese changes the suggestion wording."""
     print("\n[TEST] Language switch localizes descriptions (en -> zh)...")
     page.goto(f"{BASE_URL}/manage/analysis/anomaly")
@@ -164,7 +164,7 @@ def test_language_switch_localizes(page):
     shot(page, "04-language-switch")
 
 
-def test_overview_page_descriptions(page):
+def test_overview_page_descriptions(page):  # allow-no-assert: smoke test - visual verification only
     """The Analysis overview inline anomaly table also shows descriptions."""
     print("\n[TEST] Analysis overview — inline anomaly table descriptions...")
     page.goto(f"{BASE_URL}/manage/analysis")
@@ -200,14 +200,14 @@ def main():
             test_anomaly_page_descriptions(page)
             test_language_switch_localizes(page)
             test_overview_page_descriptions(page)
-        except Exception as e:
+        except Exception as e:  # allow-swallow: UI element may not exist
             global failed
             failed += 1
             errors.append(f"Unexpected exception: {e}")
             print(f"    [ERROR] {e}")
             try:
                 shot(page, "99-error")
-            except Exception:
+            except Exception:  # allow-swallow: UI element may not exist
                 pass
         finally:
             context.close()

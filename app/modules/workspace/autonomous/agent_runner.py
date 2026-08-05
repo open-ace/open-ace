@@ -25,10 +25,24 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from app.modules.workspace.autonomous.artifact_text import pick_best_artifact_text
 from app.modules.workspace.autonomous.models import AgentTaskResult
+from app.modules.workspace.autonomous.sandbox.legacy_posix import LegacyPosixProvider
+from app.modules.workspace.autonomous.sandbox.provider import SandboxError
+from app.modules.workspace.autonomous.sandbox.remote_machine import (
+    RemoteMachineProvider,
+    RemoteTurnSpec,
+)
+from app.modules.workspace.autonomous.sandbox.types import SandboxSpec
+from app.modules.workspace.autonomous.task_isolation import (
+    DEFAULT_TASK_ROOT,
+    ensure_task_runtime_dirs,
+)
+
+if TYPE_CHECKING:  # pragma: no cover - annotations only (PEP 563)
+    from app.modules.workspace.autonomous.sandbox.types import ExecHandle, SandboxHandle
 
 logger = logging.getLogger(__name__)
 
@@ -233,6 +247,16 @@ class _LocalSession:
     # Local subprocess sessions do not use it, but keeping it on the tracker
     # avoids a second tracker type and closes the create-vs-stop race.
     _remote_lifecycle_lock: threading.Lock = field(default_factory=threading.Lock)
+    # #2022 P3b: the SandboxProvider handle/exec_handle for the local spawn.
+    # process (above) is the raw Popen the provider exposed; these let the
+    # session release the provider sandbox at teardown. None on remote/legacy
+    # tracker paths that don't go through the provider.
+    sandbox_handle: SandboxHandle | None = None
+    exec_handle: ExecHandle | None = None
+    # #2022 P4 ③: the provider that owns this sandbox, so stop/pause/resume can
+    # route through it (gVisor has no local Popen — signals MUST reach the
+    # sandbox via the provider). None on legacy tracker paths.
+    sandbox_provider: Any = None
 
 
 # Top-level keys that indicate a JSON object is a leaked tool-call blob
@@ -707,6 +731,8 @@ class AutonomousAgentRunner:
         activity_callback=None,
         on_pid_registered=None,
         on_pid_cleared=None,
+        sandbox_provider=None,
+        on_sandbox_created=None,
     ):
         """
         Args:
@@ -720,6 +746,15 @@ class AutonomousAgentRunner:
                 when a local subprocess is created, for PID persistence.
             on_pid_cleared: Optional callback ``(session_id)`` called when a
                 local subprocess exits, for PID cleanup.
+            sandbox_provider: #2022 P3b — the SandboxProvider that owns local
+                spawn/ACL-wrap. Defaults to LegacyPosixProvider; injectable for
+                tests. P4 will branch on workspace_type for RemoteMachineProvider.
+            on_sandbox_created: Optional callback
+                ``(session_id, sandbox_id, provider_name, remote_session_id_or_None)``
+                called right after the provider execs (#2022 P6), so the
+                orchestrator can persist a mid-run ``sandbox_state='running'``
+                row + attribution. A crash between exec and task completion then
+                leaves a row the startup reconciler can destroy by id.
         """
         self.session_manager = session_manager
         self.remote_session_manager = remote_session_manager
@@ -729,12 +764,189 @@ class AutonomousAgentRunner:
         self._activity_callback = activity_callback
         self._on_pid_registered = on_pid_registered
         self._on_pid_cleared = on_pid_cleared
+        self._on_sandbox_created = on_sandbox_created
         self._local_sessions: dict[str, _LocalSession] = {}
+        # #2022 P3b: local spawns route through the SandboxProvider so the
+        # orchestrator no longer touches sudo/_wrap_agent_cmd/Popen directly
+        # for spawn. The CLI protocol layer (reader threads, stdin handshake)
+        # still drives the raw Popen the provider exposes via get_process().
+        self._sandbox_provider = sandbox_provider or LegacyPosixProvider()
 
     @staticmethod
     def _uses_sidebar_session_source(cli_tool: str, workspace_type: str) -> bool:
         """Whether this task should resolve to the real sidebar Claude session."""
         return workspace_type == "local" and cli_tool == "claude-code"
+
+    # Issue #2020: structured error codes for resource/isolation failures.
+    # The launcher emits distinct exit codes + stderr sentinels; these classify
+    # them so the orchestrator sees a structured reason, not an opaque exit.
+    TASK_WALL_CLOCK_TIMEOUT_ERROR_CODE = "task_wall_clock_timeout"
+
+    def _load_task_policy(self) -> Any:
+        """Load the #2020 AgentTaskPolicy from agent-launcher.conf, or None.
+
+        Passed into ``SandboxSpec.policy`` so #2020 HOME/TMP/quota is *expressed
+        via the spec* (the #2022 acceptance), not only enforced ad hoc by
+        _build_agent_env + openace-run-as. Legacy does not yet consume
+        spec.policy (the existing isolation path stands), but the spec now
+        carries it for contract completeness and future providers. None if the
+        conf is missing/unreadable.
+        """
+        try:
+            from app.modules.workspace.autonomous.task_isolation import (
+                read_agent_task_policy,
+                resolve_agent_task_policy_path,
+            )
+
+            conf = resolve_agent_task_policy_path(os.environ.get("OPENACE_LAUNCHER_CONF"))
+            if not conf:
+                return None
+            return read_agent_task_policy(conf)
+        except Exception:
+            return None
+
+    def _resource_policy_configured(self) -> bool:
+        """Whether agent-launcher.conf sets a non-zero memory/pids/cpu limit.
+
+        Used to gate signal-kill classification: ``task_resource_limit_exceeded``
+        should mean a configured limit was actually hit, not an unrelated kill.
+        """
+        policy = self._load_task_policy()
+        return bool(policy and (policy.memory_max_bytes or policy.pids_max or policy.cpu_max))
+
+    @staticmethod
+    def _resolve_wall_clock_timeout(explicit_timeout: int, policy: Any) -> int:
+        """Effective wall-clock cap for one attempt (#2020 Phase B).
+
+        ``AgentTaskPolicy.wall_clock_limit`` (>0) takes precedence — it is the
+        contract dimension the spec/UI surfaces and ``CPU_MEM_PIDS_TIME_QUOTA``
+        covers. 0 (unset) falls back to the orchestrator-passed ``explicit_timeout``
+        (itself defaulting to ``AUTONOMOUS_TASK_TIMEOUT`` / 3600). ``policy`` None
+        (no conf) likewise falls back.
+        """
+        if policy is not None and policy.wall_clock_limit > 0:
+            return int(policy.wall_clock_limit)
+        return explicit_timeout
+
+    @staticmethod
+    def _stamp_sandbox_attribution(
+        result: AgentTaskResult, sandbox_handle: Any, provider: Any
+    ) -> AgentTaskResult:
+        """Stamp sandbox identity + final state onto a result (#2022 P5).
+
+        Called at every _run_local/_run_remote return path where a sandbox was
+        created, so the orchestrator can persist sandbox_provider/id/generation/
+        state onto the workflow row and every evidence path carries attribution.
+        No-op when sandbox_handle is None (spawn failed before create).
+        """
+        if sandbox_handle is None:
+            return result
+        result.sandbox_id = sandbox_handle.sandbox_id
+        result.sandbox_generation = sandbox_handle.generation
+        result.sandbox_provider = sandbox_handle.provider_name
+        # #2022 P6: stamp the TASK-terminal state, not provider.inspect(). A
+        # remote CLI session is deliberately left alive on success (reusable
+        # sidebar), so inspect() returns 'running' — which the startup
+        # reconciler would mis-flag as an orphan and destroy. The workflow row's
+        # sandbox_state must mean "is THIS task's sandbox still occupying
+        # resources": success → destroyed (task done; local literally, remote
+        # task-done even if the session is reused), failure → error. A 'running'
+        # row therefore only exists from a mid-task write — and at startup, any
+        # 'running'/'paused' row is a genuine crash orphan.
+        result.sandbox_state = "destroyed" if result.success else "error"
+        return result
+
+    def _notify_sandbox_created(
+        self,
+        session_id: str,
+        sandbox_handle: Any,
+        remote_session_id: str | None,
+    ) -> None:
+        """Fire ``on_sandbox_created`` so the orchestrator persists mid-run state (#2022 P6).
+
+        Called right after ``provider.exec()`` returns (local + remote), so a
+        crash between exec and task completion leaves a ``sandbox_state='running'``
+        workflow row the startup/periodic reconciler can destroy by id. The
+        remote path passes the manager's session id; local/gVisor pass ``None``.
+        Best-effort: a callback failure is logged, never propagated to the run
+        path (mirrors ``on_pid_registered``).
+        """
+        if self._on_sandbox_created is None or sandbox_handle is None:
+            return
+        try:
+            # #2020 Phase B: snapshot the actually-effective resource/isolation
+            # policy for this run. Built from the provider's DECLARED capabilities
+            # + the spec's AgentTaskPolicy so the workflow UI shows what was in
+            # effect, independent of the live agent-launcher.conf.
+            from app.modules.workspace.autonomous.sandbox.effective_policy import (
+                build_effective_policy,
+            )
+
+            try:
+                declared_caps = self._sandbox_provider.capabilities()
+            except Exception:
+                declared_caps = frozenset()
+            effective_policy = build_effective_policy(
+                sandbox_handle.provider_name,
+                declared_caps,
+                getattr(sandbox_handle.spec, "policy", None),
+            )
+            self._on_sandbox_created(
+                session_id,
+                sandbox_handle.sandbox_id,
+                sandbox_handle.provider_name,
+                remote_session_id,
+                effective_policy,
+            )
+        except Exception as e:
+            logger.warning("on_sandbox_created callback failed: %s", e)
+
+    @staticmethod
+    def _classify_isolated_exit_code(
+        return_code: int | None,
+        stderr: str = "",
+        *,
+        orchestrator_initiated: bool = False,
+        resource_policy_configured: bool = False,
+    ) -> tuple[str | None, str | None]:
+        """Map an isolated-launcher child exit to a structured error code.
+
+        Returns ``(error_code, message)`` where both may be ``None`` for a
+        clean or generic non-isolation failure. Recognized cases:
+
+        * ``OPENACE_CGROUP_REQUIRED`` stderr sentinel → resource policy
+          unavailable (cgroup forced on but unwritable). Matched by sentinel
+          only — exit 66 is overloaded in the launcher for unrelated
+          pre-flight failures (validator/flock/base64/reject_conf).
+        * exit 68 / ``OPENACE_REPO_INTEGRITY_VIOLATION`` → .git tamper.
+        * a resource-limit breach: only when the orchestrator did NOT
+          initiate the kill, a resource policy is configured, and the kernel
+          killed the process with an exhaustion signal (SIGKILL/SIGXCPU).
+          Python ``subprocess.Popen.returncode`` encodes signal deaths as
+          negative values (-signum); SIGTERM(-15)/SIGINT(-2) are the
+          orchestrator's own stop/timeout signals and are never a resource
+          breach, so timeouts/stops are never misreported here.
+        """
+        lowered = (stderr or "").lower()
+        if "openace_cgroup_required" in lowered:
+            return (
+                "task_resource_policy_unavailable",
+                "Task resource policy could not be enforced (cgroup unavailable)",
+            )
+        if return_code == 68 or "openace_repo_integrity_violation" in lowered:
+            return ("repo_integrity_violation", None)
+        if (
+            not orchestrator_initiated
+            and resource_policy_configured
+            and return_code is not None
+            and return_code < 0
+            and -return_code in (signal.SIGKILL, signal.SIGXCPU)
+        ):
+            return (
+                "task_resource_limit_exceeded",
+                "Agent process killed by signal (possible resource-limit breach)",
+            )
+        return (None, None)
 
     @staticmethod
     def _classify_sidebar_start_failure(
@@ -1031,6 +1243,7 @@ class AutonomousAgentRunner:
         project_path: str,
         system_account: str | None,
         env: dict[str, str] | None = None,
+        task_id: str | None = None,
     ) -> tuple[list[str], str | None]:
         """Wrap an agent CLI command for cross-user launch (Issue #1395).
 
@@ -1079,13 +1292,21 @@ class AutonomousAgentRunner:
                 if env and env.get(key):
                     guard_env.append(f"{key}={env[key]}")
             guarded_cmd = ["/usr/bin/env", *guard_env, *cmd] if guard_env else cmd
+            # Issue #2020: pass a sanitized per-attempt task_id so the launcher
+            # can key HOME/TMP/XDG/flock/cgroup off the attempt rather than the
+            # shared Agent UID. Omitted for legacy callers without a task_id.
+            launcher_opts: list[str] = ["--isolated"]
+            if task_id:
+                from app.modules.workspace.autonomous.task_isolation import sanitize_task_id
+
+                launcher_opts += ["--task-id", sanitize_task_id(task_id)]
             wrapped = [
                 "sudo",
                 "-n",
                 "-u",
                 "root",
                 _OPENACE_RUN_AS,
-                "--isolated",
+                *launcher_opts,
                 system_account,
                 project_path,
                 *guarded_cmd,
@@ -1160,6 +1381,7 @@ class AutonomousAgentRunner:
         session_id: str,
         model: str,
         runtime_python_command: list[str] | None = None,
+        task_id: str | None = None,
     ) -> dict[str, str]:
         """Build subprocess env with LLM proxy auth for a local agent.
 
@@ -1176,7 +1398,7 @@ class AutonomousAgentRunner:
         in development unless OPENACE_ALLOW_RAW_KEY_FALLBACK=1 is set. The agent
         never inherits a real key from the service env.
         """
-        from app.utils.security_env import is_production_environment
+        from app.utils.security_mode import is_production
 
         env = dict(os.environ)
         guard_bin = AutonomousAgentRunner._resolve_agent_guard_bin()
@@ -1201,6 +1423,29 @@ class AutonomousAgentRunner:
         env["GH_CONFIG_DIR"] = "/var/empty/openace-autonomous-gh"
         env["GIT_TERMINAL_PROMPT"] = "0"
         env["PATH"] = guard_bin + os.pathsep + env.get("PATH", "")
+
+        # Issue #2020 Phase A: per-attempt HOME/TMP/XDG runtime tree keyed by
+        # task_id, so concurrent attempts on the same Agent UID never share
+        # HOME/TMP/cache. The cross-user launcher re-derives the same paths
+        # from ``--task-id`` (its env -i overrides these); on the same-user
+        # path these env vars are authoritative. OPENACE_GIT_CACHE_ROOT
+        # (pre-commit baseline cache) is relocated to the per-task cache dir
+        # for full isolation (decision: 2026-07-26). When task_id is absent
+        # (legacy callers) the shared defaults above stand.
+        if task_id:
+            task_root = os.environ.get("OPENACE_AGENT_TASK_ROOT", DEFAULT_TASK_ROOT)
+            # Create the tree when the root is writable (same-user/dev path,
+            # where the launcher is not invoked). On the cross-user path the
+            # root launcher creates it under root-owned /run; this returns None
+            # there and we leave HOME untouched so the launcher sets it.
+            task_dirs = ensure_task_runtime_dirs(task_id, task_root)
+            if task_dirs is not None:
+                env["HOME"] = task_dirs["home"]
+                env["TMPDIR"] = task_dirs["tmp"]
+                env["XDG_CACHE_HOME"] = task_dirs["cache"]
+                env["XDG_CONFIG_HOME"] = task_dirs["config"]
+                env["XDG_DATA_HOME"] = task_dirs["data"]
+                env["OPENACE_GIT_CACHE_ROOT"] = str(Path(task_dirs["cache"]) / "pre-commit")
 
         # Issue #2019: scrub every raw credential (provider/GitHub/SSH/cloud +
         # dynamic custom envKeys) BEFORE injecting the proxy token, and fail
@@ -1277,7 +1522,7 @@ class AutonomousAgentRunner:
                 llm_provider_keys=llm_keys,
                 proxy_env_vars=proxy_env_vars,
                 proxy_ok=proxy_ok,
-                is_production=is_production_environment(),
+                is_production=is_production(),
                 raw_fallback_allowed=os.environ.get("OPENACE_ALLOW_RAW_KEY_FALLBACK") == "1",
             ),
         )
@@ -1566,6 +1811,7 @@ class AutonomousAgentRunner:
                         "status": "active",
                         "cli_session_id": persisted_id,
                     },
+                    require_tenant=False,
                 )
             except Exception as e:
                 session.persisted_session_id = ""
@@ -1643,7 +1889,9 @@ class AutonomousAgentRunner:
             logger.warning("Failed to load tracking session context: %s", e)
 
         try:
-            self.session_manager.update_session_fields(session.session_id, updates)
+            self.session_manager.update_session_fields(
+                session.session_id, updates, require_tenant=False
+            )
         except Exception as e:
             logger.warning("Failed to sync sidebar session totals: %s", e)
 
@@ -1729,6 +1977,10 @@ class AutonomousAgentRunner:
         Returns:
             AgentTaskResult with response text, messages, tokens, etc.
         """
+        # #2020 Phase B: honor AgentTaskPolicy.wall_clock_limit (>0) over the
+        # orchestrator-passed timeout. wall_clock is the "TIME" in
+        # CPU_MEM_PIDS_TIME_QUOTA — Legacy enforces it via this deadline.
+        timeout = self._resolve_wall_clock_timeout(timeout, self._load_task_policy())
         session_id = session_id or str(uuid.uuid4())
         uses_sidebar_session = self._uses_sidebar_session_source(cli_tool, workspace_type)
         # App-server tools (ZCode) resolve their real CLI session id only after
@@ -1741,6 +1993,17 @@ class AutonomousAgentRunner:
 
         # Create wrapper sessions only for tools without a deferred session id.
         if self.session_manager and not creates_session_late:
+            # Resolve tenant_id (default 1) so fail-closed tenant resolution passes.
+            wf_tenant_id = 1
+            if user_id:
+                try:
+                    from app.repositories.user_repo import UserRepository
+
+                    wf_user = UserRepository().get_user_by_id(user_id)
+                    if wf_user and wf_user.get("tenant_id"):
+                        wf_tenant_id = int(wf_user["tenant_id"])
+                except Exception:
+                    pass  # default tenant
             try:
                 self.session_manager.create_session(
                     session_id=session_id,
@@ -1748,6 +2011,7 @@ class AutonomousAgentRunner:
                     title=f"Autonomous: {workflow_id[:8]}",
                     tool_name=cli_tool,
                     user_id=user_id,
+                    tenant_id=wf_tenant_id,
                     project_path=project_path,
                     workspace_type=workspace_type,
                     remote_machine_id=remote_machine_id,
@@ -1776,6 +2040,7 @@ class AutonomousAgentRunner:
                         self.session_manager.update_session_fields(
                             session_id,
                             {"status": "active", "completed_at": None, "paused_at": None},
+                            require_tenant=False,
                         )
                         logger.info(
                             "Reactivated session %s (was %s) for agent run",
@@ -1855,10 +2120,11 @@ class AutonomousAgentRunner:
                         total_tokens_delta=result.total_tokens or 0,
                         total_input_delta=result.total_input_tokens or 0,
                         total_output_delta=result.total_output_tokens or 0,
+                        require_tenant=False,
                     )
                     status = "completed" if result.success else "error"
                     self.session_manager.update_session_fields(
-                        persisted_session_id, {"status": status}
+                        persisted_session_id, {"status": status}, require_tenant=False
                     )
                 except Exception as e:
                     logger.warning("Failed to update session record: %s", e)
@@ -1873,6 +2139,7 @@ class AutonomousAgentRunner:
                     self.session_manager.update_session_fields(
                         session_id,
                         {"status": "completed" if result.success else "error"},
+                        require_tenant=False,
                     )
                 except Exception as e:
                     logger.warning("Failed to update remote tracking session: %s", e)
@@ -1890,6 +2157,7 @@ class AutonomousAgentRunner:
                             "status": "error",
                             "error_message": result.error or "agent failed to start",
                         },
+                        require_tenant=False,
                     )
                 except Exception as e:
                     logger.warning(
@@ -2009,10 +2277,18 @@ class AutonomousAgentRunner:
         # Open ACE (short-lived proxy token, never the raw API key).
         env = (
             self._build_agent_env(
-                adapter, cli_tool, user_id, session_id, model, runtime_python_command
+                adapter,
+                cli_tool,
+                user_id,
+                session_id,
+                model,
+                runtime_python_command,
+                task_id=session_id,
             )
             if runtime_python_command
-            else self._build_agent_env(adapter, cli_tool, user_id, session_id, model)
+            else self._build_agent_env(
+                adapter, cli_tool, user_id, session_id, model, task_id=session_id
+            )
         )
 
         # Build command
@@ -2051,37 +2327,75 @@ class AutonomousAgentRunner:
                 )
             cmd = [executable] + (adapter_args[1:] if len(adapter_args) > 1 else [])
 
-        # Cross-user launch: the run-as wrapper chdir's as root then drops to
-        # system_account (claude-code/qwen-code infer project root from cwd
-        # and have no --cwd flag). Same-user runs verbatim with cwd=project.
-        cmd, cwd = (
-            self._wrap_agent_cmd(cmd, project_path, system_account, env)
-            if self._is_cross_user(system_account)
-            else self._wrap_agent_cmd(cmd, project_path, system_account)
+        # #2022 P3b: spawn through the SandboxProvider. The orchestrator no
+        # longer touches sudo/_wrap_agent_cmd/Popen directly for spawn; the
+        # provider owns the ACL wrap (build_launch_argv) + spawn + cwd. The CLI
+        # stream-json protocol (reader threads, stdin handshake below) still
+        # drives the raw Popen the provider exposes via get_process().
+        if self._is_cross_user(system_account):
+            # Env finalization moved here from _wrap_agent_cmd's cross-user
+            # branch. The launcher forwards guard_env verbatim (runuser ...
+            # /usr/bin/env -i <env_args> "$@" — env_args sets only HOME/TMPDIR/
+            # XDG/GIT_CONFIG, NOT OPENACE_GIT_CACHE_ROOT) and does NOT re-derive
+            # it, so the agent user's pre-commit cache path must be set here;
+            # the guard-bin safety check fails closed before spawn. _build_agent_env
+            # set it to the service user's path (it has no system_account), so
+            # this overwrite is load-bearing for cross-user.
+            env["OPENACE_GIT_CACHE_ROOT"] = str(
+                self._resolve_home_dir(system_account) / ".cache" / "pre-commit"
+            )
+            self._validate_cross_user_guard_bin(env)
+        sandbox_handle = self._sandbox_provider.create(
+            SandboxSpec(
+                task_id=session_id,
+                project_path=project_path,
+                cli_tool=cli_tool,
+                system_account=system_account,
+                # #2022 P5: express #2020 HOME/TMP/quota via the spec (not just
+                # enforce ad hoc); Legacy doesn't consume it yet, future providers do.
+                policy=self._load_task_policy(),
+            )
+        )
+        # Preserve the old log: the wrapped launch argv (sudo/openace-run-as for
+        # cross-user, verbatim for same-user). build_launch_argv is pure, so
+        # calling it for display is harmless; exec re-derives it internally.
+        logger.info(
+            "Launching local agent: %s",
+            " ".join(self._sandbox_provider.build_launch_argv(sandbox_handle, cmd, env)),
         )
 
-        logger.info("Launching local agent: %s", " ".join(cmd))
-
         try:
-            process = subprocess.Popen(
-                cmd,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                cwd=cwd,
-                env=env,
-                start_new_session=True,
+            exec_handle = self._sandbox_provider.exec(
+                sandbox_handle, command=cmd, env=env, exec_policy=None
             )
+            # NOTE (#2023): get_process/build_launch_argv are Legacy-only escape
+            # hatches (NOT on the SandboxProvider Protocol) — the CLI stream-json
+            # protocol layer (_read_stdout/_send_sdk_init) drives a local Popen's
+            # stdin/stdout directly. A gVisor/container provider has no local
+            # Popen, so reusing this path requires abstracting the IO into a
+            # provider-returned transport handle (the "replaceable local seam").
+            # Deferred to #2023's first step (when gVisor needs to reuse
+            # stream-json); P4 deliberately stops at spawn/signal decoupling.
+            process = self._sandbox_provider.get_process(exec_handle)
+            # #2022 P6: persist a mid-run 'running' row so a crash between exec
+            # and task completion leaves an orphan the reconciler can destroy.
+            # Local has no external session id → None.
+            self._notify_sandbox_created(session_id, sandbox_handle, None)
         except (OSError, subprocess.SubprocessError) as e:
-            return AgentTaskResult(
-                session_id=(
-                    ""
-                    if self._uses_sidebar_session_source(cli_tool, workspace_type)
-                    else session_id
+            self._sandbox_provider.destroy(sandbox_handle)
+            return self._stamp_sandbox_attribution(
+                AgentTaskResult(
+                    session_id=(
+                        ""
+                        if self._uses_sidebar_session_source(cli_tool, workspace_type)
+                        else session_id
+                    ),
+                    tracking_session_id=session_id,
+                    success=False,
+                    error=f"Failed to start process: {e}",
                 ),
-                tracking_session_id=session_id,
-                success=False,
-                error=f"Failed to start process: {e}",
+                sandbox_handle,
+                self._sandbox_provider,
             )
 
         session = _LocalSession(
@@ -2097,6 +2411,9 @@ class AutonomousAgentRunner:
             started_at_epoch=time.time(),
             milestone_id=milestone_id,
             system_account=system_account,
+            sandbox_handle=sandbox_handle,
+            exec_handle=exec_handle,
+            sandbox_provider=self._sandbox_provider,
         )
         # For a resumed session the real CLI session_id is known up front; pin
         # it so sidebar detection reuses the existing record instead of guessing.
@@ -2156,6 +2473,15 @@ class AutonomousAgentRunner:
                 except (ProcessLookupError, OSError):
                     pass
 
+        # #2022 P3b: release the provider sandbox (reap any stragglers the
+        # process-group signal missed + clear its _procs so a shared provider
+        # instance does not leak across sessions). The reap above already killed
+        # the proc; destroy is idempotent on an already-dead sandbox.
+        try:
+            self._sandbox_provider.destroy(sandbox_handle)
+        except Exception as e:
+            logger.warning("sandbox destroy failed for %s: %s", session_id[:8], e)
+
         self._local_sessions.pop(session_id, None)
 
         # Clear PID from database
@@ -2167,9 +2493,24 @@ class AutonomousAgentRunner:
 
         if session._stderr_thread:
             session._stderr_thread.join(timeout=1)
-        if process.returncode == 68 or "OPENACE_REPO_INTEGRITY_VIOLATION" in session.last_stderr:
-            session.error_code = "repo_integrity_violation"
-            session.error = "Protected .git entry changed during autonomous agent execution"
+        # Issue #2020: classify isolated-launcher exits (repo integrity,
+        # resource-policy unavailable, signal-killed) into a structured code.
+        if not session.error_code:
+            # orchestrator_initiated: a timeout (`not completed`) or an
+            # explicit stop (`session._stopped`) means WE killed it — never a
+            # resource breach, so the wall-clock/stop code below is preserved.
+            cls_code, cls_msg = self._classify_isolated_exit_code(
+                process.returncode,
+                session.last_stderr,
+                orchestrator_initiated=(not completed) or session._stopped.is_set(),
+                resource_policy_configured=self._resource_policy_configured(),
+            )
+            if cls_code:
+                session.error_code = cls_code
+                if cls_code == "repo_integrity_violation":
+                    session.error = "Protected .git entry changed during autonomous agent execution"
+                elif cls_msg:
+                    session.error = cls_msg
 
         if (
             completed
@@ -2221,23 +2562,28 @@ class AutonomousAgentRunner:
                 and self._uses_sidebar_session_source(cli_tool, workspace_type)
             ):
                 self._replay_usage_from_jsonl(session, resolved_session_id)
-            return _build_agent_task_result(
-                session_id=session_id,
-                tracking_session_id=session_id,
-                source_session_id=resolved_session_id,
-                event_log=session.event_log,
-                fallback_text=session.assistant_text,
-                total_tokens=session.total_tokens,
-                total_input_tokens=session.total_input_tokens,
-                total_output_tokens=session.total_output_tokens,
-                request_count=session.request_count,
-                tool_calls=session.tool_calls,
-                success=False,
-                error=f"Agent task timed out after {timeout}s",
-                error_code=session.error_code,
+            return self._stamp_sandbox_attribution(
+                _build_agent_task_result(
+                    session_id=session_id,
+                    tracking_session_id=session_id,
+                    source_session_id=resolved_session_id,
+                    event_log=session.event_log,
+                    fallback_text=session.assistant_text,
+                    total_tokens=session.total_tokens,
+                    total_input_tokens=session.total_input_tokens,
+                    total_output_tokens=session.total_output_tokens,
+                    request_count=session.request_count,
+                    tool_calls=session.tool_calls,
+                    success=False,
+                    error=f"Agent task timed out after {timeout}s",
+                    error_code=session.error_code
+                    or AutonomousAgentRunner.TASK_WALL_CLOCK_TIMEOUT_ERROR_CODE,
+                ),
+                sandbox_handle,
+                self._sandbox_provider,
             )
 
-        return _build_agent_task_result(
+        result = _build_agent_task_result(
             session_id=session_id,
             tracking_session_id=session_id,
             source_session_id=resolved_session_id,
@@ -2252,6 +2598,9 @@ class AutonomousAgentRunner:
             error=session.error,
             error_code=session.error_code,
         )
+        # #2022 P5: attribute the result (provider/id/generation/state) so the
+        # orchestrator can persist sandbox identity + every evidence path carries it.
+        return self._stamp_sandbox_attribution(result, sandbox_handle, self._sandbox_provider)
 
     def _create_workflow_session(
         self,
@@ -2269,6 +2618,17 @@ class AutonomousAgentRunner:
         """
         if not self.session_manager or not sid:
             return
+        # Resolve tenant_id (default 1) so fail-closed tenant resolution passes.
+        tenant_id = 1
+        if user_id:
+            try:
+                from app.repositories.user_repo import UserRepository
+
+                user = UserRepository().get_user_by_id(user_id)
+                if user and user.get("tenant_id"):
+                    tenant_id = int(user["tenant_id"])
+            except Exception:
+                pass  # default tenant
         try:
             self.session_manager.create_session(
                 session_id=sid,
@@ -2276,6 +2636,7 @@ class AutonomousAgentRunner:
                 title=f"Autonomous: {workflow_id[:8]}",
                 tool_name=cli_tool,
                 user_id=user_id,
+                tenant_id=tenant_id,
                 project_path=project_path,
                 workspace_type=workspace_type,
                 context={"workflow_id": workflow_id},
@@ -2324,10 +2685,18 @@ class AutonomousAgentRunner:
 
         env = (
             self._build_agent_env(
-                adapter, cli_tool, user_id, session_id, model, runtime_python_command
+                adapter,
+                cli_tool,
+                user_id,
+                session_id,
+                model,
+                runtime_python_command,
+                task_id=session_id,
             )
             if runtime_python_command
-            else self._build_agent_env(adapter, cli_tool, user_id, session_id, model)
+            else self._build_agent_env(
+                adapter, cli_tool, user_id, session_id, model, task_id=session_id
+            )
         )
         # Resolve the ZCode session mode. The --mode CLI flag is ignored by
         # app-server (verified: sessions always start in "build" mode regardless
@@ -2348,9 +2717,9 @@ class AutonomousAgentRunner:
         )
         # Cross-user launch via run-as wrapper (zcode needs cwd=project too).
         cmd, cwd = (
-            self._wrap_agent_cmd(cmd, project_path, system_account, env)
+            self._wrap_agent_cmd(cmd, project_path, system_account, env, task_id=session_id)
             if self._is_cross_user(system_account)
-            else self._wrap_agent_cmd(cmd, project_path, system_account)
+            else self._wrap_agent_cmd(cmd, project_path, system_account, task_id=session_id)
         )
 
         logger.info("Launching ZCode app-server (mode=%s): %s", zcode_mode, " ".join(cmd))
@@ -2516,6 +2885,7 @@ class AutonomousAgentRunner:
                 tool_calls=collector.tool_calls,
                 success=False,
                 error=f"Agent task timed out after {timeout}s",
+                error_code=AutonomousAgentRunner.TASK_WALL_CLOCK_TIMEOUT_ERROR_CODE,
             )
 
         return _build_agent_task_result(
@@ -2753,18 +3123,26 @@ class AutonomousAgentRunner:
         cmd = [executable] + (args[1:] if len(args) > 1 and args[0] == exe_name else args)
         env = (
             self._build_agent_env(
-                adapter, cli_tool, user_id, session_id, model, runtime_python_command
+                adapter,
+                cli_tool,
+                user_id,
+                session_id,
+                model,
+                runtime_python_command,
+                task_id=session_id,
             )
             if runtime_python_command
-            else self._build_agent_env(adapter, cli_tool, user_id, session_id, model)
+            else self._build_agent_env(
+                adapter, cli_tool, user_id, session_id, model, task_id=session_id
+            )
         )
 
         # Cross-user launch via run-as wrapper (single-shot CLIs also need
         # cwd=project; openclaw documents it relies on the caller's cwd).
         cmd, cwd = (
-            self._wrap_agent_cmd(cmd, project_path, system_account, env)
+            self._wrap_agent_cmd(cmd, project_path, system_account, env, task_id=session_id)
             if self._is_cross_user(system_account)
-            else self._wrap_agent_cmd(cmd, project_path, system_account)
+            else self._wrap_agent_cmd(cmd, project_path, system_account, task_id=session_id)
         )
 
         logger.info("Launching single-shot agent (%s): %s", cli_tool, " ".join(cmd))
@@ -2814,6 +3192,7 @@ class AutonomousAgentRunner:
                 tool_calls=tool_calls,
                 success=False,
                 error=f"Agent task timed out after {timeout}s",
+                error_code=AutonomousAgentRunner.TASK_WALL_CLOCK_TIMEOUT_ERROR_CODE,
             )
         except (OSError, subprocess.SubprocessError) as e:
             return AgentTaskResult(
@@ -2834,9 +3213,21 @@ class AutonomousAgentRunner:
         error_code = None
         if not success:
             error = stderr_text or f"Command exited with code {proc.returncode}"
-            if proc.returncode == 68 or "OPENACE_REPO_INTEGRITY_VIOLATION" in stderr_text:
-                error_code = "repo_integrity_violation"
-                error = "Protected .git entry changed during autonomous agent execution"
+            # Issue #2020: structured classification of isolated-launcher exits.
+            # Single-shot runs synchronously; its timeout is handled by the
+            # subprocess.run(timeout=...) branch above, so a signal death here
+            # was not orchestrator-initiated.
+            cls_code, cls_msg = self._classify_isolated_exit_code(
+                proc.returncode,
+                stderr_text,
+                resource_policy_configured=self._resource_policy_configured(),
+            )
+            if cls_code:
+                error_code = cls_code
+                if cls_code == "repo_integrity_violation":
+                    error = "Protected .git entry changed during autonomous agent execution"
+                elif cls_msg:
+                    error = cls_msg
 
         return _build_agent_task_result(
             session_id=session_id,
@@ -2991,6 +3382,19 @@ class AutonomousAgentRunner:
 
         return events, tool_calls
 
+    def _select_sandbox_provider(self, workspace_type: str) -> Any:
+        """Pick the SandboxProvider for a task (#2022 P4 ③).
+
+        Centralizes backend selection so adding gVisor (#2023) is one branch
+        here, not a new dispatch fork in ``run_agent_task``. Local → the
+        injected LegacyPosixProvider; remote → a RemoteMachineProvider wrapping
+        ``remote_session_manager``. The runner no longer decides isolation
+        mechanics inline — it asks the provider.
+        """
+        if workspace_type == "remote" and self.remote_session_manager is not None:
+            return RemoteMachineProvider(self.remote_session_manager)
+        return self._sandbox_provider
+
     def _run_remote(
         self,
         session_id: str,
@@ -3027,6 +3431,14 @@ class AutonomousAgentRunner:
                 error="User ID is required for remote autonomous execution",
             )
 
+        # #2022 P4: route autonomous remote execution through RemoteMachineProvider
+        # so the orchestrator speaks the same create/exec/stop/destroy contract as
+        # the local path. The provider wraps RemoteSessionManager (create_remote_
+        # session / send_message / stop_session); it does NOT change the manager
+        # or remote.py (autonomous-only scope).
+        provider = self._select_sandbox_provider("remote")
+        sandbox_handle: SandboxHandle | None = None
+        exec_handle: ExecHandle | None = None
         remote_session_id = session_id
         try:
             # Register a tracker so orchestrator can signal cancellation
@@ -3036,83 +3448,91 @@ class AutonomousAgentRunner:
             )
             self._local_sessions[session_id] = tracker
 
-            # Create remote session
-            result = self.remote_session_manager.create_remote_session(
-                user_id=user_id,
-                machine_id=remote_machine_id,
-                project_path=project_path,
-                cli_tool=cli_tool,
-                model=model,
-                permission_mode=permission_mode,
-                allowed_tools=allowed_tools,
+            sandbox_handle = provider.create(
+                SandboxSpec(
+                    task_id=session_id,
+                    project_path=project_path,
+                    cli_tool=cli_tool,
+                    machine_id=remote_machine_id,
+                    user_id=user_id,
+                    # #2022 P5: express #2020 HOME/TMP/quota via the spec.
+                    policy=self._load_task_policy(),
+                )
             )
+            try:
+                with tracker._remote_lifecycle_lock:
+                    if tracker._stopped.is_set():
+                        # Shutdown arrived before dispatch — do not create/send.
+                        return self._build_remote_cancelled_result(session_id, session_id)
+                    # exec = create_remote_session + send_message(prompt). It
+                    # raises SandboxError on either failure (fail-closed),
+                    # replacing the old success-False / sent-False branches.
+                    # cancel_check restores the create↔send _stopped window the
+                    # old code had (#2078 review 🟡A): a shutdown landing during
+                    # create_remote_session is caught BEFORE send dispatches the
+                    # prompt.
+                    exec_handle = provider.exec(
+                        sandbox_handle,
+                        command=[],
+                        env=None,
+                        exec_policy=RemoteTurnSpec(
+                            prompt=prompt,
+                            model=model,
+                            permission_mode=permission_mode,
+                            allowed_tools=tuple(allowed_tools) if allowed_tools else None,
+                        ),
+                        cancel_check=lambda: tracker._stopped.is_set(),
+                    )
+                    remote_session_id = exec_handle.command_id
+                    # #2022 P6: persist mid-run 'running' + remote_session_id so
+                    # a crash leaves an orphan the reconciler can destroy by id.
+                    self._notify_sandbox_created(session_id, sandbox_handle, remote_session_id)
+                    tracker.persisted_session_id = remote_session_id
+                    tracker.sandbox_handle = sandbox_handle
+                    tracker.exec_handle = exec_handle
+                    tracker.sandbox_provider = provider
+                    if tracker._stopped.is_set():
+                        # Shutdown won while exec was in flight — stop the real
+                        # session before the poll loop observes it.
+                        provider.stop(exec_handle)
+                        return self._build_remote_cancelled_result(remote_session_id, session_id)
 
-            # The concrete RemoteSessionManager returns the session payload
-            # directly (without a success=True envelope). Keep compatibility
-            # with older/test adapters that explicitly return success=False.
-            if not result or result.get("success") is False or not result.get("session_id"):
+                    # Map the hidden stable workflow line to the real remote row so
+                    # milestone details resolve the transcript without replacing
+                    # the main/review/test tracking identity.
+                    tracking_row = self.session_manager.get_session(session_id)
+                    context = dict(getattr(tracking_row, "context", {}) or {})
+                    if isinstance(tracking_row, dict):
+                        context = dict(tracking_row.get("context", {}) or {})
+                    context.update(
+                        {
+                            "workflow_id": context.get("workflow_id", ""),
+                            "cli_session_id": remote_session_id,
+                        }
+                    )
+                    self.session_manager.update_session_fields(
+                        session_id,
+                        {
+                            "context": context,
+                            "status": "active",
+                            "cli_session_id": remote_session_id,
+                        },
+                        require_tenant=False,
+                    )
+            except SandboxError as e:
+                # provider.exec failed closed (create/send). No remote session
+                # leak: exec already stopped a partially-created session.
                 return AgentTaskResult(
                     session_id=session_id,
                     tracking_session_id=session_id,
                     success=False,
-                    error=(result or {}).get("error", "Failed to create remote session"),
+                    error=str(e),
                 )
 
-            remote_session_id = result["session_id"]
-            with tracker._remote_lifecycle_lock:
-                tracker.persisted_session_id = remote_session_id
-                if tracker._stopped.is_set():
-                    # Shutdown won while create_remote_session was in flight.
-                    # Stop the newly discovered real session before any prompt
-                    # can be dispatched.
-                    self.remote_session_manager.stop_session(remote_session_id)
-                    return self._build_remote_cancelled_result(remote_session_id, session_id)
-
-                # Map the hidden stable workflow line to the real remote row so
-                # milestone details resolve the transcript without replacing
-                # the main/review/test tracking identity.
-                tracking_row = self.session_manager.get_session(session_id)
-                context = dict(getattr(tracking_row, "context", {}) or {})
-                if isinstance(tracking_row, dict):
-                    context = dict(tracking_row.get("context", {}) or {})
-                context.update(
-                    {
-                        "workflow_id": context.get("workflow_id", ""),
-                        "cli_session_id": remote_session_id,
-                    }
-                )
-                self.session_manager.update_session_fields(
-                    session_id,
-                    {
-                        "context": context,
-                        "status": "active",
-                        "cli_session_id": remote_session_id,
-                    },
-                )
-
-                if tracker._stopped.is_set():
-                    self.remote_session_manager.stop_session(remote_session_id)
-                    return self._build_remote_cancelled_result(remote_session_id, session_id)
-
-                # The real manager names this argument ``content``. Treat an
-                # explicit False as a dispatch failure while retaining support
-                # for legacy adapters that returned None on success.
-                sent = self.remote_session_manager.send_message(
-                    session_id=remote_session_id,
-                    content=prompt,
-                    user_id=user_id,
-                )
-                if sent is False:
-                    self.remote_session_manager.stop_session(remote_session_id)
-                    return AgentTaskResult(
-                        session_id=remote_session_id,
-                        tracking_session_id=session_id,
-                        source_session_id=remote_session_id,
-                        success=False,
-                        error="Failed to send prompt to remote session",
-                    )
-
-            # Poll until session completes
+            # Poll until session completes. This stays runner-side: it needs the
+            # local session_manager for messages/tokens + _remote_turn_complete,
+            # which are CLI-protocol concerns (the provider's stream() is the
+            # contract equivalent for lifecycle events only).
             import time
 
             start_time = time.time()
@@ -3140,7 +3560,7 @@ class AutonomousAgentRunner:
 
                         remote_events, remote_tool_calls = self._normalize_remote_messages(messages)
 
-                        return _build_agent_task_result(
+                        result = _build_agent_task_result(
                             session_id=remote_session_id,
                             tracking_session_id=session_id,
                             source_session_id=remote_session_id,
@@ -3165,26 +3585,28 @@ class AutonomousAgentRunner:
                                 else None
                             ),
                         )
+                        return self._stamp_sandbox_attribution(result, sandbox_handle, provider)
                 time.sleep(5)
 
             timeout_result = self._build_remote_cancelled_result(remote_session_id, session_id)
-            try:
-                self.remote_session_manager.stop_session(remote_session_id)
-            except Exception:
-                logger.warning(
-                    "Failed to stop timed-out remote session %s",
-                    remote_session_id[:8],
-                    exc_info=True,
-                )
+            if exec_handle is not None:
+                try:
+                    provider.stop(exec_handle)
+                except Exception:
+                    logger.warning(
+                        "Failed to stop timed-out remote session %s",
+                        remote_session_id[:8],
+                        exc_info=True,
+                    )
             timeout_result.error = f"Remote agent task timed out after {timeout}s"
-            return timeout_result
+            return self._stamp_sandbox_attribution(timeout_result, sandbox_handle, provider)
 
         except Exception as e:
             # Once a real remote id exists, never drop its local tracker while
             # leaving the remote task running after a mapping/polling failure.
-            if remote_session_id != session_id:
+            if exec_handle is not None and remote_session_id != session_id:
                 try:
-                    self.remote_session_manager.stop_session(remote_session_id)
+                    provider.stop(exec_handle)
                 except Exception:
                     logger.warning(
                         "Failed to stop remote session after runner error %s",
@@ -3199,6 +3621,13 @@ class AutonomousAgentRunner:
                 error=f"Remote execution error: {e}",
             )
         finally:
+            # #2078 review 🟢: do NOT destroy/stop unconditionally. A successful
+            # remote turn leaves its reusable sidebar session deliberately
+            # active (see the success-path comment above); the failure paths
+            # (timeout / exception / cancel) already call provider.stop
+            # explicitly. The provider is per-call (factory mints a fresh one),
+            # so not destroying here leaks no cross-session state. Only the
+            # local tracker is popped.
             # Clean up the remote session tracker
             self._local_sessions.pop(session_id, None)
 
@@ -3624,8 +4053,14 @@ class AutonomousAgentRunner:
                             )
 
                     elif msg_type in {"system", "initialized"}:
-                        if msg_type == "initialized" or parsed.get("subtype") == "initialized":
-                            self._capture_cli_session_id(session, parsed, "system.initialized")
+                        subtype = parsed.get("subtype", "")
+                        # Claude CLI emits subtype "init" (older versions used
+                        # "initialized"); accept both so the real cli_session_id
+                        # is captured at agent start instead of via mtime fallback.
+                        if msg_type == "initialized" or subtype in ("initialized", "init"):
+                            self._capture_cli_session_id(
+                                session, parsed, f"system.{subtype or 'init'}"
+                            )
                         # Forward key system events to the UI so the workflow
                         # detail shows progress during long LLM waits.
                         # Without this, an agent stuck in api_retry (upstream
@@ -3633,7 +4068,6 @@ class AutonomousAgentRunner:
                         # — which never triggered _activity_callback — so the
                         # UI showed "no AI activity" for minutes until the
                         # first `assistant` event finally arrived.
-                        subtype = parsed.get("subtype", "")
                         # This is a high-frequency cumulative estimate, not a
                         # discrete user-visible activity. Skipping the event
                         # also prevents one sidebar fallback probe per token.
@@ -3780,6 +4214,21 @@ class AutonomousAgentRunner:
         session = self._local_sessions.get(session_id)
         if not session:
             return
+        # #2022 P4 ③: route stop through the SandboxProvider when the session has
+        # one. gVisor (#2023) has no local Popen — cancellation/timeout MUST
+        # reach the sandbox via provider.stop. Legacy (raw-proc killpg) and
+        # Remote (remote_session_manager.stop_session) both set sandbox_provider
+        # on the tracker, so this covers both; the branches below are the
+        # raw-proc / no-provider fallbacks for legacy tracker paths.
+        if session.sandbox_provider is not None and session.exec_handle is not None:
+            session._stopped.set()
+            with session._remote_lifecycle_lock:
+                try:
+                    session.sandbox_provider.stop(session.exec_handle)
+                except Exception as exc:
+                    logger.warning("sandbox stop failed for %s: %s", session_id[:8], exc)
+            session.completed.set()
+            return
         if session.process is None:
             # Remote autonomous calls use a process-less local tracker so the
             # synchronous poll loop can observe cancellation. Stop the actual
@@ -3847,13 +4296,28 @@ class AutonomousAgentRunner:
         """Suspend a running local session using SIGSTOP.
 
         The process is frozen in place and can be resumed with
-        :meth:`resume_session` using SIGCONT.
+        :meth:`resume_session` using SIGCONT. Legacy-effective only: a remote
+        tracker has ``process=None`` and returns False here (a remote CLI
+        session has no SIGSTOP analogue — pause is unsupported, not silently
+        claimed). The provider branch is reached only for local sessions with a
+        live process; ``RemoteMachineProvider.pause`` is a documented no-op.
         """
         session = self._local_sessions.get(session_id)
         if not session or not session.process or session.process.returncode is not None:
             return False
         if session._paused.is_set():
             return True
+        # #2022 P4 ③: route through the SandboxProvider when present (gVisor
+        # paves container pause); equivalent to the raw SIGSTOP below for Legacy.
+        if session.sandbox_provider is not None and session.exec_handle is not None:
+            try:
+                session.sandbox_provider.pause(session.exec_handle)
+                session._paused.set()
+                logger.info("Paused session %s via sandbox provider", session_id[:8])
+                return True
+            except Exception as e:
+                logger.error("Failed to pause session %s: %s", session_id[:8], e)
+                return False
         try:
             pgid = os.getpgid(session.process.pid)
             os.killpg(pgid, signal.SIGSTOP)
@@ -3871,6 +4335,15 @@ class AutonomousAgentRunner:
             return False
         if not session._paused.is_set():
             return True
+        if session.sandbox_provider is not None and session.exec_handle is not None:
+            try:
+                session.sandbox_provider.resume(session.exec_handle)
+                session._paused.clear()
+                logger.info("Resumed session %s via sandbox provider", session_id[:8])
+                return True
+            except Exception as e:
+                logger.error("Failed to resume session %s: %s", session_id[:8], e)
+                return False
         try:
             pgid = os.getpgid(session.process.pid)
             os.killpg(pgid, signal.SIGCONT)

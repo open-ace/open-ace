@@ -399,7 +399,10 @@ class TestDoReportStructuredPayload:
         ]
         orch, mock_repo = _make_orchestrator(wf, milestones=milestones)
 
-        orch._do_report(wf)
+        ctx = orch._build_workflow_context(wf)
+        result = orch._do_report(ctx, orch._build_phase_deps())
+        if result is not None:
+            orch._commit_phase_result(result)
 
         report_ms_dict = mock_repo.create_milestone.call_args_list[0][0][0]
         assert report_ms_dict["milestone_type"] == "progress_reported"
@@ -422,7 +425,10 @@ class TestDoReportStructuredPayload:
         )
         orch, _ = _make_orchestrator(wf)
 
-        orch._do_report(wf)
+        ctx = orch._build_workflow_context(wf)
+        result = orch._do_report(ctx, orch._build_phase_deps())
+        if result is not None:
+            orch._commit_phase_result(result)
 
         orch._gh.add_issue_comment.assert_called_once()
         body = orch._gh.add_issue_comment.call_args[0][1]
@@ -433,7 +439,10 @@ class TestDoReportStructuredPayload:
         wf = _make_workflow(content_language=None, github_issue_number=42)
         orch, _ = _make_orchestrator(wf)
 
-        orch._do_report(wf)
+        ctx = orch._build_workflow_context(wf)
+        result = orch._do_report(ctx, orch._build_phase_deps())
+        if result is not None:
+            orch._commit_phase_result(result)
 
         body = orch._gh.add_issue_comment.call_args[0][1]
         assert "Dev Round 1 Summary" in body

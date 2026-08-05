@@ -203,6 +203,10 @@ class TestContracts:
         rec.record_run_status("s", "completed")
         rec.record_approval_request("s", {"request": {}})
         rec.record_approval_response("s", "req-1", "allow", decided_by=1)
+        # Contract verified: none of the calls raised, and because the repo was
+        # None nothing could be persisted — a fresh repo on the same DB sees no
+        # run for this session.
+        assert RunTimelineRepository(db=rt_db).get_run_by_session("s") is None
 
     def test_base_recorder_is_abstract(self):
         base = RunRecorder()
@@ -268,6 +272,9 @@ class TestAsyncWriter:
         rec.record_usage("s", {"input": 1, "output": 1})
         # flush() must return cleanly once the worker has swallowed every error.
         rec.flush()
+        # Contract verified: no exception propagated to the caller, and the
+        # broken repo (None) means nothing was durable — the real DB has no run.
+        assert RunTimelineRepository(db=rt_db).get_run_by_session("s") is None
 
     def test_per_session_event_order_preserved_under_async(self, rt_db):
         rec = DbRunRecorder(repo=RunTimelineRepository(db=rt_db), async_writer=True)

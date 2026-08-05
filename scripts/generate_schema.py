@@ -603,7 +603,8 @@ def convert_to_sqlite(postgres_sql):
             # Remove PostgreSQL-specific syntax
             full_idx = re.sub(r" USING [a-z]+", "", full_idx)
             full_idx = re.sub(r" INCLUDE \([^)]+\)", "", full_idx)
-            # Remove ::type casts in WHERE clauses
+            # Remove ::type casts in WHERE clauses and index expressions
+            # This includes ::jsonb and ::text casts in JSONB expressions
             full_idx = re.sub(r"::[a-z_\[\]]+", "", full_idx)
             # Remove varchar_pattern_ops
             full_idx = re.sub(r"\s+varchar_pattern_ops", "", full_idx)
@@ -614,6 +615,33 @@ def convert_to_sqlite(postgres_sql):
             full_idx = re.sub(r"\((\w+)\)::text\s*=\s*'([^']*)'::text", r"\1 = '\2'", full_idx)
             # Convert (user_id IS NOT NULL) AND ... in WHERE
             full_idx = re.sub(r"\((\w+)\)::text\s*=\s*'([^']*)'", r"\1 = '\2'", full_idx)
+            # Convert PostgreSQL JSON operators to SQLite json_extract
+            # ->> extracts text: column->>'key' -> json_extract(column, '$.key')
+            # -> extracts JSON: column->'key' -> json_extract(column, '$.key')
+            # PostgreSQL uses: (((column)::jsonb ->> 'key'::text))
+            # SQLite: (json_extract(column, '$.key'))
+            # Preserve 1 level of parens for consistency with SQLite schema
+            match = re.search(r"\(+(\w+)\)*\s*->>\s*'([^']+)'", full_idx)
+            if match:
+                column = match.group(1)
+                key = match.group(2)
+                # Replace with 1 level of parens
+                replacement = f"(json_extract({column}, '$.{key}'))"
+                full_idx = re.sub(
+                    r"\(+\w+\)*\s*->>\s*'[^']+'\)*",
+                    replacement,
+                    full_idx,
+                )
+            match = re.search(r"\(+(\w+)\)*\s*->\s*'([^']+)'", full_idx)
+            if match:
+                column = match.group(1)
+                key = match.group(2)
+                replacement = f"(json_extract({column}, '$.{key}'))"
+                full_idx = re.sub(
+                    r"\(+\w+\)*\s*->\s*'[^']+'\)*",
+                    replacement,
+                    full_idx,
+                )
 
             # Skip indexes on materialized views (not supported in SQLite)
             if re.match(r"CREATE(?: UNIQUE)? INDEX\s+\w+\s+ON\s+session_stats\b", full_idx):

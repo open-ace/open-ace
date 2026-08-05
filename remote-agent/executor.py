@@ -239,7 +239,8 @@ class SessionProcess:
                             continue
 
                         if msg_type in {"system", "initialized"} and (
-                            msg_type == "initialized" or parsed.get("subtype") == "initialized"
+                            msg_type == "initialized"
+                            or parsed.get("subtype") in ("initialized", "init")
                         ):
                             self._capture_cli_session_id(parsed, "system.initialized")
 

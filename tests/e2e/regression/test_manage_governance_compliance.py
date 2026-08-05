@@ -53,7 +53,7 @@ def test_page_loads():
             assert check_element_exists(page, main_selectors), "主内容区域应存在"
 
             save_screenshot(page, MODULE_NAME, "01_page_load")
-            return True
+
         finally:
             browser.close()
 
@@ -83,7 +83,7 @@ def test_compliance_rules_list():
             assert check_element_exists(page, rules_selectors), "应有合规规则列表或空状态提示"
 
             save_screenshot(page, MODULE_NAME, "02_rules_list")
-            return True
+
         finally:
             browser.close()
 
@@ -101,18 +101,15 @@ def test_rule_detail():
             # 尝试点击规则项查看详情
             rule_item_selectors = [".compliance-rule-item", "tr", ".list-item"]
             if check_element_exists(page, rule_item_selectors):
-                try:
-                    rule_item = page.locator(
-                        rule_item_selectors[0] + ", " + rule_item_selectors[1]
-                    ).first
-                    if rule_item.is_visible():
-                        rule_item.click()
-                        page.wait_for_timeout(500)
-                except Exception:
-                    pass
+                rule_item = page.locator(
+                    rule_item_selectors[0] + ", " + rule_item_selectors[1]
+                ).first
+                assert rule_item.is_visible(), "rule_item not visible (Issue #2189)"
+                rule_item.click()
+                page.wait_for_timeout(500)
 
             save_screenshot(page, MODULE_NAME, "03_rule_detail")
-            return True
+
         finally:
             browser.close()
 
@@ -132,7 +129,7 @@ def test_rule_toggle():
             assert check_element_exists(page, toggle_selectors), "规则开关应可见"
 
             save_screenshot(page, MODULE_NAME, "04_rule_toggle")
-            return True
+
         finally:
             browser.close()
 
@@ -156,7 +153,7 @@ def test_compliance_report():
             check_element_exists(page, report_selectors)
 
             save_screenshot(page, MODULE_NAME, "05_report")
-            return True
+            assert page.locator("body").is_visible(), "页面应可见"
         finally:
             browser.close()
 

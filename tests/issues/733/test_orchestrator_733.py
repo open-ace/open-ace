@@ -164,7 +164,10 @@ class TestPermissionModePassthrough:
 
         mock_repo.list_milestones.return_value = []
 
-        orch._do_planning(wf)
+        ctx = orch._build_workflow_context(wf)
+        result = orch._do_planning(ctx, orch._build_phase_deps())
+        if result is not None:
+            orch._commit_phase_result(result)
 
         # Check that ALL run_agent_task calls received permission_mode="bypass"
         for call in orch._runner.run_agent_task.call_args_list:
@@ -406,7 +409,10 @@ class TestPlanningPromptConstraints:
         orch._runner.run_agent_task.return_value = _make_agent_result(text="# Plan\nStep 1")
         mock_repo.list_milestones.return_value = []
 
-        orch._do_planning(wf)
+        ctx = orch._build_workflow_context(wf)
+        result = orch._do_planning(ctx, orch._build_phase_deps())
+        if result is not None:
+            orch._commit_phase_result(result)
 
         # _do_planning calls run_agent_task twice: plan agent then review agent.
         # The constraint should be in the FIRST call (plan agent).
@@ -442,7 +448,10 @@ class TestPlanningPromptConstraints:
             },
         ]
 
-        orch._do_planning(wf)
+        ctx = orch._build_workflow_context(wf)
+        result = orch._do_planning(ctx, orch._build_phase_deps())
+        if result is not None:
+            orch._commit_phase_result(result)
 
         # First call is the refine-plan agent
         calls = orch._runner.run_agent_task.call_args_list
@@ -508,7 +517,10 @@ class TestFinalPlanAnnotation:
             },
         ]
 
-        orch._do_planning(wf)
+        ctx = orch._build_workflow_context(wf)
+        result = orch._do_planning(ctx, orch._build_phase_deps())
+        if result is not None:
+            orch._commit_phase_result(result)
 
         # add_issue_comment is called 3 times: plan, review, final
         # Check the last call (Final Plan)
@@ -539,7 +551,10 @@ class TestFinalPlanAnnotation:
             },
         ]
 
-        orch._do_planning(wf)
+        ctx = orch._build_workflow_context(wf)
+        result = orch._do_planning(ctx, orch._build_phase_deps())
+        if result is not None:
+            orch._commit_phase_result(result)
 
         comment = self._get_last_comment(orch._gh)
         assert "Final Implementation Plan" in comment

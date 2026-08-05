@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Check that the Alembic migration graph has exactly one head.
+Check that the Alembic migration graph has exactly one head and is resolvable.
 
 A single head is a structural invariant of the migration chain: if two
 migrations declare the same ``down_revision`` (e.g. two parallel branches each
@@ -16,8 +16,20 @@ invoking this check. The pre-commit hook ``check-migration-heads`` also calls
 this script, but it only sees the current working tree and so cannot detect
 cross-branch forks — it guards the (rarer) single-branch multi-head case.
 
-No database is opened and no ``upgrade()`` is executed; ``get_heads()`` only
-parses each migration module's ``revision`` / ``down_revision`` attributes.
+No database is opened and no ``upgrade()`` is executed here, because this
+check runs inside the synthetic pre-merged tree that CI assembles (``alembic.ini``
++ ``migrations/{baseline,version_table}.py`` + ``migrations/versions/``) — that
+tree has no ``migrations/env.py`` or ``scripts/``, so an ``upgrade()`` could not
+run even if we wanted it to. The pre-commit ``check-migration-heads`` hook sees
+the real working tree but stays database-free for parity with the CI job.
+
+In addition to the single-head assertion, building the revision map surfaces a
+dangling ``down_revision`` (one pointing at a revision id no migration defines)
+as a deterministic failure rather than an unhandled traceback. This catches the
+source-graph form of the rename-without-update regression. It does **not** catch
+a phantom that lives only in a stamped DB row (issue #2101's actual failure
+mode) — that requires a live ``alembic upgrade head`` against a throwaway
+database, which is a planned follow-up to this check (tracked on issue #2101).
 
 Usage:
     python3 scripts/check_migration_heads.py
@@ -52,7 +64,31 @@ def main() -> int:
         return 2
 
     cfg = Config(str(cfg_path))
-    heads = ScriptDirectory.from_config(cfg).get_heads()
+    script_dir = ScriptDirectory.from_config(cfg)
+
+    # Building the revision map (which get_heads()/walk_revisions() trigger)
+    # raises KeyError when a migration's down_revision points at a revision id
+    # that no file defines. Catch that here so the gate fails with a clear
+    # message instead of an unhandled traceback. See issue #2101: such a
+    # dangling reference is invisible to get_heads() in the source graph (the
+    # phantom there lived in a stamped DB row), but when it does appear in the
+    # source it must fail this check, not crash opaquely.
+    try:
+        heads = script_dir.get_heads()
+    except KeyError as exc:
+        print(
+            "FAIL: a migration references a down_revision that is not defined by "
+            "any migration file (dangling parent):",
+            file=sys.stderr,
+        )
+        print(f"  unresolved revision id: {exc}", file=sys.stderr)
+        print(
+            "A revision id was likely renamed or removed without updating its "
+            "children. Point each down_revision at a revision id that exists in "
+            "migrations/versions/.",
+            file=sys.stderr,
+        )
+        return 1
 
     if len(heads) != 1:
         print(

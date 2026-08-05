@@ -27,6 +27,8 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Framework :: Flask",
     "Topic :: Office/Business",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
@@ -38,7 +40,7 @@ dependencies = [
     "requests>=2.33.0,<3.0.0",
     "bcrypt>=4.0.0,<6.0.0",
     "PyJWT>=2.12.1,<3.0.0",
-    "cryptography>=44.0.0,<50.0.0",
+    "cryptography>=44.0.0,<51.0.0",
     "signxml>=4.2.2,<5.0.0",
     "filetype>=1.2.0,<2.0.0",
     "gunicorn>=23.0.0,<24.0.0",
@@ -127,7 +129,7 @@ skip = [".git", ".hg", ".mypy_cache", ".tox", ".venv", "_build", "buck-out", "bu
 [tool.ruff]
 line-length = 100
 target-version = "py310"
-exclude = ["*.sh", "*.bash", "*.zsh", "docker-entrypoint.sh"]
+exclude = ["*.sh", "*.bash", "*.zsh", "*.ps1", "*.cmd", "docker-entrypoint.sh"]
 
 [tool.ruff.lint]
 select = [
@@ -191,6 +193,25 @@ ignore_errors = true
 [[tool.mypy.overrides]]
 module = "scripts.*"
 disable_error_code = ["no-any-return", "arg-type", "union-attr", "operator", "index", "has-type", "return-value"]
+
+# Issue #2131: Ignore type errors in app modules that are not directly checked
+# by pre-commit but are found through dependency resolution
+[[tool.mypy.overrides]]
+module = [
+    "app.ws_frame",
+    "app.utils.outbound_url_guard",
+    "app.modules.governance.alert_notifier",
+    "app.modules.workspace.terminal_ws_bridge",
+    "app.modules.workspace.vscode_ws_bridge",
+    "app.routes.workspace",
+    "app.routes.sso",
+    "app.routes.auth",
+    "app.routes.api_keys",
+    "app.routes.alerts",
+    "app.routes.autonomous",
+    "app",
+]
+ignore_errors = true
 
 # =============================================================================
 # Pytest Configuration

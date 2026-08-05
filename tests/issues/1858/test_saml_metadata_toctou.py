@@ -47,6 +47,17 @@ class _RebindingResolver:
         return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, 443))]
 
 
+class _StableResolver:
+    """getaddrinfo that always returns the same public IP."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def __call__(self, host, *args, **kwargs):
+        self.calls += 1
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))]
+
+
 def _create_provider_without_metadata_config(extra_params=None):
     """Helper to create a SAMLProvider instance that needs metadata from URL."""
     params = {}
@@ -68,9 +79,9 @@ def _create_provider_without_metadata_config(extra_params=None):
     )
 
 
-def test_saml_metadata_url_pins_verified_ip(monkeypatch):
-    """Verify that safe_request pins the verified IP and prevents DNS rebinding."""
-    resolver = _RebindingResolver()
+def test_saml_metadata_url_retains_hostname_for_tls_sni(monkeypatch):
+    """Verify that safe_request retains the hostname for TLS SNI and re-validates at connect time."""
+    resolver = _StableResolver()
     captured = {}
 
     # Mock the pinned adapter's send to capture the request without network dial
@@ -104,17 +115,40 @@ def test_saml_metadata_url_pins_verified_ip(monkeypatch):
     # Trigger metadata loading by accessing idp_entity_id
     _ = provider.idp_entity_id
 
-    # Only ONE resolution happened — the rebinding second call was never made
-    assert resolver.calls == 1, f"Expected 1 resolution, got {resolver.calls}"
+    # Pre-validation resolution happened (connect-time re-validation is tested
+    # separately in test_outbound_url_toctou.py since send is mocked here)
+    assert resolver.calls >= 1, f"Expected >=1 resolution, got {resolver.calls}"
 
-    # The verified public IP is pinned into the URL
+    # The URL retains the original hostname (not IP literal) for TLS SNI
     outgoing = captured.get("url", "")
-    assert "93.184.216.34" in outgoing, f"Public IP not pinned: {outgoing}"
+    assert "idp.example.com" in outgoing, f"Hostname not retained in URL: {outgoing}"
+    assert "93.184.216.34" not in outgoing, f"IP literal should not be in URL: {outgoing}"
     assert "169.254.169.254" not in outgoing, f"Metadata IP should not appear: {outgoing}"
 
-    # The original hostname is preserved as Host header
-    host_header = captured["headers"].get("Host")
-    assert host_header == "idp.example.com", f"Host header not preserved: {host_header}"
+
+def test_saml_metadata_url_blocks_dns_rebinding(monkeypatch, caplog):
+    """Verify that DNS rebinding (public→metadata flip) is blocked at connect time."""
+    from app.utils.outbound_url_guard import safe_request as real_safe_request
+
+    resolver = _RebindingResolver()
+
+    def mock_safe_request(method, url, **kwargs):
+        return real_safe_request(method, url, resolver=resolver, **kwargs)
+
+    monkeypatch.setattr("app.modules.sso.saml.safe_request", mock_safe_request)
+
+    provider = _create_provider_without_metadata_config(
+        extra_params={"idp_metadata_url": "https://idp.example.com/metadata"}
+    )
+
+    # Access property to trigger metadata loading
+    entity_id = provider.idp_entity_id
+
+    # Should gracefully degrade to empty string (rebinding was blocked)
+    assert entity_id == "", f"Should be empty string: {entity_id}"
+
+    # Check log contains warning about metadata loading failure
+    assert any("Failed to load IdP metadata" in record.message for record in caplog.records)
 
 
 def test_saml_metadata_url_rejects_metadata_ip(monkeypatch, caplog):

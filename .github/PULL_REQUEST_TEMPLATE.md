@@ -34,6 +34,13 @@ Please describe the tests that you ran to verify your changes.
 - [ ] New and existing unit tests pass locally with my changes
 - [ ] Any dependent changes have been merged and published
 
+## False Positive Annotation Check (if applicable)
+
+- [ ] New tests have assertions or annotated reasons
+- [ ] Annotation reasons follow standard templates (see CLAUDE.md)
+- [ ] Annotations include TODO review timestamps (if applicable)
+- [ ] Annotation reasons are not overly permissive (reviewer confirmed)
+
 ## Screenshots (if applicable)
 
 Add screenshots to help explain your changes.

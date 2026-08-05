@@ -13,6 +13,7 @@ from app.auth.decorators import (
     _load_user_from_token,
     enforce_password_change_requirement,
 )
+from app.models.user import User
 from app.repositories.project_category_repo import ProjectCategoryRepository
 from app.repositories.user_repo import UserRepository
 
@@ -56,7 +57,7 @@ def list_categories():
 @project_categories_bp.route("/project-categories", methods=["POST"])
 def create_category():
     """Create a new category (admin only)."""
-    if g.user.get("role") != "admin":
+    if not User.is_admin_role(g.user.get("role")):
         return jsonify({"error": "Admin access required"}), 403
 
     data = request.get_json() or {}
@@ -83,7 +84,7 @@ def create_category():
 @project_categories_bp.route("/project-categories/<int:category_id>", methods=["PUT"])
 def update_category(category_id):
     """Update a category (admin only)."""
-    if g.user.get("role") != "admin":
+    if not User.is_admin_role(g.user.get("role")):
         return jsonify({"error": "Admin access required"}), 403
 
     category = category_repo.get_category(category_id)
@@ -116,7 +117,7 @@ def update_category(category_id):
 @project_categories_bp.route("/project-categories/<int:category_id>", methods=["DELETE"])
 def delete_category(category_id):
     """Delete a category (admin only)."""
-    if g.user.get("role") != "admin":
+    if not User.is_admin_role(g.user.get("role")):
         return jsonify({"error": "Admin access required"}), 403
 
     category = category_repo.get_category(category_id)

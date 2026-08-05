@@ -101,6 +101,10 @@ def _config_for(tenant_id: int) -> dict:
 
 @pytest.fixture
 def sync_env(tmp_path, monkeypatch):
+    # Issue #1820: Reset EncryptionKeyRegistry before setting new key
+    from app.utils.encryption_key_registry import reset_registry
+
+    reset_registry()
     monkeypatch.setenv("OPENACE_ENCRYPTION_KEY", "test-dingtalk-round3-key")
     # Pin the dialect to sqlite regardless of the host's configured DATABASE_URL.
     # The org-sync code path calls the module-global is_postgresql(), which reads
@@ -120,6 +124,8 @@ def sync_env(tmp_path, monkeypatch):
         yield db
     finally:
         smtp_crypto._password_manager_instance = None
+        # Issue #1820: Reset EncryptionKeyRegistry after test
+        reset_registry()
 
 
 def test_deactivate_departed_users_isolates_by_tenant(sync_env):

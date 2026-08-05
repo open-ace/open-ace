@@ -278,7 +278,10 @@ class TestOrchestratorPreparation:
         mock_gh.create_branch.return_value = {"branch": "auto-dev/test-wf"}
         mock_gh_cls.return_value = mock_gh
 
-        orch._do_preparation(wf)
+        ctx = orch._build_workflow_context(wf)
+        result = orch._do_preparation(ctx, orch._build_phase_deps())
+        if result is not None:
+            orch._commit_phase_result(result)
 
         # Should create issue
         mock_gh.create_issue.assert_called_once()
@@ -308,7 +311,10 @@ class TestOrchestratorPreparation:
         orch._gh = mock_gh
 
         with patch("app.modules.workspace.autonomous.orchestrator.GitHubOps", return_value=mock_gh):
-            orch._do_preparation(wf)
+            ctx = orch._build_workflow_context(wf)
+            result = orch._do_preparation(ctx, orch._build_phase_deps())
+            if result is not None:
+                orch._commit_phase_result(result)
 
         mock_gh.get_issue.assert_called_once_with(99)
         # Should update requirements_text from issue body
@@ -355,7 +361,10 @@ class TestOrchestratorPreparation:
         orch._gh = mock_gh
 
         with patch("app.modules.workspace.autonomous.orchestrator.GitHubOps", return_value=mock_gh):
-            orch._do_preparation(wf)
+            ctx = orch._build_workflow_context(wf)
+            result = orch._do_preparation(ctx, orch._build_phase_deps())
+            if result is not None:
+                orch._commit_phase_result(result)
 
         update_calls = mock_repo.update_workflow.call_args_list
         req_updates = [c for c in update_calls if c[0][1].get("requirements_text")]
@@ -389,7 +398,10 @@ class TestOrchestratorPreparation:
         mock_gh.get_current_branch.return_value = "auto-dev/test-wf-"
         mock_gh_cls.return_value = mock_gh
 
-        orch._do_preparation(wf)
+        ctx = orch._build_workflow_context(wf)
+        result = orch._do_preparation(ctx, orch._build_phase_deps())
+        if result is not None:
+            orch._commit_phase_result(result)
 
         mock_gh.create_worktree.assert_called_once()
         # Should set worktree_path
@@ -418,7 +430,10 @@ class TestOrchestratorPreparation:
         mock_gh.get_current_branch.return_value = "auto-dev/test-wf"
         mock_gh_cls.return_value = mock_gh
 
-        orch._do_preparation(wf)
+        ctx = orch._build_workflow_context(wf)
+        result = orch._do_preparation(ctx, orch._build_phase_deps())
+        if result is not None:
+            orch._commit_phase_result(result)
 
         mock_gh.create_worktree.assert_called_once_with(
             path="/tmp/project/.worktrees/test-wf",
@@ -439,16 +454,26 @@ class TestOrchestratorPreparation:
         mock_gh.get_current_branch.return_value = "main"
         mock_gh_cls.return_value = mock_gh
 
-        orch._do_preparation(wf)
+        ctx = orch._build_workflow_context(wf)
+        result = orch._do_preparation(ctx, orch._build_phase_deps())
+        if result is not None:
+            orch._commit_phase_result(result)
 
         # Should NOT create branch or worktree
         mock_gh.create_branch.assert_not_called()
         mock_gh.create_worktree.assert_not_called()
-        mock_repo.update_workflow.assert_any_call(
-            wf["workflow_id"], {"branch_name": mock_gh.get_current_branch.return_value}
-        )
-        # But should still transition to planning
+        # Under the PhaseResult contract, the detected branch_name travels in
+        # the merged workflow_patch applied by _commit_phase_result (alongside
+        # current_round and the planning phase/status). Assert the recorded
+        # patch carries the detected branch rather than an exact-equality call
+        # (the legacy inline method wrote {"branch_name": ...} as a standalone
+        # _update_workflow; the migration coalesces it into one commit).
         update_calls = mock_repo.update_workflow.call_args_list
+        branch_patches = [c for c in update_calls if c[0][1].get("branch_name") == "main"]
+        assert (
+            branch_patches
+        ), f"branch_name=main not recorded in any workflow update: {update_calls}"
+        # But should still transition to planning
         phases = [c[0][1].get("current_phase") for c in update_calls if "current_phase" in c[0][1]]
         assert "planning" in phases
 
@@ -467,7 +492,10 @@ class TestOrchestratorPreparation:
         mock_gh.create_branch.return_value = {"branch": "auto-dev/test-wf"}
         mock_gh_cls.return_value = mock_gh
 
-        orch._do_preparation(wf)
+        ctx = orch._build_workflow_context(wf)
+        result = orch._do_preparation(ctx, orch._build_phase_deps())
+        if result is not None:
+            orch._commit_phase_result(result)
 
         # github_issue_number should be persisted via _update_workflow
         update_calls = mock_repo.update_workflow.call_args_list
@@ -503,7 +531,10 @@ class TestOrchestratorPreparation:
         mock_gh.create_branch.return_value = {"branch": "auto-dev/test-wf"}
         mock_gh_cls.return_value = mock_gh
 
-        orch._do_preparation(wf)
+        ctx = orch._build_workflow_context(wf)
+        result = orch._do_preparation(ctx, orch._build_phase_deps())
+        if result is not None:
+            orch._commit_phase_result(result)
 
         # Should persist issue number from URL
         update_calls = mock_repo.update_workflow.call_args_list
@@ -523,7 +554,10 @@ class TestOrchestratorPreparation:
         mock_gh.create_branch.return_value = {"branch": "auto-dev/test-wf"}
         mock_gh_cls.return_value = mock_gh
 
-        orch._do_preparation(wf)
+        ctx = orch._build_workflow_context(wf)
+        result = orch._do_preparation(ctx, orch._build_phase_deps())
+        if result is not None:
+            orch._commit_phase_result(result)
 
         # Should fetch origin/main before creating branch
         fetch_calls = [c for c in mock_gh._run_git.call_args_list if "fetch" in str(c)]
@@ -585,7 +619,10 @@ class TestOrchestratorPlanning:
         orch._runner.run_agent_task.side_effect = [plan_result, review_result]
         orch._gh = mock_gh
 
-        orch._do_planning(wf)
+        ctx = orch._build_workflow_context(wf)
+        result = orch._do_planning(ctx, orch._build_phase_deps())
+        if result is not None:
+            orch._commit_phase_result(result)
 
         # Should call agent twice (plan + review)
         assert orch._runner.run_agent_task.call_count == 2
@@ -614,7 +651,10 @@ class TestOrchestratorPlanning:
         orch._runner.run_agent_task.side_effect = [plan_result, review_result]
         orch._gh = mock_gh
 
-        orch._do_planning(wf)
+        ctx = orch._build_workflow_context(wf)
+        result = orch._do_planning(ctx, orch._build_phase_deps())
+        if result is not None:
+            orch._commit_phase_result(result)
 
         update_calls = mock_repo.update_workflow.call_args_list
         phases = [c[0][1].get("current_phase") for c in update_calls if "current_phase" in c[0][1]]
@@ -644,7 +684,10 @@ class TestOrchestratorPlanning:
         orch._runner.run_agent_task.side_effect = [plan_result, review_result]
         orch._gh = mock_gh
 
-        orch._do_planning(wf)
+        ctx = orch._build_workflow_context(wf)
+        result = orch._do_planning(ctx, orch._build_phase_deps())
+        if result is not None:
+            orch._commit_phase_result(result)
 
         # Should NOT transition to development
         update_calls = mock_repo.update_workflow.call_args_list
@@ -687,7 +730,10 @@ class TestOrchestratorPlanning:
         orch._runner.run_agent_task.side_effect = [plan_result, review_result]
         orch._gh = mock_gh
 
-        orch._do_planning(wf)
+        ctx = orch._build_workflow_context(wf)
+        result = orch._do_planning(ctx, orch._build_phase_deps())
+        if result is not None:
+            orch._commit_phase_result(result)
 
         plan_updates = [
             call[0][1]
@@ -718,7 +764,10 @@ class TestOrchestratorPlanning:
         orch._runner.run_agent_task.side_effect = [plan_result, review_result]
         orch._gh = mock_gh
 
-        orch._do_planning(wf)
+        ctx = orch._build_workflow_context(wf)
+        result = orch._do_planning(ctx, orch._build_phase_deps())
+        if result is not None:
+            orch._commit_phase_result(result)
 
         # Should force transition to development
         update_calls = mock_repo.update_workflow.call_args_list
@@ -739,7 +788,10 @@ class TestOrchestratorPlanning:
         orch._runner.run_agent_task.return_value = plan_result
         orch._gh = mock_gh
 
-        orch._do_planning(wf)
+        ctx = orch._build_workflow_context(wf)
+        result = orch._do_planning(ctx, orch._build_phase_deps())
+        if result is not None:
+            orch._commit_phase_result(result)
 
         # Should set status to failed
         update_calls = mock_repo.update_workflow.call_args_list
@@ -779,8 +831,14 @@ class TestOrchestratorWait:
     def test_wait_no_issue_returns(self):
         wf = _make_workflow(current_phase="wait", github_issue_number=None)
         orch, _ = self._make_orchestrator(wf)
+        # _do_wait unconditionally binds GitHubOps via _get_gh() (even on the
+        # no-issue early-return path); stub _gh so it doesn't touch the DB.
+        orch._gh = MagicMock()
         # Should return without error
-        orch._do_wait(wf)
+        ctx = orch._build_workflow_context(wf)
+        result = orch._do_wait(ctx, orch._build_phase_deps())
+        if result is not None:
+            orch._commit_phase_result(result)
 
     @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
     def test_wait_detects_completion(self, mock_gh_cls):
@@ -794,7 +852,10 @@ class TestOrchestratorWait:
         mock_gh_cls.return_value = mock_gh
         orch._gh = mock_gh
 
-        orch._do_wait(wf)
+        ctx = orch._build_workflow_context(wf)
+        result = orch._do_wait(ctx, orch._build_phase_deps())
+        if result is not None:
+            orch._commit_phase_result(result)
 
         # Should transition to merge
         update_calls = mock_repo.update_workflow.call_args_list
@@ -813,7 +874,10 @@ class TestOrchestratorWait:
         mock_gh_cls.return_value = mock_gh
         orch._gh = mock_gh
 
-        orch._do_wait(wf)
+        ctx = orch._build_workflow_context(wf)
+        result = orch._do_wait(ctx, orch._build_phase_deps())
+        if result is not None:
+            orch._commit_phase_result(result)
 
         # Should transition to planning with new requirements
         update_calls = mock_repo.update_workflow.call_args_list
@@ -832,10 +896,20 @@ class TestOrchestratorWait:
         mock_gh_cls.return_value = mock_gh
         orch._gh = mock_gh
 
-        orch._do_wait(wf)
+        ctx = orch._build_workflow_context(wf)
+        result = orch._do_wait(ctx, orch._build_phase_deps())
+        if result is not None:
+            orch._commit_phase_result(result)
 
-        # Should NOT update workflow
-        mock_repo.update_workflow.assert_not_called()
+        # No new comments → the wait phase must not transition the workflow
+        # (no current_phase advance, no milestones). Under the PhaseResult
+        # contract a no-op wait returns PhaseResult.wait(), whose commit
+        # re-asserts status="waiting" but advances nothing — so the intent of
+        # "no transition / no milestone" is preserved by checking those keys.
+        update_calls = mock_repo.update_workflow.call_args_list
+        phase_writes = [c for c in update_calls if "current_phase" in c[0][1]]
+        assert len(phase_writes) == 0
+        mock_repo.create_milestone.assert_not_called()
 
     def test_wait_ignores_report_with_completed_word(self):
         """Progress Report comment containing 'completed' should NOT trigger merge.
@@ -861,7 +935,10 @@ class TestOrchestratorWait:
             },
         ]
 
-        orch._do_wait(wf)
+        ctx = orch._build_workflow_context(wf)
+        result = orch._do_wait(ctx, orch._build_phase_deps())
+        if result is not None:
+            orch._commit_phase_result(result)
 
         # Should NOT transition to merge
         update_calls = mock_repo.update_workflow.call_args_list
@@ -882,7 +959,10 @@ class TestOrchestratorWait:
             },
         ]
 
-        orch._do_wait(wf)
+        ctx = orch._build_workflow_context(wf)
+        result = orch._do_wait(ctx, orch._build_phase_deps())
+        if result is not None:
+            orch._commit_phase_result(result)
 
         # Should transition to merge
         update_calls = mock_repo.update_workflow.call_args_list
@@ -914,7 +994,10 @@ class TestOrchestratorWait:
             },
         ]
 
-        orch._do_wait(wf)
+        ctx = orch._build_workflow_context(wf)
+        result = orch._do_wait(ctx, orch._build_phase_deps())
+        if result is not None:
+            orch._commit_phase_result(result)
 
         # Should NOT merge — comment is before wait_start
         # (list_issue_comments receives since=wait_start, so comment is filtered server-side)
@@ -934,7 +1017,10 @@ class TestOrchestratorWait:
             },
         ]
 
-        orch._do_wait(wf)
+        ctx = orch._build_workflow_context(wf)
+        result = orch._do_wait(ctx, orch._build_phase_deps())
+        if result is not None:
+            orch._commit_phase_result(result)
 
         # Check the requirement_received milestone stores createdAt
         ms_calls = mock_repo.create_milestone.call_args_list
@@ -957,7 +1043,10 @@ class TestOrchestratorWait:
             },
         ]
 
-        orch._do_wait(wf)
+        ctx = orch._build_workflow_context(wf)
+        result = orch._do_wait(ctx, orch._build_phase_deps())
+        if result is not None:
+            orch._commit_phase_result(result)
 
         update_calls = mock_repo.update_workflow.call_args_list
         phases = [c[0][1].get("current_phase") for c in update_calls if "current_phase" in c[0][1]]
@@ -1314,6 +1403,41 @@ class TestOrchestratorDevelopment:
             == "Development failed: No conversation found with session ID: dead-session"
             for update in workflow_updates
         )
+
+    def test_development_resume_accepts_prior_agent_commits(self):
+        """Resume scenario: agent produced no NEW commit this session, but the
+        branch already has agent-authored commits from a prior dev round (e.g.
+        after an infra-failure reset). Must NOT fail as 'no code changes'."""
+        wf = _make_workflow(
+            current_phase="development",
+            status="developing",
+            branch_name="auto-dev/resume-wf",
+        )
+        orch, mock_repo = self._make_orchestrator(wf)
+        orch._runner = MagicMock()
+        orch._runner.run_agent_task.return_value = _make_agent_result(
+            success=True, text="Task already completed in prior session"
+        )
+        # commit_before == commit_sha (HEAD did not move this session)
+        orch._gh.get_current_commit.side_effect = ["abc1234", "abc1234"]
+        orch._gh.get_commit_diff_stats.return_value = {"files": 0, "additions": 0, "deletions": 0}
+        # Branch has 3 commits vs origin/main (prior agent work)
+        orch._gh.get_diff_stats.return_value = {"commits": 3, "files": 5, "additions": 100}
+        orch._gh.has_uncommitted_changes.return_value = False
+        # The branch log shows agent-authored commits
+        orch._gh._run_git.return_value = MagicMock(
+            stdout="abc1234 auto: development changes (round 1)\n"
+            "def5678 auto: ci repair (attempt 1)\n"
+            "ghi9012 Merge commit into auto-dev\n"
+        )
+
+        orch._do_development(wf)
+
+        # Must NOT set workflow to failed with "no code changes"
+        workflow_updates = [c[0][1] for c in mock_repo.update_workflow.call_args_list]
+        assert not any(
+            "no code changes" in (u.get("error_message") or "") for u in workflow_updates
+        ), "resume with prior agent commits must not fail as 'no code changes'"
 
     def test_development_test_failure_sets_error(self):
         """When tests fail past max retries, workflow status becomes failed."""
@@ -2008,7 +2132,10 @@ class TestOrchestratorReport:
         orch, mock_repo = self._make_orchestrator(wf, milestones=completed_milestones)
         orch._gh.get_diff_stats.return_value = {"additions": 100, "deletions": 20, "files": 5}
 
-        orch._do_report(wf)
+        ctx = orch._build_workflow_context(wf)
+        result = orch._do_report(ctx, orch._build_phase_deps())
+        if result is not None:
+            orch._commit_phase_result(result)
 
         # Three milestones: progress_reported + round_completed + wait_started
         assert mock_repo.create_milestone.call_count == 3
@@ -2040,7 +2167,10 @@ class TestOrchestratorReport:
         orch, _ = self._make_orchestrator(wf)
         orch._gh.get_diff_stats.return_value = {}
 
-        orch._do_report(wf)
+        ctx = orch._build_workflow_context(wf)
+        result = orch._do_report(ctx, orch._build_phase_deps())
+        if result is not None:
+            orch._commit_phase_result(result)
 
         orch._gh.add_issue_comment.assert_called_once()
         call_args = orch._gh.add_issue_comment.call_args
@@ -2059,7 +2189,10 @@ class TestOrchestratorReport:
         orch, _ = self._make_orchestrator(wf)
         orch._gh.get_diff_stats.return_value = {"additions": 100, "deletions": 20, "files": 5}
 
-        orch._do_report(wf)
+        ctx = orch._build_workflow_context(wf)
+        result = orch._do_report(ctx, orch._build_phase_deps())
+        if result is not None:
+            orch._commit_phase_result(result)
 
         # _create_milestone passes dict as positional arg to repo.create_milestone
         report_ms_dict = orch.repo.create_milestone.call_args_list[0][0][0]
@@ -2073,7 +2206,10 @@ class TestOrchestratorReport:
         orch, mock_repo = self._make_orchestrator(wf)
         orch._gh.get_diff_stats.return_value = {}
 
-        orch._do_report(wf)
+        ctx = orch._build_workflow_context(wf)
+        result = orch._do_report(ctx, orch._build_phase_deps())
+        if result is not None:
+            orch._commit_phase_result(result)
 
         update_calls = mock_repo.update_workflow.call_args_list
         final_update = update_calls[-1]
@@ -2090,7 +2226,10 @@ class TestOrchestratorReport:
         orch, _ = self._make_orchestrator(wf)
         orch._gh.get_diff_stats.return_value = {}
 
-        orch._do_report(wf)
+        ctx = orch._build_workflow_context(wf)
+        result = orch._do_report(ctx, orch._build_phase_deps())
+        if result is not None:
+            orch._commit_phase_result(result)
 
         orch._gh.add_issue_comment.assert_not_called()
 
@@ -2101,7 +2240,10 @@ class TestOrchestratorReport:
         orch._gh.get_diff_stats.side_effect = Exception("git error")
 
         # Should not raise
-        orch._do_report(wf)
+        ctx = orch._build_workflow_context(wf)
+        result = orch._do_report(ctx, orch._build_phase_deps())
+        if result is not None:
+            orch._commit_phase_result(result)
 
         # Should still create milestones and move to wait
         assert mock_repo.create_milestone.call_count == 3

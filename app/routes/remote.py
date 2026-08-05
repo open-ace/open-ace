@@ -28,6 +28,7 @@ from typing import Any
 from flask import Blueprint, Response, g, jsonify, request, stream_with_context
 
 from app.auth.decorators import _extract_token, admin_required, enforce_password_change_requirement
+from app.models.user import User
 from app.modules.governance.audit_logger import AuditAction, AuditLogger
 from app.modules.workspace.agent_token import token_hash_prefix
 from app.modules.workspace.api_key_proxy import get_api_key_proxy_service
@@ -84,8 +85,6 @@ def load_user():
         "/api/remote/agent/install.ps1",
         "/api/remote/agent/uninstall.sh",
         "/api/remote/agent/uninstall.ps1",
-        # Public daily-start script (one-click agent restart after reboot)
-        "/api/remote/agent/start.sh",
     }
     if request.path in _exact_exempt:
         return
@@ -427,7 +426,7 @@ def _validate_usage_report_binding(
 
 def _require_machine_admin(machine_id):
     """Check system admin or machine admin. Returns error or None."""
-    if g.user.get("role") == "admin":
+    if User.is_admin_role(g.user.get("role")):
         return None
     mgr = get_remote_agent_manager()
     perm = mgr.get_user_permission(machine_id, g.user["id"])
@@ -473,12 +472,64 @@ def _check_machine_access(machine_id):
     """Check if user has access to machine. Returns error or None."""
     if not machine_id:
         return jsonify({"error": "machine_id is required"}), 400
-    if g.user.get("role") == "admin":
+    if User.is_admin_role(g.user.get("role")):
         return None
     mgr = get_remote_agent_manager()
     if not mgr.check_user_access(machine_id, g.user["id"]):
         return jsonify({"error": "Permission denied"}), 403
     return None
+
+
+def _check_machine_tenant_access(machine_id: str) -> tuple[dict | None, tuple | None]:
+    """
+    Check machine access with tenant validation.
+
+    Issue #2180: Ensures tenant admin can only access machines in their tenant.
+
+    Returns:
+        (machine_data, None) on success.
+        (None, error_response) on failure.
+    """
+    agent_mgr = get_remote_agent_manager()
+    machine = agent_mgr.get_machine(machine_id)
+
+    if not machine:
+        return None, (jsonify({"error": "Machine not found"}), 404)
+
+    machine_tenant_id = machine.get("tenant_id")
+    user_role = g.user.get("role")
+    user_tenant_id = g.user.get("tenant_id")
+
+    # Platform admin: can access any machine
+    if user_role == "platform_admin":
+        return machine, None
+
+    # Tenant admin: can only access machines in their tenant
+    if user_role == "tenant_admin":
+        if user_tenant_id is None:
+            return None, (jsonify({"error": "Tenant admin must have tenant_id"}), 403)
+        if machine_tenant_id != user_tenant_id:
+            logger.warning(
+                "Tenant admin %s attempted to access machine %s (tenant %s, own tenant: %s)",
+                g.user.get("id"),
+                machine_id,
+                machine_tenant_id,
+                user_tenant_id,
+            )
+            return None, (jsonify({"error": "Machine not found"}), 404)
+        return machine, None
+
+    # Legacy admin: check tenant_id if available
+    if User.is_admin_role(user_role):
+        if user_tenant_id is not None and machine_tenant_id != user_tenant_id:
+            return None, (jsonify({"error": "Machine not found"}), 404)
+        return machine, None
+
+    # Non-admin: check user access
+    if not agent_mgr.check_user_access(machine_id, g.user["id"]):
+        return None, (jsonify({"error": "Permission denied"}), 403)
+
+    return machine, None
 
 
 def machine_access_required(f):
@@ -520,83 +571,103 @@ def register_machine():
     """
     Generate a registration token for a new machine.
     Admin only - the token is used by the agent to authenticate registration.
+
+    Issue #2180: Tenant isolation - tenant_id from auth context, not request body.
     """
 
     data = request.get_json() or {}
     agent_mgr = get_remote_agent_manager()
 
-    # Get tenant_id from user or request
-    tenant_id = data.get("tenant_id", 1)
+    # Issue #2180: Fail-closed - tenant_id from auth context only
+    # Platform admin can specify target tenant, tenant admin must use their own
+    user_role = g.user.get("role")
+    user_tenant_id = g.user.get("tenant_id")
+
+    if user_role == "platform_admin":
+        # Platform admin must explicitly specify target tenant
+        tenant_id = data.get("tenant_id")
+        if tenant_id is None:
+            return jsonify({"error": "tenant_id is required for platform admin"}), 400
+        tenant_id = int(tenant_id)
+    elif user_role == "tenant_admin":
+        # Tenant admin can only register machines for their own tenant
+        if user_tenant_id is None:
+            return jsonify({"error": "Tenant admin must have tenant_id"}), 403
+        tenant_id = user_tenant_id
+        # Ignore any tenant_id in request body - force to user's tenant
+        if data.get("tenant_id") is not None and data.get("tenant_id") != tenant_id:
+            logger.warning(
+                "Tenant admin %s attempted to register machine for tenant %s (own tenant: %s)",
+                g.user.get("id"),
+                data.get("tenant_id"),
+                tenant_id,
+            )
+    else:
+        # Regular admin (legacy role) - requires explicit tenant_id
+        tenant_id = data.get("tenant_id")
+        if tenant_id is None:
+            # Try from auth context
+            tenant_id = user_tenant_id
+            if tenant_id is None:
+                return jsonify({"error": "tenant_id is required"}), 400
+        tenant_id = int(tenant_id)
 
     token = agent_mgr.create_registration_token(
         tenant_id=tenant_id,
         created_by=g.user["id"],
     )
 
-    # Build start commands for after installation (agent re-connect daily use)
-    server_origin = request.host_url.rstrip("/")
-
-    # Install command strings (already shown in the UI)
-    install_commands = {
-        "linux": (
-            f"curl -fsSL {server_origin}/api/remote/agent/install.sh | "
-            f"bash -s -- --server {server_origin} --token {token}"
-        ),
-        "macos": (
-            f"curl -fsSL {server_origin}/api/remote/agent/install.sh | "
-            f"bash -s -- --server {server_origin} --token {token}"
-        ),
-        "windows": (
-            f"powershell -Command \"Invoke-WebRequest -Uri "
-            f"'{server_origin}/api/remote/agent/install.ps1' -OutFile 'install.ps1'; "
-            f"powershell -ExecutionPolicy Bypass -File install.ps1 "
-            f"-ServerUrl '{server_origin}' -RegistrationToken '{token}'\""
-        ),
-    }
-
-    # Daily start commands (client restart -> reconnect, no new token needed)
-    start_commands = {
-        "linux": (
-            f"bash {server_origin}/api/remote/agent/start.sh || "
-            f"bash ~/.open-ace-agent/start-agent.sh"
-        ),
-        "macos": (
-            f"bash {server_origin}/api/remote/agent/start.sh || "
-            f"bash ~/.open-ace-agent/start-agent.sh"
-        ),
-        "windows": (
-            f"powershell -ExecutionPolicy Bypass -File "
-            f"\"$env:USERPROFILE\\.open-ace-agent\\start-agent.ps1\""
-        ),
-    }
-
     return jsonify(
         {
             "success": True,
             "registration_token": token,
             "message": "Use this token to register a remote agent. It is valid for one use.",
-            "install_commands": install_commands,
-            "start_commands": start_commands,
         }
     )
 
 
 @remote_bp.route("/machines", methods=["GET"])
 def list_machines():
-    """List machines. Admin sees all, regular users see assigned machines."""
+    """
+    List machines with tenant isolation.
+
+    Issue #2180: Tenant admin sees only their tenant's machines.
+    Platform admin must specify tenant_id for cross-tenant access.
+    """
 
     agent_mgr = get_remote_agent_manager()
+    user_role = g.user.get("role")
+    user_tenant_id = g.user.get("tenant_id")
 
-    if g.user.get("role") == "admin":
-        machines = agent_mgr.list_machines()
+    # Issue #2180: Role-based tenant isolation
+    if user_role == "platform_admin":
+        # Platform admin: must specify tenant_id for cross-tenant access
+        tenant_id = request.args.get("tenant_id", type=int)
+        if tenant_id is None:
+            return jsonify({"error": "tenant_id parameter is required for platform admin"}), 400
+        machines = agent_mgr.list_machines(tenant_id=tenant_id)
+    elif user_role == "tenant_admin":
+        # Tenant admin: only see their own tenant's machines
+        if user_tenant_id is None:
+            return jsonify({"error": "Tenant admin must have tenant_id"}), 403
+        machines = agent_mgr.list_machines(tenant_id=user_tenant_id)
+    elif User.is_admin_role(user_role):
+        # Legacy admin role: requires explicit tenant_id or fall back to user's tenant
+        tenant_id = request.args.get("tenant_id", type=int)
+        if tenant_id is None:
+            tenant_id = user_tenant_id
+            if tenant_id is None:
+                return jsonify({"error": "tenant_id is required"}), 400
+        machines = agent_mgr.list_machines(tenant_id=tenant_id)
     else:
+        # Regular user: only see machines assigned to them
         machines = agent_mgr.list_machines(user_id=g.user["id"])
 
     return jsonify(
         {
             "success": True,
             "machines": machines,
-            "user_role": g.user.get("role"),  # P1-2: Explicit user role for frontend
+            "user_role": user_role,  # P1-2: Explicit user role for frontend
         }
     )
 
@@ -624,7 +695,16 @@ def get_machine(machine_id):
 @remote_bp.route("/machines/<machine_id>", methods=["DELETE"])
 @admin_required
 def deregister_machine(machine_id):
-    """Deregister a remote machine. Admin only."""
+    """
+    Deregister a remote machine. Admin only.
+
+    Issue #2180: Tenant admin can only deregister machines in their tenant.
+    """
+
+    # Validate tenant access
+    machine, error = _check_machine_tenant_access(machine_id)
+    if error:
+        return error
 
     agent_mgr = get_remote_agent_manager()
     success = agent_mgr.deregister_machine(machine_id)
@@ -637,15 +717,22 @@ def deregister_machine(machine_id):
 @remote_bp.route("/machines/<machine_id>/assign", methods=["POST"])
 @machine_admin_required
 def assign_user(machine_id):
-    """Assign a user to a machine. System admin or machine admin."""
-    # P2-1: Permission check moved to decorator @machine_admin_required
+    """
+    Assign a user to a machine. System admin or machine admin.
+
+    Issue #2180: Validate machine tenant access.
+    """
+    # Validate tenant access
+    machine, error = _check_machine_tenant_access(machine_id)
+    if error:
+        return error
 
     data = request.get_json() or {}
     user_id = data.get("user_id")
     permission = data.get("permission", "user")
 
     # Machine admins can only assign 'user' permission
-    if g.user.get("role") != "admin":
+    if g.user.get("role") not in ("admin", "platform_admin"):
         permission = "user"
 
     if not user_id:
@@ -667,11 +754,18 @@ def assign_user(machine_id):
 @remote_bp.route("/machines/<machine_id>/assign/<int:user_id>", methods=["DELETE"])
 @machine_admin_required
 def revoke_user(machine_id, user_id):
-    """Revoke a user's access to a machine. System admin or machine admin."""
-    # P2-1: Permission check moved to decorator @machine_admin_required
+    """
+    Revoke a user's access to a machine. System admin or machine admin.
+
+    Issue #2180: Validate machine tenant access.
+    """
+    # Validate tenant access
+    machine, error = _check_machine_tenant_access(machine_id)
+    if error:
+        return error
 
     # Machine admins cannot revoke other admins
-    if g.user.get("role") != "admin":
+    if g.user.get("role") not in ("admin", "platform_admin"):
         mgr = get_remote_agent_manager()
         target_perm = mgr.get_user_permission(machine_id, user_id)
         if target_perm == "admin":
@@ -688,12 +782,20 @@ def revoke_user(machine_id, user_id):
 @remote_bp.route("/machines/<machine_id>/token/rotate", methods=["POST"])
 @admin_required
 def rotate_machine_token(machine_id):
-    """Rotate the agent token for a machine. System admin only.
+    """
+    Rotate the agent token for a machine. System admin only.
+
+    Issue #2180: Validate machine tenant access.
 
     Revokes all existing tokens and issues a new one. If the existing
     tokens were already revoked (i.e., the machine was previously
     revoked and is being re-activated), this is logged as an unrevoke.
     """
+    # Validate tenant access
+    machine, error = _check_machine_tenant_access(machine_id)
+    if error:
+        return error
+
     agent_mgr = get_remote_agent_manager()
 
     result = agent_mgr.rotate_agent_token(
@@ -754,7 +856,16 @@ def rotate_machine_token(machine_id):
 @remote_bp.route("/machines/<machine_id>/token/revoke", methods=["POST"])
 @admin_required
 def revoke_machine_token(machine_id):
-    """Revoke all agent tokens for a machine. System admin only."""
+    """
+    Revoke all agent tokens for a machine. System admin only.
+
+    Issue #2180: Validate machine tenant access.
+    """
+    # Validate tenant access
+    machine, error = _check_machine_tenant_access(machine_id)
+    if error:
+        return error
+
     agent_mgr = get_remote_agent_manager()
 
     success = agent_mgr.revoke_agent_token(
@@ -786,8 +897,16 @@ def revoke_machine_token(machine_id):
 @remote_bp.route("/machines/<machine_id>/users", methods=["GET"])
 @machine_admin_required
 def get_machine_users(machine_id):
-    """Get list of users assigned to a machine. System admin or machine admin."""
-    # P2-1: Permission check moved to decorator @machine_admin_required
+    """
+    Get list of users assigned to a machine. System admin or machine admin.
+
+    Issue #2180: Validate machine tenant access.
+    """
+    # Validate tenant access
+    machine, error = _check_machine_tenant_access(machine_id)
+    if error:
+        return error
+
     agent_mgr = get_remote_agent_manager()
     assignments = agent_mgr.get_machine_assignments(machine_id)
 
@@ -1239,19 +1358,6 @@ def agent_install_script_windows():
     return Response(open(install_ps1).read(), mimetype="text/plain")
 
 
-@remote_bp.route("/agent/start.sh", methods=["GET"])
-def agent_start_script():
-    """Serve the agent daily-start shell script (Linux/macOS).
-
-    The client runs this script after a reboot to reconnect to the server.
-    It reuses the saved machine_id / agent_token — no new token is needed.
-    """
-    start_sh = os.path.join(AGENT_DIR, "start-agent.sh")
-    if not os.path.isfile(start_sh):
-        return jsonify({"error": "start-agent.sh not found"}), 404
-    return Response(open(start_sh).read(), mimetype="text/x-shellscript")
-
-
 @remote_bp.route("/agent/uninstall.sh", methods=["GET"])
 def agent_uninstall_script():
     """Serve the agent uninstallation shell script (Linux/macOS)."""
@@ -1652,9 +1758,9 @@ def agent_message():
                 sm.complete_session(terminal_id)
                 logger.info("Terminal session %s marked as completed", terminal_id[:8])
             elif status == "running":
-                sm.update_session_fields(terminal_id, {"status": "active"})
+                sm.update_session_fields(terminal_id, {"status": "active"}, require_tenant=False)
             elif status == "error":
-                sm.update_session_fields(terminal_id, {"status": "error"})
+                sm.update_session_fields(terminal_id, {"status": "error"}, require_tenant=False)
                 logger.warning("Terminal session %s error: %s", terminal_id[:8], error)
 
         return jsonify({"success": True})
@@ -1705,7 +1811,7 @@ def agent_message():
 
     elif msg_type == "vscode_status":
         # Agent reports VSCode (code-server) status
-        from app.modules.workspace.vscode_store import vscode_info_store
+        from app.modules.workspace.vscode_store import VSCODE_SESSION_TTL, vscode_info_store
 
         vscode_id = data.get("vscode_id", "")
         status = data.get("status", "")
@@ -1724,6 +1830,43 @@ def agent_message():
             import secrets as _secrets
 
             browser_token = _secrets.token_hex(32)
+
+            # Issue #2183: Inject tenant_id and owner_user_id from machine
+            tenant_id = None
+            owner_user_id = None
+            try:
+                machine = agent_mgr.get_machine(machine_id_for_vs)
+                if machine:
+                    tenant_id = machine.get("tenant_id")
+                    owner_user_id = machine.get("created_by")
+                else:
+                    logger.error(
+                        "Cannot create VSCode session: machine %s not found",
+                        machine_id_for_vs[:8],
+                    )
+                    return jsonify({"success": False, "error": "Machine not found"}), 404
+            except Exception as e:
+                logger.error(
+                    "Failed to query machine %s for VSCode session: %s",
+                    machine_id_for_vs[:8],
+                    e,
+                )
+
+            # Issue #2183: Do not use default tenant_id - reject if unable to determine
+            if tenant_id is None:
+                logger.error(
+                    "Cannot create VSCode session %s: unable to determine tenant_id",
+                    vscode_id[:8],
+                )
+                return (
+                    jsonify({"success": False, "error": "Cannot determine tenant for machine"}),
+                    500,
+                )
+
+            # Calculate expiration time
+            now = time.time()
+            expires_at = now + VSCODE_SESSION_TTL
+
             vscode_info_store.put(
                 machine_id_for_vs,
                 vscode_id,
@@ -1735,11 +1878,24 @@ def agent_message():
                     "token": browser_token,
                     "machine_id": machine_id_for_vs,
                     "project_path": data.get("project_path", ""),
+                    # Issue #2183: New required fields
+                    "owner_user_id": owner_user_id,
+                    "tenant_id": tenant_id,
+                    "created_at": now,
+                    "expires_at": expires_at,
                 },
             )
-            logger.info("VSCode %s running on %s", vscode_id[:8], http_url)
+            logger.info(
+                "VSCode %s running on %s (tenant=%s, owner=%s, expires=%ds)",
+                vscode_id[:8],
+                http_url,
+                tenant_id,
+                owner_user_id,
+                VSCODE_SESSION_TTL,
+            )
         elif status == "stopped":
-            vscode_info_store.pop(machine_id_for_vs, vscode_id)
+            # Issue #2183: Mark as stopped and invalidate token
+            vscode_info_store.mark_stopped(machine_id_for_vs, vscode_id)
             logger.info("VSCode %s stopped", vscode_id[:8])
         elif status == "error":
             vscode_info_store.put(
@@ -1859,7 +2015,9 @@ def agent_message():
                 if sync_user_id and not existing.user_id:
                     updates["user_id"] = sync_user_id
                 if updates:
-                    sync_session_mgr.update_session_fields(session_id, updates)
+                    sync_session_mgr.update_session_fields(
+                        session_id, updates, require_tenant=False
+                    )
 
             # Fetch existing message uuids for dedup and mirror to daily_messages
             try:
@@ -1899,18 +2057,6 @@ def agent_message():
                     msg_model = msg.get("model") or model
                     msg_uuid = msg.get("uuid", "")
                     content_blocks = msg.get("content_blocks")
-                    # Issue #8: derive file_change blocks from file-operating
-                    # tool_use blocks so the frontend file-change panel shows
-                    # every AI-driven file/folder change on the web-terminal
-                    # (session_sync) path too — mirroring the live
-                    # (remote_session_manager) and replay (fetch_qwen) paths.
-                    if isinstance(content_blocks, list):
-                        from scripts.shared.file_change_parser import (
-                            append_file_change_blocks,
-                        )
-
-                        content_blocks = list(content_blocks)
-                        append_file_change_blocks(content_blocks)
                     usage = msg.get("usage", {})
 
                     if not content or len(content) > MAX_RAW_CONTENT_LENGTH:
@@ -2069,6 +2215,7 @@ def agent_message():
                         total_tokens_delta=synced_input_tokens + synced_output_tokens,
                         total_input_delta=synced_input_tokens,
                         total_output_delta=synced_output_tokens,
+                        require_tenant=False,
                     )
 
                     # Record usage in QuotaManager for quota tracking
@@ -2158,6 +2305,7 @@ def start_terminal():
                 "key_id": key_id,
             },
         },
+        tenant_id=tenant_id,
     )
     logger.info(
         f"Created terminal session {terminal_id} for user {g.user['id']} on machine {machine_id}"
@@ -2329,6 +2477,7 @@ def start_cli_terminal():
             "workspace_type": "terminal",
             "remote_machine_id": machine_id,
         },
+        tenant_id=tenant_id,
     )
 
     api_proxy = get_api_key_proxy_service()
@@ -2433,7 +2582,7 @@ def attach_terminal(terminal_id):
 
     # Check access
     agent_mgr = get_remote_agent_manager()
-    if g.user.get("role") != "admin":
+    if not User.is_admin_role(g.user.get("role")):
         if not agent_mgr.check_user_access(machine_id, g.user["id"]):
             return jsonify({"error": "Access denied"}), 403
 
@@ -2579,7 +2728,7 @@ def get_terminal_status(terminal_id):
             return jsonify({"success": True, "terminal": info})
 
     # Standard user authentication
-    if g.user.get("role") != "admin":
+    if not User.is_admin_role(g.user.get("role")):
         if not agent_mgr.check_user_access(machine_id, g.user["id"]):
             return jsonify({"error": "Access denied"}), 403
 
@@ -3153,7 +3302,7 @@ def create_remote_directory(machine_id):
 
     agent_mgr = get_remote_agent_manager()
 
-    if g.user.get("role") != "admin":
+    if not User.is_admin_role(g.user.get("role")):
         if not agent_mgr.check_user_access(machine_id, g.user["id"]):
             return jsonify({"error": "Access denied"}), 403
 
@@ -3170,8 +3319,6 @@ def create_remote_directory(machine_id):
     if not machine:
         return jsonify({"error": "Machine not found"}), 404
 
-    # Agent heartbeat reports "busy" while active sessions exist — treat it
-    # as online (consistent with browse_remote_directory).
     if machine.get("status") not in ("online", "idle", "busy"):
         return (
             jsonify(
@@ -3247,7 +3394,7 @@ def _dispatch_remote_git_command(machine_id, command, required_params):
 
     agent_mgr = get_remote_agent_manager()
 
-    if g.user.get("role") != "admin":
+    if not User.is_admin_role(g.user.get("role")):
         if not agent_mgr.check_user_access(machine_id, g.user["id"]):
             return jsonify({"error": "Access denied"}), 403
 
@@ -3391,10 +3538,10 @@ def remote_vscode_stop():
         },
     )
 
-    # Clean up local store
+    # Issue #2183: Mark as stopped to invalidate token immediately
     from app.modules.workspace.vscode_store import vscode_info_store
 
-    vscode_info_store.pop(machine_id, vscode_id)
+    vscode_info_store.mark_stopped(machine_id, vscode_id)
 
     return jsonify({"success": True})
 
@@ -3415,7 +3562,7 @@ def remote_vscode_status(vscode_id):
 
     machine_id, info = found
 
-    if g.user.get("role") != "admin":
+    if not User.is_admin_role(g.user.get("role")):
         if not agent_mgr.check_user_access(machine_id, g.user["id"]):
             return jsonify({"error": "Access denied"}), 403
 
@@ -3450,7 +3597,7 @@ def remote_vscode_attach(vscode_id):
     if not machine_id:
         return jsonify({"success": False, "error": "machine_id is required"}), 400
 
-    if g.user.get("role") != "admin":
+    if not User.is_admin_role(g.user.get("role")):
         if not agent_mgr.check_user_access(machine_id, g.user["id"]):
             return jsonify({"error": "Access denied"}), 403
 
@@ -3477,18 +3624,14 @@ def remote_vscode_attach(vscode_id):
 def remote_vscode_proxy(vscode_id, path=""):
     """HTTP reverse proxy to remote code-server.
 
-    Authentication is via the token in query string, validated against
-    vscode_info_store. No session_token cookie required (needed for iframe access).
+    Issue #2183: Strict authentication required.
 
-    For subsequent requests (static assets, API calls), the token can also be
-    provided via a vscode_token cookie, which is set on the first successful
-    request with a token in the query string.
+    Authentication methods (in priority order):
+    1. VSCode browser token from query string, cookie, or Authorization header
+    2. Open ACE user session with owner/tenant/machine access validation
 
-    For nested iframe scenarios where cookies don't work, we also allow
-    requests without token if the session is known to be running.
+    No fallback to stored token - caller must provide valid credentials.
     """
-    import hmac as _hmac
-
     from app.modules.workspace.vscode_proxy import build_target_url, proxy_request_streaming
     from app.modules.workspace.vscode_store import vscode_info_store
 
@@ -3498,42 +3641,116 @@ def remote_vscode_proxy(vscode_id, path=""):
 
     machine_id, info = found
 
+    # Issue #2183: Check session status first
+    if info.get("status") != "running":
+        return jsonify({"error": "VSCode session is not running"}), 503
+
+    # Issue #2183: Check if session is expired
+    expires_at = info.get("expires_at")
+    if expires_at and time.time() > expires_at:
+        logger.warning("Attempt to access expired VSCode session %s", vscode_id[:8])
+        return jsonify({"error": "VSCode session expired"}), 403
+
     # Get stored token
     stored_token = info.get("token", "")
 
     if not stored_token:
         return jsonify({"error": "VSCode session has no token"}), 500
 
-    # Validate token from query string or cookie
-    # Query string token takes precedence (used for initial iframe load)
+    # Issue #2183: Extract token from multiple sources
+    # Priority: query string > cookie > Authorization header
     token = request.args.get("token", "")
 
-    # If no token in query string, try cookie (for static assets, API calls)
     if not token:
         token = request.cookies.get(f"vscode_token_{vscode_id}", "")
 
-    # For nested iframe scenarios (cookies blocked by SameSite), allow requests
-    # without explicit token if the session is running. The proxy URL path
-    # itself provides authentication (only valid vscode_id can be accessed).
-    # This is a capability URL design - the security relies solely on:
-    # 1. vscode_id is a UUID4 (~122 bits of randomness), hard to guess
-    # 2. The URL is only visible to the user who started the session
-    # 3. The session is scoped to a specific machine and project
-    # Note: In this fallback case, we use stored_token for HMAC validation
-    # but the caller does NOT prove they hold it. The real access control
-    # is the vscode_id in the URL path (capability URL semantics).
-    if not token and info.get("status") == "running":
-        # Use stored token for internal validation (not sent to browser)
-        token = stored_token
-
     if not token:
-        return jsonify({"error": "Invalid or missing token"}), 403
+        # Try Authorization header (Bearer token)
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            token = auth_header[7:]
 
-    if not _hmac.compare_digest(token, stored_token):
+    # Issue #2183: Try user session authentication if no token provided
+    user_authenticated = False
+    if not token and hasattr(g, "user") and g.user:
+        # Validate user access to this session
+        user_tenant_id = g.user.get("tenant_id")
+        session_tenant_id = info.get("tenant_id")
+        owner_user_id = info.get("owner_user_id")
+
+        # Check tenant isolation (Issue #2183)
+        if session_tenant_id is not None and user_tenant_id != session_tenant_id:
+            # Platform admin (or legacy admin) can access cross-tenant (with audit)
+            # Issue #2286: Accept legacy 'admin' role for backward compatibility
+            if g.user.get("role") in ("platform_admin", "admin"):
+                audit_logger.log(
+                    action=AuditAction.ADMIN_CROSS_TENANT_ACCESS.value,
+                    severity="info",
+                    user_id=g.user.get("id"),
+                    tenant_id=session_tenant_id,
+                    resource_type="vscode_session",
+                    resource_id=vscode_id,
+                    details={
+                        "admin_tenant": user_tenant_id,
+                        "target_tenant": session_tenant_id,
+                        "vscode_id": vscode_id[:8],
+                    },
+                )
+                user_authenticated = True
+            else:
+                # Log cross-tenant access attempt (security event)
+                audit_logger.log(
+                    action="CROSS_TENANT_VSCODE_ACCESS_ATTEMPT",
+                    severity="warning",
+                    user_id=g.user.get("id"),
+                    details={
+                        "user_tenant_id": user_tenant_id,
+                        "target_tenant_id": session_tenant_id,
+                        "vscode_id": vscode_id[:8],
+                    },
+                )
+                logger.warning(
+                    "Cross-tenant VSCode access denied: user=%s tenant=%s, session tenant=%s",
+                    g.user.get("id"),
+                    user_tenant_id,
+                    session_tenant_id,
+                )
+                return jsonify({"error": "Access denied"}), 403
+
+        # Check if user is owner
+        if g.user.get("id") == owner_user_id:
+            user_authenticated = True
+
+        # Check if user is tenant admin
+        if not user_authenticated and g.user.get("role") == "tenant_admin":
+            if user_tenant_id == session_tenant_id:
+                user_authenticated = True
+
+        # Check if user is machine admin
+        if not user_authenticated:
+            agent_mgr = get_remote_agent_manager()
+            perm = agent_mgr.get_user_permission(machine_id, g.user["id"])
+            if perm == "admin":
+                user_authenticated = True
+
+        # System admin can access any session
+        if g.user.get("role") in ("admin", "platform_admin"):
+            user_authenticated = True
+
+    # Issue #2183: Require valid token or user authentication
+    # NO FALLBACK to stored_token
+    if not token and not user_authenticated:
+        return jsonify({"error": "Authentication required"}), 401
+
+    # Validate token if provided
+    if token and not hmac.compare_digest(token, stored_token):
+        # Issue #2183: Do not log token prefix - only log length
+        logger.warning(
+            "Invalid token for VSCode session %s (token length: %d)",
+            vscode_id[:8],
+            len(token),
+        )
         return jsonify({"error": "Invalid token"}), 403
-
-    if info.get("status") != "running":
-        return jsonify({"error": "VSCode session is not running"}), 503
 
     original_http_url = info.get("original_http_url", "")
     if not original_http_url:

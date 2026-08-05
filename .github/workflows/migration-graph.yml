@@ -31,6 +31,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
+          submodules: false
           fetch-depth: 0 # need base-branch history + the PR merge-base
 
       - name: Fetch base branch

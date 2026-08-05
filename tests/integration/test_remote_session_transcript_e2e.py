@@ -48,7 +48,33 @@ from app.modules.workspace.session_manager import SessionManager, SessionType
 @pytest.fixture
 def sqlite_sm(tmp_path, monkeypatch):
     """A real isolated SQLite ``SessionManager`` with tables created."""
+    # Must monkeypatch database.is_postgresql, not the re-exported symbol,
+    # because SessionManager._get_connection calls the original.
+    import app.modules.workspace.session_manager as sm_mod
+    import app.repositories.database as db_mod
+
+    monkeypatch.setattr(db_mod, "is_postgresql", lambda: False)
     monkeypatch.setattr(sm_mod, "is_postgresql", lambda: False)
+
+    # Mock content filter to avoid database access for tenant config
+    from unittest.mock import MagicMock
+
+    mock_filter = MagicMock()
+    mock_filter.check_content.return_value = MagicMock(
+        action="allow", risk_level="low", matched_rules=[]
+    )
+    monkeypatch.setattr(sm_mod, "_get_content_filter", lambda: mock_filter)
+
+    # Mock tenant config cache to avoid PostgreSQL access in tests
+    monkeypatch.setattr(
+        sm_mod,
+        "_get_tenant_sensitive_keyword_config",
+        lambda tenant_id: {
+            "block_sensitive_keyword": False,
+            "sensitive_keyword_match_mode": "word_boundary",
+        },
+    )
+
     sm = SessionManager(db_path=str(tmp_path / "remote_transcript.db"))
     sm._ensure_tables()
     conn = sm._get_connection()
@@ -56,8 +82,14 @@ def sqlite_sm(tmp_path, monkeypatch):
     for col in ("project_id", "project_path"):
         try:
             cur.execute(f"ALTER TABLE agent_sessions ADD COLUMN {col} TEXT")
-        except Exception:
+        except Exception:  # allow-swallow: idempotent test setup (row may already exist)
             pass
+    # Create default user with tenant_id for fail-closed tenant resolution
+    cur.execute(
+        "INSERT INTO users (id, username, email, password_hash, role, tenant_id) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (1, "test-user", "test@example.com", "hash", "user", 1),
+    )
     conn.commit()
     conn.close()
     return sm
@@ -86,6 +118,14 @@ def manager(sqlite_sm):
         ),
         patch(
             "app.modules.workspace.remote_session_manager.get_evaluator",
+            return_value=MagicMock(),
+        ),
+        patch(
+            "app.modules.workspace.remote_session_manager.UserRepository",
+            return_value=MagicMock(),
+        ),
+        patch(
+            "app.modules.workspace.remote_session_manager.MessageRepository",
             return_value=MagicMock(),
         ),
     ):

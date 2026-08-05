@@ -27,7 +27,7 @@ SCREENSHOT_DIR = os.path.join(
 )
 
 
-def test_create_direct(ui_screenshot_dir):
+def test_create_direct(ui_screenshot_dir):  # allow-no-assert: smoke test - visual verification only
     global SCREENSHOT_DIR
     SCREENSHOT_DIR = ui_screenshot_dir
     print("=" * 70)
@@ -234,7 +234,7 @@ def test_create_direct(ui_screenshot_dir):
             if sys.stdout.isatty():
                 input("\n  Press Enter to close browser...")
 
-        except Exception as e:
+        except Exception as e:  # allow-swallow: UI element may not exist
             print(f"\n[EXCEPTION] {e}")
             import traceback
 

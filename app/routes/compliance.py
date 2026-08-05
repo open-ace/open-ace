@@ -11,7 +11,8 @@ from datetime import datetime, timedelta, timezone
 
 from flask import Blueprint, Response, g, jsonify, request
 
-from app.auth.decorators import admin_required
+from app.auth.decorators import admin_required, resolve_tenant_scope
+from app.models.user import User
 from app.modules.compliance.audit import AuditAnalyzer
 from app.modules.compliance.report import ReportGenerator, ReportType
 from app.modules.compliance.retention import DataRetentionManager
@@ -135,8 +136,11 @@ def list_reports():
 @compliance_bp.route("/reports", methods=["POST"])
 @admin_required
 def generate_report():
-    """Generate a compliance report (admin only)."""
+    """
+    Generate a compliance report (admin only).
 
+    Issue #2180: Tenant isolation for compliance reports.
+    """
     data = request.get_json()
 
     if not data:
@@ -145,6 +149,52 @@ def generate_report():
     report_type = data.get("report_type")
     if not report_type:
         return jsonify({"error": "report_type is required"}), 400
+
+    # Issue #2180: Role-based tenant isolation
+    caller_tenant_id, is_admin = resolve_tenant_scope()
+    user_role = g.user.get("role")
+    target_tenant_id = caller_tenant_id
+
+    # Platform admin can request cross-tenant reports with explicit tenant_id
+    # Issue #2286: Accept legacy 'admin' role alongside 'platform_admin' for backward compatibility.
+    if user_role in ("platform_admin", "admin") and data.get("tenant_id") is not None:
+        requested_tenant_id = data["tenant_id"]
+        # Validate tenant exists
+        db = Database()
+        tenant_row = db.fetch_one("SELECT id FROM tenants WHERE id = ?", (requested_tenant_id,))
+        if not tenant_row:
+            return jsonify({"error": f"Tenant {requested_tenant_id} not found"}), 404
+        target_tenant_id = requested_tenant_id
+        # Log cross-tenant operation
+        logger.info(
+            "Platform admin %s generating report for tenant %s",
+            g.user.get("id"),
+            target_tenant_id,
+        )
+    # Tenant admin can only generate reports for their own tenant
+    elif user_role == "tenant_admin":
+        if caller_tenant_id is None:
+            return jsonify({"error": "Tenant admin must have tenant_id"}), 403
+        # Ignore any tenant_id in request body
+        if data.get("tenant_id") is not None and data.get("tenant_id") != caller_tenant_id:
+            logger.warning(
+                "Tenant admin %s attempted to generate report for tenant %s (own tenant: %s)",
+                g.user.get("id"),
+                data.get("tenant_id"),
+                caller_tenant_id,
+            )
+        target_tenant_id = caller_tenant_id
+    # Legacy admin: backward compatibility
+    # - With tenant_id: scoped to that tenant (like tenant_admin)
+    # - Without tenant_id: global access (like platform_admin)
+    elif User.is_admin_role(user_role):
+        if caller_tenant_id is not None:
+            # Scoped to caller's tenant
+            target_tenant_id = caller_tenant_id
+        else:
+            # Global access, but require explicit tenant_id for clarity
+            # If no tenant_id provided, default to tenant 1 for backward compatibility
+            target_tenant_id = data.get("tenant_id", 1)
 
     # Parse date range
     period_start = data.get("period_start")
@@ -160,13 +210,13 @@ def generate_report():
     else:
         period_end = datetime.now(timezone.utc).replace(tzinfo=None)
 
-    # Generate report
+    # Generate report with validated tenant_id
     report = report_generator.generate_report(
         report_type=report_type,
         period_start=period_start,
         period_end=period_end,
         generated_by=g.user_id,
-        tenant_id=data.get("tenant_id", _current_tenant_id()),
+        tenant_id=target_tenant_id,
         filters=data.get("filters"),
     )
 
@@ -195,7 +245,7 @@ def generate_report():
         )
 
     if output_format == "html":
-        # Log report generation action
+        # Log report generation action with validated tenant_id
         try:
             audit_logger = AuditLogger()
             audit_logger.log(
@@ -204,12 +254,14 @@ def generate_report():
                 resource_type="compliance_report",
                 resource_id=report.metadata.report_id,
                 resource_name=report_type,
-                tenant_id=_current_tenant_id(),
+                tenant_id=target_tenant_id,
                 details={
                     "report_type": report_type,
                     "format": output_format,
                     "period_start": period_start.isoformat(),
                     "period_end": period_end.isoformat(),
+                    "caller_tenant_id": caller_tenant_id,
+                    "target_tenant_id": target_tenant_id,
                 },
             )
         except Exception:
@@ -228,7 +280,7 @@ def generate_report():
         return response
 
     if output_format == "excel":
-        # Log report generation action
+        # Log report generation action with validated tenant_id
         try:
             audit_logger = AuditLogger()
             audit_logger.log(
@@ -237,11 +289,14 @@ def generate_report():
                 resource_type="compliance_report",
                 resource_id=report.metadata.report_id,
                 resource_name=report_type,
+                tenant_id=target_tenant_id,
                 details={
                     "report_type": report_type,
                     "format": output_format,
                     "period_start": period_start.isoformat(),
                     "period_end": period_end.isoformat(),
+                    "caller_tenant_id": caller_tenant_id,
+                    "target_tenant_id": target_tenant_id,
                 },
             )
         except Exception:
