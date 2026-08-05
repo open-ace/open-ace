@@ -1942,9 +1942,16 @@ class AutonomousOrchestrator:
         )
 
     @staticmethod
-    def _scope_violation(changed_files: list[str]) -> str:
-        """Return a blocking reason when one autonomous round explodes in scope."""
-        limit = MAX_AUTONOMOUS_CHANGED_FILES
+    def _scope_violation(changed_files: list[str], limit: int | None = None) -> str:
+        """Return a blocking reason when one autonomous round explodes in scope.
+
+        ``limit`` is the per-workflow override when set (``wf["max_changed_files_override"]``),
+        else ``None`` → fall back to the global ``MAX_AUTONOMOUS_CHANGED_FILES``.
+        Callers without a workflow context (e.g. the merge-conflict resolver) omit
+        it and get the historical global bound.
+        """
+        if limit is None:
+            limit = MAX_AUTONOMOUS_CHANGED_FILES
         normalized = sorted({path for path in changed_files if path})
         if limit > 0 and len(normalized) > limit:
             sample = ", ".join(normalized[:8])
@@ -2029,12 +2036,16 @@ class AutonomousOrchestrator:
             self._update_workflow({"base_commit_sha": cumulative_base})
         if cumulative_base != commit_before:
             ranges.append(("cumulative branch", cumulative_base))
+        # Per-workflow override (#2309): a large legit issue can widen its own
+        # cap without weakening the global bound. None/0 → global fallback
+        # inside _scope_violation.
+        override_limit = wf.get("max_changed_files_override") or None
         for label, base in ranges:
             try:
                 changed_files = gh.get_changed_files(base, commit_after)
             except Exception as exc:
                 return f"Autonomous {label} scope could not be verified; refusing to push: {exc}"
-            violation = self._scope_violation(changed_files)
+            violation = self._scope_violation(changed_files, limit=override_limit)
             if violation:
                 return f"{label.capitalize()} {violation}"
         return ""

@@ -59,6 +59,7 @@ class AutonomousWorkflowRepository:
         "max_plan_rounds",
         "max_pr_review_rounds",
         "require_full_review_rounds",
+        "max_changed_files_override",
         "total_tokens",
         "total_input_tokens",
         "total_output_tokens",
