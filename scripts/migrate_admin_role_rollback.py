@@ -87,7 +87,8 @@ class RollbackTool:
             cursor = conn.cursor()
 
             if self.batch_id:
-                cursor.execute(
+                db._execute(
+                    cursor,
                     "SELECT id, username, role, tenant_id FROM admin_role_migration_backup WHERE batch_id = ?",
                     (self.batch_id,),
                 )
@@ -126,7 +127,8 @@ class RollbackTool:
                 # Rollback specific users
                 for user_id in user_ids:
                     # Get backup data
-                    cursor.execute(
+                    db._execute(
+                        cursor,
                         "SELECT role FROM admin_role_migration_backup WHERE id = ?",
                         (user_id,),
                     )
@@ -137,12 +139,14 @@ class RollbackTool:
 
                         # Restore role
                         if db.is_postgresql():
-                            cursor.execute(
+                            db._execute(
+                                cursor,
                                 "UPDATE users SET role = ?, updated_at = NOW() WHERE id = ?",
                                 (original_role, user_id),
                             )
                         else:
-                            cursor.execute(
+                            db._execute(
+                                cursor,
                                 "UPDATE users SET role = ?, updated_at = datetime('now') WHERE id = ?",
                                 (original_role, user_id),
                             )
@@ -151,7 +155,8 @@ class RollbackTool:
                 if self.batch_id:
                     # Restore from backup
                     if db.is_postgresql():
-                        cursor.execute(
+                        db._execute(
+                            cursor,
                             """
                             UPDATE users
                             SET role = b.role, updated_at = NOW()
@@ -163,7 +168,8 @@ class RollbackTool:
                     else:
                         # SQLite doesn't support FROM clause in UPDATE
                         # Use a subquery instead
-                        cursor.execute(
+                        db._execute(
+                            cursor,
                             """
                             UPDATE users
                             SET role = (

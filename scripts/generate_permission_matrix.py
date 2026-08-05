@@ -13,6 +13,17 @@ def extract_endpoint_info(file_path: Path) -> list[dict]:
     """
     Extract endpoint information from a route file.
 
+    Handles both decorator orders:
+        @route                  @permission_decorator
+        @permission_decorator   @route
+        def func():             def func():
+
+    The algorithm accumulates all decorator lines (lines starting with '@')
+    until it encounters a 'def' statement, then matches the route decorator
+    with the permission decorator.  Blank lines and comments between
+    decorators do not break accumulation; any other code line resets the
+    accumulator.
+
     Returns list of dicts with keys: method, path, decorator, function_name, line_number
     """
     endpoints = []
@@ -29,92 +40,91 @@ def extract_endpoint_info(file_path: Path) -> list[dict]:
         bp_name = file_path.stem.replace(".py", "")
         bp_prefix = f"/api/{bp_name}"
 
-    # Track current decorator
-    current_decorator = None
-    decorator_line = 0
+    # Accumulate decorators for the current function being defined.
+    # Each entry is (line_number, line_text).
+    current_decorators: list[tuple[int, str]] = []
 
     for i, line in enumerate(lines, 1):
-        # Check for decorator
-        if "@platform_admin_required" in line:
-            current_decorator = "platform_admin_required"
-            decorator_line = i
-        elif "@admin_required" in line and "@platform_admin_required" not in line:
-            current_decorator = "admin_required"
-            decorator_line = i
-        elif "@same_tenant_or_platform_admin" in line:
-            current_decorator = "same_tenant_or_platform_admin"
-            decorator_line = i
-        elif line.strip().startswith("@") and not line.strip().startswith("@tenant_bp"):
-            # Other decorator, but not route decorator
-            continue
-        elif line.strip().startswith("@tenant_bp.route") or line.strip().startswith("@bp.route"):
-            # Extract route information
-            if current_decorator:
+        stripped = line.strip()
+
+        if stripped.startswith("@"):
+            current_decorators.append((i, stripped))
+        elif stripped.startswith("def "):
+            # Process accumulated decorators for this function
+            func_match = re.search(r"def (\w+)", stripped)
+            func_name = func_match.group(1) if func_match else "unknown"
+
+            # Find route decorator
+            route_line = None
+            for dec_line_num, dec_line_text in current_decorators:
+                if dec_line_text.startswith("@tenant_bp.route") or dec_line_text.startswith("@bp.route"):
+                    route_line = dec_line_text
+                    break
+
+            # Find permission decorator (first match wins)
+            perm_decorator = None
+            perm_line = 0
+            for dec_line_num, dec_line_text in current_decorators:
+                if "@platform_admin_required" in dec_line_text:
+                    perm_decorator = "platform_admin_required"
+                    perm_line = dec_line_num
+                    break
+                elif "@admin_required" in dec_line_text:
+                    perm_decorator = "admin_required"
+                    perm_line = dec_line_num
+                    break
+                elif "@same_tenant_or_platform_admin" in dec_line_text:
+                    perm_decorator = "same_tenant_or_platform_admin"
+                    perm_line = dec_line_num
+                    break
+
+            # Only add endpoint if both route and permission decorator exist
+            if route_line and perm_decorator:
                 # Extract HTTP method
-                method_match = re.search(r"methods=\[(.*?)\]", line)
+                method_match = re.search(r"methods=\[(.*?)\]", route_line)
                 if method_match:
                     method = method_match.group(1).strip("\"'")
                 else:
                     method = "GET"
 
                 # Extract path - first argument of route decorator
-                # Handle formats like: @tenant_bp.route("/path") or @tenant_bp.route("/path", methods=["GET"])
-                # Match the first quoted string after route(
-                route_match = re.search(r'@tenant_bp\.route\(\s*["\']([^"\']*)["\']', line)
+                route_match = re.search(r'@tenant_bp\.route\(\s*["\']([^"\']*)["\']', route_line)
                 if not route_match:
-                    # Try @bp.route format
-                    route_match = re.search(r'@bp\.route\(\s*["\']([^"\']*)["\']', line)
+                    route_match = re.search(r'@bp\.route\(\s*["\']([^"\']*)["\']', route_line)
 
                 if route_match:
                     path = route_match.group(1)
                 else:
-                    # Fallback to old pattern for other formats
-                    path_match = re.search(r'"(.*?)"', line)
-                    if path_match:
-                        path = path_match.group(1)
-                    else:
-                        path = "unknown"
+                    path = "unknown"
 
                 # Combine blueprint prefix with path
-                # Empty path "" with bp_prefix "/api/tenants" becomes "/api/tenants"
-                if path != "unknown":
-                    if path == "":
-                        # Empty path means the blueprint prefix is the full path
-                        full_path = bp_prefix
-                    elif path.startswith("/"):
-                        # Path starts with /, concatenate
-                        full_path = f"{bp_prefix}{path}"
-                    else:
-                        # Path doesn't start with /, add /
-                        full_path = f"{bp_prefix}/{path}"
+                if path == "":
+                    # Empty path means the blueprint prefix is the full path
+                    full_path = bp_prefix
+                elif path.startswith("/"):
+                    full_path = f"{bp_prefix}{path}"
+                elif path != "unknown":
+                    full_path = f"{bp_prefix}/{path}"
                 else:
                     full_path = path
-
-                # Extract function name (next non-empty line that starts with 'def')
-                func_name = "unknown"
-                for j in range(i, min(i + 5, len(lines) + 1)):
-                    if j < len(lines):
-                        next_line = lines[j]
-                        if next_line.strip().startswith("def "):
-                            func_match = re.search(r"def (\w+)", next_line)
-                            if func_match:
-                                func_name = func_match.group(1)
-                            break
 
                 endpoints.append(
                     {
                         "method": method,
                         "path": full_path,
-                        "decorator": current_decorator,
+                        "decorator": perm_decorator,
                         "function_name": func_name,
-                        "line_number": decorator_line,
+                        "line_number": perm_line,
                         "file": file_path.name,
                     }
                 )
 
-            # Reset decorator for next endpoint
-            current_decorator = None
-            decorator_line = 0
+            # Reset for next function
+            current_decorators = []
+        elif stripped and not stripped.startswith("#"):
+            # Non-decorator, non-def, non-comment, non-blank line
+            # Reset accumulated decorators (they don't belong to a function)
+            current_decorators = []
 
     return endpoints
 

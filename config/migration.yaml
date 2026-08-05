@@ -12,6 +12,7 @@ environments:
     batch_size: 50
     timeout: 300
     enable_notifications: true
+    require_confirmation: true
     active_session_threshold: 10
 
   prod:

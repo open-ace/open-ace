@@ -121,6 +121,13 @@ class MigrationConfig:
                     "enable_notifications": False,
                     "active_session_threshold": 5,
                 },
+                "staging": {
+                    "batch_size": 50,
+                    "timeout": 300,
+                    "enable_notifications": True,
+                    "require_confirmation": True,
+                    "active_session_threshold": 10,
+                },
                 "prod": {
                     "batch_size": 100,
                     "timeout": 600,
@@ -199,24 +206,21 @@ class MigrationTool:
             return False
 
     def count_users_to_migrate(self) -> int:
-        """Count users to migrate."""
-        try:
-            conn = db.get_connection()
-            cursor = conn.cursor()
+        """Count users to migrate.
 
-            # Count users with admin role
-            if db.is_postgresql():
-                cursor.execute("SELECT COUNT(*) FROM users WHERE role = 'admin'")
-            else:
-                cursor.execute("SELECT COUNT(*) FROM users WHERE role = 'admin'")
+        Raises on database errors so callers can distinguish between
+        "no users" and "database failure".
+        """
+        conn = db.get_connection()
+        cursor = conn.cursor()
 
-            result = cursor.fetchone()
-            conn.close()
+        # Count users with admin role
+        db._execute(cursor, "SELECT COUNT(*) FROM users WHERE role = 'admin'")
 
-            return result[0] if result else 0
-        except Exception as e:
-            logger.error(f"Failed to count users: {e}")
-            return 0
+        result = cursor.fetchone()
+        conn.close()
+
+        return result[0] if result else 0
 
     def count_active_sessions(self) -> int:
         """Count active sessions."""
@@ -226,9 +230,9 @@ class MigrationTool:
 
             # Count sessions that expire in the future
             if db.is_postgresql():
-                cursor.execute("SELECT COUNT(*) FROM sessions WHERE expires_at > NOW()")
+                db._execute(cursor, "SELECT COUNT(*) FROM sessions WHERE expires_at > NOW()")
             else:
-                cursor.execute("SELECT COUNT(*) FROM sessions WHERE expires_at > datetime('now')")
+                db._execute(cursor, "SELECT COUNT(*) FROM sessions WHERE expires_at > datetime('now')")
 
             result = cursor.fetchone()
             conn.close()
@@ -252,7 +256,12 @@ class MigrationTool:
             return False
 
         # Count users to migrate
-        user_count = self.count_users_to_migrate()
+        try:
+            user_count = self.count_users_to_migrate()
+        except Exception as e:
+            logger.error(f"Failed to count users: {e}")
+            self._print("error.db_connection")
+            return False
         self._print("check.users", count=user_count)
 
         if user_count == 0:
@@ -319,7 +328,8 @@ class MigrationTool:
             )
 
             # Backup current users
-            cursor.execute(
+            db._execute(
+                cursor,
                 """
                 INSERT INTO admin_role_migration_backup (id, username, role, tenant_id, updated_at, backup_source, batch_id)
                 SELECT id, username, role, tenant_id, updated_at, 'local', ?
@@ -400,17 +410,22 @@ class MigrationTool:
             return False
 
     def confirm(self, skip_confirm: bool = False) -> bool:
-        """Ask for confirmation."""
+        """Ask for confirmation.
+
+        Reads ``require_confirmation`` from the environment config so that
+        any environment (not just ``prod``) can opt in to interactive
+        confirmation.
+        """
         if skip_confirm:
             return True
 
         env = os.environ.get("OPENACE_ENV", "unknown")
-        if env == "prod":
+        env_config = self.config.get_environment_config(env)
+        if env_config.get("require_confirmation", False):
             self._print("confirm.proceed")
             response = input().strip().lower()
             return response == "yes"
-        else:
-            return True
+        return True
 
     def run(self, skip_confirm: bool = False):
         """Run migration."""
