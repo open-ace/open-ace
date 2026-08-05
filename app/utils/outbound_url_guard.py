@@ -317,6 +317,11 @@ def safe_request(
 
     scheme = urlparse(url).scheme
 
+    # Explicitly disable proxy lookup to match the working code path in
+    # llm_proxy_handler. In gevent-gunicorn workers, urllib3 proxy resolution
+    # can interact badly with monkey-patched ssl, causing RecursionError.
+    kwargs.setdefault("proxies", {"http": None, "https": None})  # type: ignore[dict-item]
+
     own_session = False
     if session is None:
         session = requests.Session()

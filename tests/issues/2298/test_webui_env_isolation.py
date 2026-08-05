@@ -476,7 +476,8 @@ class TestSudoersSecurityRules:
     would allow ``sudo openace-webui-launch bash`` → root shell.
 
     It must only appear in the restricted current_user_rules format:
-    ``ALL=(ALL) NOPASSWD: /usr/local/bin/openace-webui-launch "$webui_path" *``
+    ``ALL=(ALL) NOPASSWD: /usr/local/bin/openace-webui-launch * "$webui_path" *``
+    (Issue #2313: updated to allow env vars before webui_path).
     """
 
     @pytest.fixture
@@ -565,27 +566,40 @@ class TestSudoersSecurityRules:
 
     def test_package_install_has_restricted_webui_launch_rule(self, package_install_sh):
         """Package-method install.sh must have the restricted webui-launch rule
-        in current_user_rules with the ``"$webui_path"`` constraint."""
+        in current_user_rules with the ``"$webui_path"`` constraint.
+
+        Issue #2313: The rule format was updated to allow environment variable
+        arguments (KEY=VAL) before the webui_path. The format is now:
+        ``openace-webui-launch * "$webui_path" *``
+        """
         if not package_install_sh.exists():
             pytest.skip("package-method install.sh not found")
 
         content = package_install_sh.read_text()
 
-        # The restricted rule must exist
-        assert 'openace-webui-launch "$webui_path" *' in content, (
+        # The restricted rule must exist (Issue #2313: with * before $webui_path)
+        assert 'openace-webui-launch * "$webui_path" *' in content, (
             "Package install.sh must contain the restricted sudoers rule "
-            "for openace-webui-launch with '$webui_path' first-argument constraint"
+            "for openace-webui-launch with '$webui_path' argument constraint "
+            "(env vars allowed before webui_path per Issue #2313)"
         )
 
     def test_docker_install_has_restricted_webui_launch_rule(self, docker_install_sh):
         """Docker-method install.sh must have the restricted webui-launch rule
-        with the ``"$webui_path"`` constraint."""
+        with the ``"$webui_path"`` constraint.
+
+        Issue #2313: The rule format was updated to allow environment variable
+        arguments (KEY=VAL) before the webui_path. The format is now:
+        ``openace-webui-launch * "$webui_path" *``
+        """
         if not docker_install_sh.exists():
             pytest.skip("docker-method install.sh not found")
 
         content = docker_install_sh.read_text()
 
-        assert 'openace-webui-launch "$webui_path" *' in content, (
+        # The restricted rule must exist (Issue #2313: with * before $webui_path)
+        assert 'openace-webui-launch * "$webui_path" *' in content, (
             "Docker install.sh must contain the restricted sudoers rule "
-            "for openace-webui-launch with '$webui_path' first-argument constraint"
+            "for openace-webui-launch with '$webui_path' argument constraint "
+            "(env vars allowed before webui_path per Issue #2313)"
         )

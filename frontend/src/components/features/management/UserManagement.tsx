@@ -425,6 +425,7 @@ export const UserManagement: React.FC = () => {
                         variant="outline-primary"
                         size="sm"
                         onClick={() => handleOpenEdit(user)}
+                        title={t('edit', language) ?? 'Edit'}
                       >
                         <i className="bi bi-pencil" />
                       </Button>
@@ -442,6 +443,7 @@ export const UserManagement: React.FC = () => {
                         size="sm"
                         onClick={() => handleDelete(user.id)}
                         disabled={deleteUser.isPending}
+                        title={t('delete', language) ?? 'Delete'}
                       >
                         <i className="bi bi-trash" />
                       </Button>

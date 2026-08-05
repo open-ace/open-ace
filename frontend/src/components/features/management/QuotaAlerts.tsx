@@ -432,6 +432,7 @@ export const QuotaAlerts: React.FC = () => {
                         variant="outline-primary"
                         size="sm"
                         onClick={() => handleOpenEdit(user)}
+                        title={t('editQuota', language) ?? 'Edit Quota'}
                       >
                         <i className="bi bi-pencil" />
                       </Button>
@@ -834,6 +835,7 @@ export const QuotaAlerts: React.FC = () => {
                               variant="outline-primary"
                               size="sm"
                               onClick={() => handleMarkAsRead(alert.id)}
+                              title={t('markAsRead', language) ?? 'Mark as Read'}
                             >
                               <i className="bi bi-check" />
                             </Button>
@@ -842,6 +844,7 @@ export const QuotaAlerts: React.FC = () => {
                             variant="outline-danger"
                             size="sm"
                             onClick={() => handleDeleteAlert(alert.id)}
+                            title={t('delete', language) ?? 'Delete'}
                           >
                             <i className="bi bi-trash" />
                           </Button>
