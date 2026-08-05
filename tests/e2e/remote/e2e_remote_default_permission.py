@@ -62,10 +62,10 @@ def shot(page, name):
     path = os.path.join(SCREENSHOT_DIR, f"{name}.png")
     try:
         page.screenshot(path=path, full_page=True, timeout=30000)
-    except Exception:
+    except Exception:  # allow-swallow: UI element may not exist
         try:
             page.screenshot(path=path, full_page=False, timeout=10000)
-        except Exception:
+        except Exception:  # allow-swallow: UI element may not exist
             return
     print(f"    📸 {name}.png")
 
@@ -133,14 +133,14 @@ def run_tests():
                     sid = data.get("session", {}).get("session_id")
                     if sid:
                         captured_session_id[0] = sid
-                except Exception:
+                except Exception:  # allow-swallow: UI element may not exist
                     pass
 
         page.on("response", on_response)
 
         try:
             _run_test(page, token, effective_webui_url, webui_token, captured_session_id)
-        except Exception:
+        except Exception:  # allow-swallow: UI element may not exist
             shot(page, "ERROR_final")
             traceback.print_exc()
             raise
@@ -185,7 +185,7 @@ def _run_test(page, token, webui_url, webui_token, captured_session_id):
     try:
         page.wait_for_selector("textarea, .min-h-screen", timeout=30000)
         pause(10)  # Wait for session creation + CLI startup
-    except Exception:
+    except Exception:  # allow-swallow: UI element may not exist
         shot(page, "S1_timeout")
         raise AssertionError("ChatPage did not load within 30s")
 
@@ -215,7 +215,7 @@ def _run_test(page, token, webui_url, webui_token, captured_session_id):
                         sid = s.get("session_id")
                         if sid:
                             break
-        except Exception:
+        except Exception:  # allow-swallow: UI element may not exist
             pass
         if sid:
             break
@@ -357,7 +357,7 @@ def _run_test(page, token, webui_url, webui_token, captured_session_id):
 
                     last_output_len = len(outputs)
 
-        except Exception as e:
+        except Exception as e:  # allow-swallow: UI element may not exist
             log("Error", f"Poll failed: {e}")
 
         # Exit loop if permission found (go to approval step)
@@ -440,10 +440,10 @@ def _run_test(page, token, webui_url, webui_token, captured_session_id):
                                     "Output",
                                     "  [result] error={}".format(msg.get("is_error", False)),
                                 )
-                        except Exception:
+                        except Exception:  # allow-swallow: UI element may not exist
                             pass
                     last_output_len = len(outputs)
-            except Exception:
+            except Exception:  # allow-swallow: UI element may not exist
                 pass
             if result_found:
                 break

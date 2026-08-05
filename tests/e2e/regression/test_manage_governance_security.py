@@ -53,7 +53,7 @@ def test_page_loads():
             assert check_element_exists(page, main_selectors), "主内容区域应存在"
 
             save_screenshot(page, MODULE_NAME, "01_page_load")
-            return True
+
         finally:
             browser.close()
 
@@ -73,7 +73,7 @@ def test_security_overview():
             assert check_element_exists(page, overview_selectors), "安全概览区域应存在"
 
             save_screenshot(page, MODULE_NAME, "02_overview")
-            return True
+
         finally:
             browser.close()
 
@@ -98,7 +98,7 @@ def test_security_events_list():
             assert check_element_exists(page, events_selectors), "应有安全事件列表或空状态提示"
 
             save_screenshot(page, MODULE_NAME, "03_events_list")
-            return True
+
         finally:
             browser.close()
 
@@ -118,7 +118,7 @@ def test_security_settings():
             check_element_exists(page, settings_selectors)
 
             save_screenshot(page, MODULE_NAME, "04_settings")
-            return True
+            assert page.locator("body").is_visible(), "页面应可见"
         finally:
             browser.close()
 
@@ -142,7 +142,7 @@ def test_security_report():
             check_element_exists(page, report_selectors)
 
             save_screenshot(page, MODULE_NAME, "05_report")
-            return True
+            assert page.locator("body").is_visible(), "页面应可见"
         finally:
             browser.close()
 

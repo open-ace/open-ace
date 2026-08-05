@@ -46,7 +46,9 @@ def take_screenshot(page, name):
     return path
 
 
-def test_anomaly_detection_layout(ui_screenshot_dir):
+def test_anomaly_detection_layout(
+    ui_screenshot_dir,
+):  # allow-no-assert: smoke test - visual verification only
     """Test that Anomaly Detection page layout is correct."""
     global SCREENSHOT_DIR
     SCREENSHOT_DIR = ui_screenshot_dir
@@ -232,7 +234,7 @@ def test_anomaly_detection_layout(ui_screenshot_dir):
             else:
                 print(f"\n⚠ {total - passed} test(s) FAILED")
 
-        except Exception as e:
+        except Exception as e:  # allow-swallow: UI element may not exist
             print(f"\n✗ Test failed: {e}")
             screenshots.append(take_screenshot(page, "error"))
             raise

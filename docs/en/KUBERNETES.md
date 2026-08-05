@@ -51,9 +51,17 @@ Creates the `open-ace` namespace with standard Kubernetes labels.
 | CPU | 100m | 500m |
 | Memory | 256Mi | 512Mi |
 
-**Health Checks:**
-- Liveness: HTTP GET `/health`, initialDelay=10s, period=10s
-- Readiness: HTTP GET `/health`, initialDelay=5s, period=5s
+**Health Checks (Issue #2186):**
+- Liveness: HTTP GET `/livez`, initialDelay=10s, period=10s (process alive only)
+- Readiness: HTTP GET `/readyz`, initialDelay=5s, period=5s (database, config, dependencies)
+- Startup: HTTP GET `/readyz`, failureThreshold=60, period=5s (max 300s wait)
+- Prometheus scrape: `/metrics` endpoint (Prometheus format)
+
+**Endpoint Responsibilities:**
+- `/livez`: Process liveness check, no dependency checks to avoid restart storms
+- `/readyz`: Readiness check, validates database connection, schema compatibility, config dir, workspace
+- `/metrics`: Prometheus metrics exposition
+- `/health`: Deprecated, delegates to `/readyz`, response includes `deprecated: true`
 
 **Pod Anti-Affinity:** Preferred across nodes to preserve availability when capacity allows.
 

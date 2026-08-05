@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Open ACE - AI Computing Explorer - WebUI Manager Service
 
@@ -31,6 +30,34 @@ from app.utils.workspace import ensure_system_user as _ensure_user_shared
 from app.utils.workspace import run_as_root_if_needed
 
 logger = logging.getLogger(__name__)
+
+# Environment variable keys that are handled by sudoers env_keep
+# (preserved automatically) and should NOT be inlined via
+# openace-webui-launch. Everything else (dynamic envKeys from model
+# pools, etc.) gets inlined automatically.
+_WEBUI_ENV_SUDO_KNOWN_KEYS = frozenset(
+    {
+        "PATH",
+        "OPENACE_PROXY_TOKEN",
+        "OPENACE_PROXY_URL",
+        "OPENACE_MODEL",
+        "OPENACE_LOG_DIR",
+        "SESSION_TIMEOUT_MS",
+        "KEEPALIVE_INTERVAL_MS",
+        "OPENAI_API_KEY",
+        "OPENAI_BASE_URL",
+        "LANG",
+        "LC_ALL",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "NO_PROXY",
+    }
+)
+
+# Path to the secure launch wrapper that enables inline env-var
+# passthrough via /usr/bin/env without granting unrestricted env access
+# in sudoers (Issue #2305 review).
+_WEBUI_LAUNCH_WRAPPER = "/usr/local/bin/openace-webui-launch"
 
 
 @dataclass
@@ -893,6 +920,45 @@ class WebUIManager:
                 "proxy_token": "",
             }
 
+    def _build_webui_env(
+        self,
+        user_id: int,
+        system_account: str,
+        openace_api_url: str,
+    ) -> tuple[dict[str, str], dict[str, Any]]:
+        """
+        Build minimal environment for WebUI process.
+
+        Issue #2298: Use explicit environment instead of os.environ.copy()
+        to prevent leaking sensitive variables (DATABASE_URL, TOKEN_SECRET,
+        GH_TOKEN, ANTHROPIC_API_KEY, etc.) to WebUI child process.
+
+        Returns:
+            Tuple of (environment dict, model pool dict).
+        """
+        # Start with minimal base environment
+        # Issue #1141: Prepend system dirs, but preserve inherited PATH for macOS etc.
+        # macOS Apple Silicon has node in /opt/homebrew/bin, which is not in the hardcoded PATH.
+        # Preserving inherited PATH ensures custom node installations are found.
+        _system_dirs = "/usr/local/bin:/usr/bin:/bin"
+        _inherited_path = os.environ.get("PATH", "")
+        child_env = {
+            "PATH": _system_dirs + (":" + _inherited_path if _inherited_path else ""),
+            # Language/encoding
+            "LANG": os.environ.get("LANG", "C.UTF-8"),
+            "LC_ALL": os.environ.get("LC_ALL", ""),
+        }
+
+        # Configure LLM proxy (includes dynamic envKey collection)
+        model_pool = self._configure_local_openai_proxy(user_id, child_env, openace_api_url)
+
+        # Optional: HTTP proxy settings (if configured in service environment)
+        for proxy_var in ["HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY"]:
+            if proxy_var in os.environ:
+                child_env[proxy_var] = os.environ[proxy_var]
+
+        return child_env, model_pool
+
     def _launch_webui_process(
         self, user_id: int, system_account: str, port: int, base_url: str
     ) -> tuple[subprocess.Popen | None, dict[str, Any]]:
@@ -945,9 +1011,10 @@ class WebUIManager:
             server_port = server_config.get("web_port", 19888)
             openace_api_url = f"{openace_api_url}:{server_port}"
 
-        # Build child environment first (needed for sudo env passing)
-        child_env = os.environ.copy()
-        model_pool = self._configure_local_openai_proxy(user_id, child_env, openace_api_url)
+        # Issue #2298: Build minimal environment for WebUI process
+        # Do NOT use os.environ.copy() to avoid leaking sensitive variables
+        # (DATABASE_URL, TOKEN_SECRET, GH_TOKEN, etc.)
+        child_env, model_pool = self._build_webui_env(user_id, system_account, openace_api_url)
 
         # Set OPENACE_LOG_DIR to /tmp to avoid HOME permission issues
         webui_log_dir = f"/tmp/qwen-code-webui-{user_id}"
@@ -982,22 +1049,10 @@ class WebUIManager:
                 except OSError as e:
                     logger.warning(f"Failed to chown log dir: {e}")
 
-        # Ensure PATH can resolve the `node` binary while preserving the host's
-        # inherited PATH. Prepend the standard system directories so Docker
-        # (node in /usr/bin) keeps resolving (Issue #1083), then append the
-        # inherited PATH so host-installed binaries are still found — e.g.
-        # /opt/homebrew/bin on Apple Silicon macOS, where Homebrew installs
-        # node. NODE_PATH is intentionally NOT set: it controls Node *module*
-        # resolution (a list of directories, not a binary path), so pointing it
-        # at an executable was semantically wrong and could only interfere with
-        # module lookup.
-        _system_dirs = "/usr/local/bin:/usr/bin:/bin"
-        _inherited_path = child_env.get("PATH", "")
-        child_env["PATH"] = (
-            _system_dirs + ":" + _inherited_path if _inherited_path else _system_dirs
-        )
-
-        # Build command based on platform
+        # Build command based on platform.
+        # popen_env tracks whether to pass child_env to Popen; for the sudo
+        # inline path env vars are already in the command, so skip it.
+        popen_env: dict[str, str] | None = child_env
         if webui_dir:
             # Running from project directory using node
             cmd = [
@@ -1034,24 +1089,60 @@ class WebUIManager:
                 ]
                 cwd = None
             else:
-                # Different user: use sudo -u for global executable
-                # Environment variables are passed via sudoers env_keep configuration
-                cmd = [
-                    "sudo",
-                    "-u",
-                    system_account,
-                    webui_cmd,
-                    "--port",
-                    str(port),
-                    "--host",
-                    "0.0.0.0",
-                    "--token-secret",
-                    self.config.token_secret,
-                    "--quota-check-enabled",
-                    "--openace-api-url",
-                    openace_api_url,
-                ]
+                # Different user: use sudo -u with openace-webui-launch wrapper
+                # to pass environment variables inline.
+                # Issue #2298: Popen(env=child_env) is filtered by sudo env_keep,
+                # so we inline env vars as arguments to the launch wrapper.
+                # The wrapper execs /usr/bin/env with all supplied args; sudoers
+                # restricts it to only be called with the webui path as first
+                # non-env argument (no arbitrary command execution).
+                #
+                # SECURITY NOTE: inline KEY=VALUE args are visible in /proc/<pid>/cmdline
+                # to other processes on the same host. The values here are JWT proxy tokens
+                # (not real API keys), so the risk is acceptable. For real API keys, consider
+                # passing them via a file or other IPC mechanism.
+                env_args = []
+                # Standard keys: LLM config + locale + proxy
+                for key in [
+                    "OPENAI_API_KEY",
+                    "OPENAI_BASE_URL",
+                    "LANG",
+                    "LC_ALL",
+                    "HTTP_PROXY",
+                    "HTTPS_PROXY",
+                    "NO_PROXY",
+                ]:
+                    if child_env.get(key):
+                        env_args.append(f"{key}={child_env[key]}")
+                # Dynamic envKeys from model pool (e.g., BAILIAN_CODING_PLAN_API_KEY)
+                for key, value in child_env.items():
+                    if key not in _WEBUI_ENV_SUDO_KNOWN_KEYS and value:
+                        env_args.append(f"{key}={value}")
+
+                cmd = (
+                    [
+                        "sudo",
+                        "-u",
+                        system_account,
+                        _WEBUI_LAUNCH_WRAPPER,
+                    ]
+                    + env_args
+                    + [
+                        webui_cmd,
+                        "--port",
+                        str(port),
+                        "--host",
+                        "0.0.0.0",
+                        "--token-secret",
+                        self.config.token_secret,
+                        "--quota-check-enabled",
+                        "--openace-api-url",
+                        openace_api_url,
+                    ]
+                )
                 cwd = None
+                # Env vars already inlined via launch wrapper; skip Popen env param.
+                popen_env = None
         else:
             # Other platforms: direct execution (no user switching)
             cmd = [
@@ -1083,7 +1174,7 @@ class WebUIManager:
                 cmd,
                 start_new_session=True,  # Detach from parent process group
                 cwd=cwd,
-                env=child_env,  # Passed to sudo; preserved via sudoers env_keep
+                env=popen_env,  # None for sudo-inline path (vars already in cmd)
                 stdout=subprocess.DEVNULL,  # WebUI handles its own logging via OPENACE_LOG_DIR
                 stderr=subprocess.DEVNULL,
             )

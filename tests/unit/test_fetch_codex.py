@@ -292,6 +292,7 @@ def test_reimport_replaces_stale_codex_session_rows(monkeypatch, tmp_path):
             is_group_chat INTEGER,
             agent_session_id TEXT,
             conversation_id TEXT,
+            user_id integer,
             PRIMARY KEY (date, tool_name, host_name, message_id)
         )
         """

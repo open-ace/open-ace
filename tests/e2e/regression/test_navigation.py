@@ -66,7 +66,7 @@ def test_sidebar_menu_visible():
             assert check_element_exists(page, menu_selectors), "菜单项应存在"
 
             save_screenshot(page, MODULE_NAME, "01_sidebar")
-            return True
+
         finally:
             browser.close()
 
@@ -90,20 +90,21 @@ def test_menu_navigation():
             for name, path in menu_items:
                 link_selectors = [f'a[href*="{path}"]', f'a:has-text("{name}")']
                 if check_element_exists(page, link_selectors):
-                    try:
-                        link = page.locator(link_selectors[0] + ", " + link_selectors[1]).first
-                        if link.is_visible():
-                            link.click()
-                            page.wait_for_timeout(500)
-                    except Exception:
-                        pass
+                    link = page.locator(link_selectors[0] + ", " + link_selectors[1]).first
+                    assert link.is_visible(), f"menu link '{name}' not visible"
+                    link.click()
+                    page.wait_for_timeout(500)
+                    assert (
+                        path in page.url
+                    ), f"clicking menu '{name}' did not navigate to {path} (url={page.url})"
 
             save_screenshot(page, MODULE_NAME, "02_navigation")
-            return True
+
         finally:
             browser.close()
 
 
+@pytest.mark.priority_p0
 def test_page_title_updates():
     """测试页面标题更新"""
     with sync_playwright() as p:
@@ -134,7 +135,7 @@ def test_page_title_updates():
                 ), f"页面 {path} 应有标题或导航标识"
 
             save_screenshot(page, MODULE_NAME, "03_title")
-            return True
+
         finally:
             browser.close()
 

@@ -1,0 +1,46 @@
+[Unit]
+Description=Open ACE - Scheduler Worker (background services)
+Documentation=https://github.com/open-ace/open-ace
+After=network.target
+
+[Service]
+Type=simple
+User=__USER__
+Group=__GROUP__
+WorkingDirectory=__INSTALL_PATH__
+ExecStart=__PYTHON__ -m app.scheduler_worker
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+# Environment variables
+# SCHEDULER_MODE=scheduler makes this process run ALL background services
+# (autonomous scheduler, data fetch, quota enforcement, alert compensation,
+# SSO cleanup, health monitor) via leader election. The web service
+# (open-ace.service) runs with SCHEDULER_MODE unset (defaults to "web") and
+# starts NO background services — the two roles are split since #2187.
+Environment=SCHEDULER_MODE=scheduler
+Environment=HOME=__HOME__
+Environment=SECRET_KEY=__SECRET_KEY__
+Environment=WORKSPACE_BASE_DIR=__WORKSPACE_BASE_DIR__
+
+# Secrets (OPENACE_ENCRYPTION_KEY at minimum; encrypts API keys / SMTP
+# passwords). The leading '-' makes the file OPTIONAL: installs without it
+# keep the old (development-mode, ephemeral-key) behaviour so existing
+# deployments are not broken; installs that persist a key there get durable
+# encryption across restarts. Generate once:
+#   OPENACE_ENCRYPTION_KEY=$(python3 -c 'import secrets; print(secrets.token_hex(32))')
+# and write it to /etc/openace/secrets.env (root:root, mode 0600), then
+# reference it from BOTH this unit and open-ace.service so web + scheduler
+# share the same key (else encrypted data written by one can't be read by
+# the other). WARNING: changing the key makes existing encrypted data
+# (api_key_store, smtp_settings) unreadable — re-enter those credentials.
+EnvironmentFile=-/etc/openace/secrets.env
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

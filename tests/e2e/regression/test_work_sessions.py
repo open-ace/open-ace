@@ -53,7 +53,7 @@ def test_page_loads():
             assert check_element_exists(page, main_selectors), "主内容区域应存在"
 
             save_screenshot(page, MODULE_NAME, "01_page_load")
-            return True
+
         finally:
             browser.close()
 
@@ -78,7 +78,7 @@ def test_session_list_display():
             assert check_element_exists(page, session_selectors), "应有会话列表或空状态提示"
 
             save_screenshot(page, MODULE_NAME, "02_session_list")
-            return True
+
         finally:
             browser.close()
 
@@ -96,19 +96,14 @@ def test_session_filter():
             # 检查筛选输入框
             filter_selectors = ['input[placeholder*="search"]', 'input[type="text"]']
             if check_element_exists(page, filter_selectors):
-                try:
-                    filter_input = page.locator(
-                        filter_selectors[0] + ", " + filter_selectors[1]
-                    ).first
-                    if filter_input.is_visible():
-                        filter_input.fill("test")
-                        page.wait_for_timeout(500)
-                        filter_input.clear()
-                except Exception:
-                    pass
+                filter_input = page.locator(filter_selectors[0] + ", " + filter_selectors[1]).first
+                assert filter_input.is_visible(), "filter_input not visible (Issue #2189)"
+                filter_input.fill("test")
+                page.wait_for_timeout(500)
+                filter_input.clear()
 
             save_screenshot(page, MODULE_NAME, "03_filter")
-            return True
+
         finally:
             browser.close()
 
@@ -126,18 +121,15 @@ def test_session_detail():
             # 尝试点击会话项查看详情
             session_item_selectors = [".session-item", "tr", ".list-item"]
             if check_element_exists(page, session_item_selectors):
-                try:
-                    session_item = page.locator(
-                        session_item_selectors[0] + ", " + session_item_selectors[1]
-                    ).first
-                    if session_item.is_visible():
-                        session_item.click()
-                        page.wait_for_timeout(500)
-                except Exception:
-                    pass
+                session_item = page.locator(
+                    session_item_selectors[0] + ", " + session_item_selectors[1]
+                ).first
+                assert session_item.is_visible(), "session_item not visible (Issue #2189)"
+                session_item.click()
+                page.wait_for_timeout(500)
 
             save_screenshot(page, MODULE_NAME, "04_detail")
-            return True
+
         finally:
             browser.close()
 
@@ -162,7 +154,7 @@ def test_session_delete():
             check_element_exists(page, delete_btn_selectors)
 
             save_screenshot(page, MODULE_NAME, "05_delete")
-            return True
+            assert page.locator("body").is_visible(), "页面应可见"
         finally:
             browser.close()
 

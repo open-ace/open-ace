@@ -128,7 +128,7 @@ class AgentTaskPolicy:
     memory_max_bytes: int = 0
     pids_max: int = 0
     cpu_max: str = ""
-    max_concurrent_workflows: int = 3
+    max_concurrent_workflows: int = 10
     # #2020 Phase B — complete the resource-contract dimension set. memory/pids/cpu
     # are enforced by the Legacy launcher (cgroup); wall_clock is enforced by the
     # runner (covered by the CPU_MEM_PIDS_TIME_QUOTA capability). ephemeral_storage
@@ -150,7 +150,7 @@ def _normalize_cgroup_enabled(raw: str) -> str:
     return "auto"
 
 
-def read_agent_task_policy(conf_path: str, *, concurrency_default: int = 3) -> AgentTaskPolicy:
+def read_agent_task_policy(conf_path: str, *, concurrency_default: int = 10) -> AgentTaskPolicy:
     """Parse the agent-launcher.conf keys into an :class:`AgentTaskPolicy`.
 
     Missing or unreadable file → all defaults. Malformed integer values fall

@@ -446,3 +446,120 @@ class TestUnmappedAccounts:
             content_type="application/json",
         )
         assert response.status_code == 400
+
+
+class TestGenerateDefaultRules:
+    """Test generate default rules endpoint (Issue #2131)."""
+
+    @patch("app.routes.mapping_rules.ToolAccountAutoMappingService")
+    def test_generate_default_rules_first_time(self, mock_service_class, admin_client):
+        """POST /api/mapping-rules/user/<id>/generate-default should return 201 when rules created."""
+        from app.models.tool_account_mapping_rule import ToolAccountMappingRule
+        from app.services.tool_account_auto_mapping_service import GenerateDefaultRulesResult
+
+        mock_service = MagicMock()
+        result = GenerateDefaultRulesResult(
+            created=[
+                ToolAccountMappingRule(
+                    id=1,
+                    user_id=5,
+                    pattern="alice-*",
+                    match_type="prefix",
+                    priority=10,
+                    is_auto=True,
+                    is_active=True,
+                ),
+                ToolAccountMappingRule(
+                    id=2,
+                    user_id=5,
+                    pattern="*alice*",
+                    match_type="contains",
+                    priority=5,
+                    is_auto=True,
+                    is_active=True,
+                ),
+            ],
+            skipped=[],
+            created_count=2,
+            skipped_count=0,
+        )
+        mock_service.create_default_rules_for_user.return_value = result
+        mock_service_class.return_value = mock_service
+
+        response = admin_client.post("/api/mapping-rules/user/5/generate-default")
+        assert response.status_code == 201
+        data = json.loads(response.data)
+        assert "created" in data
+        assert "skipped" in data
+        assert data["created_count"] == 2
+        assert data["skipped_count"] == 0
+
+    @patch("app.routes.mapping_rules.ToolAccountAutoMappingService")
+    def test_generate_default_rules_already_exists(self, mock_service_class, admin_client):
+        """POST /api/mapping-rules/user/<id>/generate-default should return 200 when rules already exist."""
+        from app.services.tool_account_auto_mapping_service import GenerateDefaultRulesResult
+
+        mock_service = MagicMock()
+        result = GenerateDefaultRulesResult(
+            created=[],
+            skipped=[
+                {"pattern": "alice-*", "match_type": "prefix", "priority": 10},
+                {"pattern": "*alice*", "match_type": "contains", "priority": 5},
+            ],
+            created_count=0,
+            skipped_count=2,
+        )
+        mock_service.create_default_rules_for_user.return_value = result
+        mock_service_class.return_value = mock_service
+
+        response = admin_client.post("/api/mapping-rules/user/5/generate-default")
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert data["created_count"] == 0
+        assert data["skipped_count"] == 2
+
+    @patch("app.routes.mapping_rules.ToolAccountAutoMappingService")
+    def test_generate_default_rules_partial(self, mock_service_class, admin_client):
+        """POST /api/mapping-rules/user/<id>/generate-default should handle partial success."""
+        from app.models.tool_account_mapping_rule import ToolAccountMappingRule
+        from app.services.tool_account_auto_mapping_service import GenerateDefaultRulesResult
+
+        mock_service = MagicMock()
+        result = GenerateDefaultRulesResult(
+            created=[
+                ToolAccountMappingRule(
+                    id=1,
+                    user_id=5,
+                    pattern="alice-*",
+                    match_type="prefix",
+                    priority=10,
+                    is_auto=True,
+                    is_active=True,
+                ),
+            ],
+            skipped=[
+                {"pattern": "*alice*", "match_type": "contains", "priority": 5},
+            ],
+            created_count=1,
+            skipped_count=1,
+        )
+        mock_service.create_default_rules_for_user.return_value = result
+        mock_service_class.return_value = mock_service
+
+        response = admin_client.post("/api/mapping-rules/user/5/generate-default")
+        assert response.status_code == 201
+        data = json.loads(response.data)
+        assert data["created_count"] == 1
+        assert data["skipped_count"] == 1
+
+    @patch("app.routes.mapping_rules.ToolAccountAutoMappingService")
+    def test_generate_default_rules_error(self, mock_service_class, admin_client):
+        """POST /api/mapping-rules/user/<id>/generate-default should return 500 on error."""
+        mock_service = MagicMock()
+        mock_service.create_default_rules_for_user.side_effect = Exception("Database error")
+        mock_service_class.return_value = mock_service
+
+        response = admin_client.post("/api/mapping-rules/user/5/generate-default")
+        assert response.status_code == 500
+        data = json.loads(response.data)
+        assert "error" in data

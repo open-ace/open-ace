@@ -100,7 +100,7 @@ RUN echo "deb http://mirrors.aliyun.com/debian/ trixie main" > /etc/apt/sources.
     && ps --version >/dev/null \
     # === npm and CLI Setup ===
     && npm config set registry https://registry.npmmirror.com/ \
-    && npm install -g qwen-code-webui @qwen-code/qwen-code \
+    && npm install -g qwen-code-webui@0.2.40 @qwen-code/qwen-code@0.15.10 \
     # === CLI Verification ===
     && test -f /usr/lib/node_modules/@qwen-code/qwen-code/cli.js \
     && test -x /usr/bin/qwen-code-webui \
@@ -170,6 +170,12 @@ COPY --chown=open-ace:open-ace . .
 # Copy frontend build output from frontend-builder stage (Issue #1260)
 COPY --from=frontend-builder --chown=open-ace:open-ace /app/static/js/dist ./static/js/dist
 
+# Patch qwen-code-webui "Allow All" permission for remote sessions:
+# the onAllowAll handler lacks the WebSocket branch, so remote-session
+# permission requests (requestId-only) never get answered and time out as
+# "denied". Script is version-pinned and fails the build on drift.
+RUN python3 /app/scripts/patch-qwen-webui-permission.py
+
 # Copy and set up entrypoint script
 COPY --chown=open-ace:open-ace docker-entrypoint.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
@@ -229,14 +235,17 @@ COPY scripts/openace-mkdir.sh /usr/local/bin/openace-mkdir
 COPY scripts/openace-rm.sh /usr/local/bin/openace-rm
 COPY scripts/openace-write-as.sh /usr/local/bin/openace-write-as
 COPY scripts/openace-restore-sudoers.sh /usr/local/bin/openace-restore-sudoers
+COPY scripts/openace-webui-launch.sh /usr/local/bin/openace-webui-launch
 RUN chmod 755 /usr/local/bin/openace-chown /usr/local/bin/openace-useradd \
              /usr/local/bin/openace-cat /usr/local/bin/openace-mkdir \
              /usr/local/bin/openace-rm /usr/local/bin/openace-write-as \
-             /usr/local/bin/openace-restore-sudoers && \
+             /usr/local/bin/openace-restore-sudoers \
+             /usr/local/bin/openace-webui-launch && \
     chown root:root /usr/local/bin/openace-chown /usr/local/bin/openace-useradd \
                     /usr/local/bin/openace-cat /usr/local/bin/openace-mkdir \
                     /usr/local/bin/openace-rm /usr/local/bin/openace-write-as \
-                    /usr/local/bin/openace-restore-sudoers && \
+                    /usr/local/bin/openace-restore-sudoers \
+                    /usr/local/bin/openace-webui-launch && \
     mkdir -p /var/lock && chmod 1777 /var/lock
 
 # NOTE: The image defaults to the non-root open-ace user (uid 1000) so that
@@ -267,9 +276,9 @@ ENV PYTHONUNBUFFERED=1 \
 # Expose port
 EXPOSE 19888
 
-# Health check
+# Health check (Issue #2186: uses /readyz for actual health)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:19888/health')" || exit 1
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:19888/readyz')" || exit 1
 
 # Run the application
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]

@@ -36,7 +36,9 @@ class TestMultiWorkerKeyConsistency:
                 with patch.dict(os.environ, {"OPENACE_SECURITY_MODE": "production"}, clear=False):
                     mode = get_security_mode()
                     results.append(mode)
-            except Exception as e:
+            except (
+                Exception
+            ) as e:  # allow-swallow: collect per-thread errors; the driving test asserts errors is empty
                 errors.append(e)
 
         # Run 20 concurrent detections
@@ -121,7 +123,9 @@ class TestFileBasedSecretStorage:
                 try:
                     content = secret_file.read_text().strip()
                     results.append(content)
-                except Exception as e:
+                except (
+                    Exception
+                ) as e:  # allow-swallow: collect per-thread errors; the driving test asserts errors is empty
                     errors.append(e)
 
             # Simulate 20 workers reading the same file
@@ -156,7 +160,9 @@ class TestFileBasedSecretStorage:
                         "initial-secret-key-32-characters-long",
                         "final-secret-key-32-characters-long",
                     ], f"Read partial or corrupted content: {content}"
-                except Exception as e:
+                except (
+                    Exception
+                ) as e:  # allow-swallow: collect per-thread errors; the driving test asserts errors is empty
                     errors.append(e)
 
             def write_new_secret():
@@ -232,7 +238,9 @@ class TestGunicornWorkerConsistency:
                         "secret_key": secret_key,
                     }
                 )
-            except Exception as e:
+            except (
+                Exception
+            ) as e:  # allow-swallow: collect per-thread errors; the driving test asserts errors is empty
                 errors.append((worker_id, e))
 
         # Simulate 4 workers (typical Gunicorn configuration)

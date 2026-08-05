@@ -106,7 +106,7 @@ def cleanup_test_keys(token):
 # ── 测试主流程 ──────────────────────────────────────────
 
 
-def test_api_key_cli_settings():
+def test_api_key_cli_settings():  # allow-no-assert: smoke test - visual verification only
     """Test API Key CLI Settings Configuration."""
 
     print("\n" + "=" * 60)
@@ -382,7 +382,7 @@ def test_api_key_cli_settings():
             print("  ✅ E2E Test PASSED: API Key CLI Settings Configuration")
             print("=" * 60)
 
-        except Exception as e:
+        except Exception as e:  # allow-swallow: UI element may not exist
             shot(page, "error_state")
             print(f"\n    ❌ Test FAILED: {e}")
             raise

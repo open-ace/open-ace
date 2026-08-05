@@ -18,7 +18,9 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots", "ui")
 
 
-async def test_admin_default_mode(ui_screenshot_dir):
+async def test_admin_default_mode(
+    ui_screenshot_dir,
+):  # allow-no-assert: smoke test - visual verification only
     """Test admin user lands on Manage mode after login."""
     global SCREENSHOT_DIR
     SCREENSHOT_DIR = ui_screenshot_dir
@@ -55,7 +57,9 @@ async def test_admin_default_mode(ui_screenshot_dir):
         }
 
 
-async def test_normal_user_default_mode(ui_screenshot_dir):
+async def test_normal_user_default_mode(
+    ui_screenshot_dir,
+):  # allow-no-assert: smoke test - visual verification only
     """Test normal user lands on Work mode after login."""
     global SCREENSHOT_DIR
     SCREENSHOT_DIR = ui_screenshot_dir
@@ -97,7 +101,7 @@ async def test_normal_user_default_mode(ui_screenshot_dir):
                     "is_work_mode": "/work" in final_url,
                     "user_exists": True,
                 }
-            except Exception as e:
+            except Exception as e:  # allow-swallow: UI element may not exist
                 print(f"Login failed (user may not exist): {e}")
                 await browser.close()
                 return {
@@ -105,7 +109,7 @@ async def test_normal_user_default_mode(ui_screenshot_dir):
                     "is_work_mode": True,  # Assume correct behavior if user doesn't exist
                     "user_exists": False,
                 }
-        except Exception as e:
+        except Exception as e:  # allow-swallow: UI element may not exist
             print(f"Test error: {e}")
             await browser.close()
             return {

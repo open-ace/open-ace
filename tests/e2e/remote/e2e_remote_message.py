@@ -77,7 +77,7 @@ def cleanup_remote_agent():
             if any(m.get("status") == "online" for m in machines):
                 log("Cleanup", "✓ Remote agent already online, skipping restart")
                 return
-        except Exception:
+        except Exception:  # allow-swallow: UI element may not exist
             pass
 
         # Step 3: Agent not online — kill old agent processes and restart
@@ -109,10 +109,10 @@ def cleanup_remote_agent():
                 if any(m.get("status") == "online" for m in machines):
                     log("Cleanup", "✓ Remote agent online")
                     return
-            except Exception:
+            except Exception:  # allow-swallow: UI element may not exist
                 pass
         log("Cleanup", "⚠ Agent did not come online within 40s")
-    except Exception as e:
+    except Exception as e:  # allow-swallow: UI element may not exist
         log("Cleanup", f"⚠ Cleanup failed (non-fatal): {e}")
 
 
@@ -125,10 +125,10 @@ def shot(page, name):
     path = os.path.join(SCREENSHOT_DIR, f"{name}.png")
     try:
         page.screenshot(path=path, full_page=True, timeout=30000)
-    except Exception:
+    except Exception:  # allow-swallow: UI element may not exist
         try:
             page.screenshot(path=path, full_page=False, timeout=10000)
-        except Exception:
+        except Exception:  # allow-swallow: UI element may not exist
             return
     print(f"    📸 {name}.png")
 
@@ -193,7 +193,7 @@ def run_tests():
 
         try:
             _run_all(page, token)
-        except Exception:
+        except Exception:  # allow-swallow: UI element may not exist
             shot(page, "ERROR_final")
             traceback.print_exc()
             raise

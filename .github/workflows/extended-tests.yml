@@ -75,6 +75,11 @@ jobs:
 
       - name: Run critical extended tests
         run: |
+          # Issue #2189: Validate collection before running
+          python scripts/run_extended_tests.py \
+            --category critical \
+            --dry-run 2>&1 | grep -E "Collected|Total files" || true
+
           python scripts/run_extended_tests.py \
             --category critical \
             --isolated-home \
@@ -138,6 +143,11 @@ jobs:
 
       - name: Run full E2E tests
         run: |
+          # Issue #2189: Validate collection before running
+          python scripts/run_extended_tests.py \
+            --category e2e \
+            --dry-run 2>&1 | grep -E "Collected|Total files" || true
+
           python scripts/run_extended_tests.py \
             --category e2e \
             --isolated-home \

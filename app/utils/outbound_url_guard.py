@@ -317,6 +317,11 @@ def safe_request(
 
     scheme = urlparse(url).scheme
 
+    # Explicitly disable proxy lookup to match the working code path in
+    # llm_proxy_handler. In gevent-gunicorn workers, urllib3 proxy resolution
+    # can interact badly with monkey-patched ssl, causing RecursionError.
+    kwargs.setdefault("proxies", {"http": None, "https": None})  # type: ignore[dict-item]
+
     own_session = False
     if session is None:
         session = requests.Session()
@@ -442,18 +447,19 @@ def _is_public_address(address: ipaddress._BaseAddress) -> bool:
     CGNAT outside Python's narrow private slice (``100.128.0.1``), and
     multicast.
     """
+    # mypy: _BaseAddress doesn't define these properties (defined in subclasses)
     if (
-        address.is_private
-        or address.is_loopback
-        or address.is_link_local
-        or address.is_multicast
-        or address.is_reserved
-        or address.is_unspecified
+        address.is_private  # type: ignore[attr-defined]
+        or address.is_loopback  # type: ignore[attr-defined]
+        or address.is_link_local  # type: ignore[attr-defined]
+        or address.is_multicast  # type: ignore[attr-defined]
+        or address.is_reserved  # type: ignore[attr-defined]
+        or address.is_unspecified  # type: ignore[attr-defined]
     ):
         return False
     if any(address in network for network in _NON_PUBLIC_GLOBAL_NETWORKS):
         return False
-    return bool(address.is_global)
+    return bool(address.is_global)  # type: ignore[attr-defined]
 
 
 # Public alias so callers (e.g. the alert webhook path) share the same hardened

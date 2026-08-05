@@ -53,7 +53,7 @@ def test_page_loads():
             assert check_element_exists(page, main_selectors), "主内容区域应存在"
 
             save_screenshot(page, MODULE_NAME, "01_page_load")
-            return True
+
         finally:
             browser.close()
 
@@ -73,7 +73,7 @@ def test_session_list_display():
             assert check_element_exists(page, session_selectors), "会话列表区域应存在"
 
             save_screenshot(page, MODULE_NAME, "02_session_list")
-            return True
+
         finally:
             browser.close()
 
@@ -93,7 +93,7 @@ def test_tools_panel_display():
             assert check_element_exists(page, tools_selectors), "工具面板区域应存在"
 
             save_screenshot(page, MODULE_NAME, "03_tools_panel")
-            return True
+
         finally:
             browser.close()
 
@@ -118,7 +118,7 @@ def test_new_session():
             assert check_element_exists(page, new_btn_selectors), "新建会话按钮应可见"
 
             save_screenshot(page, MODULE_NAME, "04_new_session")
-            return True
+
         finally:
             browser.close()
 
@@ -136,16 +136,13 @@ def test_session_switch():
             # 尝试点击会话项
             session_item_selectors = [".session-item", ".session-card"]
             if check_element_exists(page, session_item_selectors):
-                try:
-                    session_item = page.locator(session_item_selectors[0]).first
-                    if session_item.is_visible():
-                        session_item.click()
-                        page.wait_for_timeout(500)
-                except Exception:
-                    pass
+                session_item = page.locator(session_item_selectors[0]).first
+                assert session_item.is_visible(), "session_item not visible (Issue #2189)"
+                session_item.click()
+                page.wait_for_timeout(500)
 
             save_screenshot(page, MODULE_NAME, "05_session_switch")
-            return True
+
         finally:
             browser.close()
 

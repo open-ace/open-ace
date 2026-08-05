@@ -87,6 +87,17 @@ class PhaseHost(Protocol):
     def validate_pre_merge_change_scope(self, gh, wf, pr_head_sha) -> str:
         """Validate the effective PR delta against an immutable main snapshot."""
 
+    def recover_worktree_branch(
+        self, gh, expected_branch: str, before_head: str, before_main_head: str
+    ) -> str | None:
+        """Recover the worktree onto ``expected_branch`` when an agent left it on
+        another branch (e.g. a read-only ``git checkout main``). Returns a
+        non-empty reason when recovery was safe + performed; None when not
+        safely recoverable (caller must fail closed). Used by the pr_review
+        push check as defense-indepth (#2302). Delegates to the orchestrator's
+        ``_recover_worktree_branch`` (#2271).
+        """
+
     def sync_failed_pr_with_main(self, gh, branch_name, pr_number, pr_head_sha) -> bool:
         """Synchronize a stale PR with main before merge.
 

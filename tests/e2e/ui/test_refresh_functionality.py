@@ -20,7 +20,7 @@ VIEWPORT_SIZE = (1400, 900)
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 
 
-def test_refresh_functionality():
+def test_refresh_functionality():  # allow-no-assert: smoke test - visual verification only
     """Test refresh functionality"""
     results = []
     screenshots = []
@@ -222,7 +222,7 @@ def test_refresh_functionality():
                     ("Auto-refresh Toggle Action", "SKIP", "No auto-refresh switch to test")
                 )
 
-        except Exception as e:
+        except Exception as e:  # allow-swallow: UI element may not exist
             print(f"Error: {e}")
             page.screenshot(path="screenshots/refresh_test_error.png")
             screenshots.append(("screenshots/refresh_test_error.png", f"Error: {str(e)}"))

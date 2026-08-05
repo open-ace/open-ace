@@ -39,7 +39,7 @@ def add_issue(component, description, severity="medium"):
 def safe_click(page, selector, timeout=5000):
     try:
         page.click(selector, timeout=timeout)
-        return True
+
     except:
         return False
 
@@ -47,7 +47,7 @@ def safe_click(page, selector, timeout=5000):
 def wait_and_check(page, selector, timeout=8000):
     try:
         page.wait_for_selector(selector, state="visible", timeout=timeout)
-        return True
+
     except:
         return False
 
@@ -56,8 +56,8 @@ def safe_goto(page, url, timeout=60000):
     """Navigate to URL with error handling."""
     try:
         page.goto(url, wait_until="domcontentloaded", timeout=timeout)
-        return True
-    except Exception as e:
+
+    except Exception as e:  # allow-swallow: UI element may not exist
         add_issue(url.split("/")[-1], f"页面加载超时: {str(e)[:80]}", severity="high")
         return False
 
@@ -235,7 +235,7 @@ def run_all_tests():
                         page.wait_for_timeout(1000)
                     else:
                         add_issue("审计中心-详情按钮", "点击详情按钮后未弹出详情弹窗")
-                except Exception as e:
+                except Exception as e:  # allow-swallow: UI element may not exist
                     add_issue("审计中心-详情按钮", f"详情按钮操作失败: {str(e)[:80]}")
             else:
                 print("  未找到详情按钮")

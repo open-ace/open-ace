@@ -85,7 +85,7 @@ async def run_tests():
             await page.wait_for_timeout(10000)
             try:
                 await page.wait_for_selector(".workspace-content iframe", timeout=60000)
-            except Exception:
+            except Exception:  # allow-swallow: UI element may not exist
                 await page.screenshot(path=f"{SCREENSHOT_DIR}/workspace_load_fail_{ts}.png")
                 raise
             await page.wait_for_timeout(5000)
@@ -218,7 +218,7 @@ async def run_tests():
 
             await page.screenshot(path=f"{SCREENSHOT_DIR}/05_auto_created_tab_{ts}.png")
 
-        except Exception as e:
+        except Exception as e:  # allow-swallow: UI element may not exist
             print(f"\n✗ Test error: {e}")
             await page.screenshot(path=f"{SCREENSHOT_DIR}/error_{ts}.png")
             results.append(("Test Error", "FAIL", str(e)[:100]))

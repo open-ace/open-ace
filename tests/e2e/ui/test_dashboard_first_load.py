@@ -29,7 +29,9 @@ SCREENSHOT_DIR = os.path.join(
 )
 
 
-async def test_dashboard_first_load(ui_screenshot_dir):
+async def test_dashboard_first_load(
+    ui_screenshot_dir,
+):  # allow-no-assert: smoke test - visual verification only
     """Test dashboard first load with detailed timing."""
     global SCREENSHOT_DIR
     SCREENSHOT_DIR = ui_screenshot_dir
@@ -249,7 +251,7 @@ async def test_dashboard_first_load(ui_screenshot_dir):
             print(f"  - {len(static_requests)} static files ({sum(static_sizes)/1024:.0f} KB)")
             print(f"  - {len(api_requests)} API calls ({sum(api_times)*1000:.0f}ms)")
 
-        except Exception as e:
+        except Exception as e:  # allow-swallow: UI element may not exist
             print(f"\n✗ Error: {e}")
             screenshot_path = os.path.join(SCREENSHOT_DIR, "dashboard_first_load_error.png")
             await page.screenshot(path=screenshot_path)

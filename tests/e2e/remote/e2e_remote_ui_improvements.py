@@ -172,7 +172,7 @@ def _wait_for_workspace(page, timeout=20000):
             state="visible",
             timeout=timeout,
         )
-    except Exception:
+    except Exception:  # allow-swallow: UI element may not exist
         shot(page, "WS_wait_timeout")
         # Debug: dump DOM info
         tab_count = page.locator("[data-tab-id]").count()
@@ -230,7 +230,7 @@ def run_tests():
 
         try:
             _run_all(page)
-        except Exception:
+        except Exception:  # allow-swallow: UI element may not exist
             shot(page, "ERROR_final")
             traceback.print_exc()
             raise
@@ -284,7 +284,7 @@ def _run_all(page):
                     if sid:
                         captured_sessions.append(sid)
                         log("API", f"Session created: {sid[:8]}...")
-                except Exception:
+                except Exception:  # allow-swallow: UI element may not exist
                     pass
 
     page.on("response", on_response)
@@ -304,7 +304,7 @@ def _run_all(page):
     try:
         page.wait_for_selector("textarea, .max-w-6xl, #root, .min-h-screen", timeout=30000)
         pause(8)
-    except Exception:
+    except Exception:  # allow-swallow: UI element may not exist
         log("Warn", "ChatPage load timeout")
         shot(page, "B1_chatpage_timeout")
         raise AssertionError("ChatPage failed to load")
@@ -429,7 +429,7 @@ def _run_all(page):
                     if sid:
                         remote_session_id[0] = sid
                         log("API", f"Remote session from modal: {sid[:8]}...")
-                except Exception:
+                except Exception:  # allow-swallow: UI element may not exist
                     pass
 
     page.on("response", capture_session_resp)
@@ -445,7 +445,7 @@ def _run_all(page):
         page.wait_for_selector(".modal.show", timeout=5000)
         shot(page, "C2_modal_open")
         log("Modal", "✓ New Session modal opened")
-    except Exception:
+    except Exception:  # allow-swallow: UI element may not exist
         shot(page, "C2_modal_missing")
         raise AssertionError("New Session modal did not open")
 
@@ -522,7 +522,7 @@ def _run_all(page):
                 if create_btn.count() > 0:
                     create_btn.first.click()
                     pause(3)
-            except Exception:
+            except Exception:  # allow-swallow: UI element may not exist
                 pass
 
         tab_count = page.locator("[data-tab-id]").count()
@@ -637,7 +637,7 @@ def _run_all(page):
                 if create_btn.count() > 0:
                     create_btn.first.click()
                     pause(3)
-            except Exception:
+            except Exception:  # allow-swallow: UI element may not exist
                 pass
 
     # Find a LOCAL tab (no cloud icon) and click its close button

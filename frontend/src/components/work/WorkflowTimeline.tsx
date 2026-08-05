@@ -39,6 +39,7 @@ import ForkFromHereModal from './ForkFromHereModal';
 import { MarkdownContent } from './MarkdownContent';
 import { getProgressReportView } from './progressReport';
 import { ForkConnector, BranchColumn } from './ForkConnector';
+import { ScopeExceededBanner } from './ScopeExceededBanner';
 import { ACTIVE_WORKFLOW_STATUSES } from './AutonomousWorkflowList';
 import { getAutonomousWorkflowStatusConfig } from './autonomousWorkflowStatus';
 import type {
@@ -702,7 +703,12 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
     markDoneMutation.mutate({ workflowId: workflow.workflow_id, selectedBranch: branch });
     setShowBranchSelector(false);
   };
-  const handleRetry = () => retryMutation.mutate(workflow.workflow_id);
+  const handleRetry = (maxChangedFilesOverride?: number) =>
+    retryMutation.mutate(
+      maxChangedFilesOverride !== undefined
+        ? { workflowId: workflow.workflow_id, maxChangedFilesOverride }
+        : { workflowId: workflow.workflow_id }
+    );
 
   const formatDefinitionValue = (value: unknown) => {
     if (value === null || value === undefined || value === '') {
@@ -1090,6 +1096,16 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
     workflow.status === 'paused' ||
     workflow.status === 'waiting'
   );
+  // Scope-exceeded failure detection (#2309): surface a "raise the cap and
+  // retry" banner only when the failure was specifically the changed-files cap.
+  const scopeExceededMatch =
+    workflow.status === 'failed'
+      ? (workflow.error_message.match(
+          /Autonomous change scope exceeded: (\d+) files changed \(limit (\d+)\)/
+        ) ?? null)
+      : null;
+  const scopeFileCount = scopeExceededMatch ? parseInt(scopeExceededMatch[1], 10) : 0;
+  const scopeCurrentLimit = scopeExceededMatch ? parseInt(scopeExceededMatch[2], 10) : 0;
   const timelineHeaderDetailsId = `timeline-header-details-${workflow.workflow_id}`;
 
   // Callback ref: registers a milestone card node by id, and clears it on
@@ -2088,7 +2104,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
               <Button
                 size="sm"
                 variant="primary"
-                onClick={handleRetry}
+                onClick={() => handleRetry()}
                 disabled={retryMutation.isPending}
               >
                 <i className="bi bi-arrow-clockwise me-1"></i>
@@ -2250,6 +2266,16 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
               </div>
             </div>
           </div>
+        )}
+        {scopeExceededMatch && (
+          <ScopeExceededBanner
+            fileCount={scopeFileCount}
+            currentLimit={scopeCurrentLimit}
+            language={language}
+            isPending={retryMutation.isPending}
+            onRetryWithLimit={(limit) => handleRetry(limit)}
+            onPlainRetry={() => handleRetry()}
+          />
         )}
         {showStateBanner && (
           <div className={`timeline-state-banner timeline-state-banner--${stateBannerTone}`}>

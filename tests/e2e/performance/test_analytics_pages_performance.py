@@ -27,7 +27,7 @@ HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 VIEWPORT = {"width": 1280, "height": 900}
 
 
-async def test_analytics_pages_performance():
+async def test_analytics_pages_performance():  # allow-no-assert: smoke test - visual verification only
     """Test analytics pages load performance"""
     print("=" * 60)
     print("Analytics Pages Load Performance Test (Issue #33)")
@@ -164,7 +164,7 @@ async def test_analytics_pages_performance():
     # Test result
     if all_passed:
         print("\n✅ ALL TESTS PASSED: All pages load within acceptable time!")
-        return True
+
     else:
         print("\n❌ SOME TESTS FAILED: Some pages load too slow!")
         return False

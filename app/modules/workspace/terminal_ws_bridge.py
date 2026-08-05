@@ -92,7 +92,7 @@ def bridge_terminal_websocket_raw(
     try:
         with connect(
             upstream_url,
-            subprotocols=["binary"],
+            subprotocols=["binary"],  # type: ignore[list-item]
             close_timeout=5,
             proxy=None,
         ) as remote_ws:
