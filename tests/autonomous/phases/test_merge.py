@@ -111,7 +111,7 @@ def test_merge_handle_success_returns_completed_phase_result():
 
     assert isinstance(result, PhaseResult)
     assert result.outcome == "completed"
-    assert result.next_phase == "completed"
+    assert result.next_phase == "acceptance_verification"
     # The merge-pr call and the merged milestone went through deps/host.
     deps.gh.merge_pr.assert_called_once_with(123, strategy="merge")
     host.create_milestone_idempotent.assert_called()
@@ -132,7 +132,7 @@ def test_merge_handle_no_pr_number_skips_to_cleanup():
 
     assert isinstance(result, PhaseResult)
     assert result.outcome == "completed"
-    assert result.next_phase == "completed"
+    assert result.next_phase == "acceptance_verification"
     deps.gh.merge_pr.assert_not_called()
     host.perform_git_cleanup.assert_called_once_with()
 

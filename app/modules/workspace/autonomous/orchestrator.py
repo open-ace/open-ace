@@ -950,14 +950,19 @@ NO_EXCERPT_SENTINEL = "<no-excerpt>"
 
 
 def _next_phase(current_phase: str) -> str:
-    """Return the phase that follows current_phase."""
+    """Return the phase that follows current_phase.
+
+    The last phase in ``PHASE_ORDER`` is terminal — ``_next_phase`` returns it
+    unchanged so a caller asking "what's after the last phase?" idempotently
+    stays put (the handler still drives the real transition via ``PhaseResult``).
+    """
     try:
         idx = PHASE_ORDER.index(current_phase)
     except ValueError:
         return "planning"
     if idx + 1 < len(PHASE_ORDER):
         return PHASE_ORDER[idx + 1]
-    return "merge"
+    return current_phase
 
 
 class AutonomousOrchestrator:

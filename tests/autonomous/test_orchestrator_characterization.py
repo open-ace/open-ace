@@ -325,6 +325,7 @@ class TestPhaseTransitionContract:
             "pr_review",
             "report",
             "merge",
+            "acceptance_verification",
         ] == PHASE_ORDER
 
     def test_every_phase_has_a_status_mapping(self):
@@ -345,9 +346,14 @@ class TestPhaseTransitionContract:
     def test_next_phase_advances_along_order(self, current, expected):
         assert _next_phase(current) == expected
 
-    def test_next_phase_after_merge_is_terminal(self):
-        # merge is the last phase; _next_phase stays on merge (no advance).
-        assert _next_phase("merge") == "merge"
+    def test_next_phase_advances_merge_to_acceptance_verification(self):
+        # merge now hands off to the independent acceptance_verification phase
+        # (#2335); it is no longer the last phase.
+        assert _next_phase("merge") == "acceptance_verification"
+
+    def test_next_phase_after_acceptance_verification_is_terminal(self):
+        # acceptance_verification is the last phase; _next_phase stays on it.
+        assert _next_phase("acceptance_verification") == "acceptance_verification"
 
     def test_unknown_phase_falls_back_to_planning(self):
         # _next_phase's ValueError branch returns "planning" (the recovery
