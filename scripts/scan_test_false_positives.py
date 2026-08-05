@@ -222,7 +222,10 @@ class FalsePositiveScanner(ast.NodeVisitor):
         if self.is_test_function:
             start = _func_start(node)
             end = node.end_lineno or node.lineno
-            allow_no_assert = _src_contains(self.source_lines, start, end, "allow-no-assert")
+            # Check for annotation with content validation (Issue #2306)
+            allow_no_assert = _extract_and_validate_annotation(
+                self.source_lines, start, end, "allow-no-assert", strict=False
+            )
             if not self.has_assertion and not allow_no_assert:
                 self.findings.append(
                     Finding(
@@ -267,7 +270,10 @@ class FalsePositiveScanner(ast.NodeVisitor):
         )
         if broad:
             end = node.end_lineno or node.lineno
-            allow = _src_contains(self.source_lines, node.lineno, end, "allow-swallow")
+            # Check for annotation with content validation (Issue #2306)
+            allow = _extract_and_validate_annotation(
+                self.source_lines, node.lineno, end, "allow-swallow", strict=False
+            )
             if not _body_does_not_swallow(node.body) and not allow:
                 severity = "P0" if self.is_test_function else "P1"
                 self.findings.append(
