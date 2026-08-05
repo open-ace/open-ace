@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 批量修复 regression/ 目录的假阳性
 

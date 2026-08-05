@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 批量标注脚本：自动处理 tests/e2e 目录的假阳性问题
 

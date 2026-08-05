@@ -98,7 +98,7 @@ def test_filter_functionality():
                 'input[type="date"]',
                 'input[placeholder*="search"]',
             ]
-            filter_found = check_element_exists(page, filter_selectors)
+            check_element_exists(page, filter_selectors)
             # 筛选功能是可选的，确保页面已加载即可
             assert page.locator("body").is_visible(), "页面应可见"
 

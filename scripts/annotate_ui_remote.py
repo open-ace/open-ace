@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 批量标注 ui/remote/ 目录的假阳性
 

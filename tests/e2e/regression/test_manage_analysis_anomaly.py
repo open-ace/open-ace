@@ -118,7 +118,7 @@ def test_filter_functionality():
 
             # 检查筛选元素
             filter_selectors = [".filter-bar", "select", 'input[type="date"]', ".form-select"]
-            filter_found = check_element_exists(page, filter_selectors)
+            check_element_exists(page, filter_selectors)
             # 筛选元素可能不存在（取决于页面状态），不强制要求
             assert True, "筛选功能测试完成"
 
