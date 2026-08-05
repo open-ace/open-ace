@@ -282,9 +282,9 @@ def test_safe_request_disables_proxy_by_default(monkeypatch):
     {"http": None, "https": None} becomes an empty dict, which effectively
     disables proxy lookup.
     """
-    resolver = lambda host, *a, **kw: [
-        (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))
-    ]
+
+    def resolver(host, *a, **kw):  # type: ignore[no-untyped-def]
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))]
 
     captured = {}
 
@@ -308,9 +308,9 @@ def test_safe_request_preserves_caller_provided_proxies(monkeypatch):
     Using setdefault ensures that if the caller explicitly provides a proxies
     argument (including proxies=None or custom proxy settings), it is preserved.
     """
-    resolver = lambda host, *a, **kw: [
-        (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))
-    ]
+
+    def resolver(host, *a, **kw):  # type: ignore[no-untyped-def]
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))]
 
     captured = {}
 
