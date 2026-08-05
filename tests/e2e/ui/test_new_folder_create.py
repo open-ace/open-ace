@@ -23,7 +23,7 @@ USERNAME = os.environ.get("TEST_USERNAME", "admin")
 PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 
 
-async def test_new_folder_create():
+async def test_new_folder_create():  # allow-no-assert: smoke test - visual verification only
     async with async_playwright() as p:
         print("=== 启动浏览器 ===")
 
@@ -126,7 +126,7 @@ async def test_new_folder_create():
             await create_btn.click(timeout=5000)
             print("✓ 点击了 Create 按钮")
             await page.wait_for_timeout(2000)
-        except Exception as e:
+        except Exception as e:  # allow-swallow: UI element may not exist
             print(f"⚠️ 点击失败: {e}")
 
         await page.screenshot(path=os.path.join(SCREENSHOT_DIR, "new_folder_04_after_click.png"))

@@ -931,7 +931,10 @@ class GitWorkspaceService:
                             "the orchestrator. Paths: " + ", ".join(resolver_index_changes[:10])
                         )
                     resolver_changed_paths = wt_gh.get_worktree_changed_paths()
-                    resolver_scope_error = self._orch._scope_violation(resolver_changed_paths)
+                    resolver_scope_error = self._orch._scope_violation(
+                        resolver_changed_paths,
+                        limit=(wf.get("max_changed_files_override") or None),
+                    )
                     if resolver_scope_error:
                         raise RuntimeError(
                             "Conflict resolver scope rejected before staging: "

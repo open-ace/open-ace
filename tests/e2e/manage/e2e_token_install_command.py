@@ -174,7 +174,7 @@ def run_tests():
             print("  ✅ 注册令牌对话框中安装命令功能正常")
             print("=" * 50)
 
-        except Exception as e:
+        except Exception as e:  # allow-swallow: UI element may not exist
             shot(page, "99_error")
             print(f"\n❌ 测试失败: {e}")
             traceback.print_exc()

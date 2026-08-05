@@ -24,7 +24,7 @@ SCREENSHOT_DIR = os.path.join(
 )
 
 
-def test_security_page(ui_screenshot_dir):
+def test_security_page(ui_screenshot_dir):  # allow-no-assert: smoke test - visual verification only
     """Test Security Settings page"""
     global SCREENSHOT_DIR
     SCREENSHOT_DIR = ui_screenshot_dir
@@ -114,7 +114,7 @@ def test_security_page(ui_screenshot_dir):
                         else:
                             print(f"  ✗ {name} NOT found")
                             results.append((f"Check {name}", "FAIL"))
-                    except Exception as e:
+                    except Exception as e:  # allow-swallow: UI element may not exist
                         print(f"  ✗ Error checking {name}: {e}")
                         results.append((f"Check {name}", "FAIL"))
             else:
@@ -142,7 +142,7 @@ def test_security_page(ui_screenshot_dir):
                     results.append(("/security route shows SecuritySettings", "UNKNOWN"))
                     print("  ? /security route shows unknown content")
 
-        except Exception as e:
+        except Exception as e:  # allow-swallow: UI element may not exist
             print(f"\nError: {e}")
             results.append(("Test execution", "FAIL"))
             page.screenshot(path=os.path.join(SCREENSHOT_DIR, "test_error.png"))

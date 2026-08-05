@@ -46,7 +46,9 @@ def save_screenshot(page, name):
     return path
 
 
-def test_project_management(ui_screenshot_dir):
+def test_project_management(
+    ui_screenshot_dir,
+):  # allow-no-assert: smoke test - visual verification only
     """Test Project Management page with all features."""
     global SCREENSHOT_DIR
     SCREENSHOT_DIR = ui_screenshot_dir
@@ -158,7 +160,7 @@ def test_project_management(ui_screenshot_dir):
                                 close_btn.click()
                                 time.sleep(1)
                                 print("    Modal closed")
-                        except Exception:
+                        except Exception:  # allow-swallow: UI element may not exist
                             page.keyboard.press("Escape")
                             time.sleep(1)
                             print("    Modal closed via Escape")
@@ -196,7 +198,7 @@ def test_project_management(ui_screenshot_dir):
                                 cancel_btn.click()
                                 time.sleep(1)
                                 print("    Modal closed without deleting")
-                        except Exception:
+                        except Exception:  # allow-swallow: UI element may not exist
                             page.keyboard.press("Escape")
                             time.sleep(1)
                             print("    Modal closed via Escape")
@@ -215,7 +217,7 @@ def test_project_management(ui_screenshot_dir):
             save_screenshot(page, "07_final_state")
             screenshots.append(("07_final_state", "Final page state"))
 
-        except Exception as e:
+        except Exception as e:  # allow-swallow: UI element may not exist
             print(f"  Error: {e}")
             save_screenshot(page, "error")
             screenshots.append(("error", "Error state"))

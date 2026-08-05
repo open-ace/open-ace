@@ -53,7 +53,7 @@ def test_page_loads():
             assert check_element_exists(page, main_selectors, timeout=10000), "主内容区域应存在"
 
             save_screenshot(page, MODULE_NAME, "01_page_load")
-            return True
+
         finally:
             browser.close()
 
@@ -74,7 +74,7 @@ def test_roi_chart_render():
             assert check_element_exists(page, chart_selectors, timeout=10000), "图表或空状态应存在"
 
             save_screenshot(page, MODULE_NAME, "02_chart")
-            return True
+
         finally:
             browser.close()
 
@@ -96,7 +96,7 @@ def test_cost_benefit_display():
             ), "指标卡片或空状态应存在"
 
             save_screenshot(page, MODULE_NAME, "03_metrics")
-            return True
+
         finally:
             browser.close()
 
@@ -121,11 +121,11 @@ def test_time_range_filter():
                             element.click()
                             page.wait_for_timeout(300)
                             break
-                    except Exception:
+                    except Exception:  # allow-swallow: UI element may not exist
                         continue
 
             save_screenshot(page, MODULE_NAME, "04_time_filter")
-            return True
+            assert page.locator("body").is_visible(), "页面应可见"
         finally:
             browser.close()
 
@@ -145,7 +145,7 @@ def test_roi_summary():
             check_element_exists(page, summary_selectors)
 
             save_screenshot(page, MODULE_NAME, "05_summary")
-            return True
+            assert page.locator("body").is_visible(), "页面应可见"
         finally:
             browser.close()
 

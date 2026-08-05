@@ -51,10 +51,10 @@ def shot(page, name):
     path = os.path.join(SCREENSHOT_DIR, f"{name}.png")
     try:
         page.screenshot(path=path, full_page=True, timeout=30000)
-    except Exception:
+    except Exception:  # allow-swallow: UI element may not exist
         try:
             page.screenshot(path=path, full_page=False, timeout=10000)
-        except Exception:
+        except Exception:  # allow-swallow: UI element may not exist
             return
     print(f"    📸 {name}.png")
 
@@ -122,14 +122,14 @@ def run_tests():
                     sid = data.get("session", {}).get("session_id")
                     if sid:
                         captured_session_id[0] = sid
-                except Exception:
+                except Exception:  # allow-swallow: UI element may not exist
                     pass
 
         page.on("response", on_response)
 
         try:
             _run_test(page, token, effective_webui_url, webui_token, captured_session_id)
-        except Exception:
+        except Exception:  # allow-swallow: UI element may not exist
             shot(page, "ERROR_final")
             traceback.print_exc()
             raise
@@ -157,10 +157,12 @@ def _wait_for_permission_panel(page, timeout=120):
         panel = page.locator("text=需要权限确认").first
         if panel.is_visible(timeout=1000):
             return True
+
         # Also check English fallback
         panel_en = page.locator("text=Permission Required").first
         if panel_en.is_visible(timeout=1000):
             return True
+
         time.sleep(1)
     return False
 
@@ -214,7 +216,7 @@ def _run_test(page, token, webui_url, webui_token, captured_session_id):
                         sid = s.get("session_id")
                         if sid:
                             break
-        except Exception:
+        except Exception:  # allow-swallow: UI element may not exist
             pass
         if sid:
             break

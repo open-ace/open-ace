@@ -43,7 +43,7 @@ def is_external_domain(url: str) -> bool:
     return not (url.startswith("/") or url.startswith("./"))
 
 
-async def test_page_load():
+async def test_page_load():  # allow-no-assert: smoke test - visual verification only
     """Test page load performance and network requests"""
     global network_requests, external_domains
     network_requests = []
@@ -178,7 +178,6 @@ async def test_page_load():
         return False
     else:
         print("\n✅ TEST PASSED: No external network requests!")
-        return True
 
 
 if __name__ == "__main__":

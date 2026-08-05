@@ -53,7 +53,7 @@ def test_page_loads():
             assert check_element_exists(page, main_selectors), "主内容区域应存在"
 
             save_screenshot(page, MODULE_NAME, "01_page_load")
-            return True
+
         finally:
             browser.close()
 
@@ -77,7 +77,7 @@ def test_user_list_display():
             assert check_element_exists(page, header_selectors), "表头应存在"
 
             save_screenshot(page, MODULE_NAME, "02_user_list")
-            return True
+
         finally:
             browser.close()
 
@@ -101,7 +101,7 @@ def test_add_user_button():
             assert check_element_exists(page, add_btn_selectors), "添加用户按钮应可见"
 
             save_screenshot(page, MODULE_NAME, "03_add_user")
-            return True
+
         finally:
             browser.close()
 
@@ -125,7 +125,7 @@ def test_edit_user():
                 page.wait_for_timeout(500)
 
             save_screenshot(page, MODULE_NAME, "04_edit_user")
-            return True
+
         finally:
             browser.close()
 
@@ -145,7 +145,7 @@ def test_role_management():
             assert check_element_exists(page, role_selectors), "角色列应可见"
 
             save_screenshot(page, MODULE_NAME, "05_role")
-            return True
+
         finally:
             browser.close()
 
