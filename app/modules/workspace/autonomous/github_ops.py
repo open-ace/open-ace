@@ -799,6 +799,27 @@ class GitHubOps:
         logger.info("Added comment to issue #%s", number)
         return {"number": number}
 
+    def close_issue(self, number: int) -> dict:
+        """Close an issue.
+
+        Runs as the service user (api_only) so the action attributes to the
+        configured AI bot account, not the repo owner (#2339/#2335). The workflow
+        closes explicitly only on acceptance confirmed.
+        """
+        self._run_gh(["issue", "close", str(number)], api_only=True)
+        logger.info("Closed issue #%s", number)
+        return {"number": number}
+
+    def reopen_issue(self, number: int) -> dict:
+        """Reopen an issue (api_only → service-user/bot identity).
+
+        Used by the acceptance_verification reopen guard when an issue was closed
+        out-of-band before confirmation (#2335).
+        """
+        self._run_gh(["issue", "reopen", str(number)], api_only=True)
+        logger.info("Reopened issue #%s", number)
+        return {"number": number}
+
     def list_issue_comments(self, number: int, since: str | None = None) -> list:
         """List comments on an issue, optionally since a timestamp."""
         args = ["issue", "view", str(number), "--comments", "--json", "comments"]
@@ -1199,6 +1220,19 @@ class GitHubOps:
         self._run_gh(["pr", "comment", str(number), "--body", body], api_only=True)
         logger.info("Added comment to PR #%s", number)
         return {"number": number, "body": body}
+
+    def get_merge_commit_sha(self, pr_number: int) -> str | None:
+        """Return the merge commit SHA of a merged PR, or None if unmerged/unknown.
+
+        Used by acceptance_verification to pin the exact main SHA the verifier
+        runs against (#2335).
+        """
+        result = self._run_gh(
+            ["pr", "view", str(pr_number), "--json", "mergeCommit", "--jq", ".mergeCommit.oid"],
+            check=False,
+        )
+        out = (result.stdout or "").strip()
+        return out or None
 
     def _gh_api_args(self, extra: list[str]) -> list[str]:
         """Build a ``gh api`` arg list with GHES hostname handling.
