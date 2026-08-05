@@ -40,7 +40,9 @@ class TestMultiWorkerKeyConsistency:
                 try:
                     mode = get_security_mode()
                     results.append(mode)
-                except Exception as e:
+                except (
+                    Exception
+                ) as e:  # allow-swallow: collect per-thread errors; the driving test asserts errors is empty
                     errors.append(e)
 
             # Run 20 concurrent detections
