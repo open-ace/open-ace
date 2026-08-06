@@ -439,7 +439,14 @@ def suggest_mapping(sender_name: str):
             }
         )
     else:
-        return jsonify({"suggestion": None})
+        return jsonify(
+            {
+                "suggested_user_id": None,
+                "suggested_username": None,
+                "matched_by": None,
+                "rule_id": None,
+            }
+        )
 
 
 @mapping_rules_bp.route("/api/unmapped-accounts/<sender_name>/map", methods=["POST"])

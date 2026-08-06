@@ -435,7 +435,7 @@ class TestAutoMappingServiceTenantFiltering(unittest.TestCase):
     # --- auto_map_account tenant filtering ---
 
     def test_auto_map_account_passes_tenant_id_to_get_all_users(self):
-        """auto_map_account should pass tenant_id to get_all_users."""
+        """auto_map_account should pass tenant_id to all get_all_users calls."""
         mock_mapping_repo = MagicMock()
         mock_mapping_repo.get_by_tool_account.return_value = None  # Not already mapped
         self.service.mapping_repo = mock_mapping_repo
@@ -449,26 +449,34 @@ class TestAutoMappingServiceTenantFiltering(unittest.TestCase):
 
         self.service.auto_map_account("alice-pc-qwen", "qwen", tenant_id=1)
 
-        # Verify fetch_all was called (via get_all_users) with tenant_id param
-        call_args = self.mock_db.fetch_all.call_args
-        params = call_args[0][1] if len(call_args[0]) > 1 else call_args[1].get("params")
-        self.assertIsNotNone(params)
-        self.assertIn(1, params)
+        # Verify ALL fetch_all calls include tenant_id=1 in params
+        # (auto_map_account calls get_all_users directly AND via try_match_by_rules->_get_users_cache)
+        self.assertGreaterEqual(self.mock_db.fetch_all.call_count, 1)
+        for call in self.mock_db.fetch_all.call_args_list:
+            params = call[0][1] if len(call[0]) > 1 else call[1].get("params")
+            self.assertIsNotNone(params, f"fetch_all call {call} missing params")
+            self.assertIn(1, params, f"fetch_all call {call} missing tenant_id=1")
 
     def test_auto_map_account_tenant_filtered_no_cross_tenant_match(self):
-        """auto_map_account should not match users from other tenants."""
+        """auto_map_account should not match users from other tenants.
+
+        This test provides tenant 1 users but uses a tool_account that doesn't
+        match any of them, verifying no false positive match occurs.
+        """
         mock_mapping_repo = MagicMock()
         mock_mapping_repo.get_by_tool_account.return_value = None
         self.service.mapping_repo = mock_mapping_repo
 
-        # No users in tenant 1 (fetch_all returns empty list when tenant_id=1 filters)
-        self.mock_db.fetch_all.return_value = []
+        # Tenant 1 has user "alice", but tool_account is "bob-pc-qwen" (no match)
+        self.mock_db.fetch_all.return_value = [
+            self._make_user_row(1, "alice", 1),
+        ]
         mock_rule_repo = MagicMock()
         mock_rule_repo.get_auto_rules.return_value = []
         self.service.rule_repo = mock_rule_repo
 
-        # With tenant_id=1, no users in tenant 1, so no match
-        result = self.service.auto_map_account("alice-pc-qwen", "qwen", tenant_id=1)
+        # "bob-pc-qwen" doesn't match "alice" by username or email
+        result = self.service.auto_map_account("bob-pc-qwen", "qwen", tenant_id=1)
 
         self.assertIsNone(result)
 
@@ -502,6 +510,8 @@ class TestAutoMappingServiceTenantFiltering(unittest.TestCase):
         # mapped should only count user 1 (in tenant 1), not user 99
         self.assertEqual(stats["total_mapped"], 1)
         self.assertEqual(stats["total_unmapped"], 1)
+        # Verify unmapped accounts were fetched with tenant_id
+        mock_mapping_repo.get_unmapped_tool_accounts.assert_called_once_with(tenant_id=1)
 
     def test_get_mapping_stats_no_tenant_id_returns_all(self):
         """get_mapping_stats without tenant_id should return all stats."""

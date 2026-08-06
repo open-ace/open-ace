@@ -129,10 +129,13 @@ export const AutoMappingPanel: React.FC<AutoMappingPanelProps> = ({ users, onCha
       setSuggestions({});
     } catch (err) {
       console.error('Failed to load unmapped accounts:', err);
+      toast.error(
+        language === 'zh' ? '加载未映射账号失败' : 'Failed to load unmapped accounts'
+      );
     } finally {
       setIsLoadingUnmapped(false);
     }
-  }, []);
+  }, [language, toast]);
 
   const handleShowUnmapped = () => {
     setShowUnmappedModal(true);
@@ -210,6 +213,8 @@ export const AutoMappingPanel: React.FC<AutoMappingPanelProps> = ({ users, onCha
           variant="outline-secondary"
           size="sm"
           onClick={() => setIsExpanded(!isExpanded)}
+          aria-expanded={isExpanded}
+          aria-controls="auto-mapping-panel-content"
         >
           <i className={`bi ${isExpanded ? 'bi-chevron-up' : 'bi-chevron-down'} me-1`} />
           {zh ? '自动映射' : 'Auto Mapping'}
@@ -330,8 +335,8 @@ export const AutoMappingPanel: React.FC<AutoMappingPanelProps> = ({ users, onCha
                           </tr>
                         </thead>
                         <tbody>
-                          {autoMapPreview.mappings.map((m, idx) => (
-                            <tr key={idx}>
+                          {autoMapPreview.mappings.map((m) => (
+                            <tr key={m.tool_account}>
                               <td><code>{m.tool_account}</code></td>
                               <td>{m.username}</td>
                               <td>
