@@ -1319,7 +1319,10 @@ echo "=========================================="
 echo "  Open ACE - Starting Gunicorn"
 echo "=========================================="
 
-exec gunicorn \
+# Use gunicorn_entry.py wrapper that monkey-patches gevent BEFORE gunicorn
+# (or any transitive dep) imports urllib3. This prevents urllib3.util.ssl_
+# RecursionError under the gevent event loop during LLM proxy outbound requests.
+exec python3 /app/gunicorn_entry.py \
     --bind 0.0.0.0:19888 \
     --worker-class app.gunicorn_worker.TerminalGeventWorker \
     --workers 1 \
