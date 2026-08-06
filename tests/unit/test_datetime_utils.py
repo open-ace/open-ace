@@ -1,5 +1,6 @@
 """Unit tests for datetime_utils module."""
 import pytest
+
 from app.utils.datetime_utils import ensure_utc_suffix
 
 
