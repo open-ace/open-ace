@@ -135,13 +135,24 @@ def test_stale_pass_does_not_satisfy_rerun_that_failed():
     assert _run_failed(evidences)
 
 
-def test_non_pytest_does_not_cross_cover_between_commands():
-    # jest/go/cargo: a pass on one command cannot clear a failure on another.
+def test_non_pytest_cross_command_pass_is_undecidable_not_a_failure():
+    # jest/go/cargo carry no coverage scope, so a pass on one command still
+    # cannot *clear* a failure on another — but neither can the evidence assert
+    # the run failed. #2376 PR-2 split those: the verdict is INCONCLUSIVE, which
+    # defers to the heuristic, rather than FAILED.
+    #
+    # This changed because PR-2 made FAILED actually block the phase. While it
+    # was inert, calling this case FAILED was harmless; once it blocks, it
+    # hard-fails the ordinary "targeted test fails -> fix -> broader run passes"
+    # flow for every non-pytest runner. Decided non-coverage (both scopes known,
+    # pytest) still yields FAILED — see
+    # test_targeted_pass_does_not_cover_failed_full_suite_1967.
     evidences = [
         _te("c1", ExecutionVerdict.FAILED.value, framework="javascript"),
         _te("c2", ExecutionVerdict.PASSED.value, framework="javascript"),
     ]
-    assert _run_failed(evidences, "javascript")
+    assert not _run_failed(evidences, "javascript")
+    assert compute_run_verdict(evidences) is ExecutionVerdict.INCONCLUSIVE
 
 
 def test_restricted_pass_does_not_cover_earlier_failure():

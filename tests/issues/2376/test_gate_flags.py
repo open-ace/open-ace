@@ -23,7 +23,6 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 from app.modules.workspace.autonomous.command_evidence.types import ExecutionVerdict
 from app.modules.workspace.autonomous.models import AgentTaskResult
 
@@ -168,9 +167,10 @@ def test_conclusive_rerun_pass_supersedes_structured_failed():
         text="Tests: 40 passed",
         tool_pass=True,
     )
-    assert not any(
-        "test_retries" in p and p["test_retries"] > 0 for p in patches
-    ), f"a conclusive rerun pass must not be forced onto the retry path, got {patches}"
+    # Positive assertion: an empty patch list would satisfy a bare `not any(...)`.
+    assert any(
+        p.get("current_phase") == "pr_review" for p in patches
+    ), f"a conclusive rerun pass must let the run proceed, got {patches}"
 
 
 def test_structured_failed_does_not_emit_the_parser_gap_counter():
@@ -186,9 +186,13 @@ def test_structured_failed_does_not_emit_the_parser_gap_counter():
 
 @pytest.mark.parametrize("verdict", [ExecutionVerdict.NOT_RUN, ExecutionVerdict.INCONCLUSIVE])
 def test_parser_gap_counter_still_emits_for_not_run_and_inconclusive(verdict):
+    # Text carries no pass token: with one, the #1830 prose fallback would send
+    # this run to pr_review reporting "All tests passed" off a summary that says
+    # "1 failed" — pre-existing NOT_RUN behaviour, but the fixture should not
+    # read as if this file blesses that route.
     wf = _workflow()
     orch, _ = _orchestrator(wf)
-    _, orch = _run(orch, wf, verdict=verdict, text="1 failed, 2 passed", tool_pass=False)
+    _, orch = _run(orch, wf, verdict=verdict, text="collection error", tool_pass=False)
     orch._emit_structured_test_fallback.assert_called_once()
 
 
@@ -216,3 +220,74 @@ def test_structured_passed_still_proceeds():
         orch, wf, verdict=ExecutionVerdict.PASSED, text="243 passed in 30.12s", tool_pass=False
     )
     assert not any(p.get("test_retries", 0) for p in patches)
+
+
+def test_real_heuristic_rescues_a_same_command_rerun():
+    """Drive the UNPATCHED heuristic, not a boolean oracle.
+
+    The other tests stub `_has_passing_test_tool_result`, which proves the
+    rescue path is *wired* but not that a rescue is *available*. The review
+    found that gap is exactly where the prose exclusion over-closed: for
+    cross-command shapes the real heuristic returns False, so nothing rescues
+    them. This pins the shape that genuinely is rescued — a rerun of the same
+    normalized command — against the real implementation.
+    """
+    from app.modules.workspace.autonomous.orchestrator import _has_passing_test_tool_result
+
+    event_log = [
+        {
+            "type": "tool_use",
+            "tool_use_id": "a",
+            "tool_name": "Bash",
+            "tool_input": {"command": "npm test"},
+        },
+        {
+            "type": "tool_result",
+            "tool_use_id": "a",
+            "exit_code": 1,
+            "text": "Tests: 1 failed",
+            "is_error": True,
+        },
+        {
+            "type": "tool_use",
+            "tool_use_id": "b",
+            "tool_name": "Bash",
+            "tool_input": {"command": "npm test"},
+        },
+        {"type": "tool_result", "tool_use_id": "b", "exit_code": 0, "text": "Tests: 40 passed"},
+    ]
+    assert _has_passing_test_tool_result(event_log, "javascript") is True
+
+
+def test_real_heuristic_does_not_rescue_a_cross_command_shape():
+    """The counterpart: different commands are NOT rescued by the heuristic.
+
+    This is why the structured layer must return INCONCLUSIVE rather than
+    FAILED for undecidable coverage — if it said FAILED, nothing downstream
+    could clear it and the ordinary fix-then-rerun-broader flow would die.
+    """
+    from app.modules.workspace.autonomous.orchestrator import _has_passing_test_tool_result
+
+    event_log = [
+        {
+            "type": "tool_use",
+            "tool_use_id": "a",
+            "tool_name": "Bash",
+            "tool_input": {"command": "npm test -- --grep auth"},
+        },
+        {
+            "type": "tool_result",
+            "tool_use_id": "a",
+            "exit_code": 1,
+            "text": "Tests: 2 failed",
+            "is_error": True,
+        },
+        {
+            "type": "tool_use",
+            "tool_use_id": "b",
+            "tool_name": "Bash",
+            "tool_input": {"command": "npm test"},
+        },
+        {"type": "tool_result", "tool_use_id": "b", "exit_code": 0, "text": "Tests: 40 passed"},
+    ]
+    assert _has_passing_test_tool_result(event_log, "javascript") is False

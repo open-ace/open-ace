@@ -16,7 +16,10 @@ evidence instead of the raw ``event_log``:
 - a targeted pass never clears a failed full suite;
 - the latest invocation of a command wins (stale pass cannot satisfy a rerun);
 - non-pytest frameworks do not cross-cover (different commands cannot clear
-  each other; only an exact retry of the same command can).
+  each other; only an exact retry of the same command can) — but that is
+  *undecidable*, not a failure: with no scope to compare, a later pass yields
+  INCONCLUSIVE so the heuristic decides. Decided non-coverage (both pytest
+  scopes known, the later pass narrower) still yields FAILED (#2376 PR-2).
 
 Input source of truth: ``TestExecutionEvidence`` rows, never agent prose.
 """
@@ -86,19 +89,30 @@ def _latest_state(
     return latest
 
 
-def _has_uncovered_failure(
-    authoritative: list[tuple[int, TestExecutionEvidence]],
-) -> bool:
-    """Whether any command's latest failure lacks a later passing cover.
+def _classify_failures(authoritative: list[tuple[int, TestExecutionEvidence]]) -> str:
+    """Classify a run's failures as ``none`` / ``unresolved`` / ``uncertain``.
 
     A passing command covers an earlier failure only when it ran later and its
-    scope is a provable superset. Exact retries of the same command are already
-    collapsed by ``_latest_state``; this pass only handles cross-command
-    superset coverage, which is pytest-only.
+    scope is a provable superset. Exact retries are already collapsed by
+    ``_latest_state``; this pass handles cross-command coverage, which is
+    pytest-only — ``_latest_state`` records a scope only for pytest evidence and
+    ``_pytest_scope_covers`` rejects a ``None`` side.
 
-    Scope coverage needs no framework gate: ``_latest_state`` only records a
-    scope for pytest evidence, and ``_pytest_scope_covers`` returns False when
-    either side is None, so non-pytest commands can never cross-cover.
+    The three-way split matters because provable coverage is far rarer than it
+    looks (#2376 PR-2 review). ``_pytest_test_scope`` bails on any option it does
+    not model, so this repo's own CI command —
+    ``pytest tests/ -v --cov=app --cov-fail-under=30`` — yields no scope, and no
+    non-pytest runner ever does. Collapsing "a later command passed but we cannot
+    prove it covers this failure" into FAILED would hard-fail the ordinary
+    fix-then-rerun-broader flow for vitest, go, cargo and most real pytest
+    invocations. The evidence does not establish a failing run there, so the
+    caller defers to the heuristic instead of asserting one.
+
+    Returns:
+        ``none``       — every latest verdict passed, or each failure is covered.
+        ``unresolved`` — a failure with no later passing command at all.
+        ``uncertain``  — a failure followed by a passing command whose coverage
+                         cannot be proven.
     """
     latest = _latest_state(authoritative)
     passing = [
@@ -106,22 +120,29 @@ def _has_uncovered_failure(
         for verdict, scope, order in latest.values()
         if verdict == ExecutionVerdict.PASSED.value
     ]
+    result = "none"
     for verdict, failed_scope, order in latest.values():
         if verdict == ExecutionVerdict.PASSED.value:
             continue
-        # Latest verdict for this command is FAILED (or non-pass). A later
-        # passing command may clear it — but only for pytest, and only when
-        # the passing scope provably covers the failed scope.
         covered = False
+        undecidable = False
         for passing_scope, passing_order in passing:
             if passing_order <= order:
                 continue
             if _pytest_scope_covers(passing_scope, failed_scope):
                 covered = True
                 break
-        if not covered:
-            return True
-    return False
+            # Both scopes known means non-coverage was *decided* (a targeted
+            # pass genuinely does not clear a failed broader run — #1967). Only
+            # a missing scope on either side leaves it undecidable.
+            if passing_scope is None or failed_scope is None:
+                undecidable = True
+        if covered:
+            continue
+        if not undecidable:
+            return "unresolved"
+        result = "uncertain"
+    return result
 
 
 def compute_run_verdict(test_evidences: list[TestExecutionEvidence]) -> ExecutionVerdict:
@@ -130,10 +151,12 @@ def compute_run_verdict(test_evidences: list[TestExecutionEvidence]) -> Executio
     Returns:
         - ``NOT_RUN`` — no test evidence recorded for the run.
         - ``INCONCLUSIVE`` — evidence exists but no HIGH/MEDIUM-confidence
-          signal (all generic/LOW), or some test command could not be parsed
-          while the rest passed. The gate falls back to the heuristic.
-        - ``FAILED`` — at least one HIGH/MEDIUM command failed and no later
-          passing superset covers it.
+          signal (all generic/LOW); or some test command could not be parsed
+          while the rest passed; or a failure is followed by a passing command
+          whose coverage cannot be decided. The gate falls back to the heuristic.
+        - ``FAILED`` — at least one HIGH/MEDIUM command failed with either no
+          later passing command at all, or a later pass that is *decidably* not
+          a superset.
         - ``PASSED`` — every HIGH/MEDIUM command passed (or its failure was
           covered by a later passing superset) and no unparseable command
           leaves the run unconfirmable.
@@ -159,8 +182,15 @@ def compute_run_verdict(test_evidences: list[TestExecutionEvidence]) -> Executio
         # Every test command was generic/LOW — cannot authoritatively judge.
         return ExecutionVerdict.INCONCLUSIVE
 
-    if _has_uncovered_failure(authoritative):
+    failures = _classify_failures(authoritative)
+    if failures == "unresolved":
         return ExecutionVerdict.FAILED
+    if failures == "uncertain":
+        # A failure followed by a later passing command we cannot prove covers
+        # it. Asserting FAILED would hard-fail the ordinary fix-then-rerun flow
+        # for every non-pytest runner and for pytest invocations carrying
+        # options the scope parser does not model (#2376 PR-2 review).
+        return ExecutionVerdict.INCONCLUSIVE
 
     if has_low:
         # No uncovered HIGH/MEDIUM failure, but at least one command was

@@ -8737,10 +8737,21 @@ class AutonomousOrchestrator:
             self._post_github_comment(gh, issue_number, test_comment, context="test-results")
 
         if test_result_inconclusive:
-            message = (
-                "Test execution is inconclusive: a test command was invoked, but no "
-                "structured TEST_STATUS or recognizable pass/fail output was captured"
-            )
+            # A structured FAILED reaches this branch too (#2376): it is no
+            # longer authoritative, so it lands here when the heuristic also
+            # refuses to confirm. Reporting that as "no output was captured"
+            # would be factually wrong — the output was captured and it said a
+            # test failed.
+            if structured_verdict == ExecutionVerdict.FAILED:
+                message = (
+                    "Tests failed: structured evidence reports a failing test command, "
+                    "and no conclusive passing rerun superseded it"
+                )
+            else:
+                message = (
+                    "Test execution is inconclusive: a test command was invoked, but no "
+                    "structured TEST_STATUS or recognizable pass/fail output was captured"
+                )
             self.repo.update_milestone(
                 test_ms.get("milestone_id", ""),
                 {"status": "failed", "error_message": message},

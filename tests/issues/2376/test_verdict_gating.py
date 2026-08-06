@@ -32,7 +32,6 @@ iteration shape) would be killed.
 from __future__ import annotations
 
 import pytest
-
 from app.modules.workspace.autonomous.command_evidence.test_evidence import (
     parse_test_evidence,
 )
@@ -103,12 +102,43 @@ def test_uncovered_pytest_failure_still_fails_under_mixed():
     assert _verdict(commands, "mixed") is ExecutionVerdict.FAILED
 
 
-def test_non_python_evidence_still_does_not_cross_cover_under_mixed():
-    # Only pytest carries scope information, so two different shell commands
-    # must not cover one another even when the run-level hint is "mixed".
+def test_non_python_cross_command_pass_is_undecidable_not_failed():
+    # Only pytest carries scope, so a later pass on a *different* shell command
+    # still does not clear the failure — but the evidence cannot assert the run
+    # failed either. INCONCLUSIVE defers to the heuristic (#2376 PR-2 review).
     commands = [
         _ce(1, "bash tests/integration/a.sh", 1),
         _ce(2, "bash tests/integration/b.sh", 0),
+    ]
+    assert _verdict(commands, "mixed") is ExecutionVerdict.INCONCLUSIVE
+
+
+def test_failure_with_no_later_pass_is_still_a_real_failure():
+    # The fail-open PR-2 exists to close: a single run reporting failures must
+    # block, and "1 failed, 243 passed" is the shape that used to walk into
+    # pr_review on agent prose.
+    commands = [_ce(1, "python -m pytest tests/ -v --cov=app", 1, "1 failed, 243 passed")]
+    assert _verdict(commands, "mixed") is ExecutionVerdict.FAILED
+
+
+def test_scope_none_pytest_rerun_is_undecidable():
+    # _pytest_test_scope bails on options it does not model, and this repo's own
+    # CI command carries them. Without the three-way split these ordinary
+    # invocations would hard-fail the fix-then-rerun flow.
+    commands = [
+        _ce(1, "python -m pytest tests/test_a.py -v --cov=app --cov-fail-under=30", 1),
+        _ce(2, "python -m pytest tests/ -v --cov=app --cov-fail-under=30", 0),
+    ]
+    assert _verdict(commands, "mixed") is ExecutionVerdict.INCONCLUSIVE
+
+
+def test_decided_non_coverage_still_fails():
+    # Both scopes known and the later pass is narrower: non-coverage is
+    # *decided*, so it stays FAILED. This is the #1967 invariant and it must not
+    # be softened into "undecidable".
+    commands = [
+        _ce(1, "python -m pytest tests/ -q", 1),
+        _ce(2, "python -m pytest tests/test_a.py -q", 0),
     ]
     assert _verdict(commands, "mixed") is ExecutionVerdict.FAILED
 
@@ -136,7 +166,7 @@ def test_same_shell_command_rerun_stays_failed_at_the_structured_layer():
         _ce(1, "npm test", 1, "Tests: 1 failed"),
         _ce(2, "npm test", 0, "Tests: 40 passed"),
     ]
-    assert _verdict(commands, "mixed") is ExecutionVerdict.FAILED
+    assert _verdict(commands, "mixed") is ExecutionVerdict.INCONCLUSIVE
 
 
 def test_stale_pass_cannot_cover_a_later_failure():
