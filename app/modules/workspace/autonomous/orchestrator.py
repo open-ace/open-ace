@@ -300,33 +300,103 @@ def _is_bot_comment(comment: dict) -> bool:
     return any(kw in login.lower() for kw in BOT_AUTHOR_KEYWORDS)
 
 
-# Commands that read, search or move test files without executing them. A
-# command headed by one of these can never be a test invocation, however many
-# framework names appear in its arguments (#2376 D1): before this filter,
+# Commands that read, search, inspect or move test files without executing
+# them. A segment headed by one of these can never be a test invocation, however
+# many framework names appear in its arguments (#2376 D1): before this filter,
 # ``grep -rn "pytest" tests/`` was recognized as a test run and — since the
 # evidence parsers judge an unrecognized framework on the exit code alone —
 # could satisfy the authoritative test gate on its own.
-_READ_ONLY_COMMANDS = frozenset(
+#
+# Named "non-executing" rather than "read-only" because it also covers commands
+# that write but still cannot run a test (``cp``, ``mv``, ``rm``, ``chmod``).
+# Deliberately excludes ``source``/``.``, which *do* execute their argument.
+_NON_EXECUTING_COMMANDS = frozenset(
     {
-        "cat", "less", "more", "head", "tail", "grep", "rg", "ag", "ls", "stat",
-        "wc", "file", "git", "sed", "awk", "diff", "find", "cp", "mv", "rm",
-        "chmod", "touch", "vim", "nano", "echo", "printf", "which", "realpath",
+        "cat",
+        "less",
+        "more",
+        "head",
+        "tail",
+        "bat",
+        "nl",
+        "grep",
+        "rg",
+        "ag",
+        "ls",
+        "stat",
+        "wc",
+        "file",
+        "du",
+        "git",
+        "sed",
+        "awk",
+        "jq",
+        "sort",
+        "uniq",
+        "cut",
+        "tr",
+        "column",
+        "tee",
+        "strings",
+        "od",
+        "xxd",
+        "md5sum",
+        "sha256sum",
+        "basename",
+        "dirname",
+        "diff",
+        "find",
+        "cp",
+        "mv",
+        "rm",
+        "mkdir",
+        "chmod",
+        "touch",
+        "vim",
+        "nano",
+        "echo",
+        "printf",
+        "which",
+        "realpath",
+        "ps",
+        "curl",
+        "wget",
     }
-)  # fmt: skip
+)
 
-# Interpreters that may legitimately head a test invocation. Used only to
-# resolve a segment's effective head — an interpreter seen before any read-only
-# command means the segment is executing something, not reading it.
+# Interpreters and test runners that mark a segment as *executing*. Whichever
+# kind of token appears first decides the segment: a runner seen before any
+# non-executing command means the segment runs tests, and vice versa.
 _INTERPRETER_COMMANDS = frozenset(
     {"bash", "sh", "zsh", "python", "python3", "node", "npx", "pnpm", "yarn", "bun", "deno"}
+)
+
+_TEST_RUNNER_COMMANDS = frozenset(
+    {
+        "pytest",
+        "py.test",
+        "unittest",
+        "nose2",
+        "tox",
+        "nox",
+        "jest",
+        "vitest",
+        "mocha",
+        "npm",
+        "go",
+        "gotestsum",
+        "cargo",
+        "mvn",
+        "gradle",
+        "gradlew",
+        "make",
+    }
 )
 
 # Flags that turn a test command into a help/version query. Matched as whole
 # tokens: a raw substring test discards legitimate runs whose path or flags
 # merely contain "-h" (e.g. ``pytest -q --no-header``, ``tests/test-helper.py``).
 _EXCLUDE_FLAG_TOKENS = frozenset({"--help", "--version", "-h"})
-
-_SEGMENT_SPLIT_RE = re.compile(r"&&|\|\||;|\|")
 
 
 def _shell_tokens(text: str) -> list[str]:
@@ -338,25 +408,78 @@ def _shell_tokens(text: str) -> list[str]:
 
 
 def _command_segments(command: str) -> list[str]:
-    """Split a shell command into the segments that run as separate commands."""
-    return [seg for seg in _SEGMENT_SPLIT_RE.split(command) if seg.strip()]
+    """Split a shell command into the segments that run as separate commands.
+
+    Quote-aware, because a regex split would cut inside a quoted string and hand
+    the tail to the filter as a headless fragment — ``grep -E "pytest|unittest"
+    tests/`` would split at the alternation and the fragment ``unittest" tests/``
+    would match a test pattern with nothing to veto it (#2376 PR-1 review).
+
+    Newlines are separators too: multi-line Bash input is one tool call but many
+    commands, and treating it as a single segment lets a ``git status`` on one
+    line veto a ``pytest`` on another.
+    """
+    segments: list[str] = []
+    buf: list[str] = []
+    in_single = in_double = False
+    i, n = 0, len(command)
+    while i < n:
+        ch = command[i]
+        if ch == "\\" and not in_single and i + 1 < n:
+            buf.append(ch)
+            buf.append(command[i + 1])
+            i += 2
+            continue
+        if ch == "'" and not in_double:
+            in_single = not in_single
+        elif ch == '"' and not in_single:
+            in_double = not in_double
+        elif not in_single and not in_double:
+            if command[i : i + 2] in ("&&", "||"):
+                segments.append("".join(buf))
+                buf = []
+                i += 2
+                continue
+            if ch in ";|\n\r":
+                segments.append("".join(buf))
+                buf = []
+                i += 1
+                continue
+            # A lone "&" backgrounds a command, but "2>&1" and "&>" are
+            # redirections and must not be treated as separators.
+            if ch == "&" and (command[i - 1] if i else "") not in ">&":
+                if (command[i + 1] if i + 1 < n else "") not in "&>":
+                    segments.append("".join(buf))
+                    buf = []
+                    i += 1
+                    continue
+        buf.append(ch)
+        i += 1
+    segments.append("".join(buf))
+    return [seg for seg in segments if seg.strip()]
 
 
-def _segment_effective_head(segment: str) -> str:
-    """Basename of the first *recognized* command token in ``segment``.
+def _segment_is_non_executing(segment: str) -> bool:
+    """Whether ``segment`` reads/inspects rather than runs something.
 
-    Scanning for the first token that is either read-only or an interpreter
-    (rather than taking token 0) steps over wrapper prefixes and their operands
-    — ``sudo -u openace``, ``timeout 60``, ``ONLY_FAST=1`` — without having to
-    model each wrapper's option grammar. Returns "" when neither kind of token
-    is present, which leaves the segment eligible (conservative: an unknown
-    head is not assumed to be read-only).
+    Resolved from the first token that is a recognized command of *either* kind,
+    scanning left to right. Scanning (rather than taking token 0) steps over
+    wrapper prefixes and their operands — ``sudo -u openace``, ``timeout 60``,
+    ``ONLY_FAST=1`` — without modelling each wrapper's option grammar. Stopping
+    at a runner is what keeps an *argument* from vetoing a genuine run:
+    ``pytest tests/cat`` must stay eligible even though ``cat`` is a basename in
+    the non-executing set (#2376 PR-1 review).
+
+    An unrecognized head leaves the segment eligible — an unknown command is not
+    assumed to be non-executing.
     """
     for token in _shell_tokens(segment):
-        base = token.rsplit("/", 1)[-1]
-        if base in _READ_ONLY_COMMANDS or base in _INTERPRETER_COMMANDS:
-            return base
-    return ""
+        base = token.rsplit("/", 1)[-1].lstrip("$(`")
+        if base in _TEST_RUNNER_COMMANDS or base in _INTERPRETER_COMMANDS:
+            return False
+        if base in _NON_EXECUTING_COMMANDS:
+            return True
+    return False
 
 
 def _has_test_tool_call(tool_calls: list, framework_type: str) -> bool:
@@ -403,7 +526,7 @@ def _has_test_tool_call(tool_calls: list, framework_type: str) -> bool:
             # the read-only filter:
             #     python -c "print(1)" && grep -rn pytest tests/
             for segment in _command_segments(cmd):
-                if _segment_effective_head(segment) in _READ_ONLY_COMMANDS:
+                if _segment_is_non_executing(segment):
                     continue
                 tokens = _shell_tokens(segment)
                 # Note: -v (verbose) is NOT excluded, only --help/--version/-h

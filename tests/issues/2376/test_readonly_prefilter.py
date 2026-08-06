@@ -126,6 +126,98 @@ def test_substring_h_does_not_exclude_a_real_run(command):
     assert _has_test_tool_call(_tc(command), "mixed") is True
 
 
+# --- Multi-line commands: newlines separate commands (PR-1 review #1) --------
+#
+# A Bash tool call is routinely a multi-line script. Treating it as one segment
+# let a read-only command on any line veto a genuine run on any other line —
+# reintroducing, on a new axis, exactly the fail-closed bug #2376 exists to fix.
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cd /w && git status\npython -m pytest tests/ -q",
+        'echo "running tests"\npython -m pytest tests/ -q',
+        "ls -la\ncat foo\npytest tests/ -q",
+        # The runner runs FIRST; a later read-only line must not retract it.
+        "pytest tests/ -q\ngit status",
+        # Agent greps for context, then actually runs the suite.
+        "grep -rn pytest tests/\npython -m pytest tests/ -q",
+        "#!/bin/bash\nset -e\ncd /w\npytest tests/ -q",
+    ],
+)
+def test_newline_separated_commands_are_separate_segments(command):
+    assert _has_test_tool_call(_tc(command), "mixed") is True
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'python -c "print(1)"\ngrep -rn pytest tests/',
+        'node -e "1"\ncat tests/test_pytest_x.py',
+        'python -c "1" & grep -rn pytest tests/',
+    ],
+)
+def test_segment_bypass_closed_for_every_separator(command):
+    # The eligible segment carries no test pattern; the segment that does is
+    # read-only. True here would mean the filter is defeated by a prefix.
+    assert _has_test_tool_call(_tc(command), "mixed") is False
+
+
+# --- Quote-aware splitting (PR-1 review #2) ----------------------------------
+#
+# A regex split cuts inside quoted strings and hands the tail to the filter as a
+# headless fragment, so `|unittest` inside a grep pattern re-opened D1 entirely.
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'grep -E "pytest|unittest" tests/',
+        'grep -rn "npm test|pytest" .',
+        'git log --grep="pytest|unittest"',
+        "sed -n '/pytest/p; /jest/p' f.py",
+    ],
+)
+def test_operators_inside_quotes_do_not_split_a_read_only_command(command):
+    assert _has_test_tool_call(_tc(command), "mixed") is False
+
+
+def test_redirections_are_not_treated_as_separators():
+    # "2>&1" and "&>" are redirections, not backgrounding.
+    assert _has_test_tool_call(_tc("pytest tests/ -q 2>&1"), "mixed") is True
+    assert _has_test_tool_call(_tc("pytest tests/ -q &> out.log"), "mixed") is True
+
+
+def test_pipeline_keeps_the_runner_segment():
+    # Splitting on "|" must not drop the runner: the tee/tail segment is
+    # filtered, the pytest segment survives.
+    assert _has_test_tool_call(_tc("pytest tests/ -q 2>&1 | tee out.log"), "mixed") is True
+    assert _has_test_tool_call(_tc("pytest tests/ | tail -50"), "mixed") is True
+
+
+# --- An argument must never veto its runner (PR-1 review #3) -----------------
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "pytest tests/cat",
+        "pytest -k git tests/",
+        'pytest -k "git" tests/',
+        "pytest --deselect tests/find tests/",
+        "pytest tests/ --rootdir tests/git",
+        "npm test -- tests/diff",
+        "go test ./cmd/find",
+        "cargo test --test file",
+    ],
+)
+def test_argument_basename_does_not_veto_a_genuine_run(command):
+    # The head scan stops at the runner, so a path or flag value whose basename
+    # happens to be a non-executing command name cannot disable the gate.
+    assert _has_test_tool_call(_tc(command), "mixed") is True
+
+
 # --- Non-Bash tool names are unaffected --------------------------------------
 
 
