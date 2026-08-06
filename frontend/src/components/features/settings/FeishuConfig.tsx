@@ -116,7 +116,9 @@ export const FeishuConfig: React.FC = () => {
         );
       }
       if (formData.sync_interval !== config.sync_interval) {
-        changes.push(`${t('syncInterval', language)}: ${config.sync_interval} → ${formData.sync_interval}`);
+        changes.push(
+          `${t('syncInterval', language)}: ${config.sync_interval} → ${formData.sync_interval}`
+        );
       }
     }
 
@@ -353,7 +355,10 @@ export const FeishuConfig: React.FC = () => {
                     className="form-control"
                     value={formData.sync_interval}
                     onChange={(e) =>
-                      setFormData({ ...formData, sync_interval: parseInt(e.target.value, 10) || 60 })
+                      setFormData({
+                        ...formData,
+                        sync_interval: parseInt(e.target.value, 10) || 60,
+                      })
                     }
                     min={1}
                     max={1440}
