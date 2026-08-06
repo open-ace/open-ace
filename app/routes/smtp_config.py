@@ -14,10 +14,12 @@ import logging
 from flask import Blueprint, g, jsonify, request
 
 from app.auth.decorators import admin_required
+from app.modules.governance.audit_logger import AuditAction, AuditLogger
 from app.services.email_notification_service import get_email_notification_service
 from app.services.smtp_config_service import get_smtp_config_service
 
 logger = logging.getLogger(__name__)
+audit_logger = AuditLogger()
 
 smtp_config_bp = Blueprint("smtp_config", __name__)
 
@@ -93,6 +95,23 @@ def update_smtp_config():
 
         logger.info(f"SMTP configuration updated by user {user_id}")
 
+        # Audit log for SMTP config save (do not log password)
+        audit_logger.log_action(
+            action=AuditAction.SMTP_CONFIG_SAVE.value,
+            user_id=user_id,
+            resource_type="smtp_config",
+            resource_id=config.get("id"),
+            resource_name=smtp_host,
+            details={
+                "smtp_host": smtp_host,
+                "smtp_port": int(smtp_port),
+                "smtp_user": smtp_user,
+                "from_address": from_address,
+                "use_tls": use_tls,
+                "password_updated": bool(smtp_password),
+            },
+        )
+
         return jsonify(
             {
                 "success": True,
@@ -139,12 +158,34 @@ def delete_smtp_config():
     """Delete SMTP configuration."""
     try:
         service = get_smtp_config_service()
+
+        # Get config before deleting for audit log
+        config = service.get_config()
+        if not config:
+            return jsonify({"success": False, "error": "No SMTP configuration to delete"}), 404
+
         success = service.delete_config()
 
         if not success:
-            return jsonify({"success": False, "error": "No SMTP configuration to delete"}), 404
+            return jsonify({"success": False, "error": "Failed to delete configuration"}), 500
 
-        logger.info(f"SMTP configuration deleted by user {g.user.get('id')}")
+        user_id = g.user.get("id") if hasattr(g, "user") and g.user else None
+        logger.info(f"SMTP configuration deleted by user {user_id}")
+
+        # Audit log for SMTP config delete (do not log password)
+        audit_logger.log_action(
+            action=AuditAction.SMTP_CONFIG_DELETE.value,
+            user_id=user_id,
+            resource_type="smtp_config",
+            resource_id=config.get("id"),
+            resource_name=config.get("smtp_host"),
+            details={
+                "smtp_host": config.get("smtp_host"),
+                "smtp_port": config.get("smtp_port"),
+                "smtp_user": config.get("smtp_user"),
+                "from_address": config.get("from_address"),
+            },
+        )
 
         return jsonify({"success": True, "message": "SMTP configuration deleted"})
     except Exception as e:
