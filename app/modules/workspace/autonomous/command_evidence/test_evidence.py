@@ -282,11 +282,20 @@ def _parse_pytest(excerpt: str, exit_code: int | None, command_text: str) -> Par
 
 
 def _parse_jest(excerpt: str, exit_code: int | None) -> ParsedTestResult:
-    """Parse Jest output ("Tests: N passed, N failed")."""
+    """Parse Jest *or* vitest output.
+
+    Jest prints ``Tests:  3 passed, 4 total`` (colon); vitest prints
+    ``Tests  12 passed (12)`` and ``Test Files  3 passed (3)`` — no colon, and
+    the count follows the label. Without the colonless patterns this repo's own
+    suite (vitest, per frontend/package.json) fell through to the exit-code-only
+    generic parser at MEDIUM confidence (#2376 Fix G).
+    """
     passed = _extract_count(
         excerpt,
         [
             re.compile(r"Tests:\s*(\d+)\s+passed", re.IGNORECASE),
+            re.compile(r"Tests\s+(\d+)\s+passed", re.IGNORECASE),
+            re.compile(r"Test Files\s+(\d+)\s+passed", re.IGNORECASE),
             re.compile(r"(\d+)\s+tests?\s+passed", re.IGNORECASE),
         ],
     )
@@ -294,6 +303,8 @@ def _parse_jest(excerpt: str, exit_code: int | None) -> ParsedTestResult:
         excerpt,
         [
             re.compile(r"Tests:\s*(\d+)\s+failed", re.IGNORECASE),
+            re.compile(r"Tests\s+(\d+)\s+failed", re.IGNORECASE),
+            re.compile(r"Test Files\s+(\d+)\s+failed", re.IGNORECASE),
             re.compile(r"(\d+)\s+tests?\s+failed", re.IGNORECASE),
         ],
     )
@@ -405,6 +416,11 @@ def _resolve_framework(command_evidence: CommandExecutionEvidence, hint: str) ->
     if any(signal in command_text for signal in ("pytest", "py.test", "unittest")):
         return "python"
     if any(signal in command_text for signal in ("jest", "vitest", "npm test", "yarn test")):
+        return "javascript"
+    # `npm run test:coverage` / `yarn test:unit` / `pnpm run test` carry no bare
+    # runner name, so without this they fell to the exit-code-only generic
+    # parser even though the counts were right there in the output (#2376 Fix G).
+    if re.search(r"\b(npm|yarn|pnpm)\s+(run\s+)?test", command_text):
         return "javascript"
     if head == "go":
         return "go"

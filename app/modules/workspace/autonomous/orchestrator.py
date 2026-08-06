@@ -179,7 +179,20 @@ def _infer_test_framework(project_path: str, cli_tool: str) -> str:
         dirs[:] = [
             d
             for d in dirs
-            if d not in ("node_modules", "venv", ".venv", "__pycache__", ".git", "dist", "build")
+            # ".worktrees" holds checkouts of this same project (#2376 Fix H):
+            # descending into them both slows the walk and lets a worktree's
+            # markers flip the inferred framework for the primary clone.
+            if d
+            not in (
+                "node_modules",
+                "venv",
+                ".venv",
+                "__pycache__",
+                ".git",
+                ".worktrees",
+                "dist",
+                "build",
+            )
         ]
 
         for f in files:
@@ -625,6 +638,116 @@ def _segment_is_non_executing(segment: str) -> bool:
     return False
 
 
+# --------------------------------------------------------------------------- #
+# Repo-convention test detection (#2376 Fix C)
+# --------------------------------------------------------------------------- #
+# A file under tests/ that is *executed* is a test run whatever the interpreter.
+# This is what the pattern list structurally cannot express: wf 221 (#2349) ran
+# `bash tests/integration/test_sudoers_security.sh` — the repo's own integration
+# suite for exactly the code it changed — and no pattern matched it.
+
+_TEST_COMMAND_PATTERNS = {
+    "python": ["pytest", "python -m pytest", "-m pytest", "unittest", "tox", "nox"],
+    "javascript": ["jest", "npm test", "npm run test", "yarn test", "vitest", "mocha"],
+    "go": ["go test", "gotestsum"],
+    "rust": ["cargo test", "cargo t"],
+    "java": ["mvn test", "gradle test", "./gradlew test"],
+}
+
+# What "mixed" must match: the union of every language, not the fallback.
+_ALL_TEST_PATTERNS = sorted({p for pats in _TEST_COMMAND_PATTERNS.values() for p in pats})
+
+_TEST_PATH_RE = re.compile(r"^\.?/?tests?/.+\.(sh|bash|py|js|ts|mjs)$")
+
+# Interpreters that can execute a test file directly. `python3.N` is matched
+# separately so 3.10/3.12/... all resolve.
+_EXECUTING_INTERPRETERS = frozenset(
+    {"bash", "sh", "zsh", "python", "python3", "node", "bun", "deno", "ts-node", "tsx"}
+)
+_PYTHON_VERSIONED_RE = re.compile(r"^python3\.\d+$")
+
+# Allowlists, deliberately not denylists. A denylist has to be exhaustive to be
+# sound, and the first cut of this rule let `python -m ruff check tests/x.py`,
+# `python -m black --check` and `python -m mypy` satisfy the gate — this
+# project's own pre-commit tools.
+_PYTHON_MODULE_RUNNERS = frozenset({"pytest", "unittest", "nose2", "tox", "nox"})
+_NPX_RUNNERS = frozenset({"vitest", "jest", "mocha", "playwright", "cypress"})
+
+# Flags that make an interpreter parse a file without running it.
+_SYNTAX_CHECK_SHELLS = frozenset({"bash", "sh", "zsh"})
+
+
+def _strip_wrapper_prefix(tokens: list[str]) -> list[str]:
+    """Drop leading env assignments so the real command is at the front."""
+    index = 0
+    while index < len(tokens) and _ASSIGNMENT_RE.match(tokens[index]):
+        index += 1
+    return tokens[index:]
+
+
+def _is_syntax_check_only(tokens: list[str]) -> bool:
+    """Whether the tokens parse a file rather than execute it.
+
+    ``bash -n`` (and ``sh -en``, ``zsh -n``, ``bash --norc -n``) exit 0 without
+    running a line, so treating them as a passing test run is a fail-open. The
+    ``-n`` may be combined into a short-flag cluster or appear after another
+    flag, so every leading flag token is inspected.
+    """
+    head = tokens[0].rsplit("/", 1)[-1] if tokens else ""
+    if head in _SYNTAX_CHECK_SHELLS:
+        for token in tokens[1:]:
+            if not token.startswith("-"):
+                break
+            if token == "--":
+                break
+            if token.startswith("--"):
+                continue
+            if "n" in token[1:]:
+                return True
+    return head in {"node", "nodejs"} and "--check" in tokens
+
+
+def _is_test_path_execution(command: str) -> bool:
+    """Whether ``command`` executes a file under ``tests/``.
+
+    Recognition is per segment and runs after the non-executing pre-filter, so
+    reading or grepping a test file never reaches here.
+    """
+    for segment in _command_segments(command):
+        if _segment_is_non_executing(segment):
+            continue
+        tokens = _strip_wrapper_prefix(_shell_tokens(segment))
+        if not tokens or _is_syntax_check_only(tokens):
+            continue
+
+        # Scan for the first interpreter/runner token; wrapper operands
+        # (`sudo -u openace`, `timeout 60`) are stepped over rather than
+        # modelled, mirroring _segment_is_non_executing.
+        for index, token in enumerate(tokens):
+            base = token.rsplit("/", 1)[-1]
+            rest = tokens[index + 1 :]
+
+            # `python -m <runner>` / `npx <runner>`: allowlisted runners only.
+            if base in {"python", "python3", "node"} or _PYTHON_VERSIONED_RE.match(base):
+                if "-m" in rest:
+                    module = rest[rest.index("-m") + 1 :]
+                    return bool(module) and module[0] in _PYTHON_MODULE_RUNNERS
+            if base in {"npx", "pnpm", "yarn", "bunx"}:
+                for follower in rest:
+                    if follower.startswith("-") or follower == "dlx":
+                        continue
+                    return follower.rsplit("/", 1)[-1] in _NPX_RUNNERS
+                return False
+
+            if base in _EXECUTING_INTERPRETERS or _PYTHON_VERSIONED_RE.match(base):
+                return any(_TEST_PATH_RE.match(arg) for arg in rest)
+
+            # A test file invoked directly (`./tests/e2e/run.sh`).
+            if _TEST_PATH_RE.match(token):
+                return True
+    return False
+
+
 def _has_test_tool_call(tool_calls: list, framework_type: str) -> bool:
     """Check if tool_calls contains a test framework execution command.
 
@@ -636,16 +759,32 @@ def _has_test_tool_call(tool_calls: list, framework_type: str) -> bool:
     if not tool_calls:
         return False
 
-    test_commands = {
-        "python": ["pytest", "python -m pytest", "-m pytest", "unittest", "tox", "nox"],
-        "javascript": ["jest", "npm test", "npm run test", "yarn test", "vitest", "mocha"],
-        "go": ["go test", "gotestsum"],
-        "rust": ["cargo test", "cargo t"],
-        "java": ["mvn test", "gradle test", "./gradlew test"],
-    }
+    test_commands = _TEST_COMMAND_PATTERNS
     # P1: generic_patterns includes unittest for unknown frameworks
-    generic_patterns = ["pytest", "unittest", "jest", "go test", "cargo test", "npm test"]
-    patterns_to_check = test_commands.get(framework_type, generic_patterns)
+    # "vitest" and "npm run test" live in the javascript list but were missing
+    # here, which made the fallback strictly weaker than any single-language
+    # list — and "mixed" landed on it (#2376 D3). "npm run test" is a prefix of
+    # "npm run test:coverage"/"test:unit", so substring matching covers the
+    # `test:*` variants.
+    generic_patterns = [
+        "pytest",
+        "unittest",
+        "jest",
+        "vitest",
+        "go test",
+        "cargo test",
+        "npm test",
+        "npm run test",
+        "yarn test",
+        "pnpm test",
+    ]
+    if framework_type == "mixed":
+        # A polyglot repo must match every language, not the weakest fallback.
+        # tests/issues/1520/test_keyword_detection.py records this as the
+        # original design intent ("mixed -> pytest + Jest + go test + unittest").
+        patterns_to_check = _ALL_TEST_PATTERNS
+    else:
+        patterns_to_check = test_commands.get(framework_type, generic_patterns)
 
     for tc in tool_calls:
         tool_name = tc.get("tool", {}).get("name", "") if isinstance(tc.get("tool"), dict) else ""
@@ -678,6 +817,11 @@ def _has_test_tool_call(tool_calls: list, framework_type: str) -> bool:
                 for pattern in patterns_to_check:
                     if pattern in segment:
                         return True
+                # Repo convention (#2376 Fix C): executing a file under tests/
+                # is a test run whatever the interpreter, which no pattern list
+                # can express. Checked last so the cheaper substring match wins.
+                if _is_test_path_execution(segment):
+                    return True
 
     return False
 
