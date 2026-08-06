@@ -193,6 +193,13 @@ const navSections: NavSection[] = [
         path: '/manage/settings/model-gateway',
         adminOnly: true,
       },
+      {
+        id: 'feishu',
+        label: 'feishuIntegration',
+        icon: 'bi-chat-dots',
+        path: '/manage/settings/feishu',
+        adminOnly: true,
+      },
     ],
   },
 ];

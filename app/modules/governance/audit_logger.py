@@ -102,6 +102,11 @@ class AuditAction(Enum):
     # SMTP configuration actions
     SMTP_CONFIG_SAVE = "smtp_config_save"
     SMTP_CONFIG_DELETE = "smtp_config_delete"
+
+    # Feishu configuration actions
+    FEISHU_CONFIG_SAVE = "feishu_config_save"
+    FEISHU_CONFIG_DELETE = "feishu_config_delete"
+
     URL_TOKEN_PATH_VIOLATION = "url_token_path_violation"
     LEGACY_WEBUI_TOKEN_USED = "legacy_webui_token_used"
     TOKEN_LEAK_SUSPECTED = "token_leak_suspected"

@@ -149,6 +149,11 @@ const ModelGatewayConfig = lazy(() =>
     default: m.ModelGatewayConfig,
   }))
 );
+const FeishuConfig = lazy(() =>
+  import('@/components/features/settings/FeishuConfig').then((m) => ({
+    default: m.FeishuConfig,
+  }))
+);
 const ForceChangePasswordModal = lazy(() =>
   import('@/components/features/ForceChangePasswordModal').then((m) => ({
     default: m.ForceChangePasswordModal,
@@ -360,6 +365,7 @@ const ManageRoutes: React.FC = () => {
           <Route path="settings/ai-agent" element={<AiAgentSettings />} />
           <Route path="settings/smtp" element={<SmtpConfig />} />
           <Route path="settings/model-gateway" element={<ModelGatewayConfig />} />
+          <Route path="settings/feishu" element={<FeishuConfig />} />
 
           {/* Default */}
           <Route path="*" element={<Navigate to="/manage/dashboard" replace />} />
