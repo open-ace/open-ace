@@ -1074,4 +1074,21 @@ def get_action_categories() -> dict[str, dict[str, Any]]:
                 },
             ],
         },
+        "feishu_config": {
+            "label": "Feishu Configuration",
+            "i18n_key": "categoryFeishuConfig",
+            "resource_types": ["feishu_config"],
+            "actions": [
+                {
+                    "value": "feishu_config_save",
+                    "label": "Feishu Config Save",
+                    "i18n_key": "actionFeishuConfigSave",
+                },
+                {
+                    "value": "feishu_config_delete",
+                    "label": "Feishu Config Delete",
+                    "i18n_key": "actionFeishuConfigDelete",
+                },
+            ],
+        },
     }
