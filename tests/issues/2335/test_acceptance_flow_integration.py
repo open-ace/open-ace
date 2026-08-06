@@ -44,10 +44,26 @@ def test_reject_then_fix_then_confirm_closes_issue():
     assert r1.workflow_patch["dev_round"] == 2
     deps.gh.close_issue.assert_not_called()
 
-    # Simulate the dev round landing the required file; re-verify.
+    # Simulate the dev round landing the required file; re-verify. The fix
+    # includes a failure-path test (so the negative-test mechanical gate #2335
+    # S4 sees coverage for the security/data-loss path) and wires the new
+    # service module's caller (so the call-chain gate passes).
     wf.update(r1.workflow_patch)
     wf["verification_status"] = None  # reset for the new round
-    deps.gh.get_changed_files.return_value = ["app/services/retention.py"]
+    deps.gh.get_changed_files.return_value = [
+        "app/services/retention.py",
+        "app/services/retention_runner.py",  # production caller for the service module
+        "tests/test_retention.py",  # failure-path test for the retention path
+    ]
+    # Mechanical gates read changed-file content via git show; wire _run_git to
+    # return clean content (a test with pytest.raises, a caller that imports).
+    deps.gh._run_git.return_value.stdout = (
+        "from app.services.retention import run\n"
+        "import pytest\n"
+        "def test_retention_fail():\n"
+        "    with pytest.raises(ValueError):\n"
+        "        run('bad')\n"
+    )
     deps.host.run_verification_agent.return_value = {
         "verdicts": [
             {"item": "retention runs", "verdict": "confirmed", "evidence": [], "rationale": ""}

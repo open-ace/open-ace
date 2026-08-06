@@ -190,8 +190,10 @@ class TestGitHubOpsPR:
     def setup_method(self):
         self.gh = GitHubOps("/tmp/test-repo")
 
+    @patch("app.utils.config.get_ai_github_env", return_value=None)
     @patch("app.modules.workspace.autonomous.github_ops.subprocess.run")
-    def test_create_pr(self, mock_run):
+    def test_create_pr(self, mock_run, _no_token):
+        # No bot token -> fallback `gh pr create` path (owner identity).
         # create_pr makes two gh calls: `pr create` (prints URL) then
         # `pr view --json` (structured data).
         mock_run.side_effect = [
@@ -206,8 +208,9 @@ class TestGitHubOpsPR:
         )
         assert result["number"] == 10
 
+    @patch("app.utils.config.get_ai_github_env", return_value=None)
     @patch("app.modules.workspace.autonomous.github_ops.subprocess.run")
-    def test_create_pr_draft(self, mock_run):
+    def test_create_pr_draft(self, mock_run, _no_token):
         mock_run.side_effect = [
             MagicMock(returncode=0, stdout="https://github.com/user/test/pull/11"),
             MagicMock(
