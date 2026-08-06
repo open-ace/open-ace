@@ -1,4 +1,5 @@
 """Datetime utilities for timestamp handling."""
+
 import re
 
 
@@ -33,6 +34,6 @@ def ensure_utc_suffix(timestamp: str | None) -> str | None:
         return None
     # Check if timestamp already has timezone info
     # Z suffix or timezone offset like +00:00 or -08:00 at the end
-    if timestamp.endswith('Z') or re.search(r'[+-]\d{2}:\d{2}$', timestamp):
+    if timestamp.endswith("Z") or re.search(r"[+-]\d{2}:\d{2}$", timestamp):
         return timestamp
-    return timestamp + 'Z'
+    return timestamp + "Z"
