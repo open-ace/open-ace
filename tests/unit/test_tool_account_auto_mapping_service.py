@@ -282,6 +282,291 @@ class TestToolAccountAutoMappingService(unittest.TestCase):
         self.assertEqual(len(result.skipped), 0)
 
 
+class TestAutoMappingServiceTenantFiltering(unittest.TestCase):
+    """
+    Issue #2374: Unit tests for tenant_id filtering in auto-mapping service.
+
+    Verifies that when tenant_id is provided, the service correctly filters
+    users, rules, and stats by tenant to prevent cross-tenant data leakage.
+    """
+
+    def setUp(self):
+        """Set up test fixtures."""
+        self.mock_db = MagicMock()
+        self.service = ToolAccountAutoMappingService(db=self.mock_db)
+
+    def _make_user_row(self, user_id, username, tenant_id):
+        """Create a mock DB row for a user."""
+        return {
+            "id": user_id,
+            "username": username,
+            "email": f"{username}@example.com",
+            "role": "user",
+            "is_active": 1,
+            "auto_mapping_enabled": 1,
+            "tenant_id": tenant_id,
+        }
+
+    # --- get_all_users tenant filtering ---
+
+    def test_get_all_users_with_tenant_id_filters_users(self):
+        """get_all_users should pass tenant_id to SQL query."""
+        self.mock_db.fetch_all.return_value = [
+            self._make_user_row(1, "alice", 1),
+            self._make_user_row(2, "bob", 1),
+        ]
+
+        users = self.service.get_all_users(tenant_id=1)
+
+        self.assertEqual(len(users), 2)
+        self.assertEqual(users[0].id, 1)
+        self.assertEqual(users[0].tenant_id, 1)
+
+        # Verify fetch_all was called with tenant_id parameter
+        call_args = self.mock_db.fetch_all.call_args
+        params = call_args[0][1] if len(call_args[0]) > 1 else call_args[1].get("params")
+        self.assertIsNotNone(params)
+        self.assertIn(1, params)
+
+    def test_get_all_users_without_tenant_id_returns_all(self):
+        """get_all_users without tenant_id should not filter."""
+        self.mock_db.fetch_all.return_value = [
+            self._make_user_row(1, "alice", 1),
+            self._make_user_row(2, "bob", 2),
+        ]
+
+        users = self.service.get_all_users()
+
+        self.assertEqual(len(users), 2)
+        # Verify no tenant_id parameter was passed
+        call_args = self.mock_db.fetch_all.call_args
+        params = call_args[0][1] if len(call_args[0]) > 1 else call_args[1].get("params")
+        # params should be None (no filtering)
+        self.assertIsNone(params)
+
+    # --- try_match_by_rules tenant filtering ---
+
+    def test_try_match_by_rules_skips_cross_tenant_rules(self):
+        """try_match_by_rules should skip rules for users outside the tenant."""
+        # Tenant 1 users: user 1 and 2
+        self.mock_db.fetch_all.return_value = [
+            self._make_user_row(1, "alice", 1),
+            self._make_user_row(2, "bob", 1),
+        ]
+
+        # Rules: one for tenant 1 user, one for tenant 2 user
+        mock_rule_repo = MagicMock()
+        rule_t1 = ToolAccountMappingRule(
+            id=1,
+            user_id=1,
+            pattern="alice-*",
+            match_type="prefix",
+            is_active=True,
+            is_auto=True,
+        )
+        rule_t2 = ToolAccountMappingRule(
+            id=2,
+            user_id=99,
+            pattern="alice-*",
+            match_type="prefix",
+            is_active=True,
+            is_auto=True,
+        )
+        mock_rule_repo.get_auto_rules.return_value = [rule_t2, rule_t1]
+        self.service.rule_repo = mock_rule_repo
+
+        # With tenant_id=1, rule for user 99 should be skipped
+        result = self.service.try_match_by_rules("alice-pc-qwen", "qwen", tenant_id=1)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result.user_id, 1)  # Matched tenant 1 user's rule
+        self.assertEqual(result.rule_id, 1)
+
+    def test_try_match_by_rules_no_tenant_id_matches_all(self):
+        """try_match_by_rules without tenant_id should match all rules."""
+        self.mock_db.fetch_all.return_value = [
+            self._make_user_row(1, "alice", 1),
+            self._make_user_row(99, "alice", 2),
+        ]
+
+        mock_rule_repo = MagicMock()
+        rule_t2 = ToolAccountMappingRule(
+            id=2,
+            user_id=99,
+            pattern="alice-*",
+            match_type="prefix",
+            is_active=True,
+            is_auto=True,
+        )
+        mock_rule_repo.get_auto_rules.return_value = [rule_t2]
+        self.service.rule_repo = mock_rule_repo
+
+        # Without tenant_id, rule for user 99 should match
+        result = self.service.try_match_by_rules("alice-pc-qwen", "qwen")
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result.user_id, 99)
+
+    def test_try_match_by_rules_tenant_filter_no_match(self):
+        """try_match_by_rules should return None if no rules match within tenant."""
+        # Tenant 1 users: only user 1
+        self.mock_db.fetch_all.return_value = [
+            self._make_user_row(1, "alice", 1),
+        ]
+
+        mock_rule_repo = MagicMock()
+        # Rule for user 99 (tenant 2) that would match the tool_account
+        rule_t2 = ToolAccountMappingRule(
+            id=2,
+            user_id=99,
+            pattern="alice-*",
+            match_type="prefix",
+            is_active=True,
+            is_auto=True,
+        )
+        mock_rule_repo.get_auto_rules.return_value = [rule_t2]
+        self.service.rule_repo = mock_rule_repo
+
+        # With tenant_id=1, the only matching rule is for user 99 (tenant 2) - should be skipped
+        result = self.service.try_match_by_rules("alice-pc-qwen", "qwen", tenant_id=1)
+
+        self.assertIsNone(result)
+
+    # --- auto_map_account tenant filtering ---
+
+    def test_auto_map_account_passes_tenant_id_to_get_all_users(self):
+        """auto_map_account should pass tenant_id to get_all_users."""
+        mock_mapping_repo = MagicMock()
+        mock_mapping_repo.get_by_tool_account.return_value = None  # Not already mapped
+        self.service.mapping_repo = mock_mapping_repo
+
+        self.mock_db.fetch_all.return_value = [
+            self._make_user_row(1, "alice", 1),
+        ]
+        mock_rule_repo = MagicMock()
+        mock_rule_repo.get_auto_rules.return_value = []
+        self.service.rule_repo = mock_rule_repo
+
+        self.service.auto_map_account("alice-pc-qwen", "qwen", tenant_id=1)
+
+        # Verify fetch_all was called (via get_all_users) with tenant_id param
+        call_args = self.mock_db.fetch_all.call_args
+        params = call_args[0][1] if len(call_args[0]) > 1 else call_args[1].get("params")
+        self.assertIsNotNone(params)
+        self.assertIn(1, params)
+
+    def test_auto_map_account_tenant_filtered_no_cross_tenant_match(self):
+        """auto_map_account should not match users from other tenants."""
+        mock_mapping_repo = MagicMock()
+        mock_mapping_repo.get_by_tool_account.return_value = None
+        self.service.mapping_repo = mock_mapping_repo
+
+        # No users in tenant 1 (fetch_all returns empty list when tenant_id=1 filters)
+        self.mock_db.fetch_all.return_value = []
+        mock_rule_repo = MagicMock()
+        mock_rule_repo.get_auto_rules.return_value = []
+        self.service.rule_repo = mock_rule_repo
+
+        # With tenant_id=1, no users in tenant 1, so no match
+        result = self.service.auto_map_account("alice-pc-qwen", "qwen", tenant_id=1)
+
+        self.assertIsNone(result)
+
+    # --- get_mapping_stats tenant filtering ---
+
+    def test_get_mapping_stats_filters_mapped_by_tenant(self):
+        """get_mapping_stats should filter mapped count by tenant."""
+        # Tenant 1 users: user 1 and 2
+        self.mock_db.fetch_all.return_value = [
+            self._make_user_row(1, "alice", 1),
+            self._make_user_row(2, "bob", 1),
+        ]
+
+        mock_mapping_repo = MagicMock()
+        # Unmapped accounts for tenant 1
+        mock_mapping_repo.get_unmapped_tool_accounts.return_value = [
+            {"sender_name": "unknown-pc-qwen", "message_count": 5},
+        ]
+        # Mapped accounts: some for tenant 1, some for tenant 2
+        mapped_t1 = MagicMock()
+        mapped_t1.user_id = 1
+        mapped_t1.tool_type = "qwen"
+        mapped_t2 = MagicMock()
+        mapped_t2.user_id = 99  # User not in tenant 1
+        mapped_t2.tool_type = "qwen"
+        mock_mapping_repo.get_all.return_value = [mapped_t1, mapped_t2]
+        self.service.mapping_repo = mock_mapping_repo
+
+        stats = self.service.get_mapping_stats(tenant_id=1)
+
+        # mapped should only count user 1 (in tenant 1), not user 99
+        self.assertEqual(stats["total_mapped"], 1)
+        self.assertEqual(stats["total_unmapped"], 1)
+
+    def test_get_mapping_stats_no_tenant_id_returns_all(self):
+        """get_mapping_stats without tenant_id should return all stats."""
+        self.mock_db.fetch_all.return_value = []
+
+        mock_mapping_repo = MagicMock()
+        mock_mapping_repo.get_unmapped_tool_accounts.return_value = []
+        mapped1 = MagicMock()
+        mapped1.user_id = 1
+        mapped1.tool_type = "qwen"
+        mapped2 = MagicMock()
+        mapped2.user_id = 99
+        mapped2.tool_type = "claude"
+        mock_mapping_repo.get_all.return_value = [mapped1, mapped2]
+        self.service.mapping_repo = mock_mapping_repo
+
+        stats = self.service.get_mapping_stats()
+
+        # Without tenant_id, all mapped should be counted
+        self.assertEqual(stats["total_mapped"], 2)
+
+    # --- _get_users_cache tenant safety ---
+
+    def test_users_cache_populated_with_tenant_filter(self):
+        """_get_users_cache should populate cache with tenant-filtered users."""
+        self.mock_db.fetch_all.return_value = [
+            self._make_user_row(1, "alice", 1),
+            self._make_user_row(2, "bob", 1),
+        ]
+
+        cache = self.service._get_users_cache(tenant_id=1)
+
+        self.assertIn(1, cache)
+        self.assertIn(2, cache)
+        self.assertNotIn(99, cache)
+
+    def test_users_cache_cleared_on_run_auto_mapping(self):
+        """run_auto_mapping should clear cache to ensure fresh data."""
+        # Pre-populate cache with stale user 99
+        self.service._users_cache = {99: MagicMock()}
+
+        mock_mapping_repo = MagicMock()
+        mock_mapping_repo.get_by_tool_account.return_value = None
+        # Provide one unmapped account so the loop executes and cache gets re-populated
+        mock_mapping_repo.get_unmapped_tool_accounts.return_value = [
+            {"sender_name": "alice-pc-qwen", "message_count": 3},
+        ]
+        self.service.mapping_repo = mock_mapping_repo
+
+        # fetch_all returns tenant 1 users only (stale user 99 should be gone)
+        self.mock_db.fetch_all.return_value = [
+            self._make_user_row(1, "alice", 1),
+        ]
+        mock_rule_repo = MagicMock()
+        mock_rule_repo.get_auto_rules.return_value = []
+        self.service.rule_repo = mock_rule_repo
+
+        self.service.run_auto_mapping(dry_run=True, tenant_id=1)
+
+        # Cache should have been cleared and re-populated with tenant-filtered users
+        # Stale user 99 should no longer be in the cache
+        self.assertIsNotNone(self.service._users_cache)
+        self.assertNotIn(99, self.service._users_cache)
+
+
 class TestToolAccountMappingRule(unittest.TestCase):
     """Test cases for ToolAccountMappingRule matches method."""
 

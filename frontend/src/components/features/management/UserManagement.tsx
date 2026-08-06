@@ -31,6 +31,7 @@ import {
 import { useConfirm, useToast } from '@/components/common';
 import { ToolAccountsEditor } from './ToolAccountsEditor';
 import { MappingRulesEditor } from './MappingRulesEditor';
+import { AutoMappingPanel } from './AutoMappingPanel';
 import { createMatcherConfig } from '@/utils';
 import type { AdminUser, CreateUserRequest, UpdateUserRequest } from '@/api';
 
@@ -370,6 +371,9 @@ export const UserManagement: React.FC = () => {
           </Button>
         </div>
       </div>
+
+      {/* Auto Mapping Panel - Issue #2374 */}
+      <AutoMappingPanel users={users ?? undefined} onChange={() => refetch()} />
 
       {/* User Table */}
       {!users || users.length === 0 ? (
