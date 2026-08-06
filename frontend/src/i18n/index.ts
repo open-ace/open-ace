@@ -200,6 +200,7 @@ export const translations: Record<Language, Translations> = {
     emailRequired: 'Email is required',
     passwordRequired: 'Password is required',
     passwordTooShort: 'Password must be at least 8 characters',
+    passwordTooLong: 'Password must be less than 128 characters',
     passwordMismatch: 'Passwords do not match',
     // Password reset
     resetPassword: 'Reset Password',
@@ -1988,6 +1989,7 @@ export const translations: Record<Language, Translations> = {
     emailRequired: '邮箱不能为空',
     passwordRequired: '密码不能为空',
     passwordTooShort: '密码至少需要8个字符',
+    passwordTooLong: '密码不能超过128个字符',
     passwordMismatch: '两次输入的密码不一致',
     // Password reset
     resetPassword: '重置密码',
@@ -3831,6 +3833,7 @@ export const translations: Record<Language, Translations> = {
     emailRequired: 'メールアドレスは必須です',
     passwordRequired: 'パスワードは必須です',
     passwordTooShort: 'パスワードは8文字以上必要です',
+    passwordTooLong: 'パスワードは128文字以内である必要があります',
     passwordMismatch: 'パスワードが一致しません',
     // Password reset
     resetPassword: 'パスワードリセット',
@@ -5445,6 +5448,7 @@ export const translations: Record<Language, Translations> = {
     emailRequired: '이메일은 필수입니다',
     passwordRequired: '비밀번호는 필수입니다',
     passwordTooShort: '비밀번호는 8자 이상이어야 합니다',
+    passwordTooLong: '비밀번호는 128자 이하여야 합니다',
     passwordMismatch: '비밀번호가 일치하지 않습니다',
     // Password reset
     resetPassword: '비밀번호 재설정',

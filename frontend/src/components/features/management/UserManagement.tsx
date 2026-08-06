@@ -2,7 +2,7 @@
  * UserManagement Component - User CRUD operations
  */
 
-import React, { useState } from 'react';
+import React, { useState, useRef, useMemo } from 'react';
 import {
   useUsers,
   useCreateUser,
@@ -54,6 +54,7 @@ export const UserManagement: React.FC = () => {
   const [resetPasswordError, setResetPasswordError] = useState<string | null>(null);
   const [resetPasswordResult, setResetPasswordResult] = useState('');
   const [copiedPassword, setCopiedPassword] = useState(false);
+  const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Page refresh control - manual refresh for user management
   const pageRefresh = usePageRefresh({
@@ -100,6 +101,11 @@ export const UserManagement: React.FC = () => {
   // Password policy validation
   const validatePasswordPolicy = (password: string): string | null => {
     if (!password) return t('passwordRequired', language) ?? 'Password is required';
+
+    // Enforce maximum length to match backend validation (128 chars)
+    if (password.length > 128) {
+      return t('passwordTooLong', language) ?? 'Password must be less than 128 characters';
+    }
 
     const policy = securitySettings;
     if (policy) {
@@ -168,6 +174,12 @@ export const UserManagement: React.FC = () => {
 
     return password;
   };
+
+  // Cache password validation result to avoid recomputing on every render
+  const passwordValidationError = useMemo(
+    () => validatePasswordPolicy(editingPassword),
+    [editingPassword, securitySettings, language]
+  );
 
   // Password policy hint component
   const PasswordPolicyHint = () => {
@@ -323,6 +335,7 @@ export const UserManagement: React.FC = () => {
 
   const handleConfirmResetPassword = () => {
     // Move from Step 1 (confirm) to Step 2 (set password)
+    setResetPasswordError(null);
     setResetPasswordStep('setPassword');
   };
 
@@ -362,14 +375,14 @@ export const UserManagement: React.FC = () => {
         t('failedToSaveUser', language) ??
         'Failed to reset password';
       setResetPasswordError(errorMessage);
-      toast.error(
-        t('resetPassword', language) ?? 'Reset Password',
-        errorMessage
-      );
     }
   };
 
   const handleCloseResetPasswordModal = () => {
+    if (copyTimeoutRef.current) {
+      clearTimeout(copyTimeoutRef.current);
+      copyTimeoutRef.current = null;
+    }
     setShowResetPasswordModal(false);
     setResetPasswordUser(null);
     setResetPasswordStep('confirm');
@@ -383,7 +396,13 @@ export const UserManagement: React.FC = () => {
     const success = await copyToClipboard(resetPasswordResult);
     if (success) {
       setCopiedPassword(true);
-      setTimeout(() => setCopiedPassword(false), 2000);
+      if (copyTimeoutRef.current) {
+        clearTimeout(copyTimeoutRef.current);
+      }
+      copyTimeoutRef.current = setTimeout(() => {
+        setCopiedPassword(false);
+        copyTimeoutRef.current = null;
+      }, 2000);
     } else {
       toast.error(t('copyFailed', language) || 'Copy failed');
     }
@@ -603,8 +622,8 @@ export const UserManagement: React.FC = () => {
           {/* Error Message */}
           {formError && (
             <div className="alert alert-danger mb-3" role="alert">
-<i className="bi bi-exclamation-triangle-fill me-2" aria-hidden="true" />
-            {formError}
+              <i className="bi bi-exclamation-triangle-fill me-2" aria-hidden="true" />
+              {formError}
             </div>
           )}
 
@@ -731,7 +750,7 @@ export const UserManagement: React.FC = () => {
                 variant="primary"
                 onClick={handleConfirmSetPassword}
                 loading={resetUserPassword.isPending}
-                disabled={!!validatePasswordPolicy(editingPassword)}
+                disabled={!!passwordValidationError}
               >
                 {t('confirmResetPassword', language) ?? 'Confirm Reset Password'}
               </Button>
@@ -815,18 +834,15 @@ export const UserManagement: React.FC = () => {
                 </Button>
               </div>
               {/* Real-time validation result */}
-              {(() => {
-                const error = validatePasswordPolicy(editingPassword);
-                return error ? (
-                  <div className="text-danger small mt-1">
-                    {'\u2717'} {t('passwordDoesNotMeetRequirements', language) ?? 'Password does not meet requirements'}: {error}
-                  </div>
-                ) : (
-                  <div className="text-success small mt-1">
-                    {'\u2713'} {t('passwordMeetsAllRequirements', language) ?? 'Password meets all requirements'}
-                  </div>
-                );
-              })()}
+              {passwordValidationError ? (
+                <div className="text-danger small mt-1">
+                  {'\u2717'} {t('passwordDoesNotMeetRequirements', language) ?? 'Password does not meet requirements'}: {passwordValidationError}
+                </div>
+              ) : (
+                <div className="text-success small mt-1">
+                  {'\u2713'} {t('passwordMeetsAllRequirements', language) ?? 'Password meets all requirements'}
+                </div>
+              )}
               {/* Password requirements list */}
               <PasswordPolicyHint />
             </div>

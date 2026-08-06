@@ -254,7 +254,10 @@ def api_reset_user_password(user_id):
     data = request.get_json(silent=True) or {}
     custom_password = data.get("password")
 
-    if custom_password:
+    if custom_password is not None:
+        # A password key was explicitly provided
+        if not custom_password:
+            return jsonify({"error": "Password cannot be empty"}), 400
         # Validate the custom password against security policy
         is_valid, error_msg = validate_password(custom_password, policy_settings=settings)
         if not is_valid:
