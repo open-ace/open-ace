@@ -3500,7 +3500,13 @@ class AutonomousOrchestrator:
                         )
                     patch.setdefault("status", "completed")
                 else:
-                    patch["current_phase"] = "merge"
+                    # Default the resting current_phase to the last canonical
+                    # phase (acceptance_verification as of #2335) rather than the
+                    # legacy hardcoded "merge". A confirmed workflow therefore
+                    # rests at current_phase="acceptance_verification", matching
+                    # _COMPLETED_TERMINAL_PHASES + the phase-wiring docstring.
+                    # (#2335 S6)
+                    patch["current_phase"] = PHASE_ORDER[-1]
                     patch["status"] = "completed"
                 patch["completed_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
             elif result.next_phase == "wait":

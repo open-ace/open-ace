@@ -1715,6 +1715,15 @@ export const translations: Record<Language, Translations> = {
       'Summarizing this round’s outputs and conclusions before switching to the next state.',
     autoActiveHintMerging: 'Merging the final changes and wrapping up this workflow.',
     autoBannerPaused: 'This workflow is paused. Resume it to continue the remaining steps.',
+    autoAcceptanceOverrideTitle: 'Acceptance pending human review',
+    autoAcceptanceOverrideDesc:
+      'The verifier could not reach a confident verdict. If you have reviewed the merged code, you can confirm acceptance and close the issue.',
+    autoAcceptanceOverrideButton: 'Accept (override)',
+    autoAcceptanceOverrideConfirm:
+      'Confirm acceptance on the merged code and close the issue? This action is recorded with your username.',
+    autoAcceptanceOverrideReason: 'Reason (optional)',
+    autoAcceptanceOverrideSuccess: 'Acceptance confirmed. The issue will be closed.',
+    autoAcceptanceOverrideFailed: 'Failed to override acceptance.',
     autoBannerWaiting: 'This workflow is waiting for your next instruction before continuing.',
     autoBannerPlanningTimeout:
       'Planning has timed out. Extend the planning window or stop this workflow.',
@@ -3451,6 +3460,14 @@ export const translations: Record<Language, Translations> = {
     autoActiveHintReporting: '正在整理本轮产出和结论，随后会切换到下一状态。',
     autoActiveHintMerging: '正在合并最终变更并收尾当前工作流。',
     autoBannerPaused: '当前工作流已暂停，恢复后会继续执行剩余步骤。',
+    autoAcceptanceOverrideTitle: '验收待人工复核',
+    autoAcceptanceOverrideDesc:
+      '验证器无法给出确定性结论。如果你已审查合并后的代码，可以确认验收并关闭 Issue。',
+    autoAcceptanceOverrideButton: '确认验收（覆盖）',
+    autoAcceptanceOverrideConfirm: '确认合并代码的验收并关闭 Issue？此操作会记录你的用户名。',
+    autoAcceptanceOverrideReason: '原因（可选）',
+    autoAcceptanceOverrideSuccess: '验收已确认，Issue 将被关闭。',
+    autoAcceptanceOverrideFailed: '覆盖验收失败。',
     autoBannerWaiting: '当前工作流正在等待你的下一步指令，然后再继续。',
     autoBannerPlanningTimeout: 'Planning 已超时。你可以延长计划时间，或停止当前工作流。',
     autoJumpToLatest: '回到底部',
@@ -4989,6 +5006,15 @@ export const translations: Record<Language, Translations> = {
     autoActiveHintReporting: 'このラウンドの成果と結論を整理してから次の状態へ進みます。',
     autoActiveHintMerging: '最終変更をマージして、このワークフローを締めくくっています。',
     autoBannerPaused: 'このワークフローは一時停止中です。再開すると残りのステップを続行します。',
+    autoAcceptanceOverrideTitle: '承認確認が人間のレビューを待っています',
+    autoAcceptanceOverrideDesc:
+      '検証エージェントが確定的な結論に達しませんでした。マージ済みコードを確認した場合、承認を確定して Issue をクローズできます。',
+    autoAcceptanceOverrideButton: '承認（オーバーライド）',
+    autoAcceptanceOverrideConfirm:
+      'マージ済みコードの承認を確定し Issue をクローズしますか？この操作はユーザー名と共に記録されます。',
+    autoAcceptanceOverrideReason: '理由（任意）',
+    autoAcceptanceOverrideSuccess: '承認が確定されました。Issue はクローズされます。',
+    autoAcceptanceOverrideFailed: '承認のオーバーライドに失敗しました。',
     autoBannerWaiting: 'このワークフローは続行前に次の指示を待っています。',
     autoBannerPlanningTimeout:
       'Planning がタイムアウトしました。計画時間を延長するか、このワークフローを停止してください。',
@@ -6612,6 +6638,15 @@ export const translations: Record<Language, Translations> = {
     autoActiveHintReporting: '이번 라운드의 산출물과 결론을 정리한 뒤 다음 상태로 전환합니다.',
     autoActiveHintMerging: '최종 변경을 병합하고 이 워크플로를 마무리하는 중입니다.',
     autoBannerPaused: '이 워크플로는 일시정지 상태입니다. 재개하면 남은 단계를 계속 진행합니다.',
+    autoAcceptanceOverrideTitle: '수락 확인이 사람 검토를 기다리는 중',
+    autoAcceptanceOverrideDesc:
+      '검증 에이전트가 확정적인 결론에 도달하지 못했습니다. 병합된 코드를 검토했다면 수락을 확정하고 Issue를 닫을 수 있습니다.',
+    autoAcceptanceOverrideButton: '수락 (재정의)',
+    autoAcceptanceOverrideConfirm:
+      '병합된 코드의 수락을 확정하고 Issue를 닫으시겠습니까? 이 작업은 사용자 이름과 함께 기록됩니다.',
+    autoAcceptanceOverrideReason: '사유 (선택)',
+    autoAcceptanceOverrideSuccess: '수락이 확정되었습니다. Issue가 닫힙니다.',
+    autoAcceptanceOverrideFailed: '수락 재정의에 실패했습니다.',
     autoBannerWaiting: '이 워크플로는 계속 진행하기 전에 다음 지시를 기다리고 있습니다.',
     autoBannerPlanningTimeout:
       'Planning 시간이 초과되었습니다. 계획 시간을 연장하거나 현재 워크플로를 중지할 수 있습니다.',
