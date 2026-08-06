@@ -293,9 +293,12 @@ def _parse_jest(excerpt: str, exit_code: int | None) -> ParsedTestResult:
     passed = _extract_count(
         excerpt,
         [
+            # "Test Files N passed" is a FILE count, never a test count: a
+            # vitest run that collected zero tests reports 8 files passed, and
+            # feeding that to `passed` records 8 passing tests that do not
+            # exist — the exact condition this gate detects (#2376 PR-3 D7).
             re.compile(r"Tests:\s*(\d+)\s+passed", re.IGNORECASE),
-            re.compile(r"Tests\s+(\d+)\s+passed", re.IGNORECASE),
-            re.compile(r"Test Files\s+(\d+)\s+passed", re.IGNORECASE),
+            re.compile(r"(?<!Files)\s+Tests\s+(\d+)\s+passed", re.IGNORECASE),
             re.compile(r"(\d+)\s+tests?\s+passed", re.IGNORECASE),
         ],
     )
@@ -303,14 +306,21 @@ def _parse_jest(excerpt: str, exit_code: int | None) -> ParsedTestResult:
         excerpt,
         [
             re.compile(r"Tests:\s*(\d+)\s+failed", re.IGNORECASE),
-            re.compile(r"Tests\s+(\d+)\s+failed", re.IGNORECASE),
-            re.compile(r"Test Files\s+(\d+)\s+failed", re.IGNORECASE),
+            re.compile(r"(?<!Files)\s+Tests\s+(\d+)\s+failed", re.IGNORECASE),
             re.compile(r"(\d+)\s+tests?\s+failed", re.IGNORECASE),
         ],
     )
     if passed is not None or failed is not None:
         verdict = _verdict_from_counts(passed=passed, failed=failed, errors=None)
         confidence = ParserConfidence.HIGH
+        # Counts summarise the test run; a non-zero exit can still come from
+        # something after it — a coverage threshold, a failing posttest, a
+        # teardown crash. Before the vitest patterns landed, no counts parsed
+        # and the exit code decided; letting counts silently override it turns
+        # a failing `npm run test:coverage` into PASSED (#2376 PR-3 D5).
+        if exit_code not in (None, 0) and verdict == ExecutionVerdict.PASSED:
+            verdict = ExecutionVerdict.INCONCLUSIVE
+            confidence = ParserConfidence.MEDIUM
     elif exit_code is not None:
         verdict = ExecutionVerdict.PASSED if exit_code == 0 else ExecutionVerdict.FAILED
         confidence = ParserConfidence.MEDIUM
@@ -417,15 +427,19 @@ def _resolve_framework(command_evidence: CommandExecutionEvidence, hint: str) ->
         return "python"
     if any(signal in command_text for signal in ("jest", "vitest", "npm test", "yarn test")):
         return "javascript"
-    # `npm run test:coverage` / `yarn test:unit` / `pnpm run test` carry no bare
-    # runner name, so without this they fell to the exit-code-only generic
-    # parser even though the counts were right there in the output (#2376 Fix G).
-    if re.search(r"\b(npm|yarn|pnpm)\s+(run\s+)?test", command_text):
-        return "javascript"
     if head == "go":
         return "go"
     if head == "cargo":
         return "rust"
+    # `npm run test:coverage` / `yarn test:unit` / `pnpm run test` carry no bare
+    # runner name, so without this they fell to the exit-code-only generic
+    # parser even though the counts were right there in the output (#2376 Fix G).
+    #
+    # Ordered AFTER the go/cargo head checks: this scans the whole command, so
+    # placing it first stole `go test ./... && npm run test` from _parse_go,
+    # which then never saw the FAIL lines (#2376 PR-3 review D8).
+    if re.search(r"\b(npm|yarn|pnpm)\s+(run\s+)?test", command_text):
+        return "javascript"
     return hint or "generic"
 
 

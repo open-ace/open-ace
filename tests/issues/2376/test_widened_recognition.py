@@ -206,12 +206,8 @@ def test_unbalanced_quotes_do_not_raise():
 
 
 def test_vitest_output_parses_with_counts():
-    from app.modules.workspace.autonomous.command_evidence.test_evidence import (
-        parse_test_evidence,
-    )
-    from app.modules.workspace.autonomous.command_evidence.types import (
-        CommandExecutionEvidence,
-    )
+    from app.modules.workspace.autonomous.command_evidence.test_evidence import parse_test_evidence
+    from app.modules.workspace.autonomous.command_evidence.types import CommandExecutionEvidence
 
     # Real vitest summary shape: no colon, count follows the label. Both
     # _parse_jest regexes missed it, so this repo's own frontend suite fell to
@@ -233,12 +229,141 @@ def test_vitest_output_parses_with_counts():
 
 def test_npm_run_test_resolves_to_javascript():
     from app.modules.workspace.autonomous.command_evidence.test_evidence import _resolve_framework
-    from app.modules.workspace.autonomous.command_evidence.types import (
-        CommandExecutionEvidence,
-    )
+    from app.modules.workspace.autonomous.command_evidence.types import CommandExecutionEvidence
 
     for cmd in ("npm run test:coverage", "yarn test:unit", "pnpm run test"):
         evidence = CommandExecutionEvidence(
             command_id="c", shell_command=cmd, exit_code=0, output_excerpt="x", session_id="s"
         )
         assert _resolve_framework(evidence, "mixed") == "javascript", cmd
+
+
+# --- Negative cases from the PR-3 review (D1-D6, D11) ------------------------
+#
+# The first cut of Fix C had none of these, and each is a fail-open that reached
+# ExecutionVerdict.PASSED end to end.
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # D1: an unrecognized tool with a tests/ argument is not a test run.
+        # The path must BE the command, not merely appear among its arguments;
+        # PR-1's non-executing filter is a denylist and cannot be the only guard.
+        "ruff check tests/x.py",
+        "black --check tests/x.py",
+        "mypy tests/x.py",
+        "eslint tests/x.ts",
+        "prettier --check tests/x.ts",
+        "tsc --noEmit tests/x.ts",
+        "shellcheck tests/integration/test_sudoers_security.sh",
+        "pre-commit run --files tests/x.py",
+        "tar czf out.tgz tests/x.sh",
+        # D2: a syntax check stays one behind any wrapper prefix.
+        "sudo bash -n tests/x.sh",
+        "sudo -u openace bash -n tests/x.sh",
+        "timeout 60 bash -n tests/x.sh",
+        "nice -n 10 bash -n tests/x.sh",
+        "env FOO=1 bash -n tests/x.sh",
+        "sudo node --check tests/x.js",
+        "bash -o noexec tests/x.sh",
+        # D3: installing a runner is not running it — the hole the plan deleted
+        # Fix F' to avoid, and frontend/package.json ships this exact command.
+        "npx playwright install",
+        "npx playwright install --with-deps",
+        "yarn playwright install",
+        "npx cypress install",
+        "npx cypress verify",
+        "npx playwright codegen",
+        "npx playwright show-report",
+        # D4: bare runner names must not match as substrings of other commands.
+        "cargo tree",
+        "cargo tomlfmt",
+        "pip download tox",
+        "kubectl apply -f nox.yaml",
+        "python -c 'import equinox'",
+        "helm install mocha ./chart",
+        "docker build -t mocha .",
+        # D6: an npm script merely starting with "test" is not a test run.
+        "npm run testdata:seed",
+        "npm run test-utils:build",
+    ],
+)
+def test_review_fail_open_cases_are_rejected(command):
+    assert _has_test_tool_call(_tc(command), "mixed") is False
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # D11: agents work inside .worktrees/<id> checkouts and use absolute
+        # paths, so the anchored-at-start regex rejected wf221's own command.
+        "bash /home/openace/auto-dev-221/tests/integration/test_sudoers_security.sh",
+        "bash ../tests/x.sh",
+        "bash frontend/tests/x.sh",
+        "bash tests/x.bats",
+        # D3's positive twin: the test subcommands DO count.
+        "npx playwright test tests/e2e",
+        "npx cypress run",
+    ],
+)
+def test_review_fail_closed_cases_are_recognized(command):
+    assert _has_test_tool_call(_tc(command), "mixed") is True
+
+
+def test_vitest_counts_do_not_override_a_nonzero_exit():
+    # D5: before the vitest patterns no counts parsed and the exit code decided.
+    # Letting counts silently win turns a failing `npm run test:coverage` — a
+    # coverage threshold, a failing posttest, a teardown crash — into PASSED.
+    from app.modules.workspace.autonomous.command_evidence.test_evidence import parse_test_evidence
+    from app.modules.workspace.autonomous.command_evidence.types import CommandExecutionEvidence
+
+    evidence = CommandExecutionEvidence(
+        command_id="c",
+        id=1,
+        tool_name="Bash",
+        shell_command="cd /w/frontend && npm run test:coverage",
+        exit_code=1,
+        output_excerpt=(
+            " Test Files  3 passed (3)\n      Tests  12 passed (12)\n"
+            "ERROR: Coverage for lines (41.2%) does not meet global threshold (80%)"
+        ),
+        session_id="s",
+    )
+    assert parse_test_evidence(evidence, framework_hint="mixed").verdict != "passed"
+
+
+def test_test_files_count_is_not_a_test_count():
+    # D7: "Test Files 8 passed" is a FILE count. Recording it as `passed` claims
+    # 8 passing tests for a run that collected none — the very thing the gate
+    # exists to catch.
+    from app.modules.workspace.autonomous.command_evidence.test_evidence import parse_test_evidence
+    from app.modules.workspace.autonomous.command_evidence.types import CommandExecutionEvidence
+
+    evidence = CommandExecutionEvidence(
+        command_id="c",
+        id=1,
+        tool_name="Bash",
+        shell_command="npx vitest run",
+        exit_code=0,
+        output_excerpt=" Test Files  8 passed (8)\n      Tests  no tests",
+        session_id="s",
+    )
+    assert parse_test_evidence(evidence, framework_hint="mixed").passed is None
+
+
+def test_resolve_framework_does_not_steal_go_from_a_trailing_npm_command():
+    # D8: the npm regex scans the whole command, so placing it before the go/
+    # cargo head checks sent `go test ./... && npm run test` to _parse_jest,
+    # which never saw the FAIL lines.
+    from app.modules.workspace.autonomous.command_evidence.test_evidence import _resolve_framework
+    from app.modules.workspace.autonomous.command_evidence.types import CommandExecutionEvidence
+
+    evidence = CommandExecutionEvidence(
+        command_id="c",
+        shell_command="go test ./... 2>&1 | tail -5 && npm run test",
+        exit_code=0,
+        output_excerpt="ok  x  0.31s\nFAIL  y  0.02s",
+        session_id="s",
+    )
+    assert _resolve_framework(evidence, "mixed") == "go"

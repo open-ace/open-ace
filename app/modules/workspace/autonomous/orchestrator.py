@@ -657,7 +657,40 @@ _TEST_COMMAND_PATTERNS = {
 # What "mixed" must match: the union of every language, not the fallback.
 _ALL_TEST_PATTERNS = sorted({p for pats in _TEST_COMMAND_PATTERNS.values() for p in pats})
 
-_TEST_PATH_RE = re.compile(r"^\.?/?tests?/.+\.(sh|bash|py|js|ts|mjs)$")
+# Bare single-word runner names are matched only in *command position*. As
+# substrings they hit ordinary commands that merely contain the word, and the
+# union puts every language's names in front of every polyglot repo (#2376 PR-3
+# review D4): `helm install mocha`, `python -c 'import equinox'`,
+# `kubectl apply -f nox.yaml`, `pip download tox`.
+_BARE_RUNNER_PATTERNS = frozenset(
+    {"pytest", "unittest", "jest", "vitest", "mocha", "tox", "nox", "gotestsum"}
+)
+
+
+def _pattern_matches_segment(pattern: str, segment: str, tokens: list[str]) -> bool:
+    """Whether ``pattern`` matches ``segment`` as a test invocation.
+
+    Multi-word patterns must not be continued by a word character *or a hyphen*,
+    so ``cargo t`` no longer matches ``cargo tree`` and ``npm run test`` no
+    longer matches ``npm run testdata:seed`` or ``npm run test-utils:build`` —
+    while still matching ``npm run test:coverage``, since a colon is a genuine
+    script-name separator. Plain ``\\b`` is not enough: it treats the hyphen in
+    ``test-utils`` as a boundary.
+    """
+    if pattern in _BARE_RUNNER_PATTERNS:
+        head = next(
+            (t for t in _strip_leading_assignments(tokens) if not t.startswith("-")),
+            "",
+        )
+        return head.rsplit("/", 1)[-1] == pattern
+    return re.search(rf"{re.escape(pattern)}(?![\w-])", segment) is not None
+
+
+# Any path with a tests/ component, anchored on that component so it also
+# matches the absolute and nested forms agents actually produce inside
+# `.worktrees/<id>` checkouts (#2376 PR-3 review D11) — the anchored-at-start
+# version rejected wf221's own command written absolutely.
+_TEST_PATH_RE = re.compile(r"^(?:[\w./~-]*/)?tests?/.+\.(sh|bash|py|js|ts|mjs|bats)$")
 
 # Interpreters that can execute a test file directly. `python3.N` is matched
 # separately so 3.10/3.12/... all resolve.
@@ -671,14 +704,45 @@ _PYTHON_VERSIONED_RE = re.compile(r"^python3\.\d+$")
 # `python -m black --check` and `python -m mypy` satisfy the gate — this
 # project's own pre-commit tools.
 _PYTHON_MODULE_RUNNERS = frozenset({"pytest", "unittest", "nose2", "tox", "nox"})
-_NPX_RUNNERS = frozenset({"vitest", "jest", "mocha", "playwright", "cypress"})
+
+# Runners that execute tests when invoked bare (`npx vitest`, `npx jest`).
+_NPX_BARE_RUNNERS = frozenset({"vitest", "jest", "mocha"})
+# Runners whose binary does many things; only these subcommands run tests.
+# Without this, `npx playwright install --with-deps` satisfies the gate — the
+# very hole the plan deleted Fix F' to avoid, re-entered through another door
+# (#2376 PR-3 review D3). frontend/package.json ships exactly that command as
+# its "playwright:install" script.
+_NPX_SUBCOMMAND_RUNNERS = {"playwright": {"test"}, "cypress": {"run"}}
+_NPX_NON_TEST_SUBCOMMANDS = frozenset(
+    {"install", "verify", "codegen", "show-report", "show-trace", "open", "info", "--version"}
+)
+
+
+def _is_npx_test_invocation(rest: list[str]) -> bool:
+    """Whether ``npx``/``yarn``/``pnpm`` followed by ``rest`` runs tests."""
+    for index, follower in enumerate(rest):
+        if follower.startswith("-") or follower in {"dlx", "exec"}:
+            continue
+        base = follower.rsplit("/", 1)[-1]
+        if base in _NPX_BARE_RUNNERS:
+            return True
+        subcommands = _NPX_SUBCOMMAND_RUNNERS.get(base)
+        if subcommands is None:
+            return False
+        for candidate in rest[index + 1 :]:
+            if candidate.startswith("-"):
+                continue
+            return candidate in subcommands
+        return False
+    return False
+
 
 # Flags that make an interpreter parse a file without running it.
 _SYNTAX_CHECK_SHELLS = frozenset({"bash", "sh", "zsh"})
 
 
-def _strip_wrapper_prefix(tokens: list[str]) -> list[str]:
-    """Drop leading env assignments so the real command is at the front."""
+def _strip_leading_assignments(tokens: list[str]) -> list[str]:
+    """Drop leading ``VAR=x`` env assignments so the command is at the front."""
     index = 0
     while index < len(tokens) and _ASSIGNMENT_RE.match(tokens[index]):
         index += 1
@@ -688,23 +752,35 @@ def _strip_wrapper_prefix(tokens: list[str]) -> list[str]:
 def _is_syntax_check_only(tokens: list[str]) -> bool:
     """Whether the tokens parse a file rather than execute it.
 
-    ``bash -n`` (and ``sh -en``, ``zsh -n``, ``bash --norc -n``) exit 0 without
-    running a line, so treating them as a passing test run is a fail-open. The
-    ``-n`` may be combined into a short-flag cluster or appear after another
-    flag, so every leading flag token is inspected.
+    ``bash -n`` (and ``sh -en``, ``zsh -n``, ``bash --norc -n``, ``bash -o
+    noexec``) exit 0 without running a line, so treating them as a passing test
+    run is a fail-open.
+
+    The shell is located by scanning, exactly as the interpreter scan does
+    (#2376 PR-3 review D2). Reading ``tokens[0]`` instead let every wrapper
+    defeat this while the same wrappers were deliberately stepped over for
+    recognition — ``sudo bash -n tests/x.sh`` counted as a passing test run.
     """
-    head = tokens[0].rsplit("/", 1)[-1] if tokens else ""
-    if head in _SYNTAX_CHECK_SHELLS:
-        for token in tokens[1:]:
-            if not token.startswith("-"):
+    for index, token in enumerate(tokens):
+        base = token.rsplit("/", 1)[-1]
+        if base in {"node", "nodejs"}:
+            return "--check" in tokens[index + 1 :]
+        if base not in _SYNTAX_CHECK_SHELLS:
+            continue
+        for offset, flag in enumerate(tokens[index + 1 :]):
+            if not flag.startswith("-") or flag == "--":
                 break
-            if token == "--":
-                break
-            if token.startswith("--"):
+            if flag == "-o":
+                following = tokens[index + 2 + offset : index + 3 + offset]
+                if following and following[0].lower() in {"noexec", "no_exec"}:
+                    return True
                 continue
-            if "n" in token[1:]:
+            if flag.startswith("--"):
+                continue
+            if "n" in flag[1:]:
                 return True
-    return head in {"node", "nodejs"} and "--check" in tokens
+        return False
+    return False
 
 
 def _is_test_path_execution(command: str) -> bool:
@@ -716,9 +792,18 @@ def _is_test_path_execution(command: str) -> bool:
     for segment in _command_segments(command):
         if _segment_is_non_executing(segment):
             continue
-        tokens = _strip_wrapper_prefix(_shell_tokens(segment))
+        tokens = _strip_leading_assignments(_shell_tokens(segment))
         if not tokens or _is_syntax_check_only(tokens):
             continue
+
+        # A test file invoked directly: `./tests/e2e/run.sh`. Positional — the
+        # path must BE the command, not merely appear among its arguments.
+        # Matching any token made every unrecognized tool with a tests/ argument
+        # a test run: `ruff check tests/x.py`, `eslint tests/x.ts`,
+        # `shellcheck tests/x.sh` (#2376 PR-3 review D1). The non-executing
+        # pre-filter is a denylist and cannot be the only guard here.
+        if _TEST_PATH_RE.match(tokens[0]):
+            return True
 
         # Scan for the first interpreter/runner token; wrapper operands
         # (`sudo -u openace`, `timeout 60`) are stepped over rather than
@@ -727,24 +812,16 @@ def _is_test_path_execution(command: str) -> bool:
             base = token.rsplit("/", 1)[-1]
             rest = tokens[index + 1 :]
 
-            # `python -m <runner>` / `npx <runner>`: allowlisted runners only.
+            # `python -m <runner>`: allowlisted runners only.
             if base in {"python", "python3", "node"} or _PYTHON_VERSIONED_RE.match(base):
                 if "-m" in rest:
                     module = rest[rest.index("-m") + 1 :]
                     return bool(module) and module[0] in _PYTHON_MODULE_RUNNERS
             if base in {"npx", "pnpm", "yarn", "bunx"}:
-                for follower in rest:
-                    if follower.startswith("-") or follower == "dlx":
-                        continue
-                    return follower.rsplit("/", 1)[-1] in _NPX_RUNNERS
-                return False
+                return _is_npx_test_invocation(rest)
 
             if base in _EXECUTING_INTERPRETERS or _PYTHON_VERSIONED_RE.match(base):
                 return any(_TEST_PATH_RE.match(arg) for arg in rest)
-
-            # A test file invoked directly (`./tests/e2e/run.sh`).
-            if _TEST_PATH_RE.match(token):
-                return True
     return False
 
 
@@ -815,7 +892,7 @@ def _has_test_tool_call(tool_calls: list, framework_type: str) -> bool:
                 if any(token in _EXCLUDE_FLAG_TOKENS for token in tokens):
                     continue
                 for pattern in patterns_to_check:
-                    if pattern in segment:
+                    if _pattern_matches_segment(pattern, segment, tokens):
                         return True
                 # Repo convention (#2376 Fix C): executing a file under tests/
                 # is a test run whatever the interpreter, which no pattern list
