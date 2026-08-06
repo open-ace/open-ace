@@ -337,6 +337,7 @@ export interface ButtonProps extends BaseComponentProps {
   children: React.ReactNode;
   icon?: React.ReactNode;
   fullWidth?: boolean;
+  ariaLabel?: string;
 }
 
 // Stat Card types

@@ -201,6 +201,7 @@ export const translations: Record<Language, Translations> = {
     emailRequired: 'Email is required',
     passwordRequired: 'Password is required',
     passwordTooShort: 'Password must be at least 8 characters',
+    passwordTooLong: 'Password must be less than 128 characters',
     passwordMismatch: 'Passwords do not match',
     // Password reset
     resetPassword: 'Reset Password',
@@ -208,6 +209,21 @@ export const translations: Record<Language, Translations> = {
     tempPasswordWarning:
       'Please share this password securely with the user. They will be required to change it on first login.',
     copyToClipboard: 'Copy to clipboard',
+    // Reset password modal
+    resetUserPasswordTitle: 'Reset User Password',
+    confirmOperation: 'Confirm Operation',
+    setPassword: 'Set Password',
+    confirmResetUserPassword: "Are you sure you want to reset this user's password?",
+    afterResetPasswordWillExpire:
+      'The current password will be invalid immediately after reset, and the user must log in with the new password.',
+    continueToSetPassword: 'Confirm, Continue to Set Password',
+    generateRandomPassword: 'Generate Random Password',
+    passwordMeetsAllRequirements: 'Password meets all requirements',
+    passwordDoesNotMeetRequirements: 'Password does not meet requirements',
+    confirmResetPassword: 'Confirm Reset Password',
+    back: 'Back',
+    passwordResetSuccessfully: 'Password reset successfully',
+    userMustChangePasswordOnNextLogin: 'The user must change the password on next login.',
     // Force password change
     changePassword: 'Change Password',
     changePasswordRequired: 'Change Password Required',
@@ -1975,12 +1991,27 @@ export const translations: Record<Language, Translations> = {
     emailRequired: '邮箱不能为空',
     passwordRequired: '密码不能为空',
     passwordTooShort: '密码至少需要8个字符',
+    passwordTooLong: '密码不能超过128个字符',
     passwordMismatch: '两次输入的密码不一致',
     // Password reset
     resetPassword: '重置密码',
     temporaryPassword: '临时密码',
     tempPasswordWarning: '请将此密码安全地分享给用户。用户首次登录时必须修改此密码。',
     copyToClipboard: '复制到剪贴板',
+    // Reset password modal
+    resetUserPasswordTitle: '重置用户密码',
+    confirmOperation: '确认操作',
+    setPassword: '设置密码',
+    confirmResetUserPassword: '确定要重置此用户密码吗？',
+    afterResetPasswordWillExpire: '重置后当前密码将立即失效，用户需要使用新密码登录。',
+    continueToSetPassword: '确认，继续设置密码',
+    generateRandomPassword: '重新生成',
+    passwordMeetsAllRequirements: '密码符合所有要求',
+    passwordDoesNotMeetRequirements: '密码不符合要求',
+    confirmResetPassword: '确认重置密码',
+    back: '上一步',
+    passwordResetSuccessfully: '密码已重置成功',
+    userMustChangePasswordOnNextLogin: '用户下次登录时需修改密码。',
     // Force password change
     changePassword: '修改密码',
     changePasswordRequired: '需要修改密码',
@@ -3804,6 +3835,7 @@ export const translations: Record<Language, Translations> = {
     emailRequired: 'メールアドレスは必須です',
     passwordRequired: 'パスワードは必須です',
     passwordTooShort: 'パスワードは8文字以上必要です',
+    passwordTooLong: 'パスワードは128文字以内である必要があります',
     passwordMismatch: 'パスワードが一致しません',
     // Password reset
     resetPassword: 'パスワードリセット',
@@ -3811,6 +3843,23 @@ export const translations: Record<Language, Translations> = {
     tempPasswordWarning:
       'このパスワードをユーザーに安全に共有してください。ユーザーは初回ログイン時にパスワードを変更する必要があります。',
     copyToClipboard: 'クリップボードにコピー',
+    // Reset password modal
+    resetUserPasswordTitle: 'ユーザーパスワードのリセット',
+    confirmOperation: '操作確認',
+    setPassword: 'パスワード設定',
+    confirmResetUserPassword: 'このユーザーのパスワードをリセットしますか？',
+    afterResetPasswordWillExpire:
+      'リセット後、現在のパスワードは直ちに無効になり、ユーザーは新しいパスワードでログインする必要があります。',
+    continueToSetPassword: '確認、パスワード設定へ進む',
+    generateRandomPassword: 'ランダム生成',
+    passwordMeetsAllRequirements: 'パスワードがすべての要件を満たしています',
+    passwordDoesNotMeetRequirements: 'パスワードが要件を満たしていません',
+    confirmResetPassword: 'パスワードリセット確認',
+    back: '戻る',
+    passwordResetSuccessfully: 'パスワードが正常にリセットされました',
+    userMustChangePasswordOnNextLogin:
+      'ユーザーは次回ログイン時にパスワードを変更する必要があります。',
+    copied: 'コピーしました',
     // Force password change
     changePassword: 'パスワード変更',
     changePasswordRequired: 'パスワード変更が必要',
@@ -5403,6 +5452,7 @@ export const translations: Record<Language, Translations> = {
     emailRequired: '이메일은 필수입니다',
     passwordRequired: '비밀번호는 필수입니다',
     passwordTooShort: '비밀번호는 8자 이상이어야 합니다',
+    passwordTooLong: '비밀번호는 128자 이하여야 합니다',
     passwordMismatch: '비밀번호가 일치하지 않습니다',
     // Password reset
     resetPassword: '비밀번호 재설정',
@@ -5410,6 +5460,22 @@ export const translations: Record<Language, Translations> = {
     tempPasswordWarning:
       '이 비밀번호를 사용자에게 안전하게 공유하세요. 사용자는 첫 로그인 시 비밀번호를 변경해야 합니다.',
     copyToClipboard: '클립보드에 복사',
+    // Reset password modal
+    resetUserPasswordTitle: '사용자 비밀번호 재설정',
+    confirmOperation: '작업 확인',
+    setPassword: '비밀번호 설정',
+    confirmResetUserPassword: '이 사용자의 비밀번호를 재설정하시겠습니까?',
+    afterResetPasswordWillExpire:
+      '재설정 후 현재 비밀번호는 즉시 무효화되며 사용자는 새 비밀번호로 로그인해야 합니다.',
+    continueToSetPassword: '확인, 비밀번호 설정 계속',
+    generateRandomPassword: '랜덤 생성',
+    passwordMeetsAllRequirements: '비밀번호가 모든 요구사항을 충족합니다',
+    passwordDoesNotMeetRequirements: '비밀번호가 요구사항을 충족하지 않습니다',
+    confirmResetPassword: '비밀번호 재설정 확인',
+    back: '이전',
+    passwordResetSuccessfully: '비밀번호가 성공적으로 재설정되었습니다',
+    userMustChangePasswordOnNextLogin: '사용자는 다음 로그인 시 비밀번호를 변경해야 합니다.',
+    copied: '복사됨',
     // Force password change
     changePassword: '비밀번호 변경',
     changePasswordRequired: '비밀번호 변경 필요',
