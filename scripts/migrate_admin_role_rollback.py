@@ -17,6 +17,7 @@ Options:
 
 import argparse
 import logging
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -26,6 +27,7 @@ project_root = Path(__file__).resolve().parent.parent
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
+from scripts.migrate_admin_role import MigrationConfig
 from scripts.shared import db
 
 # Setup logging
@@ -69,6 +71,7 @@ class RollbackTool:
     def __init__(self, batch_id: str | None = None, locale: str = "en_US"):
         self.batch_id = batch_id
         self.locale = locale
+        self.config = MigrationConfig()
         self.messages = MESSAGES.get(locale, MESSAGES["en_US"])
 
     def _message(self, key: str, **kwargs) -> str:
@@ -124,32 +127,50 @@ class RollbackTool:
             cursor.execute("BEGIN")
 
             if user_ids:
-                # Rollback specific users
-                for user_id in user_ids:
-                    # Get backup data
-                    db._execute(
-                        cursor,
-                        "SELECT role FROM admin_role_migration_backup WHERE id = ?",
-                        (user_id,),
-                    )
-                    backup = cursor.fetchone()
+                # Batch optimization: fetch all backups in one query, then
+                # issue a single batch UPDATE (reduces 2N queries → 2).
+                placeholders = ", ".join(["?"] * len(user_ids))
+                db._execute(
+                    cursor,
+                    f"SELECT id, role FROM admin_role_migration_backup WHERE id IN ({placeholders})",
+                    tuple(user_ids),
+                )
+                backups = {row[0]: row[1] for row in cursor.fetchall()}
+                found_ids = list(backups.keys())
 
-                    if backup:
-                        original_role = backup[0]
+                if found_ids:
+                    found_placeholders = ", ".join(["?"] * len(found_ids))
+                    if db.is_postgresql():
+                        db._execute(
+                            cursor,
+                            f"""
+                            UPDATE users
+                            SET role = b.role, updated_at = NOW()
+                            FROM admin_role_migration_backup b
+                            WHERE users.id = b.id AND b.id IN ({found_placeholders})
+                            """,
+                            tuple(found_ids),
+                        )
+                    else:
+                        # SQLite: no FROM clause in UPDATE, use subquery
+                        db._execute(
+                            cursor,
+                            f"""
+                            UPDATE users
+                            SET role = (
+                                SELECT role FROM admin_role_migration_backup
+                                WHERE id = users.id
+                            ),
+                            updated_at = datetime('now')
+                            WHERE id IN ({found_placeholders})
+                            """,
+                            tuple(found_ids),
+                        )
 
-                        # Restore role
-                        if db.is_postgresql():
-                            db._execute(
-                                cursor,
-                                "UPDATE users SET role = ?, updated_at = NOW() WHERE id = ?",
-                                (original_role, user_id),
-                            )
-                        else:
-                            db._execute(
-                                cursor,
-                                "UPDATE users SET role = ?, updated_at = datetime('now') WHERE id = ?",
-                                (original_role, user_id),
-                            )
+                # Log users without backup
+                missing_ids = set(user_ids) - set(found_ids)
+                for uid in sorted(missing_ids):
+                    logger.warning(f"No backup found for user_id: {uid}")
             else:
                 # Rollback all users in batch
                 if self.batch_id:
@@ -209,13 +230,23 @@ class RollbackTool:
             return False
 
     def confirm(self, skip_confirm: bool = False) -> bool:
-        """Ask for confirmation."""
+        """Ask for confirmation.
+
+        Reads ``require_confirmation`` from the environment config, consistent
+        with the migration tool.  For rollback operations the default is
+        ``True`` (safety-first) — only an explicit ``require_confirmation: false``
+        in config or ``--yes`` on the CLI can skip the prompt.
+        """
         if skip_confirm:
             return True
 
-        self._print("confirm.proceed")
-        response = input().strip().lower()
-        return response == "yes"
+        env = os.environ.get("OPENACE_ENV", "unknown")
+        env_config = self.config.get_environment_config(env)
+        if env_config.get("require_confirmation", True):
+            self._print("confirm.proceed")
+            response = input().strip().lower()
+            return response == "yes"
+        return True
 
     def run(self, skip_confirm: bool = False, user_ids: list | None = None):
         """Run rollback."""

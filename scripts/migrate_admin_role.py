@@ -241,7 +241,7 @@ class MigrationTool:
 
             return result[0] if result else 0
         except Exception as e:
-            logger.warning(f"Failed to count active sessions: {e}")
+            logger.error(f"Failed to count active sessions: {e}")
             return 0
 
     def pre_check(self) -> bool:
