@@ -104,14 +104,61 @@ export const SmtpConfig: React.FC = () => {
       return;
     }
 
-    setSaving(true);
-    try {
-      const port = parseInt(formData.smtp_port, 10);
-      if (isNaN(port) || port < 1 || port > 65535) {
-        toast.error(t('validationError', language), t('invalidPortNumber', language));
+    const port = parseInt(formData.smtp_port, 10);
+    if (isNaN(port) || port < 1 || port > 65535) {
+      toast.error(t('validationError', language), t('invalidPortNumber', language));
+      return;
+    }
+
+    // Check if SMTP server or username has changed
+    const serverChanged = config && formData.smtp_host !== config.smtp_host;
+    const userChanged = config && formData.smtp_user !== (config.smtp_user ?? '');
+
+    // If server or username changed, require password
+    if ((serverChanged || userChanged) && !formData.smtp_password) {
+      toast.error(t('validationError', language), t('smtpServerChangedPasswordRequired', language));
+      return;
+    }
+
+    // Build change summary
+    const changes: string[] = [];
+    if (config) {
+      if (formData.smtp_host !== config.smtp_host) {
+        changes.push(`${t('smtpHost', language)}: ${config.smtp_host} → ${formData.smtp_host}`);
+      }
+      if (parseInt(formData.smtp_port, 10) !== config.smtp_port) {
+        changes.push(`${t('smtpPort', language)}: ${config.smtp_port} → ${formData.smtp_port}`);
+      }
+      if (formData.smtp_user !== (config.smtp_user ?? '')) {
+        changes.push(
+          `${t('smtpUser', language)}: ${config.smtp_user ?? '(empty)'} → ${formData.smtp_user || '(empty)'}`
+        );
+      }
+      if (formData.smtp_password) {
+        changes.push(`${t('smtpPassword', language)}: (updated)`);
+      }
+      if (formData.from_address !== config.from_address) {
+        changes.push(
+          `${t('senderEmail', language)}: ${config.from_address} → ${formData.from_address}`
+        );
+      }
+      if (formData.use_tls !== config.use_tls) {
+        changes.push(
+          `${t('useTLS', language)}: ${config.use_tls ? t('enabled', language) : t('disabled', language)} → ${formData.use_tls ? t('enabled', language) : t('disabled', language)}`
+        );
+      }
+    }
+
+    // Show confirmation if changes exist
+    if (changes.length > 0) {
+      const confirmMessage = `${t('confirmSaveSmtpConfig', language)}\n\n${changes.join('\n')}`;
+      if (!(await confirm({ message: confirmMessage, variant: 'primary' }))) {
         return;
       }
+    }
 
+    setSaving(true);
+    try {
       const saved = await smtpConfigApi.saveConfig({
         smtp_host: formData.smtp_host,
         smtp_port: port,
@@ -137,6 +184,16 @@ export const SmtpConfig: React.FC = () => {
   const handleTestConnection = async () => {
     if (!formData.smtp_host || !formData.smtp_port || !formData.from_address) {
       toast.error(t('validationError', language), t('smtpRequiredFields', language));
+      return;
+    }
+
+    // Check if username exists but password is empty
+    const userChanged = config && formData.smtp_user !== (config.smtp_user ?? '');
+    const needsPassword = formData.smtp_user && !formData.smtp_password;
+
+    // If username changed or new username provided but password is empty, require password
+    if (needsPassword && (userChanged || !config?.is_verified)) {
+      toast.error(t('validationError', language), t('smtpPasswordRequiredForTest', language));
       return;
     }
 
@@ -235,6 +292,30 @@ export const SmtpConfig: React.FC = () => {
       </div>
 
       {error && <Error message={error} onRetry={fetchConfig} />}
+
+      {/* Existing config info */}
+      {config && (
+        <Card className="mb-3">
+          <div className="d-flex align-items-center">
+            <i className="bi bi-info-circle text-info me-2" />
+            <span className="text-muted">
+              {t('smtpConfigExists', language)}
+              {config.created_by_username && (
+                <>
+                  {' • '}
+                  {t('createdBy', language)}: {config.created_by_username}
+                </>
+              )}
+              {config.created_at && (
+                <>
+                  {' • '}
+                  {t('createdAt', language)}: {new Date(config.created_at).toLocaleString()}
+                </>
+              )}
+            </span>
+          </div>
+        </Card>
+      )}
 
       {/* Configuration Form */}
       <Card className="mb-4">

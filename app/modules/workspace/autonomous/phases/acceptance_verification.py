@@ -26,6 +26,7 @@ import fnmatch
 import json
 import time
 
+from app.modules.workspace.autonomous.acceptance_gates import run_mechanical_gates
 from app.modules.workspace.autonomous.acceptance_snapshot import (
     AcceptanceSnapshot,
     hash_snapshot,
@@ -199,7 +200,12 @@ def handle(ctx, deps) -> PhaseResult:
     # Mechanical scope gate (deterministic): required paths must be in the diff.
     scope_verdicts = run_scope_gate(gh, snapshot.required_paths, base_sha, merge_sha)
 
-    status = aggregate_verdicts(scope_verdicts + verifier_verdicts)
+    # The other 5 mechanical gates (#2335 S4): conservative static-analysis
+    # checks whose verdicts fold into the issue-level aggregation alongside the
+    # scope gate and the verifier findings.
+    gate_verdicts = run_mechanical_gates(gh, snapshot, base_sha, merge_sha)
+
+    status = aggregate_verdicts(scope_verdicts + gate_verdicts + verifier_verdicts)
     report = {
         "merge_sha": merge_sha,
         "issue_acceptance_hash": snap_hash,
@@ -207,6 +213,15 @@ def handle(ctx, deps) -> PhaseResult:
         "scope": [
             {"item": v.item, "verdict": v.verdict.value, "evidence": v.evidence}
             for v in scope_verdicts
+        ],
+        "gates": [
+            {
+                "item": v.item,
+                "verdict": v.verdict.value,
+                "evidence": v.evidence,
+                "rationale": v.rationale,
+            }
+            for v in gate_verdicts
         ],
         "verifier": [
             {

@@ -86,19 +86,11 @@ def dismiss_force_change_password_modal(page: Page, new_password: str = "Admin12
         # 没有弹窗，正常情况
         pass
     else:
-        # 弹窗内三个密码输入框通过 placeholder 定位
-        current_pw_input = page.locator(
-            'div[role="dialog"] input[placeholder="Enter current password"],'
-            'div[role="dialog"] input[placeholder="输入当前密码"]'
-        )
-        new_pw_input = page.locator(
-            'div[role="dialog"] input[placeholder="Enter new password"],'
-            'div[role="dialog"] input[placeholder="输入新密码"]'
-        )
-        confirm_pw_input = page.locator(
-            'div[role="dialog"] input[placeholder="Confirm password"],'
-            'div[role="dialog"] input[placeholder="确认密码"]'
-        )
+        # 弹窗内三个密码输入框通过 aria-label 定位（更稳定，不受 i18n 影响）
+        # Issue #2312: 使用 aria-label 定位，避免依赖 placeholder/label 文本
+        current_pw_input = page.get_by_role("textbox", name="current-password")
+        new_pw_input = page.get_by_role("textbox", name="new-password")
+        confirm_pw_input = page.get_by_role("textbox", name="confirm-password")
 
         # 填写改密表单
         current_pw_input.fill(PASSWORD)

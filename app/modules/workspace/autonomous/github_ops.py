@@ -1063,7 +1063,58 @@ class GitHubOps:
         base: str = "main",
         draft: bool = False,
     ) -> dict:
-        """Create a pull request and return its details."""
+        """Create a pull request and return its details.
+
+        When a bot token is configured, the PR is created via the REST API as the
+        service user (api_only) so ``GH_TOKEN`` reaches ``gh`` and the PR
+        attributes to the configured AI bot account — not the repo owner (#2340).
+        Falls back to ``gh pr create`` (owner identity) when no token is set or
+        the repo slug can't be resolved.
+        """
+        if self._get_env() is not None:
+            # Resolve so _repo_slug (plain OWNER/REPO, never host-prefixed) is set;
+            # _resolve_owner_repo() returns _owner_repo which carries the GHES host
+            # and would malformed the REST path on GHES (#2340 review L1).
+            self._resolve_owner_repo()
+            slug = self._repo_slug
+            if slug:
+                fields: list[tuple[str, str]] = [
+                    ("title", title),
+                    ("base", base),
+                    ("body", body or ""),
+                ]
+                if head:
+                    fields.append(("head", head))
+                if draft:
+                    fields.append(("draft", "true"))
+                api_args = ["--method", "POST", f"repos/{slug}/pulls"]
+                for key, value in fields:
+                    api_args += ["-f", f"{key}={value}"]
+                # check=False: gh api writes the JSON error body to STDOUT (only the
+                # summary to stderr). Surface both in the exception so the
+                # "already exists" race recovery (#1857) in pr_review still detects
+                # it and falls back to find_existing_pr.
+                result = self._run_gh(
+                    self._gh_api_args(api_args), repo_scoped=False, api_only=True, check=False
+                )
+                if result.returncode != 0:
+                    detail = (result.stderr or "").strip()
+                    body_out = (result.stdout or "").strip()
+                    raise GitHubOpsError(
+                        f"create_pr REST API failed (exit {result.returncode}): {detail}"
+                        + (f" :: {body_out}" if body_out else "")
+                    )
+                try:
+                    data = json.loads((result.stdout or "").strip() or "{}")
+                    pr_number = int(data["number"])
+                except (json.JSONDecodeError, TypeError, ValueError, KeyError):
+                    raise GitHubOpsError(
+                        f"create_pr REST API returned no PR number: {result.stdout!r}"
+                    )
+                logger.info("Created PR #%s (REST API, bot identity)", pr_number)
+                return self.get_pr(pr_number)
+
+        # Fallback: gh pr create (owner identity) — same-user / no-token path.
         args = [
             "pr",
             "create",
