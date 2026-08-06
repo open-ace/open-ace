@@ -3855,7 +3855,8 @@ export const translations: Record<Language, Translations> = {
     confirmResetPassword: 'パスワードリセット確認',
     back: '戻る',
     passwordResetSuccessfully: 'パスワードが正常にリセットされました',
-    userMustChangePasswordOnNextLogin: 'ユーザーは次回ログイン時にパスワードを変更する必要があります。',
+    userMustChangePasswordOnNextLogin:
+      'ユーザーは次回ログイン時にパスワードを変更する必要があります。',
     copied: 'コピーしました',
     // Force password change
     changePassword: 'パスワード変更',

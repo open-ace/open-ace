@@ -48,7 +48,9 @@ export const UserManagement: React.FC = () => {
 
   // Reset password modal state (three-step)
   const [showResetPasswordModal, setShowResetPasswordModal] = useState(false);
-  const [resetPasswordStep, setResetPasswordStep] = useState<'confirm' | 'setPassword' | 'complete'>('confirm');
+  const [resetPasswordStep, setResetPasswordStep] = useState<
+    'confirm' | 'setPassword' | 'complete'
+  >('confirm');
   const [resetPasswordUser, setResetPasswordUser] = useState<AdminUser | null>(null);
   const [editingPassword, setEditingPassword] = useState('');
   const [resetPasswordError, setResetPasswordError] = useState<string | null>(null);
@@ -137,7 +139,7 @@ export const UserManagement: React.FC = () => {
   // Generate a secure random password using Web Crypto API
   const generateSecurePassword = (): string => {
     const policy = securitySettings;
-    const minLen = Math.max(policy?.password_min_length || 8, 12);
+    const minLen = Math.max(policy?.password_min_length ?? 8, 12);
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*';
 
     // Use crypto.getRandomValues for cryptographically secure randomness
@@ -164,10 +166,7 @@ export const UserManagement: React.FC = () => {
           const randomIndex = new Uint32Array(1);
           crypto.getRandomValues(randomIndex);
           const replacementChars = check.fallback;
-          password =
-            password.substring(0, idx) +
-            replacementChars +
-            password.substring(idx + 1);
+          password = password.substring(0, idx) + replacementChars + password.substring(idx + 1);
         }
       });
     }
@@ -765,11 +764,13 @@ export const UserManagement: React.FC = () => {
         {/* Step indicator */}
         <div className="d-flex align-items-center justify-content-center mb-3 gap-2">
           <span className={resetPasswordStep === 'confirm' ? 'fw-bold' : 'text-muted'}>
-            {resetPasswordStep === 'confirm' ? '\u25CF' : '\u25CB'} {t('confirmOperation', language) ?? 'Confirm Operation'}
+            {resetPasswordStep === 'confirm' ? '\u25CF' : '\u25CB'}{' '}
+            {t('confirmOperation', language) ?? 'Confirm Operation'}
           </span>
           <span className="text-muted">{'\u2192'}</span>
           <span className={resetPasswordStep === 'setPassword' ? 'fw-bold' : 'text-muted'}>
-            {resetPasswordStep === 'setPassword' ? '\u25CF' : '\u25CB'} {t('setPassword', language) ?? 'Set Password'}
+            {resetPasswordStep === 'setPassword' ? '\u25CF' : '\u25CB'}{' '}
+            {t('setPassword', language) ?? 'Set Password'}
           </span>
           <span className="text-muted">{'\u2192'}</span>
           <span className={resetPasswordStep === 'complete' ? 'fw-bold' : 'text-muted'}>
@@ -782,7 +783,10 @@ export const UserManagement: React.FC = () => {
           <div>
             <div className="alert alert-warning mb-3">
               <i className="bi bi-exclamation-triangle-fill me-2" aria-hidden="true" />
-              <strong>{t('confirmResetUserPassword', language) ?? 'Are you sure you want to reset this user\u2019s password?'}</strong>
+              <strong>
+                {t('confirmResetUserPassword', language) ??
+                  'Are you sure you want to reset this user\u2019s password?'}
+              </strong>
               <br />
               <span className="small">
                 {t('afterResetPasswordWillExpire', language) ??
@@ -792,7 +796,9 @@ export const UserManagement: React.FC = () => {
             <div className="mb-3">
               <div className="row mb-1">
                 <div className="col-4 text-muted">{t('tableUsername', language)}</div>
-                <div className="col-8"><strong>{resetPasswordUser.username}</strong></div>
+                <div className="col-8">
+                  <strong>{resetPasswordUser.username}</strong>
+                </div>
               </div>
               <div className="row">
                 <div className="col-4 text-muted">{t('tableEmail', language)}</div>
@@ -836,11 +842,15 @@ export const UserManagement: React.FC = () => {
               {/* Real-time validation result */}
               {passwordValidationError ? (
                 <div className="text-danger small mt-1">
-                  {'\u2717'} {t('passwordDoesNotMeetRequirements', language) ?? 'Password does not meet requirements'}: {passwordValidationError}
+                  {'\u2717'}{' '}
+                  {t('passwordDoesNotMeetRequirements', language) ??
+                    'Password does not meet requirements'}
+                  : {passwordValidationError}
                 </div>
               ) : (
                 <div className="text-success small mt-1">
-                  {'\u2713'} {t('passwordMeetsAllRequirements', language) ?? 'Password meets all requirements'}
+                  {'\u2713'}{' '}
+                  {t('passwordMeetsAllRequirements', language) ?? 'Password meets all requirements'}
                 </div>
               )}
               {/* Password requirements list */}
@@ -854,7 +864,9 @@ export const UserManagement: React.FC = () => {
           <div>
             <div className="alert alert-success mb-3">
               <i className="bi bi-check-circle-fill me-2" aria-hidden="true" />
-              <strong>{t('passwordResetSuccessfully', language) ?? 'Password reset successfully'}</strong>
+              <strong>
+                {t('passwordResetSuccessfully', language) ?? 'Password reset successfully'}
+              </strong>
               <br />
               <span className="small">
                 {t('userMustChangePasswordOnNextLogin', language) ??
@@ -877,8 +889,13 @@ export const UserManagement: React.FC = () => {
                   title={t('copy', language) ?? 'Copy'}
                   ariaLabel={t('copy', language) ?? 'Copy'}
                 >
-                  <i className={copiedPassword ? 'bi bi-check-lg' : 'bi bi-clipboard'} aria-hidden="true" />
-                  {copiedPassword ? (t('copied', language) ?? 'Copied') : (t('copy', language) ?? 'Copy')}
+                  <i
+                    className={copiedPassword ? 'bi bi-check-lg' : 'bi bi-clipboard'}
+                    aria-hidden="true"
+                  />
+                  {copiedPassword
+                    ? (t('copied', language) ?? 'Copied')
+                    : (t('copy', language) ?? 'Copy')}
                 </Button>
               </div>
             </div>

@@ -163,7 +163,10 @@ export const adminApi = {
     return apiClient.put<{ success: boolean }>(`/api/admin/users/${userId}/password`, { password });
   },
 
-  async resetUserPassword(userId: number, password?: string): Promise<{
+  async resetUserPassword(
+    userId: number,
+    password?: string
+  ): Promise<{
     success: boolean;
     temporary_password: string;
     message?: string;
