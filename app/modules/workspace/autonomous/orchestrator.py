@@ -13,6 +13,7 @@ import logging
 import os
 import pwd
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -299,6 +300,65 @@ def _is_bot_comment(comment: dict) -> bool:
     return any(kw in login.lower() for kw in BOT_AUTHOR_KEYWORDS)
 
 
+# Commands that read, search or move test files without executing them. A
+# command headed by one of these can never be a test invocation, however many
+# framework names appear in its arguments (#2376 D1): before this filter,
+# ``grep -rn "pytest" tests/`` was recognized as a test run and — since the
+# evidence parsers judge an unrecognized framework on the exit code alone —
+# could satisfy the authoritative test gate on its own.
+_READ_ONLY_COMMANDS = frozenset(
+    {
+        "cat", "less", "more", "head", "tail", "grep", "rg", "ag", "ls", "stat",
+        "wc", "file", "git", "sed", "awk", "diff", "find", "cp", "mv", "rm",
+        "chmod", "touch", "vim", "nano", "echo", "printf", "which", "realpath",
+    }
+)  # fmt: skip
+
+# Interpreters that may legitimately head a test invocation. Used only to
+# resolve a segment's effective head — an interpreter seen before any read-only
+# command means the segment is executing something, not reading it.
+_INTERPRETER_COMMANDS = frozenset(
+    {"bash", "sh", "zsh", "python", "python3", "node", "npx", "pnpm", "yarn", "bun", "deno"}
+)
+
+# Flags that turn a test command into a help/version query. Matched as whole
+# tokens: a raw substring test discards legitimate runs whose path or flags
+# merely contain "-h" (e.g. ``pytest -q --no-header``, ``tests/test-helper.py``).
+_EXCLUDE_FLAG_TOKENS = frozenset({"--help", "--version", "-h"})
+
+_SEGMENT_SPLIT_RE = re.compile(r"&&|\|\||;|\|")
+
+
+def _shell_tokens(text: str) -> list[str]:
+    """Best-effort shell tokenization; falls back to whitespace on bad quoting."""
+    try:
+        return shlex.split(text)
+    except ValueError:
+        return text.split()
+
+
+def _command_segments(command: str) -> list[str]:
+    """Split a shell command into the segments that run as separate commands."""
+    return [seg for seg in _SEGMENT_SPLIT_RE.split(command) if seg.strip()]
+
+
+def _segment_effective_head(segment: str) -> str:
+    """Basename of the first *recognized* command token in ``segment``.
+
+    Scanning for the first token that is either read-only or an interpreter
+    (rather than taking token 0) steps over wrapper prefixes and their operands
+    — ``sudo -u openace``, ``timeout 60``, ``ONLY_FAST=1`` — without having to
+    model each wrapper's option grammar. Returns "" when neither kind of token
+    is present, which leaves the segment eligible (conservative: an unknown
+    head is not assumed to be read-only).
+    """
+    for token in _shell_tokens(segment):
+        base = token.rsplit("/", 1)[-1]
+        if base in _READ_ONLY_COMMANDS or base in _INTERPRETER_COMMANDS:
+            return base
+    return ""
+
+
 def _has_test_tool_call(tool_calls: list, framework_type: str) -> bool:
     """Check if tool_calls contains a test framework execution command.
 
@@ -320,8 +380,6 @@ def _has_test_tool_call(tool_calls: list, framework_type: str) -> bool:
     # P1: generic_patterns includes unittest for unknown frameworks
     generic_patterns = ["pytest", "unittest", "jest", "go test", "cargo test", "npm test"]
     patterns_to_check = test_commands.get(framework_type, generic_patterns)
-    # Note: -v (verbose) is NOT excluded, only --help/--version/-h
-    exclude_flags = ["--help", "--version", "-h"]
 
     for tc in tool_calls:
         tool_name = tc.get("tool", {}).get("name", "") if isinstance(tc.get("tool"), dict) else ""
@@ -337,11 +395,23 @@ def _has_test_tool_call(tool_calls: list, framework_type: str) -> bool:
         # Then check Bash/run_shell_command for test commands
         if tool_name in ("Bash", "Shell", "run_shell_command", "exec_command"):
             cmd = tool_input.get("command") or tool_input.get("cmd") or ""
-            if not cmd or any(flag in cmd for flag in exclude_flags):
+            if not cmd:
                 continue
-            for pattern in patterns_to_check:
-                if pattern in cmd:
-                    return True
+            # #2376: filter and match per segment. Both must be per-segment —
+            # matching the whole command would let a surviving segment lend its
+            # eligibility to a filtered one, so a one-token prefix would defeat
+            # the read-only filter:
+            #     python -c "print(1)" && grep -rn pytest tests/
+            for segment in _command_segments(cmd):
+                if _segment_effective_head(segment) in _READ_ONLY_COMMANDS:
+                    continue
+                tokens = _shell_tokens(segment)
+                # Note: -v (verbose) is NOT excluded, only --help/--version/-h
+                if any(token in _EXCLUDE_FLAG_TOKENS for token in tokens):
+                    continue
+                for pattern in patterns_to_check:
+                    if pattern in segment:
+                        return True
 
     return False
 
