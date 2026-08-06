@@ -598,7 +598,7 @@ class TestCommitPhaseResult:
         o._commit_phase_result(PhaseResult.completed("completed"))
         last_updates = o.repo.update_workflow.call_args_list[-1].args[1]
         assert last_updates["status"] == "completed"
-        assert last_updates["current_phase"] == "merge"
+        assert last_updates["current_phase"] == "acceptance_verification"
         assert "completed_at" in last_updates
         # Same format as _do_merge's completed_at (YYYY-MM-DD HH:MM:SS strftime,
         # not ISO), so the terminal write stays symmetric with the legacy path.
