@@ -225,7 +225,7 @@ describe('ForceChangePasswordModal', () => {
       });
     });
 
-    it('should clear form after successful password change', async () => {
+    it('should submit password change successfully', async () => {
       mockChangePassword.mockResolvedValueOnce({ success: true });
 
       render(<ForceChangePasswordModal />);
@@ -367,8 +367,8 @@ describe('ForceChangePasswordModal', () => {
   });
 
   describe('Edge Cases', () => {
-    it('should use default minimum length when password policy is not loaded', async () => {
-      // This test verifies the component handles undefined password policy gracefully
+    it('should reject password shorter than minimum length', async () => {
+      // This test verifies the component handles password length validation correctly
       render(<ForceChangePasswordModal />);
 
       const currentPasswordInput = screen.getByLabelText('current-password');
@@ -406,6 +406,10 @@ describe('ForceChangePasswordModal', () => {
       // Verify close button exists but has empty onClose handler
       const closeButton = screen.getByRole('button', { name: 'Close' });
       expect(closeButton).toBeInTheDocument();
+
+      // Click close button and verify modal stays open
+      fireEvent.click(closeButton);
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
     });
   });
 });
