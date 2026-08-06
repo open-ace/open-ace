@@ -100,6 +100,19 @@ def dismiss_force_change_password_modal(page: Page, new_password: str = "Admin12
             'div[role="dialog"] input[placeholder="确认密码"]'
         )
 
+        # Issue #2361: 等待所有输入框可见（修复 Locator.fill timeout）
+        # Modal 可见 ≠ 输入框已渲染完成（React.lazy/动画延迟）
+        try:
+            current_pw_input.wait_for(state="visible", timeout=10000)
+            new_pw_input.wait_for(state="visible", timeout=10000)
+            confirm_pw_input.wait_for(state="visible", timeout=10000)
+        except PlaywrightTimeoutError:
+            save_screenshot(page, "login", "modal_inputs_not_visible")
+            raise AssertionError(
+                "ForceChangePasswordModal inputs not visible within 10s. "
+                "Check if Modal component is rendering correctly."
+            )
+
         # 填写改密表单
         current_pw_input.fill(PASSWORD)
         new_pw_input.fill(new_password)
