@@ -1,9 +1,10 @@
-"""Read-only pre-filter + token-based flag exclusion (#2376 PR-1).
+"""Non-executing-command pre-filter + token-based flag exclusion (#2376 PR-1).
 
 Two pre-existing fail-open / fail-closed defects in ``_has_test_tool_call``:
 
 D1 (fail-open) — the pattern loop substring-matches the *whole* command, so a
-command that merely reads or searches a test file counts as a test invocation.
+command that merely reads, searches or writes a test file counts as a test
+invocation.
 On ``main`` these all return True, and because ``_parse_generic`` /
 ``_parse_pytest`` judge on the exit code alone, a ``grep`` can satisfy the
 authoritative test gate:
@@ -24,7 +25,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.modules.workspace.autonomous.orchestrator import _has_test_tool_call
+from app.modules.workspace.autonomous.orchestrator import _command_segments, _has_test_tool_call
 
 
 def _tc(command: str) -> list:
@@ -183,10 +184,36 @@ def test_operators_inside_quotes_do_not_split_a_read_only_command(command):
     assert _has_test_tool_call(_tc(command), "mixed") is False
 
 
-def test_redirections_are_not_treated_as_separators():
-    # "2>&1" and "&>" are redirections, not backgrounding.
-    assert _has_test_tool_call(_tc("pytest tests/ -q 2>&1"), "mixed") is True
-    assert _has_test_tool_call(_tc("pytest tests/ -q &> out.log"), "mixed") is True
+@pytest.mark.parametrize(
+    "command,expected",
+    [
+        # Redirections are not separators. Asserted on the segmenter directly:
+        # going through _has_test_tool_call would pass even if "&" did split,
+        # because the runner sits in the first fragment either way.
+        ("pytest tests/ -q 2>&1", ["pytest tests/ -q 2>&1"]),
+        ("pytest tests/ -q &> out.log", ["pytest tests/ -q &> out.log"]),
+        ("pytest tests/ >& out.log", ["pytest tests/ >& out.log"]),
+        # A lone "&" backgrounds, so it *is* a separator.
+        ("pytest tests/ & echo done", ["pytest tests/ ", " echo done"]),
+        # Operators inside quotes are literal.
+        ('grep -E "pytest|unittest" tests/', ['grep -E "pytest|unittest" tests/']),
+        ("sed -n '/pytest/p; /jest/p' f.py", ["sed -n '/pytest/p; /jest/p' f.py"]),
+        # Newlines separate commands.
+        ("git status\npytest tests/", ["git status", "pytest tests/"]),
+        # A heredoc body is data, not commands.
+        (
+            "cat > tests/x.py <<'EOF'\nimport pytest\nEOF",
+            ["cat > tests/x.py <<'EOF'\nimport pytest\nEOF"],
+        ),
+        # Comments are stripped, not turned into headless segments.
+        ("# run pytest later\nls tests/", ["ls tests/"]),
+        ("ls tests/ # then pytest", ["ls tests/ "]),
+        # "#" mid-word is not a comment.
+        ("pytest tests/test_a.py::test_x#frag", ["pytest tests/test_a.py::test_x#frag"]),
+    ],
+)
+def test_command_segments_structure(command, expected):
+    assert _command_segments(command) == expected
 
 
 def test_pipeline_keeps_the_runner_segment():
@@ -194,6 +221,47 @@ def test_pipeline_keeps_the_runner_segment():
     # filtered, the pytest segment survives.
     assert _has_test_tool_call(_tc("pytest tests/ -q 2>&1 | tee out.log"), "mixed") is True
     assert _has_test_tool_call(_tc("pytest tests/ | tail -50"), "mixed") is True
+
+
+# --- Heredocs, comments, installs (PR-1 re-review N1/N2/N3/N4) ---------------
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # Writing a test file with a heredoc must not satisfy the gate: without
+        # a heredoc guard the body line `import pytest` becomes its own segment.
+        "cat > tests/test_new.py <<'EOF'\nimport pytest\n\n\ndef test_x():\n    assert 1\nEOF",
+        "cat >> conftest.py <<EOF\nimport pytest\nEOF",
+        "cat <<-EOF > tests/x.py\nimport pytest\nEOF",
+        # Comments are not commands.
+        "# TODO: run pytest after the refactor\nls -la tests/",
+        "ls tests/ ; # pytest is what we would run",
+        "# first, look at the suite\ngrep -rn TODO tests/\n# then run pytest\n",
+        # A runner basename inside an env assignment must not win the scan.
+        "PYTHONPATH=/opt/tox cat tests/test_pytest_x.py",
+        # Installing a runner is not running it.
+        "pip install -U pytest pytest-cov",
+        "uv pip install pytest",
+        "npm install --save-dev jest",
+        "npm ci",
+        "poetry add --group dev pytest",
+    ],
+)
+def test_data_and_dependency_commands_are_not_test_runs(command):
+    assert _has_test_tool_call(_tc(command), "mixed") is False
+
+
+def test_heredoc_guard_does_not_swallow_a_later_genuine_run():
+    # The guard stops segmenting at "<<", so a run *before* the heredoc is
+    # still seen; a run after it is inside the body and correctly is not.
+    command = "pytest tests/ -q\ncat > tests/x.py <<'EOF'\nimport pytest\nEOF"
+    assert _has_test_tool_call(_tc(command), "mixed") is True
+
+
+def test_package_manager_run_is_not_mistaken_for_an_install():
+    assert _has_test_tool_call(_tc("npm test"), "mixed") is True
+    assert _has_test_tool_call(_tc("cd /w/frontend && npm test"), "mixed") is True
 
 
 # --- An argument must never veto its runner (PR-1 review #3) -----------------

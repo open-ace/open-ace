@@ -418,6 +418,15 @@ def _command_segments(command: str) -> list[str]:
     Newlines are separators too: multi-line Bash input is one tool call but many
     commands, and treating it as a single segment lets a ``git status`` on one
     line veto a ``pytest`` on another.
+
+    Two constructs escape the newline rule, because their following lines are
+    *data*, not commands (#2376 PR-1 re-review):
+
+    - A heredoc body. ``cat > tests/test_x.py <<'EOF' … import pytest … EOF``
+      would otherwise contribute ``import pytest`` as its own segment, so
+      *writing* a test file would satisfy the gate.
+    - A comment. ``# TODO: run pytest later`` would otherwise be a segment with
+      no head and a matching pattern.
     """
     segments: list[str] = []
     buf: list[str] = []
@@ -435,6 +444,17 @@ def _command_segments(command: str) -> list[str]:
         elif ch == '"' and not in_single:
             in_double = not in_double
         elif not in_single and not in_double:
+            # A heredoc redirect makes everything after it body text; stop
+            # segmenting and let the rest ride with the current segment, whose
+            # head is the real command (``cat``, ``python``, …).
+            if command[i : i + 2] == "<<":
+                buf.append(command[i:])
+                break
+            # An unquoted word-initial "#" comments out the rest of the line.
+            if ch == "#" and (not buf or buf[-1].isspace()):
+                while i < n and command[i] not in "\n\r":
+                    i += 1
+                continue
             if command[i : i + 2] in ("&&", "||"):
                 segments.append("".join(buf))
                 buf = []
@@ -459,21 +479,55 @@ def _command_segments(command: str) -> list[str]:
     return [seg for seg in segments if seg.strip()]
 
 
+_ASSIGNMENT_RE = re.compile(r"^\w+=")
+
+# Installing a test runner is not running it. Checked before the head scan
+# because the package managers overlap the runner set (``npm ci`` vs
+# ``npm test``); without it, ``pip install -U pytest`` satisfies the gate —
+# the likeliest real instance of the class this filter exists to close.
+_PACKAGE_MANAGERS = frozenset(
+    {"pip", "pip3", "uv", "poetry", "npm", "yarn", "pnpm", "apt", "apt-get", "brew", "conda"}
+)
+_INSTALL_SUBCOMMANDS = frozenset({"install", "add", "ci", "uninstall", "remove"})
+
+
+def _is_package_manager_install(tokens: list[str]) -> bool:
+    """Whether the tokens are a dependency install rather than a test run."""
+    for index, token in enumerate(tokens):
+        if _ASSIGNMENT_RE.match(token):
+            continue
+        if token.rsplit("/", 1)[-1] not in _PACKAGE_MANAGERS:
+            return False
+        return any(t in _INSTALL_SUBCOMMANDS for t in tokens[index + 1 :])
+    return False
+
+
 def _segment_is_non_executing(segment: str) -> bool:
     """Whether ``segment`` reads/inspects rather than runs something.
 
     Resolved from the first token that is a recognized command of *either* kind,
     scanning left to right. Scanning (rather than taking token 0) steps over
-    wrapper prefixes and their operands — ``sudo -u openace``, ``timeout 60``,
-    ``ONLY_FAST=1`` — without modelling each wrapper's option grammar. Stopping
-    at a runner is what keeps an *argument* from vetoing a genuine run:
-    ``pytest tests/cat`` must stay eligible even though ``cat`` is a basename in
-    the non-executing set (#2376 PR-1 review).
+    wrapper prefixes and their operands — ``sudo -u openace``, ``timeout 60`` —
+    without modelling each wrapper's option grammar. Stopping at a runner is
+    what keeps an *argument* from vetoing a genuine run: ``pytest tests/cat``
+    must stay eligible even though ``cat`` is a basename in the non-executing
+    set (#2376 PR-1 review).
 
     An unrecognized head leaves the segment eligible — an unknown command is not
     assumed to be non-executing.
     """
-    for token in _shell_tokens(segment):
+    tokens = _shell_tokens(segment)
+    if _is_package_manager_install(tokens):
+        return True
+    for token in tokens:
+        # Env assignments are not the command. Skipping them (rather than
+        # resolving their basename) also stops a runner name inside an assigned
+        # path from winning the scan: ``PYTHONPATH=/opt/tox cat tests/x.py``.
+        if _ASSIGNMENT_RE.match(token):
+            continue
+        # ``$(``/backtick prefixes survive tokenization on unquoted command
+        # substitution; stripping them recovers the inner command name so
+        # ``$(grep -rn pytest tests/)`` still resolves to ``grep``.
         base = token.rsplit("/", 1)[-1].lstrip("$(`")
         if base in _TEST_RUNNER_COMMANDS or base in _INTERPRETER_COMMANDS:
             return False
