@@ -413,7 +413,8 @@ class TestUnmappedAccounts:
         response = admin_client.get("/api/unmapped-accounts/unknown/suggest-mapping")
         assert response.status_code == 200
         data = json.loads(response.data)
-        assert data["suggestion"] is None
+        assert data["suggested_user_id"] is None
+        assert data["suggested_username"] is None
 
     @patch("app.routes.mapping_rules.UserToolAccountRepository")
     def test_manual_map_account_success(self, mock_repo_class, admin_client):
