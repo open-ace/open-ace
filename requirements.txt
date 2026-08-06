@@ -10,7 +10,7 @@ signxml>=4.2.2,<5.0.0
 filetype>=1.2.0,<2.0.0
 
 # Production server
-gunicorn>=23.0.0,<24.0.0
+gunicorn>=23.0.0,<27.0.0
 
 # WebSocket support
 gevent>=23.9.1,<25.0.0
