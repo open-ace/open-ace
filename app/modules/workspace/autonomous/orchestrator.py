@@ -8631,21 +8631,33 @@ class AutonomousOrchestrator:
         structured_verdict, _structured_evidences, structured_reason = (
             self._compute_structured_test_verdict(test_result, framework_type, test_ms)
         )
-        structured_authoritative = structured_verdict in (
-            ExecutionVerdict.PASSED,
-            ExecutionVerdict.FAILED,
-        )
+        # Only PASSED is authoritative (#2376 D2). A structured FAILED used to
+        # set this too, which zeroed BOTH test_result_inconclusive and
+        # tests_actually_skipped — and since nothing downstream reads
+        # tests_actually_run, a run whose tests demonstrably failed fell
+        # straight through to "Tests passed" and opened a PR. Letting FAILED
+        # fall back to the heuristic is fail-closed: the failing command is in
+        # expected_commands, the heuristic refuses to confirm, and the run
+        # lands on the existing inconclusive -> test_retries path.
+        structured_authoritative = structured_verdict == ExecutionVerdict.PASSED
         if structured_verdict == ExecutionVerdict.PASSED:
             tests_actually_run = True
-        elif structured_verdict == ExecutionVerdict.FAILED:
-            tests_actually_run = False
-        else:  # NOT_RUN / INCONCLUSIVE — fall back to the legacy heuristic.
+        else:  # FAILED / NOT_RUN / INCONCLUSIVE — fall back to the heuristic.
+            # Collapsing to two arms is load-bearing: a dedicated
+            # `elif FAILED: tests_actually_run = False` arm would pin the run
+            # to False without ever consulting the heuristic, so a same-command
+            # fail-then-rerun-pass session — which the heuristic *does*
+            # supersede, keyed on the normalized command — would be killed.
             tests_actually_run = has_passing_tool_result or (
                 has_test_tool_call and has_text_pass_evidence
             )
-            self._emit_structured_test_fallback(
-                structured_verdict, structured_reason, test_ms.get("milestone_id", "")
-            )
+            if structured_verdict != ExecutionVerdict.FAILED:
+                # The fallback counter tracks *parser coverage gaps* so the
+                # heuristic can eventually be retired. A FAILED verdict is not
+                # a coverage gap, so emitting it would pollute that signal.
+                self._emit_structured_test_fallback(
+                    structured_verdict, structured_reason, test_ms.get("milestone_id", "")
+                )
         # test_result_inconclusive only applies when the structured layer could
         # not judge authoritatively; a structured FAILED is a real failure,
         # not an inconclusive run.
@@ -8690,10 +8702,18 @@ class AutonomousOrchestrator:
         # Post test results to issue
         issue_number = wf.get("github_issue_number")
         if issue_number:
-            if tests_actually_skipped:
-                status_line = "⚠️ Tests were not actually run — see details below"
+            # Order mirrors the routing below, where test_result_inconclusive is
+            # checked first — both flags can be True at once, and reporting them
+            # in the opposite order told the issue "tests were not run" for a run
+            # that actually took the inconclusive path (#2376). A structured
+            # FAILED gets its own line: it is a real failure, not a missing
+            # result, and test_result.success is typically True for it.
+            if structured_verdict == ExecutionVerdict.FAILED:
+                status_line = "❌ Tests failed — structured evidence reports a failing test command"
             elif test_result_inconclusive:
                 status_line = "⚠️ Test command was invoked but no verifiable result was captured"
+            elif tests_actually_skipped:
+                status_line = "⚠️ Tests were not actually run — see details below"
             elif test_result.success:
                 status_line = "✅ All tests passed"
             else:
