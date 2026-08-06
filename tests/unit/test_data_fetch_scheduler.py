@@ -232,6 +232,8 @@ class TestDataFetchSchedulerRunFetch:
         # Should still call other steps
         mock_mv.assert_called_once()
         mock_agg.assert_called_once()
+        # Verify exception path sets last_result_summary correctly
+        assert s._last_result_summary == {"status": "failed", "error": "exception"}
 
     @patch("app.repositories.database.is_postgresql", return_value=False)
     @patch("app.repositories.database.Database")

@@ -275,7 +275,7 @@ class DataFetchScheduler:
                 status = "failed"
                 error_message = "Data fetch encountered an unexpected error"
                 self._last_result_summary = {"status": "failed", "error": "unexpected_error"}
-            elif results.get("_skipped"):
+            elif isinstance(results, dict) and results.get("_skipped"):
                 # Concurrent fetch already running
                 status = "skipped"
                 error_message = "Concurrent data fetch already running"
