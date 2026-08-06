@@ -198,11 +198,14 @@ class TestDataFetchSchedulerRunFetch:
         # Mock leader election to always succeed
         mock_client_instance = mock_leader_client.return_value
         mock_client_instance.try_acquire_leadership.return_value = True
+        mock_fetch.return_value = {"qwen": {"success": True}}
 
         s = DataFetchScheduler()
         s._run_fetch()
         mock_fetch.assert_called_once()
         assert s._last_run is not None
+        assert s._last_result_summary is not None
+        assert s._last_result_summary["status"] == "completed"
 
     @patch("app.services.leader_election.LeaderElectionClient")
     @patch("app.services.data_fetch_scheduler.DataFetchScheduler._check_quotas")
@@ -322,6 +325,213 @@ class TestDataFetchSchedulerRunFetch:
         s._refresh_daily_stats()  # Should not raise
         # Repository instantiation was attempted (and its failure swallowed)
         mock_repo_cls.assert_called_once()
+
+    # ---- Issue #2375: fetch result propagation tests ----
+
+    def _make_run_fetch_mocks(self, mock_fetch_return_value):
+        """Helper to set up mocks for _run_fetch() tests.
+        
+        Mocks leader election (succeeds), run_fetch_scripts (returns given value),
+        and all post-fetch cleanup steps.
+        """
+        mocks = {
+            "leader_client": MagicMock(),
+            "fetch": MagicMock(),
+            "mv": MagicMock(),
+            "agg": MagicMock(),
+            "summary": MagicMock(),
+            "quotas": MagicMock(),
+            "daily_stats": MagicMock(),
+            "feishu": MagicMock(),
+            "dingtalk": MagicMock(),
+        }
+        mocks["leader_client"].return_value.try_acquire_leadership.return_value = True
+        mocks["fetch"].return_value = mock_fetch_return_value
+        return mocks
+
+    @patch("app.repositories.daily_stats_repo.DailyStatsRepository")
+    @patch("app.services.data_fetch_scheduler.DataFetchScheduler._maybe_sync_dingtalk_org")
+    @patch("app.services.data_fetch_scheduler.DataFetchScheduler._maybe_sync_feishu_org")
+    @patch("app.services.data_fetch_scheduler.DataFetchScheduler._check_quotas")
+    @patch("app.services.data_fetch_scheduler.DataFetchScheduler._refresh_usage_summary")
+    @patch("app.services.data_fetch_scheduler.DataFetchScheduler._refresh_daily_stats")
+    @patch("app.services.data_fetch_scheduler.DataFetchScheduler._aggregate_user_stats")
+    @patch("app.services.data_fetch_scheduler.DataFetchScheduler._refresh_materialized_views")
+    @patch("app.routes.fetch.run_fetch_scripts")
+    @patch("app.services.leader_election.LeaderElectionClient")
+    def test_run_fetch_all_failed(
+        self, mock_leader, mock_fetch, mock_mv, mock_agg, mock_ds,
+        mock_summary, mock_quotas, mock_feishu, mock_dingtalk, mock_ds_repo,
+    ):
+        """When all scripts fail, status should be 'failed'."""
+        mock_leader.return_value.try_acquire_leadership.return_value = True
+        mock_fetch.return_value = {
+            "qwen": {"success": False, "error": "sudo: password required"},
+            "claude": {"success": False, "error": "sudo: password required"},
+            "openclaw": {"success": False, "error": "sudo: password required"},
+            "codex": {"success": False, "error": "sudo: password required"},
+            "zcode": {"success": False, "error": "sudo: password required"},
+        }
+
+        s = DataFetchScheduler()
+        s._run_fetch()
+
+        mock_leader.return_value.record_run.assert_called_once()
+        call_args = mock_leader.return_value.record_run.call_args[0]
+        assert call_args[0] == "failed"  # status
+        assert "All fetch scripts failed" in call_args[2]  # error_message
+        assert s._last_result_summary["status"] == "failed"
+        assert s._last_result_summary["tools_failed"] == 5
+
+    @patch("app.repositories.daily_stats_repo.DailyStatsRepository")
+    @patch("app.services.data_fetch_scheduler.DataFetchScheduler._maybe_sync_dingtalk_org")
+    @patch("app.services.data_fetch_scheduler.DataFetchScheduler._maybe_sync_feishu_org")
+    @patch("app.services.data_fetch_scheduler.DataFetchScheduler._check_quotas")
+    @patch("app.services.data_fetch_scheduler.DataFetchScheduler._refresh_usage_summary")
+    @patch("app.services.data_fetch_scheduler.DataFetchScheduler._refresh_daily_stats")
+    @patch("app.services.data_fetch_scheduler.DataFetchScheduler._aggregate_user_stats")
+    @patch("app.services.data_fetch_scheduler.DataFetchScheduler._refresh_materialized_views")
+    @patch("app.routes.fetch.run_fetch_scripts")
+    @patch("app.services.leader_election.LeaderElectionClient")
+    def test_run_fetch_partial_failure(
+        self, mock_leader, mock_fetch, mock_mv, mock_agg, mock_ds,
+        mock_summary, mock_quotas, mock_feishu, mock_dingtalk, mock_ds_repo,
+    ):
+        """When some scripts fail, status=completed with warning."""
+        mock_leader.return_value.try_acquire_leadership.return_value = True
+        mock_fetch.return_value = {
+            "qwen": {"success": True},
+            "claude": {"success": True},
+            "openclaw": {"success": True},
+            "codex": {"success": False, "error": "timeout"},
+            "zcode": {"success": False, "error": "disk full"},
+        }
+
+        s = DataFetchScheduler()
+        s._run_fetch()
+
+        mock_leader.return_value.record_run.assert_called_once()
+        call_args = mock_leader.return_value.record_run.call_args[0]
+        assert call_args[0] == "completed"  # partial failure is still "completed"
+        assert "Partial failure" in call_args[2]
+        assert "codex" in call_args[2]
+        assert "zcode" in call_args[2]
+        assert s._last_result_summary["status"] == "partial"
+        assert s._last_result_summary["tools_failed"] == 2
+
+    @patch("app.repositories.daily_stats_repo.DailyStatsRepository")
+    @patch("app.services.data_fetch_scheduler.DataFetchScheduler._maybe_sync_dingtalk_org")
+    @patch("app.services.data_fetch_scheduler.DataFetchScheduler._maybe_sync_feishu_org")
+    @patch("app.services.data_fetch_scheduler.DataFetchScheduler._check_quotas")
+    @patch("app.services.data_fetch_scheduler.DataFetchScheduler._refresh_usage_summary")
+    @patch("app.services.data_fetch_scheduler.DataFetchScheduler._refresh_daily_stats")
+    @patch("app.services.data_fetch_scheduler.DataFetchScheduler._aggregate_user_stats")
+    @patch("app.services.data_fetch_scheduler.DataFetchScheduler._refresh_materialized_views")
+    @patch("app.routes.fetch.run_fetch_scripts")
+    @patch("app.services.leader_election.LeaderElectionClient")
+    def test_run_fetch_no_scripts(
+        self, mock_leader, mock_fetch, mock_mv, mock_agg, mock_ds,
+        mock_summary, mock_quotas, mock_feishu, mock_dingtalk, mock_ds_repo,
+    ):
+        """Empty results (no scripts) should be 'completed', not 'failed'."""
+        mock_leader.return_value.try_acquire_leadership.return_value = True
+        mock_fetch.return_value = {}
+
+        s = DataFetchScheduler()
+        s._run_fetch()
+
+        mock_leader.return_value.record_run.assert_called_once()
+        call_args = mock_leader.return_value.record_run.call_args[0]
+        assert call_args[0] == "completed"
+        assert s._last_result_summary["status"] == "completed"
+        assert s._last_result_summary["tools"] == 0
+
+    @patch("app.repositories.daily_stats_repo.DailyStatsRepository")
+    @patch("app.services.data_fetch_scheduler.DataFetchScheduler._maybe_sync_dingtalk_org")
+    @patch("app.services.data_fetch_scheduler.DataFetchScheduler._maybe_sync_feishu_org")
+    @patch("app.services.data_fetch_scheduler.DataFetchScheduler._check_quotas")
+    @patch("app.services.data_fetch_scheduler.DataFetchScheduler._refresh_usage_summary")
+    @patch("app.services.data_fetch_scheduler.DataFetchScheduler._refresh_daily_stats")
+    @patch("app.services.data_fetch_scheduler.DataFetchScheduler._aggregate_user_stats")
+    @patch("app.services.data_fetch_scheduler.DataFetchScheduler._refresh_materialized_views")
+    @patch("app.routes.fetch.run_fetch_scripts")
+    @patch("app.services.leader_election.LeaderElectionClient")
+    def test_run_fetch_skipped(
+        self, mock_leader, mock_fetch, mock_mv, mock_agg, mock_ds,
+        mock_summary, mock_quotas, mock_feishu, mock_dingtalk, mock_ds_repo,
+    ):
+        """Concurrent fetch skip should be 'skipped'."""
+        mock_leader.return_value.try_acquire_leadership.return_value = True
+        mock_fetch.return_value = {"_skipped": True}
+
+        s = DataFetchScheduler()
+        s._run_fetch()
+
+        mock_leader.return_value.record_run.assert_called_once()
+        call_args = mock_leader.return_value.record_run.call_args[0]
+        assert call_args[0] == "skipped"
+        assert s._last_result_summary["status"] == "skipped"
+
+    @patch("app.repositories.daily_stats_repo.DailyStatsRepository")
+    @patch("app.services.data_fetch_scheduler.DataFetchScheduler._maybe_sync_dingtalk_org")
+    @patch("app.services.data_fetch_scheduler.DataFetchScheduler._maybe_sync_feishu_org")
+    @patch("app.services.data_fetch_scheduler.DataFetchScheduler._check_quotas")
+    @patch("app.services.data_fetch_scheduler.DataFetchScheduler._refresh_usage_summary")
+    @patch("app.services.data_fetch_scheduler.DataFetchScheduler._refresh_daily_stats")
+    @patch("app.services.data_fetch_scheduler.DataFetchScheduler._aggregate_user_stats")
+    @patch("app.services.data_fetch_scheduler.DataFetchScheduler._refresh_materialized_views")
+    @patch("app.routes.fetch.run_fetch_scripts")
+    @patch("app.services.leader_election.LeaderElectionClient")
+    def test_run_fetch_none_result(
+        self, mock_leader, mock_fetch, mock_mv, mock_agg, mock_ds,
+        mock_summary, mock_quotas, mock_feishu, mock_dingtalk, mock_ds_repo,
+    ):
+        """None result (unexpected error) should be 'failed'."""
+        mock_leader.return_value.try_acquire_leadership.return_value = True
+        mock_fetch.return_value = None
+
+        s = DataFetchScheduler()
+        s._run_fetch()
+
+        mock_leader.return_value.record_run.assert_called_once()
+        call_args = mock_leader.return_value.record_run.call_args[0]
+        assert call_args[0] == "failed"
+        assert "unexpected error" in call_args[2].lower()
+        assert s._last_result_summary["status"] == "failed"
+
+    @patch("app.repositories.daily_stats_repo.DailyStatsRepository")
+    @patch("app.services.data_fetch_scheduler.DataFetchScheduler._maybe_sync_dingtalk_org")
+    @patch("app.services.data_fetch_scheduler.DataFetchScheduler._maybe_sync_feishu_org")
+    @patch("app.services.data_fetch_scheduler.DataFetchScheduler._check_quotas")
+    @patch("app.services.data_fetch_scheduler.DataFetchScheduler._refresh_usage_summary")
+    @patch("app.services.data_fetch_scheduler.DataFetchScheduler._refresh_daily_stats")
+    @patch("app.services.data_fetch_scheduler.DataFetchScheduler._aggregate_user_stats")
+    @patch("app.services.data_fetch_scheduler.DataFetchScheduler._refresh_materialized_views")
+    @patch("app.routes.fetch.run_fetch_scripts")
+    @patch("app.services.leader_election.LeaderElectionClient")
+    def test_run_fetch_all_success(
+        self, mock_leader, mock_fetch, mock_mv, mock_agg, mock_ds,
+        mock_summary, mock_quotas, mock_feishu, mock_dingtalk, mock_ds_repo,
+    ):
+        """All scripts success should be 'completed'."""
+        mock_leader.return_value.try_acquire_leadership.return_value = True
+        mock_fetch.return_value = {
+            "qwen": {"success": True},
+            "claude": {"success": True},
+            "openclaw": {"success": True},
+            "codex": {"success": True},
+            "zcode": {"success": True},
+        }
+
+        s = DataFetchScheduler()
+        s._run_fetch()
+
+        mock_leader.return_value.record_run.assert_called_once()
+        call_args = mock_leader.return_value.record_run.call_args[0]
+        assert call_args[0] == "completed"
+        assert call_args[2] is None  # No error message
+        assert s._last_result_summary["status"] == "completed"
+        assert s._last_result_summary["tools_failed"] == 0
 
 
 class TestDataFetchSchedulerCheckQuotas:

@@ -60,6 +60,7 @@ class DataFetchScheduler:
         self._last_run = None
         self._next_run = None
         self._heartbeat = None
+        self._last_result_summary = None  # Summary of last fetch results for get_status()
         self._initialized = True
         self._implementation = SCHEDULER_IMPLEMENTATION
         self._scheduler = None  # APScheduler instance
@@ -210,6 +211,7 @@ class DataFetchScheduler:
             "heartbeat": self._heartbeat.isoformat() if self._heartbeat else None,
             "heartbeat_age_seconds": heartbeat_age,
             "heartbeat_ok": heartbeat_ok,
+            "last_result_summary": self._last_result_summary,
         }
 
     def _run_loop(self):
@@ -259,11 +261,63 @@ class DataFetchScheduler:
         self._last_run = datetime.now(tz.utc).replace(tzinfo=None)
 
         try:
-            run_fetch_scripts()
-            logger.info("Scheduled data fetch completed")
+            results = run_fetch_scripts()
+            logger.info("Scheduled data fetch finished: {}".format(
+                "skipped" if (results and results.get("_skipped")) else
+                "all_failed" if (results and all(not v.get("success", False) for v in results.values())) else
+                "completed"
+            ))
+
+            if results is None:
+                # Unexpected error in run_fetch_scripts() itself
+                status = "failed"
+                error_message = "Data fetch encountered an unexpected error"
+                self._last_result_summary = {"status": "failed", "error": "unexpected_error"}
+            elif results.get("_skipped"):
+                # Concurrent fetch already running
+                status = "skipped"
+                error_message = "Concurrent data fetch already running"
+                self._last_result_summary = {"status": "skipped"}
+            elif not results:
+                # No scripts available to run - not an error
+                status = "completed"
+                error_message = None
+                self._last_result_summary = {"status": "completed", "tools": 0}
+            else:
+                # Check per-tool results
+                failed_tools = [k for k, v in results.items() if not v.get("success", False)]
+
+                if len(failed_tools) == len(results):
+                    status = "failed"
+                    error_message = "All fetch scripts failed"
+                    self._last_result_summary = {
+                        "status": "failed",
+                        "tools_total": len(results),
+                        "tools_failed": len(failed_tools),
+                        "failed_tools": failed_tools,
+                    }
+                elif failed_tools:
+                    status = "completed"
+                    error_message = f"Partial failure: {', '.join(failed_tools)}"
+                    self._last_result_summary = {
+                        "status": "partial",
+                        "tools_total": len(results),
+                        "tools_failed": len(failed_tools),
+                        "failed_tools": failed_tools,
+                    }
+                else:
+                    status = "completed"
+                    error_message = None
+                    self._last_result_summary = {
+                        "status": "completed",
+                        "tools_total": len(results),
+                        "tools_failed": 0,
+                    }
+
         except Exception as e:
             status = "failed"
             error_message = str(e)
+            self._last_result_summary = {"status": "failed", "error": "exception"}
             logger.exception(f"Error in scheduled data fetch: {e}")
 
         # Refresh materialized views for PostgreSQL
