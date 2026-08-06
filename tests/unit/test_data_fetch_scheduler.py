@@ -341,8 +341,17 @@ class TestDataFetchSchedulerRunFetch:
     @patch("app.routes.fetch.run_fetch_scripts")
     @patch("app.services.leader_election.LeaderElectionClient")
     def test_run_fetch_all_failed(
-        self, mock_leader, mock_fetch, mock_mv, mock_agg, mock_ds,
-        mock_summary, mock_quotas, mock_feishu, mock_dingtalk, mock_ds_repo,
+        self,
+        mock_leader,
+        mock_fetch,
+        mock_mv,
+        mock_agg,
+        mock_ds,
+        mock_summary,
+        mock_quotas,
+        mock_feishu,
+        mock_dingtalk,
+        mock_ds_repo,
     ):
         """When all scripts fail, status should be 'failed'."""
         mock_leader.return_value.try_acquire_leadership.return_value = True
@@ -375,8 +384,17 @@ class TestDataFetchSchedulerRunFetch:
     @patch("app.routes.fetch.run_fetch_scripts")
     @patch("app.services.leader_election.LeaderElectionClient")
     def test_run_fetch_partial_failure(
-        self, mock_leader, mock_fetch, mock_mv, mock_agg, mock_ds,
-        mock_summary, mock_quotas, mock_feishu, mock_dingtalk, mock_ds_repo,
+        self,
+        mock_leader,
+        mock_fetch,
+        mock_mv,
+        mock_agg,
+        mock_ds,
+        mock_summary,
+        mock_quotas,
+        mock_feishu,
+        mock_dingtalk,
+        mock_ds_repo,
     ):
         """When some scripts fail, status=completed with warning."""
         mock_leader.return_value.try_acquire_leadership.return_value = True
@@ -411,8 +429,17 @@ class TestDataFetchSchedulerRunFetch:
     @patch("app.routes.fetch.run_fetch_scripts")
     @patch("app.services.leader_election.LeaderElectionClient")
     def test_run_fetch_no_scripts(
-        self, mock_leader, mock_fetch, mock_mv, mock_agg, mock_ds,
-        mock_summary, mock_quotas, mock_feishu, mock_dingtalk, mock_ds_repo,
+        self,
+        mock_leader,
+        mock_fetch,
+        mock_mv,
+        mock_agg,
+        mock_ds,
+        mock_summary,
+        mock_quotas,
+        mock_feishu,
+        mock_dingtalk,
+        mock_ds_repo,
     ):
         """Empty results (no scripts) should be 'completed', not 'failed'."""
         mock_leader.return_value.try_acquire_leadership.return_value = True
@@ -439,8 +466,17 @@ class TestDataFetchSchedulerRunFetch:
     @patch("app.routes.fetch.run_fetch_scripts")
     @patch("app.services.leader_election.LeaderElectionClient")
     def test_run_fetch_skipped(
-        self, mock_leader, mock_fetch, mock_mv, mock_agg, mock_ds,
-        mock_summary, mock_quotas, mock_feishu, mock_dingtalk, mock_ds_repo,
+        self,
+        mock_leader,
+        mock_fetch,
+        mock_mv,
+        mock_agg,
+        mock_ds,
+        mock_summary,
+        mock_quotas,
+        mock_feishu,
+        mock_dingtalk,
+        mock_ds_repo,
     ):
         """Concurrent fetch skip should be 'skipped'."""
         mock_leader.return_value.try_acquire_leadership.return_value = True
@@ -465,8 +501,17 @@ class TestDataFetchSchedulerRunFetch:
     @patch("app.routes.fetch.run_fetch_scripts")
     @patch("app.services.leader_election.LeaderElectionClient")
     def test_run_fetch_none_result(
-        self, mock_leader, mock_fetch, mock_mv, mock_agg, mock_ds,
-        mock_summary, mock_quotas, mock_feishu, mock_dingtalk, mock_ds_repo,
+        self,
+        mock_leader,
+        mock_fetch,
+        mock_mv,
+        mock_agg,
+        mock_ds,
+        mock_summary,
+        mock_quotas,
+        mock_feishu,
+        mock_dingtalk,
+        mock_ds_repo,
     ):
         """None result (unexpected error) should be 'failed'."""
         mock_leader.return_value.try_acquire_leadership.return_value = True
@@ -492,8 +537,17 @@ class TestDataFetchSchedulerRunFetch:
     @patch("app.routes.fetch.run_fetch_scripts")
     @patch("app.services.leader_election.LeaderElectionClient")
     def test_run_fetch_all_success(
-        self, mock_leader, mock_fetch, mock_mv, mock_agg, mock_ds,
-        mock_summary, mock_quotas, mock_feishu, mock_dingtalk, mock_ds_repo,
+        self,
+        mock_leader,
+        mock_fetch,
+        mock_mv,
+        mock_agg,
+        mock_ds,
+        mock_summary,
+        mock_quotas,
+        mock_feishu,
+        mock_dingtalk,
+        mock_ds_repo,
     ):
         """All scripts success should be 'completed'."""
         mock_leader.return_value.try_acquire_leadership.return_value = True

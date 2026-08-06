@@ -262,13 +262,25 @@ class DataFetchScheduler:
 
         try:
             results = run_fetch_scripts()
-            logger.info("Scheduled data fetch finished: {}".format(
-                "errored" if results is None else
-                "skipped" if results.get("_skipped") else
-                "empty" if not results else
-                "all_failed" if all(not v.get("success", False) for v in results.values()) else
-                "completed"
-            ))
+            logger.info(
+                "Scheduled data fetch finished: {}".format(
+                    "errored"
+                    if results is None
+                    else (
+                        "skipped"
+                        if results.get("_skipped")
+                        else (
+                            "empty"
+                            if not results
+                            else (
+                                "all_failed"
+                                if all(not v.get("success", False) for v in results.values())
+                                else "completed"
+                            )
+                        )
+                    )
+                )
+            )
 
             if results is None:
                 # Unexpected error in run_fetch_scripts() itself
@@ -284,7 +296,11 @@ class DataFetchScheduler:
                 # No scripts available to run - not an error
                 status = "completed"
                 error_message = None
-                self._last_result_summary = {"status": "completed", "tools_total": 0, "tools_failed": 0}
+                self._last_result_summary = {
+                    "status": "completed",
+                    "tools_total": 0,
+                    "tools_failed": 0,
+                }
             else:
                 # Check per-tool results
                 failed_tools = [k for k, v in results.items() if not v.get("success", False)]

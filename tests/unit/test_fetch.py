@@ -136,7 +136,12 @@ class TestConfigPathScope:
         def selective_exists(path):
             if "fetch_qwen" in path:
                 return False
-            if "fetch_claude" in path or "fetch_openclaw" in path or "fetch_codex" in path or "fetch_zcode" in path:
+            if (
+                "fetch_claude" in path
+                or "fetch_openclaw" in path
+                or "fetch_codex" in path
+                or "fetch_zcode" in path
+            ):
                 return True
             return original_exists(path)
 
@@ -158,9 +163,10 @@ class TestConfigPathScope:
 
     def test_config_path_default_false_for_sudo(self):
         """FETCH_USE_SUDO default should be false."""
+        import inspect
+
         import app.routes.fetch as fetch_mod
 
-        import inspect
         source = inspect.getsource(fetch_mod.run_fetch_scripts)
         # Verify the default is "false" in getenv call
         assert '"FETCH_USE_SUDO", "false")' in source
