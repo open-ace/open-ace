@@ -65,12 +65,18 @@ def _run_subprocess(cmd, timeout=600, cwd=None):
 
 
 def run_fetch_scripts():
-    """Run data fetch scripts in background."""
+    """Run data fetch scripts in background.
+
+    Returns:
+        dict or None: Per-tool results on success (e.g. {"qwen": {"success": True, ...}, ...}).
+                      {"_skipped": True} if a concurrent fetch is already running.
+                      None if an unexpected error occurred in the outer handler.
+    """
     global _fetch_status
 
     with _fetch_lock:
         if _fetch_status["is_running"]:
-            return
+            return {"_skipped": True}
         _fetch_status["is_running"] = True
         _fetch_status["error"] = None
 
@@ -80,10 +86,14 @@ def run_fetch_scripts():
 
         results = {}
 
-        # NOTE: fetch scripts use sudo -n to read other users' home directories.
-        # For production, configure a dedicated service account with read-only
-        # access to user home dirs and set FETCH_USE_SUDO=false in config.
-        use_sudo = os.environ.get("FETCH_USE_SUDO", "true").lower() == "true"
+        # NOTE: fetch scripts may need elevated privileges to read other users'
+        # home directories. By default sudo is disabled for safety.
+        # If your deployment requires cross-user data collection, either:
+        #   - set FETCH_USE_SUDO=true in the environment AND configure
+        #     passwordless sudo for the service user, or
+        #   - configure a dedicated service account with read access to
+        #     user home directories.
+        use_sudo = os.environ.get("FETCH_USE_SUDO", "false").lower() == "true"
         # Use the same Python interpreter as the main process to ensure compatibility
         # with type annotation syntax (e.g., str | None requires Python 3.10+)
         python_path = sys.executable
@@ -98,12 +108,14 @@ def run_fetch_scripts():
             cmd.extend(args)
             return cmd
 
+        # Define config_path once before all per-script blocks to avoid
+        # NameError when individual scripts are not present on disk.
+        config_path = os.path.expanduser("~/.open-ace/config.json")
+
         # Run fetch_qwen.py to scan all users' qwen directories
         qwen_script = os.path.join(project_root, "scripts", "fetch_qwen.py")
         if os.path.exists(qwen_script):
             try:
-                config_path = os.path.expanduser("~/.open-ace/config.json")
-
                 result = _run_subprocess(
                     _build_cmd(
                         qwen_script,
@@ -231,13 +243,20 @@ def run_fetch_scripts():
             _fetch_status["last_result"] = results
             _fetch_status["is_running"] = False
 
-        logger.info(f"Data fetch completed: {results}")
+        all_failed = results and all(not r.get("success", False) for r in results.values())
+        if all_failed:
+            logger.error(f"All data fetch scripts failed: {results}")
+        else:
+            logger.info(f"Data fetch finished: {results}")
+
+        return results
 
     except Exception as e:
         logger.exception("Error running fetch scripts")
         with _fetch_lock:
             _fetch_status["error"] = str(e)
             _fetch_status["is_running"] = False
+        return None
 
 
 @fetch_bp.route("/fetch/data", methods=["POST"])
