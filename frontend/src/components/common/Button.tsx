@@ -46,6 +46,7 @@ export const Button: React.FC<ButtonProps> = ({
   id,
   'data-testid': testId,
   title,
+  ariaLabel,
 }) => {
   const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
     if (onClick) {
@@ -59,6 +60,7 @@ export const Button: React.FC<ButtonProps> = ({
       id={id}
       data-testid={testId}
       title={title}
+      aria-label={ariaLabel ?? title}
       className={cn(
         'btn',
         variantClasses[variant],

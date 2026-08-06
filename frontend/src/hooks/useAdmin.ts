@@ -69,8 +69,14 @@ export function useUpdateUserPassword() {
 }
 
 export function useResetUserPassword() {
+  const queryClient = useQueryClient();
+
   return useMutation({
-    mutationFn: (userId: number) => adminApi.resetUserPassword(userId),
+    mutationFn: ({ userId, password }: { userId: number; password?: string }) =>
+      adminApi.resetUserPassword(userId, password),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'users'] });
+    },
   });
 }
 

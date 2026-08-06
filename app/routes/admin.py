@@ -238,6 +238,9 @@ def api_reset_user_password(user_id):
 
     The user must change the temporary password on next login.
     Returns the temporary password to the admin for secure delivery to the user.
+
+    Optional JSON body:
+        {"password": "CustomP@ss123"}  # If provided, use this password instead of generating one.
     """
     # Get user
     user = user_repo.get_user_by_id(user_id)
@@ -246,24 +249,36 @@ def api_reset_user_password(user_id):
 
     # Get security settings for password policy
     settings = get_security_settings_cached()
-    min_length = 12  # Default to 12 for temporary passwords
 
-    if settings:
-        policy_min = settings.get("password_min_length", 8)
-        # Use policy minimum if it's higher, but ensure at least 12 chars for security
-        min_length = max(policy_min, 12)
+    # Check if a custom password was provided in the request body
+    data = request.get_json(silent=True) or {}
+    custom_password = data.get("password")
 
-    # Generate temporary password
-    # Include uppercase, lowercase, digits, and special characters
-    chars = string.ascii_letters + string.digits + "!@#$%^&*"
-    temp_password = "".join(secrets.choice(chars) for _ in range(min_length))
+    if custom_password:
+        # Validate the custom password against security policy
+        is_valid, error_msg = validate_password(custom_password, policy_settings=settings)
+        if not is_valid:
+            return jsonify({"error": error_msg}), 400
+        temp_password = custom_password
+    else:
+        # Generate a temporary password automatically
+        min_length = 12  # Default to 12 for temporary passwords
 
-    # Validate generated password meets policy
-    is_valid, error_msg = validate_password(temp_password, policy_settings=settings)
-    if not is_valid:
-        # If validation fails (unlikely), regenerate with stronger requirements
-        chars = string.ascii_uppercase + string.ascii_lowercase + string.digits + "!@#$%^&*"
-        temp_password = "".join(secrets.choice(chars) for _ in range(16))
+        if settings:
+            policy_min = settings.get("password_min_length", 8)
+            # Use policy minimum if it's higher, but ensure at least 12 chars for security
+            min_length = max(policy_min, 12)
+
+        # Include uppercase, lowercase, digits, and special characters
+        chars = string.ascii_letters + string.digits + "!@#$%^&*"
+        temp_password = "".join(secrets.choice(chars) for _ in range(min_length))
+
+        # Validate generated password meets policy
+        is_valid, error_msg = validate_password(temp_password, policy_settings=settings)
+        if not is_valid:
+            # If validation fails (unlikely), regenerate with stronger requirements
+            chars = string.ascii_uppercase + string.ascii_lowercase + string.digits + "!@#$%^&*"
+            temp_password = "".join(secrets.choice(chars) for _ in range(16))
 
     # Update password
     password_hash = hash_password(temp_password)
@@ -273,6 +288,7 @@ def api_reset_user_password(user_id):
         return jsonify({"error": "Failed to update password"}), 500
 
     # Set must_change_password flag to force password change on next login
+    # (update_password sets it to False, so we must explicitly set it back to True)
     user_repo.set_must_change_password(user_id, True)
 
     logger.info(f"Password reset for user {user_id} by admin {g.user_id}")

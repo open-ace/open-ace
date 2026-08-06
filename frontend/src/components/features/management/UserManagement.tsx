@@ -46,9 +46,14 @@ export const UserManagement: React.FC = () => {
   const resetUserPassword = useResetUserPassword();
   const syncFeishuOrg = useSyncFeishuOrg();
 
-  // Temporary password modal state
-  const [showTempPasswordModal, setShowTempPasswordModal] = useState(false);
-  const [tempPassword, setTempPassword] = useState<string>('');
+  // Reset password modal state (three-step)
+  const [showResetPasswordModal, setShowResetPasswordModal] = useState(false);
+  const [resetPasswordStep, setResetPasswordStep] = useState<'confirm' | 'setPassword' | 'complete'>('confirm');
+  const [resetPasswordUser, setResetPasswordUser] = useState<AdminUser | null>(null);
+  const [editingPassword, setEditingPassword] = useState('');
+  const [resetPasswordError, setResetPasswordError] = useState<string | null>(null);
+  const [resetPasswordResult, setResetPasswordResult] = useState('');
+  const [copiedPassword, setCopiedPassword] = useState(false);
 
   // Page refresh control - manual refresh for user management
   const pageRefresh = usePageRefresh({
@@ -95,8 +100,6 @@ export const UserManagement: React.FC = () => {
   // Password policy validation
   const validatePasswordPolicy = (password: string): string | null => {
     if (!password) return t('passwordRequired', language) ?? 'Password is required';
-    if (password.length < 8)
-      return t('passwordTooShort', language) ?? 'Password must be at least 8 characters';
 
     const policy = securitySettings;
     if (policy) {
@@ -113,11 +116,57 @@ export const UserManagement: React.FC = () => {
       if (policy.password_require_number && !/[0-9]/.test(password)) {
         return t('requireNumber', language);
       }
-      if (policy.password_require_special && !/[!@#$%^&*(),.?":{}|<>]/.test(password)) {
+      if (policy.password_require_special && !/[^\w\s]/.test(password)) {
         return t('requireSpecial', language);
+      }
+    } else {
+      // Fallback when security settings not loaded - use default min length of 8
+      if (password.length < 8) {
+        return t('passwordTooShort', language) ?? 'Password must be at least 8 characters';
       }
     }
     return null;
+  };
+
+  // Generate a secure random password using Web Crypto API
+  const generateSecurePassword = (): string => {
+    const policy = securitySettings;
+    const minLen = Math.max(policy?.password_min_length || 8, 12);
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*';
+
+    // Use crypto.getRandomValues for cryptographically secure randomness
+    const randomArray = new Uint32Array(minLen);
+    crypto.getRandomValues(randomArray);
+
+    let password = '';
+    for (let i = 0; i < minLen; i++) {
+      password += chars[randomArray[i] % chars.length];
+    }
+
+    // Ensure the password meets all policy requirements
+    if (policy) {
+      const checks: { flag: boolean | undefined; regex: RegExp; fallback: string }[] = [
+        { flag: policy.password_require_uppercase, regex: /[A-Z]/, fallback: 'A' },
+        { flag: policy.password_require_lowercase, regex: /[a-z]/, fallback: 'a' },
+        { flag: policy.password_require_number, regex: /[0-9]/, fallback: '1' },
+        { flag: policy.password_require_special, regex: /[^\w\s]/, fallback: '!' },
+      ];
+
+      checks.forEach((check, idx) => {
+        if (check.flag && !check.regex.test(password)) {
+          // Replace character at position idx with a guaranteed compliant one
+          const randomIndex = new Uint32Array(1);
+          crypto.getRandomValues(randomIndex);
+          const replacementChars = check.fallback;
+          password =
+            password.substring(0, idx) +
+            replacementChars +
+            password.substring(idx + 1);
+        }
+      });
+    }
+
+    return password;
   };
 
   // Password policy hint component
@@ -261,15 +310,82 @@ export const UserManagement: React.FC = () => {
     }
   };
 
-  const handleResetPassword = async (userId: number) => {
+  const handleResetPassword = (user: AdminUser) => {
+    // Open the three-step reset password modal instead of directly calling API
+    setResetPasswordUser(user);
+    setResetPasswordStep('confirm');
+    setEditingPassword(generateSecurePassword());
+    setResetPasswordError(null);
+    setResetPasswordResult('');
+    setCopiedPassword(false);
+    setShowResetPasswordModal(true);
+  };
+
+  const handleConfirmResetPassword = () => {
+    // Move from Step 1 (confirm) to Step 2 (set password)
+    setResetPasswordStep('setPassword');
+  };
+
+  const handleBackToConfirm = () => {
+    setResetPasswordStep('confirm');
+  };
+
+  const handleRegeneratePassword = () => {
+    setEditingPassword(generateSecurePassword());
+    setResetPasswordError(null);
+  };
+
+  const handleConfirmSetPassword = async () => {
+    if (!resetPasswordUser) return;
+
+    // Validate password before submitting
+    const error = validatePasswordPolicy(editingPassword);
+    if (error) {
+      setResetPasswordError(error);
+      return;
+    }
+
     try {
-      const result = await resetUserPassword.mutateAsync(userId);
+      const result = await resetUserPassword.mutateAsync({
+        userId: resetPasswordUser.id,
+        password: editingPassword,
+      });
       if (result.temporary_password) {
-        setTempPassword(result.temporary_password);
-        setShowTempPasswordModal(true);
+        setResetPasswordResult(result.temporary_password);
+        setResetPasswordStep('complete');
       }
     } catch (err) {
       console.error('Failed to reset password:', err);
+      const errorMessage =
+        (err as Error)?.message ??
+        (err as Record<string, string>)?.error ??
+        t('failedToSaveUser', language) ??
+        'Failed to reset password';
+      setResetPasswordError(errorMessage);
+      toast.error(
+        t('resetPassword', language) ?? 'Reset Password',
+        errorMessage
+      );
+    }
+  };
+
+  const handleCloseResetPasswordModal = () => {
+    setShowResetPasswordModal(false);
+    setResetPasswordUser(null);
+    setResetPasswordStep('confirm');
+    setEditingPassword('');
+    setResetPasswordError(null);
+    setResetPasswordResult('');
+    setCopiedPassword(false);
+  };
+
+  const handleCopyPassword = async () => {
+    const success = await copyToClipboard(resetPasswordResult);
+    if (success) {
+      setCopiedPassword(true);
+      setTimeout(() => setCopiedPassword(false), 2000);
+    } else {
+      toast.error(t('copyFailed', language) || 'Copy failed');
     }
   };
 
@@ -291,11 +407,6 @@ export const UserManagement: React.FC = () => {
         (err as Error)?.message || (language === 'zh' ? '飞书同步失败' : 'Feishu sync failed')
       );
     }
-  };
-
-  const handleCloseTempPasswordModal = () => {
-    setShowTempPasswordModal(false);
-    setTempPassword('');
   };
 
   const getRoleBadgeVariant = (role: string) => {
@@ -359,13 +470,13 @@ export const UserManagement: React.FC = () => {
             onClick={handleSyncFeishu}
             disabled={syncFeishuOrg.isPending}
           >
-            <i className="bi bi-cloud-arrow-down me-1" />
+            <i className="bi bi-cloud-arrow-down me-1" aria-hidden="true" />
             {language === 'zh' ? '同步飞书' : 'Sync Feishu'}
           </Button>
 
           {/* 添加用户按钮：柔和圆角主色按钮 */}
           <Button variant="primary" size="sm" onClick={handleOpenCreate}>
-            <i className="bi bi-plus-lg me-1" />
+            <i className="bi bi-plus-lg me-1" aria-hidden="true" />
             {t('addUser', language)}
           </Button>
         </div>
@@ -426,17 +537,19 @@ export const UserManagement: React.FC = () => {
                         size="sm"
                         onClick={() => handleOpenEdit(user)}
                         title={t('edit', language) ?? 'Edit'}
+                        ariaLabel={t('edit', language) ?? 'Edit'}
                       >
-                        <i className="bi bi-pencil" />
+                        <i className="bi bi-pencil" aria-hidden="true" />
                       </Button>
                       <Button
                         variant="outline-warning"
                         size="sm"
-                        onClick={() => handleResetPassword(user.id)}
+                        onClick={() => handleResetPassword(user)}
                         disabled={resetUserPassword.isPending}
                         title={t('resetPassword', language) ?? 'Reset Password'}
+                        ariaLabel={t('resetPassword', language) ?? 'Reset Password'}
                       >
-                        <i className="bi bi-key" />
+                        <i className="bi bi-key" aria-hidden="true" />
                       </Button>
                       <Button
                         variant="outline-danger"
@@ -444,8 +557,9 @@ export const UserManagement: React.FC = () => {
                         onClick={() => handleDelete(user.id)}
                         disabled={deleteUser.isPending}
                         title={t('delete', language) ?? 'Delete'}
+                        ariaLabel={t('delete', language) ?? 'Delete'}
                       >
-                        <i className="bi bi-trash" />
+                        <i className="bi bi-trash" aria-hidden="true" />
                       </Button>
                     </div>
                   </td>
@@ -489,8 +603,8 @@ export const UserManagement: React.FC = () => {
           {/* Error Message */}
           {formError && (
             <div className="alert alert-danger mb-3" role="alert">
-              <i className="bi bi-exclamation-triangle-fill me-2" />
-              {formError}
+<i className="bi bi-exclamation-triangle-fill me-2" aria-hidden="true" />
+            {formError}
             </div>
           )}
 
@@ -592,49 +706,168 @@ export const UserManagement: React.FC = () => {
         </form>
       </Modal>
 
-      {/* Temporary Password Modal */}
+      {/* Reset Password Modal (Three-step) */}
       <Modal
-        isOpen={showTempPasswordModal}
-        onClose={handleCloseTempPasswordModal}
-        title={t('temporaryPassword', language) ?? 'Temporary Password'}
+        isOpen={showResetPasswordModal}
+        onClose={handleCloseResetPasswordModal}
+        title={t('resetUserPasswordTitle', language) ?? 'Reset User Password'}
         size="md"
         footer={
-          <Button variant="primary" onClick={handleCloseTempPasswordModal}>
-            {t('close', language)}
-          </Button>
+          resetPasswordStep === 'confirm' ? (
+            <>
+              <Button variant="secondary" onClick={handleCloseResetPasswordModal}>
+                {t('cancel', language)}
+              </Button>
+              <Button variant="primary" onClick={handleConfirmResetPassword}>
+                {t('continueToSetPassword', language) ?? 'Confirm, Continue to Set Password'}
+              </Button>
+            </>
+          ) : resetPasswordStep === 'setPassword' ? (
+            <>
+              <Button variant="secondary" onClick={handleBackToConfirm}>
+                {t('back', language) ?? 'Back'}
+              </Button>
+              <Button
+                variant="primary"
+                onClick={handleConfirmSetPassword}
+                loading={resetUserPassword.isPending}
+                disabled={!!validatePasswordPolicy(editingPassword)}
+              >
+                {t('confirmResetPassword', language) ?? 'Confirm Reset Password'}
+              </Button>
+            </>
+          ) : (
+            <Button variant="primary" onClick={handleCloseResetPasswordModal}>
+              {t('close', language)}
+            </Button>
+          )
         }
       >
-        <div className="alert alert-warning mb-3">
-          <i className="bi bi-exclamation-triangle-fill me-2" />
-          {t('tempPasswordWarning', language) ??
-            'Please share this password securely with the user. They will be required to change it on first login.'}
+        {/* Step indicator */}
+        <div className="d-flex align-items-center justify-content-center mb-3 gap-2">
+          <span className={resetPasswordStep === 'confirm' ? 'fw-bold' : 'text-muted'}>
+            {resetPasswordStep === 'confirm' ? '\u25CF' : '\u25CB'} {t('confirmOperation', language) ?? 'Confirm Operation'}
+          </span>
+          <span className="text-muted">{'\u2192'}</span>
+          <span className={resetPasswordStep === 'setPassword' ? 'fw-bold' : 'text-muted'}>
+            {resetPasswordStep === 'setPassword' ? '\u25CF' : '\u25CB'} {t('setPassword', language) ?? 'Set Password'}
+          </span>
+          <span className="text-muted">{'\u2192'}</span>
+          <span className={resetPasswordStep === 'complete' ? 'fw-bold' : 'text-muted'}>
+            {resetPasswordStep === 'complete' ? '\u25CF' : '\u25CB'} {t('complete', language)}
+          </span>
         </div>
-        <div className="mb-3">
-          <label className="form-label">
-            {t('temporaryPasswordLabel', language) ?? 'Temporary Password'}
-          </label>
-          <div className="input-group">
-            <input
-              type="text"
-              className="form-control"
-              value={tempPassword}
-              readOnly
-              style={{ fontWeight: 'bold', fontSize: '1.2em' }}
-            />
-            <Button
-              variant="outline-secondary"
-              onClick={async () => {
-                const success = await copyToClipboard(tempPassword);
-                if (!success) {
-                  toast.error(t('copyFailed', language) || 'Copy failed');
-                }
-              }}
-              title={t('copyToClipboard', language) ?? 'Copy to clipboard'}
-            >
-              <i className="bi bi-clipboard" />
-            </Button>
+
+        {/* Step 1: Confirm */}
+        {resetPasswordStep === 'confirm' && resetPasswordUser && (
+          <div>
+            <div className="alert alert-warning mb-3">
+              <i className="bi bi-exclamation-triangle-fill me-2" aria-hidden="true" />
+              <strong>{t('confirmResetUserPassword', language) ?? 'Are you sure you want to reset this user\u2019s password?'}</strong>
+              <br />
+              <span className="small">
+                {t('afterResetPasswordWillExpire', language) ??
+                  'The current password will be invalid immediately after reset, and the user must log in with the new password.'}
+              </span>
+            </div>
+            <div className="mb-3">
+              <div className="row mb-1">
+                <div className="col-4 text-muted">{t('tableUsername', language)}</div>
+                <div className="col-8"><strong>{resetPasswordUser.username}</strong></div>
+              </div>
+              <div className="row">
+                <div className="col-4 text-muted">{t('tableEmail', language)}</div>
+                <div className="col-8">{resetPasswordUser.email}</div>
+              </div>
+            </div>
           </div>
-        </div>
+        )}
+
+        {/* Step 2: Set Password */}
+        {resetPasswordStep === 'setPassword' && (
+          <div>
+            {resetPasswordError && (
+              <div className="alert alert-danger mb-3" role="alert">
+                <i className="bi bi-exclamation-triangle-fill me-2" aria-hidden="true" />
+                {resetPasswordError}
+              </div>
+            )}
+            <div className="mb-3">
+              <label className="form-label">{t('newPassword', language)}</label>
+              <div className="input-group">
+                <input
+                  type="text"
+                  className="form-control"
+                  value={editingPassword}
+                  onChange={(e) => {
+                    setEditingPassword(e.target.value);
+                    setResetPasswordError(null);
+                  }}
+                  style={{ fontFamily: 'monospace', fontSize: '1.1em' }}
+                />
+                <Button
+                  variant="outline-secondary"
+                  onClick={handleRegeneratePassword}
+                  title={t('generateRandomPassword', language) ?? 'Generate Random Password'}
+                  ariaLabel={t('generateRandomPassword', language) ?? 'Generate Random Password'}
+                >
+                  <i className="bi bi-arrow-clockwise" aria-hidden="true" />
+                </Button>
+              </div>
+              {/* Real-time validation result */}
+              {(() => {
+                const error = validatePasswordPolicy(editingPassword);
+                return error ? (
+                  <div className="text-danger small mt-1">
+                    {'\u2717'} {t('passwordDoesNotMeetRequirements', language) ?? 'Password does not meet requirements'}: {error}
+                  </div>
+                ) : (
+                  <div className="text-success small mt-1">
+                    {'\u2713'} {t('passwordMeetsAllRequirements', language) ?? 'Password meets all requirements'}
+                  </div>
+                );
+              })()}
+              {/* Password requirements list */}
+              <PasswordPolicyHint />
+            </div>
+          </div>
+        )}
+
+        {/* Step 3: Complete */}
+        {resetPasswordStep === 'complete' && (
+          <div>
+            <div className="alert alert-success mb-3">
+              <i className="bi bi-check-circle-fill me-2" aria-hidden="true" />
+              <strong>{t('passwordResetSuccessfully', language) ?? 'Password reset successfully'}</strong>
+              <br />
+              <span className="small">
+                {t('userMustChangePasswordOnNextLogin', language) ??
+                  'The user must change the password on next login.'}
+              </span>
+            </div>
+            <div className="mb-3">
+              <label className="form-label">{t('newPassword', language)}</label>
+              <div className="input-group">
+                <input
+                  type="text"
+                  className="form-control"
+                  value={resetPasswordResult}
+                  readOnly
+                  style={{ fontFamily: 'monospace', fontSize: '1.2em', fontWeight: 'bold' }}
+                />
+                <Button
+                  variant="outline-secondary"
+                  onClick={handleCopyPassword}
+                  title={t('copy', language) ?? 'Copy'}
+                  ariaLabel={t('copy', language) ?? 'Copy'}
+                >
+                  <i className={copiedPassword ? 'bi bi-check-lg' : 'bi bi-clipboard'} aria-hidden="true" />
+                  {copiedPassword ? (t('copied', language) ?? 'Copied') : (t('copy', language) ?? 'Copy')}
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
       </Modal>
     </div>
   );
