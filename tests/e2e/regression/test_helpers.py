@@ -86,11 +86,11 @@ def dismiss_force_change_password_modal(page: Page, new_password: str = "Admin12
         # 没有弹窗，正常情况
         pass
     else:
-        # 弹窗内三个密码输入框通过 label 定位（更稳定，不依赖 placeholder 文本）
-        # Issue #2312: placeholder 文本可能因 i18n 变化，使用 label 更健壮
-        current_pw_input = page.get_by_label("Current Password", exact=False)
-        new_pw_input = page.get_by_label("New Password", exact=False)
-        confirm_pw_input = page.get_by_label("Confirm Password", exact=False)
+        # 弹窗内三个密码输入框通过 aria-label 定位（更稳定，不受 i18n 影响）
+        # Issue #2312: 使用 aria-label 定位，避免依赖 placeholder/label 文本
+        current_pw_input = page.get_by_role("textbox", name="current-password")
+        new_pw_input = page.get_by_role("textbox", name="new-password")
+        confirm_pw_input = page.get_by_role("textbox", name="confirm-password")
 
         # 填写改密表单
         current_pw_input.fill(PASSWORD)
