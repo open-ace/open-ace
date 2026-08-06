@@ -137,7 +137,6 @@ describe('useAuth', () => {
     });
 
     it('should invalidate queries after successful password change', async () => {
-      const wrapper = createWrapper();
       vi.mocked(authApi.changePassword).mockResolvedValue({ success: true });
 
       const queryClient = new QueryClient({
@@ -246,7 +245,7 @@ describe('useAuth', () => {
       await act(async () => {
         try {
           await result.current.changePassword('oldPass', 'newPass');
-        } catch (error) {
+        } catch {
           // Expected to throw
         }
       });
@@ -308,7 +307,7 @@ describe('useAuth', () => {
       await act(async () => {
         try {
           await result.current.changePassword('oldPass', 'newPass');
-        } catch (error) {
+        } catch {
           // Expected to throw
         }
       });
@@ -352,7 +351,7 @@ describe('useAuth', () => {
       await act(async () => {
         try {
           await result.current.login({ username: 'testuser', password: 'wrong' });
-        } catch (error) {
+        } catch {
           // Expected to throw
         }
       });

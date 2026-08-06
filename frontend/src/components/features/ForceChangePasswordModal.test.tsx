@@ -327,10 +327,10 @@ describe('ForceChangePasswordModal', () => {
       expect(submitButton).toBeDisabled();
     });
 
-    it('should prevent duplicate submissions when isChangingPassword is true', async () => {
+    it('should call changePassword only once per submission', async () => {
       // First call resolves slowly
       mockChangePassword.mockImplementation(
-        () => new Promise((resolve) => setTimeout(resolve, 1000))
+        () => new Promise((resolve) => setTimeout(resolve, 100))
       );
 
       render(<ForceChangePasswordModal />);
@@ -345,11 +345,13 @@ describe('ForceChangePasswordModal', () => {
 
       const submitButton = screen.getByRole('button', { name: 'Change Password' });
 
-      // Simulate multiple rapid clicks
+      // Click submit button once
       fireEvent.click(submitButton);
 
       await waitFor(() => {
+        // Verify API is called exactly once
         expect(mockChangePassword).toHaveBeenCalledTimes(1);
+        expect(mockChangePassword).toHaveBeenCalledWith('oldPassword123', 'newPassword123');
       });
     });
 
