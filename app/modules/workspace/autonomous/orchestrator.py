@@ -13,6 +13,7 @@ import logging
 import os
 import pwd
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -321,6 +322,309 @@ def _is_bot_comment(comment: dict) -> bool:
     return any(kw in login.lower() for kw in BOT_AUTHOR_KEYWORDS)
 
 
+# Commands that read, search, inspect or move test files without executing
+# them. A segment headed by one of these can never be a test invocation, however
+# many framework names appear in its arguments (#2376 D1): before this filter,
+# ``grep -rn "pytest" tests/`` was recognized as a test run and — since the
+# evidence parsers judge an unrecognized framework on the exit code alone —
+# could satisfy the authoritative test gate on its own.
+#
+# Named "non-executing" rather than "read-only" because it also covers commands
+# that write but still cannot run a test (``cp``, ``mv``, ``rm``, ``chmod``).
+# Deliberately excludes ``source``/``.``, which *do* execute their argument.
+_NON_EXECUTING_COMMANDS = frozenset(
+    {
+        "cat",
+        "less",
+        "more",
+        "head",
+        "tail",
+        "bat",
+        "nl",
+        "grep",
+        "rg",
+        "ag",
+        "ls",
+        "stat",
+        "wc",
+        "file",
+        "du",
+        "git",
+        "sed",
+        "awk",
+        "jq",
+        "sort",
+        "uniq",
+        "cut",
+        "tr",
+        "column",
+        "tee",
+        "strings",
+        "od",
+        "xxd",
+        "md5sum",
+        "sha256sum",
+        "basename",
+        "dirname",
+        "diff",
+        "find",
+        "cp",
+        "mv",
+        "rm",
+        "mkdir",
+        "chmod",
+        "touch",
+        "vim",
+        "nano",
+        "echo",
+        "printf",
+        "which",
+        "realpath",
+        "ps",
+        "curl",
+        "wget",
+    }
+)
+
+# Interpreters and test runners that mark a segment as *executing*. Whichever
+# kind of token appears first decides the segment: a runner seen before any
+# non-executing command means the segment runs tests, and vice versa.
+_INTERPRETER_COMMANDS = frozenset(
+    {"bash", "sh", "zsh", "python", "python3", "node", "npx", "pnpm", "yarn", "bun", "deno"}
+)
+
+_TEST_RUNNER_COMMANDS = frozenset(
+    {
+        "pytest",
+        "py.test",
+        "unittest",
+        "nose2",
+        "tox",
+        "nox",
+        "jest",
+        "vitest",
+        "mocha",
+        "npm",
+        "go",
+        "gotestsum",
+        "cargo",
+        "mvn",
+        "gradle",
+        "gradlew",
+        "make",
+    }
+)
+
+# Flags that turn a test command into a help/version query. Matched as whole
+# tokens: a raw substring test discards legitimate runs whose path or flags
+# merely contain "-h" (e.g. ``pytest -q --no-header``, ``tests/test-helper.py``).
+_EXCLUDE_FLAG_TOKENS = frozenset({"--help", "--version", "-h"})
+
+
+def _shell_tokens(text: str) -> list[str]:
+    """Best-effort shell tokenization; falls back to whitespace on bad quoting."""
+    try:
+        return shlex.split(text)
+    except ValueError:
+        return text.split()
+
+
+def _command_segments(command: str) -> list[str]:
+    """Split a shell command into the segments that run as separate commands.
+
+    Quote-aware, because a regex split would cut inside a quoted string and hand
+    the tail to the filter as a headless fragment — ``grep -E "pytest|unittest"
+    tests/`` would split at the alternation and the fragment ``unittest" tests/``
+    would match a test pattern with nothing to veto it (#2376 PR-1 review).
+
+    Newlines are separators too: multi-line Bash input is one tool call but many
+    commands, and treating it as a single segment lets a ``git status`` on one
+    line veto a ``pytest`` on another.
+
+    Two constructs escape the newline rule, because their following lines are
+    *data*, not commands (#2376 PR-1 re-review):
+
+    - A heredoc body. ``cat > tests/test_x.py <<'EOF' … import pytest … EOF``
+      would otherwise contribute ``import pytest`` as its own segment, so
+      *writing* a test file would satisfy the gate.
+    - A comment. ``# TODO: run pytest later`` would otherwise be a segment with
+      no head and a matching pattern.
+    """
+    segments: list[str] = []
+    buf: list[str] = []
+    pending_heredocs: list[tuple[str, bool]] = []
+    in_single = in_double = False
+    i, n = 0, len(command)
+    while i < n:
+        ch = command[i]
+        if ch == "\\" and not in_single and i + 1 < n:
+            buf.append(ch)
+            buf.append(command[i + 1])
+            i += 2
+            continue
+        if ch == "'" and not in_double:
+            in_single = not in_single
+        elif ch == '"' and not in_single:
+            in_double = not in_double
+        elif not in_single and not in_double:
+            # A heredoc's *body* is data, but the rest of its line is still
+            # command text (``cat <<EOF && pytest``), so record the delimiter
+            # and keep scanning; the body is skipped at the newline below.
+            if command[i : i + 2] == "<<":
+                delimiter, after, strip_tabs = _parse_heredoc_delimiter(command, i)
+                if delimiter is not None:
+                    buf.append(command[i:after])
+                    pending_heredocs.append((delimiter, strip_tabs))
+                    i = after
+                    continue
+            # An unquoted word-initial "#" comments out the rest of the line.
+            if ch == "#" and (not buf or buf[-1].isspace()):
+                while i < n and command[i] not in "\n\r":
+                    i += 1
+                continue
+            if command[i : i + 2] in ("&&", "||"):
+                segments.append("".join(buf))
+                buf = []
+                i += 2
+                continue
+            if ch in "\n\r":
+                segments.append("".join(buf))
+                buf = []
+                i += 1
+                # Consume each pending heredoc body up to and including its
+                # terminator line, so body text is never read as commands and
+                # commands *after* the terminator are still seen.
+                while pending_heredocs:
+                    delimiter, strip_tabs = pending_heredocs.pop(0)
+                    while i < n:
+                        end = command.find("\n", i)
+                        line = command[i:end] if end != -1 else command[i:]
+                        i = end + 1 if end != -1 else n
+                        if (line.lstrip("\t") if strip_tabs else line).strip() == delimiter:
+                            break
+                continue
+            if ch in ";|":
+                segments.append("".join(buf))
+                buf = []
+                i += 1
+                continue
+            # A lone "&" backgrounds a command, but "2>&1" and "&>" are
+            # redirections and must not be treated as separators.
+            if ch == "&" and (command[i - 1] if i else "") not in ">&":
+                if (command[i + 1] if i + 1 < n else "") not in "&>":
+                    segments.append("".join(buf))
+                    buf = []
+                    i += 1
+                    continue
+        buf.append(ch)
+        i += 1
+    segments.append("".join(buf))
+    return [seg for seg in segments if seg.strip()]
+
+
+_ASSIGNMENT_RE = re.compile(r"^\w+=")
+
+
+def _parse_heredoc_delimiter(command: str, i: int) -> tuple[str | None, int, bool]:
+    """Parse the delimiter word of a heredoc starting at ``command[i:i+2] == "<<"``.
+
+    Returns ``(delimiter, index_after_delimiter, strip_tabs)``, or
+    ``(None, i, False)`` when no valid delimiter follows — which is how an
+    arithmetic left shift (``$((1<<2))``) is told apart from a heredoc.
+    """
+    j = i + 2
+    strip_tabs = False
+    if j < len(command) and command[j] == "-":
+        strip_tabs = True
+        j += 1
+    while j < len(command) and command[j] in " \t":
+        j += 1
+    if j < len(command) and command[j] in "'\"":
+        quote = command[j]
+        end = command.find(quote, j + 1)
+        if end == -1:
+            return None, i, False
+        return command[j + 1 : end], end + 1, strip_tabs
+    end = j
+    while end < len(command) and (command[end].isalnum() or command[end] == "_"):
+        end += 1
+    word = command[j:end]
+    if not word or not (word[0].isalpha() or word[0] == "_"):
+        return None, i, False
+    return word, end, strip_tabs
+
+
+# Installing a test runner is not running it. Checked before the head scan
+# because the package managers overlap the runner set (``npm ci`` vs
+# ``npm test``); without it, ``pip install -U pytest`` satisfies the gate —
+# the likeliest real instance of the class this filter exists to close.
+_PACKAGE_MANAGERS = frozenset(
+    {"pip", "pip3", "uv", "poetry", "npm", "yarn", "pnpm", "apt", "apt-get", "brew", "conda"}
+)
+_INSTALL_SUBCOMMANDS = frozenset({"install", "add", "ci", "uninstall", "remove"})
+
+
+def _is_package_manager_install(tokens: list[str]) -> bool:
+    """Whether the tokens are a dependency install rather than a test run.
+
+    Scans for the manager rather than requiring it at token 0, so wrapper and
+    interpreter prefixes do not hide it — ``python -m pip install pytest`` is
+    the form this project's own docs use, and ``sudo pip install`` is common.
+    Only the *first non-flag* token after the manager decides, so a test-name
+    filter that happens to equal a subcommand cannot veto a genuine run
+    (``npm test -- --grep install``). One manager-to-manager hop is allowed for
+    ``uv pip install`` and ``python -m pip install``.
+    """
+    for index, token in enumerate(tokens):
+        if _ASSIGNMENT_RE.match(token):
+            continue
+        if token.rsplit("/", 1)[-1] not in _PACKAGE_MANAGERS:
+            continue
+        for follower in tokens[index + 1 :]:
+            if follower.startswith("-"):
+                continue
+            base = follower.rsplit("/", 1)[-1]
+            if base in _PACKAGE_MANAGERS:
+                continue
+            return base in _INSTALL_SUBCOMMANDS
+        return False
+    return False
+
+
+def _segment_is_non_executing(segment: str) -> bool:
+    """Whether ``segment`` reads/inspects rather than runs something.
+
+    Resolved from the first token that is a recognized command of *either* kind,
+    scanning left to right. Scanning (rather than taking token 0) steps over
+    wrapper prefixes and their operands — ``sudo -u openace``, ``timeout 60`` —
+    without modelling each wrapper's option grammar. Stopping at a runner is
+    what keeps an *argument* from vetoing a genuine run: ``pytest tests/cat``
+    must stay eligible even though ``cat`` is a basename in the non-executing
+    set (#2376 PR-1 review).
+
+    An unrecognized head leaves the segment eligible — an unknown command is not
+    assumed to be non-executing.
+    """
+    tokens = _shell_tokens(segment)
+    if _is_package_manager_install(tokens):
+        return True
+    for token in tokens:
+        # Env assignments are not the command. Skipping them (rather than
+        # resolving their basename) also stops a runner name inside an assigned
+        # path from winning the scan: ``PYTHONPATH=/opt/tox cat tests/x.py``.
+        if _ASSIGNMENT_RE.match(token):
+            continue
+        # ``$(``/backtick prefixes survive tokenization on unquoted command
+        # substitution; stripping them recovers the inner command name so
+        # ``$(grep -rn pytest tests/)`` still resolves to ``grep``.
+        base = token.rsplit("/", 1)[-1].lstrip("$(`")
+        if base in _TEST_RUNNER_COMMANDS or base in _INTERPRETER_COMMANDS:
+            return False
+        if base in _NON_EXECUTING_COMMANDS:
+            return True
+    return False
+
+
 def _has_test_tool_call(tool_calls: list, framework_type: str) -> bool:
     """Check if tool_calls contains a test framework execution command.
 
@@ -342,8 +646,6 @@ def _has_test_tool_call(tool_calls: list, framework_type: str) -> bool:
     # P1: generic_patterns includes unittest for unknown frameworks
     generic_patterns = ["pytest", "unittest", "jest", "go test", "cargo test", "npm test"]
     patterns_to_check = test_commands.get(framework_type, generic_patterns)
-    # Note: -v (verbose) is NOT excluded, only --help/--version/-h
-    exclude_flags = ["--help", "--version", "-h"]
 
     for tc in tool_calls:
         tool_name = tc.get("tool", {}).get("name", "") if isinstance(tc.get("tool"), dict) else ""
@@ -359,11 +661,23 @@ def _has_test_tool_call(tool_calls: list, framework_type: str) -> bool:
         # Then check Bash/run_shell_command for test commands
         if tool_name in ("Bash", "Shell", "run_shell_command", "exec_command"):
             cmd = tool_input.get("command") or tool_input.get("cmd") or ""
-            if not cmd or any(flag in cmd for flag in exclude_flags):
+            if not cmd:
                 continue
-            for pattern in patterns_to_check:
-                if pattern in cmd:
-                    return True
+            # #2376: filter and match per segment. Both must be per-segment —
+            # matching the whole command would let a surviving segment lend its
+            # eligibility to a filtered one, so a one-token prefix would defeat
+            # the read-only filter:
+            #     python -c "print(1)" && grep -rn pytest tests/
+            for segment in _command_segments(cmd):
+                if _segment_is_non_executing(segment):
+                    continue
+                tokens = _shell_tokens(segment)
+                # Note: -v (verbose) is NOT excluded, only --help/--version/-h
+                if any(token in _EXCLUDE_FLAG_TOKENS for token in tokens):
+                    continue
+                for pattern in patterns_to_check:
+                    if pattern in segment:
+                        return True
 
     return False
 
