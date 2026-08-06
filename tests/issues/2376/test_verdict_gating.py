@@ -59,7 +59,7 @@ def _ce(row_id: int, command: str, exit_code: int, output: str = "") -> CommandE
 
 def _verdict(commands, framework: str) -> ExecutionVerdict:
     evidences = [parse_test_evidence(ce, framework_hint=framework) for ce in commands]
-    return compute_run_verdict(evidences, framework)
+    return compute_run_verdict(evidences)
 
 
 # --- D4: pytest scope coverage must not depend on the run-level string -------
@@ -119,15 +119,22 @@ def test_same_shell_command_rerun_stays_failed_at_the_structured_layer():
     # collapse and the structured verdict stays FAILED.
     #
     # This is safe only because of the PASSED-only change: FAILED is no longer
-    # authoritative, so the gate falls back to the heuristic, whose own
-    # latest-wins is keyed on _normalize_test_command and therefore *does*
-    # collapse the rerun. Normalising the key here as well was considered and
-    # deliberately dropped — it would have required a new column on
-    # test_execution_evidence, and it opens a `| head` exit-code masking hole
-    # that the text-signal-gated heuristic does not have.
+    # authoritative, so the gate falls back to `_has_passing_test_tool_result`,
+    # whose own latest-wins is keyed on the normalized command and therefore
+    # *does* collapse the rerun. That rescue is exercised in
+    # test_gate_flags.py::test_conclusive_rerun_pass_supersedes_structured_failed.
+    #
+    # The command must be one the recognizer actually admits — a bare
+    # `bash tests/x.sh` is not recognized until PR-3's Fix C, so using it here
+    # would make the case unreachable in production AND break the rescue claim,
+    # since the heuristic shares the same recognizer.
+    #
+    # Normalising the key here as well was considered and deliberately dropped:
+    # it needs a new column on test_execution_evidence, and it opens a `| head`
+    # exit-code masking hole the text-signal-gated heuristic does not have.
     commands = [
-        _ce(1, "bash tests/integration/a.sh", 1),
-        _ce(2, "bash tests/integration/a.sh", 0),
+        _ce(1, "npm test", 1, "Tests: 1 failed"),
+        _ce(2, "npm test", 0, "Tests: 40 passed"),
     ]
     assert _verdict(commands, "mixed") is ExecutionVerdict.FAILED
 
@@ -142,21 +149,9 @@ def test_stale_pass_cannot_cover_a_later_failure():
     assert _verdict(commands, "mixed") is ExecutionVerdict.FAILED
 
 
-# --- D2: only PASSED is authoritative ----------------------------------------
-
-
-@pytest.mark.parametrize(
-    "verdict,expected_authoritative",
-    [
-        (ExecutionVerdict.PASSED, True),
-        (ExecutionVerdict.FAILED, False),
-        (ExecutionVerdict.NOT_RUN, False),
-        (ExecutionVerdict.INCONCLUSIVE, False),
-    ],
-)
-def test_only_passed_is_authoritative(verdict, expected_authoritative):
-    # Mirrors the gate's own expression. FAILED must NOT be authoritative:
-    # authoritative zeroes both test_result_inconclusive and
-    # tests_actually_skipped, and nothing downstream reads tests_actually_run,
-    # so an authoritative FAILED falls through to "Tests passed".
-    assert (verdict == ExecutionVerdict.PASSED) is expected_authoritative
+# NOTE: the D2 half of #2376 (PASSED-only authority, the three-way collapse,
+# the prose exclusion for FAILED, the fallback counter and the comment line) is
+# gate behaviour, not verdict behaviour, so it is covered in
+# tests/issues/2376/test_gate_flags.py against _run_test_phase itself. An
+# assertion here that merely restated `verdict == PASSED` would be a tautology
+# — it passes unmodified on main, where FAILED *is* authoritative.

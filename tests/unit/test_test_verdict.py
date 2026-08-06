@@ -42,7 +42,7 @@ def _te(
 
 
 def _run_failed(evidences: list[TestExecutionEvidence], framework: str = "python") -> bool:
-    return compute_run_verdict(evidences, framework) == ExecutionVerdict.FAILED
+    return compute_run_verdict(evidences) == ExecutionVerdict.FAILED
 
 
 # ── coverage / override rules (incident-encoding) ─────────────────────────────
@@ -76,7 +76,7 @@ def test_later_passing_superset_clears_earlier_failure():
             selectors=["tests/a.py", "tests/b.py", "tests/c.py"],
         ),
     ]
-    assert compute_run_verdict(evidences, "python") == ExecutionVerdict.PASSED
+    assert compute_run_verdict(evidences) == ExecutionVerdict.PASSED
 
 
 def test_earlier_passing_superset_does_not_clear_later_failure():
@@ -123,7 +123,7 @@ def test_same_command_latest_invocation_wins_head_tail_1967():
         ),
         _te("tail", ExecutionVerdict.PASSED.value, selectors=["tests/x.py"]),
     ]
-    assert compute_run_verdict(evidences, "python") == ExecutionVerdict.PASSED
+    assert compute_run_verdict(evidences) == ExecutionVerdict.PASSED
 
 
 def test_stale_pass_does_not_satisfy_rerun_that_failed():
@@ -161,11 +161,11 @@ def test_all_passed_returns_passed():
         _te("c1", ExecutionVerdict.PASSED.value, selectors=["tests/a.py"]),
         _te("c2", ExecutionVerdict.PASSED.value, selectors=["tests/b.py"]),
     ]
-    assert compute_run_verdict(evidences, "python") == ExecutionVerdict.PASSED
+    assert compute_run_verdict(evidences) == ExecutionVerdict.PASSED
 
 
 def test_empty_evidence_is_not_run():
-    assert compute_run_verdict([], "python") == ExecutionVerdict.NOT_RUN
+    assert compute_run_verdict([]) == ExecutionVerdict.NOT_RUN
 
 
 def test_all_low_confidence_is_inconclusive():
@@ -173,7 +173,7 @@ def test_all_low_confidence_is_inconclusive():
     evidences = [
         _te("c1", ExecutionVerdict.INCONCLUSIVE.value, confidence=ParserConfidence.LOW.value),
     ]
-    assert compute_run_verdict(evidences, "python") == ExecutionVerdict.INCONCLUSIVE
+    assert compute_run_verdict(evidences) == ExecutionVerdict.INCONCLUSIVE
 
 
 def test_low_confidence_command_makes_run_inconclusive_when_rest_pass():
@@ -183,7 +183,7 @@ def test_low_confidence_command_makes_run_inconclusive_when_rest_pass():
         _te("c1", ExecutionVerdict.PASSED.value, selectors=["tests/a.py"]),
         _te("c2", ExecutionVerdict.INCONCLUSIVE.value, confidence=ParserConfidence.LOW.value),
     ]
-    assert compute_run_verdict(evidences, "python") == ExecutionVerdict.INCONCLUSIVE
+    assert compute_run_verdict(evidences) == ExecutionVerdict.INCONCLUSIVE
 
 
 def test_failed_takes_priority_over_inconclusive_peer():
@@ -192,7 +192,7 @@ def test_failed_takes_priority_over_inconclusive_peer():
         _te("c1", ExecutionVerdict.FAILED.value, selectors=["tests/a.py"]),
         _te("c2", ExecutionVerdict.INCONCLUSIVE.value, confidence=ParserConfidence.LOW.value),
     ]
-    assert compute_run_verdict(evidences, "python") == ExecutionVerdict.FAILED
+    assert compute_run_verdict(evidences) == ExecutionVerdict.FAILED
 
 
 def test_medium_confidence_failure_blocks_pass():

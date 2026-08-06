@@ -124,9 +124,7 @@ def _has_uncovered_failure(
     return False
 
 
-def compute_run_verdict(
-    test_evidences: list[TestExecutionEvidence], framework: str
-) -> ExecutionVerdict:
+def compute_run_verdict(test_evidences: list[TestExecutionEvidence]) -> ExecutionVerdict:
     """Aggregate per-command evidence into a run-level verdict.
 
     Returns:
@@ -140,9 +138,12 @@ def compute_run_verdict(
           covered by a later passing superset) and no unparseable command
           leaves the run unconfirmable.
 
-    ``framework`` is the project-level framework hint (``_infer_test_framework``);
-    it gates whether pytest superset coverage applies. Non-pytest frameworks
-    never cross-cover — only an exact retry of the same command clears a failure.
+    Coverage rules are derived per evidence, not from a project-level framework
+    hint. Threading that hint down here is exactly what caused #2376 D4: a
+    polyglot repo infers ``"mixed"``, which sent pytest evidences down the
+    non-python branch and disabled superset coverage for the whole run. Non-pytest
+    evidence still never cross-covers, because only ``_parse_pytest`` emits a
+    ``coverage_scope`` and ``_pytest_scope_covers`` rejects a ``None`` side.
     """
     if not test_evidences:
         return ExecutionVerdict.NOT_RUN
