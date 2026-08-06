@@ -479,9 +479,7 @@ def main(argv: list[str] | None = None) -> int:
         # Issue #2361: 添加 subprocess 超时保护
         # 1500秒 = 25分钟 < GitHub Actions 30分钟超时，留5分钟清理时间
         try:
-            result = subprocess.run(
-                cmd, cwd=PROJECT_ROOT, env=env, check=False, timeout=1500
-            )
+            result = subprocess.run(cmd, cwd=PROJECT_ROOT, env=env, check=False, timeout=1500)
             return result.returncode
         except subprocess.TimeoutExpired:
             print("ERROR: Extended tests timed out after 1500s (25 minutes)", flush=True)
