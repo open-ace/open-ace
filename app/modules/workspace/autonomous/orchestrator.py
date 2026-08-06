@@ -430,6 +430,7 @@ def _command_segments(command: str) -> list[str]:
     """
     segments: list[str] = []
     buf: list[str] = []
+    pending_heredocs: list[tuple[str, bool]] = []
     in_single = in_double = False
     i, n = 0, len(command)
     while i < n:
@@ -444,12 +445,16 @@ def _command_segments(command: str) -> list[str]:
         elif ch == '"' and not in_single:
             in_double = not in_double
         elif not in_single and not in_double:
-            # A heredoc redirect makes everything after it body text; stop
-            # segmenting and let the rest ride with the current segment, whose
-            # head is the real command (``cat``, ``python``, …).
+            # A heredoc's *body* is data, but the rest of its line is still
+            # command text (``cat <<EOF && pytest``), so record the delimiter
+            # and keep scanning; the body is skipped at the newline below.
             if command[i : i + 2] == "<<":
-                buf.append(command[i:])
-                break
+                delimiter, after, strip_tabs = _parse_heredoc_delimiter(command, i)
+                if delimiter is not None:
+                    buf.append(command[i:after])
+                    pending_heredocs.append((delimiter, strip_tabs))
+                    i = after
+                    continue
             # An unquoted word-initial "#" comments out the rest of the line.
             if ch == "#" and (not buf or buf[-1].isspace()):
                 while i < n and command[i] not in "\n\r":
@@ -460,7 +465,23 @@ def _command_segments(command: str) -> list[str]:
                 buf = []
                 i += 2
                 continue
-            if ch in ";|\n\r":
+            if ch in "\n\r":
+                segments.append("".join(buf))
+                buf = []
+                i += 1
+                # Consume each pending heredoc body up to and including its
+                # terminator line, so body text is never read as commands and
+                # commands *after* the terminator are still seen.
+                while pending_heredocs:
+                    delimiter, strip_tabs = pending_heredocs.pop(0)
+                    while i < n:
+                        end = command.find("\n", i)
+                        line = command[i:end] if end != -1 else command[i:]
+                        i = end + 1 if end != -1 else n
+                        if (line.lstrip("\t") if strip_tabs else line).strip() == delimiter:
+                            break
+                continue
+            if ch in ";|":
                 segments.append("".join(buf))
                 buf = []
                 i += 1
@@ -481,6 +502,36 @@ def _command_segments(command: str) -> list[str]:
 
 _ASSIGNMENT_RE = re.compile(r"^\w+=")
 
+
+def _parse_heredoc_delimiter(command: str, i: int) -> tuple[str | None, int, bool]:
+    """Parse the delimiter word of a heredoc starting at ``command[i:i+2] == "<<"``.
+
+    Returns ``(delimiter, index_after_delimiter, strip_tabs)``, or
+    ``(None, i, False)`` when no valid delimiter follows — which is how an
+    arithmetic left shift (``$((1<<2))``) is told apart from a heredoc.
+    """
+    j = i + 2
+    strip_tabs = False
+    if j < len(command) and command[j] == "-":
+        strip_tabs = True
+        j += 1
+    while j < len(command) and command[j] in " \t":
+        j += 1
+    if j < len(command) and command[j] in "'\"":
+        quote = command[j]
+        end = command.find(quote, j + 1)
+        if end == -1:
+            return None, i, False
+        return command[j + 1 : end], end + 1, strip_tabs
+    end = j
+    while end < len(command) and (command[end].isalnum() or command[end] == "_"):
+        end += 1
+    word = command[j:end]
+    if not word or not (word[0].isalpha() or word[0] == "_"):
+        return None, i, False
+    return word, end, strip_tabs
+
+
 # Installing a test runner is not running it. Checked before the head scan
 # because the package managers overlap the runner set (``npm ci`` vs
 # ``npm test``); without it, ``pip install -U pytest`` satisfies the gate —
@@ -492,13 +543,29 @@ _INSTALL_SUBCOMMANDS = frozenset({"install", "add", "ci", "uninstall", "remove"}
 
 
 def _is_package_manager_install(tokens: list[str]) -> bool:
-    """Whether the tokens are a dependency install rather than a test run."""
+    """Whether the tokens are a dependency install rather than a test run.
+
+    Scans for the manager rather than requiring it at token 0, so wrapper and
+    interpreter prefixes do not hide it — ``python -m pip install pytest`` is
+    the form this project's own docs use, and ``sudo pip install`` is common.
+    Only the *first non-flag* token after the manager decides, so a test-name
+    filter that happens to equal a subcommand cannot veto a genuine run
+    (``npm test -- --grep install``). One manager-to-manager hop is allowed for
+    ``uv pip install`` and ``python -m pip install``.
+    """
     for index, token in enumerate(tokens):
         if _ASSIGNMENT_RE.match(token):
             continue
         if token.rsplit("/", 1)[-1] not in _PACKAGE_MANAGERS:
-            return False
-        return any(t in _INSTALL_SUBCOMMANDS for t in tokens[index + 1 :])
+            continue
+        for follower in tokens[index + 1 :]:
+            if follower.startswith("-"):
+                continue
+            base = follower.rsplit("/", 1)[-1]
+            if base in _PACKAGE_MANAGERS:
+                continue
+            return base in _INSTALL_SUBCOMMANDS
+        return False
     return False
 
 

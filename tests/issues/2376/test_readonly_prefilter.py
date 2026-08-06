@@ -25,7 +25,12 @@ from __future__ import annotations
 
 import pytest
 
-from app.modules.workspace.autonomous.orchestrator import _command_segments, _has_test_tool_call
+from app.modules.workspace.autonomous.orchestrator import (
+    _command_segments,
+    _has_test_tool_call,
+    _is_package_manager_install,
+    _shell_tokens,
+)
 
 
 def _tc(command: str) -> list:
@@ -200,11 +205,17 @@ def test_operators_inside_quotes_do_not_split_a_read_only_command(command):
         ("sed -n '/pytest/p; /jest/p' f.py", ["sed -n '/pytest/p; /jest/p' f.py"]),
         # Newlines separate commands.
         ("git status\npytest tests/", ["git status", "pytest tests/"]),
-        # A heredoc body is data, not commands.
+        # A heredoc body is data: consumed through its terminator, never a
+        # segment, and commands after the terminator are still segmented.
+        ("cat > tests/x.py <<'EOF'\nimport pytest\nEOF", ["cat > tests/x.py <<'EOF'"]),
         (
-            "cat > tests/x.py <<'EOF'\nimport pytest\nEOF",
-            ["cat > tests/x.py <<'EOF'\nimport pytest\nEOF"],
+            "cat > tests/x.py <<'EOF'\nimport pytest\nEOF\npytest tests/",
+            ["cat > tests/x.py <<'EOF'", "pytest tests/"],
         ),
+        # The rest of the heredoc's own line is command text.
+        ("cat <<EOF && pytest tests/\nbody\nEOF", ["cat <<EOF ", " pytest tests/"]),
+        # Not a heredoc: no valid delimiter word follows.
+        ("echo $((1<<2))", ["echo $((1<<2))"]),
         # Comments are stripped, not turned into headless segments.
         ("# run pytest later\nls tests/", ["ls tests/"]),
         ("ls tests/ # then pytest", ["ls tests/ "]),
@@ -252,16 +263,93 @@ def test_data_and_dependency_commands_are_not_test_runs(command):
     assert _has_test_tool_call(_tc(command), "mixed") is False
 
 
-def test_heredoc_guard_does_not_swallow_a_later_genuine_run():
-    # The guard stops segmenting at "<<", so a run *before* the heredoc is
-    # still seen; a run after it is inside the body and correctly is not.
+@pytest.mark.parametrize(
+    "command",
+    [
+        # Write the test file, then run it — the most common heredoc shape in
+        # agent work. Consuming to the terminator (rather than swallowing the
+        # whole remainder) is what keeps the run after it visible.
+        "cat > tests/test_x.py <<'EOF'\nimport pytest\n\n\ndef test_x():\n    assert 1\n"
+        "EOF\npython -m pytest tests/test_x.py -q",
+        "cat > /tmp/x.py <<EOF\nprint(1)\nEOF\npytest tests/ -q",
+        "cat <<EOF > tests/x.sh\necho hi\nEOF\nbash tests/x.sh && pytest tests/ -q",
+        # The rest of the heredoc's own line is still command text.
+        "cat <<EOF && pytest tests/ -q\nbody\nEOF",
+        # Two heredocs in sequence.
+        "cat > a.txt <<A\nx\nA\ncat > b.txt <<B\ny\nB\npytest tests/",
+        # Tab-stripped terminator (<<-).
+        "cat <<-EOF > tests/x.py\n\timport pytest\n\tEOF\npytest tests/ -q",
+        # An arithmetic left shift is not a heredoc: no valid delimiter word.
+        "echo $((1<<2)) && pytest tests/ -q",
+    ],
+)
+def test_heredoc_body_is_skipped_but_later_commands_are_not(command):
+    assert _has_test_tool_call(_tc(command), "mixed") is True
+
+
+def test_run_before_a_heredoc_is_still_seen():
     command = "pytest tests/ -q\ncat > tests/x.py <<'EOF'\nimport pytest\nEOF"
     assert _has_test_tool_call(_tc(command), "mixed") is True
 
 
-def test_package_manager_run_is_not_mistaken_for_an_install():
-    assert _has_test_tool_call(_tc("npm test"), "mixed") is True
-    assert _has_test_tool_call(_tc("cd /w/frontend && npm test"), "mixed") is True
+@pytest.mark.parametrize(
+    "command",
+    [
+        "npm test",
+        "cd /w/frontend && npm test",
+        # A test-name filter that happens to equal an install subcommand must
+        # not veto the run: only the first non-flag token after the manager
+        # decides.
+        "npm test -- --grep install",
+        "npm test -- -t install",
+        "npm test -- --testNamePattern install",
+        "npm test -- --install-deps",
+    ],
+)
+def test_package_manager_run_is_not_mistaken_for_an_install(command):
+    assert _has_test_tool_call(_tc(command), "mixed") is True
+
+
+@pytest.mark.parametrize(
+    "command,is_install",
+    [
+        ("pip install -U pytest pytest-cov", True),
+        ("uv pip install pytest", True),
+        ("python -m pip install pytest", True),
+        ("sudo pip install pytest", True),
+        ("npm install --save-dev jest", True),
+        ("npm ci", True),
+        ("poetry add --group dev pytest", True),
+        # Only the first non-flag token after the manager decides, so a filter
+        # argument equal to a subcommand is not an install. Asserted on the
+        # predicate directly: `yarn test` is not a recognized pattern until
+        # PR-3's Fix B, so the public function cannot express this case yet.
+        ("yarn test --grep add", False),
+        ("pnpm test -- --filter remove", False),
+        ("npm test -- --grep install", False),
+        ("npm test", False),
+        ("python -m pytest tests/", False),
+    ],
+)
+def test_is_package_manager_install(command, is_install):
+    assert _is_package_manager_install(_shell_tokens(command)) is is_install
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # The manager is found by scanning, so wrapper and interpreter prefixes
+        # cannot hide it. `python -m pip install` is the form this repo's docs use.
+        "python -m pip install pytest",
+        "python3 -m pip install -U pytest pytest-cov",
+        "sudo pip install pytest",
+        "sudo -H pip3 install pytest",
+        "sudo apt-get install -y python3-pytest",
+        "env PIP_NO_CACHE=1 pip install pytest",
+    ],
+)
+def test_wrapped_installs_are_still_detected(command):
+    assert _has_test_tool_call(_tc(command), "mixed") is False
 
 
 # --- An argument must never veto its runner (PR-1 review #3) -----------------
