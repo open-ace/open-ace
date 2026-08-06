@@ -158,18 +158,10 @@ class TestConfigPathScope:
 
     def test_config_path_default_false_for_sudo(self):
         """FETCH_USE_SUDO default should be false."""
-        # Verify the default by reading the source
         import app.routes.fetch as fetch_mod
 
-        # Check the source uses "false" as default
-        source = fetch_mod.run_fetch_scripts.__code__.co_consts
-        # The default is stored as a constant in the code object
-        # Direct test: with no env var set, sudo should not be used
-        with patch.dict(os.environ, {}, clear=True):
-            with patch.dict(os.environ, {"FETCH_USE_SUDO": ""}):
-                # Clear FETCH_USE_SUDO to test default
-                pass
-            # The default "false" means use_sudo will be False
-            # This is implicitly tested by the fact that _run_subprocess
-            # commands would not include "sudo" when scripts don't exist
-            assert True  # The default is verified at code review level
+        import inspect
+        source = inspect.getsource(fetch_mod.run_fetch_scripts)
+        # Verify the default is "false" in getenv call
+        assert '"FETCH_USE_SUDO", "false")' in source
+        assert '"FETCH_USE_SUDO", "true")' not in source

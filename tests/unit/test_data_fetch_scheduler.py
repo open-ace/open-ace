@@ -328,27 +328,6 @@ class TestDataFetchSchedulerRunFetch:
 
     # ---- Issue #2375: fetch result propagation tests ----
 
-    def _make_run_fetch_mocks(self, mock_fetch_return_value):
-        """Helper to set up mocks for _run_fetch() tests.
-        
-        Mocks leader election (succeeds), run_fetch_scripts (returns given value),
-        and all post-fetch cleanup steps.
-        """
-        mocks = {
-            "leader_client": MagicMock(),
-            "fetch": MagicMock(),
-            "mv": MagicMock(),
-            "agg": MagicMock(),
-            "summary": MagicMock(),
-            "quotas": MagicMock(),
-            "daily_stats": MagicMock(),
-            "feishu": MagicMock(),
-            "dingtalk": MagicMock(),
-        }
-        mocks["leader_client"].return_value.try_acquire_leadership.return_value = True
-        mocks["fetch"].return_value = mock_fetch_return_value
-        return mocks
-
     @patch("app.repositories.daily_stats_repo.DailyStatsRepository")
     @patch("app.services.data_fetch_scheduler.DataFetchScheduler._maybe_sync_dingtalk_org")
     @patch("app.services.data_fetch_scheduler.DataFetchScheduler._maybe_sync_feishu_org")
@@ -444,7 +423,8 @@ class TestDataFetchSchedulerRunFetch:
         call_args = mock_leader.return_value.record_run.call_args[0]
         assert call_args[0] == "completed"
         assert s._last_result_summary["status"] == "completed"
-        assert s._last_result_summary["tools"] == 0
+        assert s._last_result_summary["tools_total"] == 0
+        assert s._last_result_summary["tools_failed"] == 0
 
     @patch("app.repositories.daily_stats_repo.DailyStatsRepository")
     @patch("app.services.data_fetch_scheduler.DataFetchScheduler._maybe_sync_dingtalk_org")
