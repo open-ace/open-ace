@@ -263,13 +263,16 @@ export const PageRefreshControl: React.FC<PageRefreshControlProps> = ({
             </ul>
           </div>
         ) : (
-          /* Static clock icon when no dropdown content - shows last refresh time tooltip */
-          <i
-            className={cn('bi bi-clock-history', 'text-muted')}
-            style={{ fontSize: '0.875rem' }}
-            title={buildTooltip() || undefined}
+          /* Static clock button when no dropdown content - shows last refresh time tooltip */
+          <button
+            className={cn('btn btn-link btn-sm p-0', 'text-muted')}
+            type="button"
+            disabled
+            title={buildTooltip() || t('noRefreshYet', language)}
             data-testid="refresh-clock-icon"
-          />
+          >
+            <i className="bi bi-clock-history" />
+          </button>
         )}
 
         {/* Manual refresh button */}
