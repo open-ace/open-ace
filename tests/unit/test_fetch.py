@@ -104,7 +104,7 @@ class TestRunFetchScriptsReturns:
 
         # Force an unexpected error by making _fetch_status None
         with patch.dict(os.environ, {"FETCH_USE_SUDO": "false"}):
-            with patch("app.routes.fetch._fetch_lock") as mock_lock:
+            with patch("app.routes.fetch._fetch_lock"):
                 # Cause an exception in the try block after scripts complete
                 with patch("app.routes.fetch.datetime") as mock_dt:
                     mock_dt.now.side_effect = RuntimeError("Simulated unexpected error")
