@@ -252,6 +252,15 @@ class RemoteAgent:
         # Start session sync service
         self._session_sync.start()
 
+        # Send initial heartbeat to avoid showing "offline" during initialization
+        # (Issue #2365: restore_sessions can take minutes with many sessions)
+        try:
+            self._send_heartbeat_via_http()
+            logger.info("Initial heartbeat sent successfully")
+        except Exception as e:
+            # Heartbeat failure should not block startup
+            logger.warning("Failed to send initial heartbeat: %s", e)
+
         while self._running:
             # Reset token_revoked flag for this connection attempt.
             # If the previous loop exited due to a non-401 error (network
