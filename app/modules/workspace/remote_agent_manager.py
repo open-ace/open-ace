@@ -2616,6 +2616,8 @@ class RemoteAgentManager:
             except (json.JSONDecodeError, TypeError):
                 capabilities = {}
 
+        from app.utils.datetime_utils import ensure_utc_suffix
+
         return {
             "id": get_value("id"),
             "machine_id": get_value("machine_id"),
@@ -2631,9 +2633,9 @@ class RemoteAgentManager:
             "work_dir": get_value("work_dir"),
             "tenant_id": get_value("tenant_id"),
             "created_by": get_value("created_by"),
-            "created_at": get_value("created_at"),
-            "updated_at": get_value("updated_at"),
-            "last_heartbeat": get_value("last_heartbeat"),
+            "created_at": ensure_utc_suffix(get_value("created_at")),
+            "updated_at": ensure_utc_suffix(get_value("updated_at")),
+            "last_heartbeat": ensure_utc_suffix(get_value("last_heartbeat")),
             "connected": self.is_connected(get_value("machine_id") or ""),
         }
 
