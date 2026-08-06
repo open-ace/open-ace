@@ -84,9 +84,7 @@ class TestInitialHeartbeat:
         agent = _make_agent(agent_module)
 
         # Make heartbeat fail
-        agent._send_heartbeat_via_http = MagicMock(
-            side_effect=Exception("Network error")
-        )
+        agent._send_heartbeat_via_http = MagicMock(side_effect=Exception("Network error"))
 
         # Should not raise when wrapped in try-except
         try:
