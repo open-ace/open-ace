@@ -81,11 +81,7 @@ export const AutoMappingPanel: React.FC<AutoMappingPanelProps> = ({ users, onCha
       setAutoMapPreview(preview);
 
       if (preview.mapped_count === 0) {
-        toast.info(
-          language === 'zh'
-            ? '没有可自动映射的账号'
-            : 'No accounts can be auto-mapped'
-        );
+        toast.info(language === 'zh' ? '没有可自动映射的账号' : 'No accounts can be auto-mapped');
         setAutoMapPreview(null);
         return;
       }
@@ -113,9 +109,7 @@ export const AutoMappingPanel: React.FC<AutoMappingPanelProps> = ({ users, onCha
       onChange?.();
     } catch (err) {
       console.error('Failed to run auto-mapping:', err);
-      toast.error(
-        language === 'zh' ? '自动映射失败' : 'Failed to run auto-mapping'
-      );
+      toast.error(language === 'zh' ? '自动映射失败' : 'Failed to run auto-mapping');
     } finally {
       setIsAutoMapping(false);
     }
@@ -129,9 +123,7 @@ export const AutoMappingPanel: React.FC<AutoMappingPanelProps> = ({ users, onCha
       setSuggestions({});
     } catch (err) {
       console.error('Failed to load unmapped accounts:', err);
-      toast.error(
-        language === 'zh' ? '加载未映射账号失败' : 'Failed to load unmapped accounts'
-      );
+      toast.error(language === 'zh' ? '加载未映射账号失败' : 'Failed to load unmapped accounts');
     } finally {
       setIsLoadingUnmapped(false);
     }
@@ -149,9 +141,7 @@ export const AutoMappingPanel: React.FC<AutoMappingPanelProps> = ({ users, onCha
       setSuggestions((prev) => ({ ...prev, [senderName]: suggestion }));
     } catch (err) {
       console.error('Failed to get suggestion:', err);
-      toast.error(
-        language === 'zh' ? '获取建议失败' : 'Failed to get suggestion'
-      );
+      toast.error(language === 'zh' ? '获取建议失败' : 'Failed to get suggestion');
     } finally {
       setLoadingSuggestions((prev) => {
         const next = new Set(prev);
@@ -167,9 +157,7 @@ export const AutoMappingPanel: React.FC<AutoMappingPanelProps> = ({ users, onCha
     setIsManualMapping(true);
     try {
       await mappingRulesApi.manualMapAccount(manualMapTarget, Number(selectedUserId));
-      toast.success(
-        language === 'zh' ? '手动映射成功' : 'Manual mapping successful'
-      );
+      toast.success(language === 'zh' ? '手动映射成功' : 'Manual mapping successful');
       setManualMapTarget(null);
       setSelectedUserId('');
       // Refresh data
@@ -178,9 +166,7 @@ export const AutoMappingPanel: React.FC<AutoMappingPanelProps> = ({ users, onCha
       onChange?.();
     } catch (err) {
       console.error('Failed to manual map:', err);
-      toast.error(
-        language === 'zh' ? '手动映射失败' : 'Failed to manual map'
-      );
+      toast.error(language === 'zh' ? '手动映射失败' : 'Failed to manual map');
     } finally {
       setIsManualMapping(false);
     }
@@ -195,9 +181,7 @@ export const AutoMappingPanel: React.FC<AutoMappingPanelProps> = ({ users, onCha
       setTestMatchResult(result);
     } catch (err) {
       console.error('Failed to test match:', err);
-      toast.error(
-        language === 'zh' ? '测试匹配失败' : 'Failed to test match'
-      );
+      toast.error(language === 'zh' ? '测试匹配失败' : 'Failed to test match');
     } finally {
       setIsTestingMatch(false);
     }
@@ -242,15 +226,11 @@ export const AutoMappingPanel: React.FC<AutoMappingPanelProps> = ({ users, onCha
               <div className="d-flex align-items-center gap-3 mb-3">
                 <div>
                   <strong className="text-success">{stats.total_mapped}</strong>
-                  <span className="text-muted small ms-1">
-                    {zh ? '已映射' : 'Mapped'}
-                  </span>
+                  <span className="text-muted small ms-1">{zh ? '已映射' : 'Mapped'}</span>
                 </div>
                 <div>
                   <strong className="text-warning">{stats.total_unmapped}</strong>
-                  <span className="text-muted small ms-1">
-                    {zh ? '未映射' : 'Unmapped'}
-                  </span>
+                  <span className="text-muted small ms-1">{zh ? '未映射' : 'Unmapped'}</span>
                 </div>
                 {stats.total_unmapped > 20 && (
                   <small className="text-muted">
@@ -275,11 +255,7 @@ export const AutoMappingPanel: React.FC<AutoMappingPanelProps> = ({ users, onCha
                 </Button>
 
                 {stats.total_unmapped > 0 && (
-                  <Button
-                    variant="outline-warning"
-                    size="sm"
-                    onClick={handleShowUnmapped}
-                  >
+                  <Button variant="outline-warning" size="sm" onClick={handleShowUnmapped}>
                     <i className="bi bi-list-ul me-1" />
                     {zh ? '查看未映射账号' : 'View Unmapped'}
                     <Badge variant="secondary" className="ms-1">
@@ -297,11 +273,7 @@ export const AutoMappingPanel: React.FC<AutoMappingPanelProps> = ({ users, onCha
                   {zh ? '测试匹配' : 'Test Match'}
                 </Button>
 
-                <Button
-                  variant="outline-secondary"
-                  size="sm"
-                  onClick={loadStats}
-                >
+                <Button variant="outline-secondary" size="sm" onClick={loadStats}>
                   <i className="bi bi-arrow-clockwise me-1" />
                   {zh ? '刷新统计' : 'Refresh Stats'}
                 </Button>
@@ -337,7 +309,9 @@ export const AutoMappingPanel: React.FC<AutoMappingPanelProps> = ({ users, onCha
                         <tbody>
                           {autoMapPreview.mappings.map((m) => (
                             <tr key={m.tool_account}>
-                              <td><code>{m.tool_account}</code></td>
+                              <td>
+                                <code>{m.tool_account}</code>
+                              </td>
                               <td>{m.username}</td>
                               <td>
                                 <Badge variant="secondary">{m.matched_by}</Badge>
@@ -395,15 +369,15 @@ export const AutoMappingPanel: React.FC<AutoMappingPanelProps> = ({ users, onCha
                   const isLoadingSuggestion = loadingSuggestions.has(senderName);
                   return (
                     <tr key={senderName}>
-                      <td><code>{senderName}</code></td>
+                      <td>
+                        <code>{senderName}</code>
+                      </td>
                       <td>
                         <Badge variant="secondary">{account.message_count}</Badge>
                       </td>
                       <td>
                         {isLoadingSuggestion ? (
-                          <span className="text-muted small">
-                            {t('loading', language)}
-                          </span>
+                          <span className="text-muted small">{t('loading', language)}</span>
                         ) : suggestion ? (
                           suggestion.suggested_username ? (
                             <span>
@@ -437,9 +411,7 @@ export const AutoMappingPanel: React.FC<AutoMappingPanelProps> = ({ users, onCha
                             size="sm"
                             onClick={() => {
                               setManualMapTarget(senderName);
-                              setSelectedUserId(
-                                suggestion?.suggested_user_id ?? ''
-                              );
+                              setSelectedUserId(suggestion?.suggested_user_id ?? '');
                             }}
                             title={zh ? '手动映射' : 'Manual Map'}
                           >
@@ -490,26 +462,15 @@ export const AutoMappingPanel: React.FC<AutoMappingPanelProps> = ({ users, onCha
         {manualMapTarget && (
           <div>
             <div className="mb-3">
-              <label className="form-label">
-                {zh ? '账号' : 'Account'}
-              </label>
-              <input
-                type="text"
-                className="form-control"
-                value={manualMapTarget}
-                readOnly
-              />
+              <label className="form-label">{zh ? '账号' : 'Account'}</label>
+              <input type="text" className="form-control" value={manualMapTarget} readOnly />
             </div>
             <div className="mb-3">
-              <label className="form-label">
-                {zh ? '映射到用户' : 'Map to User'}
-              </label>
+              <label className="form-label">{zh ? '映射到用户' : 'Map to User'}</label>
               <select
                 className="form-select"
                 value={selectedUserId}
-                onChange={(e) =>
-                  setSelectedUserId(e.target.value ? Number(e.target.value) : '')
-                }
+                onChange={(e) => setSelectedUserId(e.target.value ? Number(e.target.value) : '')}
               >
                 <option value="">-- {zh ? '选择用户' : 'Select User'} --</option>
                 {users?.map((user) => (
@@ -563,9 +524,7 @@ export const AutoMappingPanel: React.FC<AutoMappingPanelProps> = ({ users, onCha
         }
       >
         <div className="mb-3">
-          <label className="form-label">
-            {zh ? '工具账号名称' : 'Tool Account Name'}
-          </label>
+          <label className="form-label">{zh ? '工具账号名称' : 'Tool Account Name'}</label>
           <input
             type="text"
             className="form-control"
