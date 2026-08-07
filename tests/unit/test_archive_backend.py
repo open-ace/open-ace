@@ -51,6 +51,7 @@ class TestLocalFileArchiveBackend:
         base_path = os.path.join(temp_archive_dir, "archives")
         backend = LocalFileArchiveBackend(base_path=base_path)
         assert os.path.exists(base_path)
+        assert backend.base_path == Path(base_path)
 
     def test_write_creates_archive(self, backend, sample_records, temp_archive_dir):
         """Test successful archive creation."""
@@ -124,7 +125,7 @@ class TestLocalFileArchiveBackend:
             # Extract and read manifest
             manifest_file = [m for m in members if "manifest" in m][0]
             tar.extract(manifest_file)
-            with open(manifest_file, 'r') as f:
+            with open(manifest_file) as f:
                 manifest = json.load(f)
 
             assert manifest["execution_id"] == "exec_123"
@@ -195,7 +196,7 @@ class TestLocalFileArchiveBackend:
 
             # Modify data
             data_file = Path(temp_dir) / "data.json"
-            with open(data_file, 'w') as f:
+            with open(data_file, "w") as f:
                 json.dump([{"id": 999, "modified": True}], f)
 
             # Re-pack archive
@@ -205,6 +206,7 @@ class TestLocalFileArchiveBackend:
 
             # Replace original archive
             import shutil
+
             shutil.move(str(temp_archive), location)
 
         # Verify should fail
@@ -216,7 +218,9 @@ class TestLocalFileArchiveBackend:
         """Test that verification handles missing archive."""
         result = backend.verify("nonexistent_archive_id")
         assert result.success is False
-        assert "not found" in result.error_message.lower() or "invalid" in result.error_message.lower()
+        assert (
+            "not found" in result.error_message.lower() or "invalid" in result.error_message.lower()
+        )
 
     def test_verify_handles_invalid_archive_id(self, backend):
         """Test that verification handles invalid archive ID."""
@@ -256,7 +260,7 @@ class TestLocalFileArchiveBackend:
         # Use a path that exists but will fail statvfs
         backend = LocalFileArchiveBackend(base_path=temp_archive_dir)
         # Mock os.statvfs to raise an exception
-        with patch('os.statvfs', side_effect=OSError("Mocked error")):
+        with patch("os.statvfs", side_effect=OSError("Mocked error")):
             result = backend.check_capacity(1024)
             assert result is False
 
@@ -291,7 +295,7 @@ class TestLocalFileArchiveBackend:
     def test_atomic_write_rollback_on_failure(self, backend, sample_records, temp_archive_dir):
         """Test that atomic write rolls back on failure."""
         # Mock verification to fail
-        with patch.object(backend, '_verify_archive_integrity', return_value=False):
+        with patch.object(backend, "_verify_archive_integrity", return_value=False):
             result = backend.write(
                 batch_id=1,
                 records=sample_records,

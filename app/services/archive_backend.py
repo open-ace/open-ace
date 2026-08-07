@@ -172,9 +172,7 @@ class LocalFileArchiveBackend(ArchiveBackend):
             ArchiveResult with archive details.
         """
         if not records:
-            return ArchiveResult(
-                success=False, error_message="No records to archive"
-            )
+            return ArchiveResult(success=False, error_message="No records to archive")
 
         # Check capacity before write
         estimated_size = len(records) * self.MAX_RECORD_SIZE_BYTES * 2  # Safety factor
@@ -182,7 +180,7 @@ class LocalFileArchiveBackend(ArchiveBackend):
             return ArchiveResult(
                 success=False,
                 error_message=f"Insufficient disk space. Required: {estimated_size} bytes",
-                error_details={"required_bytes": estimated_size}
+                error_details={"required_bytes": estimated_size},
             )
 
         # Create archive directory structure
@@ -193,7 +191,7 @@ class LocalFileArchiveBackend(ArchiveBackend):
             return ArchiveResult(
                 success=False,
                 error_message=f"Failed to create archive directory: {e}",
-                error_details={"archive_dir": str(archive_dir)}
+                error_details={"archive_dir": str(archive_dir)},
             )
 
         # Generate archive ID and filenames
@@ -210,7 +208,7 @@ class LocalFileArchiveBackend(ArchiveBackend):
         try:
             # Write data file
             data_file = temp_dir / "data.json"
-            with open(data_file, 'w') as f:
+            with open(data_file, "w") as f:
                 json.dump(records, f, default=str)
 
             # Calculate checksum before compression
@@ -230,7 +228,7 @@ class LocalFileArchiveBackend(ArchiveBackend):
             }
 
             manifest_file = temp_dir / manifest_filename
-            with open(manifest_file, 'w') as f:
+            with open(manifest_file, "w") as f:
                 json.dump(manifest, f, indent=2)
 
             # Create compressed archive with both data and manifest
@@ -244,7 +242,7 @@ class LocalFileArchiveBackend(ArchiveBackend):
                 return ArchiveResult(
                     success=False,
                     error_message="Archive verification failed before move",
-                    error_details={"archive_id": archive_id}
+                    error_details={"archive_id": archive_id},
                 )
 
             # Atomic move to final location
@@ -273,7 +271,7 @@ class LocalFileArchiveBackend(ArchiveBackend):
             return ArchiveResult(
                 success=False,
                 error_message=f"Archive write failed: {e}",
-                error_details={"archive_id": archive_id, "error": str(e)}
+                error_details={"archive_id": archive_id, "error": str(e)},
             )
         finally:
             # Clean up temporary directory
@@ -302,17 +300,13 @@ class LocalFileArchiveBackend(ArchiveBackend):
             archive_path = self.get_location(archive_id)
             if not archive_path:
                 return VerifyResult(
-                    success=False,
-                    archive_id=archive_id,
-                    error_message="Archive file not found"
+                    success=False, archive_id=archive_id, error_message="Archive file not found"
                 )
 
             archive_file = Path(archive_path)
             if not archive_file.exists():
                 return VerifyResult(
-                    success=False,
-                    archive_id=archive_id,
-                    error_message="Archive file not found"
+                    success=False, archive_id=archive_id, error_message="Archive file not found"
                 )
 
             # Extract and verify manifest
@@ -324,7 +318,7 @@ class LocalFileArchiveBackend(ArchiveBackend):
                         return VerifyResult(
                             success=False,
                             archive_id=archive_id,
-                            error_message="Manifest not found in archive"
+                            error_message="Manifest not found in archive",
                         )
 
                     manifest_member = manifest_members[0]
@@ -333,14 +327,14 @@ class LocalFileArchiveBackend(ArchiveBackend):
                         return VerifyResult(
                             success=False,
                             archive_id=archive_id,
-                            error_message="Cannot read manifest from archive"
+                            error_message="Cannot read manifest from archive",
                         )
                     manifest = json.load(manifest_fh)
                 except Exception as e:
                     return VerifyResult(
                         success=False,
                         archive_id=archive_id,
-                        error_message=f"Failed to read manifest: {e}"
+                        error_message=f"Failed to read manifest: {e}",
                     )
 
             record_count = manifest.get("record_count", 0)
@@ -349,14 +343,15 @@ class LocalFileArchiveBackend(ArchiveBackend):
             # Extract and verify data
             with tempfile.TemporaryDirectory() as temp_dir:
                 with tarfile.open(archive_file, "r:gz") as tar:
-                    tar.extractall(temp_dir)
+                    # Use filter='data' to prevent path traversal attacks
+                    tar.extractall(temp_dir, filter="data")
 
                 data_file = Path(temp_dir) / "data.json"
                 if not data_file.exists():
                     return VerifyResult(
                         success=False,
                         archive_id=archive_id,
-                        error_message="Data file not found in archive"
+                        error_message="Data file not found in archive",
                     )
 
                 # Calculate and verify checksum
@@ -364,7 +359,7 @@ class LocalFileArchiveBackend(ArchiveBackend):
                 checksum_match = actual_checksum == expected_checksum
 
                 # Verify record count
-                with open(data_file, 'r') as f:
+                with open(data_file) as f:
                     records = json.load(f)
                     actual_count = len(records)
 
@@ -380,15 +375,13 @@ class LocalFileArchiveBackend(ArchiveBackend):
                     archive_id=archive_id,
                     record_count=actual_count,
                     checksum_match=checksum_match,
-                    error_message=None if success else "Verification failed"
+                    error_message=None if success else "Verification failed",
                 )
 
         except Exception as e:
             logger.error(f"Archive verification failed: {e}")
             return VerifyResult(
-                success=False,
-                archive_id=archive_id,
-                error_message=f"Verification error: {e}"
+                success=False, archive_id=archive_id, error_message=f"Verification error: {e}"
             )
 
     def get_location(self, archive_id: str) -> str | None:
@@ -489,7 +482,8 @@ class LocalFileArchiveBackend(ArchiveBackend):
         try:
             with tempfile.TemporaryDirectory() as temp_dir:
                 with tarfile.open(archive_path, "r:gz") as tar:
-                    tar.extractall(temp_dir)
+                    # Use filter='data' to prevent path traversal attacks
+                    tar.extractall(temp_dir, filter="data")
 
                 data_file = Path(temp_dir) / "data.json"
                 if not data_file.exists():
@@ -502,7 +496,7 @@ class LocalFileArchiveBackend(ArchiveBackend):
                     return False
 
                 # Verify record count
-                with open(data_file, 'r') as f:
+                with open(data_file) as f:
                     records = json.load(f)
                     if len(records) != expected_count:
                         logger.error(
