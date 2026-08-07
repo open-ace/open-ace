@@ -196,6 +196,21 @@ def test_lock_directory_is_a_constant_not_an_environment_override():
     ), "the lock directory must not be environment-controlled"
 
 
+def test_history_is_rescued_by_rename_not_copy():
+    """`mv` is load-bearing and the end state cannot distinguish it from `cp`.
+
+    Both leave a copy at the preserve path, so a behavioural test sees no
+    difference. The difference only shows on a full tmpfs — the condition this
+    issue is about: rename needs no space, while `cp -R` needs room for a second
+    copy, fails, is swallowed by `|| true`, and the following `rm -rf` then
+    destroys the only remaining copy of the session history.
+    """
+    body = re.search(r"^\s*reclaim_task_tree\(\) \{\n(.*?)^\s*\}$", SRC, re.MULTILINE | re.DOTALL)
+    assert body, "reclaim_task_tree() not found"
+    assert re.search(r'mv "\$task_home/\.claude" "\$preserve_claude_dir"', body.group(1))
+    assert "cp " not in body.group(1), "the rescue must be an atomic rename, not a copy"
+
+
 def test_acl_registry_is_removed_at_its_point_of_consumption():
     """Truncating instead of removing leaves a stray empty registry behind.
 
