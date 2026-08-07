@@ -26,6 +26,7 @@ import fnmatch
 import json
 import time
 
+from app.modules.workspace.autonomous.acceptance_gates import run_mechanical_gates
 from app.modules.workspace.autonomous.acceptance_snapshot import (
     AcceptanceSnapshot,
     hash_snapshot,
@@ -132,6 +133,40 @@ def _format_report_comment(report: dict) -> str:
     return "\n".join(lines)
 
 
+_TERMINAL_VERIFICATION_STATUSES = frozenset({"confirmed", "rejected", "indeterminate"})
+
+
+def _already_verified_for(wf: dict, merge_sha: str, snap_hash: str) -> dict | None:
+    """Return the prior verification report if this pair is already settled.
+
+    Idempotency key is ``(verification_merge_sha, issue_acceptance_hash)``. If
+    the workflow already ran the verifier for the CURRENT pair and reached a
+    terminal status (confirmed/rejected/indeterminate), reuse that result
+    instead of re-running the expensive verifier. Returns the parsed prior
+    report dict, or ``None`` when the pair changed / status is non-terminal /
+    no report was persisted. (#2335 S5)
+    """
+    status = (wf.get("verification_status") or "").strip()
+    if status not in _TERMINAL_VERIFICATION_STATUSES:
+        return None
+    raw = wf.get("verification_report")
+    if not raw:
+        return None
+    try:
+        report = json.loads(raw) if isinstance(raw, str) else dict(raw)
+    except Exception:
+        return None
+    if not isinstance(report, dict):
+        return None
+    # Match on the CURRENT pair: merge_sha + the hash at verify time. A changed
+    # merge (new PR) or an edited issue (new hash) misses and re-verifies.
+    if report.get("merge_sha") != merge_sha:
+        return None
+    if report.get("issue_acceptance_hash") != snap_hash:
+        return None
+    return report
+
+
 def handle(ctx, deps) -> PhaseResult:
     wf = ctx.workflow
     issue_number = wf.get("github_issue_number")
@@ -167,6 +202,35 @@ def handle(ctx, deps) -> PhaseResult:
         snapshot = parse_acceptance_snapshot(_parse_issue_body(gh, issue_number))
     snap_hash = hash_snapshot(snapshot)
 
+    # Idempotency (#2335 S5): if the verifier already settled THIS
+    # (merge_sha, issue_acceptance_hash) pair to a terminal verdict, reuse the
+    # prior result instead of re-running the (expensive) credentialless agent.
+    # A changed merge SHA or an edited issue (new hash) misses and re-verifies.
+    prior = _already_verified_for(wf, merge_sha, snap_hash)
+    if prior is not None:
+        prior_status = prior.get("status") or (wf.get("verification_status") or "")
+        if prior_status == "confirmed":
+            return PhaseResult.completed(next_phase="completed")
+        if prior_status == "rejected":
+            # A prior rejection already transitioned to a new dev round (or
+            # failed at the cap). Replaying the verdict would double-advance;
+            # park indeterminately so the scheduler holds the current phase.
+            return PhaseResult.pause(
+                workflow_patch={
+                    "verification_status": "rejected",
+                    "error_message": "Acceptance already rejected for this merge; awaiting next action",
+                },
+                structured_error={"message": "replayed-rejected", "report": prior},
+            )
+        # indeterminate (or anything else terminal) — stay paused for a human.
+        return PhaseResult.pause(
+            workflow_patch={
+                "verification_status": "indeterminate",
+                "error_message": "Acceptance indeterminate (reused prior result); awaiting evidence",
+            },
+            structured_error={"message": "replayed-indeterminate", "report": prior},
+        )
+
     # Spawn the independent verifier on merged main. If the snapshot was missing
     # convention sections, the verifier extracts scope/checklist (LLM) and returns
     # the completed snapshot; persist it so later rounds reuse it.
@@ -199,14 +263,31 @@ def handle(ctx, deps) -> PhaseResult:
     # Mechanical scope gate (deterministic): required paths must be in the diff.
     scope_verdicts = run_scope_gate(gh, snapshot.required_paths, base_sha, merge_sha)
 
-    status = aggregate_verdicts(scope_verdicts + verifier_verdicts)
+    # The other 5 mechanical gates (#2335 S4): conservative static-analysis
+    # checks whose verdicts fold into the issue-level aggregation alongside the
+    # scope gate and the verifier findings.
+    gate_verdicts = run_mechanical_gates(gh, snapshot, base_sha, merge_sha)
+
+    status = aggregate_verdicts(scope_verdicts + gate_verdicts + verifier_verdicts)
+    # verified_by records the verifier model/version when the agent surfaced it
+    # (S5); fall back to the static runner tag otherwise.
+    verified_by = agent_out.get("verified_by") or VERIFIED_BY
     report = {
         "merge_sha": merge_sha,
         "issue_acceptance_hash": snap_hash,
-        "verified_by": VERIFIED_BY,
+        "verified_by": verified_by,
         "scope": [
             {"item": v.item, "verdict": v.verdict.value, "evidence": v.evidence}
             for v in scope_verdicts
+        ],
+        "gates": [
+            {
+                "item": v.item,
+                "verdict": v.verdict.value,
+                "evidence": v.evidence,
+                "rationale": v.rationale,
+            }
+            for v in gate_verdicts
         ],
         "verifier": [
             {
@@ -231,7 +312,7 @@ def handle(ctx, deps) -> PhaseResult:
         # round-trips; only the hash is canonicalized to content-only (#2335).
         "issue_acceptance_snapshot": _snapshot_to_json(snapshot),
         "issue_acceptance_hash": snap_hash,
-        "verified_by": VERIFIED_BY,
+        "verified_by": verified_by,
         "verification_attempt": (wf.get("verification_attempt") or 0) + 1,
     }
     milestone = {

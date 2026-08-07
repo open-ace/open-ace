@@ -52,23 +52,38 @@ class ToolAccountAutoMappingService:
         self.mapping_repo = UserToolAccountRepository(db)
         self._users_cache: dict[int, User] | None = None  # Cache for N+1 optimization
 
-    def _get_users_cache(self) -> dict[int, User]:
-        """Get cached user dict (keyed by user_id) for N+1 optimization."""
+    def _get_users_cache(self, tenant_id: int | None = None) -> dict[int, User]:
+        """Get cached user dict (keyed by user_id) for N+1 optimization.
+
+        Issue #2374: Cache is request-scoped because each HTTP request creates
+        a new ToolAccountAutoMappingService instance, so there is no cross-request
+        cache pollution risk.
+        """
         if self._users_cache is None:
-            users = self.get_all_users()
+            users = self.get_all_users(tenant_id=tenant_id)
             self._users_cache = {user.id: user for user in users if user.id is not None}
         return self._users_cache
 
-    def get_all_users(self) -> list[User]:
-        """Get all active users with auto_mapping enabled."""
+    def get_all_users(self, tenant_id: int | None = None) -> list[User]:
+        """Get all active users with auto_mapping enabled.
+
+        Issue #2374: If tenant_id is provided, filter users by tenant.
+        """
+        params: tuple = ()
+        tenant_filter = ""
+        if tenant_id is not None:
+            tenant_filter = " AND tenant_id = ?"
+            params = (tenant_id,)
+
         query = f"""
-            SELECT id, username, email, role, is_active, auto_mapping_enabled
+            SELECT id, username, email, role, is_active, auto_mapping_enabled, tenant_id
             FROM users
             WHERE {adapt_boolean_condition('is_active', True)}
               AND (auto_mapping_enabled IS NULL
                    OR {adapt_boolean_condition('auto_mapping_enabled', True)})
+              {tenant_filter}
         """
-        rows = self.db.fetch_all(query)
+        rows = self.db.fetch_all(query, params if params else None)
         return [
             User(
                 id=row.get("id"),
@@ -76,6 +91,7 @@ class ToolAccountAutoMappingService:
                 email=row.get("email", ""),
                 role=row.get("role", "user"),
                 is_active=row.get("is_active", True),
+                tenant_id=row.get("tenant_id"),
             )
             for row in rows
         ]
@@ -156,18 +172,27 @@ class ToolAccountAutoMappingService:
         return None
 
     def try_match_by_rules(
-        self, tool_account: str, tool_type: str | None = None
+        self, tool_account: str, tool_type: str | None = None, tenant_id: int | None = None
     ) -> AutoMappingResult | None:
         """
         Try to match tool_account using custom rules.
 
         Rules are checked in priority order (higher priority first).
         Uses cached users to avoid N+1 queries.
+
+        Issue #2374: If tenant_id is provided, skip rules belonging to users
+        outside the tenant to prevent cross-tenant matching.
         """
         rules = self.rule_repo.get_auto_rules()
-        users_cache = self._get_users_cache()  # Use cache instead of individual queries
+        users_cache = self._get_users_cache(
+            tenant_id=tenant_id
+        )  # Use cache instead of individual queries
 
         for rule in rules:
+            # Issue #2374: Skip rules belonging to users outside the tenant
+            if tenant_id is not None and rule.user_id not in users_cache:
+                continue
+
             if rule.matches(tool_account, tool_type):
                 # Get username from cache (no DB query)
                 user = users_cache.get(rule.user_id)
@@ -184,7 +209,7 @@ class ToolAccountAutoMappingService:
         return None
 
     def auto_map_account(
-        self, tool_account: str, tool_type: str | None = None
+        self, tool_account: str, tool_type: str | None = None, tenant_id: int | None = None
     ) -> AutoMappingResult | None:
         """
         Auto-map a single tool_account using all available methods.
@@ -193,6 +218,9 @@ class ToolAccountAutoMappingService:
         1. Custom rules (highest priority rules first)
         2. Username/email matching
 
+        Issue #2374: If tenant_id is provided, only match users and rules
+        within the specified tenant.
+
         Returns the mapping result if successful, None if no match found.
         """
         # Check if already mapped
@@ -200,10 +228,10 @@ class ToolAccountAutoMappingService:
         if existing:
             return None  # Already mapped
 
-        users = self.get_all_users()
+        users = self.get_all_users(tenant_id=tenant_id)
 
         # Try rule matching first (rules have explicit priority)
-        result = self.try_match_by_rules(tool_account, tool_type)
+        result = self.try_match_by_rules(tool_account, tool_type, tenant_id=tenant_id)
         if result:
             return result
 
@@ -254,7 +282,7 @@ class ToolAccountAutoMappingService:
             tool_account = account.get("sender_name", "")
             tool_type = self._infer_tool_type(tool_account)
 
-            result = self.auto_map_account(tool_account, tool_type)
+            result = self.auto_map_account(tool_account, tool_type, tenant_id=tenant_id)
 
             if result:
                 if not dry_run:
@@ -413,9 +441,15 @@ class ToolAccountAutoMappingService:
         Get statistics about mapping status.
 
         Issue #2180: If tenant_id is provided, filter stats by tenant.
+        Issue #2374: Also filter mapped count by tenant_id.
         """
         unmapped = self.get_unmapped_accounts(tenant_id=tenant_id)
         mapped = self.mapping_repo.get_all()
+
+        # Issue #2374: Filter mapped by tenant if tenant_id is provided
+        if tenant_id is not None:
+            tenant_user_ids = set(self._get_users_cache(tenant_id=tenant_id).keys())
+            mapped = [m for m in mapped if m.user_id in tenant_user_ids]
 
         # Count unmapped by inferred tool type
         unmapped_by_tool: dict[str, int] = {}

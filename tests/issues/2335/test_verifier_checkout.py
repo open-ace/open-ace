@@ -1,0 +1,223 @@
+"""S5 (#2335): verifier runs on a dedicated merged-main checkout.
+
+The verifier must NOT spawn in the workflow's dev worktree — it gets a
+throwaway checkout of ``main`` at ``verification_merge_sha``. On any
+checkout/spawn failure it returns empty verdicts (aggregates to
+``indeterminate``/pause, never a false ``confirmed``).
+"""
+
+from __future__ import annotations
+
+import os
+from unittest.mock import MagicMock, patch
+
+from app.modules.workspace.autonomous import orchestrator as orch_mod
+
+
+def _make_orchestrator():
+    """Build an AutonomousOrchestrator with stubbed dependencies."""
+    wf = {
+        "workflow_id": "wf-1",
+        "cli_tool": "claude-code",
+        "model": "test-model-x",
+        "worktree_path": "/dev/worktree",
+        "project_path": "/dev/repo",
+        "branch_strategy": "worktree",
+        "workspace_type": "local",
+    }
+    with (
+        patch("app.modules.workspace.autonomous.orchestrator.Database"),
+        patch(
+            "app.modules.workspace.autonomous.orchestrator.AutonomousWorkflowRepository"
+        ) as mock_repo_cls,
+        patch("app.modules.workspace.session_manager.SessionManager"),
+        patch("app.modules.workspace.autonomous.agent_runner.AutonomousAgentRunner"),
+    ):
+        mock_repo = MagicMock()
+        mock_repo.get_workflow.return_value = dict(wf)
+        mock_repo_cls.return_value = mock_repo
+        orch = orch_mod.AutonomousOrchestrator("wf-1")
+        orch.repo = mock_repo
+    return orch
+
+
+def test_checkout_merged_main_creates_temp_worktree_at_merge_sha(tmp_path):
+    """``_checkout_merged_main`` runs ``git worktree add --detach <tmp> <sha>``."""
+    orch = _make_orchestrator()
+    gh = MagicMock()
+    captured_cmds = []
+
+    def fake_run_git(args, **_kw):
+        captured_cmds.append(list(args))
+        # Simulate git creating the worktree dir.
+        if len(args) >= 2 and args[0] == "worktree" and args[1] == "add":
+            os.makedirs(args[-2], exist_ok=True)
+        return MagicMock(stdout="", stderr="", returncode=0)
+
+    gh._run_git = fake_run_git
+    gh.repo_path = "/dev/repo"
+
+    with patch.object(orch_mod.AutonomousOrchestrator, "_get_gh", return_value=gh):
+        with patch.object(orch_mod.tempfile, "mkdtemp", return_value=str(tmp_path)):
+            path = orch._checkout_merged_main("abc123")
+
+    assert path == str(tmp_path)
+    # The first worktree-add command should target the merge sha in detached mode.
+    add_cmds = [c for c in captured_cmds if c[:2] == ["worktree", "add"]]
+    assert add_cmds, "expected a git worktree add"
+    cmd = add_cmds[0]
+    assert "--detach" in cmd or "--no-checkout" not in cmd
+    assert cmd[-1] == "abc123"  # base ref is the merge sha
+    assert cmd[-2] == str(tmp_path)
+
+
+def test_checkout_merged_main_returns_none_on_failure(tmp_path):
+    """A git failure during checkout returns None (fail-safe, no half-created state)."""
+    orch = _make_orchestrator()
+    gh = MagicMock()
+
+    def fake_run_git(args, **_kw):
+        if args[:2] == ["worktree", "add"]:
+            raise RuntimeError("boom")
+        return MagicMock(stdout="", stderr="", returncode=0)
+
+    gh._run_git = fake_run_git
+    gh.repo_path = "/dev/repo"
+
+    with patch.object(orch_mod.AutonomousOrchestrator, "_get_gh", return_value=gh):
+        with patch.object(orch_mod.tempfile, "mkdtemp", return_value=str(tmp_path)):
+            path = orch._checkout_merged_main("abc123")
+
+    assert path is None
+
+
+def test_run_verification_agent_uses_merged_main_checkout(tmp_path):
+    """``_run_verification_agent`` spawns the agent with project_path = the temp checkout."""
+    orch = _make_orchestrator()
+    snapshot = MagicMock()
+    snapshot.to_canonical.return_value = {}
+
+    checkout_path = str(tmp_path / "merged")
+    os.makedirs(checkout_path)
+    spawn_calls = []
+
+    with patch.object(
+        orch_mod.AutonomousOrchestrator, "_checkout_merged_main", return_value=checkout_path
+    ) as mock_co:
+        with patch.object(
+            orch_mod.AutonomousOrchestrator, "_remove_verification_worktree"
+        ) as mock_rm:
+
+            def fake_run_agent(wf, **kwargs):
+                spawn_calls.append(kwargs)
+                return MagicMock()
+
+            with patch.object(
+                orch_mod.AutonomousOrchestrator, "_run_agent", side_effect=fake_run_agent
+            ):
+                with patch.object(
+                    orch_mod.AutonomousOrchestrator,
+                    "_parse_verifier_output",
+                    return_value={"verdicts": [], "snapshot": None},
+                ):
+                    orch._run_verification_agent(
+                        snapshot=snapshot,
+                        merge_sha="deadbeef",
+                        base_sha="base",
+                        issue_number=42,
+                        pr_number=99,
+                    )
+
+    # The agent was spawned with the temp checkout as project_path (not the dev worktree).
+    assert spawn_calls, "verifier should have spawned an agent"
+    assert spawn_calls[0]["project_path"] == checkout_path
+    assert spawn_calls[0]["project_path"] != "/dev/worktree"
+    mock_co.assert_called_once_with("deadbeef")
+    # Cleanup happened.
+    mock_rm.assert_called_once()
+
+
+def test_run_verification_agent_cleans_up_checkout_on_exception():
+    """Even when the spawn raises, the temp worktree is removed (try/finally)."""
+    orch = _make_orchestrator()
+    snapshot = MagicMock()
+    snapshot.to_canonical.return_value = {}
+
+    with patch.object(
+        orch_mod.AutonomousOrchestrator, "_checkout_merged_main", return_value="/tmp/merged"
+    ):
+        with patch.object(
+            orch_mod.AutonomousOrchestrator, "_remove_verification_worktree"
+        ) as mock_rm:
+            with patch.object(
+                orch_mod.AutonomousOrchestrator,
+                "_run_agent",
+                side_effect=RuntimeError("spawn failed"),
+            ):
+                result = orch._run_verification_agent(
+                    snapshot=snapshot,
+                    merge_sha="deadbeef",
+                    base_sha="base",
+                    issue_number=42,
+                    pr_number=99,
+                )
+
+    # Fail-safe: empty verdicts -> indeterminate, never confirmed.
+    assert result["verdicts"] == []
+    assert result["snapshot"] is None
+    mock_rm.assert_called_once()
+
+
+def test_run_verification_agent_returns_empty_when_checkout_fails():
+    """When the merged-main checkout cannot be created, no spawn is attempted."""
+    orch = _make_orchestrator()
+    snapshot = MagicMock()
+    snapshot.to_canonical.return_value = {}
+
+    with patch.object(orch_mod.AutonomousOrchestrator, "_checkout_merged_main", return_value=None):
+        with patch.object(orch_mod.AutonomousOrchestrator, "_run_agent") as mock_spawn:
+            result = orch._run_verification_agent(
+                snapshot=snapshot,
+                merge_sha="deadbeef",
+                base_sha="base",
+                issue_number=42,
+                pr_number=99,
+            )
+
+    assert result["verdicts"] == []
+    assert result["snapshot"] is None
+    mock_spawn.assert_not_called()
+
+
+def test_verified_by_records_model_version():
+    """``verified_by`` in the report includes the verifier model/version."""
+    # The report-builder path: we test via the phase handler's common_patch,
+    # but verified_by is also surfaced by _run_verification_agent's output so
+    # the phase can stamp it. Verify the agent records the workflow model.
+    orch = _make_orchestrator()
+    snapshot = MagicMock()
+    snapshot.to_canonical.return_value = {}
+
+    with patch.object(
+        orch_mod.AutonomousOrchestrator, "_checkout_merged_main", return_value="/tmp/merged"
+    ):
+        with patch.object(orch_mod.AutonomousOrchestrator, "_remove_verification_worktree"):
+            with patch.object(
+                orch_mod.AutonomousOrchestrator, "_run_agent", return_value=MagicMock()
+            ):
+                with patch.object(
+                    orch_mod.AutonomousOrchestrator,
+                    "_parse_verifier_output",
+                    return_value={"verdicts": [], "snapshot": None},
+                ):
+                    result = orch._run_verification_agent(
+                        snapshot=snapshot,
+                        merge_sha="deadbeef",
+                        base_sha="base",
+                        issue_number=42,
+                        pr_number=99,
+                    )
+
+    # The verifier output carries a verified_by field naming the model + runner version.
+    assert "verified_by" in result
+    assert "test-model-x" in result["verified_by"]

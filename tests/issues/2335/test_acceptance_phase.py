@@ -35,6 +35,10 @@ def test_confirmed_closes_issue_and_completes():
     gh = MagicMock()
     gh.get_issue.return_value = {"body": "## Scope\n- `app/x.py`"}
     gh.get_changed_files.return_value = ["app/x.py"]  # scope gate passes
+    # Mechanical gates (#2335 S4) read changed-file content via git show; wire
+    # _run_git so the legacy-pattern gate can read app/x.py (clean -> CONFIRMED,
+    # not INDETERMINATE, so the issue can still reach `confirmed`).
+    gh._run_git.return_value.stdout = "def f():\n    return 1\n"
     deps = _deps(gh=gh)
     deps.host.run_verification_agent.return_value = {
         "verdicts": [{"item": "works", "verdict": "confirmed", "evidence": [], "rationale": ""}],

@@ -514,6 +514,8 @@ def create_app(config=None):
         from app.repositories.database import Database, is_postgresql
         from app.repositories.schema_guard import (
             MIN_SUPPORTED_REVISION,
+            SchemaCompatibilityError,
+            check_schema_compatibility,
             get_database_revision,
             get_environment_mode,
         )
@@ -548,25 +550,33 @@ def create_app(config=None):
             try:
                 db = Database()
                 conn = db.get_connection()
-                current_revision = get_database_revision(conn)
-                conn.close()
+                try:
+                    current_revision = get_database_revision(conn)
 
-                checks["schema_version"]["current"] = current_revision
-                checks["schema_version"]["required"] = MIN_SUPPORTED_REVISION
+                    checks["schema_version"]["current"] = current_revision
+                    checks["schema_version"]["required"] = MIN_SUPPORTED_REVISION
 
-                if current_revision is None:
-                    # Fresh database
-                    checks["schema_version"]["status"] = "fresh"
-                    checks["schema_version"]["compatible"] = True
-                elif current_revision < MIN_SUPPORTED_REVISION:
-                    # Version too old
-                    checks["schema_version"]["status"] = "incompatible"
-                    checks["schema_version"]["compatible"] = False
-                    status_code = 503
-                else:
-                    # Version OK
-                    checks["schema_version"]["status"] = "ok"
-                    checks["schema_version"]["compatible"] = True
+                    if current_revision is None:
+                        # Fresh database
+                        checks["schema_version"]["status"] = "fresh"
+                        checks["schema_version"]["compatible"] = True
+                    else:
+                        # Delegate to schema_guard's compatibility logic, which
+                        # correctly treats timestamp revisions (e.g. 20260805_001)
+                        # as >= the "baseline_*" starting point. A plain string
+                        # comparison here ("2026..." < "baseline...") always
+                        # reported incompatible and kept /readyz at 503 forever.
+                        try:
+                            check_schema_compatibility(conn)
+                            checks["schema_version"]["status"] = "ok"
+                            checks["schema_version"]["compatible"] = True
+                        except SchemaCompatibilityError as exc:
+                            checks["schema_version"]["status"] = "incompatible"
+                            checks["schema_version"]["compatible"] = False
+                            checks["schema_version"]["error"] = str(exc)
+                            status_code = 503
+                finally:
+                    conn.close()  # Ensure connection is always closed
 
             except Exception as e:
                 from app.utils.health_checks import _sanitize_error_message
@@ -717,6 +727,7 @@ def register_blueprints(app):
     from app.routes.auth import auth_bp
     from app.routes.autonomous import autonomous_bp
     from app.routes.compliance import compliance_bp
+    from app.routes.feishu_config import feishu_config_bp
     from app.routes.fetch import fetch_bp
     from app.routes.fs import fs_bp
     from app.routes.governance import governance_bp
@@ -774,6 +785,7 @@ def register_blueprints(app):
     app.register_blueprint(autonomous_bp, url_prefix="/api/autonomous")
     app.register_blueprint(ai_agent_settings_bp, url_prefix="/api")
     app.register_blueprint(smtp_config_bp, url_prefix="/api")
+    app.register_blueprint(feishu_config_bp, url_prefix="/api")
     # model-gateway (removable): admin config routes for the optional LiteLLM gateway
     from app.routes.model_gateway import model_gateway_bp
 

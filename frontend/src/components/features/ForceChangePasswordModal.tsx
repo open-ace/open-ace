@@ -97,16 +97,18 @@ export const ForceChangePasswordModal: React.FC = () => {
           value={currentPassword}
           onChange={(value: string) => setCurrentPassword(value)}
           placeholder={t('enterCurrentPassword', language) ?? 'Enter current password'}
+          aria-label="current-password"
         />
       </div>
 
       <div className="mb-3">
-        <label className="form-label">{t('password', language) ?? 'New Password'}</label>
+        <label className="form-label">{t('newPassword', language) ?? 'New Password'}</label>
         <TextInput
           type="password"
           value={newPassword}
           onChange={(value: string) => setNewPassword(value)}
           placeholder={t('enterNewPassword', language) ?? 'Enter new password'}
+          aria-label="new-password"
         />
         <PasswordPolicyHint />
       </div>
@@ -118,6 +120,7 @@ export const ForceChangePasswordModal: React.FC = () => {
           value={confirmPassword}
           onChange={(value: string) => setConfirmPassword(value)}
           placeholder={t('confirmPassword', language) ?? 'Confirm password'}
+          aria-label="confirm-password"
         />
       </div>
     </Modal>

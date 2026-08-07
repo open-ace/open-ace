@@ -69,8 +69,6 @@ def check_database_connection(timeout: float = 2.0) -> dict[str, Any]:
         Dict with status and optional error message.
     """
     try:
-        import sqlalchemy as sa
-
         from app.repositories.database import is_postgresql
 
         if is_postgresql():
@@ -79,7 +77,12 @@ def check_database_connection(timeout: float = 2.0) -> dict[str, Any]:
             if conn is None:
                 return {"status": "error", "error": "connection_failed"}
             try:
-                conn.execute(sa.text("SELECT 1"))
+                # PgConnectionWrapper delegates to a psycopg2 connection, which
+                # exposes cursor() but not execute(); run the probe through a
+                # cursor instead of conn.execute() (would raise AttributeError
+                # and make /readyz report connection_failed forever).
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
                 return {"status": "ok"}
             finally:
                 conn.close()

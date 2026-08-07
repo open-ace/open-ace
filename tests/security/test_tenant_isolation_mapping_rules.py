@@ -55,10 +55,20 @@ def tenant_admin_client(app):
                 with self._auth_patch():
                     return self._client.post(*args, **kwargs)
 
+        def get(self, *args, **kwargs):
+            with self._token_patch():
+                with self._auth_patch():
+                    return self._client.get(*args, **kwargs)
+
         def put(self, *args, **kwargs):
             with self._token_patch():
                 with self._auth_patch():
                     return self._client.put(*args, **kwargs)
+
+        def delete(self, *args, **kwargs):
+            with self._token_patch():
+                with self._auth_patch():
+                    return self._client.delete(*args, **kwargs)
 
     return TenantAdminAuthenticatedClient(test_client)
 
@@ -90,6 +100,21 @@ def platform_admin_client(app):
             with self._token_patch():
                 with self._auth_patch():
                     return self._client.post(*args, **kwargs)
+
+        def get(self, *args, **kwargs):
+            with self._token_patch():
+                with self._auth_patch():
+                    return self._client.get(*args, **kwargs)
+
+        def put(self, *args, **kwargs):
+            with self._token_patch():
+                with self._auth_patch():
+                    return self._client.put(*args, **kwargs)
+
+        def delete(self, *args, **kwargs):
+            with self._token_patch():
+                with self._auth_patch():
+                    return self._client.delete(*args, **kwargs)
 
     return PlatformAdminAuthenticatedClient(test_client)
 
@@ -857,3 +882,313 @@ class TestAdminWithTenantIdNotScoped:
 
         # Should succeed, NOT 404
         assert response.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# Issue #2374: Tenant isolation for suggest_mapping and test_match endpoints.
+# ---------------------------------------------------------------------------
+
+
+class TestTenantIsolationForSuggestMapping:
+    """
+    Issue #2374: Verify tenant isolation for the suggest-mapping endpoint.
+
+    Tenant admin should only get suggestions within their own tenant.
+    """
+
+    @patch("app.routes.mapping_rules.ToolAccountAutoMappingService")
+    def test_tenant_admin_suggest_mapping_passes_tenant_id(
+        self, mock_service_class, tenant_admin_client
+    ):
+        """Tenant admin's suggest-mapping call should pass tenant_id to service."""
+        mock_service = MagicMock()
+        mock_service.auto_map_account.return_value = None
+        mock_service_class.return_value = mock_service
+
+        tenant_admin_client.get("/api/unmapped-accounts/alice-pc-qwen/suggest-mapping")
+
+        # Verify tenant_id=1 (from fixture) was passed
+        mock_service.auto_map_account.assert_called_once_with("alice-pc-qwen", tenant_id=1)
+
+    @patch("app.routes.mapping_rules.ToolAccountAutoMappingService")
+    def test_tenant_admin_suggest_mapping_returns_tenant_scoped_result(
+        self, mock_service_class, tenant_admin_client
+    ):
+        """Tenant admin should receive suggestion scoped to their tenant."""
+        from app.services.tool_account_auto_mapping_service import AutoMappingResult
+
+        mock_service = MagicMock()
+        mock_service.auto_map_account.return_value = AutoMappingResult(
+            tool_account="alice-pc-qwen",
+            user_id=5,
+            username="alice",
+            matched_by="username",
+        )
+        mock_service_class.return_value = mock_service
+
+        response = tenant_admin_client.get("/api/unmapped-accounts/alice-pc-qwen/suggest-mapping")
+
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert data["suggested_user_id"] == 5
+        assert data["suggested_username"] == "alice"
+
+    @patch("app.routes.mapping_rules.ToolAccountAutoMappingService")
+    def test_platform_admin_suggest_mapping_no_tenant_id(
+        self, mock_service_class, platform_admin_client
+    ):
+        """Platform admin's suggest-mapping call should NOT pass tenant_id."""
+        mock_service = MagicMock()
+        mock_service.auto_map_account.return_value = None
+        mock_service_class.return_value = mock_service
+
+        platform_admin_client.get("/api/unmapped-accounts/bob-laptop-qwen/suggest-mapping")
+
+        # Verify no tenant_id was passed
+        mock_service.auto_map_account.assert_called_once_with("bob-laptop-qwen")
+
+
+class TestTenantIsolationForTestMatch:
+    """
+    Issue #2374: Verify tenant isolation for the test-match endpoint.
+
+    Tenant admin should only test matches within their own tenant.
+    """
+
+    @patch("app.routes.mapping_rules.ToolAccountAutoMappingService")
+    def test_tenant_admin_test_match_passes_tenant_id(
+        self, mock_service_class, tenant_admin_client
+    ):
+        """Tenant admin's test-match call should pass tenant_id to service."""
+        mock_service = MagicMock()
+        mock_service.auto_map_account.return_value = None
+        mock_service_class.return_value = mock_service
+
+        tenant_admin_client.post(
+            "/api/mapping-rules/test-match",
+            data=json.dumps({"tool_account": "alice-pc-qwen", "tool_type": "qwen"}),
+            content_type="application/json",
+        )
+
+        # Verify tenant_id=1 (from fixture) was passed
+        mock_service.auto_map_account.assert_called_once_with("alice-pc-qwen", "qwen", tenant_id=1)
+
+    @patch("app.routes.mapping_rules.ToolAccountAutoMappingService")
+    def test_tenant_admin_test_match_returns_tenant_scoped_result(
+        self, mock_service_class, tenant_admin_client
+    ):
+        """Tenant admin should receive match result scoped to their tenant."""
+        from app.services.tool_account_auto_mapping_service import AutoMappingResult
+
+        mock_service = MagicMock()
+        mock_service.auto_map_account.return_value = AutoMappingResult(
+            tool_account="alice-pc-qwen",
+            user_id=5,
+            username="alice",
+            matched_by="rule",
+            rule_id=3,
+        )
+        mock_service_class.return_value = mock_service
+
+        response = tenant_admin_client.post(
+            "/api/mapping-rules/test-match",
+            data=json.dumps({"tool_account": "alice-pc-qwen"}),
+            content_type="application/json",
+        )
+
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert data["matched"] is True
+        assert data["user_id"] == 5
+
+    @patch("app.routes.mapping_rules.ToolAccountAutoMappingService")
+    def test_platform_admin_test_match_no_tenant_id(
+        self, mock_service_class, platform_admin_client
+    ):
+        """Platform admin's test-match call should NOT pass tenant_id."""
+        mock_service = MagicMock()
+        mock_service.auto_map_account.return_value = None
+        mock_service_class.return_value = mock_service
+
+        platform_admin_client.post(
+            "/api/mapping-rules/test-match",
+            data=json.dumps({"tool_account": "bob-laptop-qwen"}),
+            content_type="application/json",
+        )
+
+        # Verify no tenant_id was passed
+        mock_service.auto_map_account.assert_called_once_with("bob-laptop-qwen", None)
+
+
+# ---------------------------------------------------------------------------
+# Issue #2374: Fail-closed pattern tests for all auto-mapping endpoints.
+# ---------------------------------------------------------------------------
+
+
+class TestFailClosedPatternForAutoMapping:
+    """
+    Issue #2374: Verify fail-closed pattern for tenant_admin with no tenant_id.
+
+    All auto-mapping endpoints should return 403 when tenant_admin has
+    tenant_id=None, instead of falling through to global access.
+    """
+
+    def _make_no_tenant_client(self, app):
+        """Create a test client for tenant_admin with tenant_id=None."""
+        test_client = app.test_client()
+
+        class NoTenantClient:
+            def __init__(self, client):
+                self._client = client
+
+            def _auth_patch(self):
+                return patch(
+                    "app.auth.decorators._load_user_from_token",
+                    return_value={
+                        "id": 10,
+                        "role": "tenant_admin",
+                        "username": "no_tenant_admin",
+                        "tenant_id": None,
+                    },
+                )
+
+            def _token_patch(self):
+                return patch(
+                    "app.auth.decorators._extract_session_token",
+                    return_value="test-token",
+                )
+
+            def get(self, *args, **kwargs):
+                with self._token_patch():
+                    with self._auth_patch():
+                        return self._client.get(*args, **kwargs)
+
+            def post(self, *args, **kwargs):
+                with self._token_patch():
+                    with self._auth_patch():
+                        return self._client.post(*args, **kwargs)
+
+        return NoTenantClient(test_client)
+
+    @patch("app.routes.mapping_rules.ToolAccountAutoMappingService")
+    def test_no_tenant_id_get_mapping_stats_403(self, mock_service_class, app):
+        """get_mapping_stats should return 403 for tenant_admin without tenant_id."""
+        client = self._make_no_tenant_client(app)
+        response = client.get("/api/mapping-stats")
+        assert response.status_code == 403
+        mock_service_class.return_value.get_mapping_stats.assert_not_called()
+
+    @patch("app.routes.mapping_rules.ToolAccountAutoMappingService")
+    def test_no_tenant_id_run_auto_mapping_403(self, mock_service_class, app):
+        """run_auto_mapping should return 403 for tenant_admin without tenant_id."""
+        client = self._make_no_tenant_client(app)
+        response = client.post(
+            "/api/mapping-rules/auto-map",
+            data=json.dumps({"dry_run": True}),
+            content_type="application/json",
+        )
+        assert response.status_code == 403
+        mock_service_class.return_value.run_auto_mapping.assert_not_called()
+
+    @patch("app.routes.mapping_rules.UserToolAccountRepository")
+    def test_no_tenant_id_get_unmapped_accounts_403(self, mock_repo_class, app):
+        """get_unmapped_accounts should return 403 for tenant_admin without tenant_id."""
+        client = self._make_no_tenant_client(app)
+        response = client.get("/api/unmapped-accounts")
+        assert response.status_code == 403
+        mock_repo_class.return_value.get_unmapped_tool_accounts.assert_not_called()
+
+    @patch("app.routes.mapping_rules.ToolAccountAutoMappingService")
+    def test_no_tenant_id_suggest_mapping_403(self, mock_service_class, app):
+        """suggest_mapping should return 403 for tenant_admin without tenant_id."""
+        client = self._make_no_tenant_client(app)
+        response = client.get("/api/unmapped-accounts/alice-pc/suggest-mapping")
+        assert response.status_code == 403
+        mock_service_class.return_value.auto_map_account.assert_not_called()
+
+    @patch("app.routes.mapping_rules.ToolAccountAutoMappingService")
+    def test_no_tenant_id_test_match_403(self, mock_service_class, app):
+        """test_match should return 403 for tenant_admin without tenant_id."""
+        client = self._make_no_tenant_client(app)
+        response = client.post(
+            "/api/mapping-rules/test-match",
+            data=json.dumps({"tool_account": "alice-pc"}),
+            content_type="application/json",
+        )
+        assert response.status_code == 403
+        mock_service_class.return_value.auto_map_account.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Issue #2374: Admin/platform_admin with tenant_id must NOT be scoped
+# for suggest_mapping and test_match endpoints.
+# ---------------------------------------------------------------------------
+
+
+class TestAdminWithTenantIdNotScopedForNewEndpoints:
+    """
+    Issue #2374: Verify that admin/platform_admin with tenant_id is NOT
+    tenant-scoped for the new suggest_mapping and test_match endpoints.
+    """
+
+    @patch("app.routes.mapping_rules.ToolAccountAutoMappingService")
+    def test_admin_with_tenant_suggest_mapping_global(
+        self, mock_service_class, admin_with_tenant_client
+    ):
+        """Admin with tenant_id should call suggest_mapping without tenant_id."""
+        mock_service = MagicMock()
+        mock_service.auto_map_account.return_value = None
+        mock_service_class.return_value = mock_service
+
+        admin_with_tenant_client.get("/api/unmapped-accounts/alice-pc/suggest-mapping")
+
+        # Should NOT pass tenant_id
+        mock_service.auto_map_account.assert_called_once_with("alice-pc")
+
+    @patch("app.routes.mapping_rules.ToolAccountAutoMappingService")
+    def test_admin_with_tenant_test_match_global(
+        self, mock_service_class, admin_with_tenant_client
+    ):
+        """Admin with tenant_id should call test_match without tenant_id."""
+        mock_service = MagicMock()
+        mock_service.auto_map_account.return_value = None
+        mock_service_class.return_value = mock_service
+
+        admin_with_tenant_client.post(
+            "/api/mapping-rules/test-match",
+            data=json.dumps({"tool_account": "alice-pc", "tool_type": "qwen"}),
+            content_type="application/json",
+        )
+
+        # Should NOT pass tenant_id
+        mock_service.auto_map_account.assert_called_once_with("alice-pc", "qwen")
+
+    @patch("app.routes.mapping_rules.ToolAccountAutoMappingService")
+    def test_platform_admin_with_tenant_suggest_mapping_global(
+        self, mock_service_class, platform_admin_with_tenant_client
+    ):
+        """Platform admin with tenant_id should call suggest_mapping without tenant_id."""
+        mock_service = MagicMock()
+        mock_service.auto_map_account.return_value = None
+        mock_service_class.return_value = mock_service
+
+        platform_admin_with_tenant_client.get("/api/unmapped-accounts/bob-laptop/suggest-mapping")
+
+        mock_service.auto_map_account.assert_called_once_with("bob-laptop")
+
+    @patch("app.routes.mapping_rules.ToolAccountAutoMappingService")
+    def test_platform_admin_with_tenant_test_match_global(
+        self, mock_service_class, platform_admin_with_tenant_client
+    ):
+        """Platform admin with tenant_id should call test_match without tenant_id."""
+        mock_service = MagicMock()
+        mock_service.auto_map_account.return_value = None
+        mock_service_class.return_value = mock_service
+
+        platform_admin_with_tenant_client.post(
+            "/api/mapping-rules/test-match",
+            data=json.dumps({"tool_account": "bob-laptop"}),
+            content_type="application/json",
+        )
+
+        mock_service.auto_map_account.assert_called_once_with("bob-laptop", None)

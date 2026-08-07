@@ -25,6 +25,7 @@ import {
   useMarkDone,
   useRetryWorkflow,
   useExtendPlanningTimeout,
+  useAcceptanceOverride,
   useMilestoneSession,
   useMilestoneDiff,
   useWorkflowPrDiff,
@@ -350,6 +351,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
   const markDoneMutation = useMarkDone();
   const retryMutation = useRetryWorkflow();
   const extendTimeoutMutation = useExtendPlanningTimeout();
+  const acceptanceOverrideMutation = useAcceptanceOverride();
   const hasPr = !!workflow.github_pr_number;
 
   // Session detail query
@@ -709,6 +711,17 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
         ? { workflowId: workflow.workflow_id, maxChangedFilesOverride }
         : { workflowId: workflow.workflow_id }
     );
+
+  // #2335 S6: admin override for a paused indeterminate acceptance workflow.
+  const showAcceptanceOverride =
+    workflow.status === 'paused' && workflow.verification_status === 'indeterminate';
+  const handleAcceptanceOverride = () => {
+    const reason = window.prompt(t('autoAcceptanceOverrideReason', language));
+    // window.prompt returns null when the user cancels; '' is a valid (empty) reason.
+    if (reason === null) return;
+    if (!window.confirm(t('autoAcceptanceOverrideConfirm', language))) return;
+    acceptanceOverrideMutation.mutate({ workflowId: workflow.workflow_id, reason });
+  };
 
   const formatDefinitionValue = (value: unknown) => {
     if (value === null || value === undefined || value === '') {
@@ -2295,6 +2308,18 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                 >
                   <i className="bi bi-check-circle me-1"></i>
                   {t('autoCompleteWorkflow', language)}
+                </Button>
+              )}
+              {showAcceptanceOverride && (
+                <Button
+                  size="sm"
+                  variant="success"
+                  onClick={handleAcceptanceOverride}
+                  disabled={acceptanceOverrideMutation.isPending}
+                  title={t('autoAcceptanceOverrideDesc', language)}
+                >
+                  <i className="bi bi-shield-check me-1"></i>
+                  {t('autoAcceptanceOverrideButton', language)}
                 </Button>
               )}
               {latestFailedMilestone && (

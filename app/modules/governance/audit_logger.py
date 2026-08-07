@@ -98,6 +98,15 @@ class AuditAction(Enum):
     WEBUI_TOKEN_IN_QUERY_USED = "webui_token_in_query_used"
     PROXY_TOKEN_IN_QUERY_USED = "proxy_token_in_query_used"
     BROWSER_TOKEN_IN_QUERY_USED = "browser_token_in_query_used"
+
+    # SMTP configuration actions
+    SMTP_CONFIG_SAVE = "smtp_config_save"
+    SMTP_CONFIG_DELETE = "smtp_config_delete"
+
+    # Feishu configuration actions
+    FEISHU_CONFIG_SAVE = "feishu_config_save"
+    FEISHU_CONFIG_DELETE = "feishu_config_delete"
+
     URL_TOKEN_PATH_VIOLATION = "url_token_path_violation"
     LEGACY_WEBUI_TOKEN_USED = "legacy_webui_token_used"
     TOKEN_LEAK_SUSPECTED = "token_leak_suspected"
@@ -1045,6 +1054,40 @@ def get_action_categories() -> dict[str, dict[str, Any]]:
                     "value": "admin_global_session_list",
                     "label": "Admin Global Session List",
                     "i18n_key": "actionAdminGlobalSessionList",
+                },
+            ],
+        },
+        "smtp_config": {
+            "label": "SMTP Configuration",
+            "i18n_key": "categorySmtpConfig",
+            "resource_types": ["smtp_config"],
+            "actions": [
+                {
+                    "value": "smtp_config_save",
+                    "label": "SMTP Config Save",
+                    "i18n_key": "actionSmtpConfigSave",
+                },
+                {
+                    "value": "smtp_config_delete",
+                    "label": "SMTP Config Delete",
+                    "i18n_key": "actionSmtpConfigDelete",
+                },
+            ],
+        },
+        "feishu_config": {
+            "label": "Feishu Configuration",
+            "i18n_key": "categoryFeishuConfig",
+            "resource_types": ["feishu_config"],
+            "actions": [
+                {
+                    "value": "feishu_config_save",
+                    "label": "Feishu Config Save",
+                    "i18n_key": "actionFeishuConfigSave",
+                },
+                {
+                    "value": "feishu_config_delete",
+                    "label": "Feishu Config Delete",
+                    "i18n_key": "actionFeishuConfigDelete",
                 },
             ],
         },

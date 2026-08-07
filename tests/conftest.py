@@ -13,6 +13,12 @@ import sys
 
 import pytest
 
+# Stub Unix-only modules on Windows so that app.routes.fs (and transitively
+# app.routes) can be imported during test collection and patching.
+if sys.platform == "win32":
+    sys.modules.setdefault("pwd", type(sys)("pwd"))
+    sys.modules.setdefault("grp", type(sys)("grp"))
+
 # =============================================================================
 # Issue #2185: Set default security mode for tests
 # Tests should run in development mode by default.

@@ -9,7 +9,9 @@ changes:
   inline here (the T3 AST guard scans this file). Terminal completion is
   signalled with ``PhaseResult.completed(next_phase="completed", ...)``; the
   orchestrator's ``_commit_phase_result`` maps the "completed" pseudo-phase to
-  ``status=completed`` + ``completed_at`` + ``current_phase=merge``.
+  ``status=completed`` + ``completed_at`` + ``current_phase=acceptance_verification``
+  (the default terminal real phase; ``merge`` now advances to
+  ``acceptance_verification`` rather than completing directly).
 - ``phase_change`` events (e.g. ``{"phase": "completed"}``) go through
   ``deps.host.emit_phase_change`` — the commit entrypoint does NOT emit them.
 - The five orchestrator-private helpers this phase reaches for

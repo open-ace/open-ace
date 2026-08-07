@@ -18,6 +18,7 @@ export interface SMTPConfig {
   created_at?: string;
   updated_at?: string;
   created_by?: number;
+  created_by_username?: string; // Username of the user who created the config
 }
 
 export interface SMTPTestResult {

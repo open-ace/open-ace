@@ -41,6 +41,8 @@ class TestAuditActionsSynchronization:
             "SSRF Protection": 3,  # LLM_PROXY_URL_BLOCKED, ALLOWLIST_ENTRY_INVALID, IP_RESOLVED_MISMATCH
             "URL Token Security": 7,  # QUERY_SESSION_TOKEN_REJECTED, WEBUI_TOKEN_IN_QUERY_USED, PROXY_TOKEN_IN_QUERY_USED, BROWSER_TOKEN_IN_QUERY_USED, URL_TOKEN_PATH_VIOLATION, LEGACY_WEBUI_TOKEN_USED, TOKEN_LEAK_SUSPECTED
             "Admin Access": 2,  # ADMIN_CROSS_TENANT_ACCESS, ADMIN_GLOBAL_SESSION_LIST
+            "SMTP Configuration": 2,  # SMTP_CONFIG_SAVE, SMTP_CONFIG_DELETE
+            "Feishu Configuration": 2,  # FEISHU_CONFIG_SAVE, FEISHU_CONFIG_DELETE
         }
 
         total_expected = sum(expected_categories.values())

@@ -100,6 +100,14 @@ export interface AutonomousWorkflow {
   main_session_id?: string;
   review_session_id?: string;
   test_session_id?: string;
+  /**
+   * #2335 acceptance verification: the verifier verdict for a merged workflow.
+   * One of ``pending``/``confirmed``/``rejected``/``indeterminate``; null until
+   * the workflow reaches the ``acceptance_verification`` phase.
+   */
+  verification_status?: string | null;
+  verification_merge_sha?: string | null;
+  verified_by?: string | null;
 }
 
 export interface WorkflowMilestone {
@@ -306,6 +314,20 @@ export const autonomousApi = {
   async resumeWithFeedback(workflowId: string, feedback: string): Promise<{ success: boolean }> {
     return apiClient.post(`/api/autonomous/workflows/${workflowId}/resume-with-feedback`, {
       user_feedback: feedback,
+    });
+  },
+
+  /**
+   * #2335 S6: admin override for an indeterminate acceptance workflow. Sets
+   * ``verification_status="confirmed"``, posts a report, closes the issue, and
+   * completes the workflow. Admin-only server-side; non-admins get 403.
+   */
+  async acceptanceOverride(
+    workflowId: string,
+    options: { reason?: string }
+  ): Promise<{ success: boolean; workflow: AutonomousWorkflow }> {
+    return apiClient.post(`/api/autonomous/workflows/${workflowId}/verification_override`, {
+      reason: options.reason ?? '',
     });
   },
 
