@@ -960,6 +960,53 @@ def create_remote_session():
 
     # P2-1: Permission check moved to decorator @machine_access_required
     session_mgr = get_remote_session_manager()
+
+    # Issue #2408: the qwen-code-webui integrated-mode "new remote session"
+    # flow can reach here without a ha_pool_token (its session-models fetch
+    # only returns models for an existing session). The route is already
+    # gated by @machine_access_required, so fall back to issuing the pool
+    # token server-side (same logic as GET /api/workspace/session-models).
+    if not ha_pool_token and (cli_tool or "qwen-code-cli").lower().startswith("qwen"):
+        try:
+            api_proxy = get_api_key_proxy_service()
+            agent_mgr = get_remote_agent_manager()
+            machine = agent_mgr.get_machine(machine_id)
+            tenant_id = machine.get("tenant_id", 1) if machine else 1
+            pool = api_proxy.get_tool_model_pool(
+                tenant_id=tenant_id,
+                tool_name="qwen-code",
+                scope="remote",
+                provider="openai",
+            )
+            api_proxy.revoke_proxy_tokens_for_session(
+                f"ha-pool:{machine_id}",
+                reason="ha_pool_rotated",
+            )
+            ha_pool_token = api_proxy.generate_proxy_token(
+                user_id=g.user["id"],
+                session_id=f"ha-pool:{machine_id}",
+                tenant_id=tenant_id,
+                provider="openai",
+                session_type="ha_pool",
+                extra_payload={
+                    "scope": "remote",
+                    "tool_name": "qwen-code",
+                    "machine_id": machine_id,
+                    "ha_candidate_keys": pool.get("candidate_keys", []),
+                    "ha_model_key_ids": pool.get("model_key_ids", {}),
+                    "ha_models": pool.get("models", []),
+                    "ha_settings": pool.get("settings", {}),
+                    "ha_empty_reason": pool.get("empty_reason"),
+                },
+            )
+            logger.info(
+                "Issued ha_pool_token for remote session creation (machine %s, user %s)",
+                machine_id,
+                g.user["id"],
+            )
+        except Exception:
+            logger.exception("Failed to auto-issue ha_pool_token for remote session")
+
     result = session_mgr.create_remote_session(
         user_id=g.user["id"],
         machine_id=machine_id,
@@ -971,11 +1018,14 @@ def create_remote_session():
         ha_pool_token=ha_pool_token,
     )
 
-    if result:
+    if result and result.get("success") is not False:
         return jsonify({"success": True, "session": result})
     return (
         jsonify(
-            {"error": "Failed to create remote session. Check machine availability and access."}
+            {
+                "error": (result or {}).get("error")
+                or "Failed to create remote session. Check machine availability and access.",
+            }
         ),
         400,
     )
