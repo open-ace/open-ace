@@ -142,18 +142,29 @@ echo "rc=$?"
         assert "rc=0" in result.stdout
         assert (sentinel / "keep").is_file()
 
-    def test_unset_preserve_dir_does_not_trip_set_u(self, tmp_path):
-        """`set -u` + an unset preserve path would kill the wrapper from its trap."""
+    def test_blank_preserve_path_aborts_instead_of_dropping_history(self, tmp_path):
+        """A real tree plus a blank preserve path must be a no-op, not data loss.
+
+        Without the second guard the rescue `mv` silently fails (empty
+        destination) and the following `rm -rf $task_base` then takes the
+        session history with it — the tree is reclaimed but #2035 --resume is
+        permanently broken for that task.
+        """
+        paths = _make_tree(tmp_path, "t5")
         snippet = f"""
 {_extract_function("reclaim_task_tree")}
-task_base=""
-task_home=""
-reclaim_task_tree || echo "FAILED_RC=$?"
-echo done
+task_base={paths["base"]!s}
+task_home={paths["base"]!s}/home
+preserve_claude_dir=""
+reclaim_task_tree
+echo "rc=$?"
 """
         result = _run_snippet(snippet)
-        assert "unbound variable" not in result.stderr
-        assert "done" in result.stdout
+        assert result.returncode == 0, result.stderr
+        assert "rc=0" in result.stdout
+        assert (
+            paths["home"] / ".claude" / "projects" / "encoded" / "session.jsonl"
+        ).is_file(), "history was destroyed with no preserve path to rescue it into"
 
     def test_no_claude_dir_does_not_create_empty_preserve(self, tmp_path):
         paths = _make_tree(tmp_path, "t4", with_claude=False)
@@ -272,6 +283,59 @@ class TestReapStalePreserveDirs:
         result = _run_snippet(_reap_harness(task_root, lock_dir))
         assert result.returncode == 0, result.stderr
         assert not empty.exists()
+
+    def test_missing_lock_file_does_not_manufacture_one(self, tmp_path):
+        """The peer lock must be opened read-only: `8>` would create it.
+
+        Lock files cannot be reclaimed safely — unlink followed by a same-name
+        open yields a different inode, so two holders stop excluding each other.
+        A sweep that creates one per candidate would trade this leak for another.
+        """
+        task_root = tmp_path / "tasks"
+        lock_dir = tmp_path / "lock"
+        task_root.mkdir()
+        lock_dir.mkdir()
+        stale = task_root / "nolock.claude-preserve"
+        stale.mkdir()
+        _age(stale, 90)
+
+        result = _run_snippet(_reap_harness(task_root, lock_dir))
+        assert result.returncode == 0, result.stderr
+        assert not stale.exists()
+        assert (
+            list(lock_dir.iterdir()) == []
+        ), f"the sweep created lock files: {[p.name for p in lock_dir.iterdir()]}"
+
+    @requires_flock
+    def test_held_lock_protects_a_stale_looking_preserve(self, tmp_path):
+        """Age alone is not a liveness test.
+
+        The startup preserve-move and the restore bracket a window in which the
+        dir legitimately exists mid-run, and the restore can fail silently on a
+        full tmpfs. A run holding the task lock must keep its history.
+        """
+        task_root = tmp_path / "tasks"
+        lock_dir = tmp_path / "lock"
+        task_root.mkdir()
+        lock_dir.mkdir()
+        busy = task_root / "live.claude-preserve"
+        busy.mkdir()
+        (busy / "s.jsonl").write_text("{}", encoding="utf-8")
+        _age(busy / "s.jsonl", 90)
+        _age(busy, 90)
+        lock_file = lock_dir / "openace-agent-task-live.lock"
+        lock_file.touch()
+
+        # Hold the lock for the duration of the sweep, exactly as a live run would.
+        snippet = (
+            f"exec 7>{lock_file!s}\nflock -x 7\n"
+            + _reap_harness(task_root, lock_dir)
+            + "\nexec 7>&-\n"
+        )
+        result = _run_snippet(snippet)
+        assert result.returncode == 0, result.stderr
+        assert busy.exists(), "a locked (live) preserve dir was reaped"
+        assert (busy / "s.jsonl").is_file()
 
     def test_no_candidates_is_a_clean_noop(self, tmp_path):
         """The glob stays literal when nothing matches; the loop must not run."""
