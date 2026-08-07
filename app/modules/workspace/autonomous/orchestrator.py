@@ -711,6 +711,12 @@ def _executable_segments(command: str, _depth: int = 0) -> list[str]:
         tokens = _shell_tokens(segment)
         if _is_syntax_check_only(tokens):
             continue
+        # A disqualifying flag on the WRAPPER must reach its body. Callers apply
+        # _EXCLUDE_FLAG_TOKENS per segment, and the body arrives as a segment of
+        # its own, so `bash --help -c "npm test"` would otherwise leave the
+        # `--help` behind (#2376 PR-3 review-3).
+        if any(token in _EXCLUDE_FLAG_TOKENS for token in tokens):
+            continue
         inner = _shell_c_argument(tokens)
         if inner:
             segments.extend(_executable_segments(inner, _depth + 1))
@@ -727,7 +733,22 @@ def _executable_segments(command: str, _depth: int = 0) -> list[str]:
 
 _TEST_COMMAND_PATTERNS = {
     "python": ["pytest", "python -m pytest", "-m pytest", "unittest", "tox", "nox"],
-    "javascript": ["jest", "npm test", "npm run test", "yarn test", "vitest", "mocha"],
+    # pnpm/yarn are spelled out. They used to ride along on `npm test` only
+    # because the old matcher was a substring scan with no *leading* boundary —
+    # `pnpm test` contains `npm test`, and so does `xgo test` contain `go test`.
+    # Token matching removes that accident, so the real runners must be listed
+    # (#2376 PR-3 review-3).
+    "javascript": [
+        "jest",
+        "npm test",
+        "npm run test",
+        "yarn test",
+        "yarn run test",
+        "pnpm test",
+        "pnpm run test",
+        "vitest",
+        "mocha",
+    ],
     "go": ["go test", "gotestsum"],
     "rust": ["cargo test", "cargo t"],
     "java": ["mvn test", "gradle test", "./gradlew test"],
@@ -766,47 +787,115 @@ _ARTIFACT_OPERATION_VERBS = frozenset(
     }
 )
 
+# Commands whose first operand is a host or a user, not a subcommand. Without
+# these, `ssh build pytest` and `su build -c pytest` read `build` as a verb
+# (#2376 PR-3 review-3 HIGH-2).
+_OPERAND_HEAD_COMMANDS = frozenset({"ssh", "su", "doas", "runuser"})
+
+
+def _artifact_verb_precedes(tokens: list[str], index: int) -> bool:
+    """Whether a token before ``index`` is an artifact *verb* rather than a name.
+
+    A plain set intersection over everything to the left is unsound: the verb
+    set is made of ordinary English words that routinely appear as wrapper
+    *operands* — usernames, container names, conda envs, hostnames. It rejected
+    a dozen ordinary invocations, all of which work on the PR-2 tip
+    (#2376 PR-3 review-3 HIGH-2)::
+
+        sudo -u build pytest tests/
+        docker run --rm --name build img pytest
+        conda run -n build pytest tests/
+        kubectl exec -it add -- pytest tests/
+
+    A verb is only a verb when nothing marks it as an operand: an option
+    immediately to its left (``-u build``, ``--name build``) makes it that
+    option's argument, and ``ssh``/``su`` take a host or user in first position.
+    ``helm install mocha`` keeps its veto because ``install`` follows a bare
+    command name.
+    """
+    for position, token in enumerate(tokens[:index]):
+        if token.lower() not in _ARTIFACT_OPERATION_VERBS:
+            continue
+        if position == 0:
+            return True  # the verb IS the command: `install -m 755 pytest /usr/bin`
+        previous = tokens[position - 1]
+        if previous.startswith("-"):
+            continue  # an option's argument, not a subcommand
+        if previous.rsplit("/", 1)[-1] in _OPERAND_HEAD_COMMANDS:
+            continue  # `ssh <host>`, `su <user>`
+        return True
+    return False
+
+
+def _multiword_pattern_matches(pattern: str, tokens: list[str]) -> bool:
+    """Whether ``tokens`` contains ``pattern``'s words as consecutive tokens.
+
+    Matched over the token sequence rather than the raw segment text, because a
+    substring scan reads *inside quoted arguments*. PR-3 widened
+    ``_ALL_TEST_PATTERNS`` for polyglot repos, which put every language's
+    multi-word patterns in front of every command — and the shape that broke it
+    is the one this very workflow emits (#2376 PR-3 review-3 HIGH-1)::
+
+        gh pr create --body "## Test plan
+        - [x] npm run test:coverage — 12 passed"      -> PASSED
+
+    ``git`` is in the read-only pre-filter; ``gh`` is not, and no filter can be
+    exhaustive. The same hole bypassed ``_is_syntax_check_only``
+    (``bash -n -c "npm test"``) and ``_EXCLUDE_FLAG_TOKENS``. As tokens, a
+    quoted body is a single token and cannot supply a multi-token run.
+
+    Leading words compare by basename so ``/usr/bin/python -m pytest`` and
+    ``/w/gradlew test`` still match. The final word may be continued by ``:`` or
+    ``_`` (``npm run test:coverage``, ``npm run test_unit``) but not by a letter,
+    digit or hyphen (``npm run testdata:seed``, ``npm run test-utils:build``).
+    """
+    words = pattern.split()
+    span = len(words)
+    for start in range(len(tokens) - span + 1):
+        window = tokens[start : start + span]
+        if any(
+            token.rsplit("/", 1)[-1] != word.rsplit("/", 1)[-1]
+            for token, word in zip(window[:-1], words[:-1])
+        ):
+            continue
+        last, final_word = window[-1], words[-1]
+        if last == final_word:
+            return True
+        if last.startswith(final_word) and not re.match(r"[A-Za-z0-9-]", last[len(final_word) :]):
+            return True
+    return False
+
 
 def _pattern_matches_segment(pattern: str, segment: str, tokens: list[str]) -> bool:
-    r"""Whether ``pattern`` matches ``segment`` as a test invocation.
+    """Whether ``pattern`` matches ``segment`` as a test invocation.
 
-    Multi-word patterns must not be continued by a letter, digit or hyphen, so
-    ``cargo t`` no longer matches ``cargo tree`` and ``npm run test`` no longer
-    matches ``npm run testdata:seed`` or ``npm run test-utils:build`` — while
-    still matching ``npm run test:coverage`` and ``npm run test_unit``, since
-    ``:`` and ``_`` are genuine script-name separators. Plain ``\b`` is not
-    enough: it treats the hyphen in ``test-utils`` as a boundary.
+    Everything is matched over *tokens*, never over the raw segment text. Bare
+    single-word runner names must be a whole token, so the polyglot union does
+    not make ``nox`` match ``equinox`` or ``nox.yaml`` (#2376 PR-3 review D4);
+    multi-word patterns must be a consecutive token run, so a quoted argument
+    body cannot supply them (review-3 HIGH-1).
 
-    Bare single-word runner names must appear as a whole *token*, not as a
-    substring — otherwise the union puts every language's names in front of
-    every polyglot repo and ``nox`` matches ``equinox``, ``nox.yaml`` (#2376
-    PR-3 review D4).
-
-    Token equality rather than command position is deliberate. Requiring the
-    runner at the head broke every wrapped invocation — ``sudo pytest``,
-    ``timeout 600 pytest``, ``poetry run pytest``, ``uv run pytest``,
-    ``docker compose run app pytest`` — all of which work on main and are
-    ordinary (PR-3 re-review N1). Wrapper operand grammars cannot be enumerated
-    (`docker compose run --rm app`), and the rest of this module scans rather
-    than reading token 0 for exactly that reason.
-
-    The residual token equality leaves is a runner *name* used as an artifact
-    name — ``helm install mocha``, ``docker build -t mocha`` — so a preceding
-    artifact-operation verb disqualifies the token.
+    Token equality rather than command *position* is deliberate for the bare
+    names. Requiring the runner at the head broke every wrapped invocation —
+    ``sudo pytest``, ``timeout 600 pytest``, ``poetry run pytest``,
+    ``docker compose run app pytest`` — all of which work on the PR-2 tip and
+    are ordinary (review-2 N1). Wrapper operand grammars cannot be enumerated,
+    and the rest of this module scans rather than reading token 0 for exactly
+    that reason. What token equality leaves is a runner *name* used as an
+    artifact name, which ``_artifact_verb_precedes`` handles.
     """
+    # Enumerate and slice the SAME list. Slicing the unstripped `tokens` with an
+    # index into the stripped one shifts the window left by the number of
+    # assignments, dropping the verb off the end of it: `FOO=1 helm install
+    # mocha` saw only {FOO=1, helm} and was accepted (review-2 follow-up).
+    stripped = _strip_leading_assignments(tokens)
     if pattern in _BARE_RUNNER_PATTERNS:
-        # Enumerate and slice the SAME list. Slicing the unstripped `tokens`
-        # with an index into the stripped one shifts the window left by the
-        # number of assignments, dropping the verb off the end of it:
-        # `FOO=1 helm install mocha` saw only {FOO=1, helm} and was accepted.
-        stripped = _strip_leading_assignments(tokens)
         for index, token in enumerate(stripped):
             if token.rsplit("/", 1)[-1] != pattern:
                 continue
-            preceding = {t.lower() for t in stripped[:index]}
-            return not (preceding & _ARTIFACT_OPERATION_VERBS)
+            return not _artifact_verb_precedes(stripped, index)
         return False
-    return re.search(rf"{re.escape(pattern)}(?![A-Za-z0-9-])", segment) is not None
+    return _multiword_pattern_matches(pattern, stripped)
 
 
 # Any path with a tests/ component, anchored on that component so it also
@@ -814,6 +903,25 @@ def _pattern_matches_segment(pattern: str, segment: str, tokens: list[str]) -> b
 # `.worktrees/<id>` checkouts (#2376 PR-3 review D11) — the anchored-at-start
 # version rejected wf221's own command written absolutely.
 _TEST_PATH_RE = re.compile(r"^(?:[\w./~-]*/)?tests?/.+\.(sh|bash|py|js|ts|mjs|bats)$")
+
+
+def _is_test_path(token: str) -> bool:
+    """Whether ``token`` is a path to a file *inside* a ``tests/`` directory.
+
+    The regex's ``.+`` happily swallows a traversal back out again, so
+    ``python tests/../scripts/deploy.py`` matched and counted as a test run
+    (#2376 PR-3 review-3). A ``..`` *before* the tests component is fine and
+    common — agents run ``bash ../tests/x.sh`` from a subdirectory — so only the
+    remainder is checked.
+    """
+    if not _TEST_PATH_RE.match(token):
+        return False
+    parts = token.split("/")
+    for index, part in enumerate(parts):
+        if part in ("tests", "test"):
+            return ".." not in parts[index + 1 :]
+    return False
+
 
 # Interpreters that can execute a test file directly. `python3.N` is matched
 # separately so 3.10/3.12/... all resolve.
@@ -920,7 +1028,7 @@ def _is_test_path_execution(command: str) -> bool:
         # a test run: `ruff check tests/x.py`, `eslint tests/x.ts`,
         # `shellcheck tests/x.sh` (#2376 PR-3 review D1). The non-executing
         # pre-filter is a denylist and cannot be the only guard here.
-        if _TEST_PATH_RE.match(tokens[0]):
+        if _is_test_path(tokens[0]):
             return True
 
         # Scan for the first interpreter/runner token; wrapper operands
@@ -939,7 +1047,7 @@ def _is_test_path_execution(command: str) -> bool:
                 return _is_npx_test_invocation(rest)
 
             if base in _EXECUTING_INTERPRETERS or _PYTHON_VERSIONED_RE.match(base):
-                return any(_TEST_PATH_RE.match(arg) for arg in rest)
+                return any(_is_test_path(arg) for arg in rest)
     return False
 
 

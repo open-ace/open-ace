@@ -444,6 +444,116 @@ def test_collection_only_runs_are_not_test_runs(command):
     assert _has_test_tool_call(_tc(command), "mixed") is False
 
 
+# --- Re-review 3: patterns match TOKENS, never raw segment text --------------
+#
+# HIGH-1. Multi-word patterns were a substring scan over the segment, so they
+# read inside quoted argument bodies. PR-3 put every language's patterns in
+# front of every polyglot repo, and the shape that broke it is the one this
+# workflow itself emits: its PR-creation step writes a test plan into --body.
+# `git` is in the read-only pre-filter; `gh` is not, and no denylist can be
+# exhaustive. The same hole bypassed the syntax-check guard and the exclude
+# flags, and every one of these reached an authoritative PASSED.
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'gh pr create --title "x" --body "## Test plan\n- [x] npm run test:coverage — 12 passed"',
+        'gh issue comment 1 --body "ran npm test, 40 passed"',
+        'echo "go test ./... all green"',
+        'git commit -m "npm run test passes"',
+        'curl -d "mvn test" http://x',
+        # The quoted body also defeated _is_syntax_check_only and the exclude
+        # flags, because it never had to survive them as tokens.
+        'bash -n -c "npm test"',
+        'bash --help -c "npm test"',
+    ],
+)
+def test_quoted_argument_bodies_are_not_test_invocations(command):
+    assert _has_test_tool_call(_tc(command), "mixed") is False
+
+
+# HIGH-2. The artifact-verb veto was a set intersection over every preceding
+# token, but the verbs are ordinary English words that appear as wrapper
+# *operands* — usernames, container names, conda envs, hostnames. All of these
+# work on the PR-2 tip; rejecting them is the fail-closed direction that killed
+# wf 220/221 in the first place.
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "sudo -u build pytest tests/",
+        "docker run --rm --name build img pytest",
+        "docker run --rm -w build img pytest tests/",
+        "docker run --rm -u build img pytest",
+        "conda run -n build pytest tests/",
+        "poetry run --directory build pytest",
+        "kubectl exec -it add -- pytest tests/",
+        "nix-shell -p tag --run pytest",
+        "timeout 600 sudo -u build /opt/venv/bin/pytest tests/",
+        # ssh/su take a host or user in first position, not a subcommand.
+        "ssh build pytest tests/",
+        "su build -c pytest",
+    ],
+)
+def test_artifact_verbs_as_wrapper_operands_do_not_veto(command):
+    assert _has_test_tool_call(_tc(command), "mixed") is True
+
+
+def test_a_verb_in_command_position_still_vetoes():
+    # The coreutils `install` copying a file named pytest is not a test run.
+    assert _has_test_tool_call(_tc("install -m 755 pytest /usr/bin"), "mixed") is False
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # MEDIUM: `.+` swallowed a traversal back OUT of tests/.
+        "python tests/../scripts/deploy.py",
+        "bash /home/x/tests/../scripts/prod_migrate.sh",
+    ],
+)
+def test_paths_that_traverse_out_of_tests_are_rejected(command):
+    assert _has_test_tool_call(_tc(command), "mixed") is False
+
+
+@pytest.mark.parametrize("command", ["bash ../tests/x.sh", "bash ../../tests/e2e/run.sh"])
+def test_dotdot_before_the_tests_component_is_fine(command):
+    # Agents run from a subdirectory routinely; only the tail is checked.
+    assert _has_test_tool_call(_tc(command), "mixed") is True
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        # pnpm/yarn only ever matched by riding along inside `npm test` /
+        # `yarn test` as substrings — the old matcher had no *leading* boundary.
+        # Token matching removes that accident, so they are listed explicitly.
+        ("pnpm test", True),
+        ("pnpm run test:unit", True),
+        ("yarn run test:unit", True),
+        # ...and the same accident made `xgo test` match `go test`.
+        ("xgo test ./...", False),
+    ],
+)
+def test_leading_boundary_now_applies_to_multiword_patterns(command, expected):
+    assert _has_test_tool_call(_tc(command), "mixed") is expected
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # Leading words compare by basename, so an absolute interpreter or
+        # wrapper path does not lose the match.
+        "/usr/bin/python -m pytest tests/",
+        "/w/gradlew test",
+    ],
+)
+def test_multiword_patterns_resolve_leading_basenames(command):
+    assert _has_test_tool_call(_tc(command), "mixed") is True
+
+
 def test_resolve_framework_does_not_steal_go_from_a_trailing_npm_command():
     # D8: the npm regex scans the whole command, so placing it before the go/
     # cargo head checks sent `go test ./... && npm run test` to _parse_jest,
