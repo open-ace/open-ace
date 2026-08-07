@@ -944,7 +944,7 @@ def create_system_user(username):
 
 
 def sync_ssh_keys_secure(username):
-    """
+    \"\"\"
     安全同步 SSH 密钥（Issue #2182 + #2328 - fail-closed）
 
     使用独立的 Python 脚本 /usr/local/bin/openace-ssh-sync 实现：
@@ -962,7 +962,7 @@ def sync_ssh_keys_secure(username):
     Returns:
         0: Success
         1: Failure (script missing/failed/timed out/exception)
-    """
+    \"\"\"
     root_ssh = '/root/.ssh'
     user_ssh = f'/home/{username}/.ssh'
 
@@ -1019,7 +1019,7 @@ def sync_ssh_keys_secure(username):
 
 
 def _log_sync_failure(username, reason, details):
-    """Log sync failure to multiple channels for operational visibility"""
+    \"\"\"Log sync failure to multiple channels for operational visibility\"\"\"
     import json
     from datetime import datetime
 
@@ -1053,18 +1053,12 @@ def _log_sync_failure(username, reason, details):
         os.makedirs(os.path.dirname(warning_file), exist_ok=True)
 
         with open(warning_file, "w") as f:
-            f.write(f"[{timestamp}] SSH Sync Failure
-")
-            f.write(f"User: {username}
-")
-            f.write(f"Reason: {reason}
-")
-            f.write(f"Details: {details}
-")
-            f.write(f"
-Remediation:
-{_get_remediation_hint(reason)}
-")
+            f.write(f"[{timestamp}] SSH Sync Failure\n")
+            f.write(f"User: {username}\n")
+            f.write(f"Reason: {reason}\n")
+            f.write(f"Details: {details}\n")
+            remediation = _get_remediation_hint(reason)
+            f.write(f"\nRemediation:\n{remediation}\n")
     except Exception:
         # Fallback to stderr if warning file creation fails
         pass
@@ -1077,39 +1071,30 @@ Remediation:
 
 
 def _get_remediation_hint(reason):
-    """Return remediation guidance based on failure reason"""
+    \"\"\"Return remediation guidance based on failure reason\"\"\"
     hints = {
         "script_missing": (
-            "Ensure /usr/local/bin/openace-ssh-sync is installed.
-"
-            "For Docker: ensure the script is COPYed in Dockerfile.
-"
+            "Ensure /usr/local/bin/openace-ssh-sync is installed.\n"
+            "For Docker: ensure the script is COPYed in Dockerfile.\n"
             "For package installation: ensure the package installs the script."
         ),
         "script_not_executable": (
             "Run: chmod +x /usr/local/bin/openace-ssh-sync"
         ),
         "script_failed": (
-            "Check /var/log/openace/ssh-sync.log for details.
-"
+            "Check /var/log/openace/ssh-sync.log for details.\n"
             "Common causes: permission errors, invalid whitelist config."
         ),
         "script_timeout": (
-            "Script took too long. Check for:
-"
-            "- Large number of files in /root/.ssh
-"
-            "- Slow filesystem
-"
+            "Script took too long. Check for:\n"
+            "- Large number of files in /root/.ssh\n"
+            "- Slow filesystem\n"
             "- Increase timeout via OPENACE_SSH_SYNC_TIMEOUT_SECONDS"
         ),
         "script_exception": (
-            "Unexpected error. Check:
-"
-            "- Python version >= 3.10
-"
-            "- PyYAML package installed
-"
+            "Unexpected error. Check:\n"
+            "- Python version >= 3.10\n"
+            "- PyYAML package installed\n"
             "- /var/log/openace/ directory writable"
         )
     }
