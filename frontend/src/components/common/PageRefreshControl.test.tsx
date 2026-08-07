@@ -155,10 +155,22 @@ describe('PageRefreshControl', () => {
       expect(screen.queryByTestId('refresh-clock-icon')).not.toBeInTheDocument();
       // Should render refresh time as text
       expect(screen.getByText(/minutes ago/i)).toBeInTheDocument();
-      // Should have title attribute for tooltip
-      const timeText = screen.getByText(/minutes ago/i);
-      expect(timeText).toHaveAttribute('title');
-      expect(timeText.getAttribute('title')).toContain('Last Refresh');
+    });
+
+    it('should use btn-outline-secondary for refresh button in compact mode without dropdown', () => {
+      const mockRefresh = createMockRefresh();
+
+      render(
+        <PageRefreshControl
+          refresh={mockRefresh}
+          compact={true}
+          showAutoRefreshToggle={false}
+          showIntervalSelector={false}
+        />
+      );
+
+      const button = screen.getByTestId('manual-refresh-button');
+      expect(button).toHaveClass('btn-outline-secondary');
     });
 
     it('should not render clock icon or extra element when lastRefreshTime is null', () => {
