@@ -1005,6 +1005,30 @@ def get_remote_session(session_id):
                     "error": status_messages.get(status, "Remote session has ended"),
                 }
             )
+
+        # Issue #2407: filter Qwen system-context entries that were historically
+        # recorded as role=user messages so they never render as user chat
+        # messages when the webui loads a restored remote session.
+        # ``messages`` may hold SessionMessage objects or dicts — handle both.
+        msgs = result.get("messages")
+        if isinstance(msgs, list):
+            from scripts.shared.qwen_context import is_qwen_system_context
+
+            def _msg_role(m):
+                return m.get("role") if isinstance(m, dict) else getattr(m, "role", "")
+
+            def _msg_content(m):
+                return m.get("content") if isinstance(m, dict) else getattr(m, "content", "")
+
+            result["messages"] = [
+                m
+                for m in msgs
+                if not (
+                    _msg_role(m) == "user"
+                    and is_qwen_system_context(_msg_content(m))
+                )
+            ]
+
         return jsonify({"success": True, "session": result})
     return jsonify({"error": "Session not found"}), 404
 

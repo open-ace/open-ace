@@ -131,6 +131,7 @@ shared_dir = os.path.join(script_dir, "shared")
 if shared_dir not in sys.path:
     sys.path.insert(0, script_dir)
 from shared import db
+from shared.qwen_context import is_qwen_system_context  # Issue #2407
 from shared.utils import update_session_last_seen, warn_if_skipped_message_has_text
 
 
@@ -561,6 +562,13 @@ def process_jsonl_file(
 
                             # Get content
                             content = extract_content_from_entry(entry)
+
+                            # Issue #2407: Qwen CLI stores its system context
+                            # (Platform Tool Limits, startup context, memory
+                            # instructions) as type=user entries; skip them so
+                            # they never surface as user chat messages.
+                            if role == "user" and is_qwen_system_context(content):
+                                continue
 
                             # Keep ``input_tokens`` as non-cached input while
                             # ``tokens_used`` tracks the provider total (which
