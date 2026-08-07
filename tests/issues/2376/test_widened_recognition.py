@@ -554,6 +554,24 @@ def test_multiword_patterns_resolve_leading_basenames(command):
     assert _has_test_tool_call(_tc(command), "mixed") is True
 
 
+def test_every_single_word_pattern_is_registered_as_a_bare_runner():
+    # Structural invariant, not a behaviour case. _pattern_matches_segment routes
+    # on _BARE_RUNNER_PATTERNS membership: registered names need whole-token
+    # equality plus the artifact-verb veto, everything else takes the multi-word
+    # path, whose final word may be continued by ":"/"_". A one-word pattern that
+    # slips through there would match `nox:build` and skip the veto entirely —
+    # a silent fail-open introduced by a one-line edit to _TEST_COMMAND_PATTERNS.
+    from app.modules.workspace.autonomous.orchestrator import (
+        _ALL_TEST_PATTERNS,
+        _BARE_RUNNER_PATTERNS,
+    )
+
+    stray = [
+        p for p in _ALL_TEST_PATTERNS if len(p.split()) == 1 and p not in _BARE_RUNNER_PATTERNS
+    ]
+    assert stray == [], f"single-word patterns must be registered as bare runners: {stray}"
+
+
 def test_resolve_framework_does_not_steal_go_from_a_trailing_npm_command():
     # D8: the npm regex scans the whole command, so placing it before the go/
     # cargo head checks sent `go test ./... && npm run test` to _parse_jest,
