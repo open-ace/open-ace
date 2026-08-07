@@ -6,19 +6,13 @@ import { apiClient } from './client';
 
 // Types
 export interface FeishuConfigResponse {
-  id: number;
   app_id: string;
   app_secret_masked?: string;
-  tenant_id?: string;
-  auto_sync: boolean;
-  sync_interval: number;
-  is_verified: boolean;
-  last_verified_at?: string;
-  last_sync_at?: string;
-  created_at?: string;
-  updated_at?: string;
-  created_by?: number;
-  created_by_username?: string;
+  org_sync_enabled: boolean;
+  org_sync_interval_minutes: number;
+  org_sync_tenant_id?: number;
+  org_sync_max_runtime_seconds?: number;
+  org_sync_auto_recover?: boolean;
 }
 
 export interface FeishuTestResult {
@@ -40,9 +34,11 @@ export const feishuConfigApi = {
   async saveConfig(config: {
     app_id: string;
     app_secret?: string;
-    tenant_id?: string;
-    auto_sync?: boolean;
-    sync_interval?: number;
+    org_sync_enabled?: boolean;
+    org_sync_interval_minutes?: number;
+    org_sync_tenant_id?: number;
+    org_sync_max_runtime_seconds?: number;
+    org_sync_auto_recover?: boolean;
   }): Promise<FeishuConfigResponse> {
     const response = await apiClient.put<{
       success: boolean;

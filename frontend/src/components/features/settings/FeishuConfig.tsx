@@ -38,9 +38,9 @@ export const FeishuConfig: React.FC = () => {
   const [formData, setFormData] = useState({
     app_id: '',
     app_secret: '',
-    tenant_id: '',
-    auto_sync: false,
-    sync_interval: 60,
+    org_sync_tenant_id: '',
+    org_sync_enabled: false,
+    org_sync_interval_minutes: 60,
   });
 
   // Password visibility state
@@ -61,9 +61,9 @@ export const FeishuConfig: React.FC = () => {
         setFormData({
           app_id: result.app_id,
           app_secret: '', // Don't populate secret
-          tenant_id: result.tenant_id ?? '',
-          auto_sync: result.auto_sync,
-          sync_interval: result.sync_interval,
+          org_sync_tenant_id: result.org_sync_tenant_id?.toString() ?? '',
+          org_sync_enabled: result.org_sync_enabled,
+          org_sync_interval_minutes: result.org_sync_interval_minutes,
         });
       }
     } catch (err) {
@@ -91,7 +91,10 @@ export const FeishuConfig: React.FC = () => {
     }
 
     // Validate sync_interval
-    if (formData.auto_sync && (formData.sync_interval < 1 || formData.sync_interval > 1440)) {
+    if (
+      formData.org_sync_enabled &&
+      (formData.org_sync_interval_minutes < 1 || formData.org_sync_interval_minutes > 1440)
+    ) {
       toast.error(t('validationError', language), t('feishuSyncIntervalRange', language));
       return;
     }
@@ -105,19 +108,19 @@ export const FeishuConfig: React.FC = () => {
       if (formData.app_secret) {
         changes.push(`${t('feishuAppSecret', language)}: (updated)`);
       }
-      if (formData.tenant_id !== (config.tenant_id ?? '')) {
+      if (formData.org_sync_tenant_id !== (config.org_sync_tenant_id?.toString() ?? '')) {
         changes.push(
-          `${t('syncTargetTenant', language)}: ${config.tenant_id ?? '(empty)'} → ${formData.tenant_id || '(empty)'}`
+          `${t('syncTargetTenant', language)}: ${config.org_sync_tenant_id ?? '(empty)'} → ${formData.org_sync_tenant_id || '(empty)'}`
         );
       }
-      if (formData.auto_sync !== config.auto_sync) {
+      if (formData.org_sync_enabled !== config.org_sync_enabled) {
         changes.push(
-          `${t('autoSync', language)}: ${config.auto_sync ? t('enabled', language) : t('disabled', language)} → ${formData.auto_sync ? t('enabled', language) : t('disabled', language)}`
+          `${t('autoSync', language)}: ${config.org_sync_enabled ? t('enabled', language) : t('disabled', language)} → ${formData.org_sync_enabled ? t('enabled', language) : t('disabled', language)}`
         );
       }
-      if (formData.sync_interval !== config.sync_interval) {
+      if (formData.org_sync_interval_minutes !== config.org_sync_interval_minutes) {
         changes.push(
-          `${t('syncInterval', language)}: ${config.sync_interval} → ${formData.sync_interval}`
+          `${t('syncInterval', language)}: ${config.org_sync_interval_minutes} → ${formData.org_sync_interval_minutes}`
         );
       }
     }
@@ -135,9 +138,11 @@ export const FeishuConfig: React.FC = () => {
       const saved = await feishuConfigApi.saveConfig({
         app_id: formData.app_id,
         app_secret: formData.app_secret || undefined,
-        tenant_id: formData.tenant_id || undefined,
-        auto_sync: formData.auto_sync,
-        sync_interval: formData.sync_interval,
+        org_sync_tenant_id: formData.org_sync_tenant_id
+          ? parseInt(formData.org_sync_tenant_id, 10)
+          : undefined,
+        org_sync_enabled: formData.org_sync_enabled,
+        org_sync_interval_minutes: formData.org_sync_interval_minutes,
       });
 
       setConfig(saved);
@@ -200,9 +205,9 @@ export const FeishuConfig: React.FC = () => {
       setFormData({
         app_id: '',
         app_secret: '',
-        tenant_id: '',
-        auto_sync: false,
-        sync_interval: 60,
+        org_sync_tenant_id: '',
+        org_sync_enabled: false,
+        org_sync_interval_minutes: 60,
       });
       toast.success(t('feishuConfigDeleted', language), t('feishuConfigDeletedDesc', language));
     } catch (err: unknown) {
@@ -216,7 +221,7 @@ export const FeishuConfig: React.FC = () => {
     if (!config) {
       return <Badge variant="secondary">{t('feishuNotConfigured', language)}</Badge>;
     }
-    if (config.is_verified) {
+    if (config.app_secret_masked) {
       return <Badge variant="success">{t('feishuConnected', language)}</Badge>;
     }
     return <Badge variant="warning">{t('feishuInvalid', language)}</Badge>;
@@ -241,27 +246,7 @@ export const FeishuConfig: React.FC = () => {
         <Card className="mb-3">
           <div className="d-flex align-items-center">
             <i className="bi bi-info-circle text-info me-2" />
-            <span className="text-muted">
-              {t('feishuConfigExists', language)}
-              {config.created_by_username && (
-                <>
-                  {' • '}
-                  {t('createdBy', language)}: {config.created_by_username}
-                </>
-              )}
-              {config.created_at && (
-                <>
-                  {' • '}
-                  {t('createdAt', language)}: {new Date(config.created_at).toLocaleString()}
-                </>
-              )}
-              {config.last_sync_at && (
-                <>
-                  {' • '}
-                  {t('lastSyncAt', language)}: {new Date(config.last_sync_at).toLocaleString()}
-                </>
-              )}
-            </span>
+            <span className="text-muted">{t('feishuConfigExists', language)}</span>
           </div>
         </Card>
       )}
@@ -315,8 +300,8 @@ export const FeishuConfig: React.FC = () => {
             <div className="col-md-6">
               <label className="form-label">{t('syncTargetTenant', language)}</label>
               <TextInput
-                value={formData.tenant_id}
-                onChange={(value) => setFormData({ ...formData, tenant_id: value })}
+                value={formData.org_sync_tenant_id}
+                onChange={(value) => setFormData({ ...formData, org_sync_tenant_id: value })}
                 placeholder={t('enterFeishuTenantId', language)}
               />
               <small className="text-muted">
@@ -332,8 +317,8 @@ export const FeishuConfig: React.FC = () => {
                   className="form-check-input"
                   type="checkbox"
                   id="autoSync"
-                  checked={formData.auto_sync}
-                  onChange={(e) => setFormData({ ...formData, auto_sync: e.target.checked })}
+                  checked={formData.org_sync_enabled}
+                  onChange={(e) => setFormData({ ...formData, org_sync_enabled: e.target.checked })}
                 />
                 <label className="form-check-label" htmlFor="autoSync">
                   {t('autoSync', language)}
@@ -346,18 +331,18 @@ export const FeishuConfig: React.FC = () => {
             </div>
 
             {/* Sync Interval */}
-            {formData.auto_sync && (
+            {formData.org_sync_enabled && (
               <div className="col-md-6">
                 <label className="form-label">{t('syncInterval', language)}</label>
                 <div className="input-group">
                   <input
                     type="number"
                     className="form-control"
-                    value={formData.sync_interval}
+                    value={formData.org_sync_interval_minutes}
                     onChange={(e) =>
                       setFormData({
                         ...formData,
-                        sync_interval: parseInt(e.target.value, 10) || 60,
+                        org_sync_interval_minutes: parseInt(e.target.value, 10) || 60,
                       })
                     }
                     min={1}
