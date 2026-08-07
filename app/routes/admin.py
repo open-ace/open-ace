@@ -7,7 +7,7 @@ API routes for admin operations.
 import logging
 import secrets
 import string
-from typing import cast
+from typing import Any, cast
 
 import bcrypt
 from flask import Blueprint, g, jsonify, request
@@ -213,7 +213,7 @@ def api_update_user(user_id):
 
     if success:
         # Audit log for user update
-        details = {"action": "update"}
+        details: dict[str, Any] = {"action": "update"}
         if current_user:
             # Track role change
             old_role = current_user.get("role")
@@ -232,7 +232,8 @@ def api_update_user(user_id):
             username=g.user.get("username"),
             resource_type="user",
             resource_id=str(user_id),
-            resource_name=data.get("username") or (current_user.get("username") if current_user else None),
+            resource_name=data.get("username")
+            or (current_user.get("username") if current_user else None),
             details=details,
             **client_info,
         )
