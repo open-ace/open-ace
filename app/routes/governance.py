@@ -58,7 +58,12 @@ def api_get_audit_logs():
 
     # Parse dates
     start_time = datetime.fromisoformat(start_date) if start_date else None
-    end_time = datetime.fromisoformat(end_date) if end_date else None
+    # Include the entire end_date (until 23:59:59)
+    end_time = (
+        datetime.fromisoformat(end_date) + timedelta(days=1) - timedelta(seconds=1)
+        if end_date
+        else None
+    )
 
     # Query logs
     logs = audit_logger.query(
@@ -184,8 +189,9 @@ def api_export_audit_logs():
         if start_date
         else datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
     )
+    # Include the entire end_date (until 23:59:59)
     end_time = (
-        datetime.fromisoformat(end_date)
+        datetime.fromisoformat(end_date) + timedelta(days=1) - timedelta(seconds=1)
         if end_date
         else datetime.now(timezone.utc).replace(tzinfo=None)
     )
