@@ -136,7 +136,11 @@ jobs:
         run: |
           # E2E/Playwright/HTTP tests live under tests/e2e/ and are excluded via
           # pytest.ini's norecursedirs. PostgreSQL tests are marked and deselected
-          # here; they run in the postgres-test job below.
+          # here; they run in the postgres-test job below. Wall-clock timing
+          # benchmarks are marked 'performance' and deselected for the same reason:
+          # a shared GitHub-hosted runner cannot guarantee timing bounds, and this
+          # job is a required merge check running with fail-fast. They run in the
+          # non-blocking performance-test job below.
           # Coverage includes scripts/shared and P0 security modules (Issue #1856)
           # Issue #2189: Add coverage threshold to ensure failure propagates
           pytest tests/ -v \
@@ -147,7 +151,7 @@ jobs:
             --cov-fail-under=30 \
             --cov-report=xml \
             --cov-report=html \
-            -m "not postgres"
+            -m "not postgres and not performance"
 
       - name: Upload coverage to Codecov
         timeout-minutes: 2
@@ -273,6 +277,38 @@ jobs:
           DATABASE_URL: postgresql://ace:ace@localhost:5432/ace_test
           # Use separate database to avoid conflict with schema-sync workflow
           ACE_DATABASE_NAME: ace_test
+
+  # Wall-clock performance benchmarks
+  # Split out of the required `test` matrix for the same reason postgres-test is:
+  # these assert on elapsed time, which a shared GitHub-hosted runner cannot
+  # guarantee. Noisy neighbours produced 60-70% swings and failed `test (3.12)`
+  # on main; because `test` is a required merge check running with fail-fast, a
+  # single trip cancelled the rest of the matrix and blocked every PR until
+  # someone manually re-ran the job.
+  #
+  # This job is NOT a required check: a timing blip here must never block a merge.
+  # It still reports pass/fail so a genuine, sustained regression stays visible.
+  performance-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio
+
+      - name: Run performance benchmarks
+        run: pytest tests/ -v -m "performance and not postgres" --tb=short
 
   # Security Audit Gate (Issue #1890)
   # Blocks PRs with known high/critical vulnerabilities in production dependencies

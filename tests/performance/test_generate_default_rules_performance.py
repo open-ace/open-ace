@@ -2,6 +2,11 @@
 Performance tests for generate default rules functionality.
 
 Issue #2131: Verify response time < 500ms.
+
+Tests that assert on wall-clock time are marked ``@pytest.mark.performance`` and
+are deselected from the required ``test (3.x)`` CI matrix -- a shared runner
+cannot guarantee timing bounds. They run in the separate, non-blocking
+``performance-test`` job.
 """
 
 import time
@@ -58,6 +63,7 @@ class TestGenerateDefaultRulesPerformance:
     Issue #2131: Verify response time < 500ms.
     """
 
+    @pytest.mark.performance
     @patch("app.routes.mapping_rules.ToolAccountAutoMappingService")
     def test_response_time_first_generate(self, mock_service_class, admin_client):
         """
@@ -113,6 +119,7 @@ class TestGenerateDefaultRulesPerformance:
         # Log actual response time for monitoring
         print(f"Response time for first generate: {elapsed_time:.3f}s")
 
+    @pytest.mark.performance
     @patch("app.routes.mapping_rules.ToolAccountAutoMappingService")
     def test_response_time_repeat_generate(self, mock_service_class, admin_client):
         """
@@ -149,6 +156,7 @@ class TestGenerateDefaultRulesPerformance:
 
         print(f"Response time for repeat generate: {elapsed_time:.3f}s")
 
+    @pytest.mark.performance
     def test_response_time_under_load(self, admin_client):
         """
         Verify response time under simulated load.
@@ -263,6 +271,7 @@ class TestGenerateDefaultRulesPerformance:
         # For this test, we just verify no exceptions occurred
         print("Connection leak test: All requests succeeded without errors")
 
+    @pytest.mark.performance
     def test_no_performance_regression(self, admin_client):
         """
         Verify performance does not degrade beyond baseline.
