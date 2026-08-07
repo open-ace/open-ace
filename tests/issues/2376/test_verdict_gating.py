@@ -32,9 +32,8 @@ iteration shape) would be killed.
 from __future__ import annotations
 
 import pytest
-from app.modules.workspace.autonomous.command_evidence.test_evidence import (
-    parse_test_evidence,
-)
+
+from app.modules.workspace.autonomous.command_evidence.test_evidence import parse_test_evidence
 from app.modules.workspace.autonomous.command_evidence.test_verdict import compute_run_verdict
 from app.modules.workspace.autonomous.command_evidence.types import (
     CommandExecutionEvidence,

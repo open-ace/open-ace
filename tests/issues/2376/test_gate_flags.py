@@ -23,6 +23,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 import pytest
+
 from app.modules.workspace.autonomous.command_evidence.types import ExecutionVerdict
 from app.modules.workspace.autonomous.models import AgentTaskResult
 
