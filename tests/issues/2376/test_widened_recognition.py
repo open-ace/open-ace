@@ -315,8 +315,17 @@ def test_vitest_counts_do_not_override_a_nonzero_exit():
     # D5: before the vitest patterns no counts parsed and the exit code decided.
     # Letting counts silently win turns a failing `npm run test:coverage` — a
     # coverage threshold, a failing posttest, a teardown crash — into PASSED.
+    #
+    # The assertion is on the *run* verdict, not `!= "passed"` on the evidence.
+    # The first cut downgraded to (INCONCLUSIVE, MEDIUM), which satisfies
+    # `!= "passed"` while still letting the run reach PASSED, so the weaker
+    # assertion passed against a fix that did not hold (#2376 PR-3 re-review N2).
     from app.modules.workspace.autonomous.command_evidence.test_evidence import parse_test_evidence
-    from app.modules.workspace.autonomous.command_evidence.types import CommandExecutionEvidence
+    from app.modules.workspace.autonomous.command_evidence.test_verdict import compute_run_verdict
+    from app.modules.workspace.autonomous.command_evidence.types import (
+        CommandExecutionEvidence,
+        ExecutionVerdict,
+    )
 
     evidence = CommandExecutionEvidence(
         command_id="c",
@@ -330,7 +339,9 @@ def test_vitest_counts_do_not_override_a_nonzero_exit():
         ),
         session_id="s",
     )
-    assert parse_test_evidence(evidence, framework_hint="mixed").verdict != "passed"
+    parsed = parse_test_evidence(evidence, framework_hint="mixed")
+    assert parsed.verdict == "failed"
+    assert compute_run_verdict([parsed]) is ExecutionVerdict.FAILED
 
 
 def test_test_files_count_is_not_a_test_count():
@@ -350,6 +361,78 @@ def test_test_files_count_is_not_a_test_count():
         session_id="s",
     )
     assert parse_test_evidence(evidence, framework_hint="mixed").passed is None
+
+
+# --- Re-review N1: token equality must not lose wrapped invocations ----------
+#
+# Requiring the runner in *command position* closed D4 but broke every wrapped
+# form. All of these are True on the PR-2 tip, where matching was substring
+# based, and all of them are ordinary — the fail-closed direction is the more
+# dangerous one here, because a workflow that ran its tests correctly gets
+# killed for it (that is the whole reason #2376 exists).
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "sudo pytest",
+        "sudo -u openace pytest tests/",
+        "timeout 600 pytest tests/",
+        "nice -n 10 pytest",
+        "stdbuf -oL pytest tests/",
+        "env FOO=1 pytest",
+        "poetry run pytest",
+        "uv run pytest",
+        "pipenv run pytest tests/",
+        "docker compose run --rm app pytest tests/",
+        "/usr/local/bin/pytest tests/",
+        # A shell -c body is a single token, so token equality cannot see the
+        # runner inside it unless the body is re-split.
+        'bash -c "pytest tests/"',
+        "sh -c 'pytest tests/ -q'",
+        'bash -lc "npm test"',
+        'docker compose run --rm app sh -c "pytest -q"',
+        'sudo -u openace bash -c "bash tests/integration/test_sudoers_security.sh"',
+        # `_` is a genuine script-name separator; only `-` and alphanumerics
+        # continue a pattern.
+        "npm run test_unit",
+    ],
+)
+def test_wrapped_invocations_are_still_recognized(command):
+    assert _has_test_tool_call(_tc(command), "mixed") is True
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # The wrapper is cleared before the body is expanded, so a read-only
+        # command holding a shell string does not launder it.
+        'echo bash -c "pytest tests/"',
+        'bash -c "grep -rn pytest tests/"',
+        'bash -c "cat tests/x.sh"',
+        # -n parses without running, whether or not -c follows.
+        'bash -n -c "pytest tests/"',
+    ],
+)
+def test_shell_c_expansion_does_not_launder_non_executing_commands(command):
+    assert _has_test_tool_call(_tc(command), "mixed") is False
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # N4: collection flags exit 0 having asserted nothing, and the structured
+        # layer's exit-code fallback would call that a pass. `--collect-only` was
+        # reachable before PR-3; `npx playwright test --list` is new with D3's
+        # positive twin.
+        "npx playwright test --list",
+        "pytest --collect-only tests/",
+        "python -m pytest --co -q",
+        "npx jest --listTests",
+    ],
+)
+def test_collection_only_runs_are_not_test_runs(command):
+    assert _has_test_tool_call(_tc(command), "mixed") is False
 
 
 def test_resolve_framework_does_not_steal_go_from_a_trailing_npm_command():

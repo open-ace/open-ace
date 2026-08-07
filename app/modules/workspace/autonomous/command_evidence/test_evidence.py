@@ -318,9 +318,17 @@ def _parse_jest(excerpt: str, exit_code: int | None) -> ParsedTestResult:
         # teardown crash. Before the vitest patterns landed, no counts parsed
         # and the exit code decided; letting counts silently override it turns
         # a failing `npm run test:coverage` into PASSED (#2376 PR-3 D5).
+        #
+        # FAILED, not INCONCLUSIVE. The information is not missing — the counts
+        # and the exit code *disagree*, which is decided. Deferring would hand
+        # it to the heuristic, whose prose fallback is satisfied by the very
+        # summary that triggered this, re-opening the hole one layer down. And
+        # `(INCONCLUSIVE, MEDIUM)` is a state no other parser emits: it falls
+        # between compute_run_verdict's two mechanisms (`has_low` is False, and
+        # _classify_failures counts it as an uncovered failure anyway), so the
+        # run verdict became order-dependent (#2376 PR-3 re-review N2).
         if exit_code not in (None, 0) and verdict == ExecutionVerdict.PASSED:
-            verdict = ExecutionVerdict.INCONCLUSIVE
-            confidence = ParserConfidence.MEDIUM
+            verdict = ExecutionVerdict.FAILED
     elif exit_code is not None:
         verdict = ExecutionVerdict.PASSED if exit_code == 0 else ExecutionVerdict.FAILED
         confidence = ParserConfidence.MEDIUM

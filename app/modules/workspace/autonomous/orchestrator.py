@@ -428,10 +428,27 @@ _TEST_RUNNER_COMMANDS = frozenset(
     }
 )
 
-# Flags that turn a test command into a help/version query. Matched as whole
-# tokens: a raw substring test discards legitimate runs whose path or flags
-# merely contain "-h" (e.g. ``pytest -q --no-header``, ``tests/test-helper.py``).
-_EXCLUDE_FLAG_TOKENS = frozenset({"--help", "--version", "-h"})
+# Flags that turn a test command into a help/version/enumeration query. Matched
+# as whole tokens: a raw substring test discards legitimate runs whose path or
+# flags merely contain "-h" (e.g. ``pytest -q --no-header``,
+# ``tests/test-helper.py``).
+#
+# The collection flags exit 0 having asserted nothing, so they satisfy both this
+# gate and the structured layer's exit-code fallback (#2376 PR-3 re-review N4).
+# ``npx playwright test --list`` is the shape that prompted this, but
+# ``pytest --collect-only`` was already reachable before PR-3.
+_EXCLUDE_FLAG_TOKENS = frozenset(
+    {
+        "--help",
+        "--version",
+        "-h",
+        "--collect-only",
+        "--co",
+        "--list",
+        "--listTests",
+        "--list-tests",
+    }
+)
 
 
 def _shell_tokens(text: str) -> list[str]:
@@ -638,6 +655,68 @@ def _segment_is_non_executing(segment: str) -> bool:
     return False
 
 
+# Shells whose ``-c`` argument is a command line in its own right. ``python -c``
+# is deliberately absent: its argument is Python source, and expanding it would
+# make ``python -c 'import equinox'`` a test run again (#2376 PR-3 review D4).
+_SHELL_C_COMMANDS = frozenset({"bash", "sh", "zsh", "dash", "ksh"})
+
+
+def _shell_c_argument(tokens: list[str]) -> str | None:
+    """The command string passed to a shell's ``-c``, if any.
+
+    Combined short flags count, so ``bash -lc "npm test"`` resolves.
+    """
+    for index, token in enumerate(tokens):
+        if token.rsplit("/", 1)[-1] not in _SHELL_C_COMMANDS:
+            continue
+        rest = tokens[index + 1 :]
+        for offset, flag in enumerate(rest):
+            if not flag.startswith("-") or flag == "--":
+                return None
+            if flag.startswith("--"):
+                continue
+            if "c" in flag[1:]:
+                following = rest[offset + 1 :]
+                return following[0] if following else None
+        return None
+    return None
+
+
+def _executable_segments(command: str, _depth: int = 0) -> list[str]:
+    """Segments of ``command`` that actually run, including shell ``-c`` bodies.
+
+    The read-only pre-filter is applied here rather than by each caller, because
+    the two must not come apart: a ``-c`` body may only be expanded once its
+    *wrapper* has been cleared. Expanding first would make ``echo bash -c
+    "pytest tests/"`` a test run, since the inner string would arrive as a
+    top-level segment with the ``echo`` that vetoes it left behind.
+
+    Expansion exists because ``bash -c "pytest tests/"`` is a single token to
+    the tokenizer, so PR-3's token-equality rule cannot see the runner. That
+    form works on main (matching was substring-based there) and is ordinary —
+    ``docker compose run app sh -c "pytest -q"`` — so leaving it unrecognized
+    would be a fail-closed regression (#2376 PR-3 re-review N1). Re-splitting
+    the body rather than special-casing it means the pre-filter applies to the
+    inner command too, so ``bash -c "grep -rn pytest tests/"`` is still
+    rejected. ``bash -n -c "pytest"`` parses without running, so a syntax check
+    is not expanded either.
+    """
+    segments: list[str] = []
+    for segment in _command_segments(command):
+        if _segment_is_non_executing(segment):
+            continue
+        segments.append(segment)
+        if _depth >= 2:
+            continue
+        tokens = _shell_tokens(segment)
+        if _is_syntax_check_only(tokens):
+            continue
+        inner = _shell_c_argument(tokens)
+        if inner:
+            segments.extend(_executable_segments(inner, _depth + 1))
+    return segments
+
+
 # --------------------------------------------------------------------------- #
 # Repo-convention test detection (#2376 Fix C)
 # --------------------------------------------------------------------------- #
@@ -666,24 +745,63 @@ _BARE_RUNNER_PATTERNS = frozenset(
     {"pytest", "unittest", "jest", "vitest", "mocha", "tox", "nox", "gotestsum"}
 )
 
+# Verbs that make a following bare runner name an *artifact* rather than the
+# command: `helm install mocha ./chart`, `docker build -t mocha .`,
+# `pip download tox`. Without them, token equality would accept those.
+_ARTIFACT_OPERATION_VERBS = frozenset(
+    {
+        "install",
+        "uninstall",
+        "add",
+        "remove",
+        "download",
+        "build",
+        "pull",
+        "push",
+        "tag",
+        "create",
+        "apply",
+        "delete",
+        "search",
+    }
+)
+
 
 def _pattern_matches_segment(pattern: str, segment: str, tokens: list[str]) -> bool:
-    """Whether ``pattern`` matches ``segment`` as a test invocation.
+    r"""Whether ``pattern`` matches ``segment`` as a test invocation.
 
-    Multi-word patterns must not be continued by a word character *or a hyphen*,
-    so ``cargo t`` no longer matches ``cargo tree`` and ``npm run test`` no
-    longer matches ``npm run testdata:seed`` or ``npm run test-utils:build`` —
-    while still matching ``npm run test:coverage``, since a colon is a genuine
-    script-name separator. Plain ``\\b`` is not enough: it treats the hyphen in
-    ``test-utils`` as a boundary.
+    Multi-word patterns must not be continued by a letter, digit or hyphen, so
+    ``cargo t`` no longer matches ``cargo tree`` and ``npm run test`` no longer
+    matches ``npm run testdata:seed`` or ``npm run test-utils:build`` — while
+    still matching ``npm run test:coverage`` and ``npm run test_unit``, since
+    ``:`` and ``_`` are genuine script-name separators. Plain ``\b`` is not
+    enough: it treats the hyphen in ``test-utils`` as a boundary.
+
+    Bare single-word runner names must appear as a whole *token*, not as a
+    substring — otherwise the union puts every language's names in front of
+    every polyglot repo and ``nox`` matches ``equinox``, ``nox.yaml`` (#2376
+    PR-3 review D4).
+
+    Token equality rather than command position is deliberate. Requiring the
+    runner at the head broke every wrapped invocation — ``sudo pytest``,
+    ``timeout 600 pytest``, ``poetry run pytest``, ``uv run pytest``,
+    ``docker compose run app pytest`` — all of which work on main and are
+    ordinary (PR-3 re-review N1). Wrapper operand grammars cannot be enumerated
+    (`docker compose run --rm app`), and the rest of this module scans rather
+    than reading token 0 for exactly that reason.
+
+    The residual token equality leaves is a runner *name* used as an artifact
+    name — ``helm install mocha``, ``docker build -t mocha`` — so a preceding
+    artifact-operation verb disqualifies the token.
     """
     if pattern in _BARE_RUNNER_PATTERNS:
-        head = next(
-            (t for t in _strip_leading_assignments(tokens) if not t.startswith("-")),
-            "",
-        )
-        return head.rsplit("/", 1)[-1] == pattern
-    return re.search(rf"{re.escape(pattern)}(?![\w-])", segment) is not None
+        for index, token in enumerate(_strip_leading_assignments(tokens)):
+            if token.rsplit("/", 1)[-1] != pattern:
+                continue
+            preceding = {t.lower() for t in tokens[:index]}
+            return not (preceding & _ARTIFACT_OPERATION_VERBS)
+        return False
+    return re.search(rf"{re.escape(pattern)}(?![A-Za-z0-9-])", segment) is not None
 
 
 # Any path with a tests/ component, anchored on that component so it also
@@ -713,9 +831,6 @@ _NPX_BARE_RUNNERS = frozenset({"vitest", "jest", "mocha"})
 # (#2376 PR-3 review D3). frontend/package.json ships exactly that command as
 # its "playwright:install" script.
 _NPX_SUBCOMMAND_RUNNERS = {"playwright": {"test"}, "cypress": {"run"}}
-_NPX_NON_TEST_SUBCOMMANDS = frozenset(
-    {"install", "verify", "codegen", "show-report", "show-trace", "open", "info", "--version"}
-)
 
 
 def _is_npx_test_invocation(rest: list[str]) -> bool:
@@ -789,9 +904,7 @@ def _is_test_path_execution(command: str) -> bool:
     Recognition is per segment and runs after the non-executing pre-filter, so
     reading or grepping a test file never reaches here.
     """
-    for segment in _command_segments(command):
-        if _segment_is_non_executing(segment):
-            continue
+    for segment in _executable_segments(command):
         tokens = _strip_leading_assignments(_shell_tokens(segment))
         if not tokens or _is_syntax_check_only(tokens):
             continue
@@ -884,11 +997,10 @@ def _has_test_tool_call(tool_calls: list, framework_type: str) -> bool:
             # eligibility to a filtered one, so a one-token prefix would defeat
             # the read-only filter:
             #     python -c "print(1)" && grep -rn pytest tests/
-            for segment in _command_segments(cmd):
-                if _segment_is_non_executing(segment):
-                    continue
+            for segment in _executable_segments(cmd):
                 tokens = _shell_tokens(segment)
-                # Note: -v (verbose) is NOT excluded, only --help/--version/-h
+                # Note: -v (verbose) is NOT excluded — only help/version and
+                # the collection-only flags, which assert nothing.
                 if any(token in _EXCLUDE_FLAG_TOKENS for token in tokens):
                     continue
                 for pattern in patterns_to_check:
