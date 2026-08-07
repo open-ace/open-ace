@@ -1021,6 +1021,7 @@ def sync_ssh_keys_secure(username):
 def _log_sync_failure(username, reason, details):
     \"\"\"Log sync failure to multiple channels for operational visibility\"\"\"
     import json
+    import sys
     from datetime import datetime
 
     timestamp = datetime.now().isoformat()
@@ -1041,8 +1042,7 @@ def _log_sync_failure(username, reason, details):
         os.makedirs(os.path.dirname(log_file), exist_ok=True)
 
         with open(log_file, "a") as f:
-            f.write(json.dumps(log_entry) + "
-")
+            f.write(json.dumps(log_entry) + "\n")
     except Exception:
         # Fallback to stderr if file logging fails
         pass
