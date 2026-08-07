@@ -672,12 +672,33 @@ def test_both_veto_rules_are_load_bearing():
     assert _artifact_tool_subcommand_is_a_verb(only_tool_anchor) is True
 
 
-def test_the_veto_gates_the_tests_path_rule_too():
-    # The veto used to live inside _pattern_matches_segment, leaving
-    # _is_test_path_execution as a second, ungated entry point.
+def test_the_path_rule_is_positional_and_needs_no_veto():
+    # An artifact operation naming a test script is already rejected, because
+    # the path rule requires the path to BE the command or to follow an
+    # interpreter — not merely to appear as an argument.
     assert _has_test_tool_call(_tc("helm install mocha ./tests/run.sh"), "mixed") is False
-    # ...without disturbing an ordinary wrapped test-file run.
-    assert _has_test_tool_call(_tc("sudo -u openace bash tests/x.sh"), "mixed") is True
+    assert _has_test_tool_call(_tc("docker build -t mocha . tests/run.sh"), "mixed") is False
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # ...which is why the veto must NOT gate the path door. The bare-word
+        # rule fires on any verb following a bare word, and a test script's own
+        # ARGUMENT qualifies. Gating both doors looked tidier and killed these
+        # seven — the last is wf221's own command with a mode argument, and
+        # runner scripts routinely take one (#2376 PR-3 review-6).
+        "bash tests/integration/run.sh build",
+        "bash tests/integration/run.sh install",
+        "bash tests/e2e/run.sh create",
+        "./tests/e2e/run.sh build",
+        "sudo -u openace bash tests/deploy_test.sh install",
+        "bash tests/x.sh add",
+        "bash tests/integration/test_sudoers_security.sh remove",
+    ],
+)
+def test_test_scripts_may_take_an_argument_that_looks_like_a_verb(command):
+    assert _has_test_tool_call(_tc(command), "mixed") is True
 
 
 @pytest.mark.parametrize(

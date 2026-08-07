@@ -974,14 +974,24 @@ def _pattern_matches_segment(pattern: str, segment: str, tokens: list[str]) -> b
     are ordinary (review-2 N1). Wrapper operand grammars cannot be enumerated,
     and the rest of this module scans rather than reading token 0 for exactly
     that reason. What token equality leaves is a runner *name* used as an
-    artifact name, which the ``_is_artifact_operation`` veto handles — applied
-    by the caller, so it gates the ``tests/`` path rule too.
+    artifact name, which the ``_is_artifact_operation`` veto handles.
+
+    The veto is deliberately scoped to this door and NOT to the ``tests/`` path
+    rule. Gating both looked tidier and was a fail-closed regression: the
+    bare-word rule fires on any verb following a bare word, and a test script's
+    own *argument* qualifies, so ``bash tests/integration/run.sh install`` and
+    six siblings died — including wf221's own command with a mode argument
+    (#2376 PR-3 review-6). The path rule needs no veto: it is positional, so
+    ``helm install mocha ./tests/run.sh`` is already rejected because the path
+    is neither token 0 nor preceded by an interpreter.
     """
     # Enumerate and slice the SAME list. Slicing the unstripped `tokens` with an
     # index into the stripped one shifts the window left by the number of
     # assignments, dropping the verb off the end of it: `FOO=1 helm install
     # mocha` saw only {FOO=1, helm} and was accepted (review-2 follow-up).
     stripped = _strip_leading_assignments(tokens)
+    if _is_artifact_operation(stripped):
+        return False
     if pattern in _BARE_RUNNER_PATTERNS:
         return any(token.rsplit("/", 1)[-1] == pattern for token in stripped)
     return _multiword_pattern_matches(pattern, stripped)
@@ -1222,11 +1232,6 @@ def _has_test_tool_call(tool_calls: list, framework_type: str) -> bool:
                 # Note: -v (verbose) is NOT excluded — only help/version and
                 # the collection-only flags, which assert nothing.
                 if any(token in _EXCLUDE_FLAG_TOKENS for token in tokens):
-                    continue
-                # The artifact veto gates BOTH doors. Applying it inside
-                # _pattern_matches_segment left the tests/ path rule as a second,
-                # ungated entry point (#2376 PR-3 review-5).
-                if _is_artifact_operation(_strip_leading_assignments(tokens)):
                     continue
                 for pattern in patterns_to_check:
                     if _pattern_matches_segment(pattern, segment, tokens):
