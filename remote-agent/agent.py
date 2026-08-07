@@ -634,10 +634,16 @@ class RemoteAgent:
             }
         )
 
-    def _send_session_status(self, session_id: str, status: str, pid: int | None = None) -> None:
+    def _send_session_status(
+        self, session_id: str, status: str, pid: int | None = None, cli_session_id: str | None = None
+    ) -> None:
         """Send a session_status message to the server."""
         logger.info(
-            "Sending session_status: session=%s status=%s pid=%s", session_id[:8], status, pid
+            "Sending session_status: session=%s status=%s pid=%s cli_session_id=%s",
+            session_id[:8],
+            status,
+            pid,
+            cli_session_id[:8] if cli_session_id else None,
         )
         result = self._http_send(
             {
@@ -645,6 +651,7 @@ class RemoteAgent:
                 "session_id": session_id,
                 "status": status,
                 "pid": pid,
+                "cli_session_id": cli_session_id,
                 "machine_id": self.config.machine_id,
             }
         )
@@ -778,6 +785,23 @@ class RemoteAgent:
                         "result": info or {"error": "Session not found"},
                     }
                 )
+        elif command == "find_session_jsonl":
+            # Locate the qwen conversation JSONL for a historical session by
+            # cwd + creation-time proximity (restore support).
+            request_id = data.get("request_id")
+            result = self._executor.find_session_jsonl(
+                data.get("project_path", ""),
+                data.get("created_at"),
+            )
+            if request_id:
+                self._http_send(
+                    {
+                        "type": "command_response",
+                        "machine_id": self.config.machine_id,
+                        "request_id": request_id,
+                        "result": result or {"error": "No matching session JSONL found"},
+                    }
+                )
         elif command == "rotate_token":
             self._cmd_rotate_token(data)
         else:
@@ -814,14 +838,18 @@ class RemoteAgent:
         permission_mode = data.get("permission_mode")
         allowed_tools = data.get("allowed_tools")
         cli_settings = data.get("cli_settings", {})
+        # CLI conversation id to resume (qwen JSONL filename). Differs from the
+        # open-ace session_id; only set when restoring a terminated session.
+        resume_session_id = data.get("resume_session_id")
 
         logger.info(
-            "Starting session %s: cli=%s path=%s model=%s mode=%s",
+            "Starting session %s: cli=%s path=%s model=%s mode=%s resume=%s",
             session_id[:8],
             cli_tool,
             project_path,
             model,
             permission_mode,
+            resume_session_id[:8] if resume_session_id else None,
         )
 
         # Apply CLI settings before starting session
@@ -836,17 +864,63 @@ class RemoteAgent:
             model=model,
             permission_mode=permission_mode,
             allowed_tools=allowed_tools,
+            resume_session_id=resume_session_id,
         )
 
         if result["success"]:
-            self._send_session_status(session_id, "running", result.get("pid"))
+            pid = result.get("pid")
+            self._send_session_status(session_id, "running", pid)
+            # For new (non-resume) qwen sessions, once the CLI's self-generated
+            # conversation id is discovered, report it so the server persists
+            # cli_session_id for future --resume.
+            if not resume_session_id and cli_tool in ("qwen-code-cli", "qwen"):
+                self._executor.register_cli_session_callback(
+                    session_id,
+                    lambda cli_sid: self._send_session_status(
+                        session_id, "running", pid, cli_session_id=cli_sid
+                    ),
+                )
         else:
-            self._send_session_status(session_id, "error")
-            self._send_session_output(
-                session_id,
-                f"Failed to start session: {result.get('error', 'unknown error')}",
-                "stderr",
-                is_complete=True,
+            error_msg = result.get("error", "unknown error")
+            if error_msg == "Session already running":
+                # Idempotent duplicate start: the session is already running on
+                # this agent (e.g. an auto/periodic restore raced a manual one).
+                # Report running, NOT error — an error status makes the server
+                # mark the session failed and revoke all of its proxy tokens,
+                # which 401s the still-alive CLI process and leaves the webui
+                # stuck on "Thinking..." (Issue #27).
+                logger.info(
+                    "Session %s already running; duplicate start treated as no-op",
+                    session_id[:8],
+                )
+                self._send_session_status(session_id, "running")
+            else:
+                self._send_session_status(session_id, "error")
+                self._send_session_output(
+                    session_id,
+                    f"Failed to start session: {error_msg}",
+                    "stderr",
+                    is_complete=True,
+                )
+
+        # Acknowledge the command so the server can mark it 'responded'. Without
+        # this ack, persisted commands stay 'delivered' forever and the server
+        # re-delivers them every COMMAND_CLAIM_TIMEOUT_SECONDS (5 minutes),
+        # causing duplicate start_session dispatches that can revoke the proxy
+        # token of an already-running CLI process (Issue #27).
+        request_id = data.get("command_id") or data.get("request_id")
+        if request_id:
+            self._http_send(
+                {
+                    "type": "command_response",
+                    "machine_id": self.config.machine_id,
+                    "request_id": request_id,
+                    "result": {
+                        "success": bool(result.get("success")),
+                        "pid": result.get("pid"),
+                        "error": result.get("error"),
+                    },
+                }
             )
 
     def _cmd_send_message(self, data: dict[str, Any]) -> None:
@@ -870,6 +944,24 @@ class RemoteAgent:
                 f"Failed to send message: {error_msg}",
                 "stderr",
                 is_complete=True,
+            )
+
+        # Acknowledge the command so the server marks it 'responded'. Without
+        # this ack, delivered send_message commands are re-claimed after
+        # COMMAND_CLAIM_TIMEOUT_SECONDS (5 minutes) and re-delivered, so the
+        # CLI receives the same user message repeatedly (duplicate replies).
+        request_id = data.get("command_id") or data.get("request_id")
+        if request_id:
+            self._http_send(
+                {
+                    "type": "command_response",
+                    "machine_id": self.config.machine_id,
+                    "request_id": request_id,
+                    "result": {
+                        "success": bool(result.get("success")),
+                        "error": result.get("error"),
+                    },
+                }
             )
 
     def _cmd_stop_session(self, data: dict[str, Any]) -> None:
@@ -2408,12 +2500,65 @@ def build_arg_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def acquire_single_instance_lock() -> bool:
+    """Acquire an exclusive lock so only one agent runs per install directory.
+
+    A second instance (e.g. Task Scheduler autostart + a manual start) would
+    otherwise poll the same machine_id concurrently and receive commands meant
+    for the first instance, surfacing as "Session not found" errors.
+
+    The lock file lives next to agent.py; the OS releases the lock when the
+    owning process exits (even on crash/kill), so no stale-lock cleanup is
+    needed. Windows uses ``msvcrt.locking``, POSIX uses ``fcntl.flock``.
+
+    Returns:
+        True if this process acquired the lock (may continue startup),
+        False if another agent instance already holds it.
+    """
+    install_dir = os.path.dirname(os.path.abspath(__file__))
+    lock_path = os.path.join(install_dir, "agent.lock")
+    try:
+        lock_file = open(lock_path, "a+b")
+    except OSError as e:
+        logger.warning("Cannot open lock file %s: %s", lock_path, e)
+        return True  # Fail open: lock problems must not block agent startup
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            msvcrt.locking(lock_file.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        logger.error(
+            "Another Open ACE Remote Agent instance is already running "
+            "(lock held: %s). Exiting to avoid duplicate command delivery.",
+            lock_path,
+        )
+        lock_file.close()
+        return False
+
+    # Keep the lock file object alive for the process lifetime (the lock is
+    # released when this object is garbage-collected / the process exits).
+    acquire_single_instance_lock._lock_file = lock_file
+    return True
+
+
 def main(argv: list[str] | None = None) -> None:
     """Entry point for the remote agent daemon."""
     args = build_arg_parser().parse_args(argv)
     config = AgentConfig()
 
     setup_logging(config.log_level)
+
+    # Single-instance guard (Issue #24 follow-up): only one agent may run per
+    # install dir. Prevents two instances polling the same machine_id, which
+    # previously caused commands to be delivered to the instance that did not
+    # own the session ("Session not found" / no reply in the web UI).
+    if not acquire_single_instance_lock():
+        sys.exit(1)
 
     # Fix stdin for service environments (launchd/systemd/Task Scheduler)
     # This prevents "Broken pipe" errors when writing to subprocess stdin

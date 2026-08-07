@@ -13,6 +13,7 @@ import base64
 import logging
 import os
 import re
+import urllib.parse
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -1213,9 +1214,14 @@ def create_session():
         if project_path:
             base_dirs = get_workspace_base_dirs()
             if not is_valid_path(project_path, allowed_prefixes=base_dirs):
-                # Log without exposing the actual path for security
-                logger.warning("Invalid project_path rejected")
-                return jsonify({"success": False, "error": "Invalid project path"}), 400
+                # Remote-machine paths (Windows drive form, e.g. C:\workspace\aaa)
+                # live on the remote agent host, not inside this container, so the
+                # container-local check below would wrongly reject them. Allow them
+                # through; they never touch the local filesystem here.
+                if not re.match(r"^[A-Za-z]:[\\/]", project_path):
+                    # Log without exposing the actual path for security
+                    logger.warning("Invalid project_path rejected")
+                    return jsonify({"success": False, "error": "Invalid project path"}), 400
 
         # If project_path is provided but not project_id, look up the project
         if project_path and not project_id:
@@ -1523,7 +1529,9 @@ def restore_session(session_id):
                 remote_machine_id,
                 user_id,
                 cli_session_id,
-                tenant_id
+                tenant_id,
+                model,
+                created_at
             FROM agent_sessions
             WHERE session_id = {p}
               {tenant_clause}
@@ -1625,24 +1633,61 @@ def restore_session(session_id):
                         info.get("is_running") if info else "unknown",
                     )
 
-                    # Return status for frontend to guide user decision
-                    return (
-                        jsonify(
-                            {
-                                "success": False,
-                                "error": "Session process has terminated",
-                                "can_recreate": True,
-                                "can_resume": (
-                                    info.get("cli_session_id") is not None if info else False
+                    # If the agent is online and we have a project path, resume
+                    # the CLI conversation from the remote machine's JSONL by
+                    # restarting it with --resume <cli conversation id>. The
+                    # conversation id is either the persisted cli_session_id or
+                    # located by cwd + creation-time proximity. This does NOT
+                    # depend on the agent's in-memory session state, which is
+                    # cleared once a process ends (info is None then).
+                    resumed = False
+                    if project_path:
+                        try:
+                            from app.modules.workspace.remote_session_manager import (
+                                get_remote_session_manager,
+                            )
+
+                            cli_tool = {
+                                "qwen": "qwen-code-cli",
+                                "claude": "claude-code",
+                                "codex": "codex-cli",
+                                "openclaw": "openclaw",
+                                "zcode": "zcode",
+                            }.get(normalize_tool_name(tool_name))
+                            session_mgr = get_remote_session_manager()
+                            resumed = session_mgr.resume_terminated_session(
+                                session_id=session_id,
+                                machine_id=remote_machine_id,
+                                project_path=project_path,
+                                cli_tool=cli_tool or tool_name,
+                                user_id=int(
+                                    session_data.get("user_id") or g.user.get("id") or 0
                                 ),
-                                "project_path": project_path,
-                                "model": session_data.get("model"),
-                                "tool_name": tool_name,
-                                "remote_machine_id": remote_machine_id,
-                            }
-                        ),
-                        400,
-                    )
+                                model=session_data.get("model"),
+                                created_at=session_data.get("created_at"),
+                            )
+                        except Exception as e:
+                            logger.warning(f"Failed to auto-resume session {session_id}: {e}")
+
+                    if not resumed:
+                        # Return status for frontend to guide user decision
+                        return (
+                            jsonify(
+                                {
+                                    "success": False,
+                                    "error": "Session process has terminated",
+                                    "can_recreate": True,
+                                    "can_resume": (
+                                        info.get("cli_session_id") is not None if info else False
+                                    ),
+                                    "project_path": project_path,
+                                    "model": session_data.get("model"),
+                                    "tool_name": tool_name,
+                                    "remote_machine_id": remote_machine_id,
+                                }
+                            ),
+                            400,
+                        )
 
         # Generate encodedProjectName based on tool
         # Issue #2142: qwen-code-webui's history endpoints expect the legacy
@@ -1662,7 +1707,19 @@ def restore_session(session_id):
                 decoded = decode_project_name(actual_path)
                 if decoded:
                     actual_path = decoded
-            encoded_project_name = encode_project_path_legacy(actual_path) if actual_path else ""
+            if workspace_type == "remote":
+                # Remote sessions: qwen-code-webui consumes encodedProjectName
+                # as the working directory for the remote git/vscode endpoints.
+                # Its parser only understands Unix legacy encoding
+                # (-home-user-project) and cannot reverse the legacy encoding
+                # of a Windows path (C--workspace -> C:\workspace), which broke
+                # the file-changes panel after restore. Pass the real path,
+                # matching the new-remote-session flow.
+                encoded_project_name = actual_path
+            else:
+                encoded_project_name = (
+                    encode_project_path_legacy(actual_path) if actual_path else ""
+                )
         elif tool_name == "openclaw":
             # project_path is the agent_name (e.g., "main")
             encoded_project_name = project_path
@@ -1681,8 +1738,11 @@ def restore_session(session_id):
                 404,
             )
 
-        # Build workspace URL with sessionId, encodedProjectName, and toolName
-        workspace_url = f"/work/workspace?sessionId={session_id}&encodedProjectName={encoded_project_name}&toolName={tool_name}"
+        # Build workspace URL with sessionId, encodedProjectName, and toolName.
+        # URL-encode the project name so Windows paths (containing ':' and '\')
+        # survive the round trip through the browser URL intact.
+        encoded_project_name_url = urllib.parse.quote(encoded_project_name, safe="")
+        workspace_url = f"/work/workspace?sessionId={session_id}&encodedProjectName={encoded_project_name_url}&toolName={tool_name}"
 
         # Add remote parameters for remote sessions
         machine_name = None

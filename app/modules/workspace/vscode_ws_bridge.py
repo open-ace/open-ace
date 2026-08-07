@@ -143,7 +143,11 @@ def bridge_vscode_ws(browser_ws: Any, remote_ws_url: str, vscode_id: str) -> Non
 
 
 def bridge_vscode_ws_raw(
-    vscode_id: str, browser_sock, remote_ws_url: str, cs_password: str = ""
+    vscode_id: str,
+    browser_sock,
+    remote_ws_url: str,
+    cs_password: str = "",
+    cs_cookie: str = "",
 ) -> None:
     """Bridge a raw browser socket (via RemoteWSHandler) to a remote code-server.
 
@@ -155,7 +159,10 @@ def bridge_vscode_ws_raw(
         vscode_id: VSCode session ID for cleanup tracking.
         browser_sock: Browser's raw socket for WebSocket I/O.
         remote_ws_url: WebSocket URL of the remote code-server.
-        cs_password: code-server's own password for authentication (optional).
+        cs_password: code-server's own password (legacy Basic Auth, ignored
+            by code-server — kept for backward compatibility).
+        cs_cookie: code-server session cookie (``name=value``). code-server's
+            auth is cookie-based, so this is what actually authenticates.
     """
     import base64 as _b64
 
@@ -166,9 +173,12 @@ def bridge_vscode_ws_raw(
     origin_scheme = "https" if parsed.scheme == "wss" else "http"
     origin = f"{origin_scheme}://{parsed.netloc}" if parsed.netloc else None
 
-    # Build additional headers for code-server password authentication
+    # Build additional headers for code-server authentication. code-server
+    # only honours the session cookie; Basic Auth is a legacy fallback.
     additional_headers = {}
-    if cs_password:
+    if cs_cookie:
+        additional_headers["Cookie"] = cs_cookie
+    elif cs_password:
         auth_value = _b64.b64encode(f":{cs_password}".encode()).decode()
         additional_headers["Authorization"] = f"Basic {auth_value}"
 

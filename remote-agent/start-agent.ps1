@@ -90,10 +90,12 @@ function Get-PythonPath {
 # ============================================================================
 function Get-AgentProcess {
     $agentPyPath = $InstallDir.Replace('\', '\\')
-    # 使用更精确的正则表达式匹配，避免误匹配 myagent.py、subagent.py 等
-    # (^|[\\])agent\.py($|[\\\s]) 确保匹配独立的 agent.py 文件名
+    # 使用更精确的正则表达式匹配，避免误匹配 myagent.py、subagent.py 等。
+    # 实际命令行形如 "...\agent.py"（agent.py 后可能紧跟双引号），因此用
+    # 负向断言 (?![A-Za-z0-9_]) 排除 agent.pyc/agent_python 等，并允许后面
+    # 紧跟引号/空白/参数或行尾。
     Get-CimInstance Win32_Process -Filter "Name = 'python.exe' OR Name = 'python3.exe' OR Name = 'pythonw.exe'" -ErrorAction SilentlyContinue |
-        Where-Object { $_.CommandLine -and $_.CommandLine -match "(^|[\\])agent\.py($|[\\\s])" -and $_.CommandLine -match $agentPyPath }
+        Where-Object { $_.CommandLine -and $_.CommandLine -match "(^|[\\])agent\.py(?![A-Za-z0-9_])" -and $_.CommandLine -match $agentPyPath }
 }
 
 function Show-Status {

@@ -179,6 +179,23 @@ COPY --from=frontend-builder --chown=open-ace:open-ace /app/static/js/dist ./sta
 # "denied". Script is version-pinned and fails the build on drift.
 RUN python3 /app/scripts/patch-qwen-webui-permission.py
 
+# Patch qwen-code-webui conversation-history listing:
+# 1) getHistoryFiles only scanned the project root, missing chats/*.jsonl;
+# 2) groupConversations collapsed every CLI session (assistant messages carry
+#    no message.id, so empty id sets were treated as duplicates). Both made
+#    "view conversation history" show nothing and open projects as new chats.
+# Script is version-pinned and fails the build on drift.
+RUN python3 /app/scripts/patch-qwen-webui-histories.py
+
+# Patch qwen-code-webui in-app navigation so it keeps URL query params
+# (workspaceType=remote, machineId, token, encodedProjectName, openace_url):
+# sessionId nav, both "view conversation history" buttons, and the
+# project-selector nav all rebuilt the URL with a bare URLSearchParams,
+# dropping the remote context and degrading ChatPage to local mode (silent
+# chat failure + file-changes HTTP 403). Script is version-pinned and fails
+# the build on drift.
+RUN python3 /app/scripts/patch-qwen-webui-navparams.py
+
 # Copy and set up entrypoint script
 # Use python to convert Windows line endings (CRLF) to Unix (LF) and remove BOM - Issue #1988
 COPY --chown=open-ace:open-ace docker-entrypoint.sh /usr/local/bin/

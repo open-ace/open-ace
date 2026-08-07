@@ -649,6 +649,18 @@ def create_app(config=None):
     else:
         logger.info("Background services NOT started (SCHEDULER_MODE=%s)", scheduler_mode)
 
+    # Issue #24: keep the per-user webui "view conversation history" view in
+    # sync with remote/terminal sessions. Runs in web workers too (lightweight,
+    # idempotent); in scheduler mode DataFetchScheduler also invokes it.
+    try:
+        from app.modules.workspace.session_history_sync import (
+            start_webui_history_sync_loop,
+        )
+
+        start_webui_history_sync_loop()
+    except Exception:
+        logger.exception("Failed to start webui history sync loop")
+
     logger.info("Open ACE application initialized")
     return app
 

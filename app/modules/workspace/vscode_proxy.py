@@ -39,6 +39,51 @@ _proxy_session = requests.Session()
 _proxy_session.trust_env = False
 
 
+def ensure_cs_cookie(info: dict, original_http_url: str, vscode_id: str) -> str:
+    """Ensure a code-server session cookie exists in ``info`` and return it.
+
+    code-server's password auth is cookie-based only: its ``authenticated``
+    middleware checks the session cookie and ignores HTTP Basic Auth, so both
+    the HTTP proxy and the WebSocket bridge must present ``Cookie`` to reach
+    the IDE. Log in once with ``cs_password`` (POST /login) and cache the
+    session cookie in ``info`` so we do not hammer code-server's login rate
+    limiter (2/min, 12/hour).
+
+    Args:
+        info: vscode session info dict (shared reference, cookie is cached).
+        original_http_url: code-server base URL on the remote machine.
+        vscode_id: vscode session id (for logging).
+
+    Returns:
+        The session cookie (``name=value``), or "" when unavailable.
+    """
+    cs_cookie = info.get("cs_cookie", "")
+    if cs_cookie:
+        return cs_cookie
+    cs_password = info.get("cs_password", "")
+    if not cs_password:
+        return ""
+    try:
+        login_resp = _proxy_session.post(
+            f"{original_http_url.rstrip('/')}/login",
+            data={"password": cs_password},
+            allow_redirects=False,
+            timeout=10,
+        )
+        set_cookie = login_resp.headers.get("Set-Cookie", "")
+        if set_cookie:
+            cs_cookie = set_cookie.split(";")[0]
+            info["cs_cookie"] = cs_cookie
+        else:
+            logger.warning(
+                "ensure_cs_cookie: no Set-Cookie from code-server (status=%d)",
+                login_resp.status_code,
+            )
+    except Exception as exc:
+        logger.warning("ensure_cs_cookie failed for %s: %s", vscode_id[:8], exc)
+    return cs_cookie
+
+
 def _prepare_request_headers(headers: dict, target_url: str) -> dict:
     """Build upstream request headers for code-server.
 

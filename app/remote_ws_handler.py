@@ -630,8 +630,20 @@ class RemoteWSHandler(WSGIHandler):
 
         machine_id, info = found
 
-        # Get code-server password for WebSocket authentication
+        # Get code-server password for WebSocket authentication. code-server
+        # auth is cookie-based, so also (re)generate the session cookie here —
+        # the WS bridge needs it to authenticate, and it may connect before
+        # any HTTP proxy request has created one.
         cs_password = info.get("cs_password", "")
+        cs_cookie = ""
+        try:
+            from app.modules.workspace.vscode_proxy import ensure_cs_cookie
+
+            cs_cookie = ensure_cs_cookie(
+                info, info.get("original_http_url", ""), vscode_id
+            )
+        except Exception as exc:
+            logger.warning("VSCode WS handler: ensure_cs_cookie failed: %s", exc)
 
         # Issue #2183: Check session status first
         if info.get("status") != "running":
@@ -715,12 +727,15 @@ class RemoteWSHandler(WSGIHandler):
             from app.modules.workspace.vscode_ws_bridge import bridge_vscode_ws_raw
 
             logger.info(
-                "VSCode WS handler: bridging %s for machine %s (has_password=%s)",
+                "VSCode WS handler: bridging %s for machine %s (has_password=%s, has_cookie=%s)",
                 vscode_id[:8],
                 machine_id[:8],
                 bool(cs_password),
+                bool(cs_cookie),
             )
-            bridge_vscode_ws_raw(vscode_id, self.socket, remote_ws_url, cs_password)
+            bridge_vscode_ws_raw(
+                vscode_id, self.socket, remote_ws_url, cs_password, cs_cookie
+            )
         except Exception:
             logger.exception("VSCode WS handler: bridge failed for vscode %s", vscode_id[:8])
             try:

@@ -266,6 +266,18 @@ class DataFetchScheduler:
             error_message = str(e)
             logger.exception(f"Error in scheduled data fetch: {e}")
 
+        # Issue #24: mirror remote/terminal sessions into per-user webui
+        # history dirs so the webui "view conversation history" view also
+        # lists remote workspace sessions.
+        try:
+            from app.modules.workspace.session_history_sync import (
+                sync_remote_sessions_to_webui,
+            )
+
+            sync_remote_sessions_to_webui()
+        except Exception as e:
+            logger.warning(f"Session history sync to webui failed: {e}")
+
         # Refresh materialized views for PostgreSQL
         try:
             self._refresh_materialized_views()

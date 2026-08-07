@@ -18,8 +18,10 @@ import shutil
 import signal
 import subprocess
 import threading
+import time
 import uuid
 from collections.abc import Callable
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -642,6 +644,10 @@ class ProcessExecutor:
         self._usage_callback = usage_callback
         self._sessions: dict[str, SessionProcess] = {}
         self._lock = threading.Lock()
+        # session_id -> callback invoked when the CLI's self-generated
+        # conversation id (qwen JSONL filename) is discovered. Lets the agent
+        # report cli_session_id to the server for later --resume.
+        self._cli_session_callbacks: dict[str, Callable[[str], None]] = {}
 
     # ------------------------------------------------------------------
     # Public helpers
@@ -946,10 +952,30 @@ class ProcessExecutor:
         model: str | None = None,
         permission_mode: str | None = None,
         allowed_tools: list[str] | None = None,
+        resume_session_id: str | None = None,
     ) -> dict[str, Any]:
         with self._lock:
-            if session_id in self._sessions and self._sessions[session_id].is_running:
-                return {"success": False, "error": "Session already running"}
+            existing = self._sessions.get(session_id)
+            if existing and existing.is_running:
+                if resume_session_id:
+                    # Restore semantics: the server issued a fresh proxy token
+                    # and expects the process restarted with it. The old process
+                    # may still hold a revoked/expired token and would 401 every
+                    # LLM call (Issue #27). Stop it and fall through to start
+                    # again with the new token + --resume below.
+                    self._sessions.pop(session_id, None)
+                else:
+                    return {"success": False, "error": "Session already running"}
+
+        if existing is not None and resume_session_id:
+            try:
+                existing.stop()
+            except Exception as e:
+                logger.warning("Failed to stop stale session %s: %s", session_id[:8], e)
+            logger.info(
+                "Session %s already running; restarting with a fresh proxy token for resume",
+                session_id[:8],
+            )
 
         # ZCode runs a persistent app-server process driven by its own stdio
         # protocol (ZCode Protocol), not Claude's stream-json stdin. Route it
@@ -1005,14 +1031,20 @@ class ProcessExecutor:
         env = self._build_env(cli_tool, proxy_token, model)
 
         # Build command using adapter
+        # When resuming a terminated session (restore from remote JSONL), the
+        # CLI's --resume target is the CLI conversation id (the JSONL filename),
+        # which for qwen is a CLI-generated UUID unrelated to the open-ace
+        # session_id. The open-ace session_id stays as the tracking key.
+        cli_resume_target = resume_session_id or session_id
         cmd = self._build_command(
             executable,
             cli_tool,
-            session_id,
+            cli_resume_target,
             project_path,
             model,
             permission_mode or "default",
             allowed_tools,
+            resume=bool(resume_session_id),
         )
 
         logger.info(
@@ -1120,6 +1152,13 @@ class ProcessExecutor:
             process.pid,
             cli_tool,
         )
+
+        # qwen-code-cli names its conversation JSONL with a UUID it generates
+        # itself, unrelated to the open-ace session_id. For new (non-resume)
+        # qwen sessions, watch for that file so cli_session_id can be persisted
+        # and the conversation later resumed with --resume <uuid>.
+        if not resume_session_id and cli_tool in ("qwen-code-cli", "qwen"):
+            self._start_cli_session_watcher(session_proc)
 
         self._save_sessions_meta()
         return {"success": True, "pid": process.pid}
@@ -1742,6 +1781,184 @@ class ProcessExecutor:
     # ------------------------------------------------------------------
     # Crash recovery: session metadata persistence
     # ------------------------------------------------------------------
+
+    # ------------------------------------------------------------------
+    # CLI conversation-id discovery & historical JSONL lookup
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _normalize_project_path(path: str) -> str:
+        """Normalize a project path for cross-platform comparison."""
+        return str(path).replace("\\", "/").rstrip("/").lower()
+
+    @staticmethod
+    def _parse_utc_ts(value: str) -> float | None:
+        """Parse an ISO timestamp (naive treated as UTC) into a UTC epoch."""
+        s = str(value).strip()
+        try:
+            dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        except ValueError:
+            try:
+                from email.utils import parsedate_to_datetime
+
+                dt = parsedate_to_datetime(s)
+            except Exception:
+                return None
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.timestamp()
+
+    def register_cli_session_callback(self, session_id: str, callback: Callable[[str], None]) -> None:
+        """Register a callback invoked when a CLI's self-generated conversation id is discovered."""
+        with self._lock:
+            self._cli_session_callbacks[session_id] = callback
+
+    def _start_cli_session_watcher(self, session_proc: SessionProcess) -> None:
+        """Watch for the qwen conversation JSONL file the CLI just created.
+
+        qwen-code-cli stores conversations at
+        ``~/.qwen/projects/<encoded>/chats/<uuid>.jsonl`` where <uuid> is
+        generated by the CLI itself. Discover that file (matched by cwd and
+        recent mtime), stash it as ``cli_session_id`` and notify the agent so
+        the server can persist it for later ``--resume <uuid>``.
+        """
+        started_at = time.time()
+
+        def _watch() -> None:
+            deadline = started_at + 120.0
+            while time.time() < deadline and not session_proc._stopped.is_set():
+                if self._discover_cli_session_file(session_proc, started_at):
+                    return
+                time.sleep(2.0)
+
+        threading.Thread(
+            target=_watch,
+            name=f"cli-sess-{session_proc.session_id[:8]}",
+            daemon=True,
+        ).start()
+
+    def _discover_cli_session_file(self, session_proc: SessionProcess, started_at: float) -> bool:
+        """Scan qwen chats dirs for a new JSONL matching this session's cwd."""
+        if session_proc._cli_session_id:
+            return True
+        projects_dir = Path.home() / ".qwen" / "projects"
+        if not projects_dir.is_dir():
+            return False
+        target = self._normalize_project_path(session_proc.project_path)
+        try:
+            candidates = list(projects_dir.rglob("chats/*.jsonl"))
+        except OSError:
+            return False
+        for jsonl in candidates:
+            try:
+                if jsonl.stat().st_mtime < started_at - 5:
+                    continue
+                first = self._read_first_user_entry(jsonl)
+                if not first or not first.get("cwd"):
+                    continue
+                if self._normalize_project_path(first["cwd"]) != target:
+                    continue
+            except OSError:
+                continue
+            if session_proc._cli_session_id != jsonl.stem:
+                session_proc._cli_session_id = jsonl.stem
+                logger.info(
+                    "Discovered CLI conversation id %s for session %s (%s)",
+                    jsonl.stem[:8],
+                    session_proc.session_id[:8],
+                    jsonl.name,
+                )
+                callback = None
+                with self._lock:
+                    callback = self._cli_session_callbacks.get(session_proc.session_id)
+                if callback:
+                    try:
+                        callback(jsonl.stem)
+                    except Exception:
+                        logger.exception(
+                            "cli_session callback failed for session %s",
+                            session_proc.session_id[:8],
+                        )
+            return True
+        return False
+
+    @staticmethod
+    def _read_first_user_entry(jsonl_path: Path) -> dict[str, Any] | None:
+        """Read the first ``user`` entry from a qwen JSONL conversation file."""
+        try:
+            with open(jsonl_path, encoding="utf-8", errors="replace") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        entry = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if entry.get("type") != "user":
+                        continue
+                    return entry
+        except OSError:
+            return None
+        return None
+
+    def find_session_jsonl(
+        self, project_path: str, created_at: str | None = None
+    ) -> dict[str, Any] | None:
+        """Locate the qwen conversation JSONL for a historical session.
+
+        The mapping between the open-ace session_id and the qwen CLI
+        conversation UUID is not persisted for older sessions, so match by the
+        JSONL's ``cwd`` plus creation-time proximity to ``created_at``.
+        Returns ``{"session_id", "jsonl_path", "delta_seconds"}`` or None.
+        """
+        projects_dir = Path.home() / ".qwen" / "projects"
+        if not projects_dir.is_dir():
+            return None
+        target = self._normalize_project_path(project_path)
+        wanted_ts = self._parse_utc_ts(created_at) if created_at else None
+
+        best: dict[str, Any] | None = None
+        best_delta = float("inf")
+        try:
+            candidates = list(projects_dir.rglob("chats/*.jsonl"))
+        except OSError:
+            return None
+        for jsonl in candidates:
+            try:
+                if jsonl.stat().st_size < 100:
+                    continue
+                first = self._read_first_user_entry(jsonl)
+                if not first or not first.get("cwd"):
+                    continue
+                if self._normalize_project_path(first["cwd"]) != target:
+                    continue
+            except OSError:
+                continue
+            ts = self._parse_utc_ts(first.get("timestamp")) if first.get("timestamp") else None
+            delta = abs(ts - wanted_ts) if (wanted_ts is not None and ts is not None) else float("inf")
+            if delta < best_delta:
+                best_delta = delta
+                best = {
+                    "session_id": jsonl.stem,
+                    "jsonl_path": str(jsonl),
+                    "delta_seconds": round(delta, 1) if delta != float("inf") else None,
+                }
+        if best is None or best_delta > 600:
+            logger.info(
+                "find_session_jsonl: no JSONL for project=%s created=%s (best delta=%s)",
+                project_path,
+                created_at,
+                best_delta if best_delta != float("inf") else "n/a",
+            )
+            return None
+        logger.info(
+            "find_session_jsonl: matched %s (delta=%.1fs) for project=%s",
+            best["session_id"][:8],
+            best_delta,
+            project_path,
+        )
+        return best
 
     _META_DIR = Path.home() / ".open-ace-agent"
     _META_FILE = Path.home() / ".open-ace-agent" / "sessions.json"

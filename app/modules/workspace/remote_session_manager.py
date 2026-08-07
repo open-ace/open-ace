@@ -319,17 +319,23 @@ class RemoteSessionManager:
         # Verify user has access to this machine
         if not self._agent_manager.check_user_access(machine_id, user_id):
             logger.warning(f"User {user_id} has no access to machine {machine_id}")
-            return None
+            return {
+                "success": False,
+                "error": f"You do not have access to machine {machine_id}",
+            }
 
         # Check machine is connected
         if not self._agent_manager.is_connected(machine_id):
             logger.warning(f"Machine {machine_id} is not connected")
-            return None
+            return {
+                "success": False,
+                "error": "Remote machine is offline or its agent is not running",
+            }
 
         # Get machine info
         machine = self._agent_manager.get_machine(machine_id)
         if not machine:
-            return None
+            return {"success": False, "error": "Machine not found"}
 
         # Determine provider based on CLI tool
         provider = self._cli_tool_to_provider(cli_tool)
@@ -356,38 +362,62 @@ class RemoteSessionManager:
                     effective_tenant_id,
                     model_decision.reason,
                 )
-                return None
+                return {
+                    "success": False,
+                    "error": f"Model selection denied by policy: {model_decision.reason}",
+                }
 
         ha_pool: dict[str, Any] | None = None
         if tool_name == "qwen":
             if not ha_pool_token:
                 logger.warning("Missing ha_pool_token for qwen remote session creation")
-                return None
+                return {
+                    "success": False,
+                    "error": "Missing ha_pool_token for qwen remote session creation",
+                }
             token_payload = self._api_key_proxy.validate_proxy_token(ha_pool_token)
             if not token_payload:
                 logger.warning("Invalid ha_pool_token for qwen remote session creation")
-                return None
+                return {
+                    "success": False,
+                    "error": "Invalid ha_pool_token for qwen remote session creation",
+                }
             if token_payload.get("session_type") != "ha_pool":
                 logger.warning("Unexpected session_type in ha_pool_token: %s", token_payload)
-                return None
+                return {
+                    "success": False,
+                    "error": "Unexpected session_type in ha_pool_token",
+                }
             if token_payload.get("scope") != "remote":
                 logger.warning("Unexpected scope in ha_pool_token: %s", token_payload)
-                return None
+                return {
+                    "success": False,
+                    "error": "Unexpected scope in ha_pool_token",
+                }
             if token_payload.get("user_id") != user_id:
                 logger.warning("ha_pool_token user mismatch: %s != %s", token_payload, user_id)
-                return None
+                return {
+                    "success": False,
+                    "error": "ha_pool_token user mismatch",
+                }
             if token_payload.get("tenant_id") != effective_tenant_id:
                 logger.warning(
                     "ha_pool_token tenant mismatch: %s != %s",
                     token_payload,
                     effective_tenant_id,
                 )
-                return None
+                return {
+                    "success": False,
+                    "error": "ha_pool_token tenant mismatch",
+                }
             if token_payload.get("machine_id") != machine_id:
                 logger.warning(
                     "ha_pool_token machine mismatch: %s != %s", token_payload, machine_id
                 )
-                return None
+                return {
+                    "success": False,
+                    "error": "ha_pool_token machine mismatch",
+                }
             ha_pool = {
                 "provider": provider,
                 "tool_name": "qwen-code",
@@ -400,7 +430,10 @@ class RemoteSessionManager:
             }
             if model and not ha_pool.get("model_key_ids", {}).get(model):
                 logger.warning("Requested model %s is not supported by remote HA pool", model)
-                return None
+                return {
+                    "success": False,
+                    "error": f"Requested model {model} is not supported by remote HA pool",
+                }
 
         # Generate session ID
         session_id = str(uuid.uuid4())
@@ -490,6 +523,10 @@ class RemoteSessionManager:
                 ha_pool.get("model_key_ids", {}).get(model, []) if model else []
             )
         self._session_manager.update_session(session)
+        # Newly (re)created session is active — defensively clear any stale
+        # in-memory "ended" flag so the SSE /stream endpoint streams live
+        # output instead of closing with [DONE] (Issue #27).
+        self._agent_manager.clear_session_end_flag(session_id)
 
         # Also update the dedicated columns (list_sessions reads from columns, not context JSON)
         try:
@@ -536,6 +573,235 @@ class RemoteSessionManager:
             "model": model,
             "created_at": session.created_at.isoformat() if session.created_at else None,
         }
+
+    def _get_ha_metadata(self, session_id: str) -> dict[str, Any]:
+        """Best-effort reuse of the original session's HA routing metadata.
+
+        Reads the most recent non-revoked proxy-token record for the session
+        and returns the HA routing fields (candidate keys / model key ids) so a
+        restored session keeps the same key routing as the original.
+        """
+        try:
+            from app.repositories.database import adapt_sql, get_db_connection
+
+            with get_db_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    adapt_sql(
+                        "SELECT metadata FROM proxy_token_jtis "
+                        "WHERE session_id = ? AND revoked_at IS NULL AND consumed_at IS NULL "
+                        "ORDER BY issued_at DESC LIMIT 1"
+                    ),
+                    (session_id,),
+                )
+                row = cursor.fetchone()
+            if not row:
+                return {}
+            raw = row["metadata"] if isinstance(row, dict) else row[0]
+            if isinstance(raw, str):
+                try:
+                    meta = json.loads(raw)
+                except (json.JSONDecodeError, TypeError):
+                    return {}
+            elif isinstance(raw, dict):
+                meta = raw
+            else:
+                return {}
+            out: dict[str, Any] = {}
+            for key in ("ha_candidate_keys", "ha_model_key_ids", "ha_settings"):
+                if meta.get(key):
+                    out[key] = meta[key]
+            return out
+        except Exception as e:
+            logger.warning(f"Failed to load HA metadata for session {session_id}: {e}")
+            return {}
+
+    def resume_terminated_session(
+        self,
+        session_id: str,
+        machine_id: str,
+        project_path: str,
+        cli_tool: str,
+        user_id: int,
+        model: str | None = None,
+        created_at: str | None = None,
+        tenant_id: int | None = None,
+    ) -> bool:
+        """Restart a terminated remote CLI session with ``--resume``.
+
+        The CLI resume target is the CLI conversation id (the qwen JSONL
+        filename), which differs from the open-ace ``session_id``. Prefer the
+        persisted ``cli_session_id``; for historical sessions that predate the
+        capture, locate the JSONL on the remote machine by cwd + creation time.
+        A fresh proxy token is issued so the restored CLI can authenticate.
+
+        Returns True if the start command was dispatched successfully.
+        """
+        try:
+            agent_mgr = self._agent_manager
+            if not agent_mgr.is_connected(machine_id):
+                logger.warning(
+                    "resume_terminated_session: machine %s not connected", machine_id[:8]
+                )
+                return False
+
+            machine = agent_mgr.get_machine(machine_id)
+            effective_tenant_id = tenant_id or (machine.get("tenant_id") if machine else None) or 1
+
+            # Idempotency guard: if the session is already running on the agent,
+            # do not dispatch a duplicate start_session. A duplicate start would
+            # fail with "Session already running"; its error status round trip
+            # would mark the session failed and revoke the still-valid proxy
+            # token of the live CLI process, 401-ing its LLM requests (Issue #27).
+            try:
+                info = agent_mgr.send_command_with_response(
+                    machine_id=machine_id,
+                    command="get_session_info",
+                    session_id=session_id,
+                    timeout=5.0,
+                )
+                if info and info.get("is_running"):
+                    if self._api_key_proxy.has_valid_proxy_token(session_id):
+                        # The running CLI still holds a valid proxy token; a
+                        # duplicate start would be a no-op anyway, so skip.
+                        logger.info(
+                            "resume_terminated_session: session %s already running on machine %s with valid token; skip resume",
+                            session_id[:8],
+                            machine_id[:8],
+                        )
+                        self._session_manager.update_session_fields(
+                            session_id,
+                            {"status": "active"},
+                            require_tenant=False,
+                        )
+                        self._agent_manager.clear_session_end_flag(session_id)
+                        return True
+                    # The process is alive but every proxy token issued for it
+                    # was revoked or expired (e.g. an earlier error round trip)
+                    # — its LLM calls would 401. Fall through and restart the
+                    # process with a freshly issued token (Issue #27).
+                    logger.info(
+                        "resume_terminated_session: session %s running but proxy token invalid; restarting with a fresh token",
+                        session_id[:8],
+                    )
+            except Exception as e:
+                logger.warning(
+                    "resume_terminated_session: idempotency check failed for %s: %s",
+                    session_id[:8],
+                    e,
+                )
+
+            # Resolve the CLI conversation id to resume
+            cli_session_id = ""
+            try:
+                session = self._session_manager.get_session(
+                    session_id, include_messages=False
+                )
+                if session:
+                    cli_session_id = session.cli_session_id or ""
+            except Exception as e:
+                logger.warning(
+                    "resume_terminated_session: session lookup failed for %s: %s",
+                    session_id[:8],
+                    e,
+                )
+            if not cli_session_id:
+                # Normalize created_at to an ISO string — a DB datetime object
+                # is otherwise serialized to an RFC-style string when the
+                # command is persisted, which the agent cannot parse.
+                created_at_arg = None
+                if created_at is not None:
+                    created_at_arg = (
+                        created_at.isoformat()
+                        if isinstance(created_at, datetime)
+                        else str(created_at)
+                    )
+                found = agent_mgr.send_command_with_response(
+                    machine_id=machine_id,
+                    command="find_session_jsonl",
+                    session_id=session_id,
+                    timeout=8.0,
+                    extra={"project_path": project_path, "created_at": created_at_arg},
+                )
+                if found and found.get("session_id"):
+                    cli_session_id = str(found["session_id"])
+                    logger.info(
+                        "resume_terminated_session: located JSONL %s for session %s",
+                        cli_session_id[:8],
+                        session_id[:8],
+                    )
+            if not cli_session_id:
+                logger.warning(
+                    "resume_terminated_session: no cli_session_id for session %s",
+                    session_id[:8],
+                )
+                return False
+
+            provider = self._cli_tool_to_provider(cli_tool)
+
+            # Fresh proxy token; reuse original HA routing metadata when present.
+            extra_payload: dict[str, Any] = {
+                "scope": "remote",
+                "tool_name": "qwen-code" if normalize_tool_name(cli_tool) == "qwen" else normalize_tool_name(cli_tool),
+            }
+            extra_payload.update(self._get_ha_metadata(session_id))
+            proxy_token = self._api_key_proxy.generate_proxy_token(
+                user_id=user_id,
+                session_id=session_id,
+                tenant_id=effective_tenant_id,
+                provider=provider,
+                extra_payload=extra_payload,
+            )
+
+            # CLI settings for the restored tool
+            cli_settings: dict[str, Any] = {}
+            settings_tool = {
+                "claude": "claude-code",
+                "qwen": "qwen-code",
+                "codex": "codex-cli",
+                "openclaw": "openclaw",
+                "zcode": "zcode",
+            }.get(normalize_tool_name(cli_tool), cli_tool)
+            tool_settings = self._api_key_proxy.get_cli_settings_for_tool(
+                effective_tenant_id, settings_tool
+            )
+            if tool_settings:
+                cli_settings[settings_tool] = tool_settings
+
+            # Rebind and dispatch start_session with --resume target
+            agent_mgr.bind_session(session_id, machine_id)
+            command: dict[str, Any] = {
+                "type": "command",
+                "command": "start_session",
+                "session_id": session_id,
+                "project_path": project_path,
+                "model": model,
+                "cli_tool": cli_tool,
+                "proxy_token": proxy_token,
+                "cli_settings": cli_settings,
+                "resume_session_id": cli_session_id,
+            }
+            agent_mgr.send_command(machine_id, command)
+
+            self._session_manager.update_session_fields(
+                session_id,
+                {"status": "active", "cli_session_id": cli_session_id},
+                require_tenant=False,
+            )
+            # The session is now active again — clear any stale in-memory
+            # "ended" flag so the SSE /stream endpoint does not close with
+            # [DONE] immediately (Issue #27).
+            self._agent_manager.clear_session_end_flag(session_id)
+            logger.info(
+                "Resumed terminated session %s (cli_session_id=%s) on machine %s",
+                session_id[:8],
+                cli_session_id[:8],
+                machine_id[:8],
+            )
+            return True
+        except Exception as e:
+            logger.error(f"resume_terminated_session failed for session {session_id}: {e}")
+            return False
 
     def _get_machine_id(self, session_id: str) -> str | None:
         """Get machine_id for a session, with DB fallback on restart.
@@ -598,6 +864,13 @@ class RemoteSessionManager:
             logger.warning(f"No machine bound for session {session_id}")
             return False
 
+        # Issue #24: after an agent restart (or when the CLI exits after a
+        # turn), the CLI process is gone and a bare send_message fails on the
+        # agent with "Session not found". Auto-restart the terminated CLI with
+        # --resume first; resume_terminated_session is idempotent and skips
+        # when the process is already running.
+        self._ensure_cli_running(session_id, machine_id)
+
         # Store user message in session
         stored = self._session_manager.append_transcript_message(
             session_id=session_id,
@@ -619,6 +892,55 @@ class RemoteSessionManager:
         self._timeline("record_event", session_id, "user_message", role="user", content=content)
 
         return self._agent_manager.send_command(machine_id, command)
+
+    def _ensure_cli_running(self, session_id: str, machine_id: str) -> bool:
+        """Ensure the CLI process for a session exists on the agent.
+
+        After an agent restart every CLI subprocess is gone; the agent then
+        answers send_message with "Session not found" (the executor removes
+        exited sessions from its in-memory map, so its own auto-restart never
+        triggers). Probe the agent and, when the process is missing, restart
+        the terminated CLI with --resume (idempotent via
+        resume_terminated_session's running check).
+        """
+        try:
+            info = self._agent_manager.send_command_with_response(
+                machine_id=machine_id,
+                command="get_session_info",
+                session_id=session_id,
+                timeout=5.0,
+            )
+            if info and info.get("is_running"):
+                return True
+        except Exception as e:
+            logger.warning(f"_ensure_cli_running: probe failed for {session_id[:8]}: {e}")
+            return False
+
+        try:
+            session = self._session_manager.get_session(session_id, include_messages=False)
+            if not session:
+                logger.warning(f"_ensure_cli_running: session {session_id[:8]} not found in DB")
+                return False
+            tool_name = getattr(session, "tool_name", "") or ""
+            cli_tool = {
+                "qwen": "qwen-code-cli",
+                "claude": "claude-code",
+                "codex": "codex-cli",
+                "openclaw": "openclaw",
+                "zcode": "zcode",
+            }.get(tool_name.lower(), tool_name)
+            return self.resume_terminated_session(
+                session_id=session_id,
+                machine_id=machine_id,
+                project_path=session.project_path or "",
+                cli_tool=cli_tool,
+                user_id=int(session.user_id or 0),
+                model=getattr(session, "model", None),
+                created_at=getattr(session, "created_at", None),
+            )
+        except Exception as e:
+            logger.warning(f"_ensure_cli_running: resume failed for {session_id[:8]}: {e}")
+            return False
 
     def update_permission_mode(self, session_id: str, permission_mode: str) -> bool:
         """Send update_permission_mode command to the remote agent.
@@ -1508,7 +1830,11 @@ class RemoteSessionManager:
         )
 
     def process_session_status_update(
-        self, session_id: str, status: str, pid: int | None = None
+        self,
+        session_id: str,
+        status: str,
+        pid: int | None = None,
+        cli_session_id: str | None = None,
     ) -> None:
         """Process a session status update from a remote agent."""
         session = self._session_manager.get_session(session_id)
@@ -1518,6 +1844,11 @@ class RemoteSessionManager:
         if status in ("running", "active"):
             session.status = "active"
             session.paused_at = None
+            # A session going back to running/active must clear any stale
+            # in-memory "ended" flag — otherwise the SSE /stream endpoint sees
+            # is_session_ended()=True and closes with [DONE], starving the webui
+            # of live output after a restore (Issue #27).
+            self._agent_manager.clear_session_end_flag(session_id)
         elif status == "paused":
             session.status = "paused"
             if not session.paused_at:
@@ -1542,6 +1873,16 @@ class RemoteSessionManager:
             self._session_permission_modes.pop(session_id, None)
 
         self._session_manager.update_session(session)
+
+        # Persist the CLI conversation id (qwen JSONL filename) reported by the
+        # agent so the session can later be resumed with --resume <cli_session_id>.
+        if cli_session_id:
+            try:
+                self._session_manager.update_session_fields(
+                    session_id, {"cli_session_id": cli_session_id}, require_tenant=False
+                )
+            except Exception as e:
+                logger.warning(f"Failed to persist cli_session_id for {session_id}: {e}")
 
         # Record terminal lifecycle events (stop / error). The "completed/exited"
         # branch keeps the session active, so only genuine stops/errors are logged.
