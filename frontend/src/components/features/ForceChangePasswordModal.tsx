@@ -102,7 +102,7 @@ export const ForceChangePasswordModal: React.FC = () => {
       </div>
 
       <div className="mb-3">
-        <label className="form-label">{t('password', language) ?? 'New Password'}</label>
+        <label className="form-label">{t('newPassword', language) ?? 'New Password'}</label>
         <TextInput
           type="password"
           value={newPassword}
