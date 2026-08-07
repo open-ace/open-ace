@@ -94,6 +94,63 @@ NAME = "merge"
 logger = logging.getLogger(__name__)
 
 
+def _blocking_failures(gh, checks: list[dict], pr_number: int) -> list[dict]:
+    """Return the failing checks that actually block the merge (issue #2428).
+
+    CI repair rounds are a bounded budget (``MAX_CI_REPAIR_ATTEMPTS``). Spending
+    one on a check that does not gate the merge is pure waste, and it is how
+    workflows exhausted the budget and died: wf227 burned all five rounds and
+    reported ``test (3.13)`` — a check ``main`` does not require. On this
+    repository only ``lint``, ``test (3.10/3.11/3.12)`` and ``build`` are
+    required; ``test (3.13/3.14)``, ``postgres-test``, ``schema-sync``,
+    ``performance-test`` and the E2E jobs are not.
+
+    ``ReadinessService.collect_actionable_ci_failures`` already implements this
+    split — with the #1989/#2034 lesson written into its docstring — but nothing
+    ever called it, so the live merge path repaired every failure regardless.
+
+    Falls back to "everything that failed" when the required set cannot be
+    determined. Deferring instead (the ReadinessService ``indeterminate``
+    semantic) would stall the workflow indefinitely, which is worse than the
+    status quo; repairing too much is merely wasteful.
+    """
+    failed = [c for c in checks if c.get("bucket") == "fail"]
+    if not failed:
+        return []
+    try:
+        protection = gh.get_branch_protection("main")
+        required = set((protection.get("required_status_checks") or {}).get("contexts") or [])
+    except Exception as exc:  # noqa: BLE001 — degrade to the old behaviour, never stall
+        logger.warning(
+            "PR #%s: could not resolve required checks (%s); "
+            "treating all %d failing check(s) as blocking",
+            pr_number,
+            exc,
+            len(failed),
+        )
+        return failed
+    if not required:
+        # A genuinely unprotected branch has no merge gate to satisfy; keep the
+        # previous behaviour rather than concluding nothing needs repair.
+        logger.warning(
+            "PR #%s: branch 'main' reports no required checks; "
+            "treating all %d failing check(s) as blocking",
+            pr_number,
+            len(failed),
+        )
+        return failed
+    blocking = [c for c in failed if c.get("name", "") in required]
+    skipped = [c for c in failed if c.get("name", "") not in required]
+    if skipped:
+        logger.info(
+            "PR #%s: ignoring %d non-blocking CI failure(s) for repair purposes: %s",
+            pr_number,
+            len(skipped),
+            ", ".join(c.get("name", "?") for c in skipped),
+        )
+    return blocking
+
+
 def handle(ctx, deps) -> PhaseResult:
     """Execute one merge-phase cycle.
 
@@ -174,7 +231,7 @@ def handle(ctx, deps) -> PhaseResult:
                 raise GitHubOpsError(
                     f"Unable to query CI checks before merging PR #{pr_number}: {e}"
                 ) from e
-            failed = [c for c in checks if c.get("bucket") == "fail"]
+            failed = _blocking_failures(gh, checks, pr_number)
             if failed:
                 deps.host.start_ci_repair_round(wf, pr_number, failed)
                 return PhaseResult.retry()
@@ -221,7 +278,7 @@ def handle(ctx, deps) -> PhaseResult:
                     checks_err,
                 )
                 refreshed_checks = checks
-            failed = [c for c in refreshed_checks if c.get("bucket") == "fail"]
+            failed = _blocking_failures(gh, refreshed_checks, pr_number)
             if failed:
                 deps.host.start_ci_repair_round(wf, pr_number, failed)
                 return PhaseResult.retry()

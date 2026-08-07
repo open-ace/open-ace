@@ -1179,55 +1179,120 @@ class GitHubOps:
             "mergeable_state": str(data.get("mergeable_state") or "").strip().lower(),
         }
 
-    def get_branch_protection(self, branch: str = "main") -> dict:
-        """Return the branch-protection rules for ``branch`` (issue #2045 Phase B).
+    @staticmethod
+    def _is_not_found(stderr: str) -> bool:
+        lowered = (stderr or "").strip().lower()
+        return "404" in lowered or "not found" in lowered or "not protected" in lowered
 
-        Used by the merge-readiness classifier to distinguish required from
-        optional CI checks. Only ``required_status_checks`` is unpacked — that
-        is the only field the classifier consumes, so the rest of the protection
-        payload (required_reviews, enforce_admins, restrictions, ...) is ignored.
+    def _classic_required_contexts(self, repo: str, branch: str) -> tuple[list[str], str]:
+        """Required checks declared by *classic* branch protection.
 
-        A 404 (branch has no protection rules) returns an empty required-contexts
-        list rather than raising: "no required checks" is a valid classification
-        — every failing check is optional — not a probe failure.
-
-        Any other non-zero exit (403 permission, 5xx, network) raises
-        :class:`GitHubOpsError` so the classifier fails closed to
-        ``indeterminate`` instead of guessing required/optional semantics it
-        cannot observe. This is the Phase B guard for #1989-class incidents
-        where an un-verifiable signal must never silently drive an irreversible
-        merge/repair decision.
+        Returns ``(contexts, error)``. A 404 is a definitive "no classic
+        protection" and yields ``([], "")``. Any other failure yields
+        ``([], reason)`` — this source is blind, which the caller must weigh
+        against what the other source could see rather than treat as fatal on
+        its own. Notably this endpoint requires admin scope, so the autonomous
+        workflow's own PAT gets 403 here even though the branch is protected.
         """
-        repo = self.get_repo_name()
         result = self._run_gh(
             self._gh_api_args([f"repos/{repo}/branches/{branch}/protection"]),
             repo_scoped=False,
             check=False,
         )
         if result.returncode != 0:
-            stderr = (result.stderr or "").strip().lower()
-            # gh api surfaces HTTP 404 for an unprotected branch; that is a
-            # valid "no required checks" answer, not a probe failure.
-            if "404" in stderr or "not found" in stderr or "not protected" in stderr:
-                return {"required_status_checks": {"contexts": []}}
-            raise GitHubOpsError(
-                f"get_branch_protection({branch}) failed (exit {result.returncode}): "
+            if self._is_not_found(result.stderr or ""):
+                return [], ""
+            return [], (
+                f"classic protection unreadable (exit {result.returncode}): "
                 f"{(result.stderr or '').strip()}"
             )
         data = json.loads((result.stdout or "").strip() or "{}")
         rsc = data.get("required_status_checks") or {}
-        # GitHub returns the legacy string ``contexts`` array and/or the newer
-        # ``checks`` array of {context, integration_id, ...} objects. Merge both
-        # into a flat, de-duplicated required-check-name list.
         contexts: list[str] = []
-        for ctx in rsc.get("contexts", []) or []:
-            name = ctx.get("context") if isinstance(ctx, dict) else ctx
+        # GitHub returns the legacy string ``contexts`` array and/or the newer
+        # ``checks`` array of {context, integration_id, ...} objects.
+        for entry in list(rsc.get("contexts", []) or []) + list(rsc.get("checks", []) or []):
+            name = entry.get("context") if isinstance(entry, dict) else entry
             if name and name not in contexts:
                 contexts.append(name)
-        for chk in rsc.get("checks", []) or []:
-            name = chk.get("context") if isinstance(chk, dict) else chk
-            if name and name not in contexts:
+        return contexts, ""
+
+    def _ruleset_required_contexts(self, repo: str, branch: str) -> tuple[list[str], str]:
+        """Required checks declared by *rulesets* (issue #2428).
+
+        Rulesets are the modern replacement for classic branch protection, and
+        the classic endpoint does not describe them — it answers 404 for a
+        ruleset-protected branch, or 403 for a token without admin scope (which
+        is what the autonomous workflow's own PAT gets). Either way the classic
+        source alone reports no required checks on such a repository.
+
+        This endpoint needs only read access and returns the effective rules.
+        """
+        result = self._run_gh(
+            self._gh_api_args([f"repos/{repo}/rules/branches/{branch}"]),
+            repo_scoped=False,
+            check=False,
+        )
+        if result.returncode != 0:
+            # 404 means the branch/endpoint is unknown, not that the probe
+            # failed — treat it as "no ruleset rules", same as classic.
+            if self._is_not_found(result.stderr or ""):
+                return [], ""
+            return [], (
+                f"branch rules unreadable (exit {result.returncode}): "
+                f"{(result.stderr or '').strip()}"
+            )
+        rules = json.loads((result.stdout or "").strip() or "[]")
+        if not isinstance(rules, list):
+            return [], ""
+        contexts: list[str] = []
+        for rule in rules:
+            if not isinstance(rule, dict) or rule.get("type") != "required_status_checks":
+                continue
+            params = rule.get("parameters") or {}
+            for entry in params.get("required_status_checks", []) or []:
+                name = entry.get("context") if isinstance(entry, dict) else entry
+                if name and name not in contexts:
+                    contexts.append(name)
+        return contexts, ""
+
+    def get_branch_protection(self, branch: str = "main") -> dict:
+        """Return the required-check contexts enforced on ``branch``.
+
+        Used to distinguish required from optional CI checks. Only
+        ``required_status_checks`` is unpacked — that is the only field
+        consumers need.
+
+        Both enforcement mechanisms are consulted and unioned (issue #2428):
+        classic branch protection AND rulesets. Querying only the classic
+        endpoint made every ruleset-protected repository look unprotected.
+
+        A branch with neither yields an empty list, which remains a valid
+        classification — every failing check is optional — not a probe failure.
+
+        Any other non-zero exit (403 permission, 5xx, network) raises
+        :class:`GitHubOpsError` so callers fail closed to ``indeterminate``
+        instead of guessing required/optional semantics they cannot observe.
+        This is the Phase B guard for #1989-class incidents where an
+        un-verifiable signal must never silently drive an irreversible
+        merge/repair decision.
+        """
+        repo = self.get_repo_name()
+        contexts, classic_err = self._classic_required_contexts(repo, branch)
+        ruleset_contexts, ruleset_err = self._ruleset_required_contexts(repo, branch)
+        for name in ruleset_contexts:
+            if name not in contexts:
                 contexts.append(name)
+        # Fail closed only when nothing was positively observed AND at least one
+        # source was blind. A 403 on the classic endpoint is expected here (it
+        # needs admin scope), so it must not veto a successful ruleset read —
+        # but if neither source could see anything, "no required checks" would
+        # be a guess, and guessing is what #1989 forbids.
+        if not contexts and (classic_err or ruleset_err):
+            raise GitHubOpsError(
+                f"get_branch_protection({branch}) could not determine required checks: "
+                + "; ".join(e for e in (classic_err, ruleset_err) if e)
+            )
         return {"required_status_checks": {"contexts": contexts}}
 
     def find_existing_pr(self, head_branch: str) -> dict | None:
