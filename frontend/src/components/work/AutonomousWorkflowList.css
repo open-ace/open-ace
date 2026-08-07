@@ -135,6 +135,11 @@
   transform: scale(1.08);
 }
 
+/* Fix confirm state hover text readability (Issue #2398) */
+.auto-workflow-delete-btn.btn-outline-danger:hover {
+  color: #fff;
+}
+
 .auto-workflow-batch {
   border-bottom: 1px solid rgba(96, 165, 250, 0.22) !important;
   background: var(--bg-primary);
