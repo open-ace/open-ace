@@ -287,6 +287,15 @@ def test_npm_run_test_resolves_to_javascript():
         # D6: an npm script merely starting with "test" is not a test run.
         "npm run testdata:seed",
         "npm run test-utils:build",
+        # A leading env assignment must not shift the artifact-verb window off
+        # the verb. Enumerating the stripped token list while slicing the
+        # unstripped one moved it left by the number of assignments, so the
+        # `install` in `FOO=1 helm install mocha` fell outside it.
+        "FOO=1 helm install mocha ./chart",
+        "HELM_NS=prod helm install mocha ./chart",
+        "CI=1 pip download tox",
+        "A=1 B=2 pip download tox",
+        "DOCKER_BUILDKIT=1 docker build -t mocha .",
     ],
 )
 def test_review_fail_open_cases_are_rejected(command):

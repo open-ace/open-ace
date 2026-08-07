@@ -795,10 +795,15 @@ def _pattern_matches_segment(pattern: str, segment: str, tokens: list[str]) -> b
     artifact-operation verb disqualifies the token.
     """
     if pattern in _BARE_RUNNER_PATTERNS:
-        for index, token in enumerate(_strip_leading_assignments(tokens)):
+        # Enumerate and slice the SAME list. Slicing the unstripped `tokens`
+        # with an index into the stripped one shifts the window left by the
+        # number of assignments, dropping the verb off the end of it:
+        # `FOO=1 helm install mocha` saw only {FOO=1, helm} and was accepted.
+        stripped = _strip_leading_assignments(tokens)
+        for index, token in enumerate(stripped):
             if token.rsplit("/", 1)[-1] != pattern:
                 continue
-            preceding = {t.lower() for t in tokens[:index]}
+            preceding = {t.lower() for t in stripped[:index]}
             return not (preceding & _ARTIFACT_OPERATION_VERBS)
         return False
     return re.search(rf"{re.escape(pattern)}(?![A-Za-z0-9-])", segment) is not None
