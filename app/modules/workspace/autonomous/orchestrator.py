@@ -787,43 +787,83 @@ _ARTIFACT_OPERATION_VERBS = frozenset(
     }
 )
 
-# Commands whose first operand is a host or a user, not a subcommand. Without
-# these, `ssh build pytest` and `su build -c pytest` read `build` as a verb
-# (#2376 PR-3 review-3 HIGH-2).
-_OPERAND_HEAD_COMMANDS = frozenset({"ssh", "su", "doas", "runuser"})
+# Tools whose *subcommand* can be an artifact operation. The veto is anchored on
+# these rather than on the verb's neighbours: the verbs are ordinary English
+# words, and no positional rule can tell `-u build` (option + operand) from
+# `--debug build` (option + subcommand) without an option table
+# (#2376 PR-3 review-4).
+_ARTIFACT_TOOLS = frozenset(
+    {
+        "docker",
+        "podman",
+        "helm",
+        "kubectl",
+        "pip",
+        "pip3",
+        "npm",
+        "yarn",
+        "pnpm",
+        "poetry",
+        "uv",
+        "conda",
+        "apt",
+        "apt-get",
+        "brew",
+        "gem",
+        "cargo",
+        "go",
+        "mvn",
+        "gradle",
+        "gradlew",
+        "terraform",
+        "aws",
+        "gcloud",
+    }
+)
 
 
-def _artifact_verb_precedes(tokens: list[str], index: int) -> bool:
-    """Whether a token before ``index`` is an artifact *verb* rather than a name.
+def _is_artifact_operation(tokens: list[str]) -> bool:
+    """Whether the segment operates on an artifact rather than running tests.
 
-    A plain set intersection over everything to the left is unsound: the verb
-    set is made of ordinary English words that routinely appear as wrapper
-    *operands* — usernames, container names, conda envs, hostnames. It rejected
-    a dozen ordinary invocations, all of which work on the PR-2 tip
-    (#2376 PR-3 review-3 HIGH-2)::
+    ``helm install mocha ./chart``, ``docker build -t mocha .`` and
+    ``pip download tox`` name a runner as an *artifact*, so no pattern in them
+    is a test invocation.
 
-        sudo -u build pytest tests/
-        docker run --rm --name build img pytest
-        conda run -n build pytest tests/
-        kubectl exec -it add -- pytest tests/
+    Anchored on the tool, not on the verb's neighbours. Two earlier shapes both
+    failed, in opposite directions:
 
-    A verb is only a verb when nothing marks it as an operand: an option
-    immediately to its left (``-u build``, ``--name build``) makes it that
-    option's argument, and ``ssh``/``su`` take a host or user in first position.
-    ``helm install mocha`` keeps its veto because ``install`` follows a bare
-    command name.
+    - A set intersection over every preceding token rejected a dozen ordinary
+      invocations, because the verbs appear as wrapper *operands* —
+      ``sudo -u build pytest``, ``docker run --rm --name build img pytest``,
+      ``conda run -n build pytest`` (review-3 HIGH-2).
+    - Excusing a verb whose left neighbour is an option then let every global
+      flag through, since these tools all accept options *before* the
+      subcommand: ``docker --debug build -t mocha .``, ``pip -q download tox``
+      (review-4). Both valueless and ``--opt=value`` forms defeat it, so
+      "skip only valueless flags" does not help either.
+
+    The tool's first non-flag argument is its subcommand, which is the only
+    place an artifact verb can legitimately appear. ``docker run --name build``
+    keeps working because ``run`` is the subcommand and ``build`` is merely an
+    option's operand; ``sudo -u build pytest`` keeps working because ``sudo`` is
+    not one of these tools at all. Scanning for the tool rather than reading
+    token 0 also covers ``sudo docker build -t mocha .``.
+
+    Checked per segment rather than per match, so the multi-word patterns get
+    the same veto the bare runner names do — ``helm install mvn test`` was a
+    fail-open while it applied only to bare names (review-4).
     """
-    for position, token in enumerate(tokens[:index]):
-        if token.lower() not in _ARTIFACT_OPERATION_VERBS:
+    for index, token in enumerate(tokens):
+        if token.lower() in _ARTIFACT_OPERATION_VERBS and index == 0:
+            # The verb IS the command: `install -m 755 pytest /usr/bin`.
+            return True
+        if token.rsplit("/", 1)[-1].lower() not in _ARTIFACT_TOOLS:
             continue
-        if position == 0:
-            return True  # the verb IS the command: `install -m 755 pytest /usr/bin`
-        previous = tokens[position - 1]
-        if previous.startswith("-"):
-            continue  # an option's argument, not a subcommand
-        if previous.rsplit("/", 1)[-1] in _OPERAND_HEAD_COMMANDS:
-            continue  # `ssh <host>`, `su <user>`
-        return True
+        for candidate in tokens[index + 1 :]:
+            if candidate.startswith("-"):
+                continue
+            return candidate.lower() in _ARTIFACT_OPERATION_VERBS
+        return False
     return False
 
 
@@ -850,18 +890,30 @@ def _multiword_pattern_matches(pattern: str, tokens: list[str]) -> bool:
     digit or hyphen (``npm run testdata:seed``, ``npm run test-utils:build``).
     """
     words = pattern.split()
-    span = len(words)
-    for start in range(len(tokens) - span + 1):
-        window = tokens[start : start + span]
-        if any(
-            token.rsplit("/", 1)[-1] != word.rsplit("/", 1)[-1]
-            for token, word in zip(window[:-1], words[:-1])
-        ):
-            continue
-        last, final_word = window[-1], words[-1]
-        if last == final_word:
-            return True
-        if last.startswith(final_word) and not re.match(r"[A-Za-z0-9-]", last[len(final_word) :]):
+    for start in range(len(tokens)):
+        cursor = start
+        for position, word in enumerate(words):
+            # Flags may sit between the words: `npm --silent test`,
+            # `cargo -q test`, `gradle --offline test`, `npm --workspace=x test`
+            # are all ordinary and matched nothing before (#2376 PR-3
+            # review-4 Q1). Only flags are skipped, never bare operands — a
+            # `-x value` form is indistinguishable from a subcommand, and
+            # skipping operands would make `npm ci --prefix test` a test run.
+            while position and cursor < len(tokens) and tokens[cursor].startswith("-"):
+                cursor += 1
+            if cursor >= len(tokens):
+                break
+            token = tokens[cursor]
+            if position < len(words) - 1:
+                if token.rsplit("/", 1)[-1] != word.rsplit("/", 1)[-1]:
+                    break
+            elif not (
+                token == word
+                or (token.startswith(word) and not re.match(r"[A-Za-z0-9-]", token[len(word) :]))
+            ):
+                break
+            cursor += 1
+        else:
             return True
     return False
 
@@ -889,12 +941,10 @@ def _pattern_matches_segment(pattern: str, segment: str, tokens: list[str]) -> b
     # assignments, dropping the verb off the end of it: `FOO=1 helm install
     # mocha` saw only {FOO=1, helm} and was accepted (review-2 follow-up).
     stripped = _strip_leading_assignments(tokens)
-    if pattern in _BARE_RUNNER_PATTERNS:
-        for index, token in enumerate(stripped):
-            if token.rsplit("/", 1)[-1] != pattern:
-                continue
-            return not _artifact_verb_precedes(stripped, index)
+    if _is_artifact_operation(stripped):
         return False
+    if pattern in _BARE_RUNNER_PATTERNS:
+        return any(token.rsplit("/", 1)[-1] == pattern for token in stripped)
     return _multiword_pattern_matches(pattern, stripped)
 
 
@@ -926,7 +976,25 @@ def _is_test_path(token: str) -> bool:
 # Interpreters that can execute a test file directly. `python3.N` is matched
 # separately so 3.10/3.12/... all resolve.
 _EXECUTING_INTERPRETERS = frozenset(
-    {"bash", "sh", "zsh", "python", "python3", "node", "bun", "deno", "ts-node", "tsx"}
+    {
+        "bash",
+        "sh",
+        "zsh",
+        # dash/ksh must stay in step with _SHELL_C_COMMANDS. A shell whose -c
+        # body is expanded but which is not an executing interpreter cannot run
+        # a tests/ file, and one that is not a _SYNTAX_CHECK_SHELLS member has
+        # its `-n` ignored — `dash -n -c "npm test"` counted as a passing run
+        # (#2376 PR-3 review-4). test_widened_recognition pins both directions.
+        "dash",
+        "ksh",
+        "python",
+        "python3",
+        "node",
+        "bun",
+        "deno",
+        "ts-node",
+        "tsx",
+    }
 )
 _PYTHON_VERSIONED_RE = re.compile(r"^python3\.\d+$")
 
@@ -966,7 +1034,7 @@ def _is_npx_test_invocation(rest: list[str]) -> bool:
 
 
 # Flags that make an interpreter parse a file without running it.
-_SYNTAX_CHECK_SHELLS = frozenset({"bash", "sh", "zsh"})
+_SYNTAX_CHECK_SHELLS = frozenset({"bash", "sh", "zsh", "dash", "ksh"})
 
 
 def _strip_leading_assignments(tokens: list[str]) -> list[str]:

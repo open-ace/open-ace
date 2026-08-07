@@ -554,6 +554,121 @@ def test_multiword_patterns_resolve_leading_basenames(command):
     assert _has_test_tool_call(_tc(command), "mixed") is True
 
 
+# --- Re-review 4: the veto is anchored on the TOOL, not the verb's neighbours -
+#
+# Round 3 excused a verb whose left neighbour was an option, to stop
+# `sudo -u build pytest` being rejected. But docker/helm/pip/kubectl/aws all
+# accept global options BEFORE the subcommand, so any of them defeats the veto.
+# Both valueless and `--opt=value` forms do it, so "skip only valueless flags"
+# is not a fix either — you cannot tell `-u build` from `--debug build` without
+# an option table.
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "docker --debug build -t mocha .",
+        "docker --log-level=debug build -t mocha .",
+        "docker --tls build --tag mocha .",
+        "helm --debug install mocha ./chart",
+        "helm --kube-context=prod install mocha .",
+        "pip -q download tox",
+        "pip --quiet download tox",
+        "pip --disable-pip-version-check download tox",
+        # Scanning for the tool rather than reading token 0 covers this too.
+        "sudo docker build -t mocha .",
+        # The veto is per segment, so the multi-word patterns get it as well;
+        # it used to apply only to bare runner names.
+        "helm install mvn test",
+        "pip download gradle test",
+        "docker build -t go test",
+    ],
+)
+def test_artifact_operations_are_vetoed_whatever_the_flags(command):
+    assert _has_test_tool_call(_tc(command), "mixed") is False
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # ...while the tool's subcommand being something other than an artifact
+        # verb keeps the wrapper cases working. `run` is the subcommand here and
+        # `build` is merely an option's operand.
+        "docker run --rm --name build img pytest",
+        "conda run -n build pytest tests/",
+        "poetry run --directory build pytest",
+        "docker compose run --rm app pytest tests/",
+        # sudo/ssh/su are not artifact tools at all.
+        "sudo -u build pytest tests/",
+        "ssh build pytest tests/",
+        "su build -c pytest",
+        "kubectl exec -it add -- pytest tests/",
+    ],
+)
+def test_wrapper_operands_are_not_artifact_operations(command):
+    assert _has_test_tool_call(_tc(command), "mixed") is True
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        # A shell whose -c body is expanded must also be recognized as an
+        # interpreter and as a syntax-check shell, or the two come apart:
+        # dash/ksh had their body expanded but their `-n` ignored, and could not
+        # execute a tests/ file.
+        ('dash -n -c "npm test"', False),
+        ('ksh -n -c "npm test"', False),
+        ('dash -n -c "pytest tests/"', False),
+        ("dash tests/integration/test_x.sh", True),
+        ("ksh tests/integration/test_x.sh", True),
+        ('dash -c "pytest tests/"', True),
+    ],
+)
+def test_shell_c_shells_are_also_interpreters_and_syntax_check_shells(command, expected):
+    assert _has_test_tool_call(_tc(command), "mixed") is expected
+
+
+def test_shell_sets_stay_in_step():
+    # Structural twin of the single-word-pattern invariant, and unlike that one
+    # these were actually violated: adding a shell to _SHELL_C_COMMANDS without
+    # adding it to both of the others is a silent fail-open plus a fail-closed.
+    from app.modules.workspace.autonomous.orchestrator import (
+        _EXECUTING_INTERPRETERS,
+        _SHELL_C_COMMANDS,
+        _SYNTAX_CHECK_SHELLS,
+    )
+
+    assert not _SHELL_C_COMMANDS - _SYNTAX_CHECK_SHELLS
+    assert not _SHELL_C_COMMANDS - _EXECUTING_INTERPRETERS
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # A flag between the pattern's words. `npm --prefix frontend test` is
+        # wf220's command written the other standard way, and nothing caught it.
+        # Only flags are skipped, never bare operands.
+        "npm --silent test",
+        "npm -s test",
+        "npm --workspace=frontend test",
+        "cargo -q test",
+        "cargo --offline test",
+        "mvn -q test",
+        "gradle --offline test",
+        "./gradlew --no-daemon test",
+        "npm --if-present run test",
+    ],
+)
+def test_flags_may_separate_the_words_of_a_pattern(command):
+    assert _has_test_tool_call(_tc(command), "mixed") is True
+
+
+def test_bare_operands_may_not_separate_the_words_of_a_pattern():
+    # The reason skipping is limited to flags: a `-x value` form cannot be told
+    # from a subcommand, so skipping operands would make an install a test run.
+    assert _has_test_tool_call(_tc("npm ci --prefix test"), "mixed") is False
+
+
 def test_every_single_word_pattern_is_registered_as_a_bare_runner():
     # Structural invariant, not a behaviour case. _pattern_matches_segment routes
     # on _BARE_RUNNER_PATTERNS membership: registered names need whole-token
