@@ -476,7 +476,15 @@ def main(argv: list[str] | None = None) -> int:
         if args.dry_run:
             return 0
         server_proc = start_server_if_needed(args, env)
-        return subprocess.run(cmd, cwd=PROJECT_ROOT, env=env, check=False).returncode
+        # Issue #2361: 添加 subprocess 超时保护
+        # 1500秒 = 25分钟 < GitHub Actions 30分钟超时，留5分钟清理时间
+        try:
+            result = subprocess.run(cmd, cwd=PROJECT_ROOT, env=env, check=False, timeout=1500)
+            return result.returncode
+        except subprocess.TimeoutExpired:
+            print("ERROR: Extended tests timed out after 1500s (25 minutes)", flush=True)
+            print(f"       Command: {' '.join(cmd)}", flush=True)
+            return 124  # Standard timeout exit code
     finally:
         stop_server(server_proc)
         if test_home is not None:
