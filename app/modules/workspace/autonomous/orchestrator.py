@@ -792,10 +792,17 @@ _ARTIFACT_OPERATION_VERBS = frozenset(
 # words, and no positional rule can tell `-u build` (option + operand) from
 # `--debug build` (option + subcommand) without an option table
 # (#2376 PR-3 review-4).
+# Commands whose first operand is a host or a user, not a subcommand. Without
+# these, `ssh build pytest` and `su build -c pytest` read `build` as a verb
+# (#2376 PR-3 review-3 HIGH-2).
+_OPERAND_HEAD_COMMANDS = frozenset({"ssh", "su", "doas", "runuser"})
+
 _ARTIFACT_TOOLS = frozenset(
     {
         "docker",
+        "docker-compose",
         "podman",
+        "podman-compose",
         "helm",
         "kubectl",
         "pip",
@@ -829,34 +836,67 @@ def _is_artifact_operation(tokens: list[str]) -> bool:
     ``pip download tox`` name a runner as an *artifact*, so no pattern in them
     is a test invocation.
 
-    Anchored on the tool, not on the verb's neighbours. Two earlier shapes both
-    failed, in opposite directions:
+    The **union of two rules**, because they fail in opposite directions and
+    neither subsumes the other (#2376 PR-3 review-5). Replacing one with the
+    other traded 12 fail-opens for 30.
 
-    - A set intersection over every preceding token rejected a dozen ordinary
-      invocations, because the verbs appear as wrapper *operands* —
-      ``sudo -u build pytest``, ``docker run --rm --name build img pytest``,
-      ``conda run -n build pytest`` (review-3 HIGH-2).
-    - Excusing a verb whose left neighbour is an option then let every global
-      flag through, since these tools all accept options *before* the
-      subcommand: ``docker --debug build -t mocha .``, ``pip -q download tox``
-      (review-4). Both valueless and ``--opt=value`` forms defeat it, so
-      "skip only valueless flags" does not help either.
+    - ``_artifact_verb_after_a_bare_word`` is tool-agnostic, so it needs no
+      enumeration and catches noun-level subcommands (``docker image build``,
+      ``helm repo add``, ``gh release create``) and every unlisted tool
+      (``dnf install -y tox``, ``pipx install tox``, ``docker-compose build``).
+      It misses global options, because these tools accept them *before* the
+      subcommand: ``docker --debug build -t mocha .``, ``pip -q download tox``.
+    - ``_artifact_tool_subcommand_is_a_verb`` anchors on the tool, so a global
+      option cannot hide the subcommand. It misses noun levels and any tool not
+      in ``_ARTIFACT_TOOLS``.
 
-    The tool's first non-flag argument is its subcommand, which is the only
-    place an artifact verb can legitimately appear. ``docker run --name build``
-    keeps working because ``run`` is the subcommand and ``build`` is merely an
-    option's operand; ``sudo -u build pytest`` keeps working because ``sudo`` is
-    not one of these tools at all. Scanning for the tool rather than reading
-    token 0 also covers ``sudo docker build -t mocha .``.
+    Neither rule may be dropped. The verb set is ordinary English words, so the
+    first rule alone rejected a dozen ordinary invocations where the verb is a
+    wrapper *operand* (``sudo -u build pytest``, ``docker run --name build img
+    pytest``) — which is why its option-neighbour excuse exists, and why the
+    second rule is needed to cover what that excuse lets through.
 
     Checked per segment rather than per match, so the multi-word patterns get
     the same veto the bare runner names do — ``helm install mvn test`` was a
     fail-open while it applied only to bare names (review-4).
     """
+    return _artifact_verb_after_a_bare_word(tokens) or _artifact_tool_subcommand_is_a_verb(tokens)
+
+
+def _artifact_verb_after_a_bare_word(tokens: list[str]) -> bool:
+    """Veto rule 1: a verb following a bare word is a subcommand, not an operand.
+
+    Tool-agnostic, which is the point: it needs no enumeration, so an unlisted
+    package manager cannot slip past, and a noun level between the tool and the
+    verb (``docker image build``, ``helm repo add``) does not hide it.
+
+    An option immediately to the left makes the verb that option's argument
+    (``sudo -u build pytest``, ``docker run --name build img pytest``), and
+    ``ssh``/``su`` take a host or user in first position. Those excuses are what
+    rule 2 exists to backstop.
+    """
+    for position, token in enumerate(tokens):
+        if token.lower() not in _ARTIFACT_OPERATION_VERBS:
+            continue
+        if position == 0:
+            return True  # the verb IS the command: `install -m 755 pytest /usr/bin`
+        previous = tokens[position - 1]
+        if previous.startswith("-"):
+            continue  # an option's argument, not a subcommand
+        if previous.rsplit("/", 1)[-1] in _OPERAND_HEAD_COMMANDS:
+            continue  # `ssh <host>`, `su <user>`
+        return True
+    return False
+
+
+def _artifact_tool_subcommand_is_a_verb(tokens: list[str]) -> bool:
+    """Veto rule 2: a known tool whose subcommand is an artifact verb.
+
+    Anchored on the tool so a global option cannot hide the subcommand, which is
+    what defeats rule 1. ``docker run --name build`` is still a test run because
+    ``run`` is the subcommand and ``build`` is merely an option's operand.
+    """
     for index, token in enumerate(tokens):
-        if token.lower() in _ARTIFACT_OPERATION_VERBS and index == 0:
-            # The verb IS the command: `install -m 755 pytest /usr/bin`.
-            return True
         if token.rsplit("/", 1)[-1].lower() not in _ARTIFACT_TOOLS:
             continue
         for candidate in tokens[index + 1 :]:
@@ -934,15 +974,14 @@ def _pattern_matches_segment(pattern: str, segment: str, tokens: list[str]) -> b
     are ordinary (review-2 N1). Wrapper operand grammars cannot be enumerated,
     and the rest of this module scans rather than reading token 0 for exactly
     that reason. What token equality leaves is a runner *name* used as an
-    artifact name, which ``_artifact_verb_precedes`` handles.
+    artifact name, which the ``_is_artifact_operation`` veto handles — applied
+    by the caller, so it gates the ``tests/`` path rule too.
     """
     # Enumerate and slice the SAME list. Slicing the unstripped `tokens` with an
     # index into the stripped one shifts the window left by the number of
     # assignments, dropping the verb off the end of it: `FOO=1 helm install
     # mocha` saw only {FOO=1, helm} and was accepted (review-2 follow-up).
     stripped = _strip_leading_assignments(tokens)
-    if _is_artifact_operation(stripped):
-        return False
     if pattern in _BARE_RUNNER_PATTERNS:
         return any(token.rsplit("/", 1)[-1] == pattern for token in stripped)
     return _multiword_pattern_matches(pattern, stripped)
@@ -1183,6 +1222,11 @@ def _has_test_tool_call(tool_calls: list, framework_type: str) -> bool:
                 # Note: -v (verbose) is NOT excluded — only help/version and
                 # the collection-only flags, which assert nothing.
                 if any(token in _EXCLUDE_FLAG_TOKENS for token in tokens):
+                    continue
+                # The artifact veto gates BOTH doors. Applying it inside
+                # _pattern_matches_segment left the tests/ path rule as a second,
+                # ungated entry point (#2376 PR-3 review-5).
+                if _is_artifact_operation(_strip_leading_assignments(tokens)):
                     continue
                 for pattern in patterns_to_check:
                     if _pattern_matches_segment(pattern, segment, tokens):

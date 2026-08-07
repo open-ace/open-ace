@@ -588,6 +588,98 @@ def test_artifact_operations_are_vetoed_whatever_the_flags(command):
     assert _has_test_tool_call(_tc(command), "mixed") is False
 
 
+# --- Re-review 5: the veto is the UNION of two rules ------------------------
+#
+# Round 4 replaced the bare-word rule with the tool-anchored one. Measured
+# against the previous tip that traded 12 fail-opens for 30, because the two
+# rules fail in opposite directions and neither subsumes the other:
+#
+#   bare-word rule   tool-agnostic, catches noun levels and unlisted tools;
+#                    misses global options (`docker --debug build`)
+#   tool-anchored    immune to global options; misses noun levels
+#                    (`docker image build`) and anything not enumerated
+#
+# Both must run. These two batteries are the ones the replacement opened.
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # A noun level between the tool and the verb hides it from the
+        # tool-anchored rule, which reads the first non-flag argument as THE
+        # subcommand. All ordinary commands.
+        "docker image build -t mocha .",
+        "docker buildx build -t mocha .",
+        "docker image pull mocha",
+        "docker container create --name mocha img",
+        "docker volume create tox",
+        "docker network create nox",
+        "helm repo add mocha https://example.invalid",
+        "helm plugin install mocha",
+        "gh release create --title tox v1",
+        "gh repo create mocha --public",
+        "gcloud compute instances create tox",
+        "npm cache add mocha",
+    ],
+)
+def test_noun_level_subcommands_are_still_artifact_operations(command):
+    assert _has_test_tool_call(_tc(command), "mixed") is False
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # Anchoring on a tool set makes every unlisted tool a fail-open. The
+        # bare-word rule needs no enumeration, which is exactly why it stays.
+        "dnf install -y tox",
+        "yum install -y tox",
+        "apk add tox",
+        "zypper install tox",
+        "pipx install tox",
+        "snap install mocha",
+        "asdf install tox",
+        "rustup component add tox",
+        "bundle add mocha",
+        "dotnet add package tox",
+        "nuget install mocha",
+        "flatpak install mocha",
+        "docker-compose build mocha",
+        "podman-compose build mocha",
+        "choco install mocha",
+        "scoop install tox",
+        "port install tox",
+        "guix install tox",
+    ],
+)
+def test_unenumerated_tools_are_still_artifact_operations(command):
+    assert _has_test_tool_call(_tc(command), "mixed") is False
+
+
+def test_both_veto_rules_are_load_bearing():
+    # Neither rule may be dropped: each of these is caught by exactly one.
+    from app.modules.workspace.autonomous.orchestrator import (
+        _artifact_tool_subcommand_is_a_verb,
+        _artifact_verb_after_a_bare_word,
+        _shell_tokens,
+    )
+
+    only_bare_word = _shell_tokens("dnf install -y tox")
+    assert _artifact_verb_after_a_bare_word(only_bare_word) is True
+    assert _artifact_tool_subcommand_is_a_verb(only_bare_word) is False
+
+    only_tool_anchor = _shell_tokens("docker --debug build -t mocha .")
+    assert _artifact_verb_after_a_bare_word(only_tool_anchor) is False
+    assert _artifact_tool_subcommand_is_a_verb(only_tool_anchor) is True
+
+
+def test_the_veto_gates_the_tests_path_rule_too():
+    # The veto used to live inside _pattern_matches_segment, leaving
+    # _is_test_path_execution as a second, ungated entry point.
+    assert _has_test_tool_call(_tc("helm install mocha ./tests/run.sh"), "mixed") is False
+    # ...without disturbing an ordinary wrapped test-file run.
+    assert _has_test_tool_call(_tc("sudo -u openace bash tests/x.sh"), "mixed") is True
+
+
 @pytest.mark.parametrize(
     "command",
     [
