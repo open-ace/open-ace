@@ -66,9 +66,48 @@ def _gnu_find() -> bool:
 requires_gnu_find = pytest.mark.skipif(
     not _gnu_find(), reason="requires GNU findutils (-quit / relative -newermt); BSD find on macOS"
 )
-requires_flock = pytest.mark.skipif(
-    shutil.which("flock") is None, reason="requires flock(1); absent on macOS"
-)
+_FLOCK_SHIM = """#!/usr/bin/env python3
+# Minimal flock(1) for platforms without util-linux (macOS). Covers the forms
+# used here: `flock -n <fd>` (the reaper) and `flock -x <fd>` (a test holding a
+# lock), on an already-open inherited descriptor.
+import fcntl, sys
+
+mode = fcntl.LOCK_EX
+nonblock = 0
+fds = []
+for arg in sys.argv[1:]:
+    if arg == "-n":
+        nonblock = fcntl.LOCK_NB
+    elif arg == "-x":
+        mode = fcntl.LOCK_EX
+    elif arg == "-s":
+        mode = fcntl.LOCK_SH
+    elif arg == "-u":
+        mode = fcntl.LOCK_UN
+    else:
+        fds.append(arg)
+try:
+    fcntl.flock(int(fds[0]), mode | nonblock)
+except (OSError, ValueError, IndexError):
+    sys.exit(1)
+"""
+
+
+@pytest.fixture
+def flock_path(tmp_path_factory):
+    """PATH containing a usable flock(1).
+
+    The lock branch is the only one production ever reaches, so skipping it off
+    Linux would leave it unverified on the machine where it is being written.
+    """
+    existing = shutil.which("flock")
+    if existing:
+        return os.environ.get("PATH", "/usr/bin:/bin")
+    shim_dir = tmp_path_factory.mktemp("flockshim")
+    shim = shim_dir / "flock"
+    shim.write_text(_FLOCK_SHIM, encoding="utf-8")
+    shim.chmod(0o755)
+    return f"{shim_dir}:{os.environ.get('PATH', '/usr/bin:/bin')}"
 
 
 def _make_tree(task_root: Path, task_id: str, *, with_claude: bool = True) -> dict[str, Path]:
@@ -237,6 +276,11 @@ class TestReapStalePreserveDirs:
         lock_dir.mkdir()
         task_dir = task_root / "some-task-id"
         (task_dir / "home").mkdir(parents=True)
+        # Age the child FIRST, per _age's contract. Leaving a fresh child makes
+        # the age gate short-circuit, so the glob scope is never exercised and
+        # widening it to "$task_root"/* — which would `rm -rf` live task trees
+        # as root — would go undetected.
+        _age(task_dir / "home", 400)
         _age(task_dir, 400)
 
         result = _run_snippet(_reap_harness(task_root, lock_dir))
@@ -306,8 +350,37 @@ class TestReapStalePreserveDirs:
             list(lock_dir.iterdir()) == []
         ), f"the sweep created lock files: {[p.name for p in lock_dir.iterdir()]}"
 
-    @requires_flock
-    def test_held_lock_protects_a_stale_looking_preserve(self, tmp_path):
+    def test_unheld_lock_still_reaps(self, tmp_path, flock_path):
+        """The only branch production ever takes.
+
+        The task lock is created on every run and unlinked nowhere, so for any
+        preserve dir that can exist its lock file exists too — same run, same
+        boot, and /run and /run/lock are cleared together. That makes the
+        `[ ! -e "$_plock" ]` short-circuit unreachable in production, and both
+        "is reaped" tests above go down it. Without this case, neutering the
+        flock branch entirely would leave the whole suite green while the leak
+        F1c exists to close stayed wide open.
+        """
+        task_root = tmp_path / "tasks"
+        lock_dir = tmp_path / "lock"
+        task_root.mkdir()
+        lock_dir.mkdir()
+        stale = task_root / "done.claude-preserve"
+        stale.mkdir()
+        (stale / "s.jsonl").write_text("{}", encoding="utf-8")
+        _age(stale / "s.jsonl", 90)
+        _age(stale, 90)
+        # Present but unheld: the task finished and released it.
+        (lock_dir / "openace-agent-task-done.lock").touch()
+
+        result = _run_snippet(_reap_harness(task_root, lock_dir), env={"PATH": flock_path})
+        assert result.returncode == 0, result.stderr
+        assert not stale.exists(), (
+            "a finished task's preserve dir survived even though its lock was "
+            "free — the flock branch is not actually reaping anything"
+        )
+
+    def test_held_lock_protects_a_stale_looking_preserve(self, tmp_path, flock_path):
         """Age alone is not a liveness test.
 
         The startup preserve-move and the restore bracket a window in which the
@@ -332,7 +405,7 @@ class TestReapStalePreserveDirs:
             + _reap_harness(task_root, lock_dir)
             + "\nexec 7>&-\n"
         )
-        result = _run_snippet(snippet)
+        result = _run_snippet(snippet, env={"PATH": flock_path})
         assert result.returncode == 0, result.stderr
         assert busy.exists(), "a locked (live) preserve dir was reaped"
         assert (busy / "s.jsonl").is_file()

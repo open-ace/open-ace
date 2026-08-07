@@ -44,6 +44,13 @@ def test_reclaim_is_defined_before_any_exit_that_can_strand_a_tree():
     becomes a per-attempt path the moment cgroups are enabled as designed.
     """
     definition = _line_of(r"^\s*reclaim_task_tree\(\) \{")
+    arm = _line_of(r"^\s*trap reclaim_task_tree EXIT")
+    assert definition < arm, (
+        f"reclaim_task_tree() is defined at line {definition + 1} but the trap "
+        f"naming it is armed at line {arm + 1}; everything in between — "
+        f"including the mkdir/chmod that fail under `set -e` on a full tmpfs, "
+        f"the exact incident condition — would fire an undefined function"
+    )
     tree_built = _line_of(r'^\s*mkdir -p "\$task_home"')
     cgroup_exit = _line_of(r"^\s*exit 66", start=tree_built)
     assert definition < cgroup_exit, (
@@ -72,9 +79,9 @@ def test_trap_is_armed_before_the_preserve_move_window():
 def test_signal_traps_are_armed_with_the_reclaim_trap():
     """Until HUP/INT/TERM are trapped, a signal kills bash and no EXIT trap runs."""
     arm = _line_of(r"^\s*trap reclaim_task_tree EXIT")
-    window = "\n".join(LINES[arm : arm + 6])
+    window = "\n".join(LINES[arm : arm + 8])
     for signal_name in ("HUP", "INT", "TERM"):
-        assert signal_name in window, (
+        assert re.search(rf"^\s*trap 'exit \d+' {signal_name}$", window, re.MULTILINE), (
             f"{signal_name} is not trapped alongside the reclaim trap; a signal "
             f"in that window would bypass reclamation entirely"
         )
@@ -129,12 +136,37 @@ def test_preflight_cleanup_does_not_reclaim():
 
 
 def test_success_path_reclaims_before_disarming_the_trap():
+    """Anchor on a bare CALL, never a substring of the surrounding window.
+
+    A window search is satisfied by the explanatory comment sitting right above
+    the call, so deleting the call outright — restoring the leak on the most
+    common path in production, and stopping ACL revocation too, since the very
+    next line disarms the handler — would still pass.
+    """
     disarm = _line_of(r"^\s*trap - EXIT HUP INT TERM")
-    window = "\n".join(LINES[max(0, disarm - 4) : disarm])
-    assert "on_exit" in window, (
-        "the success path must reclaim before `trap -` disarms the handler, "
-        "otherwise a clean run is the one case that still leaks"
+    call = _line_of(r"^\s*on_exit$")
+    assert call < disarm, (
+        f"on_exit call at line {call + 1} must precede the disarm at "
+        f"{disarm + 1}; otherwise a clean run is the one case that still leaks"
     )
+
+
+def test_preflight_call_site_stays_the_narrow_cleanup():
+    """The pre-flight site must call cleanup_isolated, never on_exit.
+
+    It runs after the tree is built and .claude has been restored into it, so
+    calling on_exit there would `rm -rf` the tree — and the session history —
+    before the agent starts, breaking #2035 --resume on every run. Asserting
+    only that cleanup_isolated's *body* lacks the reclaim leaves this unpinned.
+    """
+    arm_full = _line_of(r"^\s*trap on_exit EXIT")
+    preflight = _line_of(r"^\s*cleanup_isolated$")
+    assert preflight < arm_full, "the bare cleanup_isolated pre-flight call is gone"
+    for index in range(0, arm_full):
+        assert not re.match(r"^\s*on_exit$", LINES[index]), (
+            f"on_exit is called at line {index + 1}, before the full handler is "
+            f"armed — at that point it would delete the just-restored .claude"
+        )
 
 
 def test_preserve_reaper_runs_after_the_restore():
@@ -162,6 +194,42 @@ def test_lock_directory_is_a_constant_not_an_environment_override():
     assert not re.search(
         r"_lock_dir=.*\$\{?OPENACE", SRC
     ), "the lock directory must not be environment-controlled"
+
+
+def test_acl_registry_is_removed_at_its_point_of_consumption():
+    """Truncating instead of removing leaves a stray empty registry behind.
+
+    It must be removed inside the revocation helper, never in
+    reclaim_task_tree: on the early `exit 66` path the revocation has not run
+    yet, so deleting the record there would orphan the agent's write ACLs.
+    """
+    body = re.search(r"^\s*_revoke_task_acls\(\) \{\n(.*?)^\s*\}$", SRC, re.MULTILINE | re.DOTALL)
+    assert body, "_revoke_task_acls() not found"
+    assert 'rm -f "$acl_registry"' in body.group(1)
+    assert ': > "$acl_registry"' not in SRC, "registry is truncated rather than removed"
+    reclaim = re.search(
+        r"^\s*reclaim_task_tree\(\) \{\n(.*?)^\s*\}$", SRC, re.MULTILINE | re.DOTALL
+    )
+    assert reclaim and "acl_registry" not in reclaim.group(1), (
+        "reclaim_task_tree must not touch the ACL registry — on the early exit "
+        "path that record has not been consumed yet"
+    )
+
+
+def test_acl_registry_is_created_with_a_tight_umask():
+    """A separate chmod would leave a world-readable window on every run."""
+    assert re.search(r"umask 077;.*acl_registry", SRC), (
+        "the registry must be created under umask 077 in the same step as the "
+        "write; it is recreated fresh every run now that it is removed"
+    )
+
+
+def test_zero_age_threshold_is_rejected():
+    """`0` passes a naive numeric guard and means 'delete every history'."""
+    assert re.search(r"^\s*0\|''\|\*\[!0-9\]\*\)", SRC, re.MULTILINE), (
+        "agent_task_preserve_max_age_days=0 would satisfy a digits-only check "
+        "and reap every session history on every run"
+    )
 
 
 def test_the_disproven_reconciler_comment_is_gone():

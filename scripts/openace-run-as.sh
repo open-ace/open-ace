@@ -325,6 +325,9 @@ if [ "$isolated" = true ]; then
     # it from an EXIT trap that also fires on the legacy `uid-*` path — under
     # `set -u` an unset name would kill the wrapper there.
     preserve_claude_dir=""
+    # Same reason as above: only assigned inside the task_id block, but read by
+    # the preserve reaper.
+    task_root=""
     # Age cutoff for reaping abandoned .claude-preserve dirs (#2403 F1c) is read
     # from the launcher conf at the call site below — _conf_value() is not
     # defined yet at this point in the script.
@@ -364,7 +367,10 @@ if [ "$isolated" = true ]; then
             rm -rf -- "$preserve_claude_dir" 2>/dev/null || true
             mv "$task_home/.claude" "$preserve_claude_dir" 2>/dev/null || true
         fi
-        rm -rf -- "$task_base" 2>/dev/null || true
+        # Log rather than swallow: a partial rm on a full tmpfs is exactly the
+        # condition this issue is about, and silence is why it went unnoticed
+        # for so long.
+        rm -rf -- "$task_base" 2>/dev/null || log_audit "result=reclaim_failed task=${task_id:-}"
     }
 
     # Issue #2403 F1c: reclaiming the tree on exit converts a fast directory
@@ -384,8 +390,13 @@ if [ "$isolated" = true ]; then
             # does not move as a session grows, and rename(2) does not touch the
             # renamed inode's mtime either. Keying on the directory mtime would
             # delete the most active long-lived sessions first.
-            [ -z "$(find "$_pdir" -newermt "-${preserve_max_age_days} days" \
-                    -print -quit 2>/dev/null)" ] || continue
+            #
+            # Check find's exit status too: swallowing it would turn any find
+            # failure into empty output, i.e. "stale", i.e. delete. Skip on
+            # error — the safe direction for a destructive test.
+            _fresh="$(find "$_pdir" -newermt "-${preserve_max_age_days} days" \
+                      -print -quit 2>/dev/null)" || continue
+            [ -z "$_fresh" ] || continue
             _pid="${_pdir##*/}"; _pid="${_pid%.claude-preserve}"
             _plock="${_lock_dir}/openace-agent-task-${_pid}.lock"
             # `8<` — read only, NO O_CREAT. flock(2) does not require write
@@ -511,8 +522,11 @@ if [ "$isolated" = true ]; then
     # Guarded on task_id because $task_root is only assigned in that block.
     if [ -n "$task_id" ]; then
         preserve_max_age_days="$(_conf_value agent_task_preserve_max_age_days)"
+        # 0 passes a naive numeric guard but means "everything is stale": it
+        # would delete every session history on every run. Treat it, and any
+        # non-numeric value, as unset.
         case "$preserve_max_age_days" in
-            ''|*[!0-9]*) preserve_max_age_days=30 ;;
+            0|''|*[!0-9]*) preserve_max_age_days=30 ;;
         esac
         reap_stale_preserve_dirs
     fi
