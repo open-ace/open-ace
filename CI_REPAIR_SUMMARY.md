@@ -2,15 +2,15 @@
 
 ## Problem Analysis
 
-The CI failed on Python 3.10 with a test collection error showing 0 tests collected. 
-Investigation revealed that while all code was correct, one documentation file was 
+The CI failed on Python 3.10 with a test collection error showing 0 tests collected.
+Investigation revealed that while all code was correct, one documentation file was
 missing a trailing newline, which would trigger the `end-of-file-fixer` pre-commit hook.
 
 ## Root Cause
 
 **MERGE_STAGE_FIX.md** was missing a trailing newline character at the end of the file.
 
-This triggers the `end-of-file-fixer` hook from the pre-commit configuration, which 
+This triggers the `end-of-file-fixer` hook from the pre-commit configuration, which
 would cause the CI lint job to fail.
 
 ## Fix Applied
@@ -60,12 +60,12 @@ After this fix, the CI should:
 
 ## Notes
 
-The test collection failure mentioned in the CI log was likely due to a transient issue 
+The test collection failure mentioned in the CI log was likely due to a transient issue
 or environment-specific problem, as:
 1. All Python files compile successfully with valid syntax
 2. All imports work correctly
 3. Test collection works locally (4268 tests)
 4. All tests pass locally (45 SSH sync + 23 acceptance gates)
 
-The only actual issue found was the missing trailing newline in MERGE_STAGE_FIX.md, 
+The only actual issue found was the missing trailing newline in MERGE_STAGE_FIX.md,
 which would trigger the end-of-file-fixer hook and cause the lint job to fail.
