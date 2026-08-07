@@ -11,7 +11,6 @@ import os
 import re
 import shutil
 import threading
-from pathlib import Path
 from typing import Any
 
 import requests
@@ -42,11 +41,7 @@ def _is_placeholder(value: str) -> bool:
     """Check if a value is a placeholder/template value."""
     if not value:
         return False
-    value_lower = value.lower()
-    for pattern in PLACEHOLDER_PATTERNS:
-        if re.search(pattern, value, re.IGNORECASE):
-            return True
-    return False
+    return any(re.search(pattern, value, re.IGNORECASE) for pattern in PLACEHOLDER_PATTERNS)
 
 
 def _mask_app_secret(app_secret: str | None) -> str:
@@ -82,12 +77,12 @@ class FeishuConfigService:
         # Read config directly from file (bypass cache to get fresh data)
         config = self._read_config_file()
         feishu_config = config.get("feishu")
-        
+
         if not feishu_config:
             return None
 
         result = dict(feishu_config)
-        
+
         # Mask app_secret for display
         if "app_secret" in result and result["app_secret"]:
             result["app_secret_masked"] = _mask_app_secret(result["app_secret"])
@@ -107,7 +102,7 @@ class FeishuConfigService:
         # Read config directly from file
         config = self._read_config_file()
         feishu_config = config.get("feishu")
-        
+
         if not feishu_config:
             return None
 
@@ -324,7 +319,7 @@ class FeishuConfigService:
             return {}
 
         try:
-            with open(self.config_path, "r", encoding="utf-8") as f:
+            with open(self.config_path, encoding="utf-8") as f:
                 return json.load(f)
         except json.JSONDecodeError as e:
             logger.error(f"Invalid JSON in config.json: {e}")
@@ -363,7 +358,7 @@ class FeishuConfigService:
     def _invalidate_cache(self) -> None:
         """Invalidate config cache."""
         # Import here to avoid circular dependency
-        from app.utils.config import _cache_lock, _cache
+        from app.utils.config import _cache, _cache_lock
 
         with _cache_lock:
             _cache.pop("_root", None)
