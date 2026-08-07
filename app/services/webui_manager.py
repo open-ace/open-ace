@@ -1114,6 +1114,32 @@ class WebUIManager:
                 ]:
                     if child_env.get(key):
                         env_args.append(f"{key}={child_env[key]}")
+
+                # Set HOME to the target user's home directory.
+                # sudo's always_set_home should handle this, but it doesn't
+                # work reliably in all sudo/PAM configurations (the webui
+                # process inherits the service user's HOME instead). Without
+                # the correct HOME, the webui fails to create its log
+                # directory ($HOME/logs) with EACCES, causing startup failure.
+                try:
+                    target_home = pwd.getpwnam(system_account).pw_dir
+                    env_args.append(f"HOME={target_home}")
+                except KeyError:
+                    logger.warning(
+                        f"Could not resolve home dir for '{system_account}', "
+                        "HOME will not be set explicitly"
+                    )
+
+                # Explicitly pass OPENACE_LOG_DIR. It's in
+                # _WEBUI_ENV_SUDO_KNOWN_KEYS (excluded from the dynamic loop
+                # below) because it was expected to be preserved by sudoers
+                # env_keep. However, with popen_env=None the parent process
+                # environment doesn't contain OPENACE_LOG_DIR (it's only in
+                # child_env), so env_keep has nothing to preserve. Inline it
+                # explicitly to ensure the webui logs to the correct directory.
+                if child_env.get("OPENACE_LOG_DIR"):
+                    env_args.append(f"OPENACE_LOG_DIR={child_env['OPENACE_LOG_DIR']}")
+
                 # Dynamic envKeys from model pool (e.g., BAILIAN_CODING_PLAN_API_KEY)
                 for key, value in child_env.items():
                     if key not in _WEBUI_ENV_SUDO_KNOWN_KEYS and value:
