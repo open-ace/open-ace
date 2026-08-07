@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -269,7 +269,9 @@ def get_current_timestamp() -> str:
     Returns:
         ISO format timestamp string.
     """
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    from datetime import UTC
+
+    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 
 def run_check_with_timeout(check_func, timeout_seconds: float = 1.0) -> dict[str, Any]:
