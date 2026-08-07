@@ -54,8 +54,6 @@ DENYLIST_PATTERNS = openace_ssh_sync.DENYLIST_PATTERNS
 DEFAULT_ALLOWLIST = openace_ssh_sync.DEFAULT_ALLOWLIST
 
 
-
-
 def _mock_root_ownership(ctx):
     """Helper to mock root ownership for tests."""
     ctx._src_st = MagicMock()
@@ -63,6 +61,7 @@ def _mock_root_ownership(ctx):
     ctx._src_st.st_nlink = 1
     ctx._src_st.st_uid = 0  # Root ownership
     return ctx
+
 
 class TestSSHFileSyncContext(unittest.TestCase):
     """SSH 文件同步安全上下文测试"""

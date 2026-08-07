@@ -317,7 +317,7 @@ def check_ssh_sync_failure() -> dict[str, Any]:
         if os.path.exists(warning_file):
             # Read the warning file for details
             try:
-                with open(warning_file, "r") as f:
+                with open(warning_file) as f:
                     content = f.read()
                 # Extract first line (timestamp) for logging
                 first_line = content.split("\n")[0] if content else "Unknown error"

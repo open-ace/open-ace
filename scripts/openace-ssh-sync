@@ -745,7 +745,9 @@ def sync_ssh_keys(
                 )
             ]
     except Exception as e:
-        log_audit(f"SYNC_ERROR user={username} reason=ownership_check_failed error={e}", level="ERROR")
+        log_audit(
+            f"SYNC_ERROR user={username} reason=ownership_check_failed error={e}", level="ERROR"
+        )
         return [SyncResult(False, f"Ownership check failed: {e}")]
 
     # 加载配置文件（如果提供）
