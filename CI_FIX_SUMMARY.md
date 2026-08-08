@@ -70,5 +70,5 @@ All critical checks pass:
 
 All three CI failures have been addressed:
 - lint: ✅ Should pass
-- test (3.13): ✅ Should pass  
+- test (3.13): ✅ Should pass
 - schema-sync: ✅ Should pass

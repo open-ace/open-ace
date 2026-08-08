@@ -6,6 +6,7 @@ State machine that drives a single autonomous development workflow
 through its phases: preparation -> planning -> development ->
 pr_review -> report -> wait -> (loop or merge).
 """
+
 from __future__ import annotations
 
 import grp
@@ -40,7 +41,7 @@ from app.modules.workspace.autonomous.artifact_text import (
     sanitize_artifact_text,
 )
 from app.modules.workspace.autonomous.command_evidence.recorder import emit_command_evidence
-from app.modules.workspace.autonomous.command_evidence.scope import (  # noqa: E402,F401; Re-imported for the legacy heuristic (_has_passing_test_tool_result) and; any in-module callers; the structured verdict (test_verdict) imports them; directly from scope to avoid a circular import (#2046 Phase B).
+from app.modules.workspace.autonomous.command_evidence.scope import (  # noqa: E402, F401; Re-imported for the legacy heuristic (_has_passing_test_tool_result) and; any in-module callers; the structured verdict (test_verdict) imports them; directly from scope to avoid a circular import (#2046 Phase B).
     _normalize_test_command,
     _pytest_scope_covers,
     _pytest_test_scope,
@@ -1946,7 +1947,7 @@ class AutonomousOrchestrator:
         return LegacyPosixProvider()
 
     @property
-    def _git_workspace(self) -> "GitWorkspaceService":
+    def _git_workspace(self) -> GitWorkspaceService:
         """Lazily attach the git-workspace service (#2044 Phase B T5).
 
         Mirrors ``_evidence``: unit tests that build the orchestrator via
@@ -2197,7 +2198,7 @@ class AutonomousOrchestrator:
 
     def recover_worktree_branch(
         self,
-        gh: "GitHubOps",
+        gh: GitHubOps,
         expected_branch: str,
         before_head: str,
         before_main_head: str,
@@ -2211,7 +2212,7 @@ class AutonomousOrchestrator:
 
     def _recover_worktree_branch(
         self,
-        gh: "GitHubOps",
+        gh: GitHubOps,
         expected_branch: str,
         before_head: str,
         before_main_head: str,
@@ -2270,7 +2271,7 @@ class AutonomousOrchestrator:
         )
         return f"recovered worktree onto {expected_branch} after read-only agent branch switch"
 
-    def _ancestor_check(self, gh: "GitHubOps", a: str, b: str) -> bool | None:
+    def _ancestor_check(self, gh: GitHubOps, a: str, b: str) -> bool | None:
         """Return True if ``a`` is an ancestor of ``b``, False if not, None on
         a git error.
 
@@ -4571,7 +4572,7 @@ class AutonomousOrchestrator:
         return True
 
     def _branch_contains_main(
-        self, gh: "GitHubOps", pr_head_sha: str, branch_name: str = ""
+        self, gh: GitHubOps, pr_head_sha: str, branch_name: str = ""
     ) -> bool | None:
         """Whether the PR branch already contains current main.
 
@@ -4593,9 +4594,7 @@ class AutonomousOrchestrator:
         main_head = gh.resolve_commit("FETCH_HEAD")
         return self._ancestor_check(gh, main_head, pr_head_sha)
 
-    def _ensure_pr_head_local(
-        self, gh: "GitHubOps", pr_head_sha: str, branch_name: str = ""
-    ) -> bool:
+    def _ensure_pr_head_local(self, gh: GitHubOps, pr_head_sha: str, branch_name: str = "") -> bool:
         """Ensure ``pr_head_sha`` is present in the local object DB.
 
         ``get_pr_head_sha`` queries the GitHub API for the SHA without fetching
@@ -10336,7 +10335,7 @@ class AutonomousOrchestrator:
                     message = str(result.structured_error.get("message") or "")
                 raise WorkflowPaused(message)
 
-    def _sync_worktree_to_pr_remote_head(self, wt_gh: "GitHubOps", branch_name: str) -> None:
+    def _sync_worktree_to_pr_remote_head(self, wt_gh: GitHubOps, branch_name: str) -> None:
         return self._git_workspace.sync_worktree_to_pr_remote_head(wt_gh, branch_name)
 
     def _resolve_merge_conflicts(self, gh: GitHubOps, branch_name: str, pr_number: int):
