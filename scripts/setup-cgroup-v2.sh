@@ -44,6 +44,9 @@ CGROUP_ENABLED="on"
 CONCURRENCY=3
 WALL_CLOCK=3600
 CONF_PATH="/etc/openace/agent-launcher.conf"
+# agent_task_preserve_max_age_days default (days). Mirrors openace-run-as.sh so
+# an install and a missing-key fallback agree. See Issue #2438.
+PRESERVE_MAX_AGE_DAYS=30
 CGROUP_ROOT="/sys/fs/cgroup/openace-agent"
 SYSTEMD_UNIT="openace-cgroup-setup.service"
 DRY_RUN=false
@@ -250,6 +253,21 @@ fi
 existing_account="${existing_account:-openace-agent}"
 existing_roots="${existing_roots:-/home /workspace}"
 
+# Issue #2438: preserve the operator's stale-.claude reaper window across
+# re-runs. The strip below removes every agent_task_ line, so this key must be
+# re-read here and re-emitted in resource_block, or a custom value is silently
+# reset to the wrapper default.
+existing_preserve=""
+if [[ -f "$CONF_PATH" ]]; then
+    existing_preserve=$(sed -n 's/^agent_task_preserve_max_age_days=//p' "$CONF_PATH" 2>/dev/null | tr -d '"' | head -1)
+fi
+# Fail-safe: 0 would reap every session's history on each run; a non-numeric
+# value is corruption. Both fall back to the default rather than aborting the
+# install, mirroring openace-run-as.sh's own guard.
+case "$existing_preserve" in
+    ''|0|*[!0-9]*) existing_preserve="$PRESERVE_MAX_AGE_DAYS" ;;
+esac
+
 # Build the new resource block
 resource_block=$(cat <<EOF
 # Issue #2020: per-task runtime isolation and resource limits.
@@ -262,6 +280,7 @@ agent_task_pids_max=$PIDS_MAX
 agent_task_cpu_max="$CPU_MAX"
 agent_task_wall_clock_limit=$WALL_CLOCK
 agent_max_concurrent_workflows=$CONCURRENCY
+agent_task_preserve_max_age_days=$existing_preserve
 EOF
 )
 
