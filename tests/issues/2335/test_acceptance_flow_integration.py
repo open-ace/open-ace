@@ -1,6 +1,9 @@
-"""End-to-end-ish acceptance flow: the phase handler + scope gate + aggregation
-drive the workflow from merged -> rejected -> dev -> confirmed -> issue closed.
-The verifier agent is mocked (no real LLM in CI)."""
+"""End-to-end-ish acceptance flow across a rejected delivery and a later fix.
+
+Rejected delivered code pauses for review.  A separately delivered fix can then
+be verified and confirmed; the old, already-cleaned worktree is never re-entered.
+The verifier agent is mocked (no real LLM in CI).
+"""
 
 from unittest.mock import MagicMock
 
@@ -18,7 +21,7 @@ def _ctx(wf):
     )
 
 
-def test_reject_then_fix_then_confirm_closes_issue():
+def test_reject_pauses_then_later_delivery_confirms_and_closes_issue():
     wf = {
         "id": 1,
         "workflow_id": "w1",
@@ -32,24 +35,25 @@ def test_reject_then_fix_then_confirm_closes_issue():
         "dev_round": 1,
     }
 
-    # Round 1: required path missing -> REJECTED -> new dev round, issue stays open.
+    # Delivery 1: required path missing -> REJECTED -> pause, issue stays open.
     deps = MagicMock()
     deps.gh.get_issue.return_value = {"body": "## Scope\n- `app/services/retention.py`"}
     deps.gh.get_changed_files.return_value = []
     deps.host.run_verification_agent.return_value = {"verdicts": [], "snapshot": None}
     deps.host.issue_is_open.return_value = True
-    deps.host.dev_round_cap_remaining.return_value = 3
     r1 = av.handle(_ctx(wf), deps)
-    assert r1.outcome == "completed" and r1.next_phase == "development"
-    assert r1.workflow_patch["dev_round"] == 2
+    assert r1.outcome == "pause"
+    assert r1.workflow_patch["verification_status"] == "rejected"
+    deps.host.dev_round_cap_remaining.assert_not_called()
     deps.gh.close_issue.assert_not_called()
 
-    # Simulate the dev round landing the required file; re-verify. The fix
+    # Simulate a later, separately delivered fix and re-verify. The fix
     # includes a failure-path test (so the negative-test mechanical gate #2335
     # S4 sees coverage for the security/data-loss path) and wires the new
     # service module's caller (so the call-chain gate passes).
     wf.update(r1.workflow_patch)
-    wf["verification_status"] = None  # reset for the new round
+    wf["verification_status"] = None
+    wf["verification_merge_sha"] = "merge-fixed"
     deps.gh.get_changed_files.return_value = [
         "app/services/retention.py",
         "app/services/retention_runner.py",  # production caller for the service module

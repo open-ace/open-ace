@@ -54,7 +54,7 @@ def test_confirmed_closes_issue_and_completes():
     assert result.workflow_patch.get("issue_closed_by_workflow_at")
 
 
-def test_rejected_starts_new_dev_round():
+def test_rejected_pauses_without_reentering_deleted_development_worktree():
     wf = {
         "id": 1,
         "github_issue_number": 42,
@@ -71,15 +71,15 @@ def test_rejected_starts_new_dev_round():
     gh.get_changed_files.return_value = []  # scope gate: required path missing -> REJECTED
     deps = _deps(gh=gh)
     deps.host.run_verification_agent.return_value = {"verdicts": [], "snapshot": None}
-    deps.host.dev_round_cap_remaining.return_value = 2
     result = av.handle(_ctx(wf), deps)
-    assert result.outcome == "completed"
-    assert result.next_phase == "development"
-    assert result.workflow_patch.get("dev_round") == 2
+    assert result.outcome == "pause"
+    assert result.workflow_patch.get("dev_round") is None
+    assert result.workflow_patch["verification_status"] == "rejected"
+    deps.host.dev_round_cap_remaining.assert_not_called()
     deps.gh.close_issue.assert_not_called()
 
 
-def test_rejected_at_cap_fails():
+def test_rejected_pauses_for_review_regardless_of_old_round_cap():
     wf = {
         "id": 1,
         "github_issue_number": 42,
@@ -98,7 +98,9 @@ def test_rejected_at_cap_fails():
     deps.host.run_verification_agent.return_value = {"verdicts": [], "snapshot": None}
     deps.host.dev_round_cap_remaining.return_value = 0
     result = av.handle(_ctx(wf), deps)
-    assert result.outcome == "failed"
+    assert result.outcome == "pause"
+    assert result.workflow_patch["verification_status"] == "rejected"
+    deps.host.dev_round_cap_remaining.assert_not_called()
     deps.gh.close_issue.assert_not_called()
 
 
@@ -165,9 +167,39 @@ def test_closed_issue_reopened_when_not_confirmed():
     gh.get_changed_files.return_value = ["app/x.py"]
     deps = _deps(gh=gh)
     deps.host.issue_is_open.return_value = False  # auto-closed externally
+    deps.gh.get_issue_closure.return_value = {
+        "closed_at": "2026-08-08T00:00:00Z",
+        "closer_login": "open-ace-bot",
+    }
+    deps.gh.get_authenticated_login.return_value = "open-ace-bot"
     deps.host.run_verification_agent.return_value = {"verdicts": [], "snapshot": None}
     av.handle(_ctx(wf), deps)
     deps.gh.reopen_issue.assert_called_once_with(42)  # reopen guard fires before verifying
+
+
+def test_human_closed_issue_is_not_reopened():
+    wf = {
+        "id": 1,
+        "github_issue_number": 42,
+        "github_pr_number": 99,
+        "base_commit_sha": "base",
+        "verification_merge_sha": "merge",
+        "verification_status": None,
+        "issue_acceptance_snapshot": None,
+    }
+    deps = _deps(gh=MagicMock())
+    deps.host.issue_is_open.return_value = False
+    deps.gh.get_issue_closure.return_value = {
+        "closed_at": "2026-08-08T00:00:00Z",
+        "closer_login": "human-maintainer",
+    }
+    deps.gh.get_authenticated_login.return_value = "open-ace-bot"
+    deps.host.run_verification_agent.return_value = {"verdicts": [], "snapshot": None}
+
+    av.handle(_ctx(wf), deps)
+
+    deps.gh.reopen_issue.assert_not_called()
+    deps.host.emit_audit_event.assert_not_called()
 
 
 def test_snapshot_persistence_round_trips_source_and_confidence():

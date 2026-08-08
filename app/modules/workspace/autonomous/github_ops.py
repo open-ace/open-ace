@@ -794,10 +794,24 @@ class GitHubOps:
         return json.loads(result.stdout.strip())
 
     def add_issue_comment(self, number: int, body: str) -> dict:
-        """Add a comment to an issue."""
+        """Add a comment to an issue, deduplicating an exact prior body.
+
+        Acceptance verification can be re-entered after a crash between the
+        GitHub mutation and the local workflow update.  Reading first makes the
+        externally-visible operation idempotent for that retry instead of
+        posting the same report twice.
+        """
+        for comment in self.list_issue_comments(number):
+            if comment.get("body") == body:
+                logger.info("Issue #%s already has the requested comment; skipping", number)
+                return {
+                    "number": number,
+                    "id": comment.get("id"),
+                    "deduplicated": True,
+                }
         self._run_gh(["issue", "comment", str(number), "--body", body], api_only=True)
         logger.info("Added comment to issue #%s", number)
-        return {"number": number}
+        return {"number": number, "deduplicated": False}
 
     def close_issue(self, number: int) -> dict:
         """Close an issue.
@@ -823,12 +837,93 @@ class GitHubOps:
     def list_issue_comments(self, number: int, since: str | None = None) -> list:
         """List comments on an issue, optionally since a timestamp."""
         args = ["issue", "view", str(number), "--comments", "--json", "comments"]
-        result = self._run_gh(args)
-        data = json.loads(result.stdout.strip())
+        result = self._run_gh(args, api_only=True)
+        data = json.loads((result.stdout or "").strip() or '{"comments": []}')
         comments = data.get("comments", [])
         if since:
             comments = [c for c in comments if c.get("createdAt", "") > since]
         return comments
+
+    def get_authenticated_login(self) -> str | None:
+        """Return the login associated with the configured bot credentials.
+
+        Without an explicit AI GitHub token, ``gh`` may inherit a repository
+        owner's personal login.  That identity must never be treated as the
+        autonomous service account for reopen decisions.
+        """
+        env = self._get_env()
+        if not env or not env.get("GH_TOKEN"):
+            return None
+        result = self._run_gh(
+            self._gh_api_args(["user", "--jq", ".login"]),
+            check=False,
+            repo_scoped=False,
+            api_only=True,
+        )
+        if result.returncode != 0:
+            return None
+        login = (result.stdout or "").strip()
+        return login or None
+
+    def get_issue_closure(self, number: int) -> dict | None:
+        """Return the current issue closure timestamp and its actual actor.
+
+        The issue view establishes that the issue is currently closed and gives
+        the authoritative ``closedAt`` timestamp.  The timeline API supplies
+        the actor for the latest close event.  Missing/ambiguous data returns
+        ``None`` so callers fail closed and never reopen a human's issue.
+        """
+        state_result = self._run_gh(
+            ["issue", "view", str(number), "--json", "state,closedAt"],
+            check=False,
+            api_only=True,
+        )
+        if state_result.returncode != 0:
+            return None
+        try:
+            issue = json.loads((state_result.stdout or "").strip() or "{}")
+        except json.JSONDecodeError:
+            return None
+        closed_at = issue.get("closedAt")
+        if str(issue.get("state") or "").lower() != "closed" or not closed_at:
+            return None
+
+        repo = self.get_repo_name()
+        if not repo:
+            return None
+        timeline_result = self._run_gh(
+            self._gh_api_args(
+                [
+                    "--paginate",
+                    f"repos/{repo}/issues/{number}/timeline",
+                    "--jq",
+                    '.[] | select(.event == "closed") | {closed_at: .created_at, closer_login: .actor.login}',
+                ]
+            ),
+            check=False,
+            repo_scoped=False,
+            api_only=True,
+        )
+        if timeline_result.returncode != 0:
+            return None
+        events: list[dict] = []
+        for line in (timeline_result.stdout or "").splitlines():
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(event, dict):
+                events.append(event)
+        if not events:
+            return None
+        matching = [event for event in events if event.get("closed_at") == closed_at]
+        if not matching:
+            return None
+        latest = matching[-1]
+        closer_login = latest.get("closer_login")
+        if not isinstance(closer_login, str) or not closer_login:
+            return None
+        return {"closed_at": closed_at, "closer_login": closer_login}
 
     def update_issue(self, number: int, title: str | None = None, body: str | None = None) -> dict:
         """Update an issue's title or body."""
@@ -1409,6 +1504,30 @@ class GitHubOps:
         )
         out = (result.stdout or "").strip()
         return out or None
+
+    def ensure_commit_available(self, commit_sha: str) -> bool:
+        """Fetch a merge commit into the local repository if it is absent.
+
+        ``gh pr merge`` completes server-side, so its merge SHA is not
+        necessarily present in the long-lived production clone.  Fetch the
+        exact object first, fall back to the reachable ``main`` ref for servers
+        that disallow raw-SHA wants, then verify the object before any diff or
+        worktree operation uses it.
+        """
+        if not re.fullmatch(r"[0-9a-fA-F]{7,40}", commit_sha or ""):
+            return False
+
+        def _present() -> bool:
+            result = self._run_git(["cat-file", "-e", f"{commit_sha}^{{commit}}"], check=False)
+            return result.returncode == 0
+
+        if _present():
+            return True
+        self._run_git(["fetch", "--no-tags", "origin", commit_sha], check=False)
+        if _present():
+            return True
+        self._run_git(["fetch", "--no-tags", "origin", "main"], check=False)
+        return _present()
 
     def _gh_api_args(self, extra: list[str]) -> list[str]:
         """Build a ``gh api`` arg list with GHES hostname handling.

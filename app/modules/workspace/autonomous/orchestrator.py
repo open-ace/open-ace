@@ -6795,7 +6795,7 @@ class AutonomousOrchestrator:
             if gh is None:
                 return True
             res = gh.get_issue(int(issue_number))
-            return (res or {}).get("state", "open") == "open"
+            return str((res or {}).get("state", "open")).lower() == "open"
         except Exception:
             # Fail open: if we can't tell, don't spuriously reopen.
             return True
@@ -6815,6 +6815,16 @@ class AutonomousOrchestrator:
             return None
         gh = self._get_gh()
         if gh is None:
+            return None
+        try:
+            available = gh.ensure_commit_available(merge_sha)
+        except Exception:
+            logger.exception(
+                "acceptance verifier: failed to fetch merge commit locally: %s", merge_sha
+            )
+            return None
+        if not available:
+            logger.error("acceptance verifier: merge commit unavailable locally: %s", merge_sha)
             return None
         tmp_dir = tempfile.mkdtemp(prefix="ace-verify-")
         try:
@@ -6857,7 +6867,12 @@ class AutonomousOrchestrator:
 
         checkout_path = self._checkout_merged_main(merge_sha)
         if not checkout_path:
-            return {"verdicts": [], "snapshot": None, "verified_by": verified_by}
+            return {
+                "verdicts": [],
+                "snapshot": None,
+                "verified_by": verified_by,
+                "infra_error": "merged-main checkout failed",
+            }
         try:
             # Spawn the agent against the merged-main checkout, NOT the dev
             # worktree. We override worktree_path/project_path on a shallow
@@ -6878,9 +6893,22 @@ class AutonomousOrchestrator:
             )
         except Exception:
             logger.exception("acceptance verifier spawn failed for issue %s", issue_number)
-            return {"verdicts": [], "snapshot": None, "verified_by": verified_by}
+            return {
+                "verdicts": [],
+                "snapshot": None,
+                "verified_by": verified_by,
+                "infra_error": "verification agent spawn failed",
+            }
         finally:
             self._remove_verification_worktree(checkout_path)
+        if result is None or getattr(result, "success", False) is not True:
+            error_code = getattr(result, "error_code", None) if result is not None else None
+            return {
+                "verdicts": [],
+                "snapshot": None,
+                "verified_by": verified_by,
+                "infra_error": f"verification agent failed ({error_code or 'runner error'})",
+            }
         parsed = self._parse_verifier_output(result)
         parsed["verified_by"] = verified_by
         return parsed
@@ -6915,7 +6943,11 @@ class AutonomousOrchestrator:
 
         text = self._artifact_text(result) if result is not None else ""
         if not text:
-            return {"verdicts": [], "snapshot": None}
+            return {
+                "verdicts": [],
+                "snapshot": None,
+                "infra_error": "verification agent returned empty output",
+            }
         # Grab the last fenced ```json ... ``` block (the agent may preface reasoning).
         blocks = _re.findall(r"```(?:json)?\s*(\{.*?\})\s*```", text, _re.DOTALL)
         candidate = blocks[-1] if blocks else text
@@ -6925,9 +6957,30 @@ class AutonomousOrchestrator:
             logger.warning(
                 "acceptance verifier output was not valid JSON; treating as indeterminate"
             )
-            return {"verdicts": [], "snapshot": None}
+            return {
+                "verdicts": [],
+                "snapshot": None,
+                "infra_error": "verification agent output was not valid JSON",
+            }
         if not isinstance(parsed, dict):
-            return {"verdicts": [], "snapshot": None}
+            return {
+                "verdicts": [],
+                "snapshot": None,
+                "infra_error": "verification agent output was not an object",
+            }
+        verdicts = parsed.get("verdicts", [])
+        if not isinstance(verdicts, list) or any(not isinstance(item, dict) for item in verdicts):
+            return {
+                "verdicts": [],
+                "snapshot": None,
+                "infra_error": "verification agent verdicts were malformed",
+            }
+        if parsed.get("snapshot") is not None and not isinstance(parsed.get("snapshot"), dict):
+            return {
+                "verdicts": [],
+                "snapshot": None,
+                "infra_error": "verification agent snapshot was malformed",
+            }
         parsed.setdefault("verdicts", [])
         parsed.setdefault("snapshot", None)
         return parsed

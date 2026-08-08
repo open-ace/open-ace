@@ -1,6 +1,6 @@
 """Mechanical acceptance gates (#2335 S4).
 
-Five conservative, deterministic static-analysis checks that fold into the
+Conservative, deterministic static-analysis checks that fold into the
 acceptance verifier's issue-level aggregation alongside the scope gate and the
 LLM verifier verdicts. Each gate returns ``list[ItemVerdict]``.
 
@@ -504,15 +504,20 @@ def run_mechanical_gates(
     *,
     read_file: Callable[[str], str] | None = None,
 ) -> list[ItemVerdict]:
-    """Run all 5 mechanical gates and return a flat list of their verdicts.
+    """Run the production-safe mechanical gates and return their verdicts.
 
     Each gate is independently defensive — a gate that raises degrades to a
     single INDETERMINATE rather than aborting the whole verification.
+
+    ``legacy_pattern_gate`` is intentionally retired from this aggregate.  It
+    scans the full post-merge contents of every changed file, so it cannot tell
+    whether a broad regex match was introduced by the PR or merely pre-existed.
+    That made ordinary delivered changes falsely REJECTED.  The helper remains
+    available for focused tests while a future diff-aware replacement is built.
     """
     out: list[ItemVerdict] = []
     for gate in (
         negative_test_gate,
-        legacy_pattern_gate,
         call_chain_gate,
         deployment_gate,
         regression_gate,

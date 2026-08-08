@@ -10,8 +10,7 @@ issue (as @open-ace-bot) on ``confirmed``.
 
 Transitions:
   confirmed      -> close issue + acceptance report -> completed
-  rejected       -> new development round (rejection report as feedback),
-                    or failed if the dev-round cap is exhausted
+  rejected       -> paused (delivered code is never marked failed; human reviews)
   indeterminate  -> paused (issue open; human provides missing evidence)
 
 Idempotent on the confirmed result: a re-entry whose ``verification_status`` is
@@ -67,7 +66,17 @@ def run_scope_gate(
     Returns one ``ItemVerdict`` per required path: CONFIRMED if a changed path
     matches (glob), REJECTED with the missing path as evidence otherwise.
     """
-    changed = gh.get_changed_files(base=base_sha, head=merge_sha) or []
+    try:
+        changed = gh.get_changed_files(base=base_sha, head=merge_sha) or []
+    except Exception as exc:  # noqa: BLE001 - git/API failures are inconclusive, not rejection
+        return [
+            ItemVerdict(
+                item="scope:changed-files",
+                verdict=Verdict.INDETERMINATE,
+                evidence=[{"ref": "git-diff:error", "note": f"scope diff failed: {exc!r}"}],
+                rationale="Required-path scope could not be read; verification must pause.",
+            )
+        ]
     verdicts: list[ItemVerdict] = []
     for path in required_paths:
         hit = _glob_matches(path, changed)
@@ -195,10 +204,29 @@ def handle(ctx, deps) -> PhaseResult:
         # Cannot verify yet (PR not merged / base unknown) — retry next cycle.
         return PhaseResult.retry()
 
-    # Reopen guard: if the issue was closed out-of-band before confirmation, reopen.
+    # Reopen only a closure performed by the configured service account.  A
+    # human-closed issue must stay closed.  The persisted
+    # issue_closed_by_workflow_at field cannot distinguish a human close from a
+    # GitHub auto-close caused by an agent-authored ``Closes #N`` commit, so use
+    # the actual timeline actor instead.
     if issue_number and not deps.host.issue_is_open(issue_number):
-        gh.reopen_issue(issue_number)
-        deps.host.emit_audit_event("acceptance_reopened_issue", {"issue": issue_number})
+        try:
+            closure = gh.get_issue_closure(int(issue_number))
+            service_login = gh.get_authenticated_login()
+        except Exception:  # noqa: BLE001 - uncertainty must preserve the human-visible state
+            closure = None
+            service_login = None
+        closer_login = (closure or {}).get("closer_login") or ""
+        if service_login and closer_login.casefold() == service_login.casefold():
+            gh.reopen_issue(issue_number)
+            deps.host.emit_audit_event(
+                "acceptance_reopened_issue",
+                {
+                    "issue": issue_number,
+                    "closer": closer_login,
+                    "closed_at": (closure or {}).get("closed_at"),
+                },
+            )
 
     # Build the acceptance snapshot (persisted; hash drives re-verification).
     snapshot = None
@@ -221,9 +249,9 @@ def handle(ctx, deps) -> PhaseResult:
         if prior_status == "confirmed":
             return PhaseResult.completed(next_phase="completed")
         if prior_status == "rejected":
-            # A prior rejection already transitioned to a new dev round (or
-            # failed at the cap). Replaying the verdict would double-advance;
-            # park indeterminately so the scheduler holds the current phase.
+            # Replaying the same rejected delivery must remain paused.  The
+            # merge worktree has already been cleaned up, so acceptance never
+            # tries to re-enter development on that deleted branch.
             return PhaseResult.pause(
                 workflow_patch={
                     "verification_status": "rejected",
@@ -262,6 +290,20 @@ def handle(ctx, deps) -> PhaseResult:
         )
         for v in (agent_out.get("verdicts") or [])
     ]
+    if agent_out.get("infra_error"):
+        verifier_verdicts.append(
+            ItemVerdict(
+                item="verifier:infrastructure",
+                verdict=Verdict.INDETERMINATE,
+                evidence=[
+                    {
+                        "ref": "verifier:infra-error",
+                        "note": str(agent_out["infra_error"]),
+                    }
+                ],
+                rationale="The verifier did not complete successfully; no acceptance decision was made.",
+            )
+        )
     if agent_out.get("snapshot"):
         try:
             snapshot = AcceptanceSnapshot(**agent_out["snapshot"])
@@ -344,19 +386,16 @@ def handle(ctx, deps) -> PhaseResult:
             milestone_events=[milestone],
         )
     if status == "rejected":
-        if deps.host.dev_round_cap_remaining(wf) > 0:
-            return PhaseResult.completed(
-                next_phase="development",
-                workflow_patch={
-                    **common_patch,
-                    "dev_round": (wf.get("dev_round") or 1) + 1,
-                    "error_message": "Acceptance verification rejected: see report",
-                },
-                milestone_events=[milestone],
-            )
-        return PhaseResult.failed(
-            structured_error={"message": "Acceptance rejected and dev rounds exhausted"},
-            workflow_patch=common_patch,
+        return PhaseResult.pause(
+            structured_error={
+                "message": "Acceptance verification rejected",
+                "report": report,
+            },
+            workflow_patch={
+                **common_patch,
+                "error_message": "Acceptance verification rejected; awaiting review",
+            },
+            milestone_events=[milestone],
         )
     # indeterminate
     return PhaseResult.pause(
@@ -364,5 +403,6 @@ def handle(ctx, deps) -> PhaseResult:
             **common_patch,
             "error_message": "Acceptance indeterminate: awaiting evidence",
         },
+        milestone_events=[milestone],
         structured_error={"message": "indeterminate", "report": report},
     )

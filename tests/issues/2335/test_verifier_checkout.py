@@ -55,6 +55,7 @@ def test_checkout_merged_main_creates_temp_worktree_at_merge_sha(tmp_path):
         return MagicMock(stdout="", stderr="", returncode=0)
 
     gh._run_git = fake_run_git
+    gh.ensure_commit_available.return_value = True
     gh.repo_path = "/dev/repo"
 
     with patch.object(orch_mod.AutonomousOrchestrator, "_get_gh", return_value=gh):
@@ -62,6 +63,7 @@ def test_checkout_merged_main_creates_temp_worktree_at_merge_sha(tmp_path):
             path = orch._checkout_merged_main("abc123")
 
     assert path == str(tmp_path)
+    gh.ensure_commit_available.assert_called_once_with("abc123")
     # The first worktree-add command should target the merge sha in detached mode.
     add_cmds = [c for c in captured_cmds if c[:2] == ["worktree", "add"]]
     assert add_cmds, "expected a git worktree add"
@@ -82,6 +84,7 @@ def test_checkout_merged_main_returns_none_on_failure(tmp_path):
         return MagicMock(stdout="", stderr="", returncode=0)
 
     gh._run_git = fake_run_git
+    gh.ensure_commit_available.return_value = True
     gh.repo_path = "/dev/repo"
 
     with patch.object(orch_mod.AutonomousOrchestrator, "_get_gh", return_value=gh):
@@ -165,6 +168,7 @@ def test_run_verification_agent_cleans_up_checkout_on_exception():
     # Fail-safe: empty verdicts -> indeterminate, never confirmed.
     assert result["verdicts"] == []
     assert result["snapshot"] is None
+    assert result["infra_error"] == "verification agent spawn failed"
     mock_rm.assert_called_once()
 
 
@@ -186,7 +190,59 @@ def test_run_verification_agent_returns_empty_when_checkout_fails():
 
     assert result["verdicts"] == []
     assert result["snapshot"] is None
+    assert result["infra_error"] == "merged-main checkout failed"
     mock_spawn.assert_not_called()
+
+
+def test_run_verification_agent_signals_unsuccessful_agent_result():
+    orch = _make_orchestrator()
+    snapshot = MagicMock()
+    snapshot.to_canonical.return_value = {}
+    failed_result = MagicMock(success=False, error="secret provider detail", error_code="timeout")
+
+    with patch.object(
+        orch_mod.AutonomousOrchestrator, "_checkout_merged_main", return_value="/tmp/merged"
+    ):
+        with patch.object(orch_mod.AutonomousOrchestrator, "_remove_verification_worktree"):
+            with patch.object(
+                orch_mod.AutonomousOrchestrator, "_run_agent", return_value=failed_result
+            ):
+                result = orch._run_verification_agent(
+                    snapshot=snapshot,
+                    merge_sha="deadbeef",
+                    base_sha="base",
+                    issue_number=42,
+                    pr_number=99,
+                )
+
+    assert result["infra_error"] == "verification agent failed (timeout)"
+    assert "secret provider detail" not in result["infra_error"]
+
+
+def test_parse_valid_empty_verdict_response_is_not_an_infra_error():
+    orch = _make_orchestrator()
+    result = MagicMock()
+    with patch.object(
+        orch_mod.AutonomousOrchestrator,
+        "_artifact_text",
+        return_value='```json\n{"verdicts": [], "snapshot": null}\n```',
+    ):
+        parsed = orch._parse_verifier_output(result)
+
+    assert parsed == {"verdicts": [], "snapshot": None}
+
+
+def test_parse_malformed_verdict_shape_is_explicit_infra_error():
+    orch = _make_orchestrator()
+    result = MagicMock()
+    with patch.object(
+        orch_mod.AutonomousOrchestrator,
+        "_artifact_text",
+        return_value='```json\n{"verdicts": ["not-an-object"], "snapshot": null}\n```',
+    ):
+        parsed = orch._parse_verifier_output(result)
+
+    assert parsed["infra_error"] == "verification agent verdicts were malformed"
 
 
 def test_verified_by_records_model_version():
