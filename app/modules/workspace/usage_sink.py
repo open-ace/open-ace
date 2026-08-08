@@ -351,14 +351,21 @@ def _record_messages_internal(
                                 break
 
                     if user_content:
-                        stored = sm.append_transcript_message(
-                            session_id=session_id,
-                            role="user",
-                            content=user_content[:10000],
-                            source="llm_proxy",
-                        )
-                        if getattr(stored, "_was_inserted", False):
-                            message_delta += 1
+                        # Issue #2407: Qwen CLI sends its system context (Platform
+                        # Tool Limits, startup context, memory instructions) as
+                        # the last role=user message in LLM requests; never
+                        # mirror it as a user chat message.
+                        from scripts.shared.qwen_context import is_qwen_system_context
+
+                        if not is_qwen_system_context(user_content):
+                            stored = sm.append_transcript_message(
+                                session_id=session_id,
+                                role="user",
+                                content=user_content[:10000],
+                                source="llm_proxy",
+                            )
+                            if getattr(stored, "_was_inserted", False):
+                                message_delta += 1
             except (json.JSONDecodeError, ValueError):
                 pass
 
