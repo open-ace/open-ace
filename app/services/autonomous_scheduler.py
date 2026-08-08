@@ -46,6 +46,11 @@ _AGENT_LAUNCHER_CONF = os.environ.get("OPENACE_LAUNCHER_CONF", "/etc/openace/age
 _SANDBOX_TTL_SECONDS = int(os.environ.get("OPENACE_SANDBOX_TTL_SECONDS", "7200"))
 _SANDBOX_REAP_INTERVAL_SECONDS = float(os.environ.get("OPENACE_SANDBOX_REAP_INTERVAL", "300"))
 
+# Renew workflow DB leases well inside the repository's 30-minute stale-lock
+# window. Agent phases (including acceptance verification) can legitimately run
+# for 60 minutes, so a one-shot acquisition is not sufficient across processes.
+WORKFLOW_LOCK_HEARTBEAT_SECONDS = 60.0
+
 
 def get_max_concurrent_workflows() -> int:
     """Resolve the concurrency cap from agent-launcher.conf (default 3)."""
@@ -510,8 +515,10 @@ class AutonomousScheduler:
         from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
         from app.routes.autonomous import _get_repo
 
-        # Unique lock owner: hostname + thread name
-        lock_owner = f"{socket.gethostname()}/{threading.current_thread().name}"
+        # Include the PID: two scheduler processes on one host commonly reuse
+        # the same worker-thread name. Without a process-unique owner, an old
+        # worker's finally could release a newer process's replacement lease.
+        lock_owner = f"{socket.gethostname()}/{os.getpid()}/{threading.current_thread().name}"
         repo = _get_repo()
 
         # Get workflow's batch_id and git-conflict keys for cleanup
@@ -549,6 +556,15 @@ class AutonomousScheduler:
                 if branch and not was_waiting:
                     self._in_progress_branches.discard(branch)
             return workflow_id
+
+        heartbeat_stop = threading.Event()
+        heartbeat_thread = threading.Thread(
+            target=self._heartbeat_workflow_lock,
+            args=(repo, workflow_id, lock_owner, heartbeat_stop),
+            name=f"workflow-lock-{workflow_id[:8]}",
+            daemon=True,
+        )
+        heartbeat_thread.start()
 
         # Quota gate (fail-closed): a user over quota (or whose quota check
         # errored) must not advance. This scheduler is the lifecycle authority
@@ -620,6 +636,10 @@ class AutonomousScheduler:
                     )
             except Exception:
                 pass
+            # Stop and join the renewer before release so it cannot refresh a
+            # lease after this worker has relinquished ownership.
+            heartbeat_stop.set()
+            heartbeat_thread.join(timeout=1)
             # Release DB lock
             try:
                 repo.release_lock(workflow_id, lock_owner)
@@ -635,6 +655,32 @@ class AutonomousScheduler:
                 if branch and not was_waiting:
                     self._in_progress_branches.discard(branch)
         return workflow_id
+
+    def _heartbeat_workflow_lock(
+        self, repo, workflow_id: str, lock_owner: str, stop_event: threading.Event
+    ) -> None:
+        """Renew a live advance's distributed lock until the worker exits."""
+        while not stop_event.wait(WORKFLOW_LOCK_HEARTBEAT_SECONDS):
+            try:
+                if repo.refresh_lock(workflow_id, lock_owner):
+                    continue
+                logger.error(
+                    "Workflow %s lost its distributed lock; stopping old advance",
+                    workflow_id[:8],
+                )
+                with self._orchestrator_lock:
+                    orchestrator = self._running_orchestrators.get(workflow_id)
+                if orchestrator is not None:
+                    orchestrator.prepare_for_shutdown()
+                return
+            except Exception:
+                # A transient DB failure does not prove ownership was lost. Try
+                # again next tick; the cadence leaves ample room before expiry.
+                logger.warning(
+                    "Failed to refresh workflow lock for %s",
+                    workflow_id[:8],
+                    exc_info=True,
+                )
 
     @staticmethod
     def _batch_has_running_workflow(batch_workflows: list[dict]) -> bool:

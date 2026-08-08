@@ -94,6 +94,22 @@ def test_checkout_merged_main_returns_none_on_failure(tmp_path):
     assert path is None
 
 
+def test_checkout_merged_main_does_not_create_worktree_when_commit_is_unavailable():
+    """A failed exact-SHA fetch stops before allocating or mutating a worktree."""
+    orch = _make_orchestrator()
+    gh = MagicMock()
+    gh.ensure_commit_available.return_value = False
+
+    with patch.object(orch_mod.AutonomousOrchestrator, "_get_gh", return_value=gh):
+        with patch.object(orch_mod.tempfile, "mkdtemp") as mock_mkdtemp:
+            path = orch._checkout_merged_main("abc123")
+
+    assert path is None
+    gh.ensure_commit_available.assert_called_once_with("abc123")
+    mock_mkdtemp.assert_not_called()
+    gh._run_git.assert_not_called()
+
+
 def test_run_verification_agent_uses_merged_main_checkout(tmp_path):
     """``_run_verification_agent`` spawns the agent with project_path = the temp checkout."""
     orch = _make_orchestrator()

@@ -1281,6 +1281,8 @@ class AutonomousWorkflowRepository:
 
         Returns True if the lock was acquired, False if already locked.
         Stale locks (older than LOCK_TIMEOUT_SECONDS) are broken automatically.
+        The scheduler renews live leases with :meth:`refresh_lock`, because
+        agent calls may legitimately run longer than this recovery timeout.
         """
         import app.repositories.database as _db_mod
 
@@ -1307,6 +1309,36 @@ class AutonomousWorkflowRepository:
             rowcount = cursor.rowcount
             conn.commit()
             return rowcount > 0
+        finally:
+            conn.close()
+
+    def refresh_lock(self, workflow_id: str, owner: str) -> bool:
+        """Renew a workflow lease only while ``owner`` still holds it.
+
+        Long agent phases can exceed :attr:`LOCK_TIMEOUT_SECONDS`. The
+        scheduler heartbeats through this compare-and-set update so another
+        process never treats a healthy advance as stale. ``False`` means
+        ownership was lost and the caller must stop the old advance.
+        """
+        import app.repositories.database as _db_mod
+
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        conn = self.db.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                _db_mod.adapt_sql(
+                    """
+                    UPDATE autonomous_workflows
+                    SET locked_at = ?
+                    WHERE workflow_id = ? AND locked_by = ?
+                    """
+                ),
+                (now, workflow_id, owner),
+            )
+            refreshed = cursor.rowcount > 0
+            conn.commit()
+            return refreshed
         finally:
             conn.close()
 

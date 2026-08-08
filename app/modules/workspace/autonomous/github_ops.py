@@ -794,21 +794,32 @@ class GitHubOps:
         return json.loads(result.stdout.strip())
 
     def add_issue_comment(self, number: int, body: str) -> dict:
-        """Add a comment to an issue, deduplicating an exact prior body.
+        """Add a comment, deduplicating an exact prior body from this bot.
 
         Acceptance verification can be re-entered after a crash between the
         GitHub mutation and the local workflow update.  Reading first makes the
         externally-visible operation idempotent for that retry instead of
-        posting the same report twice.
+        posting the same report twice.  A human-authored copy is not proof that
+        the configured service account already posted its audit record.  When
+        bot identity cannot be established, fail closed for deduplication and
+        post the comment.
         """
-        for comment in self.list_issue_comments(number):
-            if comment.get("body") == body:
-                logger.info("Issue #%s already has the requested comment; skipping", number)
-                return {
-                    "number": number,
-                    "id": comment.get("id"),
-                    "deduplicated": True,
-                }
+        bot_login = self.get_authenticated_login()
+        if bot_login:
+            for comment in self.list_issue_comments(number):
+                author = comment.get("author") or {}
+                author_login = author.get("login") if isinstance(author, dict) else author
+                if (
+                    comment.get("body") == body
+                    and isinstance(author_login, str)
+                    and author_login.casefold() == bot_login.casefold()
+                ):
+                    logger.info("Issue #%s already has the requested bot comment; skipping", number)
+                    return {
+                        "number": number,
+                        "id": comment.get("id"),
+                        "deduplicated": True,
+                    }
         self._run_gh(["issue", "comment", str(number), "--body", body], api_only=True)
         logger.info("Added comment to issue #%s", number)
         return {"number": number, "deduplicated": False}
@@ -835,11 +846,52 @@ class GitHubOps:
         return {"number": number}
 
     def list_issue_comments(self, number: int, since: str | None = None) -> list:
-        """List comments on an issue, optionally since a timestamp."""
-        args = ["issue", "view", str(number), "--comments", "--json", "comments"]
-        result = self._run_gh(args, api_only=True)
-        data = json.loads((result.stdout or "").strip() or '{"comments": []}')
-        comments = data.get("comments", [])
+        """List every issue comment, optionally since a timestamp.
+
+        Use the paginated REST endpoint rather than ``gh issue view``'s
+        connection so an older matching bot comment cannot fall off the first
+        page and be posted again.  Output is normalized to the camelCase shape
+        used by the existing wait/report consumers.
+        """
+        try:
+            repo = self.get_repo_name()
+        except (GitHubOpsError, json.JSONDecodeError):
+            repo = ""
+        if repo:
+            result = self._run_gh(
+                self._gh_api_args(
+                    [
+                        "--paginate",
+                        f"repos/{repo}/issues/{number}/comments",
+                        "--jq",
+                        ".[] | {id, body, createdAt: .created_at, author: {login: .user.login}}",
+                    ]
+                ),
+                repo_scoped=False,
+                api_only=True,
+            )
+        else:
+            # Pre-remote repositories cannot form a REST path. Preserve the
+            # best-effort CLI fallback used before pagination hardening.
+            result = self._run_gh(
+                ["issue", "view", str(number), "--comments", "--json", "comments"],
+                api_only=True,
+            )
+        comments: list[dict] = []
+        for line in (result.stdout or "").splitlines():
+            try:
+                parsed = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(parsed, dict):
+                continue
+            # Compatibility with old/mocked ``gh issue view`` output keeps
+            # callers resilient while production uses NDJSON from ``--jq``.
+            nested = parsed.get("comments")
+            if isinstance(nested, list):
+                comments.extend(item for item in nested if isinstance(item, dict))
+            else:
+                comments.append(parsed)
         if since:
             comments = [c for c in comments if c.get("createdAt", "") > since]
         return comments

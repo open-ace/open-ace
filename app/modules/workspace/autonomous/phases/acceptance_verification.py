@@ -1,9 +1,9 @@
 """acceptance_verification phase handler (#2335).
 
-Independent post-merge verification. The feature is opt-in while its gates are
-being hardened; when disabled, the handler completes immediately without
-running the verifier or changing the issue. When enabled, the workflow does NOT auto-close the issue
-on merge (autonomous PRs use ``Implements #N``, not ``Closes #N``). Instead this
+Independent post-merge verification. When explicitly disabled, the handler
+completes immediately without running the verifier or changing the issue. When
+enabled, the workflow does NOT auto-close the issue on merge (autonomous PRs use
+``Implements #N``, not ``Closes #N``). Instead this
 phase spawns a credentialless read-only verifier on the merged main SHA, runs a
 deterministic scope gate, aggregates per-item verdicts, and only closes the
 issue (as @open-ace-bot) on ``confirmed``.
@@ -12,12 +12,13 @@ Transitions:
   confirmed      -> close issue + acceptance report -> completed
   rejected       -> paused (delivered code is never marked failed; human reviews)
   indeterminate  -> paused (issue open; human provides missing evidence)
+  infrastructure -> retry (diagnostic report, no terminal milestone)
 
 Idempotent on the confirmed result: a re-entry whose ``verification_status`` is
 already ``confirmed`` is a terminal no-op (no re-close, no re-comment). A new
 merge SHA or an edited issue (new ``issue_acceptance_hash``) re-runs the
-verifier naturally because the phase re-enters; full (merge_sha, hash) dedup
-of in-flight attempts is S5 polish.
+verifier naturally because the phase re-enters. Full (merge_sha, hash) dedup
+only reuses settled evidence; infrastructure failures always retry.
 """
 
 from __future__ import annotations
@@ -170,6 +171,11 @@ def _already_verified_for(wf: dict, merge_sha: str, snap_hash: str) -> dict | No
         return None
     if not isinstance(report, dict):
         return None
+    # Infrastructure failures are observations about an attempt, not settled
+    # acceptance evidence. A resume/retry for the same pair must run a fresh
+    # verifier instead of permanently replaying the transient failure.
+    if report.get("infra_error"):
+        return None
     # Match on the CURRENT pair: merge_sha + the hash at verify time. A changed
     # merge (new PR) or an edited issue (new hash) misses and re-verifies.
     if report.get("merge_sha") != merge_sha:
@@ -311,10 +317,42 @@ def handle(ctx, deps) -> PhaseResult:
         except Exception:
             pass
 
+    # A syntactically valid verifier response is not necessarily complete.  A
+    # missing checklist verdict must never disappear from the aggregate and
+    # let unrelated scope/gate confirmations close the issue.  Require an
+    # exact item match after harmless whitespace/case normalization; anything
+    # omitted remains explicitly indeterminate for human follow-up.
+    def _normalized_item(value: object) -> str:
+        return " ".join(str(value or "").split()).casefold()
+
+    covered_items = {
+        _normalized_item(verdict.item) for verdict in verifier_verdicts if verdict.item
+    }
+    for checklist_item in snapshot.checklist:
+        normalized = _normalized_item(checklist_item)
+        if normalized and normalized not in covered_items:
+            verifier_verdicts.append(
+                ItemVerdict(
+                    item=checklist_item,
+                    verdict=Verdict.INDETERMINATE,
+                    evidence=[
+                        {
+                            "ref": "verifier:missing-item",
+                            "note": "The verifier returned no verdict for this acceptance item.",
+                        }
+                    ],
+                    rationale=(
+                        "The verifier did not cover this checklist item; no acceptance "
+                        "decision was made for it."
+                    ),
+                )
+            )
+            covered_items.add(normalized)
+
     # Mechanical scope gate (deterministic): required paths must be in the diff.
     scope_verdicts = run_scope_gate(gh, snapshot.required_paths, base_sha, merge_sha)
 
-    # The other 5 mechanical gates (#2335 S4): conservative static-analysis
+    # The other 4 mechanical gates (#2335 S4): conservative static-analysis
     # checks whose verdicts fold into the issue-level aggregation alongside the
     # scope gate and the verifier findings.
     gate_verdicts = run_mechanical_gates(gh, snapshot, base_sha, merge_sha)
@@ -350,6 +388,7 @@ def handle(ctx, deps) -> PhaseResult:
             for v in verifier_verdicts
         ],
         "status": status,
+        "infra_error": agent_out.get("infra_error") or None,
         "verified_at": _now_iso(),
     }
 
@@ -366,9 +405,22 @@ def handle(ctx, deps) -> PhaseResult:
         "verified_by": verified_by,
         "verification_attempt": (wf.get("verification_attempt") or 0) + 1,
     }
+    if agent_out.get("infra_error"):
+        # Infrastructure failures are not acceptance evidence and must not
+        # create a terminal milestone. Keep the workflow in its current phase
+        # so the scheduler can retry automatically; the attempt report remains
+        # persisted for diagnostics.
+        return PhaseResult.retry(
+            workflow_patch={
+                **common_patch,
+                "error_message": "Acceptance verifier infrastructure failure; retrying",
+            }
+        )
+
     milestone = {
         "workflow_id": wf.get("workflow_id"),
         "phase": "acceptance_verification",
+        "round_number": common_patch["verification_attempt"],
         "milestone_type": "acceptance_verification",
         "status": status,
         "title": f"Acceptance verification: {status}",
@@ -382,7 +434,11 @@ def handle(ctx, deps) -> PhaseResult:
         common_patch["issue_closed_by_workflow_at"] = _now_iso()
         return PhaseResult.completed(
             next_phase="completed",
-            workflow_patch={**common_patch, "completed_at": _now_iso()},
+            workflow_patch={
+                **common_patch,
+                "completed_at": _now_iso(),
+                "error_message": None,
+            },
             milestone_events=[milestone],
         )
     if status == "rejected":
