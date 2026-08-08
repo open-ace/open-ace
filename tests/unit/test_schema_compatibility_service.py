@@ -335,11 +335,11 @@ class TestTimeoutContext:
         assert result == 2
 
     def test_timeout_context_triggers(self):
-        """Test that timeout triggers after specified seconds."""
-        # Note: This test would actually timeout, so we just test that
-        # the context manager can be created and used
+        """Test that timeout context can be created and used."""
+        # Test that the timeout context can be created and used
         with timeout_context(100):  # Long timeout
-            pass  # Do nothing
+            result = 1 + 1
+        assert result == 2  # Verify the context executed successfully
 
 
 class TestErrorCategories:
