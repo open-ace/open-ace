@@ -41,6 +41,13 @@ def _extract_function(name: str) -> str:
     return textwrap.dedent(match.group(0))
 
 
+# reclaim_task_tree calls _move_to_preserve (Issue #2442), so any harness that
+# runs it must define both. Extract them together once at import time.
+_RECLAIM_SRC = (
+    _extract_function("_move_to_preserve") + "\n" + _extract_function("reclaim_task_tree")
+)
+
+
 def _run_snippet(snippet: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
     full_env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin")}
     full_env.update(env or {})
@@ -126,7 +133,7 @@ def _make_tree(task_root: Path, task_id: str, *, with_claude: bool = True) -> di
 def _reclaim_harness(task_root: Path, task_id: str) -> str:
     base = task_root / task_id
     return f"""
-{_extract_function("reclaim_task_tree")}
+{_RECLAIM_SRC}
 task_base={base!s}
 task_home={base!s}/home
 preserve_claude_dir={task_root!s}/{task_id}.claude-preserve
@@ -169,7 +176,7 @@ class TestReclaimTaskTree:
         sentinel.mkdir()
         (sentinel / "keep").write_text("keep", encoding="utf-8")
         snippet = f"""
-{_extract_function("reclaim_task_tree")}
+{_RECLAIM_SRC}
 task_base=""
 task_home=""
 preserve_claude_dir=""
@@ -191,7 +198,7 @@ echo "rc=$?"
         """
         paths = _make_tree(tmp_path, "t5")
         snippet = f"""
-{_extract_function("reclaim_task_tree")}
+{_RECLAIM_SRC}
 task_base={paths["base"]!s}
 task_home={paths["base"]!s}/home
 preserve_claude_dir=""
@@ -221,7 +228,7 @@ echo "rc=$?"
         try:
             snippet = f"""
 log_audit() {{ printf '%s\\n' "$1" >> {audit!s}; }}
-{_extract_function("reclaim_task_tree")}
+{_RECLAIM_SRC}
 task_base={paths["base"]!s}
 task_home={paths["base"]!s}/home
 preserve_claude_dir={victim!s}/t6.claude-preserve

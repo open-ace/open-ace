@@ -348,6 +348,21 @@ if [ "$isolated" = true ]; then
     # the reclaim in there would delete the freshly restored session history
     # before the agent even starts. Keeping it separate also lets tests extract
     # and run this function without cgroup/ACL/registry privileges.
+    # Issue #2442: move $1 (.claude) to $2 (preserve path). If the prior
+    # preserve dir cannot be removed, a following `mv` would nest source into
+    # the survivor and the next restore would hand Claude a mis-shaped tree,
+    # silently breaking --resume. Fail closed: rm failure returns non-zero so
+    # the caller decides (startup aborts via exit 70; reclaim logs). chmod 700
+    # is applied per #2403.
+    _move_to_preserve() {
+        local src="$1" dest="$2"
+        if [ -e "$dest" ] || [ -L "$dest" ]; then
+            rm -rf -- "$dest" 2>/dev/null || return 1
+        fi
+        mv -- "$src" "$dest" 2>/dev/null || return 1
+        chmod 700 "$dest" 2>/dev/null || true
+    }
+
     reclaim_task_tree() {
         [ -n "$task_base" ] || return 0
         [ -n "$preserve_claude_dir" ] || return 0
@@ -364,20 +379,13 @@ if [ "$isolated" = true ]; then
         # Do not "simplify" this to the FALSE branch — the TRUE branch is what
         # keeps #2035 --resume working.
         if [ -d "$task_home/.claude" ]; then
-            rm -rf -- "$preserve_claude_dir" 2>/dev/null || true
-            mv "$task_home/.claude" "$preserve_claude_dir" 2>/dev/null || true
-            # The preserve dir is a SIBLING of $task_base, so it inherits none
-            # of the `chmod 700` applied to the tree, and $task_root is created
-            # by `mkdir -p` under root's umask 022 (drwxr-xr-x). Without this
-            # the agent's ~/.claude — shell snapshots, settings.json,
-            # file-history copies of private source, plans, memory, todos, and
-            # the encoded project paths — sits world-readable under /run for
-            # the whole gap between two runs of a session line, and up to
-            # agent_task_preserve_max_age_days for an abandoned task. Before
-            # #2403 that layout existed only for the sub-millisecond startup
-            # window; reclaiming on exit makes it the steady state, so the mode
-            # has to be restored explicitly.
-            chmod 700 "$preserve_claude_dir" 2>/dev/null || true
+            # _move_to_preserve removes any prior preserve dir, moves .claude
+            # into it, and chmod 700 (the SIBLING-of-$task_base exposure noted
+            # in #2403). It fails closed on rm failure so mv cannot nest .claude
+            # into a survivor (#2442); reclaim only logs because errexit is live
+            # in this EXIT trap and an exit here would rewrite the status.
+            _move_to_preserve "$task_home/.claude" "$preserve_claude_dir" \
+                || log_audit "result=preserve_rescue_failed task=${task_id:-}"
         fi
         # Log rather than swallow: a partial rm on a full tmpfs is exactly the
         # condition this issue is about, and silence is why it went unnoticed
@@ -469,10 +477,10 @@ if [ "$isolated" = true ]; then
         trap 'exit 130' INT
         trap 'exit 143' TERM
         if [ -d "$task_home/.claude" ]; then
-            rm -rf -- "$preserve_claude_dir" 2>/dev/null || true
-            mv "$task_home/.claude" "$preserve_claude_dir" 2>/dev/null || true
-            # Same exposure as the reclaim path — see the comment there.
-            chmod 700 "$preserve_claude_dir" 2>/dev/null || true
+            if ! _move_to_preserve "$task_home/.claude" "$preserve_claude_dir"; then
+                echo "openace-run-as: cannot clear prior .claude-preserve dir; aborting to avoid nesting (Issue #2442)" >&2
+                exit 70
+            fi
         fi
         rm -rf -- "$task_base" 2>/dev/null || true
         mkdir -p "$task_home" "$task_tmp" "$task_cache" "$task_config" "$task_data"

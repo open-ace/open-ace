@@ -212,9 +212,11 @@ def test_history_is_rescued_by_rename_not_copy():
     copy, fails, is swallowed by `|| true`, and the following `rm -rf` then
     destroys the only remaining copy of the session history.
     """
-    body = re.search(r"^\s*reclaim_task_tree\(\) \{\n(.*?)^\s*\}$", SRC, re.MULTILINE | re.DOTALL)
-    assert body, "reclaim_task_tree() not found"
-    assert re.search(r'mv "\$task_home/\.claude" "\$preserve_claude_dir"', body.group(1))
+    # #2442 moved the rescue move into _move_to_preserve; the rename-not-copy
+    # invariant now lives there.
+    body = re.search(r"^\s*_move_to_preserve\(\) \{\n(.*?)^\s*\}$", SRC, re.MULTILINE | re.DOTALL)
+    assert body, "_move_to_preserve() not found"
+    assert re.search(r'mv -- "\$src" "\$dest"', body.group(1))
     assert "cp " not in body.group(1), "the rescue must be an atomic rename, not a copy"
 
 
@@ -284,13 +286,15 @@ def test_preserve_dir_mode_is_restored_after_every_move():
     would otherwise sit world-readable under /run for up to
     agent_task_preserve_max_age_days.
     """
-    moves = re.findall(r'mv "\$task_home/\.claude" "\$preserve_claude_dir"', SRC)
-    chmods = re.findall(r'chmod 700 "\$preserve_claude_dir"', SRC)
-    assert len(moves) == 2, f"expected the two known preserve-moves, found {len(moves)}"
-    assert len(chmods) == len(moves), (
-        f"{len(moves)} preserve-move(s) but {len(chmods)} chmod(s); every move "
-        f"must re-apply 0700 or the history is world-readable under /run"
-    )
+    # #2442 moved the move+chmod into _move_to_preserve; both preserve sites
+    # (startup + reclaim) call it, so the chmod invariant lives in the helper.
+    body = re.search(r"^\s*_move_to_preserve\(\) \{\n(.*?)^\s*\}$", SRC, re.MULTILINE | re.DOTALL)
+    assert body, "_move_to_preserve() not found"
+    helper = body.group(1)
+    assert re.search(r'mv -- "\$src" "\$dest"', helper), "helper must move"
+    assert re.search(r'chmod 700 "\$dest"', helper), "every move must re-apply 0700"
+    calls = SRC.count('_move_to_preserve "$task_home/.claude"')
+    assert calls >= 2, f"expected >=2 preserve-move call sites, found {calls}"
 
 
 def test_signal_traps_are_re_registered_outside_the_task_id_block():
