@@ -1023,10 +1023,7 @@ def get_remote_session(session_id):
             result["messages"] = [
                 m
                 for m in msgs
-                if not (
-                    _msg_role(m) == "user"
-                    and is_qwen_system_context(_msg_content(m))
-                )
+                if not (_msg_role(m) == "user" and is_qwen_system_context(_msg_content(m)))
             ]
 
         return jsonify({"success": True, "session": result})
