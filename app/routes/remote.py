@@ -22,7 +22,7 @@ import threading
 import time
 import urllib.parse
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from flask import Blueprint, Response, g, jsonify, request, stream_with_context
@@ -217,7 +217,7 @@ def _check_legacy_fallback(machine_id: str) -> tuple[bool, tuple[Any, Any] | Non
     machine = agent_mgr.get_machine(machine_id)
     if machine and machine.get("created_at"):
         try:
-            from datetime import datetime, timezone
+            from datetime import datetime
 
             created_at = machine["created_at"]
             if isinstance(created_at, str):
@@ -225,7 +225,7 @@ def _check_legacy_fallback(machine_id: str) -> tuple[bool, tuple[Any, Any] | Non
             if created_at.tzinfo is not None:
                 created_at = created_at.replace(tzinfo=None)
 
-            age_days = (datetime.now(timezone.utc).replace(tzinfo=None) - created_at).days
+            age_days = (datetime.now(UTC).replace(tzinfo=None) - created_at).days
             deadline = agent_mgr.LEGACY_MODE_DEADLINE_DAYS
             if age_days > deadline:
                 return False, (
@@ -2777,7 +2777,7 @@ def _check_usage_report_rate_limit(agent_mgr: Any, key: str, limit: int) -> bool
     called only after the authenticated machine/session binding is verified;
     unauthenticated callers cannot allocate keys or exhaust valid counters.
     """
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    now = datetime.now(UTC).replace(tzinfo=None)
     cutoff = now - timedelta(seconds=_USAGE_REPORT_RATE_LIMIT_WINDOW)
     stale_cutoff = now - timedelta(days=1)
 
@@ -2846,8 +2846,8 @@ def _legacy_usage_report_deadline() -> datetime:
         parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
     except ValueError:
         logger.error("Invalid OPENACE_USAGE_REPORT_LEGACY_DEADLINE=%r; disabling fallback", raw)
-        return datetime.min.replace(tzinfo=timezone.utc)
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+        return datetime.min.replace(tzinfo=UTC)
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
 def _normalize_usage_report_id(data: dict) -> tuple[dict, bool, str | None]:
@@ -2859,7 +2859,7 @@ def _normalize_usage_report_id(data: dict) -> tuple[dict, bool, str | None]:
         return data, False, "A valid report_id is required"
 
     deadline = _legacy_usage_report_deadline()
-    if datetime.now(timezone.utc) >= deadline:
+    if datetime.now(UTC) >= deadline:
         return data, False, "report_id is required; the legacy migration window has expired"
 
     normalized = dict(data)
@@ -2894,7 +2894,7 @@ def _claim_usage_report(
     payload_hash: str,
 ) -> str:
     """Claim a report ID and return claimed, duplicate, conflict, or processing."""
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    now = datetime.now(UTC).replace(tzinfo=None)
     with agent_mgr.db.connection() as conn:
         cursor = conn.cursor()
         cursor.execute(
@@ -2962,7 +2962,7 @@ def _claim_usage_report(
 
 
 def _finish_usage_report(agent_mgr: Any, report_id: str, status: str) -> None:
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    now = datetime.now(UTC).replace(tzinfo=None)
     with agent_mgr.db.connection() as conn:
         cursor = conn.cursor()
         cursor.execute(

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -54,7 +54,7 @@ def validate_baseline() -> tuple[bool, list[str]]:
     if not isinstance(data, list):
         return False, ["Baseline must be a JSON array"]
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     for i, item in enumerate(data):
         item_id = item.get("key", f"item {i}")

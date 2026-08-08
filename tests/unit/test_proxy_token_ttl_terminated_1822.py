@@ -11,7 +11,7 @@ import hashlib
 import os
 import tempfile
 from base64 import b64encode
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
@@ -145,7 +145,7 @@ class TestTerminatedTokenTracking:
         mock_cursor.rowcount = 1
         mock_conn.cursor.return_value = mock_cursor
 
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        now = datetime.now(UTC).replace(tzinfo=None)
         result = mock_service._mark_single_use_token_terminated_with_conn(
             conn=mock_conn,
             jti="test-jti-12345678",
@@ -163,7 +163,7 @@ class TestTerminatedTokenTracking:
         mock_cursor.rowcount = 0  # No rows updated
         mock_conn.cursor.return_value = mock_cursor
 
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        now = datetime.now(UTC).replace(tzinfo=None)
         result = mock_service._mark_single_use_token_terminated_with_conn(
             conn=mock_conn,
             jti="test-jti-12345678",
@@ -180,7 +180,7 @@ class TestTerminatedTokenTracking:
         mock_cursor.execute.side_effect = Exception("DB error")
         mock_conn.cursor.return_value = mock_cursor
 
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        now = datetime.now(UTC).replace(tzinfo=None)
         result = mock_service._mark_single_use_token_terminated_with_conn(
             conn=mock_conn,
             jti="test-jti-12345678",
@@ -200,7 +200,7 @@ class TestTerminatedTokenTracking:
 
         # Create a real database with a single-use expired token
         # First, create a token record
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        now = datetime.now(UTC).replace(tzinfo=None)
 
         # Generate a test token and record it in the database
         import secrets

@@ -1,6 +1,6 @@
 """Unit tests for helper utilities."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from unittest.mock import patch
 
 import pytest
@@ -211,7 +211,7 @@ class TestParseDbDatetime:
 
     def test_aware_datetime_returned_unchanged(self):
         """PostgreSQL TIMESTAMPTZ returns aware datetime objects."""
-        dt = datetime(2026, 1, 15, 10, 30, 0, tzinfo=timezone.utc)
+        dt = datetime(2026, 1, 15, 10, 30, 0, tzinfo=UTC)
         result = parse_db_datetime(dt)
         assert result is dt
         assert result.tzinfo is not None

@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from app.modules.workspace.autonomous import orchestrator as _orchestrator_module
@@ -1114,7 +1114,7 @@ class GitWorkspaceService:
             "transition_temp_path": None,
             "transition_error": None,
             "transition_started_at": None,
-            "transition_updated_at": datetime.now(timezone.utc).isoformat(),
+            "transition_updated_at": datetime.now(UTC).isoformat(),
         }
         if worktree_path is not None:
             updates["worktree_path"] = worktree_path

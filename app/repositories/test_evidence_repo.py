@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.modules.workspace.autonomous.command_evidence.test_evidence import TestExecutionEvidence
 from app.repositories.database import Database, is_postgresql
@@ -40,7 +40,7 @@ class TestExecutionEvidenceRepository:
         """
         selectors_json = json.dumps(evidence.selectors) if evidence.selectors else None
         scope_json = json.dumps(evidence.coverage_scope) if evidence.coverage_scope else None
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         if is_postgresql():
             return self._upsert_postgres(evidence, selectors_json, scope_json, now)

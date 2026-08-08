@@ -7,6 +7,7 @@ API routes for authentication operations.
 import logging
 import os
 import uuid
+from datetime import UTC
 from typing import cast
 
 import bcrypt
@@ -224,7 +225,7 @@ def _refresh_auth_session(token: str) -> int | None:
 
     Returns new timeout seconds if session was refreshed, None otherwise.
     """
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     from app.services.auth_service import _get_session_timeout_hours
 
@@ -239,7 +240,7 @@ def _refresh_auth_session(token: str) -> int | None:
         if isinstance(expires_at, str):
             expires_at = datetime.fromisoformat(expires_at).replace(tzinfo=None)
 
-        remaining = (expires_at - datetime.now(timezone.utc).replace(tzinfo=None)).total_seconds()
+        remaining = (expires_at - datetime.now(UTC).replace(tzinfo=None)).total_seconds()
         threshold = timedelta(minutes=_AUTH_SESSION_REFRESH_THRESHOLD_MINUTES).total_seconds()
         logger.debug(
             f"Session refresh check: remaining={remaining / 60:.1f}min, threshold={threshold / 60:.1f}min"
@@ -252,7 +253,7 @@ def _refresh_auth_session(token: str) -> int | None:
 
         # Refresh session
         timeout_hours = _get_session_timeout_hours()
-        new_expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(
+        new_expires_at = datetime.now(UTC).replace(tzinfo=None) + timedelta(
             hours=timeout_hours
         )
         user_repo.extend_session_expiry(token, new_expires_at)

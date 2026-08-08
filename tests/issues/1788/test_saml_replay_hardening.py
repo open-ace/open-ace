@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import base64
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
 from cryptography import x509
@@ -56,8 +56,8 @@ def _idp_key_and_cert():
         .issuer_name(issuer)
         .public_key(key.public_key())
         .serial_number(x509.random_serial_number())
-        .not_valid_before(datetime.now(timezone.utc) - timedelta(days=1))
-        .not_valid_after(datetime.now(timezone.utc) + timedelta(days=30))
+        .not_valid_before(datetime.now(UTC) - timedelta(days=1))
+        .not_valid_after(datetime.now(UTC) + timedelta(days=30))
         .sign(key, hashes.SHA256())
     )
     key_pem = key.private_bytes(
@@ -98,7 +98,7 @@ def _provider(cert_body: str, extra_params: dict | None = None) -> SAMLProvider:
 
 
 def _saml_time(value: datetime) -> str:
-    return value.astimezone(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+    return value.astimezone(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
 def _build_signed_response(
@@ -121,7 +121,7 @@ def _build_signed_response(
     pass ``None`` to explicitly omit an attribute and exercise the optional-attribute
     bugs under review.
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     if confirmation_not_on_or_after == "_default":
         confirmation_not_on_or_after = now + timedelta(minutes=5)
     if conditions_not_before == "_default":
@@ -315,7 +315,7 @@ def test_email_verified_true_when_idp_asserts_verification():
 def _build_signed_response_with_verified_email(
     key_pem: bytes, cert_pem: bytes, *, verified: bool
 ) -> str:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     response_id = "_response-1"
     assertion_id = "_assertion-1"
     response = etree.Element(

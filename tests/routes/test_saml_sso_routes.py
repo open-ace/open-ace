@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import re
 import urllib.parse
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -82,8 +82,8 @@ def _cert_body() -> str:
         .issuer_name(issuer)
         .public_key(key.public_key())
         .serial_number(x509.random_serial_number())
-        .not_valid_before(datetime.now(timezone.utc) - timedelta(days=1))
-        .not_valid_after(datetime.now(timezone.utc) + timedelta(days=30))
+        .not_valid_before(datetime.now(UTC) - timedelta(days=1))
+        .not_valid_after(datetime.now(UTC) + timedelta(days=30))
         .sign(key, hashes.SHA256())
     )
     cert_pem = cert.public_bytes(serialization.Encoding.PEM).decode("utf-8")

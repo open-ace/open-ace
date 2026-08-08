@@ -22,7 +22,7 @@ import logging
 import queue as queue_module
 import threading
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from app.modules.workspace.autonomous.command_evidence.types import (
@@ -182,7 +182,7 @@ class CommandEvidenceRecorder:
             argv=argv,
             cwd=cwd,
             execution_profile=execution_profile,
-            started_at=started_at or datetime.now(timezone.utc),
+            started_at=started_at or datetime.now(UTC),
             tenant_id=tenant_id,
         )
 
@@ -227,7 +227,7 @@ class CommandEvidenceRecorder:
             timed_out=timed_out,
             cancelled=cancelled,
             terminal_reason=terminal_reason.value,
-            completed_at=completed_at or datetime.now(timezone.utc),
+            completed_at=completed_at or datetime.now(UTC),
             output_excerpt=excerpt,
             stdout_digest=compute_output_digest(excerpt),
         )

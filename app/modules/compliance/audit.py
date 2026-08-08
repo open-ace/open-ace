@@ -8,7 +8,7 @@ import logging
 import math
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from app.modules.governance.audit_logger import AuditLogger
@@ -81,9 +81,9 @@ class AuditAnalyzer:
             Dict with pattern analysis results.
         """
         if not start_time:
-            start_time = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
+            start_time = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=30)
         if not end_time:
-            end_time = datetime.now(timezone.utc).replace(tzinfo=None)
+            end_time = datetime.now(UTC).replace(tzinfo=None)
 
         logs = self.audit_logger.query(
             start_time=start_time,
@@ -151,9 +151,9 @@ class AuditAnalyzer:
             List[AnomalyDetection]: Detected anomalies.
         """
         if not start_time:
-            start_time = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=7)
+            start_time = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=7)
         if not end_time:
-            end_time = datetime.now(timezone.utc).replace(tzinfo=None)
+            end_time = datetime.now(UTC).replace(tzinfo=None)
 
         anomalies = []
 
@@ -374,8 +374,8 @@ class AuditAnalyzer:
         Returns:
             Dict with user behavior profile.
         """
-        start_time = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
-        end_time = datetime.now(timezone.utc).replace(tzinfo=None)
+        start_time = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=days)
+        end_time = datetime.now(UTC).replace(tzinfo=None)
 
         # Query audit logs for administrative actions
         logs = self.audit_logger.query(
@@ -474,7 +474,7 @@ class AuditAnalyzer:
                     # Database stores UTC time, need to convert to local
                     if ts.tzinfo is None:
                         # Assume UTC if no timezone info (database timestamp without time zone)
-                        ts = ts.replace(tzinfo=timezone.utc)
+                        ts = ts.replace(tzinfo=UTC)
                     local_ts = ts.astimezone()
                     hourly_activity[local_ts.hour] += 1
                     daily_activity[local_ts.weekday()] += 1
@@ -491,7 +491,7 @@ class AuditAnalyzer:
             if log.timestamp:
                 ts = log.timestamp
                 if ts.tzinfo is None:
-                    ts = ts.replace(tzinfo=timezone.utc)
+                    ts = ts.replace(tzinfo=UTC)
                 all_timestamps.append(ts.astimezone())
         for session in sessions_data:
             # Handle both dict and tuple formats
@@ -509,7 +509,7 @@ class AuditAnalyzer:
                     # Convert to local time for consistent display
                     if ts.tzinfo is None:
                         # Assume UTC if no timezone info
-                        ts = ts.replace(tzinfo=timezone.utc)
+                        ts = ts.replace(tzinfo=UTC)
                     ts = ts.astimezone()
                     all_timestamps.append(ts)
                 except Exception:
@@ -551,9 +551,9 @@ class AuditAnalyzer:
             Dict with security score and breakdown.
         """
         if not start_time:
-            start_time = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
+            start_time = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=30)
         if not end_time:
-            end_time = datetime.now(timezone.utc).replace(tzinfo=None)
+            end_time = datetime.now(UTC).replace(tzinfo=None)
 
         # Get anomalies
         anomalies = self.detect_anomalies(start_time, end_time)

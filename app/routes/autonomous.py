@@ -18,7 +18,7 @@ import subprocess
 import threading
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from flask import Blueprint, Response, g, jsonify, request, stream_with_context
@@ -1049,13 +1049,13 @@ def pause_workflow(workflow_id):
     # Suspend the running agent subprocess (SIGSTOP)
     _pause_running_task(workflow_id)
 
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     _get_repo().update_workflow(
         workflow_id,
         {
             "status": "paused",
-            "paused_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+            "paused_at": datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S"),
         },
     )
 
@@ -1109,13 +1109,13 @@ def stop_workflow(workflow_id):
     # Kill the running agent subprocess (SIGTERM → SIGKILL)
     _stop_running_task(workflow_id)
 
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     _get_repo().update_workflow(
         workflow_id,
         {
             "status": "cancelled",
-            "completed_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+            "completed_at": datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S"),
         },
     )
 
@@ -1344,7 +1344,7 @@ def acceptance_verification_override(workflow_id):
     verified_by = f"human-override:{username or user_id}"
 
     now_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-    now_db = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    now_db = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
     merge_sha = workflow.get("verification_merge_sha") or ""
     issue_number = workflow.get("github_issue_number")
 
@@ -1615,7 +1615,7 @@ def fork_milestone(workflow_id, milestone_id):
             workflow_id,
             {
                 "status": "paused",
-                "paused_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+                "paused_at": datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S"),
             },
         )
 

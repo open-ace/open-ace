@@ -13,7 +13,7 @@ import base64
 import logging
 import os
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from flask import Blueprint, abort, g, jsonify, request
@@ -357,13 +357,13 @@ def _refresh_session(token: str, user_repo=None):
         if isinstance(expires_at, str):
             expires_at = datetime.fromisoformat(expires_at).replace(tzinfo=None)
 
-        remaining = (expires_at - datetime.now(timezone.utc).replace(tzinfo=None)).total_seconds()
+        remaining = (expires_at - datetime.now(UTC).replace(tzinfo=None)).total_seconds()
         threshold = timedelta(minutes=_SESSION_REFRESH_THRESHOLD_MINUTES).total_seconds()
         if remaining > threshold:
             return
 
         timeout_hours = _get_session_timeout_hours()
-        new_expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(
+        new_expires_at = datetime.now(UTC).replace(tzinfo=None) + timedelta(
             hours=timeout_hours
         )
         repo.extend_session_expiry(token, new_expires_at)

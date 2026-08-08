@@ -9,7 +9,7 @@ Uses RemoteAgentManager directly with a temporary SQLite database.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from unittest.mock import patch
 
 import pytest
@@ -843,7 +843,7 @@ class TestUsageReportHttpIntegration:
 
         with patch(
             "app.routes.remote._legacy_usage_report_deadline",
-            return_value=datetime.now(timezone.utc) + timedelta(days=1),
+            return_value=datetime.now(UTC) + timedelta(days=1),
         ):
             response = client.post(
                 path,
@@ -867,7 +867,7 @@ class TestUsageReportHttpIntegration:
 
         with patch(
             "app.routes.remote._legacy_usage_report_deadline",
-            return_value=datetime.now(timezone.utc) - timedelta(seconds=1),
+            return_value=datetime.now(UTC) - timedelta(seconds=1),
         ):
             response = client.post(
                 "/api/remote/agent/message",

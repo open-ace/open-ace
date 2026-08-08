@@ -23,7 +23,7 @@ tests/integration/test_org_sync_lock_recovery.py.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
 
@@ -504,7 +504,7 @@ def test_dingtalk_check_stale_sync_warns_when_overrun_sqlite(sqlite_db, caplog):
         user_repo=UserRepository(db=sqlite_db),
         config_override=_dingtalk_config(),
     )
-    service.__class__._sync_started_at = datetime.now(timezone.utc).replace(
+    service.__class__._sync_started_at = datetime.now(UTC).replace(
         tzinfo=None
     ) - timedelta(seconds=100)
     try:
@@ -522,7 +522,7 @@ def test_dingtalk_check_stale_sync_auto_recover_calls_force_release(sqlite_db, m
         user_repo=UserRepository(db=sqlite_db),
         config_override=_dingtalk_config(),
     )
-    service.__class__._sync_started_at = datetime.now(timezone.utc).replace(
+    service.__class__._sync_started_at = datetime.now(UTC).replace(
         tzinfo=None
     ) - timedelta(seconds=100)
     called: list[int] = []
@@ -545,7 +545,7 @@ def test_dingtalk_check_stale_sync_noop_when_within_budget(sqlite_db, caplog):
         user_repo=UserRepository(db=sqlite_db),
         config_override=_dingtalk_config(),
     )
-    service.__class__._sync_started_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    service.__class__._sync_started_at = datetime.now(UTC).replace(tzinfo=None)
     try:
         with caplog.at_level(logging.WARNING, logger="app.services.dingtalk_org_sync"):
             service._check_stale_sync(max_runtime_seconds=1800, auto_recover=True)
@@ -579,7 +579,7 @@ def test_feishu_check_stale_sync_warns_when_overrun_sqlite(sqlite_db, caplog):
         user_repo=UserRepository(db=sqlite_db),
         config_override=_feishu_config(),
     )
-    service.__class__._sync_started_at = datetime.now(timezone.utc).replace(
+    service.__class__._sync_started_at = datetime.now(UTC).replace(
         tzinfo=None
     ) - timedelta(seconds=100)
     try:
@@ -597,7 +597,7 @@ def test_feishu_check_stale_sync_auto_recover_calls_force_release(sqlite_db, mon
         user_repo=UserRepository(db=sqlite_db),
         config_override=_feishu_config(),
     )
-    service.__class__._sync_started_at = datetime.now(timezone.utc).replace(
+    service.__class__._sync_started_at = datetime.now(UTC).replace(
         tzinfo=None
     ) - timedelta(seconds=100)
     called: list[int] = []
@@ -620,7 +620,7 @@ def test_feishu_check_stale_sync_noop_when_within_budget(sqlite_db, caplog):
         user_repo=UserRepository(db=sqlite_db),
         config_override=_feishu_config(),
     )
-    service.__class__._sync_started_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    service.__class__._sync_started_at = datetime.now(UTC).replace(tzinfo=None)
     try:
         with caplog.at_level(logging.WARNING, logger="app.services.feishu_org_sync"):
             service._check_stale_sync(max_runtime_seconds=1800, auto_recover=True)

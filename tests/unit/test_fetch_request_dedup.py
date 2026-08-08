@@ -7,7 +7,7 @@ import json
 import os
 import sqlite3
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -94,7 +94,7 @@ def fetch_qwen_mod(tmp_path):
 
 
 def test_fetch_claude_session_stats_dedup_duplicate_message_ids(fetch_claude_mod, tmp_path):
-    ts_iso = datetime.now(timezone.utc).isoformat()
+    ts_iso = datetime.now(UTC).isoformat()
     messages = [
         {
             "date": "2026-06-22",

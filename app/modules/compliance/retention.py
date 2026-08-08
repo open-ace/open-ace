@@ -6,7 +6,7 @@ Manages data retention policies and cleanup for compliance.
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from enum import Enum
 from typing import Any, cast
 
@@ -182,7 +182,7 @@ class DataRetentionManager:
             RetentionReport: Report of cleanup actions.
         """
         report = RetentionReport(
-            timestamp=datetime.now(timezone.utc).replace(tzinfo=None),
+            timestamp=datetime.now(UTC).replace(tzinfo=None),
             rules_applied=[],
             records_deleted=0,
             records_archived=0,
@@ -193,7 +193,7 @@ class DataRetentionManager:
             if not rule.enabled:
                 continue
 
-            cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
+            cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(
                 days=rule.retention_days
             )
 
@@ -531,7 +531,7 @@ class DataRetentionManager:
             if isinstance(last_cleanup_time, str):
                 last_cleanup_time = datetime.fromisoformat(last_cleanup_time)
             days_since_cleanup = (
-                datetime.now(timezone.utc).replace(tzinfo=None) - last_cleanup_time
+                datetime.now(UTC).replace(tzinfo=None) - last_cleanup_time
             ).days
 
         # Determine compliance status

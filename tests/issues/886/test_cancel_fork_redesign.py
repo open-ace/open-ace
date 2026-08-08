@@ -14,7 +14,7 @@ Covers:
 import json
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -216,8 +216,8 @@ def _make_workflow(**overrides):
         "fork_milestone_id": None,
         "user_feedback": "",
         "original_branch_name": "",
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
+        "updated_at": datetime.now(UTC).isoformat(),
         "completed_at": None,
         "paused_at": None,
     }
@@ -252,10 +252,10 @@ def _make_milestone(**overrides):
         "fork_branch": "",
         "fork_workflow_id": "",
         "metadata": "{}",
-        "started_at": datetime.now(timezone.utc).isoformat(),
-        "completed_at": datetime.now(timezone.utc).isoformat(),
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "started_at": datetime.now(UTC).isoformat(),
+        "completed_at": datetime.now(UTC).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
+        "updated_at": datetime.now(UTC).isoformat(),
     }
     ms.update(overrides)
     return ms

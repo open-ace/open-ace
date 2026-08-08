@@ -8,7 +8,7 @@ Issue #2188: Legal hold mechanism for preventing data deletion.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from app.repositories.database import Database, adapt_sql
@@ -81,7 +81,7 @@ class LegalHoldRepository:
                     reason,
                     case_reference,
                     created_by,
-                    datetime.now(timezone.utc).replace(tzinfo=None),
+                    datetime.now(UTC).replace(tzinfo=None),
                     expires_at,
                 ),
             )
@@ -114,7 +114,7 @@ class LegalHoldRepository:
         Returns:
             List of active hold dicts.
         """
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        now = datetime.now(UTC).replace(tzinfo=None)
         return self.db.fetch_all(
             adapt_sql(
                 """
@@ -182,7 +182,7 @@ class LegalHoldRepository:
         Returns:
             Updated hold dict or None.
         """
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        now = datetime.now(UTC).replace(tzinfo=None)
         with self.db.connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
@@ -209,7 +209,7 @@ class LegalHoldRepository:
         Returns:
             List of hold dicts.
         """
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        now = datetime.now(UTC).replace(tzinfo=None)
         return self.db.fetch_all(
             adapt_sql(
                 """

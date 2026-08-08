@@ -11,7 +11,7 @@ import sqlite3
 import threading
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from enum import Enum
 from typing import Any
 
@@ -135,7 +135,7 @@ class SharedSession:
         """Check if share is expired."""
         if self.expires_at is None:
             return False
-        return datetime.now(timezone.utc).replace(tzinfo=None) > self.expires_at
+        return datetime.now(UTC).replace(tzinfo=None) > self.expires_at
 
     def can_view(self) -> bool:
         """Check if can view."""
@@ -420,7 +420,7 @@ class CollaborationManager:
             Team: The created team.
         """
         team_id = str(uuid.uuid4())
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        now = datetime.now(UTC).replace(tzinfo=None)
 
         conn = self._get_connection()
         cursor = conn.cursor()
@@ -547,7 +547,7 @@ class CollaborationManager:
                     user_id,
                     username,
                     role,
-                    datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
+                    datetime.now(UTC).replace(tzinfo=None).isoformat(),
                 ),
             )
 
@@ -646,7 +646,7 @@ class CollaborationManager:
             SharedSession: The created share.
         """
         share_id = str(uuid.uuid4())
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        now = datetime.now(UTC).replace(tzinfo=None)
 
         expires_at = None
         if expires_in_hours:
@@ -812,7 +812,7 @@ class CollaborationManager:
         conn = self._get_connection()
         cursor = conn.cursor()
 
-        now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+        now = datetime.now(UTC).replace(tzinfo=None).isoformat()
         cursor.execute(
             """
             UPDATE shared_sessions
@@ -858,7 +858,7 @@ class CollaborationManager:
             Annotation: The created annotation.
         """
         annotation_id = str(uuid.uuid4())
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        now = datetime.now(UTC).replace(tzinfo=None)
 
         conn = self._get_connection()
         cursor = conn.cursor()
@@ -991,7 +991,7 @@ class CollaborationManager:
             KnowledgeEntry: The created entry.
         """
         entry_id = str(uuid.uuid4())
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        now = datetime.now(UTC).replace(tzinfo=None)
 
         conn = self._get_connection()
         cursor = conn.cursor()

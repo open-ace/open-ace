@@ -15,7 +15,7 @@ import uuid
 from collections import deque
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
 import requests
@@ -198,7 +198,7 @@ class DingTalkOrgSyncService:
         root_department_id = str(config.get("org_sync_root_dept_id") or DINGTALK_ROOT_DEPARTMENT_ID)
         result = DingTalkOrgSyncResult(
             tenant_id=effective_tenant_id,
-            started_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
+            started_at=datetime.now(UTC).replace(tzinfo=None).isoformat(),
         )
 
         # Publish the active credentials so _request_oapi can re-exchange the token
@@ -211,7 +211,7 @@ class DingTalkOrgSyncService:
                 # Record the in-flight start for the SQLite max-runtime watchdog
                 # fallback (single-process). On Postgres the authoritative signal is
                 # derived cross-process from pg_locks (see _org_sync_lock).
-                self.__class__._sync_started_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                self.__class__._sync_started_at = datetime.now(UTC).replace(tzinfo=None)
                 try:
                     self._ensure_supporting_tables()
                     token = self._get_access_token(app_key, app_secret)
@@ -274,7 +274,7 @@ class DingTalkOrgSyncService:
                         result=result,
                     )
 
-                    result.finished_at = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+                    result.finished_at = datetime.now(UTC).replace(tzinfo=None).isoformat()
                     return result
                 finally:
                     self.__class__._sync_started_at = None
@@ -301,7 +301,7 @@ class DingTalkOrgSyncService:
         interval_minutes = max(int(config.get("org_sync_interval_minutes") or 60), 5)
         max_runtime_seconds = int(config.get("org_sync_max_runtime_seconds") or 1800)
         auto_recover = bool(config.get("org_sync_auto_recover", False))
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        now = datetime.now(UTC).replace(tzinfo=None)
 
         if not self._schedule_lock.acquire(blocking=False):
             return None
@@ -335,7 +335,7 @@ class DingTalkOrgSyncService:
             if started is None:
                 return
             hold_seconds = (
-                datetime.now(timezone.utc).replace(tzinfo=None) - started
+                datetime.now(UTC).replace(tzinfo=None) - started
             ).total_seconds()
             pid = None
         else:
@@ -485,7 +485,7 @@ class DingTalkOrgSyncService:
         is cached per app_key until one minute before its real expiry.
         """
         cache_key = app_key
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        now = datetime.now(UTC).replace(tzinfo=None)
         cached = self._token_cache.get(cache_key)
         if cached and cached.expires_at > now:
             return cached.value
@@ -818,7 +818,7 @@ class DingTalkOrgSyncService:
         if existing_teams is None:
             existing_teams = self._load_synced_teams()
         existing = existing_teams.get(department.department_id)
-        now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+        now = datetime.now(UTC).replace(tzinfo=None).isoformat()
 
         settings: dict[str, Any] = {
             "sync_source": DINGTALK_PROVIDER_NAME,
@@ -1019,7 +1019,7 @@ class DingTalkOrgSyncService:
             # marker a multi-tenant deployment would let tenant A's sync deactivate
             # tenant B's DingTalk identities (cross-tenant leak).
             "tenant_id": tenant_id,
-            "synced_at": datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
+            "synced_at": datetime.now(UTC).replace(tzinfo=None).isoformat(),
         }
         self.sso_manager.link_identity(
             user_id=existing_user_id,
@@ -1084,7 +1084,7 @@ class DingTalkOrgSyncService:
                     user_id,
                     username,
                     role,
-                    datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
+                    datetime.now(UTC).replace(tzinfo=None).isoformat(),
                 ),
             )
             result.memberships_added += 1
@@ -1131,7 +1131,7 @@ class DingTalkOrgSyncService:
         Drops a team's entry once all its preserved members are back in the expected
         membership set (so the stash doesn't grow unbounded).
         """
-        now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+        now = datetime.now(UTC).replace(tzinfo=None).isoformat()
         for team_id in synced_team_ids:
             stash = dict(preserved_by_team.get(team_id, {}))
             rejoin = {str(uid) for (tid, uid) in expected_memberships if str(tid) == team_id}

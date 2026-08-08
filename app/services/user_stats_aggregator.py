@@ -11,7 +11,7 @@ This service should be called:
 """
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import cast
 
 from app.repositories.database import Database, escape_like, is_postgresql
@@ -166,7 +166,7 @@ class UserDailyStatsAggregator:
                         ),
                     )
                 else:
-                    now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+                    now = datetime.now(UTC).replace(tzinfo=None).isoformat()
                     # SQLite: Combine data from daily_messages and agent_sessions
                     # Filters must match get_combined_usage() for data consistency (Issue #1063)
                     cursor.execute(

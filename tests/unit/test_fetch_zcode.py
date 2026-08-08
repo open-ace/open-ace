@@ -18,7 +18,7 @@ import importlib.util
 import json
 import sqlite3
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -143,7 +143,7 @@ def _insert_turn_usage(
 ) -> None:
     conn = sqlite3.connect(str(db_path))
     if started_at is None:
-        started_at = int(datetime.now(timezone.utc).timestamp() * 1000)
+        started_at = int(datetime.now(UTC).timestamp() * 1000)
     if computed_total_t is None:
         computed_total_t = input_t + output_t
     conn.execute(
@@ -402,8 +402,8 @@ def test_process_zcode_session_splits_tokens_by_turn_date_and_tracks_cache(fetch
     src_db = tmp_path / "zcode.sqlite"
     _build_zcode_source_db(src_db)
     sid = "sess_cross_day"
-    day1_ms = int(datetime(2026, 7, 14, 10, 0, tzinfo=timezone.utc).timestamp() * 1000)
-    day2_ms = int(datetime(2026, 7, 15, 12, 0, tzinfo=timezone.utc).timestamp() * 1000)
+    day1_ms = int(datetime(2026, 7, 14, 10, 0, tzinfo=UTC).timestamp() * 1000)
+    day2_ms = int(datetime(2026, 7, 15, 12, 0, tzinfo=UTC).timestamp() * 1000)
     conn = sqlite3.connect(str(src_db))
     conn.execute(
         "INSERT INTO session (id, directory, time_created, time_updated, time_archived, task_type, title) "
@@ -499,7 +499,7 @@ def test_process_zcode_session_skips_empty(fetch_mod, tmp_path):
 
 def test_update_agent_sessions_stats_inserts_session_and_messages(fetch_mod, tmp_path):
     """A new session gets an agent_sessions row + session_messages rows."""
-    ts_iso = datetime.now(timezone.utc).isoformat()
+    ts_iso = datetime.now(UTC).isoformat()
     messages = [
         {
             "date": "2026-06-20",
@@ -570,7 +570,7 @@ def test_update_agent_sessions_stats_inserts_session_and_messages(fetch_mod, tmp
 
 def test_update_agent_sessions_stats_idempotent(fetch_mod, tmp_path):
     """Re-running on the same messages does not duplicate session_messages."""
-    ts_iso = datetime.now(timezone.utc).isoformat()
+    ts_iso = datetime.now(UTC).isoformat()
     messages = [
         {
             "date": "2026-06-20",
@@ -604,7 +604,7 @@ def test_update_agent_sessions_stats_idempotent(fetch_mod, tmp_path):
 
 def test_update_agent_sessions_stats_skips_existing_workflow_session(fetch_mod, tmp_path):
     """Fetcher must not backfill raw transcript rows into workflow-owned sessions."""
-    ts_iso = datetime.now(timezone.utc).isoformat()
+    ts_iso = datetime.now(UTC).isoformat()
     dest_db = tmp_path / "dest.sqlite"
     conn = sqlite3.connect(str(dest_db))
     conn.execute(
@@ -658,7 +658,7 @@ def test_iter_candidate_sessions_filters_archived_and_noninteractive(fetch_mod, 
     src_db = tmp_path / "zcode.sqlite"
     _build_zcode_source_db(src_db)
     conn = sqlite3.connect(str(src_db))
-    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    now_ms = int(datetime.now(UTC).timestamp() * 1000)
     conn.executemany(
         "INSERT INTO session (id, directory, time_created, time_updated, time_archived, task_type, title) "
         "VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -679,8 +679,8 @@ def test_iter_candidate_sessions_filters_archived_and_noninteractive(fetch_mod, 
 def test_iter_candidate_sessions_days_filter(fetch_mod, tmp_path):
     src_db = tmp_path / "zcode.sqlite"
     _build_zcode_source_db(src_db)
-    old_ms = int((datetime.now(timezone.utc).timestamp() - 30 * 86400) * 1000)
-    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    old_ms = int((datetime.now(UTC).timestamp() - 30 * 86400) * 1000)
+    now_ms = int(datetime.now(UTC).timestamp() * 1000)
     conn = sqlite3.connect(str(src_db))
     conn.executemany(
         "INSERT INTO session (id, directory, time_created, time_updated, time_archived, task_type, title) "
@@ -701,7 +701,7 @@ def test_iter_candidate_sessions_days_filter(fetch_mod, tmp_path):
 def test_fetch_and_save_persists_zcode_cache_tokens(fetch_mod, tmp_path, monkeypatch):
     src_db = tmp_path / "source.sqlite"
     _build_zcode_source_db(src_db)
-    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    now_ms = int(datetime.now(UTC).timestamp() * 1000)
     sid = "sess_cache"
     conn = sqlite3.connect(str(src_db))
     conn.execute(
@@ -749,7 +749,7 @@ def test_fetch_and_save_persists_zcode_cache_tokens(fetch_mod, tmp_path, monkeyp
 def test_fetch_and_save_clears_stale_assistant_tokens(fetch_mod, tmp_path, monkeypatch):
     src_db = tmp_path / "source.sqlite"
     _build_zcode_source_db(src_db)
-    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    now_ms = int(datetime.now(UTC).timestamp() * 1000)
     sid = "sess_stale"
     conn = sqlite3.connect(str(src_db))
     conn.execute(
@@ -800,7 +800,7 @@ def test_fetch_and_save_clears_stale_assistant_tokens(fetch_mod, tmp_path, monke
             900,
             99,
             "GLM-5.2",
-            datetime.now(timezone.utc).isoformat(),
+            datetime.now(UTC).isoformat(),
             None,
             None,
             None,
@@ -833,7 +833,7 @@ def test_fetch_and_save_clears_stale_assistant_tokens(fetch_mod, tmp_path, monke
 def test_process_zcode_session_warns_on_partial_turn_match(fetch_mod, tmp_path, capsys):
     src_db = tmp_path / "source.sqlite"
     _build_zcode_source_db(src_db)
-    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    now_ms = int(datetime.now(UTC).timestamp() * 1000)
     sid = "sess_partial_warn"
     conn = sqlite3.connect(str(src_db))
     conn.execute(
@@ -884,7 +884,7 @@ def test_process_zcode_session_warns_on_partial_turn_match(fetch_mod, tmp_path, 
 def test_process_zcode_session_warns_when_falling_back_to_assistant(fetch_mod, tmp_path, capsys):
     src_db = tmp_path / "source.sqlite"
     _build_zcode_source_db(src_db)
-    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    now_ms = int(datetime.now(UTC).timestamp() * 1000)
     sid = "sess_fallback_warn"
     conn = sqlite3.connect(str(src_db))
     conn.execute(

@@ -11,7 +11,7 @@ These tests verify that alert row conversion handles both ``datetime`` objects
 (PostgreSQL) and strings (SQLite) without raising.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from unittest.mock import MagicMock
 
 from app.modules.governance.quota_manager import QuotaManager
@@ -94,7 +94,7 @@ def test_get_recent_alerts_falls_back_when_created_at_missing():
 
 def test_get_all_alerts_handles_postgres_datetime_objects():
     """get_all_alerts shares the same conversion path."""
-    created = datetime(2026, 7, 31, 11, 19, 33, tzinfo=timezone.utc)
+    created = datetime(2026, 7, 31, 11, 19, 33, tzinfo=UTC)
     mgr = _build_manager_with_rows([_sample_row(created)])
 
     alerts = mgr.get_all_alerts()

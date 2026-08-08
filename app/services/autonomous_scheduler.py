@@ -16,7 +16,7 @@ import socket
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -633,7 +633,7 @@ class AutonomousScheduler:
                 workflow_id,
                 {
                     "status": "paused",
-                    "paused_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+                    "paused_at": datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S"),
                     "error_message": full_reason,
                 },
             )
@@ -956,7 +956,7 @@ def _cleanup_orphan_processes():
             logger.info("No orphaned processes found")
             return
 
-        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
         cleaned = 0
         for wf in workflows:
             pid = wf.get("agent_pid")
@@ -1100,7 +1100,7 @@ def _retry_pending_git_cleanups(repo=None):
         if not pending:
             return
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         for wf in pending:
             wf_id = wf.get("workflow_id")
             if not isinstance(wf_id, str) or not wf_id:
@@ -1110,7 +1110,7 @@ def _retry_pending_git_cleanups(repo=None):
             if next_retry:
                 try:
                     due = datetime.strptime(next_retry, "%Y-%m-%d %H:%M:%S").replace(
-                        tzinfo=timezone.utc
+                        tzinfo=UTC
                     )
                 except ValueError:
                     due = now

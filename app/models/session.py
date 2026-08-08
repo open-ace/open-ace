@@ -5,7 +5,7 @@ Data models for session management.
 """
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.models.user import User
 
@@ -58,7 +58,7 @@ class Session:
         """Check if session is expired."""
         if self.expires_at is None:
             return False
-        return datetime.now(timezone.utc).replace(tzinfo=None) > self.expires_at
+        return datetime.now(UTC).replace(tzinfo=None) > self.expires_at
 
     def is_admin(self) -> bool:
         """Check if session belongs to an admin user."""

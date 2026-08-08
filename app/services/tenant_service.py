@@ -10,7 +10,7 @@ Issue #2179: 租户管理员权限模型
 
 import logging
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from app.core.actor_context import ActorContext
@@ -136,7 +136,7 @@ class TenantService:
 
         # Set trial end date if applicable
         if trial_days:
-            tenant.trial_ends_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(
+            tenant.trial_ends_at = datetime.now(UTC).replace(tzinfo=None) + timedelta(
                 days=trial_days
             )
 
@@ -287,11 +287,11 @@ class TenantService:
         last_update = getattr(tenant, "_last_settings_update", None)
         if (
             last_update
-            and (datetime.now(timezone.utc).replace(tzinfo=None) - last_update).seconds < 5
+            and (datetime.now(UTC).replace(tzinfo=None) - last_update).seconds < 5
         ):
             logger.warning("Concurrent tenant settings update detected for tenant_id=%s", tenant_id)
 
-        tenant._last_settings_update = datetime.now(timezone.utc).replace(tzinfo=None)
+        tenant._last_settings_update = datetime.now(UTC).replace(tzinfo=None)
 
         current_settings = tenant.settings.to_dict()
         current_settings.update(settings_updates)
@@ -318,25 +318,25 @@ class TenantService:
         from app.utils.cache import get_cache
 
         cache = get_cache()
-        today = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
+        today = datetime.now(UTC).replace(tzinfo=None).strftime("%Y-%m-%d")
 
         # Common date range combinations
         date_ranges = [
             (today, today),  # Today
             (
-                (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=7)).strftime(
+                (datetime.now(UTC).replace(tzinfo=None) - timedelta(days=7)).strftime(
                     "%Y-%m-%d"
                 ),
                 today,
             ),  # 7 days
             (
-                (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)).strftime(
+                (datetime.now(UTC).replace(tzinfo=None) - timedelta(days=30)).strftime(
                     "%Y-%m-%d"
                 ),
                 today,
             ),  # 30 days
             (
-                (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=90)).strftime(
+                (datetime.now(UTC).replace(tzinfo=None) - timedelta(days=90)).strftime(
                     "%Y-%m-%d"
                 ),
                 today,
@@ -467,7 +467,7 @@ class TenantService:
             List[TenantUsage]: Usage records.
         """
         start_date = (
-            datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
+            datetime.now(UTC).replace(tzinfo=None) - timedelta(days=days)
         ).strftime("%Y-%m-%d")
         return self.tenant_repo.get_usage(tenant_id, start_date=start_date)
 
@@ -491,7 +491,7 @@ class TenantService:
             return {"allowed": False, "reason": "Tenant is not active", "tenant": tenant.to_dict()}
 
         # Get today's usage
-        today = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
+        today = datetime.now(UTC).replace(tzinfo=None).strftime("%Y-%m-%d")
         usage_records = self.tenant_repo.get_usage(tenant_id, start_date=today, end_date=today)
 
         today_tokens = sum(u.tokens_used for u in usage_records)

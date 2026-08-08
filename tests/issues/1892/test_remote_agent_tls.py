@@ -9,7 +9,7 @@ import ssl
 import sys
 import threading
 import urllib.request
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from unittest.mock import patch
@@ -141,7 +141,7 @@ def test_self_signed_https_round_trip_with_custom_ca(monkeypatch, tmp_path):
     """A self-signed server is reachable when its certificate is the configured CA."""
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "127.0.0.1")])
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     certificate = (
         x509.CertificateBuilder()
         .subject_name(subject)

@@ -7,7 +7,7 @@ Tracks user quotas, generates alerts, and enforces limits.
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from enum import Enum
 from typing import Any, cast
 
@@ -60,7 +60,7 @@ class QuotaAlert:
     percentage: float = 0.0
     message: str = ""
     created_at: datetime = field(
-        default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None)
+        default_factory=lambda: datetime.now(UTC).replace(tzinfo=None)
     )
     acknowledged: bool = False
     acknowledged_at: datetime | None = None
@@ -180,7 +180,7 @@ class QuotaManager:
             bool: True if successful.
         """
         if date is None:
-            date = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
+            date = datetime.now(UTC).replace(tzinfo=None).strftime("%Y-%m-%d")
 
         try:
             with self.db.connection() as conn:
@@ -402,7 +402,7 @@ class QuotaManager:
         for threshold in sorted(self.thresholds, reverse=True):
             if percentage >= threshold:
                 # Check if we already have an alert for this threshold today
-                today = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
+                today = datetime.now(UTC).replace(tzinfo=None).strftime("%Y-%m-%d")
 
                 existing = self.db.fetch_one(
                     """
@@ -477,7 +477,7 @@ class QuotaManager:
 
     def _get_period_dates(self, period: str) -> tuple:
         """Get start and end dates for a period."""
-        today = datetime.now(timezone.utc).replace(tzinfo=None)
+        today = datetime.now(UTC).replace(tzinfo=None)
 
         if period == "daily":
             start = today.strftime("%Y-%m-%d")
@@ -611,7 +611,7 @@ class QuotaManager:
                     message=row.get("message", ""),
                     created_at=(
                         parse_db_datetime(row.get("created_at"))
-                        or datetime.now(timezone.utc).replace(tzinfo=None)
+                        or datetime.now(UTC).replace(tzinfo=None)
                     ),
                     acknowledged=bool(row.get("acknowledged", 0)),
                     acknowledged_at=parse_db_datetime(row.get("acknowledged_at")),
@@ -638,7 +638,7 @@ class QuotaManager:
                     ),
                     (
                         adapt_boolean_value(True),
-                        datetime.now(timezone.utc).replace(tzinfo=None),
+                        datetime.now(UTC).replace(tzinfo=None),
                         acknowledged_by,
                         alert_id,
                     ),
@@ -770,7 +770,7 @@ class QuotaManager:
                         message=row.get("message", ""),
                         created_at=(
                             parse_db_datetime(row.get("created_at"))
-                            or datetime.now(timezone.utc).replace(tzinfo=None)
+                            or datetime.now(UTC).replace(tzinfo=None)
                         ),
                         acknowledged=bool(row.get("acknowledged", 0)),
                         acknowledged_at=parse_db_datetime(row.get("acknowledged_at")),
@@ -864,7 +864,7 @@ class QuotaManager:
                     message=row.get("message", ""),
                     created_at=(
                         parse_db_datetime(row.get("created_at"))
-                        or datetime.now(timezone.utc).replace(tzinfo=None)
+                        or datetime.now(UTC).replace(tzinfo=None)
                     ),
                     acknowledged=bool(row.get("acknowledged", 0)),
                     acknowledged_at=parse_db_datetime(row.get("acknowledged_at")),
@@ -876,7 +876,7 @@ class QuotaManager:
 
     def cleanup_old_alerts(self, days: int = 30) -> int:
         """Delete old acknowledged alerts."""
-        cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
+        cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=days)
 
         try:
             with self.db.connection() as conn:

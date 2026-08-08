@@ -24,7 +24,7 @@ import platform
 import socket
 import sys
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, UTC
 from pathlib import Path
 from typing import Any, Optional
 
@@ -118,7 +118,7 @@ def _ms_to_date(ms: int | None) -> str:
         return "unknown"
     try:
         # Convert UTC timestamp to local time for date extraction
-        dt = datetime.fromtimestamp(ms / 1000, tz=timezone.utc).astimezone()
+        dt = datetime.fromtimestamp(ms / 1000, tz=UTC).astimezone()
         return dt.strftime("%Y-%m-%d")
     except (ValueError, OSError, OverflowError):
         return "unknown"
@@ -548,7 +548,7 @@ def update_agent_sessions_stats(messages: list) -> int:
 
     updated = 0
     messages_inserted = 0
-    now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+    now = datetime.now(UTC).replace(tzinfo=None).isoformat()
     placeholder = _placeholder()
 
     conn = get_connection()
@@ -826,7 +826,7 @@ def _iter_candidate_sessions(db_path: Path, days: int, recent: bool) -> list[tup
 
     cutoff_ms = 0
     if days > 0:
-        cutoff_ms = int((datetime.now(timezone.utc) - timedelta(days=days)).timestamp() * 1000)
+        cutoff_ms = int((datetime.now(UTC) - timedelta(days=days)).timestamp() * 1000)
     if recent:
         # Use local midnight to match the sibling fetch scripts
         # (fetch_codex.py:594-598 uses local-naive midnight), so --recent syncs
