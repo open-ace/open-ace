@@ -553,12 +553,18 @@ class AutonomousWorkflowRepository:
         return where, params
 
     def get_active_workflows(self) -> list:
-        """Get all workflows that need processing."""
+        """Get all workflows that need processing.
+
+        ``verification_pending`` must remain paired with the
+        ``acceptance_verification`` phase/status mapping so delivered rows can
+        run the default-off drain path instead of becoming dead ends.
+        """
         return self.db.fetch_all(
             """
             SELECT * FROM autonomous_workflows
             WHERE status IN ('pending', 'preparing', 'planning', 'developing',
-                             'pr_review', 'reporting', 'waiting', 'merging')
+                             'pr_review', 'reporting', 'waiting', 'merging',
+                             'verification_pending')
             ORDER BY created_at ASC
             """
         )
@@ -597,7 +603,8 @@ class AutonomousWorkflowRepository:
             SELECT COUNT(*) as count FROM autonomous_workflows
             WHERE user_id = ? AND status IN ('pending', 'preparing', 'planning',
                                               'developing', 'pr_review', 'reporting',
-                                              'waiting', 'merging')
+                                              'waiting', 'merging',
+                                              'verification_pending')
             """,
             (user_id,),
         )
