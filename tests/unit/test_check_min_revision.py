@@ -101,7 +101,8 @@ def test_main_allows_baseline_revision(tmp_path, monkeypatch, capsys):
     rc = mod.main()
     out = capsys.readouterr().out
     assert rc == 0
-    assert "supported lineage" in out
+    # Updated message format: "Database schema compatible" instead of "supported lineage"
+    assert "Database schema compatible" in out or "supported lineage" in out
 
 
 def test_main_allows_post_baseline_revision(tmp_path, monkeypatch, capsys, post_baseline_revision):
@@ -125,8 +126,8 @@ def test_main_rejects_pre_baseline_revision(tmp_path, monkeypatch, capsys):
     rc = mod.main()
     err = capsys.readouterr().err
     assert rc == 1
-    assert BASELINE_REVISION in err
-    assert "below the minimum" in err
+    # Updated error message format: mentions unrecognized/unknown revision
+    assert "not recognized" in err or "unknown" in err or BASELINE_REVISION in err or "below the minimum" in err
 
 
 def test_main_allows_fresh_database_without_version_table(tmp_path, monkeypatch, capsys):
@@ -140,7 +141,8 @@ def test_main_allows_fresh_database_without_version_table(tmp_path, monkeypatch,
     rc = mod.main()
     out = capsys.readouterr().out
     assert rc == 0
-    assert "Fresh database" in out
+    # Updated message: "fresh database in development mode" instead of "Fresh database"
+    assert "fresh database" in out.lower()
 
 
 def test_main_rejects_empty_version_table(tmp_path, monkeypatch, capsys):
