@@ -70,7 +70,14 @@ def test_reject_pauses_then_later_delivery_confirms_and_closes_issue():
     )
     deps.host.run_verification_agent.return_value = {
         "verdicts": [
-            {"item": "retention runs", "verdict": "confirmed", "evidence": [], "rationale": ""}
+            {
+                "item": "retention runs",
+                "verdict": "confirmed",
+                "evidence": [
+                    {"ref": "app/services/retention.py:1", "note": "implementation present"}
+                ],
+                "rationale": "",
+            }
         ],
         "snapshot": None,
     }

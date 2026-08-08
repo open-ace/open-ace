@@ -10,11 +10,14 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from app.modules.workspace.autonomous.acceptance_gates import (
     legacy_pattern_gate,
     run_mechanical_gates,
 )
 from app.modules.workspace.autonomous.acceptance_snapshot import AcceptanceSnapshot
+from app.modules.workspace.autonomous.acceptance_verdicts import ItemVerdict
 from app.modules.workspace.autonomous.evidence import Verdict
 from app.modules.workspace.autonomous.github_ops import GitHubOps
 from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
@@ -61,6 +64,7 @@ def test_scope_git_error_is_indeterminate_not_an_exception():
     assert len(verdicts) == 1
     assert verdicts[0].verdict is Verdict.INDETERMINATE
     assert verdicts[0].item == "scope:changed-files"
+    assert verdicts[0].retryable is True
 
 
 def test_broad_legacy_regex_is_retired_from_production_aggregate():
@@ -144,6 +148,78 @@ def test_infra_result_is_not_terminally_cached_and_resume_can_confirm():
     orchestrator._create_milestone.assert_called_once_with(**second.milestone_events[0])
 
 
+def test_infrastructure_retries_are_bounded_then_pause():
+    deps = MagicMock()
+    deps.gh.get_issue.return_value = {"body": "## Scope\n- `app/x.py`"}
+    deps.gh.get_changed_files.return_value = ["app/x.py"]
+    deps.gh._run_git.return_value.stdout = "def f():\n    return 1\n"
+    deps.host.issue_is_open.return_value = True
+    deps.host.run_verification_agent.return_value = {
+        "verdicts": [],
+        "snapshot": None,
+        "infra_error": "verification agent timed out",
+    }
+    workflow = _workflow()
+    outcomes = []
+
+    for _ in range(av.MAX_VERIFIER_INFRA_RETRIES):
+        result = av.handle(_ctx(workflow), deps)
+        outcomes.append(result)
+        workflow = {**workflow, **result.workflow_patch}
+
+    assert [result.outcome for result in outcomes] == ["retry", "retry", "pause"]
+    assert outcomes[-1].milestone_events
+    final_report = json.loads(outcomes[-1].workflow_patch["verification_report"])
+    assert final_report["infra_retry_count"] == av.MAX_VERIFIER_INFRA_RETRIES
+    assert deps.host.run_verification_agent.call_count == av.MAX_VERIFIER_INFRA_RETRIES
+
+
+@pytest.mark.parametrize("failing_probe", ["scope", "gate"])
+def test_retryable_probe_error_is_not_terminally_cached_and_can_recover(failing_probe):
+    deps = MagicMock()
+    deps.gh.get_issue.return_value = {"body": "## Scope\n- `app/x.py`"}
+    deps.host.issue_is_open.return_value = True
+    deps.host.run_verification_agent.side_effect = lambda **_kwargs: {
+        "verdicts": [],
+        "snapshot": None,
+    }
+    confirmed_scope = ItemVerdict(
+        item="app/x.py",
+        verdict=Verdict.CONFIRMED,
+        evidence=[{"ref": "git-diff:app/x.py", "note": "present"}],
+    )
+    failed_probe = ItemVerdict(
+        item=f"{failing_probe}:error",
+        verdict=Verdict.INDETERMINATE,
+        evidence=[{"ref": "error", "note": "bad object"}],
+        retryable=True,
+    )
+    scope_results = [[failed_probe], [confirmed_scope]] if failing_probe == "scope" else None
+    gate_results = [[failed_probe], []] if failing_probe == "gate" else None
+
+    with (
+        patch.object(
+            av,
+            "run_scope_gate",
+            side_effect=scope_results,
+            return_value=[confirmed_scope],
+        ),
+        patch.object(
+            av,
+            "run_mechanical_gates",
+            side_effect=gate_results,
+            return_value=[],
+        ),
+    ):
+        first = av.handle(_ctx(_workflow()), deps)
+        second = av.handle(_ctx({**_workflow(), **first.workflow_patch}), deps)
+
+    assert first.outcome == "retry"
+    assert second.outcome == "completed"
+    assert deps.host.run_verification_agent.call_count == 2
+    deps.gh.close_issue.assert_called_once_with(42)
+
+
 def test_missing_checklist_verdict_forces_indeterminate_and_never_closes_issue():
     deps = MagicMock()
     deps.gh.get_issue.return_value = {
@@ -179,6 +255,165 @@ def test_missing_checklist_verdict_forces_indeterminate_and_never_closes_issue()
         }
     ]
     deps.gh.add_issue_comment.assert_not_called()
+    deps.gh.close_issue.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("returned_snapshot", "error_fragment"),
+    [
+        (None, "omitted the required extracted acceptance snapshot"),
+        ({"bad": 1}, "returned invalid snapshot"),
+        (
+            {
+                "required_paths": [],
+                "checklist": [],
+                "non_scope": [],
+                "closure_constraints": False,
+            },
+            "contained no verifiable criteria",
+        ),
+    ],
+)
+def test_missing_issue_snapshot_cannot_close_from_invented_confirmed_verdict(
+    returned_snapshot, error_fragment
+):
+    deps = MagicMock()
+    deps.gh.get_issue.return_value = {"body": "No structured acceptance sections."}
+    deps.gh.get_changed_files.return_value = []
+    deps.host.issue_is_open.return_value = True
+    deps.host.run_verification_agent.return_value = {
+        "verdicts": [
+            {
+                "item": "invented",
+                "verdict": "confirmed",
+                "evidence": [{"ref": "app/x.py:1", "note": "not tied to issue"}],
+            }
+        ],
+        "snapshot": returned_snapshot,
+    }
+
+    result = av.handle(_ctx(_workflow()), deps)
+
+    assert result.outcome == "retry"
+    assert result.workflow_patch["verification_status"] == "indeterminate"
+    report = json.loads(result.workflow_patch["verification_report"])
+    assert error_fragment in report["infra_error"]
+    assert any(item["item"] == "verifier:infrastructure" for item in report["verifier"])
+    deps.gh.add_issue_comment.assert_not_called()
+    deps.gh.close_issue.assert_not_called()
+
+
+def test_valid_extracted_snapshot_drives_coverage_and_can_confirm():
+    deps = MagicMock()
+    deps.gh.get_issue.return_value = {"body": "Unstructured request text."}
+    deps.gh.get_changed_files.return_value = []
+    deps.host.issue_is_open.return_value = True
+    deps.host.run_verification_agent.return_value = {
+        "verdicts": [
+            {
+                "item": "The endpoint rejects expired tokens",
+                "verdict": "confirmed",
+                "evidence": [{"ref": "tests/test_auth.py:42", "note": "covered"}],
+            }
+        ],
+        "snapshot": {
+            "required_paths": [],
+            "checklist": ["The endpoint rejects expired tokens"],
+            "non_scope": [],
+            "closure_constraints": False,
+        },
+    }
+
+    result = av.handle(_ctx(_workflow()), deps)
+
+    assert result.outcome == "completed"
+    assert result.workflow_patch["verification_status"] == "confirmed"
+    persisted = json.loads(result.workflow_patch["issue_acceptance_snapshot"])
+    assert persisted["source"] == "llm"
+    assert persisted["confidence"] == "low"
+    deps.gh.close_issue.assert_called_once_with(42)
+
+
+def test_confirmed_checklist_verdict_without_evidence_is_indeterminate():
+    deps = MagicMock()
+    deps.gh.get_issue.return_value = {"body": "## Acceptance Criteria\n- [ ] security behavior"}
+    deps.gh.get_changed_files.return_value = []
+    deps.host.issue_is_open.return_value = True
+    deps.host.run_verification_agent.return_value = {
+        "verdicts": [
+            {
+                "item": "security behavior",
+                "verdict": "confirmed",
+                "evidence": [],
+                "rationale": "looks good",
+            }
+        ],
+        "snapshot": None,
+    }
+
+    result = av.handle(_ctx(_workflow()), deps)
+
+    assert result.outcome == "pause"
+    report = json.loads(result.workflow_patch["verification_report"])
+    assert report["verifier"][0]["verdict"] == "indeterminate"
+    assert report["verifier"][0]["evidence"][0]["ref"] == "verifier:missing-evidence"
+    deps.gh.close_issue.assert_not_called()
+
+
+def test_malformed_verdict_evidence_is_retryable_infrastructure():
+    deps = MagicMock()
+    deps.gh.get_issue.return_value = {"body": "## Acceptance Criteria\n- [ ] security behavior"}
+    deps.gh.get_changed_files.return_value = []
+    deps.host.issue_is_open.return_value = True
+    deps.host.run_verification_agent.return_value = {
+        "verdicts": [
+            {
+                "item": "security behavior",
+                "verdict": "confirmed",
+                "evidence": {"ref": "app/x.py:1"},
+                "rationale": [],
+            }
+        ],
+        "snapshot": None,
+    }
+
+    result = av.handle(_ctx(_workflow()), deps)
+
+    assert result.outcome == "retry"
+    report = json.loads(result.workflow_patch["verification_report"])
+    assert "verdict fields were malformed" in report["infra_error"]
+    deps.gh.close_issue.assert_not_called()
+
+
+def test_lost_scheduler_lock_blocks_confirmed_github_mutations():
+    deps = MagicMock()
+    deps.gh.get_issue.return_value = {"body": "## Scope\n- `app/x.py`"}
+    deps.gh.get_changed_files.return_value = ["app/x.py"]
+    deps.gh._run_git.return_value.stdout = "def f():\n    return 1\n"
+    deps.host.issue_is_open.return_value = True
+    deps.host.ensure_scheduler_lock.return_value = False
+    deps.host.run_verification_agent.return_value = {"verdicts": [], "snapshot": None}
+
+    result = av.handle(_ctx(_workflow()), deps)
+
+    assert result.outcome == "retry"
+    deps.gh.add_issue_comment.assert_not_called()
+    deps.gh.close_issue.assert_not_called()
+
+
+def test_lock_loss_after_comment_blocks_close_for_replacement_retry():
+    deps = MagicMock()
+    deps.gh.get_issue.return_value = {"body": "## Scope\n- `app/x.py`"}
+    deps.gh.get_changed_files.return_value = ["app/x.py"]
+    deps.gh._run_git.return_value.stdout = "def f():\n    return 1\n"
+    deps.host.issue_is_open.return_value = True
+    deps.host.ensure_scheduler_lock.side_effect = [True, False]
+    deps.host.run_verification_agent.return_value = {"verdicts": [], "snapshot": None}
+
+    result = av.handle(_ctx(_workflow()), deps)
+
+    assert result.outcome == "retry"
+    deps.gh.add_issue_comment.assert_called_once()
     deps.gh.close_issue.assert_not_called()
 
 
@@ -345,6 +580,15 @@ class _SQLiteDB:
     def get_connection(self):
         return sqlite3.connect(self.path)
 
+    def fetch_one(self, sql, params=()):
+        conn = sqlite3.connect(self.path)
+        conn.row_factory = sqlite3.Row
+        try:
+            row = conn.execute(sql, params).fetchone()
+            return dict(row) if row is not None else None
+        finally:
+            conn.close()
+
 
 def test_heartbeat_prevents_takeover_after_a_31_minute_agent_run(tmp_path):
     """Two repository instances model two scheduler processes sharing the DB."""
@@ -419,11 +663,133 @@ def test_lost_heartbeat_stops_the_old_orchestrator():
     repo.refresh_lock.return_value = False
     stop_event = MagicMock()
     stop_event.wait.return_value = False
+    lock_lost = threading.Event()
 
-    scheduler._heartbeat_workflow_lock(repo, "wf-lost", "old-owner", stop_event)
+    scheduler._heartbeat_workflow_lock(repo, "wf-lost", "old-owner", stop_event, lock_lost)
 
     repo.refresh_lock.assert_called_once_with("wf-lost", "old-owner")
+    assert lock_lost.is_set()
     orchestrator.prepare_for_shutdown.assert_called_once_with()
+
+
+def test_lock_lost_before_orchestrator_registration_never_advances():
+    scheduler = AutonomousScheduler()
+    repo = MagicMock()
+    repo.get_workflow.return_value = {"workflow_id": "wf-race", "status": "planning"}
+    repo.acquire_lock.return_value = True
+    repo.refresh_lock.return_value = False
+
+    class _InlineThread:
+        def __init__(self, *, target, args, **_kwargs):
+            self.target = target
+            self.args = args
+
+        def start(self):
+            self.target(*self.args)
+
+        def join(self, timeout=None):
+            return None
+
+    with (
+        patch("app.routes.autonomous._get_repo", return_value=repo),
+        patch(
+            "app.modules.workspace.autonomous.orchestrator.AutonomousOrchestrator"
+        ) as orchestrator_cls,
+        patch.object(scheduler_module.threading, "Thread", _InlineThread),
+        patch.object(scheduler_module, "WORKFLOW_LOCK_HEARTBEAT_SECONDS", 0),
+    ):
+        scheduler._advance_single("wf-race")
+
+    orchestrator = orchestrator_cls.return_value
+    orchestrator.bind_scheduler_lock.assert_called_once()
+    orchestrator.prepare_for_shutdown.assert_called_once_with()
+    orchestrator.advance.assert_not_called()
+    repo.clear_agent_pid_if_lock_owner.assert_called_once()
+    repo.update_workflow.assert_not_called()
+
+
+def test_phase_commit_is_fenced_after_scheduler_lock_loss():
+    orchestrator = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
+    orchestrator.repo = MagicMock()
+    orchestrator._workflow_id = "wf-lost"
+    orchestrator._scheduler_lock_owner = "old-owner"
+    orchestrator._scheduler_lock_lost = threading.Event()
+    orchestrator._scheduler_lock_lost.set()
+    orchestrator._shutdown_requested = threading.Event()
+    orchestrator._create_milestone = MagicMock()
+
+    with pytest.raises(RuntimeError, match="Distributed workflow lock was lost"):
+        orchestrator._commit_phase_result(
+            PhaseResult.completed(next_phase="completed", milestone_events=[{"phase": "x"}])
+        )
+
+    orchestrator.repo.update_workflow.assert_not_called()
+    orchestrator._create_milestone.assert_not_called()
+
+
+def test_old_owner_cannot_clear_replacement_agent_pid(tmp_path):
+    db_path = str(tmp_path / "agent-pid-fence.db")
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """CREATE TABLE autonomous_workflows (
+            workflow_id TEXT PRIMARY KEY,
+            locked_by TEXT,
+            agent_pid INTEGER,
+            agent_session_id TEXT,
+            updated_at TEXT
+        )"""
+    )
+    conn.execute(
+        "INSERT INTO autonomous_workflows VALUES (?, ?, ?, ?, ?)",
+        ("wf-new", "new-owner", 999, "new-session", ""),
+    )
+    conn.commit()
+    conn.close()
+    repo = AutonomousWorkflowRepository(_SQLiteDB(db_path))
+
+    with patch("app.repositories.database.adapt_sql", side_effect=lambda sql: sql):
+        assert repo.clear_agent_pid_if_lock_owner("wf-new", "old-owner") is False
+
+    conn = sqlite3.connect(db_path)
+    row = conn.execute(
+        "SELECT locked_by, agent_pid, agent_session_id FROM autonomous_workflows"
+    ).fetchone()
+    conn.close()
+    assert row == ("new-owner", 999, "new-session")
+
+
+def test_workflow_update_requires_current_lock_owner(tmp_path):
+    db_path = str(tmp_path / "workflow-update-fence.db")
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """CREATE TABLE autonomous_workflows (
+            workflow_id TEXT PRIMARY KEY,
+            status TEXT,
+            locked_by TEXT,
+            updated_at TEXT
+        )"""
+    )
+    conn.execute(
+        "INSERT INTO autonomous_workflows VALUES (?, ?, ?, ?)",
+        ("wf-fenced", "verification_pending", "new-owner", ""),
+    )
+    conn.commit()
+    conn.close()
+    repo = AutonomousWorkflowRepository(_SQLiteDB(db_path))
+
+    with patch("app.repositories.autonomous_repo.adapt_sql", side_effect=lambda sql: sql):
+        assert (
+            repo.update_workflow(
+                "wf-fenced", {"status": "completed"}, required_lock_owner="old-owner"
+            )
+            is None
+        )
+        updated = repo.update_workflow(
+            "wf-fenced", {"status": "paused"}, required_lock_owner="new-owner"
+        )
+
+    assert updated is not None
+    assert updated["status"] == "paused"
 
 
 def test_issue_closure_combines_closed_at_with_latest_timeline_actor():

@@ -12,7 +12,7 @@ Transitions:
   confirmed      -> close issue + acceptance report -> completed
   rejected       -> paused (delivered code is never marked failed; human reviews)
   indeterminate  -> paused (issue open; human provides missing evidence)
-  infrastructure -> retry (diagnostic report, no terminal milestone)
+  infrastructure -> retry up to 3 times, then pause for review
 
 Idempotent on the confirmed result: a re-entry whose ``verification_status`` is
 already ``confirmed`` is a terminal no-op (no re-close, no re-comment). A new
@@ -27,6 +27,7 @@ import dataclasses
 import fnmatch
 import json
 import time
+from typing import cast
 
 from app.modules.workspace.autonomous.acceptance_gates import run_mechanical_gates
 from app.modules.workspace.autonomous.acceptance_snapshot import (
@@ -40,6 +41,7 @@ from app.modules.workspace.autonomous.phase_contract import PhaseResult
 from app.utils.config import is_acceptance_verification_enabled
 
 VERIFIED_BY = "acceptance-verifier-v1"
+MAX_VERIFIER_INFRA_RETRIES = 3
 
 
 def _now_iso() -> str:
@@ -49,6 +51,45 @@ def _now_iso() -> str:
 def _snapshot_to_json(snapshot: AcceptanceSnapshot) -> str:
     """Full snapshot (incl. source/confidence) for round-trip persistence."""
     return json.dumps(dataclasses.asdict(snapshot), ensure_ascii=False)
+
+
+def _validate_extracted_snapshot(payload: object) -> AcceptanceSnapshot:
+    """Build a conservative LLM-extracted snapshot or raise ``ValueError``.
+
+    When the issue has no convention snapshot, this object becomes the source
+    of truth for checklist coverage and scope gates. Accepting unknown/missing
+    fields or wrong types would let a fabricated verdict bypass those gates.
+    """
+    expected_fields = {
+        "required_paths",
+        "checklist",
+        "non_scope",
+        "closure_constraints",
+    }
+    if not isinstance(payload, dict) or set(payload) != expected_fields:
+        raise ValueError("extracted snapshot fields were incomplete or unknown")
+
+    list_fields: dict[str, list[str]] = {}
+    for field_name in ("required_paths", "checklist", "non_scope"):
+        value = payload[field_name]
+        if not isinstance(value, list) or any(
+            not isinstance(item, str) or not item.strip() for item in value
+        ):
+            raise ValueError(f"extracted snapshot {field_name} was not a string list")
+        list_fields[field_name] = [item.strip() for item in value]
+    if not isinstance(payload["closure_constraints"], bool):
+        raise ValueError("extracted snapshot closure_constraints was not boolean")
+    if not list_fields["required_paths"] and not list_fields["checklist"]:
+        raise ValueError("extracted snapshot contained no verifiable criteria")
+
+    return AcceptanceSnapshot(
+        required_paths=list_fields["required_paths"],
+        checklist=list_fields["checklist"],
+        non_scope=list_fields["non_scope"],
+        closure_constraints=payload["closure_constraints"],
+        source="llm",
+        confidence="low",
+    )
 
 
 def _glob_matches(pattern: str, paths: list[str]) -> str | None:
@@ -76,6 +117,7 @@ def run_scope_gate(
                 verdict=Verdict.INDETERMINATE,
                 evidence=[{"ref": "git-diff:error", "note": f"scope diff failed: {exc!r}"}],
                 rationale="Required-path scope could not be read; verification must pause.",
+                retryable=True,
             )
         ]
     verdicts: list[ItemVerdict] = []
@@ -185,6 +227,25 @@ def _already_verified_for(wf: dict, merge_sha: str, snap_hash: str) -> dict | No
     return report
 
 
+def _prior_infra_retry_count(wf: dict, merge_sha: str, snap_hash: str) -> int:
+    """Return consecutive infra attempts for the current verification pair."""
+    raw = wf.get("verification_report")
+    if not raw:
+        return 0
+    try:
+        report = json.loads(raw) if isinstance(raw, str) else dict(raw)
+    except Exception:
+        return 0
+    if not isinstance(report, dict) or not report.get("infra_error"):
+        return 0
+    if report.get("merge_sha") != merge_sha or report.get("issue_acceptance_hash") != snap_hash:
+        return 0
+    try:
+        return max(0, int(report.get("infra_retry_count") or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
 def handle(ctx, deps) -> PhaseResult:
     # Keep this guard before all context/dependency access. Parked production
     # rows may have already released their worktrees and must drain safely while
@@ -224,6 +285,8 @@ def handle(ctx, deps) -> PhaseResult:
             service_login = None
         closer_login = (closure or {}).get("closer_login") or ""
         if service_login and closer_login.casefold() == service_login.casefold():
+            if ctx.cancellation.is_set() is True or deps.host.ensure_scheduler_lock() is False:
+                return PhaseResult.retry()
             gh.reopen_issue(issue_number)
             deps.host.emit_audit_event(
                 "acceptance_reopened_issue",
@@ -244,12 +307,20 @@ def handle(ctx, deps) -> PhaseResult:
     if snapshot is None:
         snapshot = parse_acceptance_snapshot(_parse_issue_body(gh, issue_number))
     snap_hash = hash_snapshot(snapshot)
+    snapshot_requires_extraction = snapshot.source == "missing" or not (
+        snapshot.required_paths or snapshot.checklist
+    )
 
     # Idempotency (#2335 S5): if the verifier already settled THIS
     # (merge_sha, issue_acceptance_hash) pair to a terminal verdict, reuse the
     # prior result instead of re-running the (expensive) credentialless agent.
     # A changed merge SHA or an edited issue (new hash) misses and re-verifies.
-    prior = _already_verified_for(wf, merge_sha, snap_hash)
+    # An empty/missing snapshot was never a settled acceptance basis: force a
+    # fresh extraction even if an older build persisted a terminal-looking
+    # report for the same empty hash.
+    prior = (
+        None if snapshot_requires_extraction else _already_verified_for(wf, merge_sha, snap_hash)
+    )
     if prior is not None:
         prior_status = prior.get("status") or (wf.get("verification_status") or "")
         if prior_status == "confirmed":
@@ -287,35 +358,63 @@ def handle(ctx, deps) -> PhaseResult:
         )
         or {}
     )
-    verifier_verdicts = [
-        ItemVerdict(
-            item=v.get("item", ""),
-            verdict=_verdict_from_str(v.get("verdict")),
-            evidence=v.get("evidence") or [],
-            rationale=v.get("rationale", ""),
+    verifier_verdicts: list[ItemVerdict] = []
+    for index, raw_verdict in enumerate(agent_out.get("verdicts") or []):
+        if not isinstance(raw_verdict, dict):
+            agent_out["infra_error"] = "verification agent verdict fields were malformed"
+            continue
+        item = raw_verdict.get("item")
+        raw_status = raw_verdict.get("verdict")
+        evidence = raw_verdict.get("evidence")
+        rationale = raw_verdict.get("rationale", "")
+        valid_evidence = isinstance(evidence, list) and all(
+            isinstance(entry, dict)
+            and isinstance(entry.get("ref"), str)
+            and bool(entry.get("ref", "").strip())
+            and ("note" not in entry or isinstance(entry.get("note"), str))
+            for entry in evidence
         )
-        for v in (agent_out.get("verdicts") or [])
-    ]
-    if agent_out.get("infra_error"):
+        if (
+            not isinstance(item, str)
+            or not item.strip()
+            or raw_status not in {"confirmed", "rejected", "indeterminate"}
+            or not valid_evidence
+            or not isinstance(rationale, str)
+        ):
+            agent_out["infra_error"] = (
+                f"verification agent verdict fields were malformed at index {index}"
+            )
+            continue
+        evidence_items = cast(list[dict], evidence)
+        verdict = _verdict_from_str(raw_status)
+        if verdict in {Verdict.CONFIRMED, Verdict.REJECTED} and not evidence_items:
+            verdict = Verdict.INDETERMINATE
+            evidence_items = [
+                {
+                    "ref": "verifier:missing-evidence",
+                    "note": "A definitive verifier verdict had no concrete evidence reference.",
+                }
+            ]
+            rationale = "Definitive acceptance verdicts require concrete evidence."
         verifier_verdicts.append(
             ItemVerdict(
-                item="verifier:infrastructure",
-                verdict=Verdict.INDETERMINATE,
-                evidence=[
-                    {
-                        "ref": "verifier:infra-error",
-                        "note": str(agent_out["infra_error"]),
-                    }
-                ],
-                rationale="The verifier did not complete successfully; no acceptance decision was made.",
+                item=item.strip(),
+                verdict=verdict,
+                evidence=evidence_items,
+                rationale=rationale,
             )
         )
-    if agent_out.get("snapshot"):
+    extracted_payload = agent_out.get("snapshot")
+    if extracted_payload is not None:
         try:
-            snapshot = AcceptanceSnapshot(**agent_out["snapshot"])
+            snapshot = _validate_extracted_snapshot(extracted_payload)
             snap_hash = hash_snapshot(snapshot)
-        except Exception:
-            pass
+        except ValueError as exc:
+            agent_out["infra_error"] = f"verification agent returned invalid snapshot: {exc}"
+    elif snapshot_requires_extraction and not agent_out.get("infra_error"):
+        agent_out["infra_error"] = (
+            "verification agent omitted the required extracted acceptance snapshot"
+        )
 
     # A syntactically valid verifier response is not necessarily complete.  A
     # missing checklist verdict must never disappear from the aggregate and
@@ -357,10 +456,40 @@ def handle(ctx, deps) -> PhaseResult:
     # scope gate and the verifier findings.
     gate_verdicts = run_mechanical_gates(gh, snapshot, base_sha, merge_sha)
 
+    retryable_gate_items = [
+        verdict.item for verdict in scope_verdicts + gate_verdicts if verdict.retryable
+    ]
+    if retryable_gate_items and not agent_out.get("infra_error"):
+        agent_out["infra_error"] = "acceptance probes failed to run: " + ", ".join(
+            retryable_gate_items
+        )
+    if agent_out.get("infra_error"):
+        verifier_verdicts.append(
+            ItemVerdict(
+                item="verifier:infrastructure",
+                verdict=Verdict.INDETERMINATE,
+                evidence=[
+                    {
+                        "ref": "verifier:infra-error",
+                        "note": str(agent_out["infra_error"]),
+                    }
+                ],
+                rationale="The verifier did not complete successfully; no acceptance decision was made.",
+                retryable=True,
+            )
+        )
+
     status = aggregate_verdicts(scope_verdicts + gate_verdicts + verifier_verdicts)
+    if agent_out.get("infra_error"):
+        # A probe failure makes the overall attempt inconclusive even if some
+        # unrelated deterministic gate happened to reject.
+        status = "indeterminate"
     # verified_by records the verifier model/version when the agent surfaced it
     # (S5); fall back to the static runner tag otherwise.
     verified_by = agent_out.get("verified_by") or VERIFIED_BY
+    infra_retry_count = 0
+    if agent_out.get("infra_error"):
+        infra_retry_count = _prior_infra_retry_count(wf, merge_sha, snap_hash) + 1
     report = {
         "merge_sha": merge_sha,
         "issue_acceptance_hash": snap_hash,
@@ -389,6 +518,7 @@ def handle(ctx, deps) -> PhaseResult:
         ],
         "status": status,
         "infra_error": agent_out.get("infra_error") or None,
+        "infra_retry_count": infra_retry_count,
         "verified_at": _now_iso(),
     }
 
@@ -405,18 +535,6 @@ def handle(ctx, deps) -> PhaseResult:
         "verified_by": verified_by,
         "verification_attempt": (wf.get("verification_attempt") or 0) + 1,
     }
-    if agent_out.get("infra_error"):
-        # Infrastructure failures are not acceptance evidence and must not
-        # create a terminal milestone. Keep the workflow in its current phase
-        # so the scheduler can retry automatically; the attempt report remains
-        # persisted for diagnostics.
-        return PhaseResult.retry(
-            workflow_patch={
-                **common_patch,
-                "error_message": "Acceptance verifier infrastructure failure; retrying",
-            }
-        )
-
     milestone = {
         "workflow_id": wf.get("workflow_id"),
         "phase": "acceptance_verification",
@@ -427,9 +545,35 @@ def handle(ctx, deps) -> PhaseResult:
         "result_summary": report,
         "metadata": report,
     }
+    if agent_out.get("infra_error") and infra_retry_count < MAX_VERIFIER_INFRA_RETRIES:
+        # Infrastructure failures are not acceptance evidence and must not
+        # create a terminal milestone. Keep the workflow in its current phase
+        # so the scheduler can retry automatically; the attempt report remains
+        # persisted for diagnostics.
+        return PhaseResult.retry(
+            workflow_patch={
+                **common_patch,
+                "error_message": "Acceptance verifier infrastructure failure; retrying",
+            }
+        )
+    if agent_out.get("infra_error"):
+        return PhaseResult.pause(
+            workflow_patch={
+                **common_patch,
+                "error_message": (
+                    "Acceptance verifier infrastructure retries exhausted; awaiting review"
+                ),
+            },
+            milestone_events=[milestone],
+            structured_error={"message": "verifier-infrastructure-exhausted", "report": report},
+        )
 
     if status == "confirmed":
+        if ctx.cancellation.is_set() is True or deps.host.ensure_scheduler_lock() is False:
+            return PhaseResult.retry()
         gh.add_issue_comment(issue_number, _format_report_comment(report))
+        if ctx.cancellation.is_set() is True or deps.host.ensure_scheduler_lock() is False:
+            return PhaseResult.retry()
         gh.close_issue(issue_number)
         common_patch["issue_closed_by_workflow_at"] = _now_iso()
         return PhaseResult.completed(

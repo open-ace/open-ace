@@ -531,6 +531,7 @@ def run_mechanical_gates(
                     verdict=Verdict.INDETERMINATE,
                     evidence=[{"ref": "error", "note": f"gate raised: {exc!r}"}],
                     rationale="Mechanical gate failed to run; defaulting to indeterminate.",
+                    retryable=True,
                 )
             )
     return out

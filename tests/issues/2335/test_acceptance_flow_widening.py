@@ -80,7 +80,12 @@ def test_multi_delivery_reject_fix_confirm_closes_issue():
     deps.gh.get_changed_files.return_value = ["app/x.py", "app/y.py"]
     deps.host.run_verification_agent.return_value = {
         "verdicts": [
-            {"item": "x works", "verdict": "confirmed", "evidence": [], "rationale": ""},
+            {
+                "item": "x works",
+                "verdict": "confirmed",
+                "evidence": [{"ref": "app/x.py:1", "note": "implementation present"}],
+                "rationale": "",
+            },
         ],
         "snapshot": None,
     }

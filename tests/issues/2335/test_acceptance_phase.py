@@ -41,7 +41,14 @@ def test_confirmed_closes_issue_and_completes():
     gh._run_git.return_value.stdout = "def f():\n    return 1\n"
     deps = _deps(gh=gh)
     deps.host.run_verification_agent.return_value = {
-        "verdicts": [{"item": "works", "verdict": "confirmed", "evidence": [], "rationale": ""}],
+        "verdicts": [
+            {
+                "item": "works",
+                "verdict": "confirmed",
+                "evidence": [{"ref": "app/x.py:1", "note": "implementation present"}],
+                "rationale": "",
+            }
+        ],
         "snapshot": None,
     }
     deps.host.issue_is_open.return_value = True

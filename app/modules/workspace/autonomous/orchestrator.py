@@ -1887,6 +1887,11 @@ class AutonomousOrchestrator:
         # interrupts the current attempt without changing the workflow's active
         # phase/status, so the next process can retry it automatically.
         self._shutdown_requested = threading.Event()
+        # Bound by AutonomousScheduler after it acquires the distributed
+        # workflow lease. Direct/unit callers leave these unset and retain the
+        # legacy unfenced behavior.
+        self._scheduler_lock_owner: str | None = None
+        self._scheduler_lock_lost: threading.Event | None = None
 
         # Wire session_manager so agent sessions are persisted to DB
         from app.modules.workspace.session_manager import SessionManager
@@ -4313,6 +4318,7 @@ class AutonomousOrchestrator:
         but routing every transition through here makes phase/status mutation a
         single auditable path — the property Phase A requires.
         """
+        self._assert_scheduler_lock()
         patch: dict[str, object] = dict(result.workflow_patch)
 
         if result.outcome == "completed":
@@ -4955,9 +4961,24 @@ class AutonomousOrchestrator:
             repair_wf = self.workflow or repair_wf
         self._run_merge_ci_repair(repair_wf, gh, pr_number, failed_checks)
 
+    def _persist_workflow_update(self, updates: dict) -> dict | None:
+        """Persist one workflow patch, fenced by the scheduler lease when bound."""
+        lock_owner = getattr(self, "_scheduler_lock_owner", None)
+        if lock_owner:
+            updated = self.repo.update_workflow(
+                self._workflow_id,
+                updates,
+                required_lock_owner=lock_owner,
+            )
+            if updated is None:
+                self._mark_scheduler_lock_lost()
+                raise WorkflowPaused("Distributed workflow lock was lost")
+            return updated
+        return self.repo.update_workflow(self._workflow_id, updates)
+
     def _update_workflow(self, updates: dict):
         """Update workflow and emit event."""
-        self.repo.update_workflow(self._workflow_id, updates)
+        self._persist_workflow_update(updates)
         self._emit("workflow_updated", updates)
 
     def _cleanup_worktree_and_branch(
@@ -5050,6 +5071,7 @@ class AutonomousOrchestrator:
 
     def _accumulate_tokens(self, _result: AgentTaskResult):
         """Refresh workflow totals from the sessions linked to milestones."""
+        self._assert_scheduler_lock()
         self.repo.refresh_workflow_usage_from_sessions(self._workflow_id)
 
     def _persist_sandbox_attribution(self, result: AgentTaskResult) -> None:
@@ -5065,14 +5087,13 @@ class AutonomousOrchestrator:
         if not provider and not sandbox_id:
             return  # no sandbox ran (e.g. CLI not found before create)
         try:
-            self.repo.update_workflow(
-                self._workflow_id,
+            self._persist_workflow_update(
                 {
                     "sandbox_provider": provider,
                     "sandbox_id": sandbox_id,
                     "sandbox_generation": getattr(result, "sandbox_generation", None),
                     "sandbox_state": getattr(result, "sandbox_state", "") or None,
-                },
+                }
             )
         except Exception as e:  # pragma: no cover - best-effort attribution
             logger.warning(
@@ -5281,8 +5302,7 @@ class AutonomousOrchestrator:
     def _on_pid_registered(self, session_id: str, pid: int):
         """Persist agent subprocess PID to database for reliable cancel/pause."""
         try:
-            self.repo.update_workflow(
-                self._workflow_id,
+            self._persist_workflow_update(
                 {
                     "agent_pid": pid,
                     "agent_session_id": session_id,
@@ -5328,7 +5348,7 @@ class AutonomousOrchestrator:
                 updates["sandbox_remote_session_id"] = remote_session_id
             if effective_policy is not None:
                 updates["sandbox_effective_policy"] = json.dumps(effective_policy)
-            self.repo.update_workflow(self._workflow_id, updates)
+            self._persist_workflow_update(updates)
             logger.info(
                 "Registered sandbox %s (provider=%s) for workflow %s%s",
                 sandbox_id[:8],
@@ -5344,8 +5364,7 @@ class AutonomousOrchestrator:
         try:
             with self._session_lock:
                 if self._current_session_id == session_id:
-                    self.repo.update_workflow(
-                        self._workflow_id,
+                    self._persist_workflow_update(
                         {
                             "agent_pid": None,
                             "agent_session_id": "",
@@ -6396,8 +6415,58 @@ class AutonomousOrchestrator:
             for session_id in session_ids:
                 offsets.pop(session_id, None)
 
+    def bind_scheduler_lock(self, owner: str, lock_lost: threading.Event) -> None:
+        """Attach the scheduler's lease identity and shared loss signal."""
+        self._scheduler_lock_owner = owner
+        self._scheduler_lock_lost = lock_lost
+
+    def _mark_scheduler_lock_lost(self) -> None:
+        event = getattr(self, "_scheduler_lock_lost", None)
+        if event is not None:
+            event.set()
+        # Do not call prepare_for_shutdown() here: this helper can run from the
+        # PID-cleared callback while _session_lock is held, and re-entering that
+        # non-reentrant lock would deadlock. The heartbeat owns active process
+        # interruption; these signals fence every subsequent local action.
+        shutdown = getattr(self, "_shutdown_requested", None)
+        if shutdown is not None:
+            shutdown.set()
+        cancel = getattr(self, "_cancel_requested", None)
+        if cancel is not None:
+            cancel.set()
+
+    def ensure_scheduler_lock(self) -> bool:
+        """Refresh and fence the lease before an irreversible external action."""
+        owner = getattr(self, "_scheduler_lock_owner", None)
+        if not owner:
+            return not self._is_shutdown_requested()
+        lost = getattr(self, "_scheduler_lock_lost", None)
+        if lost is not None and lost.is_set():
+            return False
+        try:
+            held = self.repo.refresh_lock(self._workflow_id, owner)
+        except Exception:
+            logger.warning(
+                "Could not fence workflow %s before external mutation",
+                self._workflow_id[:8],
+                exc_info=True,
+            )
+            return False
+        if held:
+            return True
+        self._mark_scheduler_lock_lost()
+        return False
+
+    def _assert_scheduler_lock(self) -> None:
+        """Raise the pause control signal when this worker has been superseded."""
+        if not self.ensure_scheduler_lock():
+            raise WorkflowPaused("Distributed workflow lock was lost")
+
     def _is_shutdown_requested(self) -> bool:
         """Support lightweight test/legacy instances constructed without ``__init__``."""
+        lock_lost = getattr(self, "_scheduler_lock_lost", None)
+        if lock_lost is not None and lock_lost.is_set():
+            return True
         event = getattr(self, "_shutdown_requested", None)
         return bool(event and event.is_set())
 

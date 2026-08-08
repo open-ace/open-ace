@@ -558,9 +558,10 @@ class AutonomousScheduler:
             return workflow_id
 
         heartbeat_stop = threading.Event()
+        lock_lost = threading.Event()
         heartbeat_thread = threading.Thread(
             target=self._heartbeat_workflow_lock,
-            args=(repo, workflow_id, lock_owner, heartbeat_stop),
+            args=(repo, workflow_id, lock_owner, heartbeat_stop, lock_lost),
             name=f"workflow-lock-{workflow_id[:8]}",
             daemon=True,
         )
@@ -604,8 +605,15 @@ class AutonomousScheduler:
                     return workflow_id
 
             orchestrator = AutonomousOrchestrator(workflow_id)
+            orchestrator.bind_scheduler_lock(lock_owner, lock_lost)
             with self._orchestrator_lock:
                 self._running_orchestrators[workflow_id] = orchestrator
+            # The heartbeat can lose the lease before the orchestrator is
+            # registered (and therefore cannot stop it directly). Fence that
+            # construction window before any phase is allowed to advance.
+            if lock_lost.is_set():
+                orchestrator.prepare_for_shutdown()
+                return workflow_id
             # stop() may race with this worker after its orchestrator snapshot.
             # Register first, then re-check the event so no new agent task can
             # start after graceful shutdown has begun.
@@ -623,17 +631,11 @@ class AutonomousScheduler:
         finally:
             with self._orchestrator_lock:
                 self._running_orchestrators.pop(workflow_id, None)
-            # Safety net: clear stale agent_pid if orchestrator failed to clean up
+            # Safety net: clear stale agent identity only if this worker still
+            # owns the distributed lease. A superseded worker must not erase a
+            # replacement process's freshly-registered PID.
             try:
-                wf_check = repo.get_workflow(workflow_id)
-                if wf_check and wf_check.get("agent_pid"):
-                    repo.update_workflow(
-                        workflow_id,
-                        {
-                            "agent_pid": None,
-                            "agent_session_id": "",
-                        },
-                    )
+                repo.clear_agent_pid_if_lock_owner(workflow_id, lock_owner)
             except Exception:
                 pass
             # Stop and join the renewer before release so it cannot refresh a
@@ -657,13 +659,19 @@ class AutonomousScheduler:
         return workflow_id
 
     def _heartbeat_workflow_lock(
-        self, repo, workflow_id: str, lock_owner: str, stop_event: threading.Event
+        self,
+        repo,
+        workflow_id: str,
+        lock_owner: str,
+        stop_event: threading.Event,
+        lock_lost: threading.Event,
     ) -> None:
         """Renew a live advance's distributed lock until the worker exits."""
         while not stop_event.wait(WORKFLOW_LOCK_HEARTBEAT_SECONDS):
             try:
                 if repo.refresh_lock(workflow_id, lock_owner):
                     continue
+                lock_lost.set()
                 logger.error(
                     "Workflow %s lost its distributed lock; stopping old advance",
                     workflow_id[:8],
