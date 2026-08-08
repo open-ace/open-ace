@@ -205,6 +205,39 @@ echo "rc=$?"
             paths["home"] / ".claude" / "projects" / "encoded" / "session.jsonl"
         ).is_file(), "history was destroyed with no preserve path to rescue it into"
 
+    def test_failed_reclaim_is_recorded(self, tmp_path):
+        """Silence is why this leak went unnoticed for so long.
+
+        A partial `rm -rf` on a full tmpfs is exactly the condition this issue
+        is about; if it is swallowed, the next investigation starts from zero
+        again. Provoked here by making the parent unwritable so the unlink
+        cannot succeed.
+        """
+        victim = tmp_path / "victim"
+        victim.mkdir()
+        paths = _make_tree(victim, "t6")
+        audit = tmp_path / "audit.log"  # outside the frozen directory
+        victim.chmod(0o500)  # read+execute only: children cannot be unlinked
+        try:
+            snippet = f"""
+log_audit() {{ printf '%s\\n' "$1" >> {audit!s}; }}
+{_extract_function("reclaim_task_tree")}
+task_base={paths["base"]!s}
+task_home={paths["base"]!s}/home
+preserve_claude_dir={victim!s}/t6.claude-preserve
+task_id=t6
+reclaim_task_tree
+echo "rc=$?"
+"""
+            result = _run_snippet(snippet)
+        finally:
+            victim.chmod(0o700)
+        assert result.returncode == 0, result.stderr
+        if paths["base"].exists():
+            assert audit.is_file() and "reclaim_failed" in audit.read_text(
+                encoding="utf-8"
+            ), "reclamation failed and nothing was recorded"
+
     def test_no_claude_dir_does_not_create_empty_preserve(self, tmp_path):
         paths = _make_tree(tmp_path, "t4", with_claude=False)
         result = _run_snippet(_reclaim_harness(tmp_path, "t4"))
@@ -213,7 +246,7 @@ echo "rc=$?"
         assert not paths["preserve"].exists()
 
 
-def _reap_harness(task_root: Path, lock_dir: Path, days: int = 30) -> str:
+def _reap_harness(task_root: Path, lock_dir: Path, days: object = 30) -> str:
     return f"""
 {_extract_function("reap_stale_preserve_dirs")}
 task_root={task_root!s}
@@ -409,6 +442,30 @@ class TestReapStalePreserveDirs:
         assert result.returncode == 0, result.stderr
         assert busy.exists(), "a locked (live) preserve dir was reaped"
         assert (busy / "s.jsonl").is_file()
+
+    def test_find_failure_skips_rather_than_deletes(self, tmp_path):
+        """A failing age test must not read as "stale".
+
+        The age gate is a destructive test, so its failure direction matters:
+        swallowing find's exit status turns any error into empty output, which
+        the emptiness check then reads as "nothing fresh here" and deletes. The
+        threshold is injected directly to provoke the failure — the script's own
+        guard against bad config values is pinned separately.
+        """
+        task_root = tmp_path / "tasks"
+        lock_dir = tmp_path / "lock"
+        task_root.mkdir()
+        lock_dir.mkdir()
+        precious = task_root / "keepme.claude-preserve"
+        precious.mkdir()
+        (precious / "s.jsonl").write_text("{}", encoding="utf-8")
+
+        result = _run_snippet(_reap_harness(task_root, lock_dir, days="not-a-number"))
+        assert result.returncode == 0, result.stderr
+        assert precious.exists(), (
+            "the age test errored and the directory was deleted anyway — find's "
+            "exit status is being ignored, so any failure means 'stale'"
+        )
 
     def test_no_candidates_is_a_clean_noop(self, tmp_path):
         """The glob stays literal when nothing matches; the loop must not run."""
