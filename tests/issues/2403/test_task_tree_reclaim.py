@@ -477,3 +477,98 @@ class TestReapStalePreserveDirs:
         result = _run_snippet(_reap_harness(task_root, lock_dir))
         assert result.returncode == 0, result.stderr
         assert not (task_root / "*.claude-preserve").exists()
+
+
+def _script_default_preserve_days() -> int:
+    """The default the script itself falls back to, parsed from source.
+
+    _reap_harness always injects a threshold, so the script's own default was
+    never exercised — reverting it to 1 passed the whole suite.
+    """
+    m = re.search(r"^\s*preserve_max_age_days=(\d+)\s*$", SCRIPT.read_text(encoding="utf-8"), re.M)
+    assert m, "could not find the preserve_max_age_days default in the script"
+    return int(m.group(1))
+
+
+def _age_minutes(path: Path, minutes: int) -> None:
+    stamp = time.time() - minutes * 60
+    os.utime(path, (stamp, stamp))
+
+
+class TestPreservedHistoryIsPrivate:
+    """The reclaim must not move ~/.claude into a world-readable location.
+
+    $task_root is created by `mkdir -p` as root (umask 022) so it is 0755, and
+    the preserve dir is its child, not a child of the `chmod 700` tree. Before
+    #2403 this layout existed only for the sub-millisecond startup window;
+    reclaiming on exit makes it the steady state between runs.
+    """
+
+    def test_preserved_history_is_not_world_readable(self, tmp_path):
+        paths = _make_tree(tmp_path, "priv1")
+        (paths["home"] / ".claude").chmod(0o755)
+        result = _run_snippet(_reclaim_harness(tmp_path, "priv1"))
+        assert result.returncode == 0, result.stderr
+        mode = paths["preserve"].stat().st_mode & 0o777
+        assert mode == 0o700, (
+            f"preserve dir is {mode:o}, not 700: every local account can read the "
+            f"agent's shell snapshots, settings, file-history copies of private "
+            f"source and encoded project paths out of /run"
+        )
+
+    def test_group_and_other_bits_are_cleared_even_from_a_permissive_source(self, tmp_path):
+        paths = _make_tree(tmp_path, "priv2")
+        (paths["home"] / ".claude").chmod(0o777)
+        _run_snippet(_reclaim_harness(tmp_path, "priv2"))
+        mode = paths["preserve"].stat().st_mode & 0o777
+        assert not mode & 0o077, f"group/other bits still set: {mode:o}"
+
+
+@requires_gnu_find
+class TestAgeThresholdUnits:
+    def test_threshold_is_days_not_minutes(self, tmp_path, flock_path):
+        """`-newermt "-N days"` vs `"-N minutes"` is invisible to every other test.
+
+        The existing reaper tests use either just-written files (fresh in any
+        unit) or 90/400-day-old ones (stale in any unit), so swapping the unit
+        passed all of them — while in production it would reap every session
+        line idle more than 30 minutes and silently break --resume.
+        """
+        task_root = tmp_path / "tasks"
+        lock_dir = tmp_path / "lock"
+        task_root.mkdir()
+        lock_dir.mkdir()
+        pdir = task_root / "t.claude-preserve"
+        pdir.mkdir()
+        (pdir / "f").write_text("x", encoding="utf-8")
+        _age_minutes(pdir / "f", 45)
+        _age_minutes(pdir, 45)
+
+        result = _run_snippet(_reap_harness(task_root, lock_dir, days=1), env={"PATH": flock_path})
+        assert result.returncode == 0, result.stderr
+        assert pdir.exists(), (
+            "a 45-minute-old preserve dir was reaped under a 1-DAY threshold; "
+            "the find expression is counting minutes"
+        )
+
+    def test_script_default_threshold_keeps_recent_history(self, tmp_path, flock_path):
+        """Pin the script's own fallback, which no harness ever exercised."""
+        default_days = _script_default_preserve_days()
+        task_root = tmp_path / "tasks"
+        lock_dir = tmp_path / "lock"
+        task_root.mkdir()
+        lock_dir.mkdir()
+        pdir = task_root / "t.claude-preserve"
+        pdir.mkdir()
+        (pdir / "f").write_text("x", encoding="utf-8")
+        _age(pdir / "f", 20)
+        _age(pdir, 20)
+
+        result = _run_snippet(
+            _reap_harness(task_root, lock_dir, days=default_days), env={"PATH": flock_path}
+        )
+        assert result.returncode == 0, result.stderr
+        assert pdir.exists(), (
+            f"20-day-old history reaped under the script default of {default_days} "
+            f"days; lowering that default silently shortens --resume's memory"
+        )

@@ -28,6 +28,13 @@ SRC = SCRIPT.read_text(encoding="utf-8")
 LINES = SRC.splitlines()
 
 
+# The early trap must call the reclaim through a `|| true` guard: errexit is
+# live inside a trap handler, so an unguarded failure both truncates the handler
+# before it removes the tree and rewrites the exit status to 1, which would make
+# _classify_isolated_exit_code misread the fail-closed `exit 66` / `exit 68`.
+_RECLAIM_TRAP_RE = r"^\s*trap 'reclaim_task_tree \|\| true' EXIT"
+
+
 def _line_of(pattern: str, *, start: int = 0) -> int:
     for index in range(start, len(LINES)):
         if re.search(pattern, LINES[index]):
@@ -44,7 +51,7 @@ def test_reclaim_is_defined_before_any_exit_that_can_strand_a_tree():
     becomes a per-attempt path the moment cgroups are enabled as designed.
     """
     definition = _line_of(r"^\s*reclaim_task_tree\(\) \{")
-    arm = _line_of(r"^\s*trap reclaim_task_tree EXIT")
+    arm = _line_of(_RECLAIM_TRAP_RE)
     assert definition < arm, (
         f"reclaim_task_tree() is defined at line {definition + 1} but the trap "
         f"naming it is armed at line {arm + 1}; everything in between — "
@@ -68,7 +75,7 @@ def test_trap_is_armed_before_the_preserve_move_window():
     trap already installed.
     """
     derive = _line_of(r'^\s*preserve_claude_dir="\$\{task_base\}\.claude-preserve"')
-    arm = _line_of(r"^\s*trap reclaim_task_tree EXIT", start=derive)
+    arm = _line_of(_RECLAIM_TRAP_RE, start=derive)
     startup_wipe = _line_of(r'^\s*rm -rf -- "\$task_base"', start=arm)
     assert derive < arm < startup_wipe, (
         f"derive={derive + 1} arm={arm + 1} wipe={startup_wipe + 1}: the trap must "
@@ -78,7 +85,7 @@ def test_trap_is_armed_before_the_preserve_move_window():
 
 def test_signal_traps_are_armed_with_the_reclaim_trap():
     """Until HUP/INT/TERM are trapped, a signal kills bash and no EXIT trap runs."""
-    arm = _line_of(r"^\s*trap reclaim_task_tree EXIT")
+    arm = _line_of(_RECLAIM_TRAP_RE)
     window = "\n".join(LINES[arm : arm + 8])
     for signal_name in ("HUP", "INT", "TERM"):
         assert re.search(rf"^\s*trap 'exit \d+' {signal_name}$", window, re.MULTILINE), (
@@ -251,3 +258,62 @@ def test_the_disproven_reconciler_comment_is_gone():
     """That comment is why the leak went unnoticed: it described a mechanism
     nobody ever implemented."""
     assert "reconciled by the scheduler on restart" not in SRC
+
+
+def test_early_reclaim_trap_is_failure_guarded():
+    """errexit stays live inside a trap handler.
+
+    Without the guard, a failure inside reclaim_task_tree (realistically the
+    `log_audit` command substitution) aborts the handler before `rm -rf
+    "$task_base"` — restoring the leak — and replaces the process's exit status
+    with 1, so the cgroup fail-closed `exit 66` and repo-integrity `exit 68`
+    would be misclassified by _classify_isolated_exit_code.
+    """
+    assert re.search(
+        _RECLAIM_TRAP_RE, SRC, re.MULTILINE
+    ), "the early EXIT trap must be `trap 'reclaim_task_tree || true' EXIT`"
+
+
+def test_preserve_dir_mode_is_restored_after_every_move():
+    """Both preserve-moves must re-apply 0700.
+
+    The preserve dir is a SIBLING of $task_base, so the `chmod 700` on the tree
+    does not cover it, and $task_root is created by `mkdir -p` under root's
+    umask 022. Reclaiming on exit turns what used to be a sub-millisecond
+    startup window into the steady state between runs, so the agent's ~/.claude
+    would otherwise sit world-readable under /run for up to
+    agent_task_preserve_max_age_days.
+    """
+    moves = re.findall(r'mv "\$task_home/\.claude" "\$preserve_claude_dir"', SRC)
+    chmods = re.findall(r'chmod 700 "\$preserve_claude_dir"', SRC)
+    assert len(moves) == 2, f"expected the two known preserve-moves, found {len(moves)}"
+    assert len(chmods) == len(moves), (
+        f"{len(moves)} preserve-move(s) but {len(chmods)} chmod(s); every move "
+        f"must re-apply 0700 or the history is world-readable under /run"
+    )
+
+
+def test_signal_traps_are_re_registered_outside_the_task_id_block():
+    """The later trap block is the ONLY signal coverage on the legacy path.
+
+    The early block (armed beside the reclaim trap) sits inside
+    `[ -n "$task_id" ]`. A wrapper invoked the legacy `uid-*` way never enters
+    it, so deleting the re-registration leaves that path with no HUP/INT/TERM
+    traps at all: a SIGTERM kills bash outright and the EXIT handler — ACL
+    revocation and signature-registry cleanup — never runs. Asserting only on
+    the early block cannot see that.
+    """
+    early = _line_of(_RECLAIM_TRAP_RE)
+    for signal_name, code in (("HUP", 129), ("INT", 130), ("TERM", 143)):
+        occurrences = [
+            i
+            for i, line in enumerate(LINES)
+            if re.match(rf"^\s*trap 'exit {code}' {signal_name}$", line)
+        ]
+        assert len(occurrences) >= 2, (
+            f"{signal_name} is trapped {len(occurrences)} time(s); the legacy "
+            f"uid-* path needs the re-registration outside the task_id block"
+        )
+        assert any(
+            i > early for i in occurrences
+        ), f"the only {signal_name} trap is inside the task_id block"

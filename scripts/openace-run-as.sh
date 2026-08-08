@@ -366,6 +366,18 @@ if [ "$isolated" = true ]; then
         if [ -d "$task_home/.claude" ]; then
             rm -rf -- "$preserve_claude_dir" 2>/dev/null || true
             mv "$task_home/.claude" "$preserve_claude_dir" 2>/dev/null || true
+            # The preserve dir is a SIBLING of $task_base, so it inherits none
+            # of the `chmod 700` applied to the tree, and $task_root is created
+            # by `mkdir -p` under root's umask 022 (drwxr-xr-x). Without this
+            # the agent's ~/.claude — shell snapshots, settings.json,
+            # file-history copies of private source, plans, memory, todos, and
+            # the encoded project paths — sits world-readable under /run for
+            # the whole gap between two runs of a session line, and up to
+            # agent_task_preserve_max_age_days for an abandoned task. Before
+            # #2403 that layout existed only for the sub-millisecond startup
+            # window; reclaiming on exit makes it the steady state, so the mode
+            # has to be restored explicitly.
+            chmod 700 "$preserve_claude_dir" 2>/dev/null || true
         fi
         # Log rather than swallow: a partial rm on a full tmpfs is exactly the
         # condition this issue is about, and silence is why it went unnoticed
@@ -447,13 +459,20 @@ if [ "$isolated" = true ]; then
         # The signal traps are pure `exit N` and are hoisted here for the same
         # reason: until they exist, a SIGTERM kills bash outright and the EXIT
         # trap never runs at all. They are re-registered (not duplicated) below.
-        trap reclaim_task_tree EXIT
+        # `|| true` for the same reason every step of on_exit has it: errexit
+        # stays live inside a trap handler, and a failure there both truncates
+        # the handler before `rm -rf "$task_base"` and rewrites the exit status
+        # to 1 — which would make _classify_isolated_exit_code misread the
+        # fail-closed `exit 66` / `exit 68` this trap exists to cover.
+        trap 'reclaim_task_tree || true' EXIT
         trap 'exit 129' HUP
         trap 'exit 130' INT
         trap 'exit 143' TERM
         if [ -d "$task_home/.claude" ]; then
             rm -rf -- "$preserve_claude_dir" 2>/dev/null || true
             mv "$task_home/.claude" "$preserve_claude_dir" 2>/dev/null || true
+            # Same exposure as the reclaim path — see the comment there.
+            chmod 700 "$preserve_claude_dir" 2>/dev/null || true
         fi
         rm -rf -- "$task_base" 2>/dev/null || true
         mkdir -p "$task_home" "$task_tmp" "$task_cache" "$task_config" "$task_data"
