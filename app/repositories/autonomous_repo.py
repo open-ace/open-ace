@@ -183,6 +183,9 @@ class AutonomousWorkflowRepository:
             "reporting",
             "waiting",
             "merging",
+            # #2431: a workflow parked at acceptance_verification can still own
+            # an agent PID, so the startup orphan sweep must consider it.
+            "verification_pending",
         )
         placeholders = ", ".join(["?"] * len(active_statuses))
         conn = self.db.get_connection()
@@ -563,15 +566,22 @@ class AutonomousWorkflowRepository:
     def get_workflows_pending_cleanup(self) -> list:
         """Get delivered workflows whose Git cleanup is still pending (#2043).
 
-        Returns ``status='completed'`` rows with ``cleanup_status='pending'`` so
-        the startup sweep and scheduler retry pass can re-attempt worktree/branch
-        removal. Ordered by ``cleanup_updated_at`` so the oldest failures retry
-        first. Legacy rows (NULL cleanup_status) are excluded.
+        Returns delivered rows with ``cleanup_status='pending'`` so the startup
+        sweep and scheduler retry pass can re-attempt worktree/branch removal.
+        Ordered by ``cleanup_updated_at`` so the oldest failures retry first.
+        Legacy rows (NULL cleanup_status) are excluded.
+
+        ``verification_pending`` counts as delivered (#2431): the PR is merged
+        by the time the workflow reaches acceptance_verification, so its cleanup
+        is just as due as a completed workflow's. Excluding it left the sweep
+        blind for the entire parked window. The caller skips workflows the
+        scheduler is currently advancing — see ``_is_in_flight``.
         """
         return self.db.fetch_all(
             """
             SELECT * FROM autonomous_workflows
-            WHERE status = 'completed' AND cleanup_status = 'pending'
+            WHERE status IN ('completed', 'verification_pending')
+              AND cleanup_status = 'pending'
             ORDER BY cleanup_updated_at ASC NULLS LAST, created_at ASC
             """
         )
@@ -1283,6 +1293,53 @@ class AutonomousWorkflowRepository:
                     SET locked_at = ?, locked_by = ?
                     WHERE workflow_id = ?
                       AND (locked_at IS NULL OR locked_at < ?)
+                    """
+                ),
+                (now, owner, workflow_id, cutoff),
+            )
+            rowcount = cursor.rowcount
+            conn.commit()
+            return rowcount > 0
+        finally:
+            conn.close()
+
+    def acquire_cleanup_lock(self, workflow_id: str, owner: str) -> bool:
+        """Atomically lock a workflow for destructive Git cleanup (#2431).
+
+        Unlike :meth:`acquire_lock`, a stale timestamp is not enough to break a
+        lock on ``verification_pending`` at all, even after the generic
+        30-minute timeout. Agent tasks may legitimately run for 60 minutes and
+        clear ``agent_pid`` before the same advance finishes its mechanical
+        gates, so PID alone is not a sufficient lease. A stale lock is only
+        recoverable here after the workflow is terminal ``completed`` and has no
+        agent PID; active verification rows are left for the scheduler's normal
+        advance/recovery path to release.
+        """
+        import app.repositories.database as _db_mod
+
+        now_dt = datetime.now(timezone.utc)
+        now = now_dt.strftime("%Y-%m-%d %H:%M:%S")
+        cutoff = (now_dt - timedelta(seconds=self.LOCK_TIMEOUT_SECONDS)).strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
+
+        conn = self.db.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                _db_mod.adapt_sql(
+                    """
+                    UPDATE autonomous_workflows
+                    SET locked_at = ?, locked_by = ?
+                    WHERE workflow_id = ?
+                      AND (
+                        locked_at IS NULL
+                        OR (
+                          locked_at < ?
+                          AND status = 'completed'
+                          AND (agent_pid IS NULL OR agent_pid <= 0)
+                        )
+                      )
                     """
                 ),
                 (now, owner, workflow_id, cutoff),
