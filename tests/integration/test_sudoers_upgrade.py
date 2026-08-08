@@ -13,6 +13,7 @@ Test scenarios:
 """
 
 import os
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -67,6 +68,47 @@ openace ALL=(root) NOPASSWD: GH_SAFE
 """
 
 
+def visudo_available() -> bool:
+    """Check if visudo is available for syntax validation."""
+    return shutil.which("visudo") is not None
+
+
+def _run_force_upgrade(tmp_path: Path):
+    """Run ``--force`` against a legacy sudoers under tmp_path.
+
+    Returns ``(result, test_sudoers, wrapper_dir)``. Stubs ``openace-rm`` so
+    the wrapper-rule branch is exercised, and redirects every script path
+    (SUDOERS_FILE/WRAPPER_DIR/BACKUP_DIR/AUDIT_LOG) under tmp_path so it runs
+    unprivileged.
+    """
+    test_sudoers = tmp_path / "sudoers.d" / "open-ace-webui"
+    test_sudoers.parent.mkdir(parents=True, exist_ok=True)
+    test_sudoers.write_text(create_legacy_sudoers())
+
+    wrapper_dir = tmp_path / "wrappers"
+    wrapper_dir.mkdir()
+    stub = wrapper_dir / "openace-rm"
+    stub.write_text("#!/bin/sh\nexit 0\n")
+    os.chmod(stub, 0o755)
+
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    env = {
+        **os.environ,
+        "SUDOERS_FILE": str(test_sudoers),
+        "WRAPPER_DIR": str(wrapper_dir),
+        "BACKUP_DIR": str(log_dir),
+        "AUDIT_LOG": str(log_dir / "audit.log"),
+    }
+    result = subprocess.run(
+        [str(UPGRADE_SCRIPT), "--force"],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    return result, test_sudoers, wrapper_dir
+
+
 @pytest.mark.skipif(not script_available(), reason="upgrade-sudoers-security.sh not available")
 class TestSudoersUpgrade:
     """Tests for sudoers upgrade functionality."""
@@ -112,8 +154,8 @@ class TestSudoersUpgrade:
             env={**os.environ, "SUDOERS_FILE": str(test_sudoers)},
         )
 
-        # Should show changes
-        assert "removing" in result.stdout.lower() or "upgrade" in result.stdout.lower()
+        # Should show changes (progress now on stderr per #2440; banner on stdout)
+        assert "removing" in result.stderr.lower() or "upgrade" in result.stdout.lower()
 
         # Original file should be unchanged
         assert test_sudoers.read_text() == original_content
@@ -167,6 +209,47 @@ class TestSudoersUpgrade:
         script_content = UPGRADE_SCRIPT.read_text()
         assert "backup" in script_content.lower()
         assert ".bak" in script_content
+
+    @pytest.mark.skipif(not visudo_available(), reason="visudo not available")
+    def test_force_upgrade_produces_visudo_valid_candidate(self, tmp_path: Path):
+        """``--force`` must yield a visudo-valid candidate with progress on stderr.
+
+        Regression for #2440: progress echoes on stdout used to pollute the
+        generated candidate, so ``visudo`` rejected it (exit 4, fail-closed)
+        and the upgrade could never succeed.
+        """
+        result, test_sudoers, _ = _run_force_upgrade(tmp_path)
+
+        # The upgrade must succeed — the bug exits 4 (polluted candidate).
+        assert result.returncode == 0, (
+            f"upgrade failed rc={result.returncode}\n"
+            f"STDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+        )
+
+        # Progress belongs on stderr, never on the candidate-bearing stdout.
+        assert "Adding wrapper rule" in result.stderr
+        assert "Removing deprecated" in result.stderr
+        assert "Adding wrapper rule" not in result.stdout
+        assert "Removing deprecated" not in result.stdout
+
+        # Generated candidate must be valid sudoers.
+        check = subprocess.run(
+            ["visudo", "-c", "-f", str(test_sudoers)], capture_output=True, text=True
+        )
+        assert (
+            check.returncode == 0
+        ), f"candidate invalid:\n{check.stderr}\n{test_sudoers.read_text()}"
+
+    @pytest.mark.skipif(not visudo_available(), reason="visudo not available")
+    def test_candidate_carries_both_account_rules_unchanged_scope(self, tmp_path: Path):
+        """Both service accounts get the wrapper rule; command scope is not widened (#2440)."""
+        result, test_sudoers, wrapper_dir = _run_force_upgrade(tmp_path)
+        assert result.returncode == 0, f"upgrade failed rc={result.returncode}:\n{result.stderr}"
+        content = test_sudoers.read_text()
+        assert "open-ace ALL=(root) NOPASSWD:" in content
+        assert "openace ALL=(root) NOPASSWD:" in content
+        # Scope stays "${wrapper_path} *" — not widened.
+        assert f"{wrapper_dir / 'openace-rm'} *" in content
 
 
 @pytest.mark.skipif(not wrapper_available("openace-rm"), reason="openace-rm wrapper not available")
