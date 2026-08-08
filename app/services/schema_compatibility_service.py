@@ -465,6 +465,16 @@ class SchemaCompatibilityService:
         current_time = time.time()
         if db_hash in _bypass_states:
             last_bypass = _bypass_states[db_hash]
+
+            # Check if bypass has expired
+            if last_bypass.expires_at and current_time > last_bypass.expires_at:
+                logger.warning(
+                    f"Emergency bypass has expired. "
+                    f"Expired at: {last_bypass.expires_at}, Current: {current_time}"
+                )
+                return BypassState(is_active=False)
+
+            # Check rate limiting
             if last_bypass.enabled_at and (current_time - last_bypass.enabled_at) < 3600:
                 logger.warning(
                     f"Emergency bypass rate limited for database. "
