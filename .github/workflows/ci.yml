@@ -155,13 +155,13 @@ jobs:
 
       # pytest.ini's norecursedirs excludes tests/issues entirely, so nothing
       # under it is collected by the run above — ~4200 tests across 238 issue
-      # directories never execute here. Fixing that wholesale is tracked
-      # separately; until then, issue suites must opt in explicitly or they are
+      # directories never execute here. Fixing that wholesale is tracked in
+      # #2429; until then, issue suites must opt in explicitly or they are
       # written, reviewed, and merged without ever gating anything.
       - name: Issue regression suites (opt-in; see norecursedirs)
         timeout-minutes: 5
         run: |
-          pytest tests/issues/2403 -v \
+          pytest tests/issues/2403 tests/issues/2428 -v \
             -m "not postgres and not performance"
 
       - name: Upload coverage to Codecov

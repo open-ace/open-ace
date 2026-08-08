@@ -106,18 +106,20 @@ def test_get_branch_protection_permission_error_raises_for_fail_closed():
 
 
 def test_get_branch_protection_defaults_to_main_branch():
+    """Both enforcement sources are consulted, and both default to main."""
     gh = _make_gh()
-    captured: dict = {}
+    urls: list[str] = []
 
     def fake_run(args, check=True, repo_scoped=True):
-        captured["args"] = args
+        urls.append(args[-1])
         return MagicMock(
             returncode=0, stdout='{"required_status_checks":{"contexts":[]}}', stderr=""
         )
 
     with patch.object(gh, "_run_gh", side_effect=fake_run):
         gh.get_branch_protection()
-    assert "branches/main/protection" in captured["args"][-1]
+    assert any("branches/main/protection" in url for url in urls), urls
+    assert any("rules/branches/main" in url for url in urls), urls
 
 
 # ── ReadinessService.classify_merge_readiness (7-state) ─────────────────────
