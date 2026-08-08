@@ -99,21 +99,26 @@ class TestCheckSchemaCompatibility:
             assert check_schema_compatibility(conn) is None
 
     def test_older_timestamp_version_with_explicit_min(self):
-        """Test that older timestamp version fails with explicit min_revision."""
+        """Test that older timestamp version fails with explicit min_revision.
+
+        Note: min_revision parameter is deprecated and ignored in the new implementation.
+        This test verifies that revisions not in the migration graph are rejected.
+        """
         engine = sa.create_engine("sqlite:///:memory:")
         with engine.connect() as conn:
             conn.execute(sa.text("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)"))
+            # Use a revision that doesn't exist in migration files
             conn.execute(
-                sa.text("INSERT INTO alembic_version (version_num) VALUES ('20260701_001')")
+                sa.text("INSERT INTO alembic_version (version_num) VALUES ('nonexistent_revision')")
             )
             conn.commit()
 
-            # Should raise when checking against a newer timestamp revision
+            # Should raise because revision doesn't exist in migration graph
+            # Note: min_revision parameter is deprecated and ignored
             with pytest.raises(SchemaCompatibilityError) as exc_info:
                 check_schema_compatibility(conn, min_revision="20260801_001")
 
-            assert exc_info.value.current_revision == "20260701_001"
-            assert exc_info.value.min_revision == "20260801_001"
+            assert exc_info.value.current_revision == "nonexistent_revision"
 
     def test_incompatible_version_raises(self):
         """Test that incompatible version raises error."""

@@ -385,7 +385,7 @@ def handle(ctx, deps) -> PhaseResult:
                 f"verification agent verdict fields were malformed at index {index}"
             )
             continue
-        evidence_items = cast(list[dict], evidence)
+        evidence_items = cast("list[dict]", evidence)
         verdict = _verdict_from_str(raw_status)
         if verdict in {Verdict.CONFIRMED, Verdict.REJECTED} and not evidence_items:
             verdict = Verdict.INDETERMINATE
