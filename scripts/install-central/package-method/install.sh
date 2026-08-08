@@ -2206,6 +2206,58 @@ install_write_as_wrapper() {
     return 0
 }
 
+# Install a generic wrapper script to /usr/local/bin/.
+# Used by install_chown_wrapper, install_useradd_wrapper, etc.
+_install_wrapper() {
+    local name="$1"
+    local install_dir="$2"
+    local src="$install_dir/scripts/${name}.sh"
+    local dst="/usr/local/bin/${name}"
+
+    if [ ! -f "$src" ]; then
+        print_warning "${name}.sh not found at $src; skipping wrapper install"
+        return 1
+    fi
+    if ! cp "$src" "$dst" 2>/dev/null; then
+        print_warning "Failed to copy ${name}.sh to $dst (need root?)"
+        return 1
+    fi
+    chown root:root "$dst" 2>/dev/null || true
+    chmod 755 "$dst"
+    print_success "Installed $name wrapper to $dst"
+    return 0
+}
+
+# Install the chown wrapper BEFORE configure_sudoers (Issue #2349):
+# the sudoers rule keys off `[ -x /usr/local/bin/openace-chown ]`.
+install_chown_wrapper() {
+    _install_wrapper "openace-chown" "$1"
+}
+
+# Install the useradd wrapper BEFORE configure_sudoers (Issue #2349):
+# the sudoers rule keys off `[ -x /usr/local/bin/openace-useradd ]`.
+install_useradd_wrapper() {
+    _install_wrapper "openace-useradd" "$1"
+}
+
+# Install the cat wrapper BEFORE configure_sudoers (Issue #2349):
+# the sudoers rule keys off `[ -x /usr/local/bin/openace-cat ]`.
+install_cat_wrapper() {
+    _install_wrapper "openace-cat" "$1"
+}
+
+# Install the mkdir wrapper BEFORE configure_sudoers (Issue #2349):
+# the sudoers rule keys off `[ -x /usr/local/bin/openace-mkdir ]`.
+install_mkdir_wrapper() {
+    _install_wrapper "openace-mkdir" "$1"
+}
+
+# Install the rm wrapper BEFORE configure_sudoers (Issue #2349):
+# the sudoers rule keys off `[ -x /usr/local/bin/openace-rm ]`.
+install_rm_wrapper() {
+    _install_wrapper "openace-rm" "$1"
+}
+
 # Install the webui-launch wrapper for secure inline env-var passthrough.
 # This replaces the insecure /usr/bin/env * sudoers rule (Issue #2305 review).
 # The wrapper must be installed BEFORE configure_sudoers so the sudoers rule
