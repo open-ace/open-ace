@@ -9,9 +9,11 @@ checkout/spawn failure it returns empty verdicts (aggregates to
 from __future__ import annotations
 
 import os
+import stat
 from unittest.mock import MagicMock, patch
 
 from app.modules.workspace.autonomous import orchestrator as orch_mod
+from app.modules.workspace.autonomous.github_ops import OPENACE_RM_WRAPPER, GitHubOps
 
 
 def _make_orchestrator():
@@ -58,12 +60,13 @@ def test_checkout_merged_main_creates_temp_worktree_at_merge_sha(tmp_path):
     gh.ensure_commit_available.return_value = True
     gh.repo_path = "/dev/repo"
 
+    gh.create_verification_worktree_dir.return_value = str(tmp_path)
     with patch.object(orch_mod.AutonomousOrchestrator, "_get_gh", return_value=gh):
-        with patch.object(orch_mod.tempfile, "mkdtemp", return_value=str(tmp_path)):
-            path = orch._checkout_merged_main("abc123")
+        path = orch._checkout_merged_main("abc123")
 
     assert path == str(tmp_path)
     gh.ensure_commit_available.assert_called_once_with("abc123")
+    gh.create_verification_worktree_dir.assert_called_once_with("/dev/repo")
     # The first worktree-add command should target the merge sha in detached mode.
     add_cmds = [c for c in captured_cmds if c[:2] == ["worktree", "add"]]
     assert add_cmds, "expected a git worktree add"
@@ -79,7 +82,7 @@ def test_checkout_merged_main_returns_none_on_failure(tmp_path):
     gh = MagicMock()
 
     def fake_run_git(args, **_kw):
-        if args[:2] == ["worktree", "add"]:
+        if args[:2] in (["worktree", "add"], ["worktree", "remove"]):
             raise RuntimeError("boom")
         return MagicMock(stdout="", stderr="", returncode=0)
 
@@ -87,11 +90,12 @@ def test_checkout_merged_main_returns_none_on_failure(tmp_path):
     gh.ensure_commit_available.return_value = True
     gh.repo_path = "/dev/repo"
 
+    gh.create_verification_worktree_dir.return_value = str(tmp_path)
     with patch.object(orch_mod.AutonomousOrchestrator, "_get_gh", return_value=gh):
-        with patch.object(orch_mod.tempfile, "mkdtemp", return_value=str(tmp_path)):
-            path = orch._checkout_merged_main("abc123")
+        path = orch._checkout_merged_main("abc123")
 
     assert path is None
+    gh.remove_verification_worktree_dir.assert_called_once_with(str(tmp_path), "/dev/repo")
 
 
 def test_checkout_merged_main_does_not_create_worktree_when_commit_is_unavailable():
@@ -101,13 +105,70 @@ def test_checkout_merged_main_does_not_create_worktree_when_commit_is_unavailabl
     gh.ensure_commit_available.return_value = False
 
     with patch.object(orch_mod.AutonomousOrchestrator, "_get_gh", return_value=gh):
-        with patch.object(orch_mod.tempfile, "mkdtemp") as mock_mkdtemp:
-            path = orch._checkout_merged_main("abc123")
+        path = orch._checkout_merged_main("abc123")
 
     assert path is None
     gh.ensure_commit_available.assert_called_once_with("abc123")
-    mock_mkdtemp.assert_not_called()
+    gh.create_verification_worktree_dir.assert_not_called()
     gh._run_git.assert_not_called()
+
+
+def test_cross_user_verifier_directory_is_created_by_repository_owner():
+    """Cross-user allocation must not leave a service-owned 0700 target."""
+    gh = GitHubOps("/home/alice/repo", system_account="alice")
+    completed = MagicMock(returncode=0, stdout="", stderr="")
+    with (
+        patch.object(gh, "_needs_sudo", return_value=True),
+        patch(
+            "app.modules.workspace.autonomous.github_ops.subprocess.run",
+            return_value=completed,
+        ) as run,
+        patch("app.modules.workspace.autonomous.github_ops.uuid.uuid4") as make_uuid,
+    ):
+        make_uuid.return_value.hex = "a" * 32
+        path = gh.create_verification_worktree_dir("/home/alice/repo")
+
+    expected_root = os.path.join(os.path.realpath("/home/alice/repo"), ".worktrees")
+    assert path == os.path.join(expected_root, "verify-" + "a" * 32)
+    commands = [call.args[0] for call in run.call_args_list]
+    assert commands == [
+        ["sudo", "-u", "alice", "mkdir", "-p", "--", expected_root],
+        ["sudo", "-u", "alice", "mkdir", "-m", "700", "--", path],
+    ]
+
+
+def test_same_user_verifier_directory_is_private_and_owner_writable(tmp_path):
+    """The real allocator creates a traversable/writable 0700 dir for its owner."""
+    gh = GitHubOps(str(tmp_path))
+    path = gh.create_verification_worktree_dir(str(tmp_path))
+    try:
+        mode = stat.S_IMODE(os.stat(path).st_mode)
+        assert mode == 0o700
+        assert os.access(path, os.X_OK | os.W_OK)
+    finally:
+        gh.remove_verification_worktree_dir(path, str(tmp_path))
+
+
+def test_cross_user_verifier_cleanup_uses_owner_safe_wrapper():
+    """A service user never tries to rmtree a repository-owner 0700 directory."""
+    gh = GitHubOps("/home/alice/repo", system_account="alice")
+    project = os.path.realpath("/home/alice/repo")
+    path = os.path.join(project, ".worktrees", "verify-abc")
+    completed = MagicMock(returncode=0, stdout="", stderr="")
+    with (
+        patch.object(gh, "_needs_sudo", return_value=True),
+        patch(
+            "app.modules.workspace.autonomous.github_ops.subprocess.run",
+            return_value=completed,
+        ) as run,
+        patch("app.modules.workspace.autonomous.github_ops.shutil.rmtree") as rmtree,
+    ):
+        gh.remove_verification_worktree_dir(path, project)
+
+    cmd = run.call_args.args[0]
+    assert cmd[:3] == ["sudo", OPENACE_RM_WRAPPER, "alice"]
+    assert cmd[3:] == [path, "-r", "-f"]
+    rmtree.assert_not_called()
 
 
 def test_run_verification_agent_uses_merged_main_checkout(tmp_path):

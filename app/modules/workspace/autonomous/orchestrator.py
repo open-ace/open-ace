@@ -17,7 +17,6 @@ import shlex
 import shutil
 import subprocess
 import sys
-import tempfile
 import threading
 import time
 import uuid
@@ -123,20 +122,28 @@ COMPLETION_KEYWORDS = [
 # ── Framework inference for test detection (Phase 1, P0) ────────────────
 
 
-def _remove_worktree_dir(gh, path: str) -> None:
+def _remove_worktree_dir(gh, path: str, project_path: str = "") -> None:
     """Best-effort removal of a (possibly registered) worktree dir (#2335 S5).
 
     Tries ``git worktree remove --force`` when a GitHubOps handle is available
-    (unregisters the worktree from the repo's metadata), then falls back to a
-    filesystem ``shutil.rmtree``. Never raises — this runs in cleanup paths.
+    (unregisters the worktree from the repo's metadata), then uses repository-
+    owner cleanup for verifier directories before a final filesystem fallback.
+    Never raises — this runs in cleanup paths.
     """
     if not path:
         return
     if gh is not None:
         try:
             gh._run_git(["worktree", "remove", path, "--force"])
+            return
         except Exception:
             pass
+        if project_path:
+            try:
+                gh.remove_verification_worktree_dir(path, project_path)
+                return
+            except Exception:
+                pass
     try:
         if os.path.isdir(path):
             shutil.rmtree(path, ignore_errors=True)
@@ -6895,14 +6902,23 @@ class AutonomousOrchestrator:
         if not available:
             logger.error("acceptance verifier: merge commit unavailable locally: %s", merge_sha)
             return None
-        tmp_dir = tempfile.mkdtemp(prefix="ace-verify-")
+        wf = self.workflow or {}
+        project_path = str(wf.get("project_path") or "")
+        if not project_path:
+            logger.error("acceptance verifier: project path unavailable")
+            return None
+        try:
+            tmp_dir = gh.create_verification_worktree_dir(project_path)
+        except Exception:
+            logger.exception("acceptance verifier: failed to allocate owner-readable worktree")
+            return None
         try:
             # Detached HEAD at the merge commit: a read-only throwaway view.
             gh._run_git(["worktree", "add", "--detach", tmp_dir, merge_sha])
         except Exception:
             logger.exception("acceptance verifier: failed to checkout merged main @ %s", merge_sha)
             # Clean up the empty dir so no half-created state lingers.
-            _remove_worktree_dir(gh, tmp_dir)
+            _remove_worktree_dir(gh, tmp_dir, project_path)
             return None
         return tmp_dir
 
@@ -6915,7 +6931,8 @@ class AutonomousOrchestrator:
         if not path:
             return
         gh = self._get_gh()
-        _remove_worktree_dir(gh, path)
+        wf = self.workflow or {}
+        _remove_worktree_dir(gh, path, str(wf.get("project_path") or ""))
 
     def _run_verification_agent(
         self, *, snapshot, merge_sha, base_sha, issue_number, pr_number

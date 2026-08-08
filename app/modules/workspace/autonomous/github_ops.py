@@ -11,11 +11,15 @@ import logging
 import os
 import pwd
 import re
+import shutil
 import subprocess
 import sys
 import time
+import uuid
 from pathlib import Path
 from urllib.parse import urlparse
+
+from app.utils.workspace import OPENACE_RM_WRAPPER
 
 logger = logging.getLogger(__name__)
 
@@ -711,6 +715,80 @@ class GitHubOps:
             return False
 
     # ── Repo Operations ────────────────────────────────────────────
+
+    def create_verification_worktree_dir(self, project_path: str) -> str:
+        """Allocate an empty verifier worktree directory as the repo owner.
+
+        ``git worktree add`` runs as ``system_account`` in multi-user mode, so
+        its destination must not be a service-owned ``tempfile.mkdtemp``
+        directory (which is mode 0700 and cannot be traversed cross-user).
+        Keep verifier checkouts under the repository's established
+        ``.worktrees`` root and create both the root and the unique child with
+        the same identity that will run git.
+        """
+        project_root = os.path.realpath(project_path)
+        if not project_root or not os.path.isabs(project_root):
+            raise GitHubOpsError("Cannot allocate verifier worktree under an invalid project path")
+        worktrees_root = os.path.join(project_root, ".worktrees")
+        kwargs = self._build_subprocess_kwargs()
+        kwargs.pop("cwd", None)
+        kwargs["timeout"] = 10
+
+        def _mkdir(args: list[str]) -> subprocess.CompletedProcess:
+            if self._needs_sudo():
+                account = self.system_account
+                assert account is not None
+                cmd = ["sudo", "-u", account, "mkdir", *args]
+            else:
+                cmd = ["mkdir", *args]
+            return subprocess.run(cmd, **kwargs)
+
+        root_result = _mkdir(["-p", "--", worktrees_root])
+        if root_result.returncode != 0:
+            raise GitHubOpsError(
+                "Cannot create verifier worktree root: " f"{(root_result.stderr or '').strip()}"
+            )
+
+        for _attempt in range(3):
+            path = os.path.join(worktrees_root, f"verify-{uuid.uuid4().hex}")
+            result = _mkdir(["-m", "700", "--", path])
+            if result.returncode == 0:
+                return path
+        raise GitHubOpsError(
+            "Cannot allocate a unique verifier worktree directory: "
+            f"{(result.stderr or '').strip()}"
+        )
+
+    def remove_verification_worktree_dir(self, path: str, project_path: str) -> None:
+        """Remove a verifier directory with the identity that owns it.
+
+        This is only the fallback after ``git worktree remove``. The strict
+        direct-child and ``verify-`` checks keep recursive deletion scoped to
+        directories allocated by :meth:`create_verification_worktree_dir`.
+        """
+        worktrees_root = os.path.realpath(os.path.join(project_path, ".worktrees"))
+        real_path = os.path.realpath(path)
+        _assert_path_contained(real_path, worktrees_root, label="verification worktree")
+        if os.path.dirname(real_path) != worktrees_root or not os.path.basename(
+            real_path
+        ).startswith("verify-"):
+            raise GitHubOpsError("Refusing to remove a non-verifier worktree directory")
+        if not self._needs_sudo():
+            shutil.rmtree(real_path, ignore_errors=True)
+            return
+        account = self.system_account
+        assert account is not None
+        result = subprocess.run(
+            ["sudo", OPENACE_RM_WRAPPER, account, real_path, "-r", "-f"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env=self._build_subprocess_kwargs().get("env"),
+        )
+        if result.returncode != 0:
+            raise GitHubOpsError(
+                f"Cannot remove verifier worktree directory: {(result.stderr or '').strip()}"
+            )
 
     def create_repo(self, name: str, private: bool = True, description: str = "") -> dict:
         """Create a new GitHub repository."""
