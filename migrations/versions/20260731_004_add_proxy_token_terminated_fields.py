@@ -39,13 +39,25 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """Remove terminated_at and termination_reason columns."""
+    """Remove terminated_at and termination_reason columns.
+
+    SQLite: Use batch mode for DROP COLUMN compatibility.
+    """
     connection = op.get_bind()
     inspector = sa.inspect(connection)
     existing_columns = {col["name"] for col in inspector.get_columns("proxy_token_jtis")}
+    dialect = connection.dialect.name
 
-    if "termination_reason" in existing_columns:
-        op.drop_column("proxy_token_jtis", "termination_reason")
-
-    if "terminated_at" in existing_columns:
-        op.drop_column("proxy_token_jtis", "terminated_at")
+    # SQLite requires batch mode for DROP COLUMN
+    if dialect == "sqlite":
+        with op.batch_alter_table("proxy_token_jtis") as batch_op:
+            if "termination_reason" in existing_columns:
+                batch_op.drop_column("termination_reason")
+            if "terminated_at" in existing_columns:
+                batch_op.drop_column("terminated_at")
+    else:
+        # PostgreSQL: direct DROP COLUMN
+        if "termination_reason" in existing_columns:
+            op.drop_column("proxy_token_jtis", "termination_reason")
+        if "terminated_at" in existing_columns:
+            op.drop_column("proxy_token_jtis", "terminated_at")

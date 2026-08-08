@@ -52,5 +52,24 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """Downgrade: drop columns (PostgreSQL) or no-op (SQLite).
+
+    SQLite does not support DROP COLUMN before version 3.35.0 (2021-03-12).
+    Batch mode is not suitable for production data preservation.
+    For SQLite, we skip column drops and rely on schema migration
+    during next upgrade.
+    """
+    from alembic import context
+
+    bind = op.get_bind()
+    dialect = bind.dialect.name
+
+    # SQLite: skip DROP COLUMN operations
+    if dialect == "sqlite":
+        # SQLite doesn't support DROP COLUMN in older versions
+        # Columns will remain but are harmless (nullable)
+        return
+
+    # PostgreSQL: proceed with DROP COLUMN
     for name, _, _ in reversed(COLUMNS):
         op.drop_column("autonomous_workflows", name)

@@ -80,14 +80,26 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """Remove tenant_version columns and tenant_migrations table."""
+    """Remove tenant_version columns and tenant_migrations table.
+
+    SQLite: Use batch mode for DROP COLUMN compatibility.
+    """
     # Drop tenant_migrations table and indexes
     op.drop_index("idx_tenant_migrations_status", table_name="tenant_migrations")
     op.drop_index("idx_tenant_migrations_user", table_name="tenant_migrations")
     op.drop_table("tenant_migrations")
 
-    # Drop tenant_version from agent_sessions
-    op.drop_column("agent_sessions", "tenant_version")
+    # Get dialect to determine approach
+    connection = op.get_bind()
+    dialect = connection.dialect.name
 
-    # Drop tenant_version from users
-    op.drop_column("users", "tenant_version")
+    # SQLite requires batch mode for DROP COLUMN
+    if dialect == "sqlite":
+        with op.batch_alter_table("agent_sessions") as batch_op:
+            batch_op.drop_column("tenant_version")
+        with op.batch_alter_table("users") as batch_op:
+            batch_op.drop_column("tenant_version")
+    else:
+        # PostgreSQL: direct DROP COLUMN
+        op.drop_column("agent_sessions", "tenant_version")
+        op.drop_column("users", "tenant_version")
