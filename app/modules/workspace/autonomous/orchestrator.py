@@ -80,6 +80,7 @@ from app.modules.workspace.autonomous.progress_report_i18n import (
     build_progress_payload,
     render_progress_report,
 )
+from app.modules.workspace.autonomous.terminal_report_i18n import render_ci_repair_terminal_report
 from app.repositories.autonomous_repo import DEFAULT_CONTENT_LANGUAGE, AutonomousWorkflowRepository
 from app.repositories.database import Database
 from app.repositories.user_repo import UserRepository
@@ -3414,6 +3415,14 @@ class AutonomousOrchestrator:
                 title="CI repair environment is incompatible",
                 error_message=runtime_error,
             )
+            self._emit_ci_repair_terminal_report(
+                wf,
+                pr_number,
+                category="ci_repair_environment_mismatch",
+                reason=runtime_error,
+                attempts=attempt,
+                branch_name=branch_name,
+            )
             self._update_workflow({"status": "failed", "error_message": runtime_error})
             return
 
@@ -3502,6 +3511,14 @@ class AutonomousOrchestrator:
                     "error_message": message,
                 },
             )
+            self._emit_ci_repair_terminal_report(
+                wf,
+                pr_number,
+                category="ci_repair_context_overflow",
+                reason=message,
+                attempts=attempt,
+                branch_name=branch_name,
+            )
             self._update_workflow({"status": "failed", "error_message": message})
             return
 
@@ -3521,6 +3538,14 @@ class AutonomousOrchestrator:
                         "status": "failed",
                         "error_message": message,
                     },
+                )
+                self._emit_ci_repair_terminal_report(
+                    wf,
+                    pr_number,
+                    category="ci_repair_branch_changed",
+                    reason=message,
+                    attempts=attempt,
+                    branch_name=branch_name,
                 )
                 self._update_workflow({"status": "failed", "error_message": message})
                 return
@@ -3595,6 +3620,14 @@ class AutonomousOrchestrator:
             milestone_updates["status"] = "failed"
             milestone_updates["error_message"] = message
             self.repo.update_milestone(repair_ms.get("milestone_id", ""), milestone_updates)
+            self._emit_ci_repair_terminal_report(
+                wf,
+                pr_number,
+                category="ci_repair_push_failed",
+                reason=message,
+                attempts=attempt,
+                branch_name=branch_name,
+            )
             self._update_workflow({"status": "failed", "error_message": message})
             return
 
@@ -3637,6 +3670,14 @@ class AutonomousOrchestrator:
             milestone_updates["error_message"] = message
             self.repo.update_milestone(repair_ms.get("milestone_id", ""), milestone_updates)
             if terminal:
+                self._emit_ci_repair_terminal_report(
+                    wf,
+                    pr_number,
+                    category="ci_repair_terminal",
+                    reason=message,
+                    attempts=attempt,
+                    branch_name=branch_name,
+                )
                 self._update_workflow({"status": "failed", "error_message": message})
             else:
                 self._update_workflow({"status": "merging", "error_message": message})
@@ -3647,6 +3688,14 @@ class AutonomousOrchestrator:
             milestone_updates["status"] = "failed"
             milestone_updates["error_message"] = message
             self.repo.update_milestone(repair_ms.get("milestone_id", ""), milestone_updates)
+            self._emit_ci_repair_terminal_report(
+                wf,
+                pr_number,
+                category="ci_repair_agent_failed",
+                reason=message,
+                attempts=attempt,
+                branch_name=branch_name,
+            )
             self._update_workflow({"status": "failed", "error_message": message})
             return
 
@@ -4618,6 +4667,57 @@ class AutonomousOrchestrator:
     def _resolve_recovery_head(self, main_gh: GitHubOps, wf: dict) -> tuple[str | None, str, dict]:
         return self._git_workspace.resolve_recovery_head(main_gh, wf)
 
+    def _emit_ci_repair_terminal_report(
+        self,
+        wf: dict,
+        pr_number: int,
+        *,
+        category: str,
+        reason: str,
+        attempts: int,
+        failure_names: str = "",
+        branch_name: str = "",
+    ) -> None:
+        """Post a Tier2 terminal report when CI repair exhausts (#2443 PR-A).
+
+        Makes an absorbing merge ``failed`` visible on its issue with a retry
+        entry point, instead of silent DB absorption (the #2443 gap). Does NOT
+        change the status machine — ``failed`` stays ``failed``. Idempotent: a
+        ``terminal_report_posted`` milestone (non-ci_repair_ prefix, so
+        completed milestones match) plus add_issue_comment's author-aware dedup,
+        so scheduler restart/replay never double-posts.
+        """
+        dev_round = int(wf.get("dev_round", 1) or 1)
+        if self._find_existing_milestone(
+            phase="merge",
+            milestone_type="terminal_report_posted",
+            dev_round=dev_round,
+            round_number=attempts,
+            completed=True,
+        ):
+            return
+        body = render_ci_repair_terminal_report(
+            category=category,
+            reason=reason,
+            attempts=attempts,
+            pr_number=pr_number,
+            failure_names=failure_names,
+            branch_name=branch_name,
+        )
+        try:
+            self._get_gh().add_issue_comment(pr_number, body)
+        except Exception as exc:
+            logger.warning("Failed to post CI repair terminal report to PR #%s: %s", pr_number, exc)
+        self._create_milestone(
+            phase="merge",
+            dev_round=dev_round,
+            round_number=attempts,
+            milestone_type="terminal_report_posted",
+            status="completed",
+            title=f"CI repair terminal report posted ({category})",
+            error_message=body[:500],
+        )
+
     def _start_ci_repair_round(self, wf: dict, pr_number: int, failed_checks: list[dict]) -> None:
         """Repair merge-phase CI failures in-place on the existing PR branch."""
         dev_round = int(wf.get("dev_round", 1) or 1)
@@ -4647,6 +4747,13 @@ class AutonomousOrchestrator:
                     title="CI repair transient retry limit reached",
                     error_message=message,
                 )
+                self._emit_ci_repair_terminal_report(
+                    wf,
+                    pr_number,
+                    category="ci_repair_transient_exhausted",
+                    reason=message,
+                    attempts=previous_attempts,
+                )
                 self._update_workflow({"status": "failed", "error_message": message})
                 return
             # Don't increment ci_repair_attempts; bump ci_repair_transient_retries
@@ -4675,6 +4782,13 @@ class AutonomousOrchestrator:
                         f"{MAX_CI_REPAIR_NO_CHANGE_RETRIES} retries"
                     ),
                     error_message=message,
+                )
+                self._emit_ci_repair_terminal_report(
+                    wf,
+                    pr_number,
+                    category="ci_repair_no_change_exhausted",
+                    reason=message,
+                    attempts=previous_attempts,
                 )
                 self._update_workflow({"status": "failed", "error_message": message})
                 return
@@ -4731,6 +4845,14 @@ class AutonomousOrchestrator:
                 status="failed",
                 title="CI automatic repair limit reached",
                 error_message=message,
+            )
+            self._emit_ci_repair_terminal_report(
+                wf,
+                pr_number,
+                category="ci_repair_exhausted",
+                reason=message,
+                attempts=next_attempt,
+                failure_names=failure_names,
             )
             self._update_workflow({"status": "failed", "error_message": message})
             return
@@ -4823,6 +4945,13 @@ class AutonomousOrchestrator:
                     pending_ms.get("milestone_id", ""),
                     {"status": "failed", "error_message": terminal},
                 )
+                self._emit_ci_repair_terminal_report(
+                    wf,
+                    pr_number,
+                    category="ci_repair_diagnostics_exhausted",
+                    reason=terminal,
+                    attempts=previous_attempts,
+                )
                 self._update_workflow(
                     {
                         "status": "failed",
@@ -4902,6 +5031,14 @@ class AutonomousOrchestrator:
                 status="failed",
                 title="CI failures unchanged after automatic repair",
                 error_message=message,
+            )
+            self._emit_ci_repair_terminal_report(
+                wf,
+                pr_number,
+                category="ci_repair_signature_unchanged",
+                reason=message,
+                attempts=next_attempt,
+                failure_names=failure_names,
             )
             self._update_workflow({"status": "failed", "error_message": message})
             return
