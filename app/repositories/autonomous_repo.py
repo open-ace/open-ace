@@ -183,6 +183,9 @@ class AutonomousWorkflowRepository:
             "reporting",
             "waiting",
             "merging",
+            # #2431: a workflow parked at acceptance_verification can still own
+            # an agent PID, so the startup orphan sweep must consider it.
+            "verification_pending",
         )
         placeholders = ", ".join(["?"] * len(active_statuses))
         conn = self.db.get_connection()
@@ -563,15 +566,22 @@ class AutonomousWorkflowRepository:
     def get_workflows_pending_cleanup(self) -> list:
         """Get delivered workflows whose Git cleanup is still pending (#2043).
 
-        Returns ``status='completed'`` rows with ``cleanup_status='pending'`` so
-        the startup sweep and scheduler retry pass can re-attempt worktree/branch
-        removal. Ordered by ``cleanup_updated_at`` so the oldest failures retry
-        first. Legacy rows (NULL cleanup_status) are excluded.
+        Returns delivered rows with ``cleanup_status='pending'`` so the startup
+        sweep and scheduler retry pass can re-attempt worktree/branch removal.
+        Ordered by ``cleanup_updated_at`` so the oldest failures retry first.
+        Legacy rows (NULL cleanup_status) are excluded.
+
+        ``verification_pending`` counts as delivered (#2431): the PR is merged
+        by the time the workflow reaches acceptance_verification, so its cleanup
+        is just as due as a completed workflow's. Excluding it left the sweep
+        blind for the entire parked window. The caller skips workflows the
+        scheduler is currently advancing — see ``_is_in_flight``.
         """
         return self.db.fetch_all(
             """
             SELECT * FROM autonomous_workflows
-            WHERE status = 'completed' AND cleanup_status = 'pending'
+            WHERE status IN ('completed', 'verification_pending')
+              AND cleanup_status = 'pending'
             ORDER BY cleanup_updated_at ASC NULLS LAST, created_at ASC
             """
         )

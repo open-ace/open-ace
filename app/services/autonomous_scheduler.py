@@ -90,6 +90,35 @@ RUNNING_BATCH_STATUSES = {
 QUEUE_ADVANCE_STATUSES = {"waiting", "completed", "failed", "planning_timeout"}
 QUEUE_BLOCKING_STATUSES = {"paused", "cancelled"}
 
+# Phases at or past which the workflow's PR is already merged and its git
+# working tree released, so a batch sibling may start even though this workflow
+# has not reached a terminal status. (#2431)
+#
+# Keyed on PHASE, not status, deliberately. A workflow resting in
+# acceptance_verification can carry several different statuses —
+# verification_pending (parked awaiting the verifier), paused (an
+# ``indeterminate`` verdict), failed, completed — and for queueing purposes they
+# all mean the same thing: the merge is done, nothing downstream needs the slot.
+# Enumerating those statuses in QUEUE_ADVANCE_STATUSES instead would have to be
+# redone every time the phase grows an outcome, and would still miss ``paused``,
+# which QUEUE_BLOCKING_STATUSES rejects one branch earlier.
+#
+# Verified against production: every parked row carries
+# ``cleanup_status='completed'`` and an EMPTY ``worktree_path``, so the working
+# tree really is released by the time the workflow gets here.
+DELIVERED_PHASES = frozenset({"acceptance_verification"})
+
+
+def _slot_released(wf: dict) -> bool:
+    """Whether this workflow has stopped occupying its batch's execution slot.
+
+    The batch queue exists only to keep two agents out of the same git working
+    tree. Once the merge phase completes the branch is on main and the worktree
+    is released, so the next sibling is free to start.
+    """
+    return (wf.get("current_phase") or "") in DELIVERED_PHASES
+
+
 # Prefix written to error_message when a workflow is paused because its owner
 # exceeded quota. The scheduler auto-resumes only workflows paused with this
 # prefix — a user's manual pause (error_message empty / different text) is left
@@ -736,10 +765,23 @@ class AutonomousScheduler:
 
             previous_workflow = batch_workflows[queued_index - 1]
             previous_status = previous_workflow.get("status")
-            if previous_status in QUEUE_BLOCKING_STATUSES or previous_status == "queued":
+            # These two block regardless of phase. `cancelled` is an operator
+            # decision — a stopped batch must not resurrect itself just because
+            # the head happened to reach acceptance — and a `queued` predecessor
+            # has not run at all.
+            if previous_status in ("cancelled", "queued"):
                 continue
-            if previous_status not in QUEUE_ADVANCE_STATUSES:
-                continue
+            # A predecessor past the merge phase releases the queue whatever its
+            # status: it holds no worktree. Without this a workflow parked in
+            # `verification_pending` — which is in NEITHER status set — stalls
+            # the entire remainder of the batch indefinitely, and an
+            # `indeterminate` acceptance verdict re-stalls it under the name
+            # `paused`, which the blocking set rejects one branch earlier. #2431
+            if not _slot_released(previous_workflow):
+                if previous_status in QUEUE_BLOCKING_STATUSES:
+                    continue
+                if previous_status not in QUEUE_ADVANCE_STATUSES:
+                    continue
 
             repo.update_workflow(workflow["workflow_id"], {"status": "pending"})
             _emit_event_safe(workflow["workflow_id"], "status_change", {"status": "pending"})
@@ -1075,6 +1117,24 @@ def _reconcile_pending_transitions():
         logger.error("Worktree transition reconcile sweep failed: %s", e, exc_info=True)
 
 
+def _is_in_flight(workflow_id: str) -> bool:
+    """Whether the scheduler is currently advancing this workflow (#2431).
+
+    The cleanup sweep runs on the scheduler thread at the top of every tick and
+    takes neither the in-progress set nor the DB lock, while
+    ``_perform_git_cleanup`` removes the worktree AND the branch. That was safe
+    only because ``status='completed'`` rows are never advanced. Once the sweep
+    also returns rows that CAN advance, an in-flight acceptance verification —
+    an LLM agent call lasting minutes — could have its worktree deleted out from
+    under it. Cheap to check, and it hardens the pre-existing path too.
+    """
+    instance = AutonomousScheduler._instance
+    if instance is None:
+        return False
+    with instance._in_progress_lock:
+        return workflow_id in instance._in_progress_ids
+
+
 def _retry_pending_git_cleanups(repo=None):
     """Re-attempt post-merge Git cleanup for delivered workflows (#2043).
 
@@ -1104,6 +1164,9 @@ def _retry_pending_git_cleanups(repo=None):
         for wf in pending:
             wf_id = wf.get("workflow_id")
             if not isinstance(wf_id, str) or not wf_id:
+                continue
+            if _is_in_flight(wf_id):
+                logger.debug("Skipping cleanup sweep for in-flight workflow %s", wf_id[:8])
                 continue
             # Backoff: skip until cleanup_next_retry_at has passed.
             next_retry = wf.get("cleanup_next_retry_at") or ""
