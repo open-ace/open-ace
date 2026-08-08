@@ -708,6 +708,29 @@ def test_lock_lost_before_orchestrator_registration_never_advances():
     repo.update_workflow.assert_not_called()
 
 
+def test_heartbeat_start_failure_still_releases_distributed_lock():
+    scheduler = AutonomousScheduler()
+    repo = MagicMock()
+    repo.get_workflow.return_value = {"workflow_id": "wf-start", "status": "planning"}
+    repo.acquire_lock.return_value = True
+    heartbeat_thread = MagicMock()
+    heartbeat_thread.start.side_effect = RuntimeError("thread unavailable")
+
+    with (
+        patch("app.routes.autonomous._get_repo", return_value=repo),
+        patch(
+            "app.modules.workspace.autonomous.orchestrator.AutonomousOrchestrator"
+        ) as orchestrator_cls,
+        patch.object(scheduler_module.threading, "Thread", return_value=heartbeat_thread),
+    ):
+        scheduler._advance_single("wf-start")
+
+    orchestrator_cls.assert_not_called()
+    heartbeat_thread.join.assert_not_called()
+    owner = repo.acquire_lock.call_args.args[1]
+    repo.release_lock.assert_called_once_with("wf-start", owner)
+
+
 def test_phase_commit_is_fenced_after_scheduler_lock_loss():
     orchestrator = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
     orchestrator.repo = MagicMock()

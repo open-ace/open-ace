@@ -565,7 +565,6 @@ class AutonomousScheduler:
             name=f"workflow-lock-{workflow_id[:8]}",
             daemon=True,
         )
-        heartbeat_thread.start()
 
         # Quota gate (fail-closed): a user over quota (or whose quota check
         # errored) must not advance. This scheduler is the lifecycle authority
@@ -583,7 +582,10 @@ class AutonomousScheduler:
         # still release the DB lock and in-progress slot — otherwise a
         # quota-paused workflow would hold both forever.
         orchestrator = None
+        heartbeat_started = False
         try:
+            heartbeat_thread.start()
+            heartbeat_started = True
             # owner_id resolved above (alongside batch_id) for in-progress accounting.
             if owner_id is not None:
                 try:
@@ -631,6 +633,11 @@ class AutonomousScheduler:
         finally:
             with self._orchestrator_lock:
                 self._running_orchestrators.pop(workflow_id, None)
+            # Stop and join the renewer before any final mutation/release so it
+            # cannot refresh a lease after this worker relinquishes ownership.
+            heartbeat_stop.set()
+            if heartbeat_started:
+                heartbeat_thread.join(timeout=1)
             # Safety net: clear stale agent identity only if this worker still
             # owns the distributed lease. A superseded worker must not erase a
             # replacement process's freshly-registered PID.
@@ -638,10 +645,6 @@ class AutonomousScheduler:
                 repo.clear_agent_pid_if_lock_owner(workflow_id, lock_owner)
             except Exception:
                 pass
-            # Stop and join the renewer before release so it cannot refresh a
-            # lease after this worker has relinquished ownership.
-            heartbeat_stop.set()
-            heartbeat_thread.join(timeout=1)
             # Release DB lock
             try:
                 repo.release_lock(workflow_id, lock_owner)
