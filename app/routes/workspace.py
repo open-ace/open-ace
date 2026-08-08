@@ -1209,9 +1209,14 @@ def create_session():
         if project_path:
             base_dirs = get_workspace_base_dirs()
             if not is_valid_path(project_path, allowed_prefixes=base_dirs):
-                # Log without exposing the actual path for security
-                logger.warning("Invalid project_path rejected")
-                return jsonify({"success": False, "error": "Invalid project path"}), 400
+                # Remote-machine paths (Windows drive form, e.g. C:\workspace\aaa)
+                # live on the remote agent host, not inside this container, so the
+                # container-local check below would wrongly reject them. Allow them
+                # through; they never touch the local filesystem here.
+                if not re.match(r"^[A-Za-z]:[\\/]", project_path):
+                    # Log without exposing the actual path for security
+                    logger.warning("Invalid project_path rejected")
+                    return jsonify({"success": False, "error": "Invalid project path"}), 400
 
         # If project_path is provided but not project_id, look up the project
         if project_path and not project_id:
