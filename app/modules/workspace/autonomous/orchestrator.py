@@ -17,7 +17,6 @@ import shlex
 import shutil
 import subprocess
 import sys
-import tempfile
 import threading
 import time
 import uuid
@@ -123,20 +122,28 @@ COMPLETION_KEYWORDS = [
 # ── Framework inference for test detection (Phase 1, P0) ────────────────
 
 
-def _remove_worktree_dir(gh, path: str) -> None:
+def _remove_worktree_dir(gh, path: str, project_path: str = "") -> None:
     """Best-effort removal of a (possibly registered) worktree dir (#2335 S5).
 
     Tries ``git worktree remove --force`` when a GitHubOps handle is available
-    (unregisters the worktree from the repo's metadata), then falls back to a
-    filesystem ``shutil.rmtree``. Never raises — this runs in cleanup paths.
+    (unregisters the worktree from the repo's metadata), then uses repository-
+    owner cleanup for verifier directories before a final filesystem fallback.
+    Never raises — this runs in cleanup paths.
     """
     if not path:
         return
     if gh is not None:
         try:
             gh._run_git(["worktree", "remove", path, "--force"])
+            return
         except Exception:
             pass
+        if project_path:
+            try:
+                gh.remove_verification_worktree_dir(path, project_path)
+                return
+            except Exception:
+                pass
     try:
         if os.path.isdir(path):
             shutil.rmtree(path, ignore_errors=True)
@@ -1887,6 +1894,11 @@ class AutonomousOrchestrator:
         # interrupts the current attempt without changing the workflow's active
         # phase/status, so the next process can retry it automatically.
         self._shutdown_requested = threading.Event()
+        # Bound by AutonomousScheduler after it acquires the distributed
+        # workflow lease. Direct/unit callers leave these unset and retain the
+        # legacy unfenced behavior.
+        self._scheduler_lock_owner: str | None = None
+        self._scheduler_lock_lost: threading.Event | None = None
 
         # Wire session_manager so agent sessions are persisted to DB
         from app.modules.workspace.session_manager import SessionManager
@@ -4313,6 +4325,7 @@ class AutonomousOrchestrator:
         but routing every transition through here makes phase/status mutation a
         single auditable path — the property Phase A requires.
         """
+        self._assert_scheduler_lock()
         patch: dict[str, object] = dict(result.workflow_patch)
 
         if result.outcome == "completed":
@@ -4955,9 +4968,24 @@ class AutonomousOrchestrator:
             repair_wf = self.workflow or repair_wf
         self._run_merge_ci_repair(repair_wf, gh, pr_number, failed_checks)
 
+    def _persist_workflow_update(self, updates: dict) -> dict | None:
+        """Persist one workflow patch, fenced by the scheduler lease when bound."""
+        lock_owner = getattr(self, "_scheduler_lock_owner", None)
+        if lock_owner:
+            updated = self.repo.update_workflow(
+                self._workflow_id,
+                updates,
+                required_lock_owner=lock_owner,
+            )
+            if updated is None:
+                self._mark_scheduler_lock_lost()
+                raise WorkflowPaused("Distributed workflow lock was lost")
+            return updated
+        return self.repo.update_workflow(self._workflow_id, updates)
+
     def _update_workflow(self, updates: dict):
         """Update workflow and emit event."""
-        self.repo.update_workflow(self._workflow_id, updates)
+        self._persist_workflow_update(updates)
         self._emit("workflow_updated", updates)
 
     def _cleanup_worktree_and_branch(
@@ -5050,6 +5078,7 @@ class AutonomousOrchestrator:
 
     def _accumulate_tokens(self, _result: AgentTaskResult):
         """Refresh workflow totals from the sessions linked to milestones."""
+        self._assert_scheduler_lock()
         self.repo.refresh_workflow_usage_from_sessions(self._workflow_id)
 
     def _persist_sandbox_attribution(self, result: AgentTaskResult) -> None:
@@ -5065,14 +5094,13 @@ class AutonomousOrchestrator:
         if not provider and not sandbox_id:
             return  # no sandbox ran (e.g. CLI not found before create)
         try:
-            self.repo.update_workflow(
-                self._workflow_id,
+            self._persist_workflow_update(
                 {
                     "sandbox_provider": provider,
                     "sandbox_id": sandbox_id,
                     "sandbox_generation": getattr(result, "sandbox_generation", None),
                     "sandbox_state": getattr(result, "sandbox_state", "") or None,
-                },
+                }
             )
         except Exception as e:  # pragma: no cover - best-effort attribution
             logger.warning(
@@ -5281,8 +5309,7 @@ class AutonomousOrchestrator:
     def _on_pid_registered(self, session_id: str, pid: int):
         """Persist agent subprocess PID to database for reliable cancel/pause."""
         try:
-            self.repo.update_workflow(
-                self._workflow_id,
+            self._persist_workflow_update(
                 {
                     "agent_pid": pid,
                     "agent_session_id": session_id,
@@ -5328,7 +5355,7 @@ class AutonomousOrchestrator:
                 updates["sandbox_remote_session_id"] = remote_session_id
             if effective_policy is not None:
                 updates["sandbox_effective_policy"] = json.dumps(effective_policy)
-            self.repo.update_workflow(self._workflow_id, updates)
+            self._persist_workflow_update(updates)
             logger.info(
                 "Registered sandbox %s (provider=%s) for workflow %s%s",
                 sandbox_id[:8],
@@ -5344,8 +5371,7 @@ class AutonomousOrchestrator:
         try:
             with self._session_lock:
                 if self._current_session_id == session_id:
-                    self.repo.update_workflow(
-                        self._workflow_id,
+                    self._persist_workflow_update(
                         {
                             "agent_pid": None,
                             "agent_session_id": "",
@@ -6396,8 +6422,58 @@ class AutonomousOrchestrator:
             for session_id in session_ids:
                 offsets.pop(session_id, None)
 
+    def bind_scheduler_lock(self, owner: str, lock_lost: threading.Event) -> None:
+        """Attach the scheduler's lease identity and shared loss signal."""
+        self._scheduler_lock_owner = owner
+        self._scheduler_lock_lost = lock_lost
+
+    def _mark_scheduler_lock_lost(self) -> None:
+        event = getattr(self, "_scheduler_lock_lost", None)
+        if event is not None:
+            event.set()
+        # Do not call prepare_for_shutdown() here: this helper can run from the
+        # PID-cleared callback while _session_lock is held, and re-entering that
+        # non-reentrant lock would deadlock. The heartbeat owns active process
+        # interruption; these signals fence every subsequent local action.
+        shutdown = getattr(self, "_shutdown_requested", None)
+        if shutdown is not None:
+            shutdown.set()
+        cancel = getattr(self, "_cancel_requested", None)
+        if cancel is not None:
+            cancel.set()
+
+    def ensure_scheduler_lock(self) -> bool:
+        """Refresh and fence the lease before an irreversible external action."""
+        owner = getattr(self, "_scheduler_lock_owner", None)
+        if not owner:
+            return not self._is_shutdown_requested()
+        lost = getattr(self, "_scheduler_lock_lost", None)
+        if lost is not None and lost.is_set():
+            return False
+        try:
+            held = self.repo.refresh_lock(self._workflow_id, owner)
+        except Exception:
+            logger.warning(
+                "Could not fence workflow %s before external mutation",
+                self._workflow_id[:8],
+                exc_info=True,
+            )
+            return False
+        if held:
+            return True
+        self._mark_scheduler_lock_lost()
+        return False
+
+    def _assert_scheduler_lock(self) -> None:
+        """Raise the pause control signal when this worker has been superseded."""
+        if not self.ensure_scheduler_lock():
+            raise WorkflowPaused("Distributed workflow lock was lost")
+
     def _is_shutdown_requested(self) -> bool:
         """Support lightweight test/legacy instances constructed without ``__init__``."""
+        lock_lost = getattr(self, "_scheduler_lock_lost", None)
+        if lock_lost is not None and lock_lost.is_set():
+            return True
         event = getattr(self, "_shutdown_requested", None)
         return bool(event and event.is_set())
 
@@ -6795,7 +6871,7 @@ class AutonomousOrchestrator:
             if gh is None:
                 return True
             res = gh.get_issue(int(issue_number))
-            return (res or {}).get("state", "open") == "open"
+            return str((res or {}).get("state", "open")).lower() == "open"
         except Exception:
             # Fail open: if we can't tell, don't spuriously reopen.
             return True
@@ -6816,14 +6892,33 @@ class AutonomousOrchestrator:
         gh = self._get_gh()
         if gh is None:
             return None
-        tmp_dir = tempfile.mkdtemp(prefix="ace-verify-")
+        try:
+            available = gh.ensure_commit_available(merge_sha)
+        except Exception:
+            logger.exception(
+                "acceptance verifier: failed to fetch merge commit locally: %s", merge_sha
+            )
+            return None
+        if not available:
+            logger.error("acceptance verifier: merge commit unavailable locally: %s", merge_sha)
+            return None
+        wf = self.workflow or {}
+        project_path = str(wf.get("project_path") or "")
+        if not project_path:
+            logger.error("acceptance verifier: project path unavailable")
+            return None
+        try:
+            tmp_dir = gh.create_verification_worktree_dir(project_path)
+        except Exception:
+            logger.exception("acceptance verifier: failed to allocate owner-readable worktree")
+            return None
         try:
             # Detached HEAD at the merge commit: a read-only throwaway view.
             gh._run_git(["worktree", "add", "--detach", tmp_dir, merge_sha])
         except Exception:
             logger.exception("acceptance verifier: failed to checkout merged main @ %s", merge_sha)
             # Clean up the empty dir so no half-created state lingers.
-            _remove_worktree_dir(gh, tmp_dir)
+            _remove_worktree_dir(gh, tmp_dir, project_path)
             return None
         return tmp_dir
 
@@ -6836,7 +6931,8 @@ class AutonomousOrchestrator:
         if not path:
             return
         gh = self._get_gh()
-        _remove_worktree_dir(gh, path)
+        wf = self.workflow or {}
+        _remove_worktree_dir(gh, path, str(wf.get("project_path") or ""))
 
     def _run_verification_agent(
         self, *, snapshot, merge_sha, base_sha, issue_number, pr_number
@@ -6857,7 +6953,12 @@ class AutonomousOrchestrator:
 
         checkout_path = self._checkout_merged_main(merge_sha)
         if not checkout_path:
-            return {"verdicts": [], "snapshot": None, "verified_by": verified_by}
+            return {
+                "verdicts": [],
+                "snapshot": None,
+                "verified_by": verified_by,
+                "infra_error": "merged-main checkout failed",
+            }
         try:
             # Spawn the agent against the merged-main checkout, NOT the dev
             # worktree. We override worktree_path/project_path on a shallow
@@ -6878,9 +6979,22 @@ class AutonomousOrchestrator:
             )
         except Exception:
             logger.exception("acceptance verifier spawn failed for issue %s", issue_number)
-            return {"verdicts": [], "snapshot": None, "verified_by": verified_by}
+            return {
+                "verdicts": [],
+                "snapshot": None,
+                "verified_by": verified_by,
+                "infra_error": "verification agent spawn failed",
+            }
         finally:
             self._remove_verification_worktree(checkout_path)
+        if result is None or getattr(result, "success", False) is not True:
+            error_code = getattr(result, "error_code", None) if result is not None else None
+            return {
+                "verdicts": [],
+                "snapshot": None,
+                "verified_by": verified_by,
+                "infra_error": f"verification agent failed ({error_code or 'runner error'})",
+            }
         parsed = self._parse_verifier_output(result)
         parsed["verified_by"] = verified_by
         return parsed
@@ -6915,7 +7029,11 @@ class AutonomousOrchestrator:
 
         text = self._artifact_text(result) if result is not None else ""
         if not text:
-            return {"verdicts": [], "snapshot": None}
+            return {
+                "verdicts": [],
+                "snapshot": None,
+                "infra_error": "verification agent returned empty output",
+            }
         # Grab the last fenced ```json ... ``` block (the agent may preface reasoning).
         blocks = _re.findall(r"```(?:json)?\s*(\{.*?\})\s*```", text, _re.DOTALL)
         candidate = blocks[-1] if blocks else text
@@ -6925,9 +7043,30 @@ class AutonomousOrchestrator:
             logger.warning(
                 "acceptance verifier output was not valid JSON; treating as indeterminate"
             )
-            return {"verdicts": [], "snapshot": None}
+            return {
+                "verdicts": [],
+                "snapshot": None,
+                "infra_error": "verification agent output was not valid JSON",
+            }
         if not isinstance(parsed, dict):
-            return {"verdicts": [], "snapshot": None}
+            return {
+                "verdicts": [],
+                "snapshot": None,
+                "infra_error": "verification agent output was not an object",
+            }
+        verdicts = parsed.get("verdicts", [])
+        if not isinstance(verdicts, list) or any(not isinstance(item, dict) for item in verdicts):
+            return {
+                "verdicts": [],
+                "snapshot": None,
+                "infra_error": "verification agent verdicts were malformed",
+            }
+        if parsed.get("snapshot") is not None and not isinstance(parsed.get("snapshot"), dict):
+            return {
+                "verdicts": [],
+                "snapshot": None,
+                "infra_error": "verification agent snapshot was malformed",
+            }
         parsed.setdefault("verdicts", [])
         parsed.setdefault("snapshot", None)
         return parsed

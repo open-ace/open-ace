@@ -11,11 +11,15 @@ import logging
 import os
 import pwd
 import re
+import shutil
 import subprocess
 import sys
 import time
+import uuid
 from pathlib import Path
 from urllib.parse import urlparse
+
+from app.utils.workspace import OPENACE_RM_WRAPPER
 
 logger = logging.getLogger(__name__)
 
@@ -712,6 +716,80 @@ class GitHubOps:
 
     # ── Repo Operations ────────────────────────────────────────────
 
+    def create_verification_worktree_dir(self, project_path: str) -> str:
+        """Allocate an empty verifier worktree directory as the repo owner.
+
+        ``git worktree add`` runs as ``system_account`` in multi-user mode, so
+        its destination must not be a service-owned ``tempfile.mkdtemp``
+        directory (which is mode 0700 and cannot be traversed cross-user).
+        Keep verifier checkouts under the repository's established
+        ``.worktrees`` root and create both the root and the unique child with
+        the same identity that will run git.
+        """
+        project_root = os.path.realpath(project_path)
+        if not project_root or not os.path.isabs(project_root):
+            raise GitHubOpsError("Cannot allocate verifier worktree under an invalid project path")
+        worktrees_root = os.path.join(project_root, ".worktrees")
+        kwargs = self._build_subprocess_kwargs()
+        kwargs.pop("cwd", None)
+        kwargs["timeout"] = 10
+
+        def _mkdir(args: list[str]) -> subprocess.CompletedProcess:
+            if self._needs_sudo():
+                account = self.system_account
+                assert account is not None
+                cmd = ["sudo", "-u", account, "mkdir", *args]
+            else:
+                cmd = ["mkdir", *args]
+            return subprocess.run(cmd, **kwargs)
+
+        root_result = _mkdir(["-p", "--", worktrees_root])
+        if root_result.returncode != 0:
+            raise GitHubOpsError(
+                "Cannot create verifier worktree root: " f"{(root_result.stderr or '').strip()}"
+            )
+
+        for _attempt in range(3):
+            path = os.path.join(worktrees_root, f"verify-{uuid.uuid4().hex}")
+            result = _mkdir(["-m", "700", "--", path])
+            if result.returncode == 0:
+                return path
+        raise GitHubOpsError(
+            "Cannot allocate a unique verifier worktree directory: "
+            f"{(result.stderr or '').strip()}"
+        )
+
+    def remove_verification_worktree_dir(self, path: str, project_path: str) -> None:
+        """Remove a verifier directory with the identity that owns it.
+
+        This is only the fallback after ``git worktree remove``. The strict
+        direct-child and ``verify-`` checks keep recursive deletion scoped to
+        directories allocated by :meth:`create_verification_worktree_dir`.
+        """
+        worktrees_root = os.path.realpath(os.path.join(project_path, ".worktrees"))
+        real_path = os.path.realpath(path)
+        _assert_path_contained(real_path, worktrees_root, label="verification worktree")
+        if os.path.dirname(real_path) != worktrees_root or not os.path.basename(
+            real_path
+        ).startswith("verify-"):
+            raise GitHubOpsError("Refusing to remove a non-verifier worktree directory")
+        if not self._needs_sudo():
+            shutil.rmtree(real_path, ignore_errors=True)
+            return
+        account = self.system_account
+        assert account is not None
+        result = subprocess.run(
+            ["sudo", OPENACE_RM_WRAPPER, account, real_path, "-r", "-f"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env=self._build_subprocess_kwargs().get("env"),
+        )
+        if result.returncode != 0:
+            raise GitHubOpsError(
+                f"Cannot remove verifier worktree directory: {(result.stderr or '').strip()}"
+            )
+
     def create_repo(self, name: str, private: bool = True, description: str = "") -> dict:
         """Create a new GitHub repository."""
         args = ["repo", "create", name]
@@ -794,10 +872,35 @@ class GitHubOps:
         return json.loads(result.stdout.strip())
 
     def add_issue_comment(self, number: int, body: str) -> dict:
-        """Add a comment to an issue."""
+        """Add a comment, deduplicating an exact prior body from this bot.
+
+        Acceptance verification can be re-entered after a crash between the
+        GitHub mutation and the local workflow update.  Reading first makes the
+        externally-visible operation idempotent for that retry instead of
+        posting the same report twice.  A human-authored copy is not proof that
+        the configured service account already posted its audit record.  When
+        bot identity cannot be established, fail closed for deduplication and
+        post the comment.
+        """
+        bot_login = self.get_authenticated_login()
+        if bot_login:
+            for comment in self.list_issue_comments(number):
+                author = comment.get("author") or {}
+                author_login = author.get("login") if isinstance(author, dict) else author
+                if (
+                    comment.get("body") == body
+                    and isinstance(author_login, str)
+                    and author_login.casefold() == bot_login.casefold()
+                ):
+                    logger.info("Issue #%s already has the requested bot comment; skipping", number)
+                    return {
+                        "number": number,
+                        "id": comment.get("id"),
+                        "deduplicated": True,
+                    }
         self._run_gh(["issue", "comment", str(number), "--body", body], api_only=True)
         logger.info("Added comment to issue #%s", number)
-        return {"number": number}
+        return {"number": number, "deduplicated": False}
 
     def close_issue(self, number: int) -> dict:
         """Close an issue.
@@ -821,14 +924,136 @@ class GitHubOps:
         return {"number": number}
 
     def list_issue_comments(self, number: int, since: str | None = None) -> list:
-        """List comments on an issue, optionally since a timestamp."""
-        args = ["issue", "view", str(number), "--comments", "--json", "comments"]
-        result = self._run_gh(args)
-        data = json.loads(result.stdout.strip())
-        comments = data.get("comments", [])
+        """List every issue comment, optionally since a timestamp.
+
+        Use the paginated REST endpoint rather than ``gh issue view``'s
+        connection so an older matching bot comment cannot fall off the first
+        page and be posted again.  Output is normalized to the camelCase shape
+        used by the existing wait/report consumers.
+        """
+        try:
+            repo = self.get_repo_name()
+        except (GitHubOpsError, json.JSONDecodeError):
+            repo = ""
+        if repo:
+            result = self._run_gh(
+                self._gh_api_args(
+                    [
+                        "--paginate",
+                        f"repos/{repo}/issues/{number}/comments",
+                        "--jq",
+                        ".[] | {id, body, createdAt: .created_at, author: {login: .user.login}}",
+                    ]
+                ),
+                repo_scoped=False,
+                api_only=True,
+            )
+        else:
+            # Pre-remote repositories cannot form a REST path. Preserve the
+            # best-effort CLI fallback used before pagination hardening.
+            result = self._run_gh(
+                ["issue", "view", str(number), "--comments", "--json", "comments"],
+                api_only=True,
+            )
+        comments: list[dict] = []
+        for line in (result.stdout or "").splitlines():
+            try:
+                parsed = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(parsed, dict):
+                continue
+            # Compatibility with old/mocked ``gh issue view`` output keeps
+            # callers resilient while production uses NDJSON from ``--jq``.
+            nested = parsed.get("comments")
+            if isinstance(nested, list):
+                comments.extend(item for item in nested if isinstance(item, dict))
+            else:
+                comments.append(parsed)
         if since:
             comments = [c for c in comments if c.get("createdAt", "") > since]
         return comments
+
+    def get_authenticated_login(self) -> str | None:
+        """Return the login associated with the configured bot credentials.
+
+        Without an explicit AI GitHub token, ``gh`` may inherit a repository
+        owner's personal login.  That identity must never be treated as the
+        autonomous service account for reopen decisions.
+        """
+        env = self._get_env()
+        if not env or not env.get("GH_TOKEN"):
+            return None
+        result = self._run_gh(
+            self._gh_api_args(["user", "--jq", ".login"]),
+            check=False,
+            repo_scoped=False,
+            api_only=True,
+        )
+        if result.returncode != 0:
+            return None
+        login = (result.stdout or "").strip()
+        return login or None
+
+    def get_issue_closure(self, number: int) -> dict | None:
+        """Return the current issue closure timestamp and its actual actor.
+
+        The issue view establishes that the issue is currently closed and gives
+        the authoritative ``closedAt`` timestamp.  The timeline API supplies
+        the actor for the latest close event.  Missing/ambiguous data returns
+        ``None`` so callers fail closed and never reopen a human's issue.
+        """
+        state_result = self._run_gh(
+            ["issue", "view", str(number), "--json", "state,closedAt"],
+            check=False,
+            api_only=True,
+        )
+        if state_result.returncode != 0:
+            return None
+        try:
+            issue = json.loads((state_result.stdout or "").strip() or "{}")
+        except json.JSONDecodeError:
+            return None
+        closed_at = issue.get("closedAt")
+        if str(issue.get("state") or "").lower() != "closed" or not closed_at:
+            return None
+
+        repo = self.get_repo_name()
+        if not repo:
+            return None
+        timeline_result = self._run_gh(
+            self._gh_api_args(
+                [
+                    "--paginate",
+                    f"repos/{repo}/issues/{number}/timeline",
+                    "--jq",
+                    '.[] | select(.event == "closed") | {closed_at: .created_at, closer_login: .actor.login}',
+                ]
+            ),
+            check=False,
+            repo_scoped=False,
+            api_only=True,
+        )
+        if timeline_result.returncode != 0:
+            return None
+        events: list[dict] = []
+        for line in (timeline_result.stdout or "").splitlines():
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(event, dict):
+                events.append(event)
+        if not events:
+            return None
+        matching = [event for event in events if event.get("closed_at") == closed_at]
+        if not matching:
+            return None
+        latest = matching[-1]
+        closer_login = latest.get("closer_login")
+        if not isinstance(closer_login, str) or not closer_login:
+            return None
+        return {"closed_at": closed_at, "closer_login": closer_login}
 
     def update_issue(self, number: int, title: str | None = None, body: str | None = None) -> dict:
         """Update an issue's title or body."""
@@ -1409,6 +1634,30 @@ class GitHubOps:
         )
         out = (result.stdout or "").strip()
         return out or None
+
+    def ensure_commit_available(self, commit_sha: str) -> bool:
+        """Fetch a merge commit into the local repository if it is absent.
+
+        ``gh pr merge`` completes server-side, so its merge SHA is not
+        necessarily present in the long-lived production clone.  Fetch the
+        exact object first, fall back to the reachable ``main`` ref for servers
+        that disallow raw-SHA wants, then verify the object before any diff or
+        worktree operation uses it.
+        """
+        if not re.fullmatch(r"[0-9a-fA-F]{7,40}", commit_sha or ""):
+            return False
+
+        def _present() -> bool:
+            result = self._run_git(["cat-file", "-e", f"{commit_sha}^{{commit}}"], check=False)
+            return result.returncode == 0
+
+        if _present():
+            return True
+        self._run_git(["fetch", "--no-tags", "origin", commit_sha], check=False)
+        if _present():
+            return True
+        self._run_git(["fetch", "--no-tags", "origin", "main"], check=False)
+        return _present()
 
     def _gh_api_args(self, extra: list[str]) -> list[str]:
         """Build a ``gh api`` arg list with GHES hostname handling.

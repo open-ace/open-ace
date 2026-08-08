@@ -104,6 +104,9 @@ class PhaseHost(Protocol):
     def emit_audit_event(self, name: str, payload: dict) -> None:
         """Emit a generic audit event (e.g. acceptance_reopened_issue)."""
 
+    def ensure_scheduler_lock(self) -> bool:
+        """Fence the distributed lease before an irreversible external action."""
+
     # ── Merge-phase helpers (#2044 Phase B T10) ──────────────────────────
     # These are orchestrator-private methods (each tens-to-hundreds of lines,
     # with their own transitive ``self._`` calls) that the merge handler needs
