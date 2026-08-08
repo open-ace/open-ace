@@ -107,6 +107,7 @@ QUEUE_BLOCKING_STATUSES = {"paused", "cancelled"}
 # ``cleanup_status='completed'`` and an EMPTY ``worktree_path``, so the working
 # tree really is released by the time the workflow gets here.
 DELIVERED_PHASES = frozenset({"acceptance_verification"})
+_TERMINAL_ACCEPTANCE_STATUSES = frozenset({"confirmed", "rejected", "indeterminate"})
 
 
 def _slot_released(wf: dict) -> bool:
@@ -116,7 +117,17 @@ def _slot_released(wf: dict) -> bool:
     tree. Once the merge phase completes the branch is on main and the worktree
     is released, so the next sibling is free to start.
     """
-    return (wf.get("current_phase") or "") in DELIVERED_PHASES
+    if (wf.get("current_phase") or "") not in DELIVERED_PHASES:
+        return False
+    # A manual pause can freeze the verifier before its handler returns. It is
+    # not delivered yet: resume SIGCONTs that same agent. Only a persisted
+    # terminal acceptance verdict proves that a paused handler has finished and
+    # the batch/conflict slot may be handed to a sibling.
+    if wf.get("status") == "paused":
+        if wf.get("agent_pid"):
+            return False
+        return (wf.get("verification_status") or "") in _TERMINAL_ACCEPTANCE_STATUSES
+    return True
 
 
 # Prefix written to error_message when a workflow is paused because its owner
@@ -383,6 +394,13 @@ class AutonomousScheduler:
             except Exception:
                 w = None
             if w and w.get("status") == "paused":
+                # Any acceptance workflow still present in _in_progress_ids is
+                # inside advance(), even if a prior terminal verdict remains on
+                # the row while a changed issue is being re-verified. A manual
+                # pause resumes that same verifier via SIGCONT, so keep every
+                # conflict key until advance()'s finally releases them.
+                if w.get("current_phase") == "acceptance_verification":
+                    continue
                 paused.append(w)
 
         if not paused:
@@ -1118,15 +1136,12 @@ def _reconcile_pending_transitions():
 
 
 def _is_in_flight(workflow_id: str) -> bool:
-    """Whether the scheduler is currently advancing this workflow (#2431).
+    """Whether this process is currently advancing the workflow (#2431).
 
-    The cleanup sweep runs on the scheduler thread at the top of every tick and
-    takes neither the in-progress set nor the DB lock, while
-    ``_perform_git_cleanup`` removes the worktree AND the branch. That was safe
-    only because ``status='completed'`` rows are never advanced. Once the sweep
-    also returns rows that CAN advance, an in-flight acceptance verification —
-    an LLM agent call lasting minutes — could have its worktree deleted out from
-    under it. Cheap to check, and it hardens the pre-existing path too.
+    This is the cheap same-process guard. The cleanup sweep also acquires the
+    workflow's distributed DB lock immediately before deleting anything, which
+    closes the rolling-restart / multiple-scheduler race this singleton cannot
+    observe.
     """
     instance = AutonomousScheduler._instance
     if instance is None:
@@ -1138,12 +1153,13 @@ def _is_in_flight(workflow_id: str) -> bool:
 def _retry_pending_git_cleanups(repo=None):
     """Re-attempt post-merge Git cleanup for delivered workflows (#2043).
 
-    Walks every ``status='completed'`` workflow with ``cleanup_status='pending'``
-    and re-runs the idempotent ``_perform_git_cleanup``. Honors the per-workflow
+    Walks every delivered workflow with ``cleanup_status='pending'`` and re-runs
+    the idempotent ``_perform_git_cleanup``. Honors the per-workflow
     ``cleanup_next_retry_at`` backoff so a transient failure is not retried every
     tick. This is shared by the startup sweep and the periodic scheduler tick so
-    both converge leaked worktrees/branches without a separate worker. Failures
-    are isolated per workflow.
+    both converge leaked worktrees/branches without a separate worker. The
+    workflow DB lock serializes cleanup with advances in every scheduler process;
+    failures are isolated per workflow.
 
     ``repo`` lets the periodic tick reuse the scheduler's own (mock-friendly)
     repository; the startup sweep omits it and constructs one.
@@ -1179,7 +1195,22 @@ def _retry_pending_git_cleanups(repo=None):
                     due = now
                 if due > now:
                     continue
+            # Serialize cleanup against an advance in every scheduler process.
+            # The in-memory check above cannot see an old worker during a
+            # rolling restart, while every advance holds this same DB lock.
+            # Acquiring it here makes the final check atomic: either cleanup
+            # owns the workflow and may remove its git resources, or the active
+            # verifier owns it and cleanup defers to the next tick.
+            cleanup_lock_owner = (
+                f"{socket.gethostname()}/cleanup-{os.getpid()}-"
+                f"{threading.current_thread().name}"
+            )
+            lock_acquired = False
             try:
+                lock_acquired = repo.acquire_cleanup_lock(wf_id, cleanup_lock_owner)
+                if not lock_acquired:
+                    logger.debug("Skipping cleanup sweep for DB-locked workflow %s", wf_id[:8])
+                    continue
                 orchestrator = AutonomousOrchestrator(wf_id)
                 orchestrator._perform_git_cleanup()
             except Exception as e:  # noqa: BLE001
@@ -1189,6 +1220,16 @@ def _retry_pending_git_cleanups(repo=None):
                     e,
                     exc_info=True,
                 )
+            finally:
+                if lock_acquired:
+                    try:
+                        repo.release_lock(wf_id, cleanup_lock_owner)
+                    except Exception as e:  # noqa: BLE001
+                        logger.warning(
+                            "Failed to release cleanup lock for workflow %s: %s",
+                            wf_id[:8],
+                            e,
+                        )
 
         logger.info("Processed %d pending Git cleanup(s)", len(pending))
     except Exception as e:  # noqa: BLE001

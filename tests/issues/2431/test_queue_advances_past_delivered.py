@@ -30,11 +30,12 @@ from app.services.autonomous_scheduler import (
 )
 
 
-def _wf(wid: str, status: str, phase: str, order: int) -> dict:
+def _wf(wid: str, status: str, phase: str, order: int, *, verification_status: str = "") -> dict:
     return {
         "workflow_id": wid,
         "status": status,
         "current_phase": phase,
+        "verification_status": verification_status,
         "batch_id": "b1",
         "batch_order": order,
     }
@@ -66,7 +67,15 @@ class TestDeliveredPredecessorsReleaseTheQueue:
         EARLIER than the advance set, so fixing only the advance set would
         re-stall the batch under a different status name.
         """
-        assert _promote(_wf("head", "paused", "acceptance_verification", 1))
+        assert _promote(
+            _wf(
+                "head",
+                "paused",
+                "acceptance_verification",
+                1,
+                verification_status="indeterminate",
+            )
+        )
 
     def test_failed_at_acceptance_releases(self):
         assert _promote(_wf("head", "failed", "acceptance_verification", 1))
@@ -80,6 +89,10 @@ class TestNonDeliveredPredecessorsStillBlock:
         phase, not simply drop `paused` from the blocking set.
         """
         assert not _promote(_wf("head", "paused", "development", 1))
+
+    def test_manually_paused_acceptance_verifier_still_holds_the_queue(self):
+        """A pause before the verifier returns has no terminal verdict yet."""
+        assert not _promote(_wf("head", "paused", "acceptance_verification", 1))
 
     def test_developing_head_still_holds_the_queue(self):
         assert not _promote(_wf("head", "developing", "development", 1))
@@ -97,6 +110,22 @@ class TestPredicate:
         for phase in ("preparation", "planning", "development", "pr_review", "report", "merge"):
             assert not _slot_released({"current_phase": phase}), phase
         assert _slot_released({"current_phase": "acceptance_verification"})
+        assert not _slot_released({"status": "paused", "current_phase": "acceptance_verification"})
+        assert _slot_released(
+            {
+                "status": "paused",
+                "current_phase": "acceptance_verification",
+                "verification_status": "indeterminate",
+            }
+        )
+        assert not _slot_released(
+            {
+                "status": "paused",
+                "current_phase": "acceptance_verification",
+                "verification_status": "indeterminate",
+                "agent_pid": 4242,
+            }
+        )
 
     def test_missing_or_null_phase_is_not_delivered(self):
         """Legacy rows must fall through to the original status-based logic."""

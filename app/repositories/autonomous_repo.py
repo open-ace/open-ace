@@ -1303,6 +1303,53 @@ class AutonomousWorkflowRepository:
         finally:
             conn.close()
 
+    def acquire_cleanup_lock(self, workflow_id: str, owner: str) -> bool:
+        """Atomically lock a workflow for destructive Git cleanup (#2431).
+
+        Unlike :meth:`acquire_lock`, a stale timestamp is not enough to break a
+        lock on ``verification_pending`` at all, even after the generic
+        30-minute timeout. Agent tasks may legitimately run for 60 minutes and
+        clear ``agent_pid`` before the same advance finishes its mechanical
+        gates, so PID alone is not a sufficient lease. A stale lock is only
+        recoverable here after the workflow is terminal ``completed`` and has no
+        agent PID; active verification rows are left for the scheduler's normal
+        advance/recovery path to release.
+        """
+        import app.repositories.database as _db_mod
+
+        now_dt = datetime.now(timezone.utc)
+        now = now_dt.strftime("%Y-%m-%d %H:%M:%S")
+        cutoff = (now_dt - timedelta(seconds=self.LOCK_TIMEOUT_SECONDS)).strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
+
+        conn = self.db.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                _db_mod.adapt_sql(
+                    """
+                    UPDATE autonomous_workflows
+                    SET locked_at = ?, locked_by = ?
+                    WHERE workflow_id = ?
+                      AND (
+                        locked_at IS NULL
+                        OR (
+                          locked_at < ?
+                          AND status = 'completed'
+                          AND (agent_pid IS NULL OR agent_pid <= 0)
+                        )
+                      )
+                    """
+                ),
+                (now, owner, workflow_id, cutoff),
+            )
+            rowcount = cursor.rowcount
+            conn.commit()
+            return rowcount > 0
+        finally:
+            conn.close()
+
     def release_lock(self, workflow_id: str, owner: str) -> None:
         """Release the lock, but only if we are the owner."""
         import app.repositories.database as _db_mod
