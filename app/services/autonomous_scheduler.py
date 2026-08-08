@@ -76,6 +76,7 @@ ACTIVE_WORKFLOW_STATUSES = {
     "reporting",
     "waiting",
     "merging",
+    "verification_pending",
 }
 
 RUNNING_BATCH_STATUSES = {

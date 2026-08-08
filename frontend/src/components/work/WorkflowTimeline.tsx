@@ -52,7 +52,9 @@ import type { Language } from '@/types';
 import {
   findForkMilestoneIndex,
   formatTokens,
+  getActiveStatusHintKey,
   getActivityHostMilestoneId,
+  getWorkflowPhaseLabelKey,
   getWorkflowSessionIdForMilestone,
   isAiMilestoneType,
   isDisplayableTimelineActivity,
@@ -105,27 +107,6 @@ const MILESTONE_DISPLAY: Record<string, { icon: string; color: string }> = {
 // worth viewing after the run finishes (the live activity stream is run-time only).
 const PLAN_CONTENT_TYPES = ['plan_created', 'plan_refined', 'plan_finalized'];
 const REVIEW_CONTENT_TYPES = ['plan_reviewed', 'pr_reviewed', 'pr_review_summary'];
-const PHASE_LABEL_KEYS: Record<string, string> = {
-  preparation: 'autoPhasePreparation',
-  planning: 'autoPhasePlanning',
-  development: 'autoPhaseDevelopment',
-  pr_review: 'autoPhasePRReview',
-  report: 'autoPhaseReport',
-  wait: 'autoPhaseWait',
-  merge: 'autoPhaseMerge',
-};
-
-const ACTIVE_STATUS_HINT_KEYS: Record<string, string> = {
-  queued: 'autoActiveHintQueued',
-  pending: 'autoActiveHintPending',
-  preparing: 'autoActiveHintPreparing',
-  planning: 'autoActiveHintPlanning',
-  developing: 'autoActiveHintDeveloping',
-  pr_review: 'autoActiveHintPrReview',
-  reporting: 'autoActiveHintReporting',
-  merging: 'autoActiveHintMerging',
-};
-
 const MILESTONE_ICON_COLORS: Record<string, string> = {
   dark: 'var(--text-primary)',
   info: 'var(--color-info)',
@@ -1065,12 +1046,9 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
     milestones.length > 0 ? getMilestoneAnchorTime(milestones[0]) : workflow.created_at;
   const workflowStatusConfig = getAutonomousWorkflowStatusConfig(workflow.status);
   const workflowStatusLabel = t(workflowStatusConfig.labelKey, language);
-  const workflowPhaseLabel = t(
-    PHASE_LABEL_KEYS[workflow.current_phase] ?? 'autoPhasePreparation',
-    language
-  );
+  const workflowPhaseLabel = t(getWorkflowPhaseLabelKey(workflow.current_phase), language);
   const isLiveStatus = ACTIVE_WORKFLOW_STATUSES.includes(workflow.status);
-  const activeStatusHintKey = ACTIVE_STATUS_HINT_KEYS[workflow.status];
+  const activeStatusHintKey = getActiveStatusHintKey(workflow.status);
   const activeStatusHint = activeStatusHintKey ? t(activeStatusHintKey, language) : '';
   const latestMilestoneWithSession = [...milestones]
     .reverse()

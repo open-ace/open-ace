@@ -172,6 +172,7 @@ PHASE_TO_STATUS = {
     "report": "reporting",
     "wait": "waiting",
     "merge": "merging",
+    "acceptance_verification": "verification_pending",
 }
 
 ISSUE_URL_RE = re.compile(r"^https://github\.com/[^/\s]+/[^/\s]+/issues/(\d+)(?:[/?#].*)?$", re.I)

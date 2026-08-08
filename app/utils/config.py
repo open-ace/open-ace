@@ -76,6 +76,18 @@ def is_autonomous_enabled() -> bool:
     return bool(get_config_value("autonomous", "enabled", True))
 
 
+def is_acceptance_verification_enabled() -> bool:
+    """Check whether post-merge acceptance verification is enabled.
+
+    The verifier remains opt-in while its scope and legacy-pattern gates are
+    being hardened.  Keeping the default disabled lets workflows already
+    parked at ``verification_pending`` drain safely to completion.
+    """
+    # Fail closed: JSON strings such as "false" are truthy in Python and must
+    # never accidentally enable a verifier that is intentionally opt-in.
+    return get_config_value("autonomous", "acceptance_verification_enabled", False) is True
+
+
 def is_run_timeline_enabled() -> bool:
     """Check whether the persisted remote-session run timeline feature is enabled.
 

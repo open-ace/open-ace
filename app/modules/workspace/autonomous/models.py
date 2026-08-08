@@ -102,6 +102,7 @@ class AutonomousWorkflow:
         "reporting",
         "waiting",
         "merging",
+        "verification_pending",
         "queued",
     )
 
