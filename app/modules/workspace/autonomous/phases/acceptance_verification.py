@@ -1,6 +1,8 @@
 """acceptance_verification phase handler (#2335).
 
-Independent post-merge verification: the workflow does NOT auto-close the issue
+Independent post-merge verification. The feature is opt-in while its gates are
+being hardened; when disabled, the handler completes immediately without
+running the verifier or changing the issue. When enabled, the workflow does NOT auto-close the issue
 on merge (autonomous PRs use ``Implements #N``, not ``Closes #N``). Instead this
 phase spawns a credentialless read-only verifier on the merged main SHA, runs a
 deterministic scope gate, aggregates per-item verdicts, and only closes the
@@ -35,6 +37,7 @@ from app.modules.workspace.autonomous.acceptance_snapshot import (
 from app.modules.workspace.autonomous.acceptance_verdicts import ItemVerdict, aggregate_verdicts
 from app.modules.workspace.autonomous.evidence import Verdict
 from app.modules.workspace.autonomous.phase_contract import PhaseResult
+from app.utils.config import is_acceptance_verification_enabled
 
 VERIFIED_BY = "acceptance-verifier-v1"
 
@@ -168,6 +171,12 @@ def _already_verified_for(wf: dict, merge_sha: str, snap_hash: str) -> dict | No
 
 
 def handle(ctx, deps) -> PhaseResult:
+    # Keep this guard before all context/dependency access. Parked production
+    # rows may have already released their worktrees and must drain safely while
+    # the verifier is opt-in.
+    if not is_acceptance_verification_enabled():
+        return PhaseResult.completed(next_phase="completed")
+
     wf = ctx.workflow
     issue_number = wf.get("github_issue_number")
     pr_number = wf.get("github_pr_number")

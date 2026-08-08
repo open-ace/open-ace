@@ -62,6 +62,12 @@ export const AUTONOMOUS_WORKFLOW_STATUS_CONFIG: Record<string, AutonomousWorkflo
     labelKey: 'autoStatusMerging',
     tone: 'info',
   },
+  verification_pending: {
+    variant: 'info',
+    icon: 'bi-shield-check',
+    labelKey: 'autoStatusVerificationPending',
+    tone: 'info',
+  },
   completed: {
     variant: 'success',
     icon: 'bi-check-circle',

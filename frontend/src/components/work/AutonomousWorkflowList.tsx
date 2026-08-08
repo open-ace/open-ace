@@ -37,6 +37,11 @@ const STATUS_CONFIG: Record<string, { variant: string; icon: string; labelKey: s
   reporting: { variant: 'info', icon: 'bi-file-text', labelKey: 'autoStatusReporting' },
   waiting: { variant: 'secondary', icon: 'bi-clock', labelKey: 'autoStatusWaiting' },
   merging: { variant: 'info', icon: 'bi-sign-merge-right', labelKey: 'autoStatusMerging' },
+  verification_pending: {
+    variant: 'info',
+    icon: 'bi-shield-check',
+    labelKey: 'autoStatusVerificationPending',
+  },
   completed: { variant: 'success', icon: 'bi-check-circle', labelKey: 'autoStatusCompleted' },
   failed: { variant: 'danger', icon: 'bi-x-circle', labelKey: 'autoStatusFailed' },
   cancelled: { variant: 'secondary', icon: 'bi-slash-circle', labelKey: 'autoStatusCancelled' },
@@ -59,13 +64,14 @@ export const ACTIVE_WORKFLOW_STATUSES = [
   'reporting',
   'waiting',
   'merging',
+  'verification_pending',
 ];
 
 const STATUS_FILTER_TABS = [
   { key: '', labelKey: 'autoFilterAll' },
   { key: 'queued', labelKey: 'autoFilterQueued' },
   {
-    key: 'pending,preparing,planning,developing,pr_review,reporting,waiting,merging,paused,planning_timeout',
+    key: 'pending,preparing,planning,developing,pr_review,reporting,waiting,merging,verification_pending,paused,planning_timeout',
     labelKey: 'autoFilterActive',
   },
   { key: 'completed', labelKey: 'autoFilterCompleted' },
