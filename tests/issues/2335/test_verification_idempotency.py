@@ -52,11 +52,11 @@ def _persisted_snapshot_json():
 
     snap = AcceptanceSnapshot(
         required_paths=[],
-        checklist=[],
+        checklist=["works"],
         non_scope=[],
         closure_constraints=False,
-        source="missing",
-        confidence="low",
+        source="convention",
+        confidence="high",
     )
     return json.dumps(dataclasses.asdict(snap), ensure_ascii=False), hash_snapshot(snap)
 

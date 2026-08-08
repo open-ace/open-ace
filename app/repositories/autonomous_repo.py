@@ -680,7 +680,11 @@ class AutonomousWorkflowRepository:
             conn.close()
 
     def update_workflow(
-        self, workflow_id: str, updates: dict, expected_values: dict | None = None
+        self,
+        workflow_id: str,
+        updates: dict,
+        expected_values: dict | None = None,
+        required_lock_owner: str | None = None,
     ) -> dict | None:
         """Update a workflow's fields. Returns updated record.
 
@@ -692,6 +696,8 @@ class AutonomousWorkflowRepository:
             workflow_id: Workflow UUID
             updates: Dict of fields to update
             expected_values: Optional dict of {field: old_value} for optimistic lock
+            required_lock_owner: Optional distributed-lock owner that must still
+                match for the update to commit (scheduler fencing).
 
         Returns:
             Updated workflow dict if successful, None if optimistic lock failed
@@ -724,6 +730,9 @@ class AutonomousWorkflowRepository:
 
         # ── Optimistic lock support (Phase 1, P0) ──────────────────────
         where_clauses = ["workflow_id = ?"]
+        if required_lock_owner:
+            where_clauses.append("locked_by = ?")
+            params.append(required_lock_owner)
         if expected_values:
             # Filter expected_values to retry fields only (保守策略)
             _RETRY_FIELDS = {"test_retries", "skip_retries", "dev_retries_on_test_fail"}
@@ -742,12 +751,13 @@ class AutonomousWorkflowRepository:
             affected_rows = cursor.rowcount
             conn.commit()
 
-            if expected_values and affected_rows == 0:
-                # Optimistic lock failed - concurrent modification detected
+            if (expected_values or required_lock_owner) and affected_rows == 0:
+                # Optimistic/fencing condition failed - concurrent modification detected
                 logger.warning(
-                    "Optimistic lock failed for workflow %s: expected_values=%s",
+                    "Conditional workflow update failed for %s: expected=%s lock_owner=%s",
                     workflow_id[:8],
                     expected_values,
+                    required_lock_owner,
                 )
                 return None
 
@@ -1281,6 +1291,8 @@ class AutonomousWorkflowRepository:
 
         Returns True if the lock was acquired, False if already locked.
         Stale locks (older than LOCK_TIMEOUT_SECONDS) are broken automatically.
+        The scheduler renews live leases with :meth:`refresh_lock`, because
+        agent calls may legitimately run longer than this recovery timeout.
         """
         import app.repositories.database as _db_mod
 
@@ -1307,6 +1319,64 @@ class AutonomousWorkflowRepository:
             rowcount = cursor.rowcount
             conn.commit()
             return rowcount > 0
+        finally:
+            conn.close()
+
+    def refresh_lock(self, workflow_id: str, owner: str) -> bool:
+        """Renew a workflow lease only while ``owner`` still holds it.
+
+        Long agent phases can exceed :attr:`LOCK_TIMEOUT_SECONDS`. The
+        scheduler heartbeats through this compare-and-set update so another
+        process never treats a healthy advance as stale. ``False`` means
+        ownership was lost and the caller must stop the old advance.
+        """
+        import app.repositories.database as _db_mod
+
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        conn = self.db.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                _db_mod.adapt_sql(
+                    """
+                    UPDATE autonomous_workflows
+                    SET locked_at = ?
+                    WHERE workflow_id = ? AND locked_by = ?
+                    """
+                ),
+                (now, workflow_id, owner),
+            )
+            refreshed = cursor.rowcount > 0
+            conn.commit()
+            return refreshed
+        finally:
+            conn.close()
+
+    def clear_agent_pid_if_lock_owner(self, workflow_id: str, owner: str) -> bool:
+        """Clear stale agent identity only while ``owner`` still holds the lease.
+
+        This is the scheduler-finally safety net. A superseded worker must not
+        clear the PID just registered by the replacement owner.
+        """
+        import app.repositories.database as _db_mod
+
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        conn = self.db.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                _db_mod.adapt_sql(
+                    """
+                    UPDATE autonomous_workflows
+                    SET agent_pid = NULL, agent_session_id = '', updated_at = ?
+                    WHERE workflow_id = ? AND locked_by = ? AND agent_pid IS NOT NULL
+                    """
+                ),
+                (now, workflow_id, owner),
+            )
+            cleared = cursor.rowcount > 0
+            conn.commit()
+            return cleared
         finally:
             conn.close()
 

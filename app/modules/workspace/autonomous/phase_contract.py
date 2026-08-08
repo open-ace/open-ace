@@ -157,6 +157,7 @@ class PhaseResult:
     def pause(
         *,
         workflow_patch: dict | None = None,
+        milestone_events: list[dict] | None = None,
         structured_error: object | None = None,
     ) -> PhaseResult:
         """Build a result that pauses the workflow (user-facing pause)."""
@@ -165,6 +166,7 @@ class PhaseResult:
             next_phase=None,
             next_status="paused",
             workflow_patch=workflow_patch or {},
+            milestone_events=milestone_events or [],
             structured_error=structured_error,
         )
 

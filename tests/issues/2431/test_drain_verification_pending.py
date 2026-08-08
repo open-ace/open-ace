@@ -1,8 +1,8 @@
-"""Issue #2431 PR B: parked verification rows must drain safely.
+"""Issue #2431: parked verification rows drain safely and the verifier is controllable.
 
 The scheduler query and phase/status mapping are an atomic change.  Once the
-row is selected, the acceptance handler's default-off guard must run before it
-touches workflow context or verifier dependencies and complete the workflow.
+row is selected, an explicit flag-off guard must run before it touches workflow
+context or verifier dependencies and complete the workflow.
 """
 
 from __future__ import annotations
@@ -72,16 +72,16 @@ def test_phase_mapping_and_active_sets_move_together():
     assert "verification_pending" in AutonomousWorkflow.ACTIVE_STATUSES
 
 
-def test_acceptance_verification_defaults_off():
-    with patch.object(config_module, "get_config_value", return_value=False) as get_value:
-        assert config_module.is_acceptance_verification_enabled() is False
-
-    get_value.assert_called_once_with("autonomous", "acceptance_verification_enabled", False)
-
-
-def test_acceptance_verification_can_be_explicitly_enabled():
-    with patch.object(config_module, "get_config_value", return_value=True):
+def test_acceptance_verification_defaults_on_after_hardening():
+    with patch.object(config_module, "get_config_value", return_value=True) as get_value:
         assert config_module.is_acceptance_verification_enabled() is True
+
+    get_value.assert_called_once_with("autonomous", "acceptance_verification_enabled", True)
+
+
+def test_acceptance_verification_can_be_explicitly_disabled():
+    with patch.object(config_module, "get_config_value", return_value=False):
+        assert config_module.is_acceptance_verification_enabled() is False
 
 
 def test_acceptance_verification_rejects_truthy_non_boolean_values():
