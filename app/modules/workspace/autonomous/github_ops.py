@@ -1181,8 +1181,57 @@ class GitHubOps:
 
     @staticmethod
     def _is_not_found(stderr: str) -> bool:
+        """Whether ``stderr`` is GitHub reporting a definitive 404.
+
+        Anchored on the HTTP status gh prints, NOT on a bare ``not found``
+        substring: ``sudo: gh: command not found`` is a missing binary on the
+        service account's PATH, and treating that as "no branch protection"
+        would report an empty required set with no error at all — silently
+        voiding the fail-closed contract this helper feeds. ``not protected``
+        stays because gh emits it verbatim for an unprotected branch.
+        """
         lowered = (stderr or "").strip().lower()
-        return "404" in lowered or "not found" in lowered or "not protected" in lowered
+        # Exclude the shell/exec failures FIRST. gh is invoked through `sudo -u
+        # <account> gh …`, so a gh missing from that account's PATH surfaces as
+        # `sudo: gh: command not found` — Python found `sudo`, so no
+        # FileNotFoundError is raised and a bare `not found` substring test
+        # would classify a broken deployment as "this branch has no protection".
+        if "command not found" in lowered or "no such file" in lowered:
+            return False
+        # gh prints `gh: Not Found (HTTP 404)`; the raw REST body carries
+        # `"status":"404"`. Both are definitive absence.
+        return "404" in lowered or "not protected" in lowered
+
+    def _probe_gh_api(self, args: list[str]) -> subprocess.CompletedProcess:
+        """Run a read-only ``gh api`` probe, retrying transient failures.
+
+        ``_run_gh(check=False)`` returns the first non-zero exit immediately —
+        its retry loop is guarded by ``if check and result.returncode != 0``.
+        The required-check probes need ``check=False`` so they can inspect a
+        404, which meant a single ``Empty reply from server`` (this host reaches
+        github.com through a failover proxy) resolved to "source blind".
+
+        That is not a harmless degradation: a blind probe makes
+        ``get_branch_protection`` raise, ``_blocking_failures`` then treats
+        *every* failing check as blocking, and the workflow burns its bounded
+        CI-repair budget on checks that never gated the merge — the precise
+        failure this issue exists to remove. So transient errors are retried
+        here on the same schedule ``_run_gh`` uses for its checked calls.
+        """
+        result = self._run_gh(args, repo_scoped=False, check=False)
+        for attempt in range(1, GIT_NETWORK_RETRY_COUNT):
+            if result.returncode == 0 or not _is_transient_error(result.stderr, result.returncode):
+                return result
+            logger.warning(
+                "gh api probe transient error (attempt %d/%d), retrying in %ds: %s",
+                attempt,
+                GIT_NETWORK_RETRY_COUNT,
+                GIT_NETWORK_RETRY_INTERVAL,
+                (result.stderr or "").strip()[:200],
+            )
+            time.sleep(GIT_NETWORK_RETRY_INTERVAL)
+            result = self._run_gh(args, repo_scoped=False, check=False)
+        return result
 
     def _classic_required_contexts(self, repo: str, branch: str) -> tuple[list[str], str]:
         """Required checks declared by *classic* branch protection.
@@ -1194,10 +1243,8 @@ class GitHubOps:
         its own. Notably this endpoint requires admin scope, so the autonomous
         workflow's own PAT gets 403 here even though the branch is protected.
         """
-        result = self._run_gh(
-            self._gh_api_args([f"repos/{repo}/branches/{branch}/protection"]),
-            repo_scoped=False,
-            check=False,
+        result = self._probe_gh_api(
+            self._gh_api_args([f"repos/{repo}/branches/{branch}/protection"])
         )
         if result.returncode != 0:
             if self._is_not_found(result.stderr or ""):
@@ -1227,15 +1274,22 @@ class GitHubOps:
         source alone reports no required checks on such a repository.
 
         This endpoint needs only read access and returns the effective rules.
+
+        Paginated: it emits one entry per (ruleset x rule), so a repository with
+        an org-level ruleset stacked on repo-level ones can push the
+        ``required_status_checks`` rule past the first page. Without
+        ``--paginate`` that reads as "no required checks", which makes
+        ``_blocking_failures`` repair every failing check. Verified against the
+        live API: ``?per_page=1`` on this repo returns a ``Link: rel="next"``
+        header, so the pagination is real and not hypothetical.
         """
-        result = self._run_gh(
-            self._gh_api_args([f"repos/{repo}/rules/branches/{branch}"]),
-            repo_scoped=False,
-            check=False,
+        result = self._probe_gh_api(
+            self._gh_api_args(["--paginate", f"repos/{repo}/rules/branches/{branch}"])
         )
         if result.returncode != 0:
-            # 404 means the branch/endpoint is unknown, not that the probe
-            # failed — treat it as "no ruleset rules", same as classic.
+            # A branch with no rules answers 200 [] (verified live), so a 404
+            # here means the repo/endpoint itself is unknown rather than the
+            # probe having failed — treat it as "no ruleset rules", as classic.
             if self._is_not_found(result.stderr or ""):
                 return [], ""
             return [], (
@@ -1270,12 +1324,18 @@ class GitHubOps:
         A branch with neither yields an empty list, which remains a valid
         classification — every failing check is optional — not a probe failure.
 
-        Any other non-zero exit (403 permission, 5xx, network) raises
-        :class:`GitHubOpsError` so callers fail closed to ``indeterminate``
-        instead of guessing required/optional semantics they cannot observe.
-        This is the Phase B guard for #1989-class incidents where an
-        un-verifiable signal must never silently drive an irreversible
-        merge/repair decision.
+        Raises :class:`GitHubOpsError` only when **neither** source observed
+        anything and at least one was blind, because "no required checks" would
+        then be a guess (#1989).
+
+        Note the direction honestly: partial blindness (one source readable, the
+        other not) does NOT raise, so the required set can *understate*. That is
+        deliberate. GitHub is the final gate — understating produces a rejected
+        merge attempt and a visible policy pause, whereas raising makes
+        ``_blocking_failures`` treat every failing check as blocking and burn
+        the bounded CI-repair budget, which is the exact #2428 failure this
+        method exists to remove. Over-reporting blindness is the more damaging
+        error here, not the safer one.
         """
         repo = self.get_repo_name()
         contexts, classic_err = self._classic_required_contexts(repo, branch)

@@ -237,3 +237,30 @@ def test_plain_string_contexts_in_ruleset_are_accepted():
     )
     with patch.object(gh, "_run_gh", side_effect=router):
         assert _contexts(gh) == ["lint"]
+
+
+# ── #2430 review follow-ups (N5, N2, N3) ─────────────────────────────────
+
+
+def test_missing_gh_binary_is_not_mistaken_for_an_unprotected_branch():
+    """`sudo: gh: command not found` must count as BLIND, never as a 404.
+
+    Python finds `sudo`, so no FileNotFoundError is raised; a bare "not found"
+    substring test classified a broken deployment as "this branch requires
+    nothing", which makes _blocking_failures skip every repair and silently
+    void the fail-closed contract.
+    """
+    from app.modules.workspace.autonomous.github_ops import GitHubOps
+
+    assert GitHubOps._is_not_found("sudo: gh: command not found") is False
+    assert GitHubOps._is_not_found("/bin/sh: 1: gh: not found") is False
+    assert GitHubOps._is_not_found("gh: No such file or directory") is False
+
+
+def test_real_gh_404_shapes_are_recognised():
+    from app.modules.workspace.autonomous.github_ops import GitHubOps
+
+    # The literal string gh emits, verified against the live API.
+    assert GitHubOps._is_not_found("gh: Not Found (HTTP 404)") is True
+    assert GitHubOps._is_not_found("HTTP 404: Not Found") is True
+    assert GitHubOps._is_not_found("Branch not protected") is True

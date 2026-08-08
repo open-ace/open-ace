@@ -94,7 +94,53 @@ NAME = "merge"
 logger = logging.getLogger(__name__)
 
 
-def _blocking_failures(gh, checks: list[dict], pr_number: int) -> list[dict]:
+def _required_contexts(gh, pr_number: int, base_branch: str) -> set[str] | None:
+    """Required-check contexts for ``base_branch``, or None if undeterminable.
+
+    None means "could not observe" and is distinct from an empty set, which
+    means "observed, and the branch requires nothing".
+    """
+    try:
+        protection = gh.get_branch_protection(base_branch)
+    except Exception as exc:  # noqa: BLE001 — degrade, never stall the merge
+        logger.warning(
+            "PR #%s: could not resolve required checks for '%s' (%s)",
+            pr_number,
+            base_branch,
+            exc,
+        )
+        return None
+    return set((protection.get("required_status_checks") or {}).get("contexts") or [])
+
+
+def _blocking_pending(gh, checks: list[dict], pr_number: int, base_branch: str) -> list[dict]:
+    """Pending checks that actually gate the merge (issue #2428).
+
+    The required/optional split applies to *pending* exactly as it does to
+    *failing*: a slow non-required job (``Critical PR E2E``, ``Full E2E``) must
+    not defer the merge every scheduler cycle. ``ReadinessService._partition_checks``
+    documents the same rule. Degrades to "all pending block" when the required
+    set cannot be observed, matching :func:`_blocking_failures`.
+    """
+    pending = [c for c in checks if c.get("bucket") == "pending"]
+    if not pending:
+        return []
+    required = _required_contexts(gh, pr_number, base_branch)
+    if not required:
+        return pending
+    blocking = [c for c in pending if (c.get("name") or "") in required]
+    ignored = [c for c in pending if (c.get("name") or "") not in required]
+    if ignored:
+        logger.info(
+            "PR #%s: not deferring for %d non-blocking pending check(s): %s",
+            pr_number,
+            len(ignored),
+            ", ".join(c.get("name") or "?" for c in ignored),
+        )
+    return blocking
+
+
+def _blocking_failures(gh, checks: list[dict], pr_number: int, base_branch: str) -> list[dict]:
     """Return the failing checks that actually block the merge (issue #2428).
 
     CI repair rounds are a bounded budget (``MAX_CI_REPAIR_ATTEMPTS``). Spending
@@ -117,15 +163,12 @@ def _blocking_failures(gh, checks: list[dict], pr_number: int) -> list[dict]:
     failed = [c for c in checks if c.get("bucket") == "fail"]
     if not failed:
         return []
-    try:
-        protection = gh.get_branch_protection("main")
-        required = set((protection.get("required_status_checks") or {}).get("contexts") or [])
-    except Exception as exc:  # noqa: BLE001 — degrade to the old behaviour, never stall
+    required = _required_contexts(gh, pr_number, base_branch)
+    if required is None:
         logger.warning(
-            "PR #%s: could not resolve required checks (%s); "
-            "treating all %d failing check(s) as blocking",
+            "PR #%s: required checks undeterminable; treating all %d failing check(s) "
+            "as blocking",
             pr_number,
-            exc,
             len(failed),
         )
         return failed
@@ -133,20 +176,21 @@ def _blocking_failures(gh, checks: list[dict], pr_number: int) -> list[dict]:
         # A genuinely unprotected branch has no merge gate to satisfy; keep the
         # previous behaviour rather than concluding nothing needs repair.
         logger.warning(
-            "PR #%s: branch 'main' reports no required checks; "
+            "PR #%s: branch '%s' reports no required checks; "
             "treating all %d failing check(s) as blocking",
             pr_number,
+            base_branch,
             len(failed),
         )
         return failed
-    blocking = [c for c in failed if c.get("name", "") in required]
-    skipped = [c for c in failed if c.get("name", "") not in required]
+    blocking = [c for c in failed if (c.get("name") or "") in required]
+    skipped = [c for c in failed if (c.get("name") or "") not in required]
     if skipped:
         logger.info(
             "PR #%s: ignoring %d non-blocking CI failure(s) for repair purposes: %s",
             pr_number,
             len(skipped),
-            ", ".join(c.get("name", "?") for c in skipped),
+            ", ".join(c.get("name") or "?" for c in skipped),
         )
     return blocking
 
@@ -161,6 +205,11 @@ def handle(ctx, deps) -> PhaseResult:
     gh = deps.gh
     pr_number = wf.get("github_pr_number")
     branch_name = wf.get("branch_name", "")
+    # The branch the PR targets — the one whose protection/ruleset defines which
+    # checks are required. Hardcoding "main" silently reports the wrong required
+    # set for any workflow targeting another base. Mirrors the
+    # ``original_branch_name or "main"`` idiom the orchestrator already uses.
+    base_branch = (wf.get("original_branch_name") or "main").strip() or "main"
 
     if pr_number:
         # Phase B (#2045): verify the PR head through the evidence contract
@@ -231,7 +280,7 @@ def handle(ctx, deps) -> PhaseResult:
                 raise GitHubOpsError(
                     f"Unable to query CI checks before merging PR #{pr_number}: {e}"
                 ) from e
-            failed = _blocking_failures(gh, checks, pr_number)
+            failed = _blocking_failures(gh, checks, pr_number, base_branch)
             if failed:
                 deps.host.start_ci_repair_round(wf, pr_number, failed)
                 return PhaseResult.retry()
@@ -245,7 +294,7 @@ def handle(ctx, deps) -> PhaseResult:
         # cycle instead of blocking (synchronous poll) or failing. The
         # scheduler re-enters the merge phase every ~10s.
         # (checks is empty for unstable PRs — no deferral needed.)
-        pending = [c for c in checks if c.get("bucket") == "pending"]
+        pending = _blocking_pending(gh, checks, pr_number, base_branch)
         if pending:
             logger.info(
                 "PR #%s: %d CI checks pending, deferring merge to next cycle",
@@ -278,11 +327,11 @@ def handle(ctx, deps) -> PhaseResult:
                     checks_err,
                 )
                 refreshed_checks = checks
-            failed = _blocking_failures(gh, refreshed_checks, pr_number)
+            failed = _blocking_failures(gh, refreshed_checks, pr_number, base_branch)
             if failed:
                 deps.host.start_ci_repair_round(wf, pr_number, failed)
                 return PhaseResult.retry()
-            pending = [c for c in refreshed_checks if c.get("bucket") == "pending"]
+            pending = _blocking_pending(gh, refreshed_checks, pr_number, base_branch)
 
             try:
                 merge_state = gh.get_pr_merge_state(pr_number)

@@ -50,7 +50,7 @@ def test_non_required_failures_do_not_trigger_repair():
         _check("schema-sync"),
         _check("lint", bucket="pass"),
     ]
-    assert _blocking_failures(_gh(), checks, 2425) == [], (
+    assert _blocking_failures(_gh(), checks, 2425, "main") == [], (
         "a repair round would be started — and an attempt consumed — for checks "
         "that do not block the merge"
     )
@@ -58,7 +58,7 @@ def test_non_required_failures_do_not_trigger_repair():
 
 def test_required_failures_are_returned():
     checks = [_check("lint"), _check("test (3.13)")]
-    result = _blocking_failures(_gh(), checks, 1)
+    result = _blocking_failures(_gh(), checks, 1, "main")
     assert [c["name"] for c in result] == ["lint"]
 
 
@@ -70,7 +70,7 @@ def test_mixed_failures_pass_only_the_blocking_ones_to_the_agent():
         _check("Critical PR E2E"),
         _check("test (3.11)"),
     ]
-    names = [c["name"] for c in _blocking_failures(_gh(), checks, 1)]
+    names = [c["name"] for c in _blocking_failures(_gh(), checks, 1, "main")]
     assert names == ["build", "test (3.11)"]
 
 
@@ -80,26 +80,26 @@ def test_passing_and_pending_checks_are_never_returned():
         _check("build", bucket="pending"),
         _check("test (3.10)", bucket="fail"),
     ]
-    names = [c["name"] for c in _blocking_failures(_gh(), checks, 1)]
+    names = [c["name"] for c in _blocking_failures(_gh(), checks, 1, "main")]
     assert names == ["test (3.10)"]
 
 
 def test_no_failures_short_circuits_without_an_api_call():
     """Do not pay for a protection lookup when there is nothing to filter."""
     gh = _gh()
-    assert _blocking_failures(gh, [_check("lint", bucket="pass")], 1) == []
+    assert _blocking_failures(gh, [_check("lint", bucket="pass")], 1, "main") == []
     gh.get_branch_protection.assert_not_called()
 
 
 def test_protection_lookup_failure_degrades_to_repairing_everything():
     """Must not stall: deferring forever is worse than repairing too much."""
     checks = [_check("test (3.13)"), _check("lint")]
-    result = _blocking_failures(_gh(raises=RuntimeError("HTTP 403")), checks, 1)
+    result = _blocking_failures(_gh(raises=RuntimeError("HTTP 403")), checks, 1, "main")
     assert [c["name"] for c in result] == ["test (3.13)", "lint"]
 
 
 def test_empty_required_set_degrades_to_repairing_everything():
     """An unprotected branch has no gate; do not conclude nothing needs repair."""
     checks = [_check("test (3.13)"), _check("lint")]
-    result = _blocking_failures(_gh(required=[]), checks, 1)
+    result = _blocking_failures(_gh(required=[]), checks, 1, "main")
     assert [c["name"] for c in result] == ["test (3.13)", "lint"]
