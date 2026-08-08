@@ -16,7 +16,7 @@ import tarfile
 import tempfile
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -195,7 +195,7 @@ class LocalFileArchiveBackend(ArchiveBackend):
             )
 
         # Generate archive ID and filenames
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
         archive_filename = f"archive_{timestamp}_{batch_id}.tar.gz"
         manifest_filename = f"manifest_{timestamp}_{batch_id}.json"
 
@@ -222,7 +222,7 @@ class LocalFileArchiveBackend(ArchiveBackend):
                 "batch_id": batch_id,
                 "record_count": len(records),
                 "checksum_sha256": checksum,
-                "created_at": datetime.now(timezone.utc).isoformat(),
+                "created_at": datetime.now(UTC).isoformat(),
                 "archive_file": archive_filename,
                 "source_deleted": False,
             }

@@ -13,7 +13,7 @@ Two bugs caused worktrees in the 807-845 batch to fail at the merge phase:
    needs ``--auto`` so GitHub merges asynchronously once requirements pass.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from unittest.mock import MagicMock, call, patch
 
 import pytest
@@ -79,7 +79,7 @@ def _make_orchestrator(wf):
     # stays a real EvidenceService, so _validate_pre_merge_change_scope /
     # _resolve_merge_conflicts / _branch_contains_main keep their genuine
     # verify_commit_available / verify_branch_contains behaviour.
-    _now = datetime.now(timezone.utc)
+    _now = datetime.now(UTC)
     o._evidence.resolve_verified_pr_head = MagicMock(
         return_value=Evidence(
             source="github_api",
@@ -349,8 +349,8 @@ class TestDoMergeDeferredRetry:
             source="github_api",
             subject="pr_head",
             verdict=Verdict.CONFIRMED,
-            observed_at=datetime.now(timezone.utc),
-            verified_at=datetime.now(timezone.utc),
+            observed_at=datetime.now(UTC),
+            verified_at=datetime.now(UTC),
             verification_method="stub",
             commit_shas=("old-pr-head",),
         )

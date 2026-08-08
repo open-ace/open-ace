@@ -10,7 +10,7 @@ orchestrator concrete class.
 from __future__ import annotations
 
 import threading
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from unittest.mock import MagicMock
 
 from app.modules.workspace.autonomous import phases as phases_pkg
@@ -34,8 +34,8 @@ def _evidence(confirmed: bool = True) -> Evidence:
         source="github_api",
         subject="pr_head",
         verdict=Verdict.CONFIRMED if confirmed else Verdict.INDETERMINATE,
-        observed_at=datetime.now(timezone.utc),
-        verified_at=datetime.now(timezone.utc),
+        observed_at=datetime.now(UTC),
+        verified_at=datetime.now(UTC),
         verification_method="cat-file -e",
         commit_shas=("abc123",),
         reason="" if confirmed else "head not in local object db",

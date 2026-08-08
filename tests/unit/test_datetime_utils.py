@@ -1,6 +1,6 @@
 """Unit tests for datetime_utils module."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
 
@@ -58,7 +58,7 @@ class TestEnsureUtcSuffix:
 
     def test_datetime_with_utc_timezone(self):
         """Test that datetime with UTC timezone preserves +00:00, no Z added."""
-        dt = datetime(2026, 8, 6, 9, 54, 57, tzinfo=timezone.utc)
+        dt = datetime(2026, 8, 6, 9, 54, 57, tzinfo=UTC)
         result = ensure_utc_suffix(dt)
         # isoformat() outputs "2026-08-06T09:54:57+00:00", which should not get Z
         assert result == "2026-08-06T09:54:57+00:00"

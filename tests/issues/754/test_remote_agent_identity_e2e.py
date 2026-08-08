@@ -11,7 +11,7 @@ Uses RemoteAgentManager directly with a temporary SQLite database.
 from __future__ import annotations
 
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from unittest.mock import patch
 
 import pytest
@@ -247,7 +247,7 @@ class TestScenario08_ExpiredRegistrationToken:
         from app.modules.workspace.agent_token import hash_token
 
         token_hash = hash_token(reg_token)
-        past_time = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
+        past_time = (datetime.now(UTC) - timedelta(hours=2)).isoformat()
         with manager.db.connection() as conn:
             cursor = conn.cursor()
             cursor.execute(

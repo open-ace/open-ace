@@ -9,7 +9,7 @@ instead of scanning the large daily_messages table.
 import logging
 import time
 import warnings
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from app.repositories.database import Database, is_postgresql
@@ -837,7 +837,7 @@ class DailyStatsRepository:
         """
         start_time = time.time()
         try:
-            now = datetime.now(timezone.utc).replace(tzinfo=None)
+            now = datetime.now(UTC).replace(tzinfo=None)
 
             if date:
                 # Refresh specific date
@@ -1057,7 +1057,7 @@ class DailyStatsRepository:
             bool: True if successful.
         """
         try:
-            now = datetime.now(timezone.utc).replace(tzinfo=None)
+            now = datetime.now(UTC).replace(tzinfo=None)
 
             if date:
                 # Refresh specific date

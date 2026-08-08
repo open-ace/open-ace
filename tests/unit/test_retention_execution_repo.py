@@ -4,7 +4,7 @@ Unit tests for Retention Execution Repository.
 Issue #2188: Execution tracking with batch recovery support.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
 
@@ -331,7 +331,7 @@ class TestRetentionExecutionRepository:
         )
 
         # Update with completion timestamp
-        completed_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        completed_at = datetime.now(UTC).replace(tzinfo=None)
         updated = repo.update_execution(
             "exec_complete",
             status="completed",

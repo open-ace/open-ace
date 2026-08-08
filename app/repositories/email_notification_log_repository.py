@@ -5,7 +5,7 @@ Provides database access for email notification audit logs.
 """
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import psycopg2
@@ -76,7 +76,7 @@ class EmailNotificationLogRepository:
                     recipient_email,
                     subject,
                     email_body,
-                    datetime.now(timezone.utc).replace(tzinfo=None),
+                    datetime.now(UTC).replace(tzinfo=None),
                     status,
                     error_message,
                     0,
@@ -97,7 +97,7 @@ class EmailNotificationLogRepository:
                     recipient_email,
                     subject,
                     email_body,
-                    datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
+                    datetime.now(UTC).replace(tzinfo=None).isoformat(),
                     status,
                     error_message,
                     0,
@@ -183,7 +183,7 @@ class EmailNotificationLogRepository:
                 LIMIT 50
             """
             ),
-            (max_retry_count, datetime.now(timezone.utc).replace(tzinfo=None)),
+            (max_retry_count, datetime.now(UTC).replace(tzinfo=None)),
         )
 
         rows = cursor.fetchall()
@@ -244,7 +244,7 @@ class EmailNotificationLogRepository:
         conn = self._get_connection()
         cursor = conn.cursor()
 
-        cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
+        cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=days)
 
         # Total counts by status
         cursor.execute(
@@ -308,7 +308,7 @@ class EmailNotificationLogRepository:
         conn = self._get_connection()
         cursor = conn.cursor()
 
-        cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
+        cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=days)
 
         cursor.execute(
             adapt_sql("DELETE FROM email_notification_logs WHERE sent_at < ?"),

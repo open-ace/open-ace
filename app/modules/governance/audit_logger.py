@@ -23,7 +23,7 @@ Resource conventions (governance audit logging):
 import json
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from enum import Enum
 from typing import Any, cast
 
@@ -131,7 +131,7 @@ class AuditLog:
 
     id: int | None = None
     timestamp: datetime = field(
-        default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None)
+        default_factory=lambda: datetime.now(UTC).replace(tzinfo=None)
     )
     user_id: int | None = None
     username: str | None = None
@@ -179,7 +179,7 @@ class AuditLog:
             timestamp=(
                 timestamp
                 if isinstance(timestamp, datetime)
-                else datetime.now(timezone.utc).replace(tzinfo=None)
+                else datetime.now(UTC).replace(tzinfo=None)
             ),
             user_id=data.get("user_id"),
             username=data.get("username"),
@@ -365,7 +365,7 @@ class AuditLogger:
                 """
                     ),
                     (
-                        datetime.now(timezone.utc).replace(tzinfo=None),
+                        datetime.now(UTC).replace(tzinfo=None),
                         user_id,
                         username,
                         action,
@@ -599,7 +599,7 @@ class AuditLogger:
         Returns:
             Dict with activity summary.
         """
-        start_time = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
+        start_time = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=days)
 
         logs = self.query(
             user_id=user_id,
@@ -631,7 +631,7 @@ class AuditLogger:
         Returns:
             int: Number of logs deleted.
         """
-        cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
+        cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=days)
 
         try:
             with self.db.connection() as conn:

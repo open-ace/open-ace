@@ -14,7 +14,7 @@ Tests cover:
 
 import csv
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from io import StringIO
 
 import pytest
@@ -39,7 +39,7 @@ def sample_report_metadata():
     return ReportMetadata(
         report_id="test-report-001",
         report_type=ReportType.USAGE_SUMMARY.value,
-        generated_at=datetime.now(timezone.utc).replace(tzinfo=None),
+        generated_at=datetime.now(UTC).replace(tzinfo=None),
         period_start=datetime(2024, 1, 1),
         period_end=datetime(2024, 1, 31),
         generated_by=1,

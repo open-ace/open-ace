@@ -6,7 +6,7 @@ API endpoints for ROI analysis and cost optimization.
 
 import logging
 import math
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Optional
 
 from flask import Blueprint, g, jsonify, request
@@ -158,9 +158,9 @@ def get_roi():
 
         # Default to last 30 days if not specified
         if not start_date or not end_date:
-            end_date = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
+            end_date = datetime.now(UTC).replace(tzinfo=None).strftime("%Y-%m-%d")
             start_date = (
-                datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
+                datetime.now(UTC).replace(tzinfo=None) - timedelta(days=30)
             ).strftime("%Y-%m-%d")
 
         try:
@@ -208,9 +208,9 @@ def get_roi_by_tool():
         end_date = request.args.get("end_date")
 
         if not start_date or not end_date:
-            end_date = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
+            end_date = datetime.now(UTC).replace(tzinfo=None).strftime("%Y-%m-%d")
             start_date = (
-                datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
+                datetime.now(UTC).replace(tzinfo=None) - timedelta(days=30)
             ).strftime("%Y-%m-%d")
 
         try:
@@ -237,9 +237,9 @@ def get_roi_by_user():
         end_date = request.args.get("end_date")
 
         if not start_date or not end_date:
-            end_date = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
+            end_date = datetime.now(UTC).replace(tzinfo=None).strftime("%Y-%m-%d")
             start_date = (
-                datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
+                datetime.now(UTC).replace(tzinfo=None) - timedelta(days=30)
             ).strftime("%Y-%m-%d")
 
         try:
@@ -274,9 +274,9 @@ def get_cost_breakdown():
         user_id = request.args.get("user_id", type=int)
 
         if not start_date or not end_date:
-            end_date = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
+            end_date = datetime.now(UTC).replace(tzinfo=None).strftime("%Y-%m-%d")
             start_date = (
-                datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
+                datetime.now(UTC).replace(tzinfo=None) - timedelta(days=30)
             ).strftime("%Y-%m-%d")
 
         calculator = ROICalculator()
@@ -312,9 +312,9 @@ def get_daily_costs():
         user_id = request.args.get("user_id", type=int)
 
         if not start_date or not end_date:
-            end_date = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
+            end_date = datetime.now(UTC).replace(tzinfo=None).strftime("%Y-%m-%d")
             start_date = (
-                datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
+                datetime.now(UTC).replace(tzinfo=None) - timedelta(days=30)
             ).strftime("%Y-%m-%d")
 
         calculator = ROICalculator()
@@ -337,9 +337,9 @@ def get_roi_summary():
         user_id = request.args.get("user_id", type=int)
 
         if not start_date or not end_date:
-            end_date = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
+            end_date = datetime.now(UTC).replace(tzinfo=None).strftime("%Y-%m-%d")
             start_date = (
-                datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
+                datetime.now(UTC).replace(tzinfo=None) - timedelta(days=30)
             ).strftime("%Y-%m-%d")
 
         try:

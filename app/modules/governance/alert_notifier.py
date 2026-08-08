@@ -24,7 +24,7 @@ import time
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from enum import Enum
 from typing import Any, cast
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
@@ -304,7 +304,7 @@ def _utcnow_naive() -> datetime:
     across SQLite and PostgreSQL (matches ``cleanup_old_alerts`` and
     ``has_recent_quota_alert``).
     """
-    return datetime.now(timezone.utc).replace(tzinfo=None)
+    return datetime.now(UTC).replace(tzinfo=None)
 
 
 class _PinnedWebhookAdapter(HTTPAdapter):
@@ -391,7 +391,7 @@ class Alert:
     tool_name: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
     created_at: datetime = field(
-        default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None)
+        default_factory=lambda: datetime.now(UTC).replace(tzinfo=None)
     )
     read: bool = False
     action_url: str | None = None
@@ -1914,7 +1914,7 @@ class AlertNotifier:
         conn = self._get_connection()
         cursor = conn.cursor()
 
-        threshold = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=hours)
+        threshold = datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=hours)
 
         # ``alerts.metadata`` is TEXT in both schemas.  PostgreSQL therefore
         # needs an explicit JSONB cast before using ``->>``; without it the
@@ -2052,7 +2052,7 @@ class AlertNotifier:
         cursor = conn.cursor()
 
         cutoff = (
-            datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
+            datetime.now(UTC).replace(tzinfo=None) - timedelta(days=days)
         ).isoformat()
         cursor.execute(
             adapt_sql(
@@ -2260,7 +2260,7 @@ class AlertNotifier:
             metadata=json.loads(row["metadata"]) if row["metadata"] else {},
             created_at=(
                 parse_db_datetime(row["created_at"])
-                or datetime.now(timezone.utc).replace(tzinfo=None)
+                or datetime.now(UTC).replace(tzinfo=None)
             ),
             read=bool(row["read"]),
             action_url=row["action_url"],

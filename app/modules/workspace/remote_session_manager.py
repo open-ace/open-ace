@@ -11,7 +11,7 @@ import json
 import logging
 import threading
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, Optional
 
 from app.modules.policy import get_evaluator
@@ -279,7 +279,7 @@ class RemoteSessionManager:
             "data": json.dumps(control_request),
             "stream": "permission",
             "is_complete": False,
-            "timestamp": datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
+            "timestamp": datetime.now(UTC).replace(tzinfo=None).isoformat(),
         }
         self._agent_manager.buffer_output(session_id, output_entry)
         logger.info(
@@ -958,7 +958,7 @@ class RemoteSessionManager:
         session = self._session_manager.get_session(session_id)
         if session:
             session.status = "paused"
-            session.paused_at = datetime.now(timezone.utc).replace(tzinfo=None)
+            session.paused_at = datetime.now(UTC).replace(tzinfo=None)
             self._session_manager.update_session(session)
 
         self._timeline("record_run_status", session_id, "pause")
@@ -1026,7 +1026,7 @@ class RemoteSessionManager:
             "data": data,
             "stream": stream,
             "is_complete": is_complete,
-            "timestamp": datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
+            "timestamp": datetime.now(UTC).replace(tzinfo=None).isoformat(),
         }
 
         self._agent_manager.buffer_output(session_id, output_entry)
@@ -1466,7 +1466,7 @@ class RemoteSessionManager:
             "data": json.dumps(payload, ensure_ascii=False),
             "stream": "request_state",
             "is_complete": state == "abort_failed",
-            "timestamp": datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
+            "timestamp": datetime.now(UTC).replace(tzinfo=None).isoformat(),
         }
 
         self._agent_manager.buffer_output(session_id, output_entry)
@@ -1491,7 +1491,7 @@ class RemoteSessionManager:
         elif status == "paused":
             session.status = "paused"
             if not session.paused_at:
-                session.paused_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                session.paused_at = datetime.now(UTC).replace(tzinfo=None)
         elif status == "stopped":
             # User-initiated stop — finalize the session
             session.status = "completed"
@@ -1555,7 +1555,7 @@ class RemoteSessionManager:
         if not session:
             return
         try:
-            now = datetime.now(timezone.utc).replace(tzinfo=None)
+            now = datetime.now(UTC).replace(tzinfo=None)
             self._message_repo.save_message(
                 date=now.strftime("%Y-%m-%d"),
                 tool_name=normalize_tool_name(session.tool_name or "unknown"),

@@ -11,7 +11,7 @@ import hashlib
 import os
 import tempfile
 from base64 import b64encode
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
@@ -35,7 +35,7 @@ class TestClockSkewTolerance:
 
     def test_token_within_clock_skew_passes(self, mock_service):
         """Test that token within clock skew tolerance passes validation."""
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        now = datetime.now(UTC).replace(tzinfo=None)
         # Token expired 20 seconds ago (within default 30s skew)
         exp = now - timedelta(seconds=20)
 
@@ -52,7 +52,7 @@ class TestClockSkewTolerance:
 
     def test_token_outside_clock_skew_rejected(self, mock_service):
         """Test that token outside clock skew tolerance is rejected."""
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        now = datetime.now(UTC).replace(tzinfo=None)
         # Token expired 40 seconds ago (outside default 30s skew)
         exp = now - timedelta(seconds=40)
 
@@ -70,7 +70,7 @@ class TestClockSkewTolerance:
     def test_custom_clock_skew_from_env(self, mock_service):
         """Test that clock skew can be configured via environment variable."""
         with patch.dict(os.environ, {"OPENACE_PROXY_TOKEN_CLOCK_SKEW_DEFAULT_SECONDS": "60"}):
-            now = datetime.now(timezone.utc).replace(tzinfo=None)
+            now = datetime.now(UTC).replace(tzinfo=None)
             # Token expired 50 seconds ago (within custom 60s skew)
             exp = now - timedelta(seconds=50)
 
@@ -94,7 +94,7 @@ class TestClockSkewTolerance:
                 "OPENACE_PROXY_TOKEN_CLOCK_SKEW_HA_POOL_SECONDS": "60",
             },
         ):
-            now = datetime.now(timezone.utc).replace(tzinfo=None)
+            now = datetime.now(UTC).replace(tzinfo=None)
             # Token expired 50 seconds ago
             exp = now - timedelta(seconds=50)
 
@@ -146,7 +146,7 @@ class TestClockSkewTolerance:
 
     def test_token_exactly_at_skew_boundary(self, mock_service):
         """Test token exactly at clock skew boundary."""
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        now = datetime.now(UTC).replace(tzinfo=None)
         # Token expired exactly 30 seconds ago (at boundary)
         exp = now - timedelta(seconds=30)
 
@@ -164,7 +164,7 @@ class TestClockSkewTolerance:
 
     def test_clock_skew_with_conn_method(self, mock_service):
         """Test clock skew tolerance in _session_allows_proxy_token_with_conn."""
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        now = datetime.now(UTC).replace(tzinfo=None)
         # Token expired 25 seconds ago (within skew)
         exp = now - timedelta(seconds=25)
 
@@ -199,7 +199,7 @@ class TestClockSkewEdgeCases:
     def test_zero_clock_skew(self, mock_service):
         """Test that zero clock skew works correctly."""
         with patch.dict(os.environ, {"OPENACE_PROXY_TOKEN_CLOCK_SKEW_DEFAULT_SECONDS": "0"}):
-            now = datetime.now(timezone.utc).replace(tzinfo=None)
+            now = datetime.now(UTC).replace(tzinfo=None)
             # Token expired 1 second ago
             exp = now - timedelta(seconds=1)
 

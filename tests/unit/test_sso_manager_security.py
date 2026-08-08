@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -156,7 +156,7 @@ def test_complete_authentication_rejects_missing_pkce_verifier(sso_manager):
     # Simulate the upstream failure mode flagged by the review: state storage
     # produced a row but the verifier never landed in it.
     # Issue #2163: expires_at is NOT NULL, must provide a value
-    expires_at = datetime.now(timezone.utc) + timedelta(minutes=10)
+    expires_at = datetime.now(UTC) + timedelta(minutes=10)
     sso_manager.db.execute(
         "INSERT INTO sso_auth_states (state, code_verifier, provider_name, nonce, expires_at) "
         "VALUES (?, ?, ?, ?, ?)",
@@ -345,7 +345,7 @@ def test_store_auth_state_includes_expires_at(sso_manager):
     if isinstance(expires_at, str):
         expires_at = datetime.fromisoformat(expires_at.replace("Z", "+00:00").replace("+00:00", ""))
 
-    expected_expiry = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(
+    expected_expiry = datetime.now(UTC).replace(tzinfo=None) + timedelta(
         seconds=AUTH_STATE_TTL_SECONDS
     )
     # Allow 1 minute tolerance for test execution time
@@ -355,7 +355,7 @@ def test_store_auth_state_includes_expires_at(sso_manager):
 def test_get_auth_state_returns_none_for_expired_state(sso_manager):
     """Issue #1815 Finding 2: Expired auth_state should return None."""
     # Insert an already-expired auth state directly
-    past_time = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=1)
+    past_time = datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=1)
     sso_manager.db.execute(
         "INSERT INTO sso_auth_states (state, code_verifier, provider_name, nonce, expires_at) "
         "VALUES (?, ?, ?, ?, ?)",
@@ -381,7 +381,7 @@ def test_get_auth_state_returns_valid_for_non_expired_state(sso_manager):
 def test_cleanup_expired_auth_states_deletes_expired_rows(sso_manager):
     """Issue #1815 Finding 2: cleanup_expired_auth_states should delete expired rows."""
     # Insert expired auth state
-    past_time = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=1)
+    past_time = datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=1)
     sso_manager.db.execute(
         "INSERT INTO sso_auth_states (state, code_verifier, provider_name, nonce, expires_at) "
         "VALUES (?, ?, ?, ?, ?)",
@@ -394,7 +394,7 @@ def test_cleanup_expired_auth_states_deletes_expired_rows(sso_manager):
     )
 
     # Insert non-expired auth state
-    future_time = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=1)
+    future_time = datetime.now(UTC).replace(tzinfo=None) + timedelta(hours=1)
     sso_manager.db.execute(
         "INSERT INTO sso_auth_states (state, code_verifier, provider_name, nonce, expires_at) "
         "VALUES (?, ?, ?, ?, ?)",

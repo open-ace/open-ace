@@ -19,7 +19,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 logger = logging.getLogger(__name__)
 
@@ -222,7 +222,7 @@ class SchedulerHealthMonitor:
         check_status = "completed"
         check_error = None
 
-        self._last_check = datetime.now(timezone.utc).replace(tzinfo=None)
+        self._last_check = datetime.now(UTC).replace(tzinfo=None)
 
         # Check quota enforcement scheduler
         try:

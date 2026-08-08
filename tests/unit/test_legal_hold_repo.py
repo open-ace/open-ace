@@ -4,7 +4,7 @@ Unit tests for Legal Hold Repository.
 Issue #2188: Legal hold mechanism for preventing data deletion.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
 
@@ -202,7 +202,7 @@ class TestLegalHoldRepository:
     def test_hold_expiry(self, repo):
         """Test that expired holds are not active."""
         # Create hold that expires in 1 second
-        expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(seconds=1)
+        expires_at = datetime.now(UTC).replace(tzinfo=None) + timedelta(seconds=1)
         repo.create_hold(
             tenant_id=1,
             hold_type="global",

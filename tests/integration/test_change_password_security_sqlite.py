@@ -8,7 +8,7 @@ Tests:
 - Transaction boundaries
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from unittest.mock import patch
 
 import pytest
@@ -125,7 +125,7 @@ class TestChangePasswordLockoutIntegration:
         key = _get_change_password_lockout_key(999)
 
         # Manually insert an expired lockout
-        expired_time = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=30)
+        expired_time = datetime.now(UTC).replace(tzinfo=None) - timedelta(minutes=30)
         tmp_db.execute(
             "INSERT INTO login_attempts (username, attempt_count, locked_until) VALUES (?, ?, ?)",
             (key, 5, expired_time.isoformat()),

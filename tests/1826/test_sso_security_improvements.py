@@ -15,7 +15,7 @@ import inspect
 import json
 import os
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -492,7 +492,7 @@ class TestF8RelayStateSignature:
             "v": 2,
             "s": "original_state",
             "r": "https://attacker.com/malicious",
-            "t": int(datetime.now(timezone.utc).timestamp()),
+            "t": int(datetime.now(UTC).timestamp()),
             "sig": "invalid_signature_12345",
         }
         encoded = base64.urlsafe_b64encode(json.dumps(state_data).encode()).decode()

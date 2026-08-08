@@ -4,7 +4,7 @@ import base64
 import re
 import urllib.parse
 import zlib
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
@@ -44,8 +44,8 @@ def _idp_key_and_cert():
         .issuer_name(issuer)
         .public_key(key.public_key())
         .serial_number(x509.random_serial_number())
-        .not_valid_before(datetime.now(timezone.utc) - timedelta(days=1))
-        .not_valid_after(datetime.now(timezone.utc) + timedelta(days=30))
+        .not_valid_before(datetime.now(UTC) - timedelta(days=1))
+        .not_valid_after(datetime.now(UTC) + timedelta(days=30))
         .sign(key, hashes.SHA256())
     )
     key_pem = key.private_bytes(
@@ -86,7 +86,7 @@ def _provider(cert_body: str, extra_params: dict | None = None) -> SAMLProvider:
 
 
 def _saml_time(value: datetime) -> str:
-    return value.astimezone(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+    return value.astimezone(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
 def _signed_response(
@@ -99,7 +99,7 @@ def _signed_response(
     recipient: str = ACS_URL,
     in_response_to: str = "_request-1",
 ) -> str:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     response_id = "_response-1"
     assertion_id = "_assertion-1"
     response = etree.Element(
@@ -260,7 +260,7 @@ def test_saml_response_rejects_missing_required_email_attribute():
 
 def _evil_unsigned_assertion(*, name_id: str, email: str) -> etree._Element:
     """Build a validly-structured but UNSIGNED Assertion element for wrapping attacks."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     assertion = etree.Element(
         f"{{{SAML_ASSERTION_NS}}}Assertion",
         nsmap={"saml": SAML_ASSERTION_NS},
@@ -347,7 +347,7 @@ def test_saml_response_message_signed_single_assertion_authenticates():
     """
     key_pem, cert_pem, cert_body = _idp_key_and_cert()
     provider = _provider(cert_body)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     response_id = "_response-1"
     assertion_id = "_assertion-1"
     response = etree.Element(

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from app.repositories.database import Database, adapt_sql
@@ -50,7 +50,7 @@ class RetentionExecutionRepository:
         Returns:
             Created execution dict.
         """
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        now = datetime.now(UTC).replace(tzinfo=None)
         with self.db.connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
@@ -272,7 +272,7 @@ class RetentionExecutionRepository:
         Returns:
             True if lock acquired, False otherwise.
         """
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        now = datetime.now(UTC).replace(tzinfo=None)
         expires_at = now + timedelta(seconds=lock_timeout_seconds)
 
         with self.db.connection() as conn:

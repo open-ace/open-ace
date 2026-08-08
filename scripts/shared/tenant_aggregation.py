@@ -13,7 +13,7 @@ It includes:
 import calendar
 import json
 import logging
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone, UTC
 from typing import Any, Dict, List, Optional, Tuple
 
 # Import database utilities
@@ -266,7 +266,7 @@ def check_quota_usage_quality(
             "skipped_records": null_user_id + negative_tokens,
             "good_records": good_records,
             "quality_score": round(quality_score, 2),
-            "checked_at": datetime.now(timezone.utc).isoformat(),
+            "checked_at": datetime.now(UTC).isoformat(),
         }
 
     finally:
@@ -814,7 +814,7 @@ def run_tenant_aggregation(start_date: str | None = None, end_date: str | None =
         Aggregation report.
     """
     report = {
-        "started_at": datetime.now(timezone.utc).isoformat(),
+        "started_at": datetime.now(UTC).isoformat(),
         "periods_reset": 0,
         "quality_report": None,
         "records_aggregated": 0,
@@ -894,7 +894,7 @@ def run_tenant_aggregation(start_date: str | None = None, end_date: str | None =
         raise
 
     finally:
-        report["completed_at"] = datetime.now(timezone.utc).isoformat()
+        report["completed_at"] = datetime.now(UTC).isoformat()
 
     return report
 

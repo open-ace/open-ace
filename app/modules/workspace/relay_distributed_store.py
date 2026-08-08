@@ -18,6 +18,7 @@ import os
 import threading
 import time
 from dataclasses import dataclass
+from datetime import UTC
 from enum import Enum
 from typing import Any
 
@@ -551,9 +552,9 @@ class RelayDistributedStore:
     @staticmethod
     def _format_timestamp(ts: float) -> str:
         """Format a Unix timestamp as ISO 8601 string."""
-        from datetime import datetime, timezone
+        from datetime import datetime
 
-        return datetime.fromtimestamp(ts, tz=timezone.utc).replace(tzinfo=None).isoformat()
+        return datetime.fromtimestamp(ts, tz=UTC).replace(tzinfo=None).isoformat()
 
 
 # Global singleton instance

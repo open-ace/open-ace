@@ -5,7 +5,7 @@ Provides database access for SMTP configuration management.
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import psycopg2
@@ -197,8 +197,8 @@ class SMTPConfigRepository:
                     use_tls,
                     False,  # is_verified - needs testing
                     created_by,
-                    datetime.now(timezone.utc).replace(tzinfo=None),
-                    datetime.now(timezone.utc).replace(tzinfo=None),
+                    datetime.now(UTC).replace(tzinfo=None),
+                    datetime.now(UTC).replace(tzinfo=None),
                 ),
             )
             config_id = cursor.fetchone()["id"]
@@ -219,8 +219,8 @@ class SMTPConfigRepository:
                     1 if use_tls else 0,
                     0,
                     created_by,
-                    datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
-                    datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
+                    datetime.now(UTC).replace(tzinfo=None).isoformat(),
+                    datetime.now(UTC).replace(tzinfo=None).isoformat(),
                 ),
             )
             config_id = cursor.lastrowid
@@ -267,8 +267,8 @@ class SMTPConfigRepository:
             ),
             (
                 is_verified if is_postgresql() else (1 if is_verified else 0),
-                datetime.now(timezone.utc).replace(tzinfo=None),
-                datetime.now(timezone.utc).replace(tzinfo=None),
+                datetime.now(UTC).replace(tzinfo=None),
+                datetime.now(UTC).replace(tzinfo=None),
                 config_id,
             ),
         )

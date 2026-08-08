@@ -9,7 +9,7 @@ Repository for governance data access operations:
 import json
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, cast
 
 from app.repositories.database import CONFIG_DIR, Database
@@ -117,7 +117,7 @@ class GovernanceRepository:
                         action,
                         is_enabled,
                         description,
-                        datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
+                        datetime.now(UTC).replace(tzinfo=None).isoformat(),
                     ),
                     commit=True,
                 )
@@ -138,7 +138,7 @@ class GovernanceRepository:
                         action,
                         is_enabled_val,
                         description,
-                        datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
+                        datetime.now(UTC).replace(tzinfo=None).isoformat(),
                     ),
                 )
                 return cast("int | None", cursor.lastrowid)
@@ -199,7 +199,7 @@ class GovernanceRepository:
             return False
 
         updates.append("updated_at = ?")
-        params.append(datetime.now(timezone.utc).replace(tzinfo=None).isoformat())
+        params.append(datetime.now(UTC).replace(tzinfo=None).isoformat())
         params.append(rule_id)
 
         query = f"UPDATE content_filter_rules SET {', '.join(updates)} WHERE id = ?"

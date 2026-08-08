@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
-from datetime import datetime
+from datetime import UTC, datetime
 
 logger = logging.getLogger(__name__)
 
@@ -120,13 +120,12 @@ class DataFetchScheduler:
             self._gevent_stop_event = gevent.event.Event()
 
             def gevent_loop():
-                from datetime import timezone as tz
 
                 self._next_run = datetime.now().timestamp() + self._interval
                 while not self._gevent_stop_event.is_set():
                     gevent.sleep(self._interval)
                     self._run_fetch()
-                    self._heartbeat = datetime.now(tz.utc).replace(tzinfo=None)
+                    self._heartbeat = datetime.now(UTC).replace(tzinfo=None)
                     self._next_run = datetime.now().timestamp() + self._interval
 
             self._greenlet = gevent.spawn(gevent_loop)
@@ -154,9 +153,8 @@ class DataFetchScheduler:
     def _run_fetch_with_heartbeat(self):
         """Run fetch and update heartbeat."""
         self._run_fetch()
-        from datetime import timezone as tz
 
-        self._heartbeat = datetime.now(tz.utc).replace(tzinfo=None)
+        self._heartbeat = datetime.now(UTC).replace(tzinfo=None)
 
     def stop(self):
         """Stop the scheduler."""
@@ -184,7 +182,6 @@ class DataFetchScheduler:
     def get_status(self) -> dict:
         """Get scheduler status."""
         from datetime import datetime as dt
-        from datetime import timezone as tz
 
         next_run_str = None
         if self._next_run:
@@ -197,7 +194,7 @@ class DataFetchScheduler:
         # Check heartbeat freshness
         heartbeat_age = None
         if self._heartbeat:
-            heartbeat_age = (dt.now(tz.utc).replace(tzinfo=None) - self._heartbeat).total_seconds()
+            heartbeat_age = (dt.now(UTC).replace(tzinfo=None) - self._heartbeat).total_seconds()
 
         heartbeat_ok = heartbeat_age is not None and heartbeat_age < self._interval + 60
 
@@ -216,7 +213,6 @@ class DataFetchScheduler:
 
     def _run_loop(self):
         """Main scheduler loop."""
-        from datetime import timezone as tz
 
         # Calculate next run time
         self._next_run = datetime.now().timestamp() + self._interval
@@ -230,7 +226,7 @@ class DataFetchScheduler:
             self._run_fetch()
 
             # Update heartbeat
-            self._heartbeat = datetime.now(tz.utc).replace(tzinfo=None)
+            self._heartbeat = datetime.now(UTC).replace(tzinfo=None)
 
             # Update next run time
             self._next_run = datetime.now().timestamp() + self._interval
@@ -238,7 +234,6 @@ class DataFetchScheduler:
     def _run_fetch(self):
         """Run the data fetch scripts with distributed lock (Issue #2187)."""
         import time
-        from datetime import timezone as tz
 
         from app.repositories.database import Database
         from app.routes.fetch import run_fetch_scripts
@@ -258,7 +253,7 @@ class DataFetchScheduler:
         error_message = None
 
         logger.info("Starting scheduled data fetch...")
-        self._last_run = datetime.now(tz.utc).replace(tzinfo=None)
+        self._last_run = datetime.now(UTC).replace(tzinfo=None)
 
         try:
             results = run_fetch_scripts()
@@ -438,7 +433,6 @@ class DataFetchScheduler:
     def _check_quotas(self):
         """Check all users' quotas and enforce limits after data refresh."""
         from datetime import datetime as dt
-        from datetime import timezone as tz
 
         from app.repositories.database import (
             Database,
@@ -448,8 +442,8 @@ class DataFetchScheduler:
         )
 
         bigint_cast = "::bigint" if is_postgresql() else ""
-        today = dt.now(tz.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
-        month_start = dt.now(tz.utc).replace(tzinfo=None).replace(day=1).strftime("%Y-%m-%d")
+        today = dt.now(UTC).replace(tzinfo=None).strftime("%Y-%m-%d")
+        month_start = dt.now(UTC).replace(tzinfo=None).replace(day=1).strftime("%Y-%m-%d")
         db = Database()
 
         exceeded_users = set()

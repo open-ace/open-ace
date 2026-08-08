@@ -14,7 +14,7 @@ import json
 import sqlite3
 import tempfile
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -239,7 +239,7 @@ class TestRetentionCleanup:
         manager = RemoteAgentManager(db_path=temp_db)
 
         # Insert expired records
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        now = datetime.now(UTC).replace(tzinfo=None)
         expired = (now - timedelta(hours=25)).isoformat()
 
         with manager.db.connection() as conn:
@@ -266,7 +266,7 @@ class TestRetentionCleanup:
         """Test that cleanup doesn't delete non-expired rows."""
         manager = RemoteAgentManager(db_path=temp_db)
 
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        now = datetime.now(UTC).replace(tzinfo=None)
         future = (now + timedelta(hours=1)).isoformat()
 
         with manager.db.connection() as conn:
@@ -364,7 +364,7 @@ class TestClaimPersistedCommands:
                     "machine-1",
                     json.dumps({"command": "test"}),
                     "pending",
-                    datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
+                    datetime.now(UTC).replace(tzinfo=None).isoformat(),
                 ),
             )
             conn.commit()
@@ -380,7 +380,7 @@ class TestClaimPersistedCommands:
         manager = RemoteAgentManager(db_path=temp_db)
 
         # Insert delivered command with old delivered_at
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        now = datetime.now(UTC).replace(tzinfo=None)
         old_time = (now - timedelta(minutes=10)).isoformat()
 
         with manager.db.connection() as conn:
@@ -422,7 +422,7 @@ class TestClaimPersistedCommands:
                     json.dumps({"command": "test"}),
                     "delivered",
                     None,
-                    datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
+                    datetime.now(UTC).replace(tzinfo=None).isoformat(),
                 ),
             )
             conn.commit()
@@ -484,7 +484,7 @@ class TestSendCommandWithStatus:
                     "machine-1",
                     "{}",
                     "pending",
-                    datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
+                    datetime.now(UTC).replace(tzinfo=None).isoformat(),
                 ),
             )
             conn.commit()
@@ -512,7 +512,7 @@ class TestGapDetection:
         manager = RemoteAgentManager(db_path=temp_db)
 
         # Insert output with gap in event_index (1, 3 - missing 2)
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        now = datetime.now(UTC).replace(tzinfo=None)
         with manager.db.connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
@@ -552,7 +552,7 @@ class TestGapDetection:
         manager = RemoteAgentManager(db_path=temp_db)
 
         # Insert contiguous outputs (1, 2, 3)
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        now = datetime.now(UTC).replace(tzinfo=None)
         with manager.db.connection() as conn:
             cursor = conn.cursor()
             for i in range(1, 4):

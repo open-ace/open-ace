@@ -16,7 +16,7 @@ import uuid
 from collections import deque
 from contextlib import suppress
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
 import gevent
@@ -296,7 +296,7 @@ class RemoteAgentManager:
         Deletes expired rows in batches to avoid long transactions.
         Records cleanup statistics to retention_history table.
         """
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        now = datetime.now(UTC).replace(tzinfo=None)
         total_deleted_commands = 0
         total_deleted_outputs = 0
 
@@ -354,7 +354,7 @@ class RemoteAgentManager:
         Returns:
             Total number of rows deleted.
         """
-        now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+        now = datetime.now(UTC).replace(tzinfo=None).isoformat()
         total_deleted = 0
         max_retries = 3
         retry_delay = 30  # seconds
@@ -454,13 +454,13 @@ class RemoteAgentManager:
         Also cleans up remote sessions that have been offline longer than
         the recovery window, allowing reconnection for brief disconnects.
         """
-        recovery_cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
+        recovery_cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(
             seconds=self.SESSION_RECOVERY_WINDOW_SECONDS
         )
 
         with self.db.connection() as conn:
             cursor = conn.cursor()
-            heartbeat_cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
+            heartbeat_cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(
                 seconds=self.HEARTBEAT_TIMEOUT_SECONDS
             )
 
@@ -471,7 +471,7 @@ class RemoteAgentManager:
                 WHERE status != 'offline' AND last_heartbeat < {_param()}
             """,
                 (
-                    datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
+                    datetime.now(UTC).replace(tzinfo=None).isoformat(),
                     heartbeat_cutoff.isoformat(),
                 ),
             )
@@ -515,7 +515,7 @@ class RemoteAgentManager:
                 cursor.execute(
                     f"UPDATE agent_sessions SET status = 'completed', "
                     f"updated_at = {_param()} WHERE session_id IN ({placeholders})",
-                    [datetime.now(timezone.utc).replace(tzinfo=None).isoformat()] + sids,
+                    [datetime.now(UTC).replace(tzinfo=None).isoformat()] + sids,
                 )
                 logger.info(
                     f"Cleaned up %d remote sessions (offline > {self.SESSION_RECOVERY_WINDOW_SECONDS}s)",
@@ -530,7 +530,7 @@ class RemoteAgentManager:
     def _cleanup_stale_paused_sessions(self) -> None:
         """Stop sessions that have been paused for more than 4 hours."""
         PAUSE_TIMEOUT_HOURS = 4
-        cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
+        cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(
             hours=PAUSE_TIMEOUT_HOURS
         )
 
@@ -593,7 +593,7 @@ class RemoteAgentManager:
 
         token = generate_registration_token()
         token_hash = hash_token(token)
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        now = datetime.now(UTC).replace(tzinfo=None)
         expires_at = (now + timedelta(seconds=self.REGISTRATION_TOKEN_TTL)).isoformat()
 
         with self.db.connection() as conn:
@@ -649,7 +649,7 @@ class RemoteAgentManager:
         with self._lock, self.db.connection() as conn:
             cursor = conn.cursor()
 
-            now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+            now = datetime.now(UTC).replace(tzinfo=None).isoformat()
 
             try:
                 # Check for existing machine with same hostname in same tenant
@@ -867,7 +867,7 @@ class RemoteAgentManager:
             Dict with tenant_id and created_by if valid, None otherwise.
         """
         token_hash_val = hash_token(token)
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        now = datetime.now(UTC).replace(tzinfo=None)
 
         with self._lock, self.db.connection() as conn:
             cursor = conn.cursor()
@@ -933,7 +933,7 @@ class RemoteAgentManager:
         """
         token = generate_agent_token()
         token_hash_val = hash_token(token)
-        now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+        now = datetime.now(UTC).replace(tzinfo=None).isoformat()
 
         with self.db.connection() as conn:
             cursor = conn.cursor()
@@ -1005,7 +1005,7 @@ class RemoteAgentManager:
         Returns:
             New plaintext agent token, or None if machine not found.
         """
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        now = datetime.now(UTC).replace(tzinfo=None)
 
         with self._lock, self.db.connection() as conn:
             cursor = conn.cursor()
@@ -1076,7 +1076,7 @@ class RemoteAgentManager:
         Returns:
             True if any tokens were revoked, False otherwise.
         """
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        now = datetime.now(UTC).replace(tzinfo=None)
 
         with self._lock, self.db.connection() as conn:
             cursor = conn.cursor()
@@ -1121,7 +1121,7 @@ class RemoteAgentManager:
             """,
                 (
                     adapt_boolean_value(False),
-                    datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
+                    datetime.now(UTC).replace(tzinfo=None).isoformat(),
                     machine_id,
                     adapt_boolean_value(True),
                 ),
@@ -1159,7 +1159,7 @@ class RemoteAgentManager:
         Returns:
             Number of tokens removed.
         """
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        now = datetime.now(UTC).replace(tzinfo=None)
 
         with self.db.connection() as conn:
             cursor = conn.cursor()
@@ -1219,8 +1219,8 @@ class RemoteAgentManager:
                 WHERE machine_id = {_param()}
             """,
                 (
-                    datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
-                    datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
+                    datetime.now(UTC).replace(tzinfo=None).isoformat(),
+                    datetime.now(UTC).replace(tzinfo=None).isoformat(),
                     machine_id,
                 ),
             )
@@ -1241,7 +1241,7 @@ class RemoteAgentManager:
                 UPDATE remote_machines SET status = 'offline', updated_at = {_param()}
                 WHERE machine_id = {_param()}
             """,
-                (datetime.now(timezone.utc).replace(tzinfo=None).isoformat(), machine_id),
+                (datetime.now(UTC).replace(tzinfo=None).isoformat(), machine_id),
             )
             conn.commit()
 
@@ -1339,7 +1339,7 @@ class RemoteAgentManager:
         command["command_id"] = command_id
         session_id = command.get("session_id")
         command_type = command.get("command") or command.get("type") or ""
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        now = datetime.now(UTC).replace(tzinfo=None)
         expires_at = (now + timedelta(seconds=self.COMMAND_TTL_SECONDS)).isoformat()
         try:
             with self.db.connection() as conn:
@@ -1377,7 +1377,7 @@ class RemoteAgentManager:
         Returns:
             List of claimed command payloads.
         """
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        now = datetime.now(UTC).replace(tzinfo=None)
         now_iso = now.isoformat()
         timeout_threshold = (
             now - timedelta(seconds=self.COMMAND_CLAIM_TIMEOUT_SECONDS)
@@ -1575,7 +1575,7 @@ class RemoteAgentManager:
                 (
                     "responded",
                     json.dumps(result) if result is not None else None,
-                    datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
+                    datetime.now(UTC).replace(tzinfo=None).isoformat(),
                     request_id,
                 ),
             )
@@ -1765,7 +1765,7 @@ class RemoteAgentManager:
             if len(buf) == self.MAX_BUFFER_SIZE:
                 self._buffer_offsets[session_id] += 1
                 # Insert gap marker for buffer trim
-                now_iso = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+                now_iso = datetime.now(UTC).replace(tzinfo=None).isoformat()
                 gap_marker = {
                     "type": "gap",
                     "gap_type": "buffer_trim",
@@ -1854,7 +1854,7 @@ class RemoteAgentManager:
         if not outputs:
             return
 
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        now = datetime.now(UTC).replace(tzinfo=None)
         expires_at = (now + timedelta(seconds=self.OUTPUT_RETENTION_SECONDS)).isoformat()
 
         last_exc: Exception | None = None
@@ -1990,7 +1990,7 @@ class RemoteAgentManager:
         lock additionally coalesces in-process producers so the common case
         needs one attempt.
         """
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        now = datetime.now(UTC).replace(tzinfo=None)
         payload = json.dumps(output)
         stream = str(output.get("stream", "stdout"))
         expires_at = (now + timedelta(seconds=self.OUTPUT_RETENTION_SECONDS)).isoformat()
@@ -2102,7 +2102,7 @@ class RemoteAgentManager:
                     (
                         session_id,
                         max(0, after_index),
-                        datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
+                        datetime.now(UTC).replace(tzinfo=None).isoformat(),
                         self.MAX_BUFFER_SIZE,
                     ),
                 )
@@ -2113,7 +2113,7 @@ class RemoteAgentManager:
 
         events: list[dict] = []
         expected_index = after_index + 1
-        now_iso = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+        now_iso = datetime.now(UTC).replace(tzinfo=None).isoformat()
 
         for row in rows:
             event_index = row["event_index"]
@@ -2266,7 +2266,7 @@ class RemoteAgentManager:
 
         with self.db.connection() as conn:
             cursor = conn.cursor()
-            now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+            now = datetime.now(UTC).replace(tzinfo=None).isoformat()
 
             cursor.execute(
                 f"""
@@ -2282,7 +2282,7 @@ class RemoteAgentManager:
         """Update capabilities for a remote machine."""
         with self.db.connection() as conn:
             cursor = conn.cursor()
-            now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+            now = datetime.now(UTC).replace(tzinfo=None).isoformat()
             cursor.execute(
                 f"""
                 UPDATE remote_machines
@@ -2298,7 +2298,7 @@ class RemoteAgentManager:
         """Update IP address for a remote machine."""
         with self.db.connection() as conn:
             cursor = conn.cursor()
-            now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+            now = datetime.now(UTC).replace(tzinfo=None).isoformat()
             cursor.execute(
                 f"""
                 UPDATE remote_machines
@@ -2395,7 +2395,7 @@ class RemoteAgentManager:
                             user_id,
                             permission,
                             granted_by,
-                            datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
+                            datetime.now(UTC).replace(tzinfo=None).isoformat(),
                         ),
                     )
                 else:
@@ -2410,7 +2410,7 @@ class RemoteAgentManager:
                             user_id,
                             permission,
                             granted_by,
-                            datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
+                            datetime.now(UTC).replace(tzinfo=None).isoformat(),
                         ),
                     )
                 conn.commit()

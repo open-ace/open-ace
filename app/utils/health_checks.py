@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -269,7 +269,9 @@ def get_current_timestamp() -> str:
     Returns:
         ISO format timestamp string.
     """
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    from datetime import UTC
+
+    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 
 def run_check_with_timeout(check_func, timeout_seconds: float = 1.0) -> dict[str, Any]:
@@ -298,4 +300,46 @@ def run_check_with_timeout(check_func, timeout_seconds: float = 1.0) -> dict[str
     except Exception as e:
         error_msg = _sanitize_error_message(e)
         logger.warning(f"Health check failed: {error_msg}")
+        return {"status": "error", "error": error_msg}
+
+
+def check_ssh_sync_failure() -> dict[str, Any]:
+    """Check for SSH sync failure warning file (Issue #2328).
+
+    The secure SSH sync creates a warning file when it fails.
+    This check ensures the health check fails when SSH sync has failed,
+    providing operational visibility.
+
+    Returns:
+        Dict with status. If SSH sync failed, returns error status.
+    """
+    warning_file = "/var/log/openace/ssh-sync-failure.warning"
+
+    try:
+        if os.path.exists(warning_file):
+            # Read the warning file for details
+            try:
+                with open(warning_file) as f:
+                    content = f.read()
+                # Extract first line (timestamp) for logging
+                first_line = content.split("\n")[0] if content else "Unknown error"
+                logger.error(f"SSH sync failure detected: {first_line}")
+                return {
+                    "status": "error",
+                    "error": "ssh_sync_failure",
+                    "details": first_line,
+                    "warning_file": warning_file,
+                }
+            except Exception as e:
+                logger.error(f"SSH sync failure detected but could not read warning file: {e}")
+                return {
+                    "status": "error",
+                    "error": "ssh_sync_failure",
+                    "warning_file": warning_file,
+                }
+        else:
+            return {"status": "ok"}
+    except Exception as e:
+        error_msg = _sanitize_error_message(e)
+        logger.warning(f"SSH sync check failed: {error_msg}")
         return {"status": "error", "error": error_msg}

@@ -26,7 +26,7 @@ import socket
 import threading
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -198,8 +198,8 @@ class LeaderElectionClient:
 
         Attempts to insert a new leader record or update an expired one.
         """
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
-        expires_at = datetime.now(timezone.utc).replace(tzinfo=None).replace(
+        now = datetime.now(UTC).replace(tzinfo=None)
+        expires_at = datetime.now(UTC).replace(tzinfo=None).replace(
             second=0, microsecond=0
         ) + __import__("datetime").timedelta(seconds=timeout)
 
@@ -262,7 +262,7 @@ class LeaderElectionClient:
         if self.strategy != "heartbeat" or not self._is_leader:
             return False
 
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        now = datetime.now(UTC).replace(tzinfo=None)
 
         try:
             self.db.execute(
@@ -368,7 +368,7 @@ class LeaderElectionClient:
             duration_ms: Execution duration in milliseconds
             error_message: Error message if failed
         """
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        now = datetime.now(UTC).replace(tzinfo=None)
 
         try:
             # Update counters in scheduler_leaders

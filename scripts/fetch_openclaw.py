@@ -16,7 +16,7 @@ import socket
 import sys
 import uuid
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, UTC
 from pathlib import Path
 from typing import Any, Optional
 
@@ -104,7 +104,7 @@ def parse_timestamp(ts_str: str) -> str:
             else:
                 dt = datetime.strptime(ts_str, "%Y-%m-%dT%H:%M:%SZ")
             # UTC time - convert to local time for date extraction
-            dt = dt.replace(tzinfo=timezone.utc).astimezone()
+            dt = dt.replace(tzinfo=UTC).astimezone()
         else:
             dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
         return dt.strftime("%Y-%m-%d")
@@ -277,7 +277,7 @@ async def get_openclaw_usage(gateway_url: str, token: str, days: int = 7) -> dic
     except websockets.exceptions.ConnectionClosed as e:
         print(f"WebSocket connection closed: {e.code} {e.reason}")
         return None
-    except asyncio.TimeoutError:
+    except TimeoutError:
         print("Timeout waiting for response")
         return None
     except Exception as e:
