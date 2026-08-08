@@ -127,7 +127,12 @@ def test_main_rejects_pre_baseline_revision(tmp_path, monkeypatch, capsys):
     err = capsys.readouterr().err
     assert rc == 1
     # Updated error message format: mentions unrecognized/unknown revision
-    assert "not recognized" in err or "unknown" in err or BASELINE_REVISION in err or "below the minimum" in err
+    assert (
+        "not recognized" in err
+        or "unknown" in err
+        or BASELINE_REVISION in err
+        or "below the minimum" in err
+    )
 
 
 def test_main_allows_fresh_database_without_version_table(tmp_path, monkeypatch, capsys):

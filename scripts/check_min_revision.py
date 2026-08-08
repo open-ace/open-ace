@@ -24,13 +24,12 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from migrations.baseline import BASELINE_REVISION
-from scripts.shared.db import _get_db_url
-
 # Import new SchemaCompatibilityService
 from app.repositories.schema_guard import get_environment_mode
 from app.services.schema_compatibility_service import get_schema_compatibility_service
 from app.services.schema_compatibility_types import CompatibilityPolicy, SchemaErrorCategory
+from migrations.baseline import BASELINE_REVISION
+from scripts.shared.db import _get_db_url
 
 # Keep these functions for backward compatibility with existing tests
 _REVISION_RE = re.compile(r"^revision\s*:\s*str\s*=\s*['\"]([^'\"]+)['\"]", re.MULTILINE)
@@ -159,16 +158,24 @@ def main() -> int:
                 print(file=sys.stderr)
 
                 if result.current_heads:
-                    print(f"Current database revisions: {', '.join(result.current_heads)}", file=sys.stderr)
+                    print(
+                        f"Current database revisions: {', '.join(result.current_heads)}",
+                        file=sys.stderr,
+                    )
                 else:
                     print("Current database revisions: (none)", file=sys.stderr)
 
                 print(f"Expected head revision: {result.expected_head}", file=sys.stderr)
-                print(f"Error category: {result.error_category.value if result.error_category else 'unknown'}", file=sys.stderr)
+                print(
+                    f"Error category: {result.error_category.value if result.error_category else 'unknown'}",
+                    file=sys.stderr,
+                )
                 print(f"Policy: {policy.value}", file=sys.stderr)
 
                 if result.missing_migrations:
-                    print(f"\nMissing migrations ({len(result.missing_migrations)}):", file=sys.stderr)
+                    print(
+                        f"\nMissing migrations ({len(result.missing_migrations)}):", file=sys.stderr
+                    )
                     for migration in result.missing_migrations:
                         print(f"  - {migration}", file=sys.stderr)
 

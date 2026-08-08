@@ -579,7 +579,9 @@ def create_app(config=None):
                 try:
                     # Use new SchemaCompatibilityService
                     service = get_schema_compatibility_service()
-                    result = service.check_database_compatibility(conn, CompatibilityPolicy.REQUIRE_HEAD)
+                    result = service.check_database_compatibility(
+                        conn, CompatibilityPolicy.REQUIRE_HEAD
+                    )
 
                     # Populate check results
                     if result.current_heads:
@@ -611,7 +613,9 @@ def create_app(config=None):
                         if result.error_category:
                             checks["schema_version"]["error_category"] = result.error_category.value
                         if result.missing_migrations:
-                            checks["schema_version"]["missing_migrations"] = len(result.missing_migrations)
+                            checks["schema_version"]["missing_migrations"] = len(
+                                result.missing_migrations
+                            )
                         status_code = 503
 
                 finally:

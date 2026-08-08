@@ -117,9 +117,7 @@ class SchemaCompatibilityService:
 
             # Check for multiple heads in database
             if len(current_heads) > 1:
-                return self._handle_multiple_heads(
-                    current_heads, expected_heads, start_time
-                )
+                return self._handle_multiple_heads(current_heads, expected_heads, start_time)
 
             current_revision = current_heads[0]
 
@@ -185,9 +183,7 @@ class SchemaCompatibilityService:
 
             # For SUPPORT_N_1, check if within one migration of head
             if policy == CompatibilityPolicy.SUPPORT_N_1:
-                missing = self._get_missing_migrations(
-                    script_dir, current_revision, expected_head
-                )
+                missing = self._get_missing_migrations(script_dir, current_revision, expected_head)
                 if len(missing) <= 1:
                     return CompatibilityResult(
                         is_compatible=True,
@@ -279,9 +275,7 @@ class SchemaCompatibilityService:
                 )
                 # Return a minimal ScriptDirectory if possible
                 # This will likely fail later, but gives better error message
-                raise FileNotFoundError(
-                    f"alembic.ini not found at {self.alembic_config_path}"
-                )
+                raise FileNotFoundError(f"alembic.ini not found at {self.alembic_config_path}")
 
         cfg = Config(str(config_path))
         script_dir = ScriptDirectory.from_config(cfg)
@@ -330,9 +324,7 @@ class SchemaCompatibilityService:
         heads = script_dir.get_heads()
         return heads[0] if heads else None
 
-    def _is_in_lineage(
-        self, script_dir: ScriptDirectory, revision: str, ancestor: str
-    ) -> bool:
+    def _is_in_lineage(self, script_dir: ScriptDirectory, revision: str, ancestor: str) -> bool:
         """Check if revision is descended from ancestor using graph traversal.
 
         Args:
@@ -655,9 +647,7 @@ class SchemaCompatibilityService:
             ),
         )
 
-    def _format_behind_head_message(
-        self, current: str, expected: str, missing: list[str]
-    ) -> str:
+    def _format_behind_head_message(self, current: str, expected: str, missing: list[str]) -> str:
         """Format diagnostic message for behind_head error."""
         missing_count = len(missing)
         missing_list = "\n  - ".join(missing) if missing else "none"

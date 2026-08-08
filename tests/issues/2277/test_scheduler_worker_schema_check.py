@@ -4,6 +4,7 @@ Issue #2330: scheduler_worker now uses SchemaCompatibilityService directly
 instead of check_min_revision.main(). These tests verify that the service
 correctly passes/fails compatibility checks.
 """
+
 from __future__ import annotations
 
 import os
@@ -38,9 +39,12 @@ def test_schema_check_passes_when_compatible():
     mock_result.current_heads = ["test_revision"]
     mock_result.expected_head = "test_revision"
 
-    with patch("scripts.shared.db._get_db_url", return_value="sqlite:///:memory:"), patch(
-        "app.services.schema_compatibility_service.get_schema_compatibility_service"
-    ) as mock_get_service:
+    with (
+        patch("scripts.shared.db._get_db_url", return_value="sqlite:///:memory:"),
+        patch(
+            "app.services.schema_compatibility_service.get_schema_compatibility_service"
+        ) as mock_get_service,
+    ):
         mock_service = MagicMock()
         mock_service.check_database_compatibility.return_value = mock_result
         mock_get_service.return_value = mock_service
@@ -60,9 +64,12 @@ def test_schema_check_exits_when_incompatible():
     mock_result.diagnostic_message = "Database schema is behind head"
     mock_result.missing_migrations = ["migration_1"]
 
-    with patch("scripts.shared.db._get_db_url", return_value="sqlite:///:memory:"), patch(
-        "app.services.schema_compatibility_service.get_schema_compatibility_service"
-    ) as mock_get_service:
+    with (
+        patch("scripts.shared.db._get_db_url", return_value="sqlite:///:memory:"),
+        patch(
+            "app.services.schema_compatibility_service.get_schema_compatibility_service"
+        ) as mock_get_service,
+    ):
         mock_service = MagicMock()
         mock_service.check_database_compatibility.return_value = mock_result
         mock_get_service.return_value = mock_service
@@ -80,9 +87,12 @@ def test_schema_check_passes_with_bypass():
     mock_result.bypass_active = True
     mock_result.bypass_reason = "Emergency bypass"
 
-    with patch("scripts.shared.db._get_db_url", return_value="sqlite:///:memory:"), patch(
-        "app.services.schema_compatibility_service.get_schema_compatibility_service"
-    ) as mock_get_service:
+    with (
+        patch("scripts.shared.db._get_db_url", return_value="sqlite:///:memory:"),
+        patch(
+            "app.services.schema_compatibility_service.get_schema_compatibility_service"
+        ) as mock_get_service,
+    ):
         mock_service = MagicMock()
         mock_service.check_database_compatibility.return_value = mock_result
         mock_get_service.return_value = mock_service

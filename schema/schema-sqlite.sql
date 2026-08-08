@@ -1407,6 +1407,11 @@ CREATE TABLE workflow_milestones (
  tldr text DEFAULT '' NOT NULL
 );
 
+CREATE TABLE schema_metadata (
+ initialized_at TIMESTAMP NOT NULL,
+ schema_version TEXT
+);
+
 CREATE UNIQUE INDEX agent_approvals_request_id_key ON agent_approvals (request_id);
 
 CREATE UNIQUE INDEX agent_runs_run_id_key ON agent_runs (run_id);

@@ -2168,6 +2168,12 @@ CREATE SEQUENCE workflow_milestones_id_seq
     CACHE 1;
 
 ALTER SEQUENCE workflow_milestones_id_seq OWNED BY workflow_milestones.id;
+
+CREATE TABLE schema_metadata (
+    initialized_at timestamp without time zone NOT NULL,
+    schema_version character varying(64)
+);
+
 ALTER TABLE ONLY agent_approvals ALTER COLUMN id SET DEFAULT nextval('agent_approvals_id_seq'::regclass);
 
 ALTER TABLE ONLY agent_run_events ALTER COLUMN id SET DEFAULT nextval('agent_run_events_id_seq'::regclass);

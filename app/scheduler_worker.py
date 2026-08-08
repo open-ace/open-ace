@@ -156,7 +156,9 @@ class SchedulerWorker:
                 with engine.connect() as conn:
                     # Use SchemaCompatibilityService
                     service = get_schema_compatibility_service()
-                    result = service.check_database_compatibility(conn, CompatibilityPolicy.REQUIRE_HEAD)
+                    result = service.check_database_compatibility(
+                        conn, CompatibilityPolicy.REQUIRE_HEAD
+                    )
 
                     if not result.is_compatible:
                         if result.bypass_active:
@@ -166,7 +168,9 @@ class SchedulerWorker:
                             )
                         else:
                             # Format error message based on category
-                            error_msg = result.diagnostic_message or "Schema compatibility check failed"
+                            error_msg = (
+                                result.diagnostic_message or "Schema compatibility check failed"
+                            )
 
                             if result.error_category == SchemaErrorCategory.FRESH_DATABASE:
                                 logger.error(

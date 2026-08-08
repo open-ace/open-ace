@@ -24,16 +24,43 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     """Add schema_metadata table for database initialization tracking."""
-    # Create table with dialect-agnostic syntax
-    # Use sa.func.now() or current_timestamp for cross-dialect compatibility
     conn = op.get_bind()
     dialect = conn.dialect.name
 
+    # Check if table already exists (idempotent migration)
+    if dialect == "postgresql":
+        result = conn.execute(
+            sa.text(
+                "SELECT EXISTS ("
+                "  SELECT 1 FROM information_schema.tables "
+                "  WHERE table_schema = 'public' "
+                "  AND table_name = 'schema_metadata'"
+                ")"
+            )
+        )
+        table_exists = result.scalar()
+    else:
+        # SQLite
+        result = conn.execute(
+            sa.text(
+                "SELECT EXISTS ("
+                "  SELECT 1 FROM sqlite_master "
+                "  WHERE type='table' AND name='schema_metadata'"
+                ")"
+            )
+        )
+        table_exists = result.scalar()
+
+    if table_exists:
+        # Table already exists, skip creation (idempotent)
+        return
+
+    # Create table with dialect-specific syntax
     if dialect == "postgresql":
         # PostgreSQL: use native TIMESTAMP type
         op.execute(
             """
-            CREATE TABLE IF NOT EXISTS schema_metadata (
+            CREATE TABLE schema_metadata (
                 initialized_at TIMESTAMP NOT NULL DEFAULT NOW(),
                 schema_version VARCHAR(64)
             )
@@ -41,29 +68,22 @@ def upgrade() -> None:
         )
     else:
         # SQLite and others: use dialect-agnostic approach
-        # SQLite doesn't support DEFAULT NOW() in CREATE TABLE
         op.create_table(
             "schema_metadata",
             sa.Column("initialized_at", sa.DateTime(), nullable=False),
             sa.Column("schema_version", sa.String(64), nullable=True),
         )
 
-    # Check if table is empty before inserting
-    # This prevents duplicate inserts on re-runs
-    result = conn.execute(sa.text("SELECT COUNT(*) FROM schema_metadata"))
-    count = result.scalar()
-
-    if count == 0:
-        # Insert initialization record with current timestamp
-        # Use datetime.now() for cross-dialect compatibility
-        current_time = datetime.now(timezone.utc).isoformat()
-        conn.execute(
-            sa.text(
-                "INSERT INTO schema_metadata (initialized_at, schema_version) "
-                "VALUES (:ts, 'baseline_2026_06_23')"
-            ),
-            {"ts": current_time},
-        )
+    # Insert initialization record with current timestamp
+    # Use datetime.now() for cross-dialect compatibility
+    current_time = datetime.now(timezone.utc).isoformat()
+    conn.execute(
+        sa.text(
+            "INSERT INTO schema_metadata (initialized_at, schema_version) "
+            "VALUES (:ts, 'baseline_2026_06_23')"
+        ),
+        {"ts": current_time},
+    )
 
 
 def downgrade() -> None:

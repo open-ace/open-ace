@@ -238,12 +238,15 @@ def check_schema_compatibility(
             # Try to extract revision from error message
             # Pattern: "identified by 'revision_id'" or "revision 'revision_id'"
             import re
+
             match = re.search(r"identified by '([^']+)'", result.diagnostic_message)
             if match:
                 current_rev = match.group(1)
             else:
                 # Alternative pattern: "revision 'revision_id'"
-                match = re.search(r"revision[^']*'([^']+)'", result.diagnostic_message, re.IGNORECASE)
+                match = re.search(
+                    r"revision[^']*'([^']+)'", result.diagnostic_message, re.IGNORECASE
+                )
                 if match:
                     current_rev = match.group(1)
 
