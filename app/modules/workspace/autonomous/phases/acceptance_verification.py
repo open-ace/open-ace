@@ -406,11 +406,18 @@ def handle(ctx, deps) -> PhaseResult:
         )
     extracted_payload = agent_out.get("snapshot")
     if extracted_payload is not None:
-        try:
-            snapshot = _validate_extracted_snapshot(extracted_payload)
-            snap_hash = hash_snapshot(snapshot)
-        except ValueError as exc:
-            agent_out["infra_error"] = f"verification agent returned invalid snapshot: {exc}"
+        if not snapshot_requires_extraction:
+            # The issue's convention snapshot is authoritative. A verifier
+            # must not replace it with an easier LLM-authored checklist.
+            agent_out["infra_error"] = (
+                "verification agent returned an unexpected snapshot for structured criteria"
+            )
+        else:
+            try:
+                snapshot = _validate_extracted_snapshot(extracted_payload)
+                snap_hash = hash_snapshot(snapshot)
+            except ValueError as exc:
+                agent_out["infra_error"] = f"verification agent returned invalid snapshot: {exc}"
     elif snapshot_requires_extraction and not agent_out.get("infra_error"):
         agent_out["infra_error"] = (
             "verification agent omitted the required extracted acceptance snapshot"

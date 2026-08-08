@@ -334,6 +334,38 @@ def test_valid_extracted_snapshot_drives_coverage_and_can_confirm():
     deps.gh.close_issue.assert_called_once_with(42)
 
 
+def test_verifier_cannot_replace_structured_issue_snapshot():
+    deps = MagicMock()
+    deps.gh.get_issue.return_value = {"body": "## Acceptance Criteria\n- [ ] security behavior"}
+    deps.gh.get_changed_files.return_value = []
+    deps.host.issue_is_open.return_value = True
+    deps.host.run_verification_agent.return_value = {
+        "verdicts": [
+            {
+                "item": "easier substitute",
+                "verdict": "confirmed",
+                "evidence": [{"ref": "app/x.py:1", "note": "unrelated"}],
+                "rationale": "",
+            }
+        ],
+        "snapshot": {
+            "required_paths": [],
+            "checklist": ["easier substitute"],
+            "non_scope": [],
+            "closure_constraints": False,
+        },
+    }
+
+    result = av.handle(_ctx(_workflow()), deps)
+
+    assert result.outcome == "retry"
+    report = json.loads(result.workflow_patch["verification_report"])
+    assert "unexpected snapshot" in report["infra_error"]
+    persisted = json.loads(result.workflow_patch["issue_acceptance_snapshot"])
+    assert persisted["checklist"] == ["security behavior"]
+    deps.gh.close_issue.assert_not_called()
+
+
 def test_confirmed_checklist_verdict_without_evidence_is_indeterminate():
     deps = MagicMock()
     deps.gh.get_issue.return_value = {"body": "## Acceptance Criteria\n- [ ] security behavior"}
