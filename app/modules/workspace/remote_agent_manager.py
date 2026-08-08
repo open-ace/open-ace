@@ -1452,6 +1452,7 @@ class RemoteAgentManager:
         command: str,
         session_id: str,
         timeout: float = 5.0,
+        extra: dict[str, Any] | None = None,
     ) -> dict | None:
         """
         Send a command to an agent and wait for a response.
@@ -1465,6 +1466,7 @@ class RemoteAgentManager:
             command: Command name (e.g., "get_session_info").
             session_id: Target session ID.
             timeout: Maximum wait time in seconds.
+            extra: Optional extra payload fields merged into the command.
 
         Returns:
             Response dict if received within timeout, None otherwise.
@@ -1479,15 +1481,15 @@ class RemoteAgentManager:
             }
 
         # Send the command
-        self.send_command(
-            machine_id,
-            {
-                "type": "command",
-                "command": command,
-                "session_id": session_id,
-                "request_id": request_id,
-            },
-        )
+        payload: dict[str, Any] = {
+            "type": "command",
+            "command": command,
+            "session_id": session_id,
+            "request_id": request_id,
+        }
+        if extra:
+            payload.update(extra)
+        self.send_command(machine_id, payload)
 
         # Wait for response. The in-process Event handles the same-pod fast
         # path; the DB poll handles non-sticky deployments where the agent's
@@ -2155,6 +2157,21 @@ class RemoteAgentManager:
         with self._lock:
             self._session_end_flags[session_id] = True
             self._last_delivered.pop(session_id, None)  # Cleanup SSE state
+
+    def clear_session_end_flag(self, session_id: str) -> None:
+        """Clear the in-memory session-ended flag when a session becomes active.
+
+        ``is_session_ended`` consults this flag before hitting the DB. The flag
+        is set when a session reaches completed/error/stopped (or is restored
+        from DB on startup) but was never cleared when the session went back to
+        active — which made the SSE /stream endpoint close immediately with
+        ``[DONE]`` after a restore, starving the webui of live output (Issue #2404).
+        """
+        with self._lock:
+            if self._session_end_flags.pop(session_id, None):
+                logger.info(
+                    "Cleared stale session-ended flag for %s", session_id[:8]
+                )
 
     def _log_session_ended_db_failure_cached(self, session_id: str, minute: int) -> None:
         """Log DB failure for is_session_ended with rate limiting (Issue #1823).

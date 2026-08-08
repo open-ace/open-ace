@@ -933,10 +933,30 @@ class ProcessExecutor:
         model: str | None = None,
         permission_mode: str | None = None,
         allowed_tools: list[str] | None = None,
+        resume_session_id: str | None = None,
     ) -> dict[str, Any]:
         with self._lock:
-            if session_id in self._sessions and self._sessions[session_id].is_running:
-                return {"success": False, "error": "Session already running"}
+            existing = self._sessions.get(session_id)
+            if existing and existing.is_running:
+                if resume_session_id:
+                    # Restore semantics: the server issued a fresh proxy token
+                    # and expects the process restarted with it. The old process
+                    # may still hold a revoked/expired token and would 401 every
+                    # LLM call (Issue #2405). Stop it and fall through to start
+                    # again with the new token + --resume below.
+                    self._sessions.pop(session_id, None)
+                else:
+                    return {"success": False, "error": "Session already running"}
+
+        if existing is not None and resume_session_id:
+            try:
+                existing.stop()
+            except Exception as e:
+                logger.warning("Failed to stop stale session %s: %s", session_id[:8], e)
+            logger.info(
+                "Session %s already running; restarting with a fresh proxy token for resume",
+                session_id[:8],
+            )
 
         # ZCode runs a persistent app-server process driven by its own stdio
         # protocol (ZCode Protocol), not Claude's stream-json stdin. Route it
