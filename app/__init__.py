@@ -294,13 +294,12 @@ def create_app(config=None):
     try:
         require_explicit_mode()
     except RuntimeError as e:
-        # In production: re-raise to prevent startup
-        from app.utils.security_mode import is_production
-
-        if is_production():
-            raise
-        # In development: log warning and continue
-        logger.warning(f"Security mode validation failed (non-production): {e}")
+        # Fail fast: cannot determine security mode
+        # The error message from require_explicit_mode() provides clear guidance
+        logger.error(f"Security mode validation failed: {e}")
+        logger.error("Cannot start application without explicit security mode")
+        # Always re-raise - we cannot safely determine mode to make decisions
+        raise
 
     # Terminal WebSocket must be handled at the WSGI layer because
     # Flask/Werkzeug cannot reliably route upgraded connections.

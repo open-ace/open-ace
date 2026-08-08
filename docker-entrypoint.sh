@@ -774,6 +774,55 @@ CONFIG_EOF
 # falling back to generation only if still unset) and before gunicorn (which
 # needs SECRET_KEY / OPENACE_ENCRYPTION_KEY in env).
 ensure_secret_env
+
+# Issue #2331: Create pilot metadata when in pilot mode with auto-generated secrets
+if [ "${OPENACE_SECURITY_MODE}" = "pilot" ]; then
+    # Check if we have generated secrets (indicates auto-generation occurred)
+    if [ -f "${OPENACE_CONFIG_DIR}/generated-secrets.env" ]; then
+        echo "Creating pilot mode metadata file..."
+
+# Create pilot metadata using Python
+        python3 -c "
+import json
+import os
+from datetime import datetime, timezone
+
+metadata_path = os.path.join(os.environ.get('OPENACE_CONFIG_DIR', '/home/open-ace/.open-ace'), 'pilot-mode-metadata.json')
+
+# Check which secrets were auto-generated
+secrets_generated = []
+secrets_file = os.path.join(os.environ.get('OPENACE_CONFIG_DIR', '/home/open-ace/.open-ace'), 'generated-secrets.env')
+if os.path.exists(secrets_file):
+    with open(secrets_file) as f:
+        for line in f:
+            line = line.strip()
+            if '=' in line and not line.startswith('#'):
+                name = line.split('=', 1)[0]
+                if name in ['SECRET_KEY', 'OPENACE_ENCRYPTION_KEY', 'UPLOAD_AUTH_KEY']:
+                    secrets_generated.append(name)
+
+metadata = {
+    'mode': 'pilot',
+    'generated_at': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
+    'warning': 'NOT FOR PRODUCTION USE - Auto-generated secrets',
+    'secrets_generated': secrets_generated,
+    'persistent_file': 'generated-secrets.env'
+}
+
+with open(metadata_path, 'w') as f:
+    json.dump(metadata, f, indent=2)
+
+print(f'Pilot metadata created at {metadata_path}')
+"
+
+        echo "=========================================="
+        echo "  PILOT MODE WARNING"
+        echo "  Auto-generated secrets - NOT for production use"
+        echo "  Metadata: ${OPENACE_CONFIG_DIR}/pilot-mode-metadata.json"
+        echo "=========================================="
+    fi
+fi
+
 generate_default_config
 
 # ============================================================================
