@@ -140,53 +140,55 @@ class SchedulerWorker:
         Issue #2330: Uses Alembic revision graph validation
         """
         try:
-            from app.repositories.database import Database
+            import sqlalchemy as sa
+
             from app.repositories.schema_guard import get_environment_mode
             from app.services.schema_compatibility_service import get_schema_compatibility_service
             from app.services.schema_compatibility_types import CompatibilityPolicy, SchemaErrorCategory
+            from scripts.shared.db import _get_db_url
 
             # Check if we're in production mode
             env_mode = get_environment_mode()
 
-            # Get database connection
-            db = Database()
-            conn = db.get_connection()
+            # Get database URL and create SQLAlchemy engine
+            database_url = _get_db_url()
+            engine = sa.create_engine(database_url)
             try:
-                # Use SchemaCompatibilityService
-                service = get_schema_compatibility_service()
-                result = service.check_database_compatibility(conn, CompatibilityPolicy.REQUIRE_HEAD)
+                with engine.connect() as conn:
+                    # Use SchemaCompatibilityService
+                    service = get_schema_compatibility_service()
+                    result = service.check_database_compatibility(conn, CompatibilityPolicy.REQUIRE_HEAD)
 
-                if not result.is_compatible:
-                    if result.bypass_active:
-                        logger.warning(
-                            f"Schema compatibility BYPASSED for emergency: {result.bypass_reason}. "
-                            "Scheduler continuing with potentially incompatible database."
-                        )
-                    else:
-                        # Format error message based on category
-                        error_msg = result.diagnostic_message or "Schema compatibility check failed"
-
-                        if result.error_category == SchemaErrorCategory.FRESH_DATABASE:
-                            logger.error(
-                                "Fresh database detected in production. "
-                                "Scheduler workers must not start on uninitialized database. "
-                                "Run migration job first: alembic upgrade head"
-                            )
-                        elif result.error_category == SchemaErrorCategory.BEHIND_HEAD:
-                            logger.error(
-                                f"Database schema is behind head revision. "
-                                f"Missing {len(result.missing_migrations)} migrations. "
-                                f"Run: alembic upgrade head"
+                    if not result.is_compatible:
+                        if result.bypass_active:
+                            logger.warning(
+                                f"Schema compatibility BYPASSED for emergency: {result.bypass_reason}. "
+                                "Scheduler continuing with potentially incompatible database."
                             )
                         else:
-                            logger.error(f"Database schema version check failed: {error_msg}")
+                            # Format error message based on category
+                            error_msg = result.diagnostic_message or "Schema compatibility check failed"
 
-                        sys.exit(1)
+                            if result.error_category == SchemaErrorCategory.FRESH_DATABASE:
+                                logger.error(
+                                    "Fresh database detected in production. "
+                                    "Scheduler workers must not start on uninitialized database. "
+                                    "Run migration job first: alembic upgrade head"
+                                )
+                            elif result.error_category == SchemaErrorCategory.BEHIND_HEAD:
+                                logger.error(
+                                    f"Database schema is behind head revision. "
+                                    f"Missing {len(result.missing_migrations)} migrations. "
+                                    f"Run: alembic upgrade head"
+                                )
+                            else:
+                                logger.error(f"Database schema version check failed: {error_msg}")
 
-                logger.info("Database schema version check passed")
+                            sys.exit(1)
 
+                    logger.info("Database schema version check passed")
             finally:
-                conn.close()
+                engine.dispose()
 
         except Exception as e:
             logger.error(f"Failed to check schema version: {e}")

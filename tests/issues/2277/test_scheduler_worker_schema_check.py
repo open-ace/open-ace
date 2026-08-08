@@ -1,18 +1,13 @@
-"""scheduler_worker._check_schema_version must call check_min_revision.main() (#2277).
+"""scheduler_worker._check_schema_version must use SchemaCompatibilityService (#2330).
 
-PR#2214's scheduler_worker shipped calling ``scripts.check_min_revision.
-check_min_revision()`` — a function that does not exist (the module exposes
-``main``/``collect_active_revision_ids``/``is_supported_revision``). The
-scheduler crashed on its first prod start (AttributeError → ``sys.exit(1)`` →
-restart loop) because the worker had never been exercised in CI or prod. These
-tests pin the correct API: ``main()`` returns 0 on a supported/fresh DB and
-non-zero when too old.
+Issue #2330: scheduler_worker now uses SchemaCompatibilityService directly
+instead of check_min_revision.main(). These tests verify that the service
+correctly passes/fails compatibility checks.
 """
-
 from __future__ import annotations
 
 import os
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -34,15 +29,62 @@ def _run_check() -> None:
     SchedulerWorker._check_schema_version(instance)
 
 
-def test_schema_check_passes_when_main_returns_zero():
-    """main() == 0 (supported revision / fresh DB) → no exit, no raise."""
-    with patch("scripts.check_min_revision.main", return_value=0):
+def test_schema_check_passes_when_compatible():
+    """Compatible database → no exit, no raise."""
+    # Mock SchemaCompatibilityService to return compatible result
+    mock_result = MagicMock()
+    mock_result.is_compatible = True
+    mock_result.bypass_active = False
+    mock_result.current_heads = ["test_revision"]
+    mock_result.expected_head = "test_revision"
+
+    with patch(
+        "app.services.schema_compatibility_service.get_schema_compatibility_service"
+    ) as mock_get_service:
+        mock_service = MagicMock()
+        mock_service.check_database_compatibility.return_value = mock_result
+        mock_get_service.return_value = mock_service
+
         _run_check()  # should not raise
 
 
-def test_schema_check_exits_when_main_returns_nonzero():
-    """main() != 0 (DB too old / unsupported) → SystemExit(1)."""
-    with patch("scripts.check_min_revision.main", return_value=1):
+def test_schema_check_exits_when_incompatible():
+    """Incompatible database → SystemExit(1)."""
+    from app.services.schema_compatibility_types import SchemaErrorCategory
+
+    # Mock SchemaCompatibilityService to return incompatible result
+    mock_result = MagicMock()
+    mock_result.is_compatible = False
+    mock_result.bypass_active = False
+    mock_result.error_category = SchemaErrorCategory.BEHIND_HEAD
+    mock_result.diagnostic_message = "Database schema is behind head"
+    mock_result.missing_migrations = ["migration_1"]
+
+    with patch(
+        "app.services.schema_compatibility_service.get_schema_compatibility_service"
+    ) as mock_get_service:
+        mock_service = MagicMock()
+        mock_service.check_database_compatibility.return_value = mock_result
+        mock_get_service.return_value = mock_service
+
         with pytest.raises(SystemExit) as exc_info:
             _run_check()
         assert exc_info.value.code == 1
+
+
+def test_schema_check_passes_with_bypass():
+    """Bypass active → no exit, continues with warning."""
+    # Mock SchemaCompatibilityService to return bypass result
+    mock_result = MagicMock()
+    mock_result.is_compatible = False  # Incompatible but bypassed
+    mock_result.bypass_active = True
+    mock_result.bypass_reason = "Emergency bypass"
+
+    with patch(
+        "app.services.schema_compatibility_service.get_schema_compatibility_service"
+    ) as mock_get_service:
+        mock_service = MagicMock()
+        mock_service.check_database_compatibility.return_value = mock_result
+        mock_get_service.return_value = mock_service
+
+        _run_check()  # should not raise due to bypass
