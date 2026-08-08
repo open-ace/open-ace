@@ -928,6 +928,11 @@ class AutonomousAgentRunner:
           breach, so timeouts/stops are never misreported here.
         """
         lowered = (stderr or "").lower()
+        if return_code == 70:
+            return (
+                "preserve_preparation_failed",
+                "Could not prepare .claude preserve directory; nesting guard aborted to protect --resume history",
+            )
         if "openace_cgroup_required" in lowered:
             return (
                 "task_resource_policy_unavailable",
