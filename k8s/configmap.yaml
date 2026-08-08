@@ -8,9 +8,15 @@ metadata:
     app.kubernetes.io/name: open-ace
     app.kubernetes.io/component: config
 data:
+  # SECURITY MODE (Issue #2331) - REQUIRED
+  # MUST be set explicitly. Missing value causes startup failure.
+  # production: Strict validation, reject weak secrets
+  # pilot: Trial mode, auto-generate with warnings
+  # development: Local dev only, auto-generate
+  OPENACE_SECURITY_MODE: "production"
+
   # Application settings
   FLASK_APP: "server.py"
-  FLASK_ENV: "production"
   PYTHONUNBUFFERED: "1"
   LOG_LEVEL: "INFO"
 

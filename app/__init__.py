@@ -287,6 +287,21 @@ def create_app(config=None):
     # This is needed for HTTPS iframe URL generation in multi-user mode
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
 
+    # Issue #2331: Require explicit security mode in production paths
+    # Must run BEFORE any application initialization to fail fast
+    from app.utils.security_mode import require_explicit_mode
+
+    try:
+        require_explicit_mode()
+    except RuntimeError as e:
+        # In production: re-raise to prevent startup
+        from app.utils.security_mode import is_production
+
+        if is_production():
+            raise
+        # In development: log warning and continue
+        logger.warning(f"Security mode validation failed (non-production): {e}")
+
     # Terminal WebSocket must be handled at the WSGI layer because
     # Flask/Werkzeug cannot reliably route upgraded connections.
     # See issue #147 and #557 for context.
@@ -488,13 +503,57 @@ def create_app(config=None):
     def security_status():
         """Security baseline status endpoint for monitoring and health checks.
 
+        Issue #2331: Enhanced with security mode source and pilot metadata.
+
         Returns security configuration status for the current deployment.
         In production mode, returns HTTP 503 if security baseline fails.
         """
         from app.utils.security_baseline import check_all
+        from app.utils.security_mode import (
+            get_security_mode_with_source,
+            load_pilot_metadata,
+            SecurityModeSource,
+        )
 
         results = check_all()
         status_code = 200
+
+        # Issue #2331: Add security mode source information
+        try:
+            mode, source = get_security_mode_with_source()
+            pilot_metadata = load_pilot_metadata()
+
+            results["security_mode"] = {
+                "mode": mode.value,
+                "source": source.value,
+                "explicit": source == SecurityModeSource.EXPLICIT,
+            }
+
+            if pilot_metadata:
+                results["pilot_metadata"] = pilot_metadata
+
+                # Warning if pilot metadata exists in production mode
+                if mode.value == "production":
+                    results["warnings"] = results.get("warnings", [])
+                    results["warnings"].append(
+                        "Production mode running with pilot metadata file. "
+                        "This indicates pilot-to-production migration without secret configuration."
+                    )
+        except RuntimeError as e:
+            results["security_mode"] = {
+                "mode": "error",
+                "source": "error",
+                "error": str(e),
+            }
+            status_code = 503
+
+        # Add migration status for FLASK_ENV users
+        results["migration_status"] = {
+            "flask_env_deprecated": True,
+            "removal_version": "v2.1.0",
+            "migration_script": "scripts/migrate_security_mode.sh",
+            "issue": "https://github.com/open-ace/open-ace/issues/2331",
+        }
 
         # For production mode, return 503 if unhealthy
         if results.get("status") == "unhealthy":
@@ -502,14 +561,16 @@ def create_app(config=None):
 
         return jsonify(results), status_code
 
-    # Readiness check endpoint (Issue #2186, #2190)
+    # Readiness check endpoint (Issue #2186, #2190, #2331)
     @app.route("/readyz")
     def readiness_check():
         """Readiness check endpoint for Kubernetes and load balancers.
 
         Checks database connection, schema version compatibility, config directory,
-        workspace directory, encryption keys, and initialization status.
+        workspace directory, encryption keys, initialization status, and security mode.
         Returns HTTP 503 if any critical check fails.
+
+        Issue #2331: Also checks security mode source validation.
         """
         from app.repositories.database import Database, is_postgresql
         from app.repositories.schema_guard import (
@@ -517,7 +578,6 @@ def create_app(config=None):
             SchemaCompatibilityError,
             check_schema_compatibility,
             get_database_revision,
-            get_environment_mode,
         )
         from app.utils.health_checks import (
             check_config_directory,
@@ -527,6 +587,11 @@ def create_app(config=None):
             check_workspace_directory,
             run_check_with_timeout,
         )
+        from app.utils.security_mode import (
+            get_security_mode_with_source,
+            load_pilot_metadata,
+            SecurityModeSource,
+        )
 
         checks: dict[str, dict[str, str | bool | None]] = {
             "database": {"status": "unknown"},
@@ -535,9 +600,51 @@ def create_app(config=None):
             "workspace_dir": {"status": "unknown"},
             "encryption_keys": {"status": "unknown"},
             "init_status": {"status": "unknown"},
+            "security_mode": {"status": "unknown"},
         }
 
         status_code = 200
+
+        # Issue #2331: Check security mode source first
+        # Security mode must be EXPLICIT in production-capable paths
+        try:
+            mode, source = get_security_mode_with_source()
+            pilot_metadata = load_pilot_metadata()
+
+            checks["security_mode"]["mode"] = mode.value
+            checks["security_mode"]["source"] = source.value
+            checks["security_mode"]["pilot_metadata"] = pilot_metadata is not None
+            checks["security_mode"]["status"] = "ok"
+
+            # Fail if mode is not explicit in production-capable paths
+            # (validation already done by require_explicit_mode(), but double-check here)
+            if source != SecurityModeSource.EXPLICIT:
+                # Check if we're in test context
+                from app.utils.security_mode import is_test_context
+
+                if not is_test_context():
+                    checks["security_mode"]["status"] = "not_explicit"
+                    checks["security_mode"]["reason"] = (
+                        f"Security mode must be explicitly set (current source: {source.value})"
+                    )
+                    status_code = 503
+
+            # Check for pilot metadata in production mode
+            if mode.value == "production" and pilot_metadata:
+                checks["security_mode"]["status"] = "pilot_metadata_in_production"
+                checks["security_mode"]["warning"] = (
+                    "Production mode running with pilot metadata file present. "
+                    "This indicates pilot-to-production migration without secret configuration."
+                )
+                logger.error(
+                    "Production mode running with pilot metadata file! "
+                    "Remove metadata and set secrets explicitly."
+                )
+                # Log error but don't fail readiness (migration path)
+        except RuntimeError as e:
+            checks["security_mode"]["status"] = "error"
+            checks["security_mode"]["error"] = str(e)
+            status_code = 503
 
         # Check database connection with timeout (Issue #2186)
         db_result = check_database_connection(timeout=2.0)
@@ -546,7 +653,10 @@ def create_app(config=None):
             status_code = 503
 
         # Check schema version (PostgreSQL production only)
-        if is_postgresql() and get_environment_mode() == "production":
+        # Issue #2331: Use unified security mode
+        from app.utils.security_mode import get_security_mode
+
+        if is_postgresql() and get_security_mode().value == "production":
             try:
                 db = Database()
                 conn = db.get_connection()

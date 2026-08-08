@@ -41,6 +41,90 @@ if [ "${WORKSPACE_MULTI_USER_MODE}" = "true" ]; then
 fi
 
 # ============================================================================
+# 0. Security Mode Validation (Issue #2331)
+# ============================================================================
+# Require explicit OPENACE_SECURITY_MODE in production-capable paths.
+# Must run BEFORE any database initialization or secret generation.
+
+validate_security_mode() {
+    local mode="${OPENACE_SECURITY_MODE:-}"
+    local scheduler_mode="${SCHEDULER_MODE:-web}"
+    local flask_env="${FLASK_ENV:-}"
+
+    # Check if this is a production-capable path
+    # Production indicators: scheduler running, FLASK_ENV=production, or running in production container
+    local is_production_path=false
+
+    # If SCHEDULER_MODE is set to web or scheduler (not dev), it's production-capable
+    if [ "$scheduler_mode" = "web" ] || [ "$scheduler_mode" = "scheduler" ]; then
+        is_production_path=true
+    fi
+
+    # If FLASK_ENV is production, it's production-capable
+    if [ "$flask_env" = "production" ]; then
+        is_production_path=true
+    fi
+
+    # If running under Kubernetes
+    if [ -n "${KUBERNETES_SERVICE_HOST:-}" ]; then
+        is_production_path=true
+    fi
+
+    # If running under systemd
+    if [ -d "/run/systemd/system" ]; then
+        is_production_path=true
+    fi
+
+    # Test/CI contexts are NOT production-capable
+    if [ "${OPENACE_TEST_MODE:-}" = "1" ] || [ "${CI:-}" = "true" ] || [ "$flask_env" = "test" ]; then
+        is_production_path=false
+    fi
+
+    # Emergency rollback flag (expires after 30 days - checked by Python code)
+    if [ "${OPENACE_ALLOW_IMPLICIT_MODE:-}" = "1" ]; then
+        echo "WARNING: OPENACE_ALLOW_IMPLICIT_MODE=1 is set (emergency rollback)"
+        echo "         This flag should not be used in production"
+        is_production_path=false
+    fi
+
+    # Production-capable paths MUST have explicit mode
+    if [ "$is_production_path" = true ] && [ -z "$mode" ]; then
+        echo "ERROR: OPENACE_SECURITY_MODE must be set explicitly in production-capable paths"
+        echo ""
+        echo "Valid values:"
+        echo "  production  - Strict validation, reject weak secrets"
+        echo "  pilot       - Trial mode, auto-generate secrets with warnings"
+        echo "  development - Local dev only, auto-generate secrets"
+        echo ""
+        echo "Examples:"
+        echo "  For production:  OPENACE_SECURITY_MODE=production"
+        echo "  For trial:       OPENACE_SECURITY_MODE=pilot"
+        echo "  For development: OPENACE_SECURITY_MODE=development"
+        echo ""
+        echo "Migration guide: https://github.com/open-ace/open-ace/issues/2331"
+        exit 1
+    fi
+
+    # Validate mode value if set
+    if [ -n "$mode" ]; then
+        case "$mode" in
+            production|pilot|development)
+                # Valid mode
+                ;;
+            *)
+                echo "ERROR: Invalid OPENACE_SECURITY_MODE value: '$mode'"
+                echo ""
+                echo "Valid values: production, pilot, development"
+                exit 1
+                ;;
+        esac
+    fi
+}
+
+# Run security mode validation before any other checks
+validate_security_mode
+
+# ============================================================================
 # 0. Security Baseline Check (Issue #1893)
 # ============================================================================
 # Detect security mode and enforce baseline checks before proceeding.
