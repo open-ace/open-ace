@@ -142,13 +142,12 @@ class SchedulerWorker:
         try:
             import sqlalchemy as sa
 
-            from app.repositories.schema_guard import get_environment_mode
             from app.services.schema_compatibility_service import get_schema_compatibility_service
-            from app.services.schema_compatibility_types import CompatibilityPolicy, SchemaErrorCategory
+            from app.services.schema_compatibility_types import (
+                CompatibilityPolicy,
+                SchemaErrorCategory,
+            )
             from scripts.shared.db import _get_db_url
-
-            # Check if we're in production mode
-            env_mode = get_environment_mode()
 
             # Get database URL and create SQLAlchemy engine
             database_url = _get_db_url()

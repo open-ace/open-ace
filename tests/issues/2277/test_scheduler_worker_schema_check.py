@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 # scheduler_worker.py has a module-level guard that sys.exit(1)s unless
-# SCHEDULER_MODE=="scheduler". Set it before the deferred import in _run_check.
+# SCHEDULER_MODE=="scheduler". Set it before importing scheduler_worker.
 os.environ["SCHEDULER_MODE"] = "scheduler"
 
 
@@ -38,7 +38,7 @@ def test_schema_check_passes_when_compatible():
     mock_result.current_heads = ["test_revision"]
     mock_result.expected_head = "test_revision"
 
-    with patch(
+    with patch("scripts.shared.db._get_db_url", return_value="sqlite:///:memory:"), patch(
         "app.services.schema_compatibility_service.get_schema_compatibility_service"
     ) as mock_get_service:
         mock_service = MagicMock()
@@ -60,7 +60,7 @@ def test_schema_check_exits_when_incompatible():
     mock_result.diagnostic_message = "Database schema is behind head"
     mock_result.missing_migrations = ["migration_1"]
 
-    with patch(
+    with patch("scripts.shared.db._get_db_url", return_value="sqlite:///:memory:"), patch(
         "app.services.schema_compatibility_service.get_schema_compatibility_service"
     ) as mock_get_service:
         mock_service = MagicMock()
@@ -80,7 +80,7 @@ def test_schema_check_passes_with_bypass():
     mock_result.bypass_active = True
     mock_result.bypass_reason = "Emergency bypass"
 
-    with patch(
+    with patch("scripts.shared.db._get_db_url", return_value="sqlite:///:memory:"), patch(
         "app.services.schema_compatibility_service.get_schema_compatibility_service"
     ) as mock_get_service:
         mock_service = MagicMock()

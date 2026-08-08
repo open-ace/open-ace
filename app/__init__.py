@@ -416,7 +416,7 @@ def create_app(config=None):
                             f"Run: alembic upgrade head"
                         )
                     else:
-                        guidance = f"\n\nRun: alembic upgrade head"
+                        guidance = "\n\nRun: alembic upgrade head"
 
                     raise RuntimeError(f"Database schema is not compatible: {error_msg}{guidance}")
 

@@ -12,7 +12,7 @@ import signal
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import sqlalchemy as sa
 from alembic.config import Config
