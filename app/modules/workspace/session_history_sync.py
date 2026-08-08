@@ -1,4 +1,4 @@
-"""
+r"""
 Open ACE - Session History Sync (Issue #24)
 
 Synchronizes remote/terminal workspace sessions from the database into the
@@ -39,7 +39,7 @@ _sync_thread: threading.Thread | None = None
 
 
 def encode_project_path(project_path: str) -> str:
-    """Mirror qwen-code-webui ``encodeProjectPath``: strip trailing '/', then
+    r"""Mirror qwen-code-webui ``encodeProjectPath``: strip trailing '/', then
     replace every char outside [a-zA-Z0-9] with '-'.
 
     ``C:\\workspace`` -> ``C--workspace``; ``/workspace/admin`` ->
@@ -50,7 +50,7 @@ def encode_project_path(project_path: str) -> str:
 
 
 def encode_openace_path(project_path: str) -> str:
-    """Mirror the qwen-code-webui SPA ``ko()`` encoding used in open-ace
+    r"""Mirror the qwen-code-webui SPA ``ko()`` encoding used in open-ace
     integrated mode: drop a leading drive letter, drop leading slashes, then
     replace every char outside [a-zA-Z0-9] with '-' and prepend '-'.
 
@@ -171,9 +171,7 @@ def sync_remote_sessions_to_webui() -> dict:
     for user_id, system_account in _fetch_users():
         home = f"/home/{system_account}"
         if not os.path.isdir(home):
-            logger.warning(
-                "session_history_sync: home %s missing for user %s", home, user_id
-            )
+            logger.warning("session_history_sync: home %s missing for user %s", home, user_id)
             continue
         stats["users"] += 1
         for sess in _fetch_remote_sessions(user_id):
@@ -197,9 +195,7 @@ def sync_remote_sessions_to_webui() -> dict:
                 )
                 if not encodings:
                     continue
-                lines = _build_jsonl(
-                    session_id, project_path, _fetch_messages(session_id)
-                )
+                lines = _build_jsonl(session_id, project_path, _fetch_messages(session_id))
                 if not lines:
                     continue
                 std_encoded = encode_project_path(project_path)
@@ -209,13 +205,12 @@ def sync_remote_sessions_to_webui() -> dict:
                     # project list; create the mirror directory once.
                     if encoded == std_encoded and not encoded.startswith("-"):
                         try:
-                            os.makedirs(
-                                simple_decode_project_path(encoded), exist_ok=True
-                            )
+                            os.makedirs(simple_decode_project_path(encoded), exist_ok=True)
                         except OSError as e:
                             logger.warning(
                                 "session_history_sync: mkdir mirror for %s failed: %s",
-                                encoded, e,
+                                encoded,
+                                e,
                             )
                     chats_dir = f"{home}/.qwen/projects/{encoded}/chats"
                     os.makedirs(chats_dir, exist_ok=True)
@@ -228,7 +223,8 @@ def sync_remote_sessions_to_webui() -> dict:
                 stats["errors"] += 1
                 logger.warning(
                     "session_history_sync: failed for session %s: %s",
-                    session_id[:8], e,
+                    session_id[:8],
+                    e,
                 )
     logger.info("session_history_sync done: %s", stats)
     return stats
