@@ -64,6 +64,11 @@ def test_projects_list_excludes_other_tenant_shared_projects(tmp_db, monkeypatch
         tenant_id=2,
     )
 
+    # Issue #2408: _fetch_remote_projects creates a new Database() connection
+    # that doesn't use tmp_db, causing "no such table: agent_sessions" in CI.
+    # Mock it to return an empty list for this tenant isolation test.
+    monkeypatch.setattr(projects_module, "_fetch_remote_projects", lambda uid: [])
+
     _login_as(monkeypatch, tenant_one_user)
     client = app.test_client()
     response = client.get("/api/projects")
@@ -87,6 +92,10 @@ def test_project_detail_returns_404_for_other_tenant_project(tmp_db, monkeypatch
         created_by=tenant_two_user,
         tenant_id=2,
     )
+
+    # Issue #2408: mock _fetch_remote_projects to avoid agent_sessions table
+    # lookup in CI environment.
+    monkeypatch.setattr(projects_module, "_fetch_remote_projects", lambda uid: [])
 
     _login_as(monkeypatch, tenant_one_user)
     client = app.test_client()
