@@ -104,6 +104,24 @@ class SchedulerWorker:
         logger.info(f"Hostname: {socket.gethostname()}")
         logger.info(f"PID: {os.getpid()}")
         logger.info(f"Python: {sys.version}")
+
+        # Issue #2331: Require explicit security mode before any operations
+        # Must run BEFORE database connection to fail fast
+        try:
+            from app.utils.security_mode import require_explicit_mode
+
+            require_explicit_mode()
+        except RuntimeError as e:
+            logger.error(f"Security mode validation failed: {e}")
+            logger.error(
+                "Scheduler worker requires explicit OPENACE_SECURITY_MODE in production. "
+                "Set OPENACE_SECURITY_MODE=production|pilot|development"
+            )
+            sys.exit(1)
+
+        # Check database type
+        from app.repositories.database import is_postgresql
+
         logger.info(f"Database: {'PostgreSQL' if is_postgresql() else 'SQLite'}")
 
         # Check database schema version
