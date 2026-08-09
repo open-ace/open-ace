@@ -42,7 +42,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 # ---------------------------------------------------------------------------
 # 1. Stub the heavy app.* deps so app/routes/fs.py imports standalone.
-#    (Same technique as tests/routes/test_fs_file_ops.py.)
+#    (Same technique as tests/integration/routes/test_fs_file_ops.py.)
 # ---------------------------------------------------------------------------
 for _pkg in [
     "app",

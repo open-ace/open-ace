@@ -21,6 +21,12 @@ def _ensure_tenant(pg_db, tenant_id):
     )
 
 
+@pytest.fixture(autouse=True)
+def _default_tenant(pg_db):
+    """Provide the explicit tenant context required by fail-closed writes."""
+    _ensure_tenant(pg_db, 1)
+
+
 def _insert_user(pg_db, username="testuser", email=None, tenant_id=1):
     """Insert a user row for foreign key references."""
     _ensure_tenant(pg_db, tenant_id)
@@ -46,6 +52,7 @@ class TestProjectCRUD:
             path="/projects/my-project",
             name="My Project",
             description="A test project",
+            tenant_id=1,
         )
         assert project_id is not None
 
@@ -73,7 +80,7 @@ class TestProjectCRUD:
 
     def test_get_project_by_id(self, pg_db):
         repo = ProjectRepository(db=pg_db)
-        project_id = repo.create_project(path="/projects/test", name="Test")
+        project_id = repo.create_project(path="/projects/test", name="Test", tenant_id=1)
 
         project = repo.get_project_by_id(project_id)
         assert project is not None
@@ -81,7 +88,7 @@ class TestProjectCRUD:
 
     def test_get_project_by_path(self, pg_db):
         repo = ProjectRepository(db=pg_db)
-        repo.create_project(path="/projects/unique-path", name="Path Project")
+        repo.create_project(path="/projects/unique-path", name="Path Project", tenant_id=1)
 
         project = repo.get_project_by_path("/projects/unique-path")
         assert project is not None
@@ -113,7 +120,7 @@ class TestProjectCRUD:
 
     def test_update_project(self, pg_db):
         repo = ProjectRepository(db=pg_db)
-        project_id = repo.create_project(path="/projects/up", name="Old")
+        project_id = repo.create_project(path="/projects/up", name="Old", tenant_id=1)
 
         result = repo.update_project(project_id, name="New", description="New desc", is_shared=True)
         assert result is True
@@ -123,7 +130,7 @@ class TestProjectCRUD:
 
     def test_soft_delete_project(self, pg_db):
         repo = ProjectRepository(db=pg_db)
-        project_id = repo.create_project(path="/projects/del", name="Del")
+        project_id = repo.create_project(path="/projects/del", name="Del", tenant_id=1)
 
         assert repo.delete_project(project_id, soft_delete=True) is True
         assert repo.get_project_by_id(project_id) is None
@@ -243,7 +250,7 @@ class TestUserProject:
     def test_add_user_project(self, pg_db):
         repo = ProjectRepository(db=pg_db)
         user_id = _insert_user(pg_db, username="user1")
-        project_id = repo.create_project(path="/projects/up-test")
+        project_id = repo.create_project(path="/projects/up-test", tenant_id=1)
 
         result = repo.add_user_project(user_id, project_id)
         assert result is not None
@@ -251,7 +258,7 @@ class TestUserProject:
     def test_get_user_project(self, pg_db):
         repo = ProjectRepository(db=pg_db)
         user_id = _insert_user(pg_db, username="user2")
-        project_id = repo.create_project(path="/projects/get-up")
+        project_id = repo.create_project(path="/projects/get-up", tenant_id=1)
         repo.add_user_project(user_id, project_id)
 
         up = repo.get_user_project(user_id, project_id)
@@ -262,7 +269,7 @@ class TestUserProject:
     def test_update_user_project_stats(self, pg_db):
         repo = ProjectRepository(db=pg_db)
         user_id = _insert_user(pg_db, username="user3")
-        project_id = repo.create_project(path="/projects/stats")
+        project_id = repo.create_project(path="/projects/stats", tenant_id=1)
         repo.add_user_project(user_id, project_id)
 
         repo.update_user_project_stats(user_id, project_id, sessions_delta=2, tokens_delta=500)
@@ -276,7 +283,7 @@ class TestUserProject:
         user_id = _insert_user(pg_db, username="creator")
 
         repo.create_project(path="/projects/all-1", created_by=user_id)
-        repo.create_project(path="/projects/all-2")
+        repo.create_project(path="/projects/all-2", tenant_id=1)
 
         assert len(repo.get_all_projects()) == 2
         assert len(repo.get_all_projects(created_by=user_id)) == 1

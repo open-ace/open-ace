@@ -63,15 +63,19 @@ cd open-ace
 python3 -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 
-# Install dependencies
-pip install -r requirements.txt
+# Install the exact dependency set used by GitHub CI
+pip install -r requirements-ci.lock
 
-# Install development dependencies
-pip install pytest playwright
+# Install the browser binary only when running browser E2E tests
+playwright install chromium
 
 # Run tests
 pytest
 ```
+
+`requirements.txt` is the human-maintained dependency policy. After changing it,
+regenerate the reviewed CI lock with
+`uv pip compile --universal --python-version 3.10 requirements.txt -o requirements-ci.lock`.
 
 ## 📝 Code Style
 
@@ -115,7 +119,10 @@ pytest --cov=scripts/shared tests/
 
 ### Writing Tests
 
-- Place tests in the `tests/` directory
+- Place each test in exactly one runtime layer: `tests/unit`,
+  `tests/integration`, `tests/e2e`, or `tests/performance`
+- Do not add new `tests/issues/<number>` or top-level `tests/regression`
+  directories; use `regression` and `issue(number)` markers for provenance
 - Name test files with `test_` prefix
 - Use descriptive test function names
 
@@ -126,6 +133,15 @@ def test_get_daily_usage_with_valid_date():
     assert result is not None
     assert "tokens" in result
 ```
+
+For a defect regression, add module- or function-level metadata without
+duplicating the test:
+
+```python
+pytestmark = [pytest.mark.regression, pytest.mark.issue(2429)]
+```
+
+See `docs/TEST_LAYERS.md` for CI execution guarantees and legacy migration.
 
 ## 📋 Pull Request Process
 

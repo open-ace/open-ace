@@ -25,13 +25,13 @@ import os
 import sys
 import time
 
-import helpers
 import requests
-from helpers import (
+
+from . import helpers
+from .helpers import (
     BASE_URL,
     HEADLESS,
     PROJECT_ROOT,
-    SCREENSHOT_DIR,
     WEBUI_URL,
     TestResults,
     api_get,

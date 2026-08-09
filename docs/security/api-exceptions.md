@@ -32,7 +32,7 @@ Security suppressions are stored in `scripts/lint/security_baseline.json`. Each 
     "reviewed_at": "2026-07-23",
     "expires_at": "2027-01-23T00:00:00Z",
     "risk_level": "low",
-    "test_coverage": "tests/routes/test_example.py::test_example",
+    "test_coverage": "tests/integration/routes/test_example.py::test_example",
     "alternative_controls": [
       "List of alternative security controls in place"
     ]

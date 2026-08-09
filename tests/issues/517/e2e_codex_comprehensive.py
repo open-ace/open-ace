@@ -25,12 +25,12 @@ import time
 import uuid
 
 import requests
-from helpers import (
+
+from .helpers import (
     BASE_URL,
     HEADLESS,
     PROJECT_ROOT,
     REMOTE_TEST_HOST,
-    SCREENSHOT_DIR,
     TEST_PASS,
     TEST_USER,
     WEBUI_URL,
