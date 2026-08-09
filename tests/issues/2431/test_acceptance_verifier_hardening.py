@@ -602,7 +602,12 @@ def test_ci_executes_the_issue_2335_verifier_regressions():
     repo_root = Path(__file__).resolve().parents[3]
     workflow = (repo_root / ".github" / "workflows" / "ci.yml").read_text()
 
-    assert "pytest tests/issues/2335 tests/issues/2403" in workflow
+    # Membership, not adjacency: both dirs must be in the opt-in pytest line so
+    # their regressions run in CI (tests/issues/ is excluded by norecursedirs).
+    # An adjacency assertion brittle-breaks whenever another opt-in dir is
+    # inserted between them (#2454 added 2390/2401 there); assert presence.
+    assert "pytest tests/issues/2335 " in workflow
+    assert "tests/issues/2403" in workflow
 
 
 class _SQLiteDB:

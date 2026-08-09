@@ -1176,6 +1176,86 @@ def _is_test_path_execution(command: str) -> bool:
     return False
 
 
+# Tool names that ARE a shell, compared case-insensitively (#2401 b). One
+# canonical set so a new sandbox provider's shell tool name is added in exactly
+# one place; ``test_tool_name_contract`` pins that every provider-declared shell
+# tool name is a member. The old whitelist was closed + case-sensitive, so a
+# tool-name drift (``bash``/``terminal``/``execute_bash``/...) voided the gate
+# for any command — the same "ran the right tests, judged as not run" failure as
+# the original #2376 incident, but invisible because it is command-independent.
+_SHELL_TOOL_NAMES = frozenset(
+    {
+        "bash",
+        "sh",
+        "shell",
+        "zsh",
+        "run_shell_command",
+        "exec_command",
+        "execute_bash",
+        "local_shell",
+        "container.exec",
+        "terminal",
+        "run_terminal_cmd",
+    }
+)
+
+# Dedicated test-runner tool names (#2401 a). NOT fail-open: the tool name is
+# treated as ``argv[0]`` and run through the SAME recognition as a shell command,
+# so ``pytest`` (a runner token) is recognized while ``test``/``run_tests`` pass
+# only when the command carries a real runner. Before this, the name alone
+# returned True, so a tool literally named ``test`` running ``helm install`` (or
+# nothing) reached the authoritative PASSED verdict.
+_TEST_TOOL_NAMES = frozenset({"pytest", "run_tests", "test"})
+
+
+def _command_text(tool_input: dict) -> str:
+    """Resolve one command string from a tool_use input across provider shapes.
+
+    Providers spell the executed command differently: ``command``/``cmd`` carry a
+    joined shell string, while argv-style providers carry ``argv``/``args`` as a
+    token list (#2401 c). Reading only ``command``/``cmd`` made an argv-only
+    invocation invisible to the gate; join the list forms so recognition sees the
+    same text whatever the shape.
+    """
+    if not isinstance(tool_input, dict):
+        return ""
+    command = tool_input.get("command") or tool_input.get("cmd")
+    if isinstance(command, str) and command:
+        return command
+    for key in ("argv", "args"):
+        value = tool_input.get(key)
+        if isinstance(value, list) and value:
+            # shlex.join so an arg with spaces re-quotes faithfully and the
+            # downstream _shell_tokens (shlex.split) round-trips it.
+            return shlex.join([str(part) for part in value])
+        if isinstance(value, str) and value:
+            return value
+    return ""
+
+
+def _command_runs_tests(command: str, patterns_to_check) -> bool:
+    """Per-segment recognition: whether ``command`` runs tests.
+
+    Extracted from ``_has_test_tool_call`` (#2401) so the dedicated-tool-name and
+    shell-tool-name branches share one recognition path. Each executable segment
+    is checked after the read-only pre-filter (``_EXCLUDE_FLAG_TOKENS`` drops
+    ``--help``/``--version``/collection-only flags, which assert nothing); a
+    runner pattern or a direct ``tests/`` file execution marks it a run. The
+    per-segment split is load-bearing: matching the whole command would let a
+    surviving segment lend its eligibility to a filtered one.
+    """
+    for segment in _executable_segments(command):
+        tokens = _shell_tokens(segment)
+        if any(token in _EXCLUDE_FLAG_TOKENS for token in tokens):
+            continue
+        for pattern in patterns_to_check:
+            if _pattern_matches_segment(pattern, segment, tokens):
+                return True
+        if _is_test_path_execution(segment):
+            return True
+    return False
+
+
 def _has_test_tool_call(tool_calls: list, framework_type: str) -> bool:
     """Check if tool_calls contains a test framework execution command.
 
@@ -1221,34 +1301,34 @@ def _has_test_tool_call(tool_calls: list, framework_type: str) -> bool:
             (tc.get("tool", {}).get("input", {}) or {}) if isinstance(tc.get("tool"), dict) else {}
         )
 
-        # P2: Check non-Bash test tools first (pytest, run_tests, test)
-        if tool_name in ("pytest", "run_tests", "test"):
-            return True
+        lowered = tool_name.lower()
+        command = _command_text(tool_input)
 
-        # Then check Bash/run_shell_command for test commands
-        if tool_name in ("Bash", "Shell", "run_shell_command", "exec_command"):
-            cmd = tool_input.get("command") or tool_input.get("cmd") or ""
-            if not cmd:
+        # (a #2401) A dedicated test-runner tool name is NOT fail-open: prepend it
+        # as argv[0] and run the SAME per-segment recognition as a shell command.
+        # ``pytest`` is itself a runner token so a bare pytest tool is recognized;
+        # ``test``/``run_tests`` pass only when the command carries a real runner,
+        # so a tool named ``test`` running ``helm install`` (or nothing) no longer
+        # reaches the authoritative PASSED verdict. ``run_tests`` is added to the
+        # pattern set so a bare ``run_tests`` suite run is recognized (it is not a
+        # _BARE_RUNNER token, so it routes through the multiword matcher).
+        if lowered in _TEST_TOOL_NAMES:
+            synthetic = f"{lowered} {command}".strip()
+            if _command_runs_tests(synthetic, [*patterns_to_check, "run_tests"]):
+                return True
+            continue
+
+        # (b #2401) Shell tool names, matched case-insensitively against one
+        # canonical set (see _SHELL_TOOL_NAMES). Empty command → nothing to judge.
+        # Recognition is per segment: matching the whole command would let a
+        # surviving segment lend eligibility to a filtered one, so a one-token
+        # prefix could defeat the read-only filter:
+        #     python -c "print(1)" && grep -rn pytest tests/
+        if lowered in _SHELL_TOOL_NAMES:
+            if not command:
                 continue
-            # #2376: filter and match per segment. Both must be per-segment —
-            # matching the whole command would let a surviving segment lend its
-            # eligibility to a filtered one, so a one-token prefix would defeat
-            # the read-only filter:
-            #     python -c "print(1)" && grep -rn pytest tests/
-            for segment in _executable_segments(cmd):
-                tokens = _shell_tokens(segment)
-                # Note: -v (verbose) is NOT excluded — only help/version and
-                # the collection-only flags, which assert nothing.
-                if any(token in _EXCLUDE_FLAG_TOKENS for token in tokens):
-                    continue
-                for pattern in patterns_to_check:
-                    if _pattern_matches_segment(pattern, segment, tokens):
-                        return True
-                # Repo convention (#2376 Fix C): executing a file under tests/
-                # is a test run whatever the interpreter, which no pattern list
-                # can express. Checked last so the cheaper substring match wins.
-                if _is_test_path_execution(segment):
-                    return True
+            if _command_runs_tests(command, patterns_to_check):
+                return True
 
     return False
 
@@ -5502,6 +5582,28 @@ class AutonomousOrchestrator:
             command_evidences = CommandExecutionEvidenceRepository().query_by_session(session_id)
             if not command_evidences:
                 return ExecutionVerdict.NOT_RUN, [], "no command execution evidence"
+
+            # #2390: ``session_id`` is stable across dev rounds, so query_by_session
+            # accumulates prior rounds' evidence into this round's verdict —
+            # forcing the structured layer to defer (non-pytest → INCONCLUSIVE) or
+            # false-FAIL (pytest broad→targeted). Scope to the current test
+            # milestone, which each ``_run_test_phase`` stamps on its evidence.
+            # Narrow ONLY when stamping is present in this session: an unstamped
+            # legacy session keeps session scope rather than silently NOT_RUN
+            # (fail-closed, but never worse than today).
+            current_milestone_id = (test_ms.get("milestone_id") or "").strip()
+            if current_milestone_id and any((ce.milestone_id or "") for ce in command_evidences):
+                command_evidences = [
+                    ce
+                    for ce in command_evidences
+                    if (ce.milestone_id or "") == current_milestone_id
+                ]
+                if not command_evidences:
+                    return (
+                        ExecutionVerdict.NOT_RUN,
+                        [],
+                        "no command evidence for current test milestone",
+                    )
 
             # Only parse commands that look like test invocations; an ``echo``
             # or ``ls`` must not be fed to the generic parser as if it were a

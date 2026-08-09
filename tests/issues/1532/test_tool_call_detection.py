@@ -72,10 +72,16 @@ class TestHasTestToolCall:
                 "python",
                 True,
             ),
-            # Non-Bash test tools (pytest, run_tests, test)
+            # Non-Bash test tools. #2401 closed the fail-open here: the
+            # unambiguous runner names pytest/run_tests still pass on the name
+            # (a provider names a tool that only when it runs tests), but the
+            # ambiguous ``test`` name alone no longer passes — it must carry a
+            # real runner, else a tool literally named ``test`` running nothing
+            # reached the authoritative PASSED verdict.
             ([{"tool": {"name": "pytest", "input": {}}}], "python", True),
             ([{"tool": {"name": "run_tests", "input": {}}}], "python", True),
-            ([{"tool": {"name": "test", "input": {}}}], "python", True),
+            ([{"tool": {"name": "test", "input": {}}}], "python", False),
+            ([{"tool": {"name": "test", "input": {"command": "pytest tests/"}}}], "python", True),
             # Empty/malformed tool_calls
             ([{}], "python", False),
             ([{"tool": {}}], "python", False),

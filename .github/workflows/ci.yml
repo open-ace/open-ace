@@ -161,7 +161,7 @@ jobs:
       - name: Issue regression suites (opt-in; see norecursedirs)
         timeout-minutes: 5
         run: |
-          pytest tests/issues/2335 tests/issues/2403 tests/issues/2428 tests/issues/2431 tests/issues/2438 tests/issues/2439 tests/issues/2442 tests/issues/2443 -v \
+          pytest tests/issues/2335 tests/issues/2390 tests/issues/2401 tests/issues/2403 tests/issues/2428 tests/issues/2431 tests/issues/2438 tests/issues/2439 tests/issues/2442 tests/issues/2443 -v \
             -m "not postgres and not performance"
 
       - name: Upload coverage to Codecov
