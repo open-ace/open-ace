@@ -2005,7 +2005,7 @@ def test_nonstandard_report_with_real_test_evidence_does_not_retry():
     orch._workflow_id = "wf-1897"
     orch.repo = MagicMock()
     orch._create_milestone = MagicMock(return_value={"milestone_id": "ms-test"})
-    orch._build_test_execution_context = MagicMock(return_value="targeted")
+    orch._build_test_execution_context = MagicMock(return_value=("targeted", []))
     orch._accumulate_tokens = MagicMock()
     orch._post_github_comment = MagicMock()
     orch._emit = MagicMock()
@@ -2064,7 +2064,7 @@ def test_test_tool_call_without_result_is_inconclusive():
     orch._workflow_id = "wf-inconclusive"
     orch.repo = MagicMock()
     orch._create_milestone = MagicMock(return_value={"milestone_id": "ms-test"})
-    orch._build_test_execution_context = MagicMock(return_value="targeted")
+    orch._build_test_execution_context = MagicMock(return_value=("targeted", []))
     orch._accumulate_tokens = MagicMock()
     orch._post_github_comment = MagicMock()
     orch._emit = MagicMock()
@@ -2096,7 +2096,7 @@ def test_model_pass_summary_without_tool_result_is_inconclusive():
     orch._workflow_id = "wf-model-summary"
     orch.repo = MagicMock()
     orch._create_milestone = MagicMock(return_value={"milestone_id": "ms-test"})
-    orch._build_test_execution_context = MagicMock(return_value="targeted")
+    orch._build_test_execution_context = MagicMock(return_value=("targeted", []))
     orch._accumulate_tokens = MagicMock()
     orch._post_github_comment = MagicMock()
     orch._emit = MagicMock()
@@ -2125,7 +2125,7 @@ def test_text_pass_evidence_fallback_when_tool_result_missing():
     orch._workflow_id = "wf-1830-fallback"
     orch.repo = MagicMock()
     orch._create_milestone = MagicMock(return_value={"milestone_id": "ms-test"})
-    orch._build_test_execution_context = MagicMock(return_value="targeted")
+    orch._build_test_execution_context = MagicMock(return_value=("targeted", []))
     orch._accumulate_tokens = MagicMock()
     orch._post_github_comment = MagicMock()
     orch._emit = MagicMock()

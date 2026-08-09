@@ -227,6 +227,144 @@ def _infer_test_framework(project_path: str, cli_tool: str) -> str:
         return "unknown"
 
 
+# ── #2391 requirer semantics ────────────────────────────────────────────────
+# Derive which evidence *domains* a change requires from its changed paths — a
+# recognizer-independent path (it never touches _has_test_tool_call). A required
+# domain with no passing evidence is, under enforce mode, a fail-closed retry;
+# under the default shadow mode it is observation only.
+
+_REQUIRER_MODES = ("off", "shadow", "enforce")
+_FRONTEND_CODE_EXT = (".ts", ".tsx", ".js", ".jsx", ".vue", ".svelte")
+_DOC_EXT = (".md", ".rst", ".txt")
+# framework (TestExecutionEvidence.framework) → required-evidence domain. A
+# ``generic`` run (wrapper-invoked, no runner token) maps to no domain, so it
+# cannot vacuously "cover" a changed domain (#2391 review F2).
+_FRAMEWORK_TO_DOMAIN = {
+    "python": "python",
+    "javascript": "javascript",
+    "go": "go",
+    "rust": "rust",
+    "java": "java",
+}
+
+
+def _test_evidence_requirer_mode() -> str:
+    """Requirer rollout mode: ``off`` | ``shadow`` | ``enforce`` (default shadow).
+
+    Env-flag mechanism + ``OPENACE_`` prefix mirror ``OPENACE_MODEL_GATEWAY_MODE``
+    (the tri-state precedent). An unknown value falls back to the safe default.
+    """
+    mode = (os.environ.get("OPENACE_TEST_EVIDENCE_REQUIRER_MODE") or "shadow").strip().lower()
+    return mode if mode in _REQUIRER_MODES else "shadow"
+
+
+def _is_doc_path(path: str) -> bool:
+    lowered = path.lower()
+    return lowered.endswith(_DOC_EXT) or "/docs/" in lowered or lowered.startswith("docs/")
+
+
+def _requirer_python_suite_exists(tree_path: str) -> bool:
+    """Whether a python test suite exists in the tree the agent ran in.
+
+    Probes are cheap and best-effort; any error → not present (require nothing).
+    """
+    if not tree_path:
+        return False
+    try:
+        if os.path.exists(os.path.join(tree_path, "pytest.ini")):
+            return True
+        if os.path.isdir(os.path.join(tree_path, "tests")):
+            return True
+        pyproject = os.path.join(tree_path, "pyproject.toml")
+        if os.path.exists(pyproject):
+            with open(pyproject, encoding="utf-8", errors="replace") as handle:
+                if "[tool.pytest" in handle.read():
+                    return True
+    except OSError:
+        return False
+    return False
+
+
+def _requirer_js_suite_exists(tree_path: str) -> bool:
+    """Whether a JS test suite exists: ``frontend/package.json`` has a test script."""
+    if not tree_path:
+        return False
+    package_json = os.path.join(tree_path, "frontend", "package.json")
+    try:
+        if not os.path.exists(package_json):
+            return False
+        with open(package_json, encoding="utf-8", errors="replace") as handle:
+            scripts = json.load(handle).get("scripts") or {}
+        return any(name == "test" or name.startswith("test:") for name in scripts)
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
+def _required_evidence_domains(changed_files: list | None, tree_path: str) -> set[str]:
+    """Evidence domains a change requires, derived from concrete changed paths.
+
+    Precise path rules (NOT the loose ``_analyze_changed_files`` tags): ``*.py``
+    under ``app``/``backend``/``tests`` (excluding e2e) → ``python``; a
+    ``frontend/**`` code file → ``javascript``. Docs-only changes require
+    nothing, and a domain is required only when its suite exists in ``tree_path``
+    (never hard-fail a repo that has no such suite). ``migrations/``, ``*.sh``,
+    ``tests/e2e/`` and a ``.ts`` outside ``frontend/`` are deliberately
+    de-scoped (fail-open). An empty/unavailable ``changed_files`` requires
+    nothing (fail-open — #2391 review F4).
+    """
+    normalized = [path.strip() for path in (changed_files or []) if path and path.strip()]
+    if not normalized or all(_is_doc_path(path) for path in normalized):
+        return set()
+
+    required: set[str] = set()
+    for path in normalized:
+        lowered = path.lower()
+        if lowered.endswith(".py") and (
+            path.startswith(("app/", "backend/"))
+            or (path.startswith("tests/") and not path.startswith("tests/e2e/"))
+        ):
+            required.add("python")
+        if path.startswith("frontend/") and lowered.endswith(_FRONTEND_CODE_EXT):
+            required.add("javascript")
+
+    if "python" in required and not _requirer_python_suite_exists(tree_path):
+        required.discard("python")
+    if "javascript" in required and not _requirer_js_suite_exists(tree_path):
+        required.discard("javascript")
+    return required
+
+
+def _evidence_domains_covered(structured_evidences: list | None) -> set[str]:
+    """Domains with an authoritative PASSED evidence in the (milestone-scoped) run.
+
+    ``generic``-framework evidence maps to no domain, so a wrapper-invoked run
+    that could not be attributed to a domain does not vacuously cover one
+    (#2391 review F2).
+    """
+    from app.modules.workspace.autonomous.command_evidence.test_evidence import ParserConfidence
+
+    authoritative = (ParserConfidence.HIGH.value, ParserConfidence.MEDIUM.value)
+    covered: set[str] = set()
+    for evidence in structured_evidences or []:
+        if (
+            evidence.verdict == ExecutionVerdict.PASSED.value
+            and evidence.parser_confidence in authoritative
+        ):
+            domain = _FRAMEWORK_TO_DOMAIN.get(evidence.framework)
+            if domain:
+                covered.add(domain)
+    return covered
+
+
+def _requirer_reason(missing: set[str]) -> str:
+    """Bilingual reason for a missing-domain enforce failure (#2391 review F10)."""
+    domains = ", ".join(sorted(missing))
+    return (
+        f"Changed {domains} but no passing {domains} test evidence in this run"
+        f" / 改动涉及 {domains} 但本轮未见对应的通过测试证据"
+    )
+
+
 def _has_strict_keyword_result(test_response_text: str, has_hallucination_desc: bool) -> bool:
     """Strict keyword detection with multiple conditions (Phase 1, P0).
 
@@ -4233,7 +4371,7 @@ class AutonomousOrchestrator:
 
         return scopes
 
-    def _build_test_execution_context(self, wf: dict, gh: GitHubOps) -> str:
+    def _build_test_execution_context(self, wf: dict, gh: GitHubOps) -> tuple[str, list[str]]:
         """Build a targeted validation brief for the test phase."""
         project_path = wf.get("worktree_path") or wf.get("project_path", "")
         framework_type = _infer_test_framework(project_path, wf.get("cli_tool", ""))
@@ -4338,7 +4476,9 @@ class AutonomousOrchestrator:
                 guardrail,
             ]
         )
-        return "\n".join(context).strip()
+        # Return the changed files alongside the brief so the #2391 requirer can
+        # reuse them (single fetch — no second git diff at the gate).
+        return "\n".join(context).strip(), changed_files
 
     def _post_github_comment(
         self,
@@ -5677,6 +5817,68 @@ class AutonomousOrchestrator:
             )
         except Exception as e:
             logger.debug("structured fallback event emit failed: %s", e)
+
+    def _apply_test_evidence_requirer(
+        self,
+        milestone_id: str,
+        changed_files: list | None,
+        tree_path: str,
+        structured_evidences: list | None,
+    ) -> tuple[str, set[str]]:
+        """Compute the requirer's ``(mode, missing-domains)`` and emit its shadow event.
+
+        Recognizer-independent (#2391): required domains derive from changed paths,
+        covered domains from the milestone-scoped structured evidence; ``missing =
+        required - covered``. Fail-open — any compute error returns an empty
+        ``missing`` (never blocks a run on its own failure), and the observability
+        emit is separately guarded so a DB error cannot raise into the gate.
+        ``off`` computes and emits nothing; ``shadow``/``enforce`` both emit, and
+        only the caller acts on ``missing`` (under ``enforce``).
+        """
+        mode = _test_evidence_requirer_mode()
+        if mode == "off":
+            return "off", set()
+        try:
+            required = _required_evidence_domains(changed_files, tree_path)
+            covered = _evidence_domains_covered(structured_evidences)
+            missing = required - covered
+        except Exception as exc:
+            logger.debug("test-evidence requirer compute failed: %s", exc)
+            return mode, set()
+        try:
+            self.repo.create_event(
+                {
+                    "workflow_id": self._workflow_id,
+                    "milestone_id": milestone_id,
+                    "event_type": "test_evidence_requirer_shadow",
+                    "event_data": json.dumps(
+                        {
+                            "mode": mode,
+                            "required": sorted(required),
+                            "covered": sorted(covered),
+                            "missing": sorted(missing),
+                            "changed_files": list(changed_files or []),
+                            "milestone_id": milestone_id,
+                            "tree_path": tree_path,
+                            # Per-evidence framework/confidence so a genuine miss is
+                            # distinguishable from the generic-framework (F2) and
+                            # cross-milestone (F3) misfires before flipping enforce.
+                            "evidences": [
+                                {
+                                    "framework": getattr(ev, "framework", ""),
+                                    "parser_confidence": getattr(ev, "parser_confidence", ""),
+                                    "verdict": getattr(ev, "verdict", ""),
+                                }
+                                for ev in (structured_evidences or [])
+                            ],
+                        },
+                        ensure_ascii=False,
+                    ),
+                }
+            )
+        except Exception as exc:
+            logger.debug("test-evidence requirer shadow emit failed: %s", exc)
+        return mode, missing
 
     def _on_pid_registered(self, session_id: str, pid: int):
         """Persist agent subprocess PID to database for reliable cancel/pause."""
@@ -9360,14 +9562,19 @@ class AutonomousOrchestrator:
             status="in_progress",
             title=f"Running tests round {dev_round}",
         )
+        requirer_changed_files: list[str] = []
         try:
-            targeted_test_context = self._build_test_execution_context(wf, gh)
+            targeted_test_context, requirer_changed_files = self._build_test_execution_context(
+                wf, gh
+            )
         except Exception as exc:
             logger.warning(
                 "Failed to build targeted test context for workflow %s: %s",
                 self._workflow_id[:8],
                 exc,
             )
+            # requirer_changed_files stays [] → the requirer requires nothing
+            # (fail-open) when the change set is unavailable.
             targeted_test_context = (
                 "## 本轮定向验证上下文\n"
                 "- 自动构建验证上下文失败，请先自行检查最终方案、改动文件和仓库测试约定，"
@@ -9779,6 +9986,27 @@ class AutonomousOrchestrator:
             )
         )
 
+        # #2391 requirer: derive the evidence domains this change *requires* from
+        # its changed paths and compare against the domains actually covered by
+        # passing evidence (recognizer-independent, fail-open). Shadow-emits an
+        # observability event always; only ``enforce`` mode acts on a missing
+        # domain, and only for a run that would otherwise proceed — not an
+        # inconclusive or skipped run (those have their own handling below). That
+        # is exactly the PASSED-but-unverified-domain case that flows straight to
+        # pr_review today.
+        requirer_mode, requirer_missing = self._apply_test_evidence_requirer(
+            test_ms.get("milestone_id", ""),
+            requirer_changed_files,
+            wf.get("worktree_path") or wf.get("project_path", ""),
+            _structured_evidences,
+        )
+        requirer_enforced = (
+            requirer_mode == "enforce"
+            and bool(requirer_missing)
+            and not test_result_inconclusive
+            and not tests_actually_skipped
+        )
+
         # Post test results to issue
         issue_number = wf.get("github_issue_number")
         if issue_number:
@@ -9801,6 +10029,14 @@ class AutonomousOrchestrator:
                 )
             elif tests_actually_skipped:
                 status_line = "⚠️ Tests were not actually run — see details below"
+            elif requirer_enforced:
+                # #2391 N1: the requirer retry fires below; without this arm the
+                # comment would read "All tests passed" and then re-run.
+                status_line = (
+                    "⚠️ Changed "
+                    + ", ".join(sorted(requirer_missing))
+                    + " but this run has no passing evidence for it — retrying"
+                )
             elif test_result.success:
                 status_line = "✅ All tests passed"
             else:
@@ -9826,6 +10062,25 @@ class AutonomousOrchestrator:
                     "Test execution is inconclusive: a test command was invoked, but no "
                     "structured TEST_STATUS or recognizable pass/fail output was captured"
                 )
+            self.repo.update_milestone(
+                test_ms.get("milestone_id", ""),
+                {"status": "failed", "error_message": message},
+            )
+            test_retries = int(wf.get("test_retries", 0) or 0) + 1
+            if test_retries <= MAX_TEST_RETRIES:
+                self._update_workflow({"test_retries": test_retries})
+                return
+            self._update_workflow({"status": "failed", "error_message": message})
+            return
+
+        # #2391 enforce: a required evidence domain (e.g. changed frontend) had no
+        # passing evidence, on a run that would otherwise proceed to pr_review.
+        # Force the same retry the inconclusive path uses, capped by
+        # MAX_TEST_RETRIES. ``requirer_enforced`` already excludes the
+        # inconclusive/skipped runs handled above/below, and is False in the
+        # default shadow mode — so this is a no-op until enforce is enabled.
+        if requirer_enforced:
+            message = _requirer_reason(requirer_missing)
             self.repo.update_milestone(
                 test_ms.get("milestone_id", ""),
                 {"status": "failed", "error_message": message},
