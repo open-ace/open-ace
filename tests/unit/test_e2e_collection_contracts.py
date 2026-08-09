@@ -19,6 +19,8 @@ def test_personal_files_e2e_route_stub_imports() -> None:
             sys.executable,
             "-c",
             (
+                # The default run_name is "<run_path>", so the module's
+                # __main__ browser/server entry point is intentionally skipped.
                 "import runpy; "
                 "runpy.run_path('tests/e2e/work/e2e_personal_files_upload_download.py')"
             ),
