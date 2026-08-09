@@ -2314,3 +2314,57 @@ def test_review_fix_rejects_dirty_worktree_when_pre_existing_changes_out_of_scop
         if isinstance(updates, dict) and updates.get("status") == "failed":
             failed_updates.append(updates)
     assert any("scope validation" in u.get("error_message", "") for u in failed_updates)
+
+
+def test_review_fix_stage_failure_marks_paused_not_failed():
+    """#2441: when auto-staging pre-existing dirty changes fails (e.g. a cross-user
+    object-DB permission error — the service user owns .git/objects while the fix
+    agent runs as system_account, so the write is denied), the workflow must PAUSE
+    (resumable via POST /resume, worktree preserved) rather than terminal-fail.
+    This aligns pr_review with the dev/CI-repair paths, which warn-and-continue
+    instead of hard-failing on staging. The fix agent must NOT run, and the tree is
+    reset to the pre-staging commit so no half-staged state is left behind."""
+    from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+    orch = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
+    orch._workflow_id = "wf-stage-fail"
+    orch.repo = MagicMock()
+    orch.emitter = MagicMock()
+    orch._create_milestone = MagicMock(return_value={"milestone_id": "ms-fix"})
+    orch._accumulate_tokens = MagicMock()
+    orch._validate_autonomous_change_scope = MagicMock(return_value="")
+    orch._clean_agent_text = MagicMock(return_value="review feedback")
+    orch._run_agent_with_context_recovery = MagicMock()
+
+    gh = MagicMock()
+    gh.has_uncommitted_changes.return_value = True  # dirty → triggers auto-stage
+    gh.get_current_commit.return_value = "commit-pre-staging"
+    # Auto-stage itself fails (the cross-user object-DB write is denied).
+    gh.git_add_all = MagicMock(
+        side_effect=Exception("fatal: could not write .git/objects/ab/cdef123: permission denied")
+    )
+    gh.reset_hard_to = MagicMock()
+
+    wf = {
+        "workflow_id": "wf-stage-fail",
+        "worktree_path": "/tmp/repo",
+        "project_path": "/tmp/repo",
+        "cli_tool": "claude-code",
+        "dev_round": 1,
+        "branch_name": "auto-dev/wf-stage-fail",
+    }
+
+    result = orch._apply_pr_review_fix(wf, gh, 1, 1, "looks good", [], 1234)
+
+    # Stage failed → workflow paused (not failed); fix agent never ran.
+    assert result is False
+    orch._run_agent_with_context_recovery.assert_not_called()
+    statuses = []
+    for call in orch.repo.update_workflow.call_args_list:
+        updates = call.args[1] if len(call.args) > 1 else call.args[0]
+        if isinstance(updates, dict):
+            statuses.append(updates.get("status"))
+    assert "paused" in statuses, "stage failure must pause (resumable), not terminal-fail"
+    assert "failed" not in statuses, "stage failure must NOT hard-fail (#2441)"
+    # Tree reset to the pre-staging commit (no half-staged state left behind).
+    gh.reset_hard_to.assert_called_once_with("commit-pre-staging")

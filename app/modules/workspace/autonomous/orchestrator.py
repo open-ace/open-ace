@@ -10000,6 +10000,25 @@ class AutonomousOrchestrator:
             self._update_workflow({"status": "failed", "error_message": message})
             return False
 
+        def pause_fix(message: str) -> bool:
+            """Pause (not fail) when auto-staging pre-existing changes is blocked.
+
+            A dirty-worktree auto-stage failure is recoverable — most often a
+            cross-user object-DB permission error (the service user owns
+            .git/objects while the fix agent runs as system_account, so the write
+            is denied) that the operator can fix. Terminal ``failed`` stranded the
+            workflow: ``paused`` is reachable via POST /resume (after the operator
+            fixes the tree/perms), preserves the worktree for diagnosis, and aligns
+            pr_review with the dev/CI-repair paths, which warn-and-continue rather
+            than hard-failing on staging (#2441).
+            """
+            self.repo.update_milestone(
+                fix_ms.get("milestone_id", ""),
+                {"status": "failed", "error_message": message},
+            )
+            self._update_workflow({"status": "paused", "error_message": message})
+            return False
+
         fix_prompt = (
             AUTONOMOUS_CONTEXT
             + f"根据以下代码审查意见修改代码：\n\n{self._clean_agent_text(review_text)}\n\n"
@@ -10089,7 +10108,7 @@ class AutonomousOrchestrator:
                         gh.reset_hard_to(commit_before_staging)
                     except Exception:
                         pass
-                return fail_fix(
+                return pause_fix(
                     f"Worktree was dirty and auto-staging pre-existing changes failed: {exc}"
                 )
 
