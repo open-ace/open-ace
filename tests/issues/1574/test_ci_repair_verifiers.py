@@ -137,8 +137,18 @@ def test_start_ci_repair_round_stays_in_merge_and_runs_merge_repair():
     assert "current_round" not in updates
 
 
-def test_start_ci_repair_round_fails_when_signature_unchanged_after_new_head():
-    from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+def test_start_ci_repair_round_escalates_when_signature_unchanged_after_new_head():
+    """A meaningful unchanged signature after a new head fires the give-up guard.
+
+    #2443 PR-C: ci_repair_signature_unchanged is a Tier1 category, so under the
+    dev-round cap (with a recoverable PR branch) it escalates to a fresh
+    development round instead of terminal-failing; at the cap it falls through
+    to failed. Either way the agent is NOT run again.
+    """
+    from app.modules.workspace.autonomous.orchestrator import (
+        MAX_MERGE_FAIL_DEV_ROUNDS,
+        AutonomousOrchestrator,
+    )
 
     failed_checks = [
         {"name": "lint", "state": "failure", "bucket": "fail", "link": "https://example.com"}
@@ -154,12 +164,14 @@ def test_start_ci_repair_round_fails_when_signature_unchanged_after_new_head():
     ).hexdigest()[:12]
     expected_fingerprint = f"lint::{expected_digest}"
 
+    # Under cap → Tier1 escalation to development.
     wf = _make_workflow(
         status="merging",
         current_phase="merge",
         ci_repair_attempts=1,
         last_ci_failure_signature=expected_fingerprint,
         last_ci_failure_head_sha="sha-old",
+        merge_fail_dev_rounds=0,
     )
     orch, mock_repo = _make_orchestrator(wf)
     gh = MagicMock()
@@ -172,8 +184,28 @@ def test_start_ci_repair_round_fails_when_signature_unchanged_after_new_head():
 
     orch._run_merge_ci_repair.assert_not_called()
     updates = mock_repo.update_workflow.call_args.args[1]
-    assert updates["status"] == "failed"
-    assert "CI 失败在自动修复后仍未变化" in updates["error_message"]
+    assert updates["status"] == "developing"
+
+    # At the dev-round cap → Tier2 fall-through to terminal failed, with the
+    # "signature still unchanged" reason recorded on the failed update.
+    wf_cap = _make_workflow(
+        status="merging",
+        current_phase="merge",
+        ci_repair_attempts=1,
+        last_ci_failure_signature=expected_fingerprint,
+        last_ci_failure_head_sha="sha-old",
+        merge_fail_dev_rounds=MAX_MERGE_FAIL_DEV_ROUNDS,
+    )
+    orch2, mock_repo2 = _make_orchestrator(wf_cap)
+    gh2 = MagicMock()
+    gh2.get_pr_head_sha.return_value = "sha-new"
+    gh2.get_check_failure_excerpt.return_value = excerpt
+    orch2._get_gh = MagicMock(return_value=gh2)
+    orch2._run_merge_ci_repair = MagicMock()
+    orch2._start_ci_repair_round(wf_cap, 1697, failed_checks)
+    cap_updates = mock_repo2.update_workflow.call_args.args[1]
+    assert cap_updates["status"] == "failed"
+    assert "CI 失败在自动修复后仍未变化" in cap_updates["error_message"]
 
 
 def test_run_merge_ci_repair_pushes_commit_and_stays_in_merge():

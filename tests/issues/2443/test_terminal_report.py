@@ -61,11 +61,18 @@ def test_helper_defined_and_uses_idempotent_milestone_type():
     assert "ci_repair_terminal_report_posted" not in ORCH_SRC
 
 
-def test_every_ci_repair_terminal_site_emits_a_report():
-    """Each CI-repair terminal ``_update_workflow({status:failed})`` must be
-    preceded by a terminal-report call. 11 terminal sites + 1 definition."""
+def test_every_tier2_terminal_site_emits_a_report():
+    """PR-C routed the 3 Tier1 exhaustion sites (MAX / no-change /
+    unchanged-signature) through ``_escalate_ci_repair_exhaustion`` instead of
+    emitting directly — under the dev-round cap they escalate to development
+    (no report, by design); at the cap / for Tier2 they fall through to a
+    report. So the direct ``_emit_ci_repair_terminal_report`` call sites are now
+    the 8 Tier2 categories + 1 inside the escalation helper's Tier2 branch, plus
+    the definition = 10. Tier1/Tier2 category coverage is locked in
+    test_escalation.py; this guards that the report wiring itself survives."""
     calls = ORCH_SRC.count("_emit_ci_repair_terminal_report(")
-    assert calls >= 12, (
-        f"expected >=11 call sites + 1 definition, found {calls}; a CI-repair "
-        "terminal site is missing its report"
+    assert calls == 10, (
+        f"expected 8 Tier2 direct + 1 escalation fallthrough + 1 def = 10, "
+        f"found {calls}; a CI-repair terminal site may be missing its report"
     )
+    assert "_escalate_ci_repair_exhaustion(" in ORCH_SRC
