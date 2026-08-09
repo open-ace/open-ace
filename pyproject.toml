@@ -51,6 +51,11 @@ dependencies = [
     "PyYAML>=6.0.0,<7.0.0",
     "psycopg2-binary>=2.9.12,<3.0.0",
     "psycogreen>=1.0.0,<2.0.0",
+    "openpyxl>=3.1.0,<4.0.0",
+    "jinja2>=3.0.0,<4.0.0",
+    "cachetools>=5.5.0,<8.0.0",
+    "prometheus_client>=0.20.0,<1.0.0",
+    "prometheus_flask_exporter>=0.23.0,<1.0.0",
 ]
 
 [project.optional-dependencies]

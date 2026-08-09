@@ -32,7 +32,7 @@ openpyxl>=3.1.0,<4.0.0
 jinja2>=3.0.0,<4.0.0
 
 # Caching
-cachetools>=5.5.0
+cachetools>=5.5.0,<8.0.0
 
 # Monitoring (Issue #2186)
 prometheus_client>=0.20.0,<1.0.0
