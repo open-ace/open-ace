@@ -83,7 +83,12 @@ _rw = importlib.util.module_from_spec(_rspec)
 _rspec.loader.exec_module(_rw)
 _ws.get_workspace_base_dir = _rw.get_workspace_base_dir
 _ws.get_workspace_base_dirs = _rw.get_workspace_base_dirs
-_ws.OPENACE_CHOWN_WRAPPER = "/usr/local/bin/openace-chown"
+# Keep the standalone route stub aligned with every privileged workspace
+# wrapper imported by app/routes/fs.py.  Copying the constants from the real
+# module prevents a new wrapper from breaking full-E2E collection again.
+for _name in dir(_rw):
+    if _name.startswith("OPENACE_") and _name.endswith("_WRAPPER"):
+        setattr(_ws, _name, getattr(_rw, _name))
 _ws._is_wrapper_available = lambda p: False
 _ws.run_as_root_if_needed = lambda cmd: None
 
