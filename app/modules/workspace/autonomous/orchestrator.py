@@ -9986,14 +9986,31 @@ class AutonomousOrchestrator:
             )
         )
 
+        # #2391 F1 (PR review, enforce-phase): detect the agent's unfixable signal
+        # up here so the requirer guard below can exclude it. Situation B (an
+        # [UNFIXABLE] report) must keep taking its dev-round retry, never be
+        # preempted by the requirer's test retry. Cheap text scan; harmless on the
+        # early-return paths that don't reach Situation B.
+        test_response = self._artifact_visible_text(test_result) or self._artifact_text(test_result)
+        _unfixable_marker = "[UNFIXABLE]"
+        has_unfixable = _unfixable_marker in test_response
+        if not has_unfixable:
+            # Fallback: check legacy keywords for backward compatibility
+            _legacy_unfixable = [
+                "无法修复",
+                "不可修复",
+                "cannot fix",
+                "unable to fix",
+            ]
+            has_unfixable = any(kw in test_response.lower() for kw in _legacy_unfixable)
+
         # #2391 requirer: derive the evidence domains this change *requires* from
         # its changed paths and compare against the domains actually covered by
         # passing evidence (recognizer-independent, fail-open). Shadow-emits an
         # observability event always; only ``enforce`` mode acts on a missing
-        # domain, and only for a run that would otherwise proceed — not an
-        # inconclusive or skipped run (those have their own handling below). That
-        # is exactly the PASSED-but-unverified-domain case that flows straight to
-        # pr_review today.
+        # domain, and only for a run that would otherwise proceed to pr_review —
+        # excluding inconclusive, skipped, agent-session-failed (Situation A) and
+        # unfixable (Situation B) runs, each of which has its own handling below.
         requirer_mode, requirer_missing = self._apply_test_evidence_requirer(
             test_ms.get("milestone_id", ""),
             requirer_changed_files,
@@ -10005,6 +10022,8 @@ class AutonomousOrchestrator:
             and bool(requirer_missing)
             and not test_result_inconclusive
             and not tests_actually_skipped
+            and test_result.success
+            and not has_unfixable
         )
 
         # Post test results to issue
@@ -10077,8 +10096,8 @@ class AutonomousOrchestrator:
         # passing evidence, on a run that would otherwise proceed to pr_review.
         # Force the same retry the inconclusive path uses, capped by
         # MAX_TEST_RETRIES. ``requirer_enforced`` already excludes the
-        # inconclusive/skipped runs handled above/below, and is False in the
-        # default shadow mode — so this is a no-op until enforce is enabled.
+        # inconclusive/skipped/agent-failed/unfixable runs handled above/below,
+        # and is False in the default shadow mode — a no-op until enforce is on.
         if requirer_enforced:
             message = _requirer_reason(requirer_missing)
             self.repo.update_milestone(
@@ -10190,20 +10209,9 @@ class AutonomousOrchestrator:
                 )
                 return
 
-        # Situation B: test agent succeeded but reported unfixable failures
-        test_response = self._artifact_visible_text(test_result) or self._artifact_text(test_result)
-        _unfixable_marker = "[UNFIXABLE]"
-        has_unfixable = _unfixable_marker in test_response
-        if not has_unfixable:
-            # Fallback: check legacy keywords for backward compatibility
-            _legacy_unfixable = [
-                "无法修复",
-                "不可修复",
-                "cannot fix",
-                "unable to fix",
-            ]
-            has_unfixable = any(kw in test_response.lower() for kw in _legacy_unfixable)
-
+        # Situation B: test agent succeeded but reported unfixable failures.
+        # ``has_unfixable`` is computed above (so the #2391 requirer guard can
+        # exclude it); this is where an [UNFIXABLE] run takes its dev-round retry.
         if has_unfixable:
             dev_retries = wf.get("dev_retries_on_test_fail", 0) + 1
             if dev_retries <= MAX_DEV_RETRIES_ON_TEST_FAIL:

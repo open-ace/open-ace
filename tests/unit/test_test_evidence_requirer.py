@@ -24,6 +24,7 @@ from app.modules.workspace.autonomous.command_evidence.test_evidence import (
 from app.modules.workspace.autonomous.command_evidence.types import ExecutionVerdict
 from app.modules.workspace.autonomous.models import AgentTaskResult
 from app.modules.workspace.autonomous.orchestrator import (
+    MAX_TEST_RETRIES,
     AutonomousOrchestrator,
     _evidence_domains_covered,
     _required_evidence_domains,
@@ -268,17 +269,31 @@ def _orchestrator(wf):
         return orch
 
 
-def _drive_test_phase(orch, wf, *, structured, changed_files, mode, monkeypatch):
+def _drive_test_phase(
+    orch,
+    wf,
+    *,
+    structured,
+    changed_files,
+    mode,
+    monkeypatch,
+    session_success=True,
+    response_text="243 passed in 3.0s",
+):
     """Drive ``_run_test_phase`` end-to-end with a scripted structured verdict,
     changed files, and a requirer mode; return the ``_update_workflow`` patches so
     the caller can assert the route taken. Mirrors the proven harness in
-    tests/issues/2376/test_gate_flags.py (which is collect-only in CI)."""
+    tests/issues/2376/test_gate_flags.py (which is collect-only in CI).
+
+    ``session_success`` / ``response_text`` let a caller drive the agent-session
+    failure (Situation A) and the ``[UNFIXABLE]`` report (Situation B), which the
+    enforce guard must not preempt."""
     monkeypatch.setenv("OPENACE_TEST_EVIDENCE_REQUIRER_MODE", mode)
     result = AgentTaskResult(
         session_id="sess",
-        response_text="243 passed in 3.0s",
-        visible_response_text="243 passed in 3.0s",
-        success=True,
+        response_text=response_text,
+        visible_response_text=response_text,
+        success=session_success,
         tool_calls=[{"tool": {"name": "Bash", "input": {"command": "python -m pytest tests/ -q"}}}],
     )
     patches: list[dict] = []
@@ -388,3 +403,94 @@ class TestEnforceControlFlow:
         # Both domains covered → no missing → proceeds even under enforce.
         assert any(patch_.get("current_phase") == "pr_review" for patch_ in patches), patches
         assert not any(patch_.get("test_retries") == 1 for patch_ in patches)
+
+    @staticmethod
+    def _requirer_status_posted(orch) -> bool:
+        """True if any posted issue comment carried the requirer's retry line."""
+        for call in orch._post_github_comment.call_args_list:
+            body = call.args[2] if len(call.args) > 2 else call.kwargs.get("body", "")
+            if "no passing evidence for it" in str(body):
+                return True
+        return False
+
+    def test_enforce_does_not_preempt_agent_session_failure(self, tmp_path, monkeypatch):
+        # PR-review F1 guard gap: a PASSED structured verdict can coexist with a
+        # FAILED agent session (pytest ran + was recorded, then the session timed
+        # out). With a missing domain under enforce, the requirer must NOT preempt
+        # Situation A's agent-failure retry. Mutation check: dropping
+        # ``test_result.success`` from the guard fires the requirer instead, which
+        # this test's silence assertion catches.
+        tree = _js_repo(tmp_path)
+        wf = _workflow(worktree_path=tree, project_path=tree)
+        orch = _orchestrator(wf)
+        patches = _drive_test_phase(
+            orch,
+            wf,
+            structured=(ExecutionVerdict.PASSED, [_ev("python", ExecutionVerdict.PASSED)], "ok"),
+            changed_files=["app/x.py", "frontend/src/a.tsx"],
+            mode="enforce",
+            monkeypatch=monkeypatch,
+            session_success=False,
+            response_text="fatal: agent session terminated",
+        )
+        assert any(patch_.get("test_retries") == 1 for patch_ in patches), patches
+        assert not self._requirer_status_posted(orch)
+        assert not any(patch_.get("current_phase") == "pr_review" for patch_ in patches)
+
+    def test_enforce_does_not_preempt_an_unfixable_report(self, tmp_path, monkeypatch):
+        # PR-review F1 guard gap: a PASSED structured verdict + an [UNFIXABLE]
+        # report must take Situation B's dev-round retry, not the requirer's test
+        # retry — different counter, and [UNFIXABLE] means "return to development",
+        # which a test rerun cannot satisfy. Mutation check: dropping
+        # ``not has_unfixable`` from the guard fires the requirer (test_retries)
+        # instead of the dev round.
+        tree = _js_repo(tmp_path)
+        wf = _workflow(worktree_path=tree, project_path=tree)
+        orch = _orchestrator(wf)
+        patches = _drive_test_phase(
+            orch,
+            wf,
+            structured=(ExecutionVerdict.PASSED, [_ev("python", ExecutionVerdict.PASSED)], "ok"),
+            changed_files=["app/x.py", "frontend/src/a.tsx"],
+            mode="enforce",
+            monkeypatch=monkeypatch,
+            response_text="243 passed, but the flaky harness is [UNFIXABLE]",
+        )
+        assert any(patch_.get("dev_round") == wf["dev_round"] + 1 for patch_ in patches), patches
+        assert not any(patch_.get("test_retries") == 1 for patch_ in patches)
+        assert not self._requirer_status_posted(orch)
+
+    def test_enforce_exhaustion_fails_the_workflow(self, tmp_path, monkeypatch):
+        # After MAX_TEST_RETRIES the requirer stops retrying and fails the run,
+        # mirroring the inconclusive path's cap.
+        tree = _js_repo(tmp_path)
+        wf = _workflow(worktree_path=tree, project_path=tree, test_retries=MAX_TEST_RETRIES)
+        orch = _orchestrator(wf)
+        patches = _drive_test_phase(
+            orch,
+            wf,
+            structured=(ExecutionVerdict.PASSED, [_ev("python", ExecutionVerdict.PASSED)], "ok"),
+            changed_files=["app/x.py", "frontend/src/a.tsx"],
+            mode="enforce",
+            monkeypatch=monkeypatch,
+        )
+        assert any(patch_.get("status") == "failed" for patch_ in patches), patches
+        assert not any(patch_.get("current_phase") == "pr_review" for patch_ in patches)
+
+    def test_enforce_is_suppressed_on_an_inconclusive_run(self, tmp_path, monkeypatch):
+        # A missing domain on an INCONCLUSIVE run takes the inconclusive retry, not
+        # the requirer branch (the guard's ``not test_result_inconclusive``).
+        tree = _js_repo(tmp_path)
+        wf = _workflow(worktree_path=tree, project_path=tree)
+        orch = _orchestrator(wf)
+        patches = _drive_test_phase(
+            orch,
+            wf,
+            structured=(ExecutionVerdict.INCONCLUSIVE, [], "inconclusive"),
+            changed_files=["app/x.py", "frontend/src/a.tsx"],
+            mode="enforce",
+            monkeypatch=monkeypatch,
+            response_text="a test command ran but produced no parseable result",
+        )
+        assert any(patch_.get("test_retries") == 1 for patch_ in patches), patches
+        assert not self._requirer_status_posted(orch)
