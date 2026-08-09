@@ -258,6 +258,9 @@ jobs:
     continue-on-error: true
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    env:
+      # Keep the installed browser outside the isolated HOME used by the tests.
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.cache/ms-playwright
     steps:
       - uses: actions/checkout@v6
         with:

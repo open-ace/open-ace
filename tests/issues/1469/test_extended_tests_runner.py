@@ -99,6 +99,22 @@ def test_prepare_test_home_preserves_existing_playwright_browser_cache(tmp_path)
         test_home.cleanup()
 
 
+def test_prepare_test_home_preserves_explicit_playwright_browser_path(tmp_path):
+    browsers_path = tmp_path / "shared-playwright-browsers"
+    env = {
+        "HOME": str(tmp_path),
+        "PLAYWRIGHT_BROWSERS_PATH": str(browsers_path),
+    }
+
+    test_home = run_extended_tests.prepare_test_home(env, isolated_home=True)
+    try:
+        assert env["HOME"] != str(tmp_path)
+        assert env["PLAYWRIGHT_BROWSERS_PATH"] == str(browsers_path)
+    finally:
+        assert test_home is not None
+        test_home.cleanup()
+
+
 def test_isolated_base_url_uses_loopback_and_an_available_port():
     base_url = run_extended_tests.isolated_base_url("http://localhost:19888")
 
