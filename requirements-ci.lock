@@ -21,7 +21,7 @@ bandit==1.9.4
 bcrypt==5.0.0
     # via -r requirements.txt
 black==26.5.1
-    # via -r requirements.txt
+    # via -r requirements-ci.in
 blinker==1.9.0
     # via flask
 boolean-py==5.0
@@ -107,7 +107,7 @@ importlib-metadata==9.0.0 ; python_full_version < '3.10.2'
 iniconfig==2.3.0
     # via pytest
 isort==8.0.1
-    # via -r requirements.txt
+    # via -r requirements-ci.in
 itsdangerous==2.2.0
     # via flask
 jinja2==3.1.6
@@ -139,7 +139,7 @@ multidict==6.7.1
     #   aiohttp
     #   yarl
 mypy==2.3.0
-    # via -r requirements.txt
+    # via -r requirements-ci.in
 mypy-extensions==1.1.0
     # via
     #   black
@@ -183,7 +183,7 @@ pluggy==1.6.0
     #   pytest
     #   pytest-cov
 pre-commit==4.6.1
-    # via -r requirements.txt
+    # via -r requirements-ci.in
 prometheus-client==0.26.0
     # via
     #   -r requirements.txt
@@ -216,7 +216,7 @@ pyproject-hooks==1.2.0
     # via build
 pytest==9.1.1
     # via
-    #   -r requirements.txt
+    #   -r requirements-ci.in
     #   pytest-asyncio
     #   pytest-cov
     #   pytest-rerunfailures
@@ -224,17 +224,17 @@ pytest==9.1.1
     #   pytest-timeout
     #   pytest-xdist
 pytest-asyncio==1.4.0
-    # via -r requirements.txt
+    # via -r requirements-ci.in
 pytest-cov==7.1.0
-    # via -r requirements.txt
+    # via -r requirements-ci.in
 pytest-rerunfailures==16.4
-    # via -r requirements.txt
+    # via -r requirements-ci.in
 pytest-split==0.11.0
-    # via -r requirements.txt
+    # via -r requirements-ci.in
 pytest-timeout==2.4.0
-    # via -r requirements.txt
+    # via -r requirements-ci.in
 pytest-xdist==3.8.0
-    # via -r requirements.txt
+    # via -r requirements-ci.in
 python-discovery==1.5.1
     # via virtualenv
 pytokens==0.4.1
@@ -254,7 +254,7 @@ rich==15.0.0
     #   bandit
     #   pip-audit
 ruff==0.16.2
-    # via -r requirements.txt
+    # via -r requirements-ci.in
 signxml==4.5.1
     # via -r requirements.txt
 sortedcontainers==2.4.0
@@ -280,9 +280,9 @@ tomli==2.4.1
 tomli-w==1.2.0
     # via pip-audit
 types-cachetools==7.0.0.20260713
-    # via -r requirements.txt
+    # via -r requirements-ci.in
 types-requests==2.33.0.20260712
-    # via -r requirements.txt
+    # via -r requirements-ci.in
 typing-extensions==4.16.0
     # via
     #   aiohttp

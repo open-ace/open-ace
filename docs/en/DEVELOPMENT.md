@@ -39,7 +39,7 @@ python3 cli.py config init
 open-ace/
 ├── server.py              # Web server entry point
 ├── requirements.txt       # Production dependency policy
-├── requirements-ci.in     # CI-only tools plus production dependencies
+├── requirements-ci.in     # Development/CI tools plus production dependencies
 ├── requirements-ci.lock   # Resolved local/GitHub CI dependency set
 │
 ├── app/                # Flask application

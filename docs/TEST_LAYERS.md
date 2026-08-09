@@ -92,8 +92,10 @@ compileall 和 unit smoke，并不代表全量跨版本覆盖。Python 3.13 仍�
 `.python-version` 与 `.nvmrc` 分别固定为 3.11 和 20，支持 uv/pyenv/nvm
 等工具自动选择与 Actions 相同的主版本。
 `requirements-ci.lock` 从最低支持版本 Python 3.10 做 universal 解析，所有本地
-和 GitHub 测试 job 都安装该文件。生产依赖保留在 `requirements.txt`；仅 CI
-需要的 Playwright、Bandit、build 和 pip-audit 保留在 `requirements-ci.in`。
+和 GitHub 测试 job 都安装该文件。生产依赖保留在 `requirements.txt`；开发和
+CI 所需的测试、检查、构建及审计工具统一保留在
+`requirements-ci.in`，不得加入生产安装使用的 `requirements.txt`；对应的
+`dev` extra 必须与该输入保持一致，策略测试会自动检查两者及生产依赖边界。
 修改任一输入后必须按 `CONTRIBUTING.md` 的命令重新生成并提交 lock。
 
 收集成功只证明测试“存在且能导入”，不证明断言是绿的。Legacy suite 的定时

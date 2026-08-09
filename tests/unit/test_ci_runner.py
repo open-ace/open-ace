@@ -5,6 +5,14 @@ import subprocess
 from pathlib import Path
 from unittest.mock import Mock, call
 
+from packaging.requirements import Requirement
+from packaging.utils import canonicalize_name
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
+    import tomli as tomllib
+
 ROOT = Path(__file__).resolve().parents[2]
 SPEC = importlib.util.spec_from_file_location("openace_ci", ROOT / "scripts" / "ci.py")
 assert SPEC and SPEC.loader
@@ -57,15 +65,28 @@ def test_ci_input_change_selects_package_and_dependency_suites():
     assert "compatibility-smoke" in selected
 
 
-def test_ci_only_tools_stay_out_of_production_requirements():
-    production = (ROOT / "requirements.txt").read_text().lower().splitlines()
-    declared = {
-        line.split("[", 1)[0].split("=", 1)[0].split("<", 1)[0].strip()
-        for line in production
-        if line.strip() and not line.lstrip().startswith("#")
+def _requirement_names(lines):
+    return {
+        canonicalize_name(Requirement(line).name)
+        for raw_line in lines
+        if (line := raw_line.strip()) and not line.startswith(("#", "-r "))
     }
 
-    assert declared.isdisjoint({"bandit", "build", "pip-audit", "playwright"})
+
+def test_development_tools_stay_out_of_production_requirements():
+    production = _requirement_names((ROOT / "requirements.txt").read_text().splitlines())
+    ci_input = _requirement_names((ROOT / "requirements-ci.in").read_text().splitlines())
+
+    assert ci_input
+    assert production.isdisjoint(ci_input)
+
+
+def test_ci_input_matches_packaging_dev_extra():
+    ci_input = _requirement_names((ROOT / "requirements-ci.in").read_text().splitlines())
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text())
+    dev_extra = _requirement_names(project["project"]["optional-dependencies"]["dev"])
+
+    assert ci_input == dev_extra
 
 
 def test_ci_policy_change_fails_safe_to_all_pr_suites():
