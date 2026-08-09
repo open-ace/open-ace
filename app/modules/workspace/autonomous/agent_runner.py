@@ -39,6 +39,7 @@ from app.modules.workspace.autonomous.sandbox.types import SandboxSpec
 from app.modules.workspace.autonomous.task_isolation import (
     DEFAULT_TASK_ROOT,
     ensure_task_runtime_dirs,
+    task_runtime_dirs,
 )
 
 if TYPE_CHECKING:  # pragma: no cover - annotations only (PEP 563)
@@ -239,6 +240,10 @@ class _LocalSession:
     # Milestone this task belongs to — tags session_messages for per-phase detail views.
     milestone_id: str = ""
     system_account: str | None = None
+    # #2439: the per-attempt task_id whose HOME the CLI writes its session JSONL
+    # under. Drives per-task Claude-history resolution (_claude_projects_root);
+    # empty for legacy callers (fall back to the system account's passwd home).
+    task_id: str = ""
     # Distinct assistant message_ids counted toward request_count (dedup, since
     # claude emits multiple assistant events per message: thinking then text).
     _counted_message_ids: set = field(default_factory=set)
@@ -1025,8 +1030,19 @@ class AutonomousAgentRunner:
         return ""
 
     @staticmethod
-    def _resolve_home_dir(system_account: str | None) -> Path:
-        """Resolve the target user's home dir for Claude history lookups."""
+    def _resolve_home_dir(system_account: str | None, task_id: str | None = None) -> Path:
+        """Resolve the HOME whose .claude/projects the CLI writes session JSONL to.
+
+        With a per-attempt ``task_id`` (#2020 isolation), the CLI runs under the
+        per-task HOME (``/run/openace-agent-tasks/<task_id>/home``, set in
+        ``_build_env`` + the cross-user launcher), so its history lives there —
+        NOT under the system account's passwd home. Resolving the passwd home
+        here (#2439) returned the wrong directory, making the mtime session
+        fallback and the timeout usage replay silently miss. Fall back to the
+        passwd/system home only for legacy callers without a task_id.
+        """
+        if task_id:
+            return Path(task_runtime_dirs(task_id)["home"])
         if system_account:
             try:
                 pw_entry = pwd.getpwnam(system_account)
@@ -1037,9 +1053,9 @@ class AutonomousAgentRunner:
         return Path.home()
 
     @classmethod
-    def _claude_projects_root(cls, system_account: str | None) -> Path:
+    def _claude_projects_root(cls, system_account: str | None, task_id: str | None = None) -> Path:
         """Return the ~/.claude/projects root for the workflow owner."""
-        return cls._resolve_home_dir(system_account) / ".claude" / "projects"
+        return cls._resolve_home_dir(system_account, task_id) / ".claude" / "projects"
 
     @staticmethod
     def _read_text_as_user(path: Path, system_account: str | None) -> str:
@@ -1596,6 +1612,7 @@ class AutonomousAgentRunner:
         min_mtime_epoch: float,
         bound_cli_session_ids: set[str] | None = None,
         system_account: str | None = None,
+        task_id: str | None = None,
     ) -> str:
         """Find the latest Claude JSONL session created for the active worktree.
 
@@ -1612,7 +1629,7 @@ class AutonomousAgentRunner:
         if not encoded_project_path:
             return ""
 
-        project_dir = self._claude_projects_root(system_account) / encoded_project_path
+        project_dir = self._claude_projects_root(system_account, task_id) / encoded_project_path
         candidates = self._list_jsonl_files(project_dir, system_account)
         if not candidates:
             return ""
@@ -1691,7 +1708,7 @@ class AutonomousAgentRunner:
         if not cli_session_id or not session.encoded_project_path:
             return
         jsonl_path = (
-            self._claude_projects_root(session.system_account)
+            self._claude_projects_root(session.system_account, session.task_id)
             / session.encoded_project_path
             / f"{cli_session_id}.jsonl"
         )
@@ -1784,6 +1801,7 @@ class AutonomousAgentRunner:
                 session.started_at_epoch,
                 bound_cli_session_ids=bound_ids,
                 system_account=session.system_account,
+                task_id=session.task_id,
             )
             logger.warning(
                 "Using mtime fallback to resolve session (control_response missed) — "
@@ -2416,6 +2434,7 @@ class AutonomousAgentRunner:
             started_at_epoch=time.time(),
             milestone_id=milestone_id,
             system_account=system_account,
+            task_id=session_id,
             sandbox_handle=sandbox_handle,
             exec_handle=exec_handle,
             sandbox_provider=self._sandbox_provider,
@@ -2762,6 +2781,7 @@ class AutonomousAgentRunner:
             workspace_type=workspace_type,
             started_at_epoch=time.time(),
             milestone_id=milestone_id,
+            task_id=session_id,
         )
 
         collector = _ZcodeResultCollector(
@@ -3450,6 +3470,7 @@ class AutonomousAgentRunner:
             tracker = _LocalSession(
                 session_id=session_id,
                 process=None,  # type: ignore[arg-type]
+                task_id=session_id,
             )
             self._local_sessions[session_id] = tracker
 
