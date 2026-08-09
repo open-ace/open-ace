@@ -5,8 +5,9 @@ on:
     branches: [main, master]
     types: [opened, synchronize, reopened, labeled]
   schedule:
-    # Nightly full coverage; expensive cross-browser/performance checks are weekly.
-    - cron: '0 2 * * *'
+    # Daily at 01:18 Singapore time; expensive cross-browser/performance checks are weekly.
+    - cron: '18 1 * * *'
+      timezone: 'Asia/Singapore'
   workflow_dispatch:
     inputs:
       category:

@@ -2,7 +2,9 @@ name: Weekly Quality
 
 on:
   schedule:
-    - cron: '0 4 * * 0'
+    # Saturday at 03:18 Singapore time.
+    - cron: '18 3 * * 6'
+      timezone: 'Asia/Singapore'
   workflow_dispatch:
 
 permissions:
