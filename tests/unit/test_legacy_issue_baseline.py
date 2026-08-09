@@ -366,6 +366,28 @@ def test_identical_dups_dedupe():
     assert len(r.new) == 1 and not r.invalid
 
 
+def test_multi_key_per_nodeid_rejected():
+    # a single nodeid carrying two different (outcome,category) keys must not be
+    # silently collapsed (would let a resolved/changed entry drop silently)
+    a = ParsedTestcase("tests/issues/716/t.py::a", "failure", "assertion_failure", "E", "s")
+    b = ParsedTestcase("tests/issues/716/t.py::a", "error", "setup_error", "E2", "s2")
+    r = _compare([], [a, b], ["tests/issues/716/t.py::a"])
+    assert r.exit_code != 0 and any("multiple failure keys" in i for i in r.invalid)
+
+
+def test_targeted_run_marked_invalid_not_full_gate():
+    parsed = [_tc_parsed("tests/issues/716/t.py::a")]
+    r = lib.compare(
+        Baseline(entries=[]),
+        parsed,
+        ["tests/issues/716/t.py::a"],
+        baseline_min_files=0,
+        require_review_threshold_pct=0.0,
+        targeted=True,
+    )
+    assert r.exit_code != 0 and any("targeted run" in i for i in r.invalid)
+
+
 # --- Task 6: cli ------------------------------------------------------------
 
 

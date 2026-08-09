@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
-import fnmatch
 import glob
 import json
 import os
@@ -362,6 +361,14 @@ def build_expected_manifest(
             if line.startswith("tests/") and "::" in line
         }
     )
+    if not nodeids:
+        # Degraded collection (pytest exited non-zero / import error / wrong
+        # flags). An empty expected set would silently disable the nodeid
+        # completeness check, so fail closed here.
+        raise BaselineError(
+            "expected-nodeid manifest collected 0 nodeids "
+            f"(pytest exit {proc.returncode}); collection is degraded"
+        )
     files = sorted({_file_of(n) for n in nodeids})
     return ExpectedManifest(nodeids=nodeids, files=files, selection=selection, targeted=targeted)
 
@@ -389,8 +396,14 @@ class CompareResult:
 
 
 def _failure_index(records: list[FailureRecord]) -> dict[tuple[str, str, str], FailureRecord]:
-    """Index failures by key; raise on conflicting same-key records."""
+    """Index failures by key; raise on any conflict.
+
+    Two failure modes are rejected loudly (never last-write-wins): same key with
+    a different summary, and the same nodeid mapping to more than one key (e.g.
+    a hand-edited baseline carrying both ``failure`` and ``error`` for one node).
+    """
     index: dict[tuple[str, str, str], FailureRecord] = {}
+    nodeid_keys: dict[str, set[tuple[str, str, str]]] = {}
     for r in records:
         existing = index.get(r.key)
         if existing is not None and (
@@ -402,6 +415,13 @@ def _failure_index(records: list[FailureRecord]) -> dict[tuple[str, str, str], F
                 f"{r.exception_type}/{r.summary!r}); refusing last-write-wins"
             )
         index[r.key] = r
+        nodeid_keys.setdefault(r.nodeid, set()).add(r.key)
+    for nodeid, keys in nodeid_keys.items():
+        if len(keys) > 1:
+            raise BaselineError(
+                f"nodeid {nodeid} has multiple failure keys {sorted(keys)}; "
+                f"a test must have exactly one (outcome, category)"
+            )
     return index
 
 
@@ -618,7 +638,13 @@ def _write_summary(text: str) -> None:
 
 
 def _cmd_compare(args: argparse.Namespace) -> int:
-    baseline = Baseline.from_json(Path(args.baseline).read_text())
+    try:
+        baseline = Baseline.from_json(Path(args.baseline).read_text())
+    except OSError as exc:
+        raise BaselineError(
+            f"cannot read baseline {args.baseline}: {exc} "
+            f"— generate it with `snapshot` from a complete reference run"
+        ) from exc
     parsed = _load_junit_glob(args.junit)
     if args.manifest:
         manifest = json.loads(Path(args.manifest).read_text())
