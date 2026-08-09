@@ -1833,6 +1833,24 @@ PRE_COMMIT_CONVERGENCE_TIMEOUT = 600
 CI_PRE_COMMIT_SKIP = "bandit,no-commit-to-branch"
 MAX_CI_DIAGNOSTICS_ATTEMPTS = 6  # bound scheduler polls when failed job logs stay unavailable
 MAX_CLEANUP_ATTEMPTS = 10  # post-merge Git cleanup retries before giving up (#2043)
+# Cap on Tier1 CI-repair-exhaustion escalations back to a fresh development
+# round (#2443 PR-C). A Tier1 exhaustion (MAX / no-change / unchanged-signature)
+# means the PR branch and CI logs are still recoverable, so instead of terminal
+# `failed` we rebase the existing PR branch onto main, reset the CI-repair
+# counters, and re-enter development on the SAME PR/branch (ci_repair_context is
+# preserved so _get_ci_repair_prompt surfaces the prior failure). After this many
+# dev-round escalations the workflow falls through to a Tier2 terminal report +
+# `failed` — the repair is not converging and must not loop forever.
+MAX_MERGE_FAIL_DEV_ROUNDS = 3
+# Exhaustion categories that are recoverable (PR branch present, failure
+# actionable) and therefore eligible for a Tier1 dev-round escalation.
+_CI_REPAIR_TIER1_CATEGORIES = frozenset(
+    {
+        "ci_repair_exhausted",  # MAX_CI_REPAIR_ATTEMPTS reached
+        "ci_repair_no_change_exhausted",
+        "ci_repair_signature_unchanged",  # meaningful fingerprint unchanged
+    }
+)
 
 
 def _cleanup_backoff_time(attempts: int) -> str:
@@ -4718,6 +4736,122 @@ class AutonomousOrchestrator:
             error_message=body[:500],
         )
 
+    def _escalate_ci_repair_exhaustion(
+        self,
+        wf: dict,
+        pr_number: int,
+        *,
+        category: str,
+        reason: str,
+        attempts: int,
+        failure_names: str = "",
+        branch_name: str = "",
+    ) -> None:
+        """Route a CI-repair exhaustion to Tier1 (fresh dev round) or Tier2 (terminal).
+
+        #2443 PR-C. ``category`` distinguishes the two tiers:
+
+        * **Tier1** (``_CI_REPAIR_TIER1_CATEGORIES`` — MAX / no-change /
+          unchanged-signature): the PR branch and CI logs are recoverable, so a
+          fresh development pass may still succeed. While ``merge_fail_dev_rounds``
+          is under ``MAX_MERGE_FAIL_DEV_ROUNDS`` AND a PR branch exists, rebase
+          the existing branch onto main, reset the full CI-repair counter set,
+          and re-enter development on the SAME PR/branch.
+        * **Tier2** (every other category) or Tier1-at-cap: post the PR-A
+          terminal report and write absorbing ``failed``.
+
+        Replaces the PR-A ``_emit_ci_repair_terminal_report`` + ``failed`` pair
+        at the 3 Tier1 exhaustion sites; the 8 Tier2 sites keep PR-A's behavior.
+        """
+        merge_fail_dev_rounds = int(wf.get("merge_fail_dev_rounds", 0) or 0)
+        recoverable_branch = bool((wf.get("branch_name") or branch_name or "").strip())
+        if (
+            category in _CI_REPAIR_TIER1_CATEGORIES
+            and merge_fail_dev_rounds < MAX_MERGE_FAIL_DEV_ROUNDS
+            and recoverable_branch
+        ):
+            self._escalate_to_development_round(
+                wf,
+                pr_number,
+                reason=reason,
+                attempts=attempts,
+                branch_name=(wf.get("branch_name") or branch_name or ""),
+            )
+            return
+        # Tier2, or Tier1 at the dev-round cap: terminal report + absorbing failed.
+        self._emit_ci_repair_terminal_report(
+            wf,
+            pr_number,
+            category=category,
+            reason=reason,
+            attempts=attempts,
+            failure_names=failure_names,
+            branch_name=branch_name,
+        )
+        self._update_workflow({"status": "failed", "error_message": reason})
+
+    def _escalate_to_development_round(
+        self, wf: dict, pr_number: int, *, reason: str, attempts: int, branch_name: str
+    ) -> None:
+        """Re-enter development on the existing PR branch after a Tier1 exhaustion.
+
+        Rebase the PR branch onto current main first (best-effort — a sync
+        failure must not strand the workflow in ``failed``), record the
+        escalation, then transition to ``developing`` with a full CI-repair
+        counter reset. ``ci_repair_context`` is deliberately NOT cleared: the
+        development prompt's ``_get_ci_repair_prompt`` surfaces it so the fresh
+        dev round is aware of the prior CI failure rather than re-deriving the
+        same broken implementation blind (#2443 PR-C, plan N6).
+        """
+        dev_round = int(wf.get("dev_round", 1) or 1)
+        merge_fail_dev_rounds = int(wf.get("merge_fail_dev_rounds", 0) or 0)
+        if branch_name:
+            try:
+                gh = self._get_gh()
+                head_sha = ""
+                try:
+                    head_sha = gh.get_pr_head_sha(pr_number)
+                except Exception:
+                    pass
+                if head_sha:
+                    # Ignore the return: whether or not a sync push happened, the
+                    # branch is now current with main and development proceeds.
+                    self._sync_failed_pr_with_main(gh, branch_name, pr_number, head_sha)
+            except Exception as exc:
+                logger.warning(
+                    "Pre-development rebase failed for PR #%s (proceeding anyway): %s",
+                    pr_number,
+                    exc,
+                )
+        self._create_milestone(
+            phase="merge",
+            dev_round=dev_round,
+            round_number=attempts,
+            milestone_type="ci_repair_escalated_to_development",
+            status="completed",
+            title="CI repair exhausted — escalating to a fresh development round",
+            error_message=reason,
+        )
+        self._update_workflow(
+            {
+                "status": "developing",
+                "current_phase": "development",
+                "dev_round": dev_round + 1,
+                "merge_fail_dev_rounds": merge_fail_dev_rounds + 1,
+                # Full counter reset — a fresh dev round must not inherit stale
+                # CI-repair counts or a stale failure signature (mirrors
+                # retry_workflow, PR-B). ci_repair_context is intentionally left
+                # untouched (preserved as dev feedback).
+                "ci_repair_attempts": 0,
+                "ci_repair_transient_retries": 0,
+                "ci_repair_no_change_retries": 0,
+                "ci_diagnostics_attempts": 0,
+                "last_ci_failure_signature": "",
+                "last_ci_failure_head_sha": "",
+                "error_message": "",
+            }
+        )
+
     def _start_ci_repair_round(self, wf: dict, pr_number: int, failed_checks: list[dict]) -> None:
         """Repair merge-phase CI failures in-place on the existing PR branch."""
         dev_round = int(wf.get("dev_round", 1) or 1)
@@ -4783,14 +4917,13 @@ class AutonomousOrchestrator:
                     ),
                     error_message=message,
                 )
-                self._emit_ci_repair_terminal_report(
+                self._escalate_ci_repair_exhaustion(
                     wf,
                     pr_number,
                     category="ci_repair_no_change_exhausted",
                     reason=message,
                     attempts=previous_attempts,
                 )
-                self._update_workflow({"status": "failed", "error_message": message})
                 return
             # Don't increment ci_repair_attempts; bump the no-change counter
             # (reset to 0 on a change-producing round).
@@ -4846,15 +4979,15 @@ class AutonomousOrchestrator:
                 title="CI automatic repair limit reached",
                 error_message=message,
             )
-            self._emit_ci_repair_terminal_report(
+            self._escalate_ci_repair_exhaustion(
                 wf,
                 pr_number,
                 category="ci_repair_exhausted",
                 reason=message,
                 attempts=next_attempt,
                 failure_names=failure_names,
+                branch_name=branch_name,
             )
-            self._update_workflow({"status": "failed", "error_message": message})
             return
 
         # Resolve log evidence before consuming an attempt.  A repair agent
@@ -5032,15 +5165,15 @@ class AutonomousOrchestrator:
                 title="CI failures unchanged after automatic repair",
                 error_message=message,
             )
-            self._emit_ci_repair_terminal_report(
+            self._escalate_ci_repair_exhaustion(
                 wf,
                 pr_number,
                 category="ci_repair_signature_unchanged",
                 reason=message,
                 attempts=next_attempt,
                 failure_names=failure_names,
+                branch_name=branch_name,
             )
-            self._update_workflow({"status": "failed", "error_message": message})
             return
 
         context = self._build_ci_repair_context(wf, gh, pr_number, failed_checks)

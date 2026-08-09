@@ -515,7 +515,8 @@ CREATE TABLE autonomous_workflows (
     issue_acceptance_hash text,
     verified_by text,
     verification_session_id text,
-    issue_closed_by_workflow_at timestamp with time zone
+    issue_closed_by_workflow_at timestamp with time zone,
+    merge_fail_dev_rounds integer DEFAULT 0
 );
 
 CREATE SEQUENCE autonomous_workflows_id_seq

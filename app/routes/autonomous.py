@@ -1226,6 +1226,9 @@ def retry_workflow(workflow_id):
         "ci_diagnostics_attempts": 0,
         "last_ci_failure_signature": "",
         "last_ci_failure_head_sha": "",
+        # PR-C (#2443): reset the Tier1 dev-round escalation budget too, so a
+        # retried workflow gets a fresh MAX_MERGE_FAIL_DEV_ROUNDS allowance.
+        "merge_fail_dev_rounds": 0,
     }
     # Optional per-workflow scope bump (#2309): a failed round whose only
     # blocker was the changed-files cap can be retried with a higher limit
