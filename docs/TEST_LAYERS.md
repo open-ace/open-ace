@@ -81,8 +81,10 @@ python scripts/run_extended_tests.py --category issues --split-total 4 --split-g
 
 所有 suite 的命令、超时和工具链版本以 `ci/suites.json` 为唯一来源；本地和
 GitHub Actions 都通过 `python scripts/ci.py` 执行。PR 使用生产 Python 3.11
-做全量确定性测试，3.10/3.14 只做兼容性 smoke；定时工作流承担全量跨版本、
-E2E、legacy shards 和易受 runner 噪声影响的检查。
+做全量确定性测试；为兼容当前 ruleset，3.10、3.12、3.14 的同名 check 只执行
+compileall 和 unit smoke，并不代表全量跨版本覆盖。Python 3.13 仍是声明支持版本，
+但不在 PR 矩阵中。定时工作流在 3.10、3.11、3.14 上执行完整 Python suite，
+并承担 E2E、legacy shards 和易受 runner 噪声影响的检查。
 
 提交前可运行 `python scripts/ci.py doctor --strict` 验证本地 Python/Node
 主版本与 PR 一致，再用 `python scripts/ci.py pr --base origin/main` 按相同路径
@@ -90,8 +92,9 @@ E2E、legacy shards 和易受 runner 噪声影响的检查。
 `.python-version` 与 `.nvmrc` 分别固定为 3.11 和 20，支持 uv/pyenv/nvm
 等工具自动选择与 Actions 相同的主版本。
 `requirements-ci.lock` 从最低支持版本 Python 3.10 做 universal 解析，所有本地
-和 GitHub 测试 job 都安装该文件；修改 `requirements.txt` 后必须按
-`CONTRIBUTING.md` 的命令重新生成并提交 lock。
+和 GitHub 测试 job 都安装该文件。生产依赖保留在 `requirements.txt`；仅 CI
+需要的 Playwright、Bandit、build 和 pip-audit 保留在 `requirements-ci.in`。
+修改任一输入后必须按 `CONTRIBUTING.md` 的命令重新生成并提交 lock。
 
 收集成功只证明测试“存在且能导入”，不证明断言是绿的。Legacy suite 的定时
 结果用于迁移盘点；只有迁移到 required lane 的测试才能作为合并门禁。
@@ -125,3 +128,10 @@ collection 检查 legacy item 数；extended runner 的分片只能按文件分�
 
 Baseline 是防止测试静默消失的下限，不是覆盖率指标。降低 baseline 必须在 PR
 中说明迁移、删除或合并测试的原因；新增测试后应定期向上收紧。
+
+更新流程：先分别运行 `python scripts/ci.py run default-collection` 和
+`python scripts/ci.py run issue-collection` 记录实际 item/file 数；然后更新
+`.test-baseline.json` 的 `actual_*`。只有有意删除、合并或迁移测试时才降低
+`min_*`，并在 PR 中解释原因；新增测试只更新 `actual_*`，定期将 `min_*`
+向实际值收紧。最后重跑两个 collection suite。`ci/suites.json` 的
+`baseline_runbook` 字段固定指向本节，确保从 suite 清单可以发现本流程。

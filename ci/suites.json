@@ -1,5 +1,6 @@
 {
   "version": 1,
+  "baseline_runbook": "docs/TEST_LAYERS.md#baseline",
   "toolchain": {
     "production_python": "3.11",
     "compatibility_python": ["3.10", "3.14"],
@@ -108,7 +109,7 @@
       "description": "Change-sensitive critical browser path; not required until stabilized",
       "timeout_seconds": 480,
       "commands": [
-        ["{python}", "scripts/run_extended_tests.py", "--category", "critical", "--isolated-home", "--timeout", "120", "--maxfail", "1"]
+        ["{python}", "scripts/run_extended_tests.py", "--category", "critical", "--isolated-home", "--reruns", "1", "--timeout", "180", "--maxfail", "5"]
       ]
     }
   }

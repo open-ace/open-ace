@@ -1,0 +1,8 @@
+# Production and existing development dependencies.
+-r requirements.txt
+
+# CI-only tooling. Keep these out of production installation paths.
+bandit[toml]>=1.8.0,<2.0.0
+build>=1.2.0,<2.0.0
+pip-audit>=2.7.0,<3.0.0
+playwright>=1.40.0,<2.0.0

@@ -50,6 +50,24 @@ def test_python_lock_change_selects_package_and_dependency_suites():
     assert "compatibility-smoke" in selected
 
 
+def test_ci_input_change_selects_package_and_dependency_suites():
+    selected = ci.select_pr_suites(["requirements-ci.in"])
+    assert "package" in selected
+    assert "dependency-audit" in selected
+    assert "compatibility-smoke" in selected
+
+
+def test_ci_only_tools_stay_out_of_production_requirements():
+    production = (ROOT / "requirements.txt").read_text().lower().splitlines()
+    declared = {
+        line.split("[", 1)[0].split("=", 1)[0].split("<", 1)[0].strip()
+        for line in production
+        if line.strip() and not line.lstrip().startswith("#")
+    }
+
+    assert declared.isdisjoint({"bandit", "build", "pip-audit", "playwright"})
+
+
 def test_ci_policy_change_fails_safe_to_all_pr_suites():
     selected = ci.select_pr_suites(["ci/suites.json"])
     assert set(selected) == set(ci.load_config()["pr_suites"])

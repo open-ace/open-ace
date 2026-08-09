@@ -38,7 +38,8 @@ python3 cli.py config init
 ```
 open-ace/
 ├── server.py              # Web 服务器入口
-├── requirements.txt       # 人工维护的依赖策略
+├── requirements.txt       # 生产依赖策略
+├── requirements-ci.in     # CI 专用工具及生产依赖入口
 ├── requirements-ci.lock   # 本地/GitHub CI 统一的解析结果
 │
 ├── app/                # Flask 应用

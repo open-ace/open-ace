@@ -282,7 +282,7 @@ class TestUserProject:
         repo = ProjectRepository(db=pg_db)
         user_id = _insert_user(pg_db, username="creator")
 
-        repo.create_project(path="/projects/all-1", created_by=user_id)
+        repo.create_project(path="/projects/all-1", created_by=user_id, tenant_id=1)
         repo.create_project(path="/projects/all-2", tenant_id=1)
 
         assert len(repo.get_all_projects()) == 2

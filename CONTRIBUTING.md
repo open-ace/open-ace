@@ -73,9 +73,9 @@ playwright install chromium
 pytest
 ```
 
-`requirements.txt` is the human-maintained dependency policy. After changing it,
-regenerate the reviewed CI lock with
-`uv pip compile --universal --python-version 3.10 requirements.txt -o requirements-ci.lock`.
+`requirements.txt` is the production dependency policy; CI-only tools are declared
+in `requirements-ci.in`. After changing either input, regenerate the reviewed lock
+with `uv pip compile --universal --python-version 3.10 requirements-ci.in -o requirements-ci.lock`.
 
 ## 📝 Code Style
 
