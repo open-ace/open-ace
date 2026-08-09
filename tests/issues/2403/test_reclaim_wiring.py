@@ -321,3 +321,47 @@ def test_signal_traps_are_re_registered_outside_the_task_id_block():
         assert any(
             i > early for i in occurrences
         ), f"the only {signal_name} trap is inside the task_id block"
+
+
+# ── #2437: the per-task mutex is sharded, not one-file-per-task_id ────────
+
+
+def test_task_lock_is_sharded_not_one_file_per_task_id():
+    """#2437: the per-task mutex is sharded onto a FIXED lock-file set so /run/lock
+    can't accumulate one ``openace-agent-task-<task_id>.lock`` per attempt."""
+    assert re.search(r"_TASK_LOCK_SHARDS=\d+", SRC), "_TASK_LOCK_SHARDS not defined"
+    assert "_task_lock_shard() {" in SRC, "_task_lock_shard() undefined"
+    # the task_id branch acquires the shard file ...
+    assert 'openace-agent-task-shard-$(_task_lock_shard "$task_id").lock' in SRC
+    # ... via the _task_lock variable; the old direct per-task-id acquire is gone.
+    assert 'exec 9>"$_task_lock"' in SRC
+    assert (
+        'exec 9>"${_lock_dir}/openace-agent-${isolation_key}.lock"' not in SRC
+    ), "the old unbounded per-task-id lock acquire survives"
+
+
+def test_reaper_probes_the_shard_not_a_per_task_lock():
+    """The reaper derives the SAME shard from a preserve dir's task_id and probes
+    it; the old ``openace-agent-task-${_pid}.lock`` derivation must be gone (it
+    would point at a lock file that no longer exists under sharding)."""
+    assert 'openace-agent-task-shard-$(_task_lock_shard "$_pid").lock' in SRC
+    assert (
+        "openace-agent-task-${_pid}.lock" not in SRC
+    ), "the old per-task reaper lock derivation survives"
+
+
+def test_shard_files_are_never_unlinked():
+    """The stable inode is what makes flock mutually exclusive forever. Unlinking a
+    shard would let a second opener create a new inode under the same name and grab
+    a second lock. No rm/unlink may target the shard files."""
+    assert not re.search(
+        r"(^|\s)(rm|unlink)\b[^#]*openace-agent-task-shard", SRC
+    ), "a shard lock file is targeted by rm/unlink, breaking the no-double-lock invariant"
+
+
+def test_only_the_lock_is_sharded_registries_stay_per_attempt():
+    """The acl/signature registries are per-attempt data; only the mutex is sharded.
+    Collisions on the registries would corrupt them, so they must stay 1:1 with the
+    attempt (isolation_key)."""
+    assert 'acl_registry="/run/openace-agent-acl-${isolation_key}"' in SRC
+    assert 'signature_registry="/run/openace-agent-git-signature-${isolation_key}"' in SRC

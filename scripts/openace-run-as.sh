@@ -294,25 +294,47 @@ if [ "$isolated" = true ]; then
                 ;;
         esac
     done
+    # #2437: shard the per-task mutex onto a FIXED lock-file set so /run/lock
+    # can't accumulate one openace-agent-task-<task_id>.lock per attempt
+    # (unbounded under task churn). The shard is a deterministic function of
+    # task_id (cksum mod N); cksum is POSIX (present on Linux AND macOS) and the
+    # shard is computed only here in the launcher (acquire + reaper) -- never in
+    # Python -- so there is no cross-language twin to keep in sync. Shard files
+    # are NEVER unlinked: the stable inode is what makes flock mutually exclusive
+    # forever (unlink + same-name re-open yields a different inode, letting a
+    # second opener grab a second lock). /run/lock clears on reboot, so the set
+    # is recreated lazily and stays bounded at N.
+    _TASK_LOCK_SHARDS=64
+    _task_lock_shard() {
+        # cksum prints "<crc> <length>"; take the crc (field 1) mod N.
+        _cs="$(printf '%s' "$1" | cksum)"
+        _crc="${_cs%% *}"
+        : $(( _shard = _crc % _TASK_LOCK_SHARDS ))
+        echo "$_shard"
+    }
     # Issue #2020: key the lock + registries off the attempt (task_id) when
     # present, so concurrent attempts on the same UID neither serialize on a
     # UID-level flock nor overwrite each other's ACL/signature registry. The
     # uid-* fallback preserves legacy single-attempt semantics for callers
     # that do not pass --task-id.
-    if [ -n "$task_id" ]; then
-        isolation_key="task-${task_id}"
-    else
-        isolation_key="uid-${target_uid}"
-    fi
-    acl_registry="/run/openace-agent-acl-${isolation_key}"
-    signature_registry="/run/openace-agent-git-signature-${isolation_key}"
-    signature_tmp="${signature_registry}.next"
     # Single source for the lock directory so the #2403 preserve reaper derives
     # peer lock paths exactly the way this run derives its own. Deliberately a
     # constant, not an environment override: redirecting it would silently break
     # mutual exclusion between concurrent attempts.
     _lock_dir="/run/lock"
-    exec 9>"${_lock_dir}/openace-agent-${isolation_key}.lock"
+    if [ -n "$task_id" ]; then
+        isolation_key="task-${task_id}"
+        # Only the mutex is sharded (#2437); the acl/signature registries stay
+        # 1:1 with the attempt (per-attempt data, must not collide).
+        _task_lock="${_lock_dir}/openace-agent-task-shard-$(_task_lock_shard "$task_id").lock"
+    else
+        isolation_key="uid-${target_uid}"
+        _task_lock="${_lock_dir}/openace-agent-${isolation_key}.lock"
+    fi
+    acl_registry="/run/openace-agent-acl-${isolation_key}"
+    signature_registry="/run/openace-agent-git-signature-${isolation_key}"
+    signature_tmp="${signature_registry}.next"
+    exec 9>"$_task_lock"
     flock -x 9
 
     # Per-attempt HOME/TMP/XDG runtime tree (#2020). Ephemeral parent under
@@ -418,13 +440,22 @@ if [ "$isolated" = true ]; then
                       -print -quit 2>/dev/null)" || continue
             [ -z "$_fresh" ] || continue
             _pid="${_pdir##*/}"; _pid="${_pid%.claude-preserve}"
-            _plock="${_lock_dir}/openace-agent-task-${_pid}.lock"
+            # #2437: the per-task lock is now a fixed shard (see the acquire
+            # block), so derive the SAME shard from this preserve dir's task_id
+            # and probe it. flock -n on the shard: acquire => no task on that
+            # shard is running => this task_id is not running => safe to reap;
+            # blocked => some task on the shard is live => skip (conservative --
+            # the dead preserve is reaped later when the shard frees). The reaper
+            # runs only in this launcher (cross-user/prod path); the same-user
+            # Python launch path takes no lock and invokes no reaper, so a
+            # lockless dev run can't be wrongly reaped here.
+            _plock="${_lock_dir}/openace-agent-task-shard-$(_task_lock_shard "$_pid").lock"
             # `8<` — read only, NO O_CREAT. flock(2) does not require write
-            # access, and this must never manufacture a lock file: lock files
-            # cannot be reclaimed safely (unlink then same-name open yields a
-            # different inode, so two holders stop excluding each other). A live
-            # run creates its lock before touching anything, so an absent lock
-            # file means no live run.
+            # access, and this must never manufacture a lock file: shard files
+            # are never unlinked (the stable inode is what keeps flock mutually
+            # exclusive), so creating extras would only ever add dead weight. A
+            # live run creates its shard on first acquire, so an absent shard
+            # file means no task has ever run on it => no live run.
             if [ ! -e "$_plock" ]; then
                 rm -rf -- "$_pdir" 2>/dev/null || true
                 continue
