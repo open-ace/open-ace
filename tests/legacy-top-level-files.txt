@@ -1,0 +1,10 @@
+# Grandfathered test modules at tests/ root. Remove entries as files migrate.
+# New tests must be placed in an execution-layer directory.
+test_audit_actions_sync.py
+test_email_notification_integration.py
+test_email_notification_service.py
+test_encryption_key_registry.py
+test_scene_specific_alerts.py
+test_security_baseline.py
+test_security_env.py
+test_smtp_connection_modes.py

@@ -5,7 +5,8 @@ on:
     branches: [main, master]
     types: [opened, synchronize, reopened, labeled]
   schedule:
-    - cron: '0 2 * * 0'
+    # Nightly full coverage; expensive cross-browser/performance checks are weekly.
+    - cron: '0 2 * * *'
   workflow_dispatch:
     inputs:
       category:
@@ -39,9 +40,16 @@ concurrency:
 jobs:
   critical-pr:
     name: Critical PR E2E
-    if: github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'skip-extended-tests')
-    runs-on: ubuntu-latest
+    # Main CI selects this lane by changed paths. This explicit label is an
+    # escape hatch for changes outside those paths.
+    if: >-
+      github.event_name == 'pull_request' &&
+      contains(github.event.pull_request.labels.*.name, 'run-critical-e2e') &&
+      !contains(github.event.pull_request.labels.*.name, 'skip-extended-tests')
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.cache/ms-playwright
     steps:
       - uses: actions/checkout@v6
         with:
@@ -65,28 +73,16 @@ jobs:
         with:
           python-version: '3.11'
           cache: pip
+          cache-dependency-path: requirements-ci.lock
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install playwright
+          pip install -r requirements-ci.lock
           playwright install chromium --with-deps
 
       - name: Run critical extended tests
-        run: |
-          # Issue #2189: Validate collection before running
-          python scripts/run_extended_tests.py \
-            --category critical \
-            --dry-run 2>&1 | grep -E "Collected|Total files" || true
-
-          python scripts/run_extended_tests.py \
-            --category critical \
-            --isolated-home \
-            --reruns 1 \
-            --timeout 180 \
-            --maxfail 5 \
-            --junitxml test-results/critical-pr.xml
+        run: python scripts/ci.py run critical-e2e
         env:
           CI: true
           HEADLESS: true
@@ -102,14 +98,50 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+  nightly-python:
+    name: Nightly Python ${{ matrix.python-version }}
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.11', '3.14']
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: requirements-ci.lock
+      - name: Install test dependencies
+        run: pip install -r requirements-ci.lock
+      - name: Run full deterministic and collection gates
+        run: |
+          mkdir -p test-results
+          python scripts/ci.py run default-collection issue-collection python-core \
+            2>&1 | tee "test-results/nightly-python-${{ matrix.python-version }}.log"
+      - name: Upload nightly Python log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: nightly-python-${{ matrix.python-version }}
+          path: test-results/
+          if-no-files-found: error
+          retention-days: 14
+
   full-e2e:
     name: Full E2E
     if: |
       github.event_name == 'schedule' ||
       (github.event_name == 'workflow_dispatch' && (inputs.category == 'e2e' || inputs.category == 'all')) ||
       (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'run-full-e2e'))
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 120
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.cache/ms-playwright
     steps:
       - uses: actions/checkout@v6
         with:
@@ -133,12 +165,12 @@ jobs:
         with:
           python-version: '3.11'
           cache: pip
+          cache-dependency-path: requirements-ci.lock
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install playwright
+          pip install -r requirements-ci.lock
           playwright install chromium --with-deps
 
       - name: Run full E2E tests
@@ -175,8 +207,10 @@ jobs:
       github.event_name == 'schedule' ||
       (github.event_name == 'workflow_dispatch' && (inputs.category == 'issues' || inputs.category == 'all')) ||
       (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'run-issue-tests'))
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 180
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.cache/ms-playwright
     strategy:
       fail-fast: false
       matrix:
@@ -204,12 +238,12 @@ jobs:
         with:
           python-version: '3.11'
           cache: pip
+          cache-dependency-path: requirements-ci.lock
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install playwright
+          pip install -r requirements-ci.lock
           playwright install chromium --with-deps
 
       - name: Run issue regression shard
@@ -241,8 +275,10 @@ jobs:
   manual-extended:
     name: Manual Extended Tests
     if: github.event_name == 'workflow_dispatch' && inputs.category != 'issues' && inputs.category != 'all'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 120
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.cache/ms-playwright
     steps:
       - uses: actions/checkout@v6
         with:
@@ -266,12 +302,12 @@ jobs:
         with:
           python-version: '3.11'
           cache: pip
+          cache-dependency-path: requirements-ci.lock
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install playwright
+          pip install -r requirements-ci.lock
           playwright install chromium --with-deps
 
       - name: Run selected extended tests
@@ -308,3 +344,30 @@ jobs:
             screenshots/
           if-no-files-found: ignore
           retention-days: 14
+
+  nightly-summary:
+    name: Nightly Quality Gate
+    if: always() && github.event_name == 'schedule'
+    needs: [nightly-python, full-e2e, issue-tests]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Publish nightly result
+        env:
+          PYTHON_RESULT: ${{ needs.nightly-python.result }}
+          E2E_RESULT: ${{ needs.full-e2e.result }}
+          ISSUE_RESULT: ${{ needs.issue-tests.result }}
+        run: |
+          {
+            echo "## Nightly quality gate"
+            echo "| Lane | Result |"
+            echo "|---|---|"
+            echo "| Python 3.10/3.11/3.14 | $PYTHON_RESULT |"
+            echo "| Full Python E2E | $E2E_RESULT |"
+            echo "| Legacy issue shards | $ISSUE_RESULT |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$PYTHON_RESULT" != success ] || \
+             [ "$E2E_RESULT" != success ] || \
+             [ "$ISSUE_RESULT" != success ]; then
+            echo "::error::One or more nightly quality lanes failed; inspect their artifacts."
+            exit 1
+          fi

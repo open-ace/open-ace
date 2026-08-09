@@ -23,11 +23,11 @@ cd open-ace
 python3 -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 
-# Install dependencies
-pip install -r requirements.txt
+# Install the exact dependency set used by GitHub CI
+pip install -r requirements-ci.lock
 
-# Install development dependencies
-pip install pytest pytest-cov playwright
+# Only needed for browser E2E tests
+playwright install chromium
 
 # Initialize configuration
 python3 cli.py config init
@@ -38,7 +38,9 @@ python3 cli.py config init
 ```
 open-ace/
 ├── server.py              # Web server entry point
-├── requirements.txt    # Python dependencies
+├── requirements.txt       # Production dependency policy
+├── requirements-ci.in     # Development/CI tools plus production dependencies
+├── requirements-ci.lock   # Resolved local/GitHub CI dependency set
 │
 ├── app/                # Flask application
 │   ├── __init__.py     # create_app() factory
@@ -217,18 +219,22 @@ tests/
 │   ├── test_governance_repo_sqlite.py
 │   └── ...
 ├── e2e/                # End-to-end tests
+│   ├── browser/        # Browser behavior (regression is a marker)
 │   ├── manage/         # Admin UI tests
 │   ├── remote/         # Remote workspace tests
 │   └── terminal/       # Terminal tests
-├── regression/         # Full regression test suite
-├── performance/        # Performance tests
-├── ui/                 # UI screenshot/interaction tests
-├── issues/             # Issue-specific tests
+├── performance/        # Timing/resource tests (scheduled lane)
+├── issues/             # Legacy quarantine; do not add new tests
 │   ├── 164/
 │   ├── 517/
 │   └── ...
 └── conftest.py         # Shared fixtures
 ```
+
+Regression and issue provenance are pytest markers, not additional copies or
+top-level directories. Put a new bug test in its single runtime layer and use
+`pytest.mark.regression` plus `pytest.mark.issue(number)`. See
+`docs/TEST_LAYERS.md` for the migration and CI policy.
 
 ### Writing Tests
 

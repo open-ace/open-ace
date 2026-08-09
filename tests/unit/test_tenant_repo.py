@@ -556,6 +556,24 @@ class TestTenantRepository:
         assert len(result) == 1
         assert result[0].tokens_used == 500
 
+    def test_get_usage_normalizes_postgresql_date(self):
+        from datetime import date
+
+        self.db.fetch_all.return_value = [
+            {
+                "tenant_id": 1,
+                "date": date(2024, 1, 2),
+                "tokens_used": 500,
+                "requests_made": 10,
+                "active_users": 3,
+                "new_users": 1,
+            },
+        ]
+
+        result = self.repo.get_usage(tenant_id=1)
+
+        assert result[0].date == "2024-01-02"
+
     def test_get_usage_with_date_range(self):
         self.db.fetch_all.return_value = []
         self.repo.get_usage(tenant_id=1, start_date="2024-01-01", end_date="2024-01-31", limit=10)
