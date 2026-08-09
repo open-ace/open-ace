@@ -1225,7 +1225,9 @@ def _command_text(tool_input: dict) -> str:
     for key in ("argv", "args"):
         value = tool_input.get(key)
         if isinstance(value, list) and value:
-            return " ".join(str(part) for part in value)
+            # shlex.join so an arg with spaces re-quotes faithfully and the
+            # downstream _shell_tokens (shlex.split) round-trips it.
+            return shlex.join([str(part) for part in value])
         if isinstance(value, str) and value:
             return value
     return ""

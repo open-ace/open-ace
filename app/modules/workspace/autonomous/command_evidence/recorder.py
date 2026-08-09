@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 import queue as queue_module
+import shlex
 import threading
 from collections.abc import Callable
 from datetime import datetime, timezone
@@ -293,7 +294,10 @@ class CommandEvidenceRecorder:
                         # it. Without this an argv-only test run was invisible to the
                         # verdict → mis-judged NOT_RUN (#2401 c).
                         if not (isinstance(shell_command, str) and shell_command) and argv:
-                            shell_command = " ".join(argv)
+                            # shlex.join (not " ".join) so an arg containing spaces
+                            # re-quotes faithfully and _shell_tokens (shlex.split)
+                            # round-trips it back to the same tokens.
+                            shell_command = shlex.join(argv)
                     self.record_tool_use(
                         command_id=command_id,
                         session_id=session_id,

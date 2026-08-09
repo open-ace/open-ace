@@ -120,22 +120,36 @@ class TestShellToolNamesAreNotFailClosed:
         assert _call(name, {"command": "ls -la"}) is False
 
     def test_every_provider_shell_tool_name_is_recognized(self):
-        # Contract guard (#2401 b): the shell tool-name string each provider/CLI
-        # actually emits into evidence must be a member of the gate's set. A new
-        # provider (or a renamed one) that adds a shell tool name here without
-        # adding it to _SHELL_TOOL_NAMES trips this test rather than silently
-        # voiding the gate. Sourced from AUTONOMOUS_DEV_ALLOWED_TOOLS +
-        # agent_runner's default tool_name.
+        # Contract guard (#2401 b): a shell tool name any provider emits into
+        # evidence must be a member of the gate's set, else a drift silently voids
+        # the gate. Derived from the REAL registry (not a hardcoded map) so a
+        # future provider added to AUTONOMOUS_DEV_ALLOWED_TOOLS with a shell tool
+        # name trips this test rather than passing unnoticed.
+        import re
+
+        from app.modules.workspace.autonomous.constants import AUTONOMOUS_DEV_ALLOWED_TOOLS
         from app.modules.workspace.autonomous.orchestrator import _SHELL_TOOL_NAMES
 
-        provider_shell_tool_names = {
-            "claude-code": "Bash",
-            "qwen-code-cli": "run_shell_command",
+        # Explicit truth for today's providers (documents the mapping).
+        assert "bash" in _SHELL_TOOL_NAMES  # claude-code emits "Bash"
+        assert "run_shell_command" in _SHELL_TOOL_NAMES  # qwen-code-cli
+
+        # Conservative shell markers — a `sh`/`bash`/`zsh` suffix, or `shell`/
+        # `terminal` — so a non-shell tool cannot false-trip this.
+        shell_marker = re.compile(r"(?:^|[_.])(?:ba|z)?sh$|shell|terminal", re.IGNORECASE)
+        registry_shell_tools = {
+            tool
+            for tools in AUTONOMOUS_DEV_ALLOWED_TOOLS.values()
+            for tool in tools
+            if shell_marker.search(tool)
         }
-        for cli, shell_tool in provider_shell_tool_names.items():
+        # Guard the guard: the marker must detect the known shells, so an empty
+        # set never passes vacuously.
+        assert {"Bash", "run_shell_command"} <= registry_shell_tools
+        for tool in registry_shell_tools:
             assert (
-                shell_tool.lower() in _SHELL_TOOL_NAMES
-            ), f"{cli} emits shell tool {shell_tool!r} not in _SHELL_TOOL_NAMES"
+                tool.lower() in _SHELL_TOOL_NAMES
+            ), f"registry shell tool {tool!r} not in _SHELL_TOOL_NAMES"
 
 
 class TestArgvIsNotInvisible:
