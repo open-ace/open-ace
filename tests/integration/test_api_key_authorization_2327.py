@@ -59,8 +59,7 @@ class TestAPIKeyTenantAuthorization:
 
                     client = app.test_client()
                     response = client.get(
-                        "/api-keys",
-                        headers={"Authorization": "Bearer test-token"}
+                        "/api-keys", headers={"Authorization": "Bearer test-token"}
                     )
 
         assert response.status_code == 200
@@ -87,8 +86,7 @@ class TestAPIKeyTenantAuthorization:
                 client = app.test_client()
                 # 尝试访问 tenant B
                 response = client.get(
-                    "/api-keys?tenant_id=2",
-                    headers={"Authorization": "Bearer test-token"}
+                    "/api-keys?tenant_id=2", headers={"Authorization": "Bearer test-token"}
                 )
 
         assert response.status_code == 403
@@ -115,8 +113,7 @@ class TestAPIKeyTenantAuthorization:
 
                     client = app.test_client()
                     response = client.get(
-                        "/api-keys?tenant_id=2",
-                        headers={"Authorization": "Bearer test-token"}
+                        "/api-keys?tenant_id=2", headers={"Authorization": "Bearer test-token"}
                     )
 
         assert response.status_code == 200
@@ -138,10 +135,7 @@ class TestAPIKeyTenantAuthorization:
                 }
 
                 client = app.test_client()
-                response = client.get(
-                    "/api-keys",
-                    headers={"Authorization": "Bearer test-token"}
-                )
+                response = client.get("/api-keys", headers={"Authorization": "Bearer test-token"})
 
         assert response.status_code == 400
         data = response.get_json()
@@ -174,7 +168,7 @@ class TestAPIKeyTenantAuthorization:
                             "key_name": "test_key",
                             "api_key": "sk-test",
                         },
-                        headers={"Authorization": "Bearer test-token"}
+                        headers={"Authorization": "Bearer test-token"},
                     )
 
         assert response.status_code == 200
@@ -206,7 +200,7 @@ class TestAPIKeyTenantAuthorization:
                         "api_key": "sk-test",
                         "tenant_id": 2,  # 尝试为 tenant B 创建
                     },
-                    headers={"Authorization": "Bearer test-token"}
+                    headers={"Authorization": "Bearer test-token"},
                 )
 
         assert response.status_code == 403
@@ -234,7 +228,7 @@ class TestAPIKeyTenantAuthorization:
                     response = client.put(
                         "/api-keys/1",
                         json={"key_name": "updated_key"},
-                        headers={"Authorization": "Bearer test-token"}
+                        headers={"Authorization": "Bearer test-token"},
                     )
 
         assert response.status_code == 200
@@ -262,7 +256,7 @@ class TestAPIKeyTenantAuthorization:
                 response = client.put(
                     "/api-keys/2",
                     json={"tenant_id": 2, "key_name": "updated_key"},
-                    headers={"Authorization": "Bearer test-token"}
+                    headers={"Authorization": "Bearer test-token"},
                 )
 
         assert response.status_code == 403
@@ -288,8 +282,7 @@ class TestAPIKeyTenantAuthorization:
 
                     client = app.test_client()
                     response = client.delete(
-                        "/api-keys/1",
-                        headers={"Authorization": "Bearer test-token"}
+                        "/api-keys/1", headers={"Authorization": "Bearer test-token"}
                     )
 
         assert response.status_code == 200
@@ -316,7 +309,7 @@ class TestAPIKeyTenantAuthorization:
                 response = client.delete(
                     "/api-keys/2",
                     json={"tenant_id": 2},
-                    headers={"Authorization": "Bearer test-token"}
+                    headers={"Authorization": "Bearer test-token"},
                 )
 
         assert response.status_code == 403
@@ -342,8 +335,7 @@ class TestAPIKeyTenantAuthorization:
 
                     client = app.test_client()
                     response = client.get(
-                        "/api-keys?tenant_id=1",
-                        headers={"Authorization": "Bearer test-token"}
+                        "/api-keys?tenant_id=1", headers={"Authorization": "Bearer test-token"}
                     )
 
         assert response.status_code == 200
@@ -364,10 +356,7 @@ class TestAPIKeyTenantAuthorization:
                 }
 
                 client = app.test_client()
-                response = client.get(
-                    "/api-keys",
-                    headers={"Authorization": "Bearer test-token"}
-                )
+                response = client.get("/api-keys", headers={"Authorization": "Bearer test-token"})
 
         assert response.status_code == 400
 
@@ -389,8 +378,7 @@ class TestAPIKeyTenantAuthorization:
 
                 client = app.test_client()
                 response = client.get(
-                    "/api-keys?tenant_id=-1",
-                    headers={"Authorization": "Bearer test-token"}
+                    "/api-keys?tenant_id=-1", headers={"Authorization": "Bearer test-token"}
                 )
 
         assert response.status_code == 400
@@ -411,8 +399,7 @@ class TestAPIKeyTenantAuthorization:
 
                 client = app.test_client()
                 response = client.get(
-                    "/api-keys?tenant_id=0",
-                    headers={"Authorization": "Bearer test-token"}
+                    "/api-keys?tenant_id=0", headers={"Authorization": "Bearer test-token"}
                 )
 
         assert response.status_code == 400
