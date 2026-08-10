@@ -2112,6 +2112,129 @@ def _next_phase(current_phase: str) -> str:
     return current_phase
 
 
+def _extract_verifier_json(text: str) -> dict | None:
+    """Extract the acceptance verifier's JSON verdict object from agent output.
+
+    Tolerant of the glm family's common deviations from "ONLY a fenced JSON
+    block": prose prefaces, multiple/partial code fences, trailing commas
+    (``{"a":1,}``), and braces appearing inside string values. Returns the
+    parsed dict, or ``None`` when no JSON object can be recovered (the caller
+    records an infra_error and logs the raw text). ``None`` defers to
+    infra-retry — it never fabricates a verdict.
+    """
+    import json as _json
+    import re as _re
+
+    def _try_parse(candidate: str) -> dict | None:
+        candidate = (candidate or "").strip()
+        if not candidate:
+            return None
+        try:
+            parsed = _json.loads(candidate)
+        except Exception:
+            # glm models routinely emit trailing commas ({"a":1,}); strip them.
+            # String-aware so a ",}" inside a value (e.g. an evidence note
+            # containing a code snippet) is preserved, not mangled.
+            cleaned = _strip_trailing_commas(candidate)
+            try:
+                parsed = _json.loads(cleaned)
+            except Exception:
+                return None
+        return parsed if isinstance(parsed, dict) else None
+
+    def _strip_trailing_commas(s: str) -> str:
+        out: list[str] = []
+        in_str = False
+        escaped = False
+        i = 0
+        n = len(s)
+        while i < n:
+            ch = s[i]
+            if escaped:
+                out.append(ch)
+                escaped = False
+                i += 1
+                continue
+            if ch == "\\":
+                out.append(ch)
+                escaped = True
+                i += 1
+                continue
+            if ch == '"':
+                in_str = not in_str
+                out.append(ch)
+                i += 1
+                continue
+            if not in_str and ch == ",":
+                j = i + 1
+                while j < n and s[j].isspace():
+                    j += 1
+                if j < n and s[j] in "}]":
+                    i += 1  # drop the trailing comma
+                    continue
+            out.append(ch)
+            i += 1
+        return "".join(out)
+
+    def _first_balanced(s: str) -> str | None:
+        # First string-aware balanced { ... } substring; braces inside quoted
+        # strings are skipped so evidence text mentioning {} can't fool depth.
+        start = s.find("{")
+        while start != -1:
+            depth = 0
+            in_str = False
+            escaped = False
+            end = None
+            for i in range(start, len(s)):
+                ch = s[i]
+                if escaped:
+                    escaped = False
+                    continue
+                if ch == "\\":
+                    escaped = True
+                    continue
+                if ch == '"':
+                    in_str = not in_str
+                    continue
+                if in_str:
+                    continue
+                if ch == "{":
+                    depth += 1
+                elif ch == "}":
+                    depth -= 1
+                    if depth == 0:
+                        end = i
+                        break
+            if end is not None:
+                return s[start : end + 1]
+            start = s.find("{", start + 1)
+        return None
+
+    # 1) Prefer fenced ```json ... ``` regions (non-greedy per fence pair so two
+    #    blocks don't merge). The LAST region wins — the agent may preface with
+    #    an earlier partial draft. Within a region, take its first balanced {}.
+    fenced_regions = list(_re.finditer(r"```(?:json)?\s*(.*?)\s*```", text, _re.DOTALL))
+    for region in reversed(fenced_regions):
+        obj = _first_balanced(region.group(1))
+        if obj is not None:
+            parsed = _try_parse(obj)
+            if parsed is not None:
+                return parsed
+
+    # 2) No usable fenced region → balanced { ... } over the WHOLE text
+    #    (prose-wrapped / unfenced output). NOTE: this returns the FIRST
+    #    balanced object — if the agent writes prose with a JSON-shaped
+    #    reasoning object before the real verdict, that first object wins.
+    #    Bounded risk: a non-verdict dict lacks `verdicts`/`snapshot` and
+    #    downstream aggregates to indeterminate (never a false confirmed).
+    obj = _first_balanced(text)
+    if obj is not None:
+        parsed = _try_parse(obj)
+        if parsed is not None:
+            return parsed
+    return None
+
+
 class AutonomousOrchestrator:
     """Drives a single autonomous workflow through its phases."""
 
@@ -7685,9 +7808,6 @@ class AutonomousOrchestrator:
         )
 
     def _parse_verifier_output(self, result) -> dict:
-        import json as _json
-        import re as _re
-
         text = self._artifact_text(result) if result is not None else ""
         if not text:
             return {
@@ -7695,14 +7815,14 @@ class AutonomousOrchestrator:
                 "snapshot": None,
                 "infra_error": "verification agent returned empty output",
             }
-        # Grab the last fenced ```json ... ``` block (the agent may preface reasoning).
-        blocks = _re.findall(r"```(?:json)?\s*(\{.*?\})\s*```", text, _re.DOTALL)
-        candidate = blocks[-1] if blocks else text
-        try:
-            parsed = _json.loads(candidate)
-        except Exception:
+        # Tolerant extraction: fenced blocks, prose-wrapped, trailing commas,
+        # braces in strings (glm family deviates from "ONLY a fenced JSON block").
+        parsed = _extract_verifier_json(text)
+        if parsed is None:
             logger.warning(
-                "acceptance verifier output was not valid JSON; treating as indeterminate"
+                "acceptance verifier output was not valid JSON; treating as "
+                "indeterminate. raw_output=%s",
+                text[:1500],
             )
             return {
                 "verdicts": [],
