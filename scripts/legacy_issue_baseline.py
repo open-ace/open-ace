@@ -476,6 +476,7 @@ def compare(
     observed_files: set[str] | None = None,
     targeted: bool = False,
     exit_codes: dict[str, int] | None = None,
+    expected_shard_count: int = 0,
 ) -> CompareResult:
     """Compute the bidirectional diff and fail-closed completeness verdict."""
     current_nodeids = {tc.nodeid for tc in parsed_testcases}
@@ -538,6 +539,7 @@ def compare(
         min_files=baseline_min_files,
         require_review_threshold_pct=require_review_threshold_pct,
         exit_codes=exit_codes,
+        expected_shard_count=expected_shard_count,
     )
     if targeted:
         invalid.append(
@@ -698,6 +700,7 @@ def verify_completeness(
     min_files: int = 0,
     require_review_threshold_pct: float = 0.0,
     exit_codes: dict[str, int] | None = None,
+    expected_shard_count: int = 0,
 ) -> list[str]:
     """Canonical fail-closed completeness checks shared by compare + snapshot.
 
@@ -720,18 +723,44 @@ def verify_completeness(
         invalid.append("no JUnit reports matched the glob; expected shard artifacts missing")
     for n in sorted(set(duplicates))[:50]:
         invalid.append(f"duplicate nodeid result (cross-shard/rerun conflict): {n}")
-    if exit_codes:
-        for name, code in sorted(exit_codes.items()):
-            if code not in (0, 1):
-                invalid.append(
-                    f"shard {name} exited {code} (infrastructure failure, not a test failure)"
-                )
+    invalid.extend(_check_exit_codes(exit_codes, expected_shard_count))
     floor = min_files * (1 - require_review_threshold_pct / 100.0)
     if min_files and len(observed_files) < floor:
         invalid.append(
             f"observed {len(observed_files)} files, below floor {floor:.0f} "
             f"({min_files} × {100 - require_review_threshold_pct:.0f}%)"
         )
+    return invalid
+
+
+def _check_exit_codes(exit_codes: dict[str, int] | None, expected_shard_count: int) -> list[str]:
+    """Validate shard exit-code cardinality + values.
+
+    With ``expected_shard_count`` set, require EXACTLY the N expected files
+    (``issues-{1..N}.exit-code``): missing/extra/duplicate/wrong-name or any
+    unparseable value fails closed. Without it, only non-{0,1} values fail.
+    """
+    invalid: list[str] = []
+    if expected_shard_count <= 0:
+        if exit_codes:
+            for name, code in sorted(exit_codes.items()):
+                if code not in (0, 1):
+                    invalid.append(
+                        f"shard {name} exited {code} (infrastructure failure, not a test failure)"
+                    )
+        return invalid
+    expected_names = {f"issues-{i}.exit-code" for i in range(1, expected_shard_count + 1)}
+    present = set(exit_codes or {})
+    for name in sorted(expected_names - present):
+        invalid.append(f"missing shard exit-code file: {name}")
+    for name in sorted(present - expected_names):
+        invalid.append(f"unexpected shard exit-code file: {name}")
+    for name in sorted(expected_names & present):
+        code = (exit_codes or {})[name]
+        if code not in (0, 1):
+            invalid.append(
+                f"shard {name} exited {code} (infrastructure failure, not a test failure)"
+            )
     return invalid
 
 
@@ -768,6 +797,7 @@ def _cmd_compare(args: argparse.Namespace) -> int:
         observed_files=observed,
         targeted=targeted,
         exit_codes=exit_codes,
+        expected_shard_count=args.shard_count,
     )
     if args.json_output:
         _ensure_parent(args.json_output)
@@ -832,6 +862,7 @@ def _cmd_snapshot(args: argparse.Namespace) -> int:
         min_files=min_files,
         require_review_threshold_pct=thr,
         exit_codes=exit_codes,
+        expected_shard_count=args.shard_count,
     )
     if incomplete:
         print(
@@ -875,6 +906,7 @@ def build_parser() -> argparse.ArgumentParser:
     cmp.add_argument("--manifest", default="")
     cmp.add_argument("--test-baseline", default=str(TEST_BASELINE_FILE))
     cmp.add_argument("--exit-code-glob", default="")
+    cmp.add_argument("--shard-count", type=int, default=4)
     cmp.add_argument("--json-output", default="")
     cmp.add_argument("--markdown-output", default="")
     cmp.add_argument("--targeted-issues", action="store_true")
@@ -886,6 +918,7 @@ def build_parser() -> argparse.ArgumentParser:
     snap.add_argument("--manifest", default="")
     snap.add_argument("--test-baseline", default=str(TEST_BASELINE_FILE))
     snap.add_argument("--exit-code-glob", default="")
+    snap.add_argument("--shard-count", type=int, default=4)
     snap.add_argument("--source-run", default="")
     snap.add_argument("--source-run-url", default="")
     snap.add_argument("--reference-commit", default="")

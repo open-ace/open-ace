@@ -467,6 +467,8 @@ def test_cli_compare_known_only_exits_zero(tmp_path, monkeypatch):
             str(tmp_path / "diff.json"),
             "--markdown-output",
             str(tmp_path / "sum.md"),
+            "--shard-count",
+            "0",
         ]
     )
     assert rc == 0
@@ -512,6 +514,8 @@ def test_cli_snapshot_writes_baseline(tmp_path, monkeypatch):
             str(out),
             "--test-baseline",
             str(tb),
+            "--shard-count",
+            "0",
             "--source-run",
             "123",
         ]
@@ -593,6 +597,8 @@ def test_compare_creates_output_parent_dirs(tmp_path, monkeypatch):
             str(tb),
             "--json-output",
             str(nested),
+            "--shard-count",
+            "0",
         ]
     )
     assert rc == 0
@@ -648,3 +654,27 @@ def test_compare_infra_exit_code_fails_closed(tmp_path):
     )
     assert r.exit_code != 0
     assert any("exited 2" in i for i in r.invalid)
+
+
+def test_exit_code_cardinality_enforced(tmp_path):
+    # P1#4/P0#2: with expected_shard_count=4, exactly issues-{1..4}.exit-code are
+    # required; 0/1/3 files, wrong names, and 2-5 codes all fail closed.
+    parsed = [_tc_parsed("tests/issues/716/t.py::a")]
+    base = Baseline(entries=[_fail("tests/issues/716/t.py::a")])
+    exp = ["tests/issues/716/t.py::a"]
+
+    def _res(codes):
+        return lib.compare(base, parsed, exp, exit_codes=codes, expected_shard_count=4)
+
+    # only 1 of 4 -> missing three
+    r = _res({"issues-1.exit-code": 1})
+    assert r.exit_code != 0 and any("missing shard exit-code" in i for i in r.invalid)
+    # all 4 but one exited 2 (infra) -> fail
+    r = _res({f"issues-{i}.exit-code": 0 for i in range(1, 5)} | {"issues-3.exit-code": 2})
+    assert r.exit_code != 0 and any("exited 2" in i for i in r.invalid)
+    # extra wrong-name file -> fail
+    r = _res({f"issues-{i}.exit-code": 0 for i in range(1, 5)} | {"issues-9.exit-code": 0})
+    assert r.exit_code != 0 and any("unexpected shard exit-code" in i for i in r.invalid)
+    # exactly 4, all 0/1 -> pass (known-only)
+    r = _res({f"issues-{i}.exit-code": (0 if i % 2 else 1) for i in range(1, 5)})
+    assert r.exit_code == 0
