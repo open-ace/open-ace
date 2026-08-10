@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from app.modules.workspace.api_key_router import APIKeyRouter
 from app.repositories.database import DB_PATH, is_postgresql
+from app.utils.datetime_utils import ensure_utc_suffix
 from app.utils.security_env import get_encryption_key_material
 from app.utils.tool_names import TOOL_NAME_ALIASES, normalize_tool_name
 
@@ -878,8 +879,8 @@ class APIKeyProxyService:
                     "key_name": row["key_name"],
                     "base_url": row["base_url"],
                     "is_active": bool(row["is_active"]),
-                    "created_at": row["created_at"],
-                    "updated_at": row["updated_at"],
+                    "created_at": ensure_utc_suffix(row["created_at"]),
+                    "updated_at": ensure_utc_suffix(row["updated_at"]),
                     "cli_tools": row["cli_tools"],
                     "cli_settings": row["cli_settings"],
                     "scope": row["scope"] or "remote",

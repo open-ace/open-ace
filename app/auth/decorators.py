@@ -663,12 +663,26 @@ def admin_required(f=None):
 
     Issue #2179: Accept admin, platform_admin, and tenant_admin roles.
 
+    Issue #2332: DEPRECATED - Use any_admin_required or platform_admin_required instead.
+    This decorator does not distinguish between admin types and may accept legacy admin
+    role even in strict mode. Migrate to specific decorators for clarity.
+
     Sets g.user, g.user_id, g.user_role on success.
     """
 
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
+            # Log deprecation warning (Issue #2332)
+            # This decorator should be replaced with any_admin_required or platform_admin_required
+            logger.warning(
+                "DEPRECATION: admin_required decorator used at %s. "
+                "This decorator does not distinguish between admin types. "
+                "Migrate to any_admin_required (for tenant-scoped operations) or "
+                "platform_admin_required (for cross-tenant operations).",
+                request.path,
+            )
+
             # First try session token from cookie/header only
             token = _extract_session_token()
             if token:
@@ -931,17 +945,20 @@ def platform_admin_required(f=None):
     """
     Decorator: require platform admin role.
 
-    Validation rules:
-    1. User is authenticated
-    2. User role is 'platform_admin' (or legacy 'admin' for backward compatibility)
-    3. Platform admin can have tenant_id=NULL or any tenant_id
+    Behavior depends on OPENACE_PLATFORM_ADMIN_STRICT_MODE feature flag:
+    - strict=True: Only accepts role='platform_admin'
+    - strict=False: Accepts role='platform_admin' or 'admin' (legacy)
+
+    Audit logging:
+    - Logs legacy admin acceptance with deprecation warning (non-strict mode)
+    - Logs all cross-tenant operations by platform admin
 
     Failure responses:
     - 401: Not authenticated
     - 403: Not a platform admin
 
     Issue #2179: Platform admin can manage all tenants
-    Issue #2286: Accept legacy 'admin' role for backward compatibility
+    Issue #2332: Hardened decorator with strict mode support
     """
 
     def decorator(func):
@@ -956,15 +973,28 @@ def platform_admin_required(f=None):
             if not user:
                 return jsonify({"error": "Invalid or expired session"}), 401
 
-            # Check platform admin role
-            # Issue #2286: Also accept legacy 'admin' role for backward compatibility
-            # with installations that were initialized before the role model migration (#2179).
-            if user.get("role") not in ("platform_admin", "admin"):
+            # Authorization check with strict mode support
+            from app.auth.permissions import get_cached_strict_mode, is_platform_admin_role
+
+            user_role = user.get("role")
+
+            # Check platform admin role using centralized utility
+            if not is_platform_admin_role(user_role):
                 return jsonify({"error": "Platform admin access required"}), 403
+
+            # Log deprecation warning for legacy admin usage (non-strict mode only)
+            if user_role == "admin" and not get_cached_strict_mode():
+                logger.warning(
+                    "DEPRECATION: Legacy admin role accepted for user %s at %s. "
+                    "This will be rejected in strict mode. "
+                    "Set OPENACE_PLATFORM_ADMIN_STRICT_MODE=true to enable strict mode.",
+                    user.get("id"),
+                    request.path,
+                )
 
             g.user = user
             g.user_id = user.get("id")
-            g.user_role = user.get("role")
+            g.user_role = user_role
             g.tenant_id = user.get("tenant_id")
 
             password_change_response = enforce_password_change_requirement(user)
@@ -1056,7 +1086,7 @@ def same_tenant_or_platform_admin(f=None):
 
     Validation rules:
     1. User is authenticated
-    2. If platform_admin (or legacy admin): allow (log cross-tenant operation)
+    2. If platform_admin (per strict mode): allow (log cross-tenant operation)
     3. If tenant_admin: verify tenant_id matches
     4. Other roles: deny
 
@@ -1069,7 +1099,7 @@ def same_tenant_or_platform_admin(f=None):
     - 403: Not authorized or cross-tenant access denied
 
     Issue #2179: Support both platform admin and tenant admin scenarios
-    Issue #2286: Accept legacy 'admin' role for backward compatibility
+    Issue #2332: Use strict mode for platform admin checking
     """
 
     def decorator(func):
@@ -1088,9 +1118,20 @@ def same_tenant_or_platform_admin(f=None):
             user_tenant_id = user.get("tenant_id")
             user_id = user.get("id")
 
-            # Platform admin (or legacy admin): allow with audit logging
-            # Issue #2286: Accept legacy 'admin' role for backward compatibility
-            if user_role in ("platform_admin", "admin"):
+            # Check platform admin role using centralized utility
+            from app.auth.permissions import get_cached_strict_mode, is_platform_admin_role
+
+            # Platform admin: allow with audit logging
+            if is_platform_admin_role(user_role):
+                # Log deprecation warning for legacy admin (non-strict mode only)
+                if user_role == "admin" and not get_cached_strict_mode():
+                    logger.warning(
+                        "DEPRECATION: Legacy admin role accepted for user %s at %s. "
+                        "This will be rejected in strict mode.",
+                        user.get("id"),
+                        request.path,
+                    )
+
                 g.user = user
                 g.user_id = user_id
                 g.user_role = user_role
@@ -1143,6 +1184,58 @@ def same_tenant_or_platform_admin(f=None):
 
             # Other roles: deny
             return jsonify({"error": "Admin access required"}), 403
+
+        return wrapper
+
+    if f is not None:
+        return decorator(f)
+    return decorator
+
+
+def any_admin_required(f=None):
+    """
+    Decorator: require any admin role (platform_admin, tenant_admin, or legacy admin).
+
+    Use this for non-cross-tenant operations where any admin level is acceptable.
+    This is the explicit name to distinguish from platform_admin_required.
+
+    Examples:
+    - User management within own tenant
+    - System configuration (if tenant-neutral)
+    - Audit log access (filtered by tenant scope)
+
+    Issue #2332: Explicit decorator to distinguish from platform_admin_required.
+    """
+
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            # First try session token from cookie/header only
+            token = _extract_session_token()
+            if not token:
+                return jsonify({"error": "Authentication required"}), 401
+
+            user = _load_user_from_token(token)
+            if not user:
+                return jsonify({"error": "Invalid or expired session"}), 401
+
+            # Check for any admin role
+            from app.auth.permissions import is_any_admin_role
+
+            user_role = user.get("role")
+            if not is_any_admin_role(user_role):
+                return jsonify({"error": "Admin access required"}), 403
+
+            g.user = user
+            g.user_id = user.get("id")
+            g.user_role = user_role
+            g.tenant_id = user.get("tenant_id")
+
+            password_change_response = enforce_password_change_requirement(user)
+            if password_change_response is not None:
+                return password_change_response
+
+            return func(*args, **kwargs)
 
         return wrapper
 
