@@ -13,7 +13,6 @@ from datetime import datetime, timezone
 from typing import Any
 
 from app.repositories.database import Database, is_postgresql
-from app.services.scheduler_guard import LockAcquisitionError, SchedulerExecutionGuard
 from app.utils.cache import cached
 from app.utils.sender_hash import EMPTY_SENDER_HASH, compute_sender_hash
 from app.utils.senders import get_sender_filter_sql
@@ -837,6 +836,9 @@ class DailyStatsRepository:
         Returns:
             bool: True if successful, False if skipped (lock unavailable) or failed.
         """
+        # Import here to avoid circular dependency with app.services
+        from app.services.scheduler_guard import LockAcquisitionError, SchedulerExecutionGuard
+
         start_time = time.time()
 
         # Issue #2333: Use SchedulerExecutionGuard for fail-closed lock management
@@ -1070,6 +1072,9 @@ class DailyStatsRepository:
         Returns:
             bool: True if successful, False if skipped (lock unavailable) or failed.
         """
+        # Import here to avoid circular dependency with app.services
+        from app.services.scheduler_guard import LockAcquisitionError, SchedulerExecutionGuard
+
         start_time = time.time()
 
         # Issue #2333: Use SchedulerExecutionGuard for fail-closed lock management

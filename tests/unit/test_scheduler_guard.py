@@ -206,8 +206,8 @@ class TestSchedulerGuardHeartbeat:
             with guard:
                 # Should have fencing token
                 assert guard.get_fencing_token() == 12345
-
-            assert guard.acquired
+                # Should be acquired inside the context
+                assert guard.acquired
 
     def test_check_lease_valid_returns_true_initially(self, mock_db):
         """Test check_lease_valid returns True initially."""
@@ -294,9 +294,8 @@ class TestSchedulerGuardConnectionSafety:
 
             # Should not raise even if close fails
             with guard:
-                pass
-
-            assert guard.acquired
+                # Should be acquired inside the context
+                assert guard.acquired
 
 
 class TestCheckSchedulerProcessGuard:
