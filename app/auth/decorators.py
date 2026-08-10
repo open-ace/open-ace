@@ -661,12 +661,26 @@ def admin_required(f=None):
 
     Issue #2179: Accept admin, platform_admin, and tenant_admin roles.
 
+    Issue #2332: DEPRECATED - Use any_admin_required or platform_admin_required instead.
+    This decorator does not distinguish between admin types and may accept legacy admin
+    role even in strict mode. Migrate to specific decorators for clarity.
+
     Sets g.user, g.user_id, g.user_role on success.
     """
 
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
+            # Log deprecation warning (Issue #2332)
+            # This decorator should be replaced with any_admin_required or platform_admin_required
+            logger.warning(
+                "DEPRECATION: admin_required decorator used at %s. "
+                "This decorator does not distinguish between admin types. "
+                "Migrate to any_admin_required (for tenant-scoped operations) or "
+                "platform_admin_required (for cross-tenant operations).",
+                request.path
+            )
+
             # First try session token from cookie/header only
             token = _extract_session_token()
             if token:

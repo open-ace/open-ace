@@ -38,6 +38,32 @@ depends_on: str | None = None
 MIGRATION_ID = "mig_2332_enforce_admin_role"
 
 
+def _build_whitelist_condition(whitelist: list[str], table_prefix: str = "") -> tuple[str, dict]:
+    """Build safe whitelist IN clause with parameterized values.
+
+    Args:
+        whitelist: List of usernames to whitelist
+        table_prefix: Optional table prefix (e.g., 'u.')
+
+    Returns:
+        Tuple of (condition_sql, params_dict) for use with sa.text()
+    """
+    if not whitelist:
+        return "1=0", {}
+
+    # Build parameterized IN clause
+    params = {}
+    placeholders = []
+    for i, username in enumerate(whitelist):
+        param_name = f"whitelist_{i}"
+        params[param_name] = username
+        placeholders.append(f":{param_name}")
+
+    prefix = f"{table_prefix}." if table_prefix else ""
+    condition = f"{prefix}username IN ({','.join(placeholders)})"
+    return condition, params
+
+
 def _get_initial_admin_whitelist() -> list[str]:
     """Get initial platform admin whitelist from environment or config.
 
@@ -217,6 +243,45 @@ def _preflight_validation(conn: sa.engine.Connection, whitelist: list[str]) -> l
     problems = []
     dialect = conn.dialect.name
 
+    # Issue #2332 P1-2: Verify api_keys table has tenant_id column
+    # This prevents security vulnerability if API Keys are global in some deployments
+    try:
+        if dialect == "postgresql":
+            result = conn.execute(
+                sa.text("""
+                    SELECT column_name
+                    FROM information_schema.columns
+                    WHERE table_name = 'api_keys'
+                """)
+            )
+            api_key_columns = {row[0] for row in result}
+        else:
+            result = conn.execute(
+                sa.text("PRAGMA table_info(api_keys)")
+            )
+            api_key_columns = {row[1] for row in result}
+
+        if "api_keys" in api_key_columns and "tenant_id" not in api_key_columns:
+            # Table exists but lacks tenant_id - this is a security concern
+            # Log warning but don't block migration (non-blocking issue)
+            log.warning(
+                "SECURITY: api_keys table exists but lacks tenant_id column. "
+                "API Keys may be globally accessible. Consider adding tenant_id "
+                "column to api_keys table for proper tenant isolation."
+            )
+            problems.append({
+                "issue": "api_keys_missing_tenant_id",
+                "id": None,
+                "username": None,
+                "tenant_id": None,
+                "message": "api_keys table lacks tenant_id column. API Keys may be globally accessible. "
+                           "Consider adding tenant_id for proper tenant isolation.",
+                "blocking": False  # Non-blocking warning
+            })
+    except Exception:
+        # Table doesn't exist - no problem
+        pass
+
     # Determine tenant validity condition
     # Check if tenants table has is_active and deleted_at columns
     if dialect == "postgresql":
@@ -272,11 +337,8 @@ def _preflight_validation(conn: sa.engine.Connection, whitelist: list[str]) -> l
         })
 
     # Check for ambiguous platform admins (no tenant_id, not whitelisted, not id=1)
-    # Build whitelist condition
-    whitelist_condition = "1=0"  # Default: no whitelist matches
-    if whitelist:
-        escaped = [w.replace("'", "''") for w in whitelist]
-        whitelist_condition = f"u.username IN ({','.join(['\'' + w + '\'' for w in escaped])})"
+    # Build whitelist condition with parameterized query
+    whitelist_condition, whitelist_params = _build_whitelist_condition(whitelist, "u")
 
     result = conn.execute(
         sa.text(f"""
@@ -286,7 +348,8 @@ def _preflight_validation(conn: sa.engine.Connection, whitelist: list[str]) -> l
               AND u.tenant_id IS NULL
               AND u.id != 1
               AND NOT ({whitelist_condition})
-        """)
+        """),
+        whitelist_params
     )
 
     for row in result:
@@ -387,11 +450,8 @@ def _classify_admin_accounts(
     log.info(f"Classified {results['tenant_admin_count']} accounts as tenant_admin")
 
     # Step 2: Classify admin + tenant_id NULL + proven → platform_admin
-    # Build whitelist condition
-    whitelist_condition = "1=0"
-    if whitelist:
-        escaped = [w.replace("'", "''") for w in whitelist]
-        whitelist_condition = f"username IN ({','.join(['\'' + w + '\'' for w in escaped])})"
+    # Build whitelist condition with parameterized query
+    whitelist_condition, whitelist_params = _build_whitelist_condition(whitelist)
 
     # Heuristic: user.id = 1
     heuristic_condition = "id = 1"
@@ -406,7 +466,8 @@ def _classify_admin_accounts(
             WHERE role = 'admin'
               AND tenant_id IS NULL
               AND {proven_condition}
-        """)
+        """),
+        whitelist_params
     )
     results["platform_admin_count"] = result.rowcount
     log.info(f"Classified {results['platform_admin_count']} accounts as platform_admin")
