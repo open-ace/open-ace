@@ -155,10 +155,71 @@ describe('PageRefreshControl', () => {
       expect(screen.queryByTestId('refresh-clock-icon')).not.toBeInTheDocument();
       // Should render refresh time as text
       expect(screen.getByText(/minutes ago/i)).toBeInTheDocument();
-      // Should have title attribute for tooltip
+    });
+
+    it('should render time text with Tooltip wrapper in compact mode without dropdown', async () => {
+      const mockRefresh = createMockRefresh();
+      mockRefresh.lastRefreshTime = Date.now() - 120000; // 2 minutes ago
+
+      render(
+        <PageRefreshControl
+          refresh={mockRefresh}
+          compact={true}
+          showAutoRefreshToggle={false}
+          showIntervalSelector={false}
+          showLastRefreshTime={true}
+        />
+      );
+
+      // Should render time text
       const timeText = screen.getByText(/minutes ago/i);
-      expect(timeText).toHaveAttribute('title');
-      expect(timeText.getAttribute('title')).toContain('Last Refresh');
+      expect(timeText).toBeInTheDocument();
+      // Issue #2397: Should have tabIndex for keyboard accessibility
+      expect(timeText).toHaveAttribute('tabindex', '0');
+    });
+
+    it('should render multi-line JSX in tooltip content', async () => {
+      const mockRefresh = createMockRefresh();
+      mockRefresh.lastRefreshTime = Date.now() - 120000; // 2 minutes ago
+
+      render(
+        <PageRefreshControl
+          refresh={mockRefresh}
+          compact={true}
+          showAutoRefreshToggle={false}
+          showIntervalSelector={false}
+          showLastRefreshTime={true}
+        />
+      );
+
+      const timeText = screen.getByText(/minutes ago/i);
+      fireEvent.mouseOver(timeText);
+
+      await waitFor(() => {
+        const tooltip = screen.getByRole('tooltip');
+        // Verify multi-line structure (div > div)
+        expect(tooltip.querySelector('div > div')).toBeInTheDocument();
+        // Verify guidance text is present
+        expect(tooltip.textContent).toContain('Click the refresh button');
+      });
+    });
+
+    it('should render refresh button with outline-secondary class in compact mode', () => {
+      const mockRefresh = createMockRefresh();
+
+      render(
+        <PageRefreshControl
+          refresh={mockRefresh}
+          compact={true}
+          showAutoRefreshToggle={false}
+          showIntervalSelector={false}
+        />
+      );
+
+      // Issue #2397: Button should use outline-secondary for visual consistency
+      const button = screen.getByTestId('manual-refresh-button');
+      expect(button.className).toContain('btn-outline-secondary');
+      expect(button.className).toContain('btn-sm');
     });
 
     it('should not render clock icon or extra element when lastRefreshTime is null', () => {
