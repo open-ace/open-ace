@@ -22,12 +22,9 @@ import time
 import uuid
 from contextlib import suppress
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, Callable
+from typing import Any, Self
 
 from app.repositories.database import Database, adapt_sql, is_postgresql
-
-if TYPE_CHECKING:
-    from psycopg2.extensions import connection as PgConnection
 
 logger = logging.getLogger(__name__)
 
@@ -144,7 +141,7 @@ class SchedulerExecutionGuard:
         # State tracking
         self._acquired = False
 
-    def __enter__(self) -> "SchedulerExecutionGuard":
+    def __enter__(self) -> Self:
         """Acquire lock and enter context."""
         if self.strategy == "session_lock":
             self._acquire_session_lock()

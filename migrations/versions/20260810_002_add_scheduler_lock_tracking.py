@@ -120,17 +120,19 @@ def downgrade() -> None:
     if dialect == "postgresql":
         op.execute("DROP SEQUENCE IF EXISTS fencing_token_seq")
 
-    # Drop columns from scheduler_leaders
-    _drop_column_if_exists("scheduler_leaders", "lock_strategy")
-    _drop_column_if_exists("scheduler_leaders", "fencing_token")
+    # Drop columns from scheduler_leaders (use batch_alter_table for SQLite compatibility)
+    with op.batch_alter_table("scheduler_leaders") as batch_op:
+        batch_op.drop_column("lock_strategy")
+        batch_op.drop_column("fencing_token")
 
-    # Drop columns from scheduler_runs
-    _drop_column_if_exists("scheduler_runs", "leader_host")
-    _drop_column_if_exists("scheduler_runs", "skip_reason")
-    _drop_column_if_exists("scheduler_runs", "lock_released_at")
-    _drop_column_if_exists("scheduler_runs", "lock_acquired_at")
-    _drop_column_if_exists("scheduler_runs", "fencing_token")
-    _drop_column_if_exists("scheduler_runs", "lock_strategy")
+    # Drop columns from scheduler_runs (use batch_alter_table for SQLite compatibility)
+    with op.batch_alter_table("scheduler_runs") as batch_op:
+        batch_op.drop_column("leader_host")
+        batch_op.drop_column("skip_reason")
+        batch_op.drop_column("lock_released_at")
+        batch_op.drop_column("lock_acquired_at")
+        batch_op.drop_column("fencing_token")
+        batch_op.drop_column("lock_strategy")
 
 
 def _add_column_if_not_exists(
@@ -152,15 +154,3 @@ def _add_column_if_not_exists(
             table_name,
             sa.Column(column_name, column_type, nullable=nullable, server_default=server_default),
         )
-
-
-def _drop_column_if_exists(table_name: str, column_name: str) -> None:
-    """Drop column if it exists."""
-    connection = op.get_bind()
-    inspector = sa.inspect(connection)
-
-    # Get columns for the table
-    columns = [col["name"] for col in inspector.get_columns(table_name)]
-
-    if column_name in columns:
-        op.drop_column(table_name, column_name)
