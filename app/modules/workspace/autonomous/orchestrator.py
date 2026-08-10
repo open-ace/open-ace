@@ -7636,6 +7636,7 @@ class AutonomousOrchestrator:
                 cli_tool=cli_tool,
                 model=model,
                 project_path=checkout_path,
+                workflow_id=self._workflow_id,
             )
         except Exception:
             logger.exception("acceptance verifier spawn failed for issue %s", issue_number)
