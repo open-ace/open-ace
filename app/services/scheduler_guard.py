@@ -252,11 +252,15 @@ class SchedulerExecutionGuard:
 
         try:
             # Get fencing token from sequence
-            cursor = self.db.get_connection().cursor()
-            cursor.execute("SELECT nextval('fencing_token_seq')")
-            result = cursor.fetchone()
-            self._fencing_token = result[0] if isinstance(result, tuple) else result.get("nextval")
-            cursor.close()
+            # Use a temporary connection - must be closed explicitly
+            connection = self.db.get_connection()
+            try:
+                cursor = connection.cursor()
+                cursor.execute("SELECT nextval('fencing_token_seq')")
+                result = cursor.fetchone()
+                self._fencing_token = result[0] if isinstance(result, tuple) else result.get("nextval")
+            finally:
+                connection.close()
 
             # Try to acquire/update lease
             self.db.execute(
