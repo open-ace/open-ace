@@ -9,8 +9,8 @@ Issue #2332: Centralized platform admin checking with strict mode support.
 
 from __future__ import annotations
 
-import os
 import logging
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -46,14 +46,13 @@ def is_platform_admin_strict_mode() -> bool:
     if _PLATFORM_ADMIN_STRICT_MODE is None:
         # Read once at first access, then cache
         _PLATFORM_ADMIN_STRICT_MODE = (
-            os.environ.get("OPENACE_PLATFORM_ADMIN_STRICT_MODE", "false")
-            .lower() == "true"
+            os.environ.get("OPENACE_PLATFORM_ADMIN_STRICT_MODE", "false").lower() == "true"
         )
 
         # Log the mode at startup
         logger.info(
             "Platform admin strict mode: %s (set OPENACE_PLATFORM_ADMIN_STRICT_MODE=true to enable)",
-            "ENABLED" if _PLATFORM_ADMIN_STRICT_MODE else "DISABLED"
+            "ENABLED" if _PLATFORM_ADMIN_STRICT_MODE else "DISABLED",
         )
 
     return _PLATFORM_ADMIN_STRICT_MODE

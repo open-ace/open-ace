@@ -38,6 +38,7 @@ class ActorContext:
         if strict is None:
             # Use cached feature flag value
             from app.auth.permissions import get_cached_strict_mode
+
             strict = get_cached_strict_mode()
 
         if strict:

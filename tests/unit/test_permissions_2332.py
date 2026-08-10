@@ -64,6 +64,7 @@ class TestPermissionUtilities:
 
     def test_is_platform_admin_role_logic(self):
         """Test the logic of platform admin checking."""
+
         # Test the function logic directly
         def check_role(role, strict):
             """Simplified logic from is_platform_admin_role."""

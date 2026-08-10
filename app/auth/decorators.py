@@ -678,7 +678,7 @@ def admin_required(f=None):
                 "This decorator does not distinguish between admin types. "
                 "Migrate to any_admin_required (for tenant-scoped operations) or "
                 "platform_admin_required (for cross-tenant operations).",
-                request.path
+                request.path,
             )
 
             # First try session token from cookie/header only
@@ -972,7 +972,7 @@ def platform_admin_required(f=None):
                 return jsonify({"error": "Invalid or expired session"}), 401
 
             # Authorization check with strict mode support
-            from app.auth.permissions import is_platform_admin_role, get_cached_strict_mode
+            from app.auth.permissions import get_cached_strict_mode, is_platform_admin_role
 
             user_role = user.get("role")
 
@@ -987,7 +987,7 @@ def platform_admin_required(f=None):
                     "This will be rejected in strict mode. "
                     "Set OPENACE_PLATFORM_ADMIN_STRICT_MODE=true to enable strict mode.",
                     user.get("id"),
-                    request.path
+                    request.path,
                 )
 
             g.user = user
@@ -1117,7 +1117,7 @@ def same_tenant_or_platform_admin(f=None):
             user_id = user.get("id")
 
             # Check platform admin role using centralized utility
-            from app.auth.permissions import is_platform_admin_role, get_cached_strict_mode
+            from app.auth.permissions import get_cached_strict_mode, is_platform_admin_role
 
             # Platform admin: allow with audit logging
             if is_platform_admin_role(user_role):
@@ -1127,7 +1127,7 @@ def same_tenant_or_platform_admin(f=None):
                         "DEPRECATION: Legacy admin role accepted for user %s at %s. "
                         "This will be rejected in strict mode.",
                         user.get("id"),
-                        request.path
+                        request.path,
                     )
 
                 g.user = user

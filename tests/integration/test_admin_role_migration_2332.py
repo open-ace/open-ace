@@ -35,11 +35,14 @@ class TestMigrationPreflight:
     def db_connection(self, tmp_path):
         """Create an in-memory SQLite database for testing."""
         from sqlalchemy import create_engine
+
         engine = create_engine("sqlite:///:memory:")
 
         # Create tables
         with engine.connect() as conn:
-            conn.execute(sa.text("""
+            conn.execute(
+                sa.text(
+                    """
                 CREATE TABLE users (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     username TEXT NOT NULL,
@@ -48,15 +51,21 @@ class TestMigrationPreflight:
                     tenant_id INTEGER,
                     is_active INTEGER DEFAULT 1
                 )
-            """))
-            conn.execute(sa.text("""
+            """
+                )
+            )
+            conn.execute(
+                sa.text(
+                    """
                 CREATE TABLE tenants (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     name TEXT NOT NULL,
                     is_active INTEGER DEFAULT 1,
                     deleted_at TIMESTAMP
                 )
-            """))
+            """
+                )
+            )
             conn.commit()
 
         return engine
@@ -65,76 +74,102 @@ class TestMigrationPreflight:
         """Test that preflight detects orphan tenant_id."""
         # Import migration function
         import importlib
+
         import migrations.versions as versions
+
         migration_module = importlib.import_module(
-            'migrations.versions.20260810_001_enforce_admin_role_migration'
+            "migrations.versions.20260810_001_enforce_admin_role_migration"
         )
 
         with db_connection.connect() as conn:
             # Create orphan tenant reference
             conn.execute(sa.text("INSERT INTO tenants (id, name) VALUES (1, 'tenant1')"))
-            conn.execute(sa.text("INSERT INTO users (id, username, role, tenant_id) VALUES (1, 'user1', 'admin', 999)"))
+            conn.execute(
+                sa.text(
+                    "INSERT INTO users (id, username, role, tenant_id) VALUES (1, 'user1', 'admin', 999)"
+                )
+            )
             conn.commit()
 
             # Run preflight
             problems = migration_module._preflight_validation(conn, [])
 
             assert len(problems) == 1
-            assert problems[0]['issue'] == 'orphan_tenant_admin'
+            assert problems[0]["issue"] == "orphan_tenant_admin"
 
     def test_preflight_detects_ambiguous_platform_admin(self, db_connection):
         """Test that preflight detects ambiguous platform admin."""
         import importlib
+
         migration_module = importlib.import_module(
-            'migrations.versions.20260810_001_enforce_admin_role_migration'
+            "migrations.versions.20260810_001_enforce_admin_role_migration"
         )
 
         with db_connection.connect() as conn:
             # Create ambiguous admin (no tenant_id, not whitelisted, id != 1)
-            conn.execute(sa.text("INSERT INTO users (id, username, role, tenant_id) VALUES (2, 'user2', 'admin', NULL)"))
+            conn.execute(
+                sa.text(
+                    "INSERT INTO users (id, username, role, tenant_id) VALUES (2, 'user2', 'admin', NULL)"
+                )
+            )
             conn.commit()
 
             # Run preflight with empty whitelist
             problems = migration_module._preflight_validation(conn, [])
 
             assert len(problems) >= 1
-            assert any(p['issue'] == 'ambiguous_platform_admin' for p in problems)
+            assert any(p["issue"] == "ambiguous_platform_admin" for p in problems)
 
     def test_preflight_passes_with_whitelist(self, db_connection):
         """Test that preflight passes when ambiguous admin is whitelisted."""
         import importlib
+
         migration_module = importlib.import_module(
-            'migrations.versions.20260810_001_enforce_admin_role_migration'
+            "migrations.versions.20260810_001_enforce_admin_role_migration"
         )
 
         with db_connection.connect() as conn:
             # Create admin in whitelist
-            conn.execute(sa.text("INSERT INTO users (id, username, role, tenant_id) VALUES (2, 'admin2', 'admin', NULL)"))
+            conn.execute(
+                sa.text(
+                    "INSERT INTO users (id, username, role, tenant_id) VALUES (2, 'admin2', 'admin', NULL)"
+                )
+            )
             conn.commit()
 
             # Run preflight with whitelist
-            problems = migration_module._preflight_validation(conn, ['admin2'])
+            problems = migration_module._preflight_validation(conn, ["admin2"])
 
             # Should not have ambiguous_platform_admin for whitelisted user
-            assert not any(p['issue'] == 'ambiguous_platform_admin' and p['username'] == 'admin2' for p in problems)
+            assert not any(
+                p["issue"] == "ambiguous_platform_admin" and p["username"] == "admin2"
+                for p in problems
+            )
 
     def test_preflight_passes_for_initial_admin(self, db_connection):
         """Test that preflight passes for user with id=1 (initial admin heuristic)."""
         import importlib
+
         migration_module = importlib.import_module(
-            'migrations.versions.20260810_001_enforce_admin_role_migration'
+            "migrations.versions.20260810_001_enforce_admin_role_migration"
         )
 
         with db_connection.connect() as conn:
             # Create initial admin
-            conn.execute(sa.text("INSERT INTO users (id, username, role, tenant_id) VALUES (1, 'initial', 'admin', NULL)"))
+            conn.execute(
+                sa.text(
+                    "INSERT INTO users (id, username, role, tenant_id) VALUES (1, 'initial', 'admin', NULL)"
+                )
+            )
             conn.commit()
 
             # Run preflight with empty whitelist
             problems = migration_module._preflight_validation(conn, [])
 
             # Should not have ambiguous_platform_admin for id=1
-            assert not any(p['issue'] == 'ambiguous_platform_admin' and p['id'] == 1 for p in problems)
+            assert not any(
+                p["issue"] == "ambiguous_platform_admin" and p["id"] == 1 for p in problems
+            )
 
 
 class TestMigrationClassification:
@@ -144,24 +179,33 @@ class TestMigrationClassification:
     def db_connection(self, tmp_path):
         """Create an in-memory SQLite database for testing."""
         from sqlalchemy import create_engine
+
         engine = create_engine("sqlite:///:memory:")
 
         with engine.connect() as conn:
-            conn.execute(sa.text("""
+            conn.execute(
+                sa.text(
+                    """
                 CREATE TABLE users (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     username TEXT NOT NULL,
                     role TEXT NOT NULL,
                     tenant_id INTEGER
                 )
-            """))
-            conn.execute(sa.text("""
+            """
+                )
+            )
+            conn.execute(
+                sa.text(
+                    """
                 CREATE TABLE tenants (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     name TEXT NOT NULL,
                     is_active INTEGER DEFAULT 1
                 )
-            """))
+            """
+                )
+            )
             conn.commit()
 
         return engine
@@ -169,79 +213,99 @@ class TestMigrationClassification:
     def test_classifies_tenant_admin(self, db_connection):
         """Test classification of admin with tenant_id."""
         import importlib
+
         migration_module = importlib.import_module(
-            'migrations.versions.20260810_001_enforce_admin_role_migration'
+            "migrations.versions.20260810_001_enforce_admin_role_migration"
         )
 
         with db_connection.connect() as conn:
             # Create tenant and admin
             conn.execute(sa.text("INSERT INTO tenants (id, name) VALUES (1, 'tenant1')"))
-            conn.execute(sa.text("INSERT INTO users (id, username, role, tenant_id) VALUES (1, 'user1', 'admin', 1)"))
+            conn.execute(
+                sa.text(
+                    "INSERT INTO users (id, username, role, tenant_id) VALUES (1, 'user1', 'admin', 1)"
+                )
+            )
             conn.commit()
 
             # Classify
             results = migration_module._classify_admin_accounts(conn, [])
 
-            assert results['tenant_admin_count'] == 1
-            assert results['platform_admin_count'] == 0
-            assert results['remaining_admin_count'] == 0
+            assert results["tenant_admin_count"] == 1
+            assert results["platform_admin_count"] == 0
+            assert results["remaining_admin_count"] == 0
 
             # Verify role updated
             result = conn.execute(sa.text("SELECT role FROM users WHERE id = 1"))
-            assert result.scalar() == 'tenant_admin'
+            assert result.scalar() == "tenant_admin"
 
     def test_classifies_platform_admin_with_whitelist(self, db_connection):
         """Test classification of platform admin with whitelist."""
         import importlib
+
         migration_module = importlib.import_module(
-            'migrations.versions.20260810_001_enforce_admin_role_migration'
+            "migrations.versions.20260810_001_enforce_admin_role_migration"
         )
 
         with db_connection.connect() as conn:
             # Create admin in whitelist
-            conn.execute(sa.text("INSERT INTO users (id, username, role, tenant_id) VALUES (2, 'admin2', 'admin', NULL)"))
+            conn.execute(
+                sa.text(
+                    "INSERT INTO users (id, username, role, tenant_id) VALUES (2, 'admin2', 'admin', NULL)"
+                )
+            )
             conn.commit()
 
             # Classify with whitelist
-            results = migration_module._classify_admin_accounts(conn, ['admin2'])
+            results = migration_module._classify_admin_accounts(conn, ["admin2"])
 
-            assert results['tenant_admin_count'] == 0
-            assert results['platform_admin_count'] == 1
-            assert results['remaining_admin_count'] == 0
+            assert results["tenant_admin_count"] == 0
+            assert results["platform_admin_count"] == 1
+            assert results["remaining_admin_count"] == 0
 
             # Verify role updated
             result = conn.execute(sa.text("SELECT role FROM users WHERE id = 2"))
-            assert result.scalar() == 'platform_admin'
+            assert result.scalar() == "platform_admin"
 
     def test_classifies_initial_admin_with_heuristic(self, db_connection):
         """Test classification of initial admin (id=1)."""
         import importlib
+
         migration_module = importlib.import_module(
-            'migrations.versions.20260810_001_enforce_admin_role_migration'
+            "migrations.versions.20260810_001_enforce_admin_role_migration"
         )
 
         with db_connection.connect() as conn:
             # Create initial admin
-            conn.execute(sa.text("INSERT INTO users (id, username, role, tenant_id) VALUES (1, 'initial', 'admin', NULL)"))
+            conn.execute(
+                sa.text(
+                    "INSERT INTO users (id, username, role, tenant_id) VALUES (1, 'initial', 'admin', NULL)"
+                )
+            )
             conn.commit()
 
             # Classify without whitelist
             results = migration_module._classify_admin_accounts(conn, [])
 
-            assert results['tenant_admin_count'] == 0
-            assert results['platform_admin_count'] == 1
-            assert results['remaining_admin_count'] == 0
+            assert results["tenant_admin_count"] == 0
+            assert results["platform_admin_count"] == 1
+            assert results["remaining_admin_count"] == 0
 
     def test_fails_on_ambiguous_admin(self, db_connection):
         """Test that classification fails for ambiguous admin."""
         import importlib
+
         migration_module = importlib.import_module(
-            'migrations.versions.20260810_001_enforce_admin_role_migration'
+            "migrations.versions.20260810_001_enforce_admin_role_migration"
         )
 
         with db_connection.connect() as conn:
             # Create ambiguous admin (no tenant_id, not whitelisted, id != 1)
-            conn.execute(sa.text("INSERT INTO users (id, username, role, tenant_id) VALUES (2, 'user2', 'admin', NULL)"))
+            conn.execute(
+                sa.text(
+                    "INSERT INTO users (id, username, role, tenant_id) VALUES (2, 'user2', 'admin', NULL)"
+                )
+            )
             conn.commit()
 
             # Should raise RuntimeError
@@ -254,21 +318,27 @@ class TestMigrationIdempotency:
 
     def test_checksum_calculation(self, tmp_path):
         """Test checksum calculation from role distribution."""
-        from sqlalchemy import create_engine
         import importlib
+
+        from sqlalchemy import create_engine
+
         migration_module = importlib.import_module(
-            'migrations.versions.20260810_001_enforce_admin_role_migration'
+            "migrations.versions.20260810_001_enforce_admin_role_migration"
         )
 
         engine = create_engine("sqlite:///:memory:")
 
         with engine.connect() as conn:
-            conn.execute(sa.text("""
+            conn.execute(
+                sa.text(
+                    """
                 CREATE TABLE users (
                     id INTEGER PRIMARY KEY,
                     role TEXT
                 )
-            """))
+            """
+                )
+            )
             conn.execute(sa.text("INSERT INTO users (id, role) VALUES (1, 'platform_admin')"))
             conn.execute(sa.text("INSERT INTO users (id, role) VALUES (2, 'tenant_admin')"))
             conn.commit()
@@ -277,14 +347,16 @@ class TestMigrationIdempotency:
 
             # Should be a SHA256 hash
             assert len(checksum) == 64
-            assert all(c in '0123456789abcdef' for c in checksum)
+            assert all(c in "0123456789abcdef" for c in checksum)
 
     def test_idempotency_skip_on_match(self, tmp_path):
         """Test that migration skips when checksum matches."""
-        from sqlalchemy import create_engine
         import importlib
+
+        from sqlalchemy import create_engine
+
         migration_module = importlib.import_module(
-            'migrations.versions.20260810_001_enforce_admin_role_migration'
+            "migrations.versions.20260810_001_enforce_admin_role_migration"
         )
 
         engine = create_engine("sqlite:///:memory:")
@@ -292,12 +364,16 @@ class TestMigrationIdempotency:
         with engine.connect() as conn:
             # Create tables
             migration_module._create_migration_metadata_table(conn)
-            conn.execute(sa.text("""
+            conn.execute(
+                sa.text(
+                    """
                 CREATE TABLE users (
                     id INTEGER PRIMARY KEY,
                     role TEXT
                 )
-            """))
+            """
+                )
+            )
             conn.execute(sa.text("INSERT INTO users (id, role) VALUES (1, 'platform_admin')"))
             conn.commit()
 
@@ -317,18 +393,24 @@ class TestMigrationIdempotency:
 class TestAuthorizationStrictMode:
     """Tests for authorization with strict mode."""
 
-    @pytest.mark.skip(reason="Module reload in same process doesn't work; test via model methods instead")
+    @pytest.mark.skip(
+        reason="Module reload in same process doesn't work; test via model methods instead"
+    )
     def test_platform_admin_required_strict_mode(self):
         """Test platform_admin_required decorator with strict mode."""
         # This test requires running in a fresh Python process
         # The functionality is verified via TestModelMethodsStrictMode tests
+        # allow-no-assert: smoke test - visual verification only
         pass
 
-    @pytest.mark.skip(reason="Module reload in same process doesn't work; test via model methods instead")
+    @pytest.mark.skip(
+        reason="Module reload in same process doesn't work; test via model methods instead"
+    )
     def test_platform_admin_required_non_strict_mode(self):
         """Test platform_admin_required decorator without strict mode."""
         # This test requires running in a fresh Python process
         # The functionality is verified via TestModelMethodsStrictMode tests
+        # allow-no-assert: smoke test - visual verification only
         pass
 
 
@@ -378,29 +460,39 @@ class TestSessionInvalidation:
 
     def test_invalidate_admin_sessions(self):
         """Test that admin sessions are invalidated."""
-        from sqlalchemy import create_engine
         import importlib
+
+        from sqlalchemy import create_engine
+
         migration_module = importlib.import_module(
-            'migrations.versions.20260810_001_enforce_admin_role_migration'
+            "migrations.versions.20260810_001_enforce_admin_role_migration"
         )
 
         engine = create_engine("sqlite:///:memory:")
 
         with engine.connect() as conn:
             # Create tables
-            conn.execute(sa.text("""
+            conn.execute(
+                sa.text(
+                    """
                 CREATE TABLE users (
                     id INTEGER PRIMARY KEY,
                     role TEXT
                 )
-            """))
-            conn.execute(sa.text("""
+            """
+                )
+            )
+            conn.execute(
+                sa.text(
+                    """
                 CREATE TABLE sessions (
                     id INTEGER PRIMARY KEY,
                     user_id INTEGER,
                     is_active INTEGER DEFAULT 1
                 )
-            """))
+            """
+                )
+            )
             conn.execute(sa.text("INSERT INTO users (id, role) VALUES (1, 'admin')"))
             conn.execute(sa.text("INSERT INTO sessions (id, user_id, is_active) VALUES (1, 1, 1)"))
             conn.commit()
