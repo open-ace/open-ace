@@ -388,6 +388,7 @@ jobs:
           python scripts/legacy_issue_baseline.py compare \
             --baseline ci/legacy-issue-failures.json \
             --junit "artifacts/test-results/issues-*.xml" \
+            --exit-code-glob "artifacts/test-results/issues-*.exit-code" \
             --test-baseline .test-baseline.json \
             --json-output test-results/legacy-issue-diff.json \
             --markdown-output test-results/legacy-issue-summary.md

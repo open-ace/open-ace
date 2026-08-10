@@ -258,6 +258,29 @@ def _scrub_env(text: str) -> str:
     return text
 
 
+# pytest xunit2 commonly omits the ``type`` attribute on <failure>/<error>, so
+# recover the exception class from the stable message/text forms: a bare
+# ``assert`` statement, or a leading ``<dotted.ExceptionClass>:`` / the
+# traceback's ``E   <Class>:`` line.
+_ASSERT_RX = re.compile(r"^\s*assert\b")
+_EXC_CLASS_RX = re.compile(
+    r"(?:^|\n\s*E\s+)([A-Za-z_][\w.]*(?:Error|Exception|Warning|Cancelled|NotFound))\s*:"
+)
+
+
+def _extract_exception_type(type_attr: str | None, message: str | None, text: str | None) -> str:
+    if type_attr and type_attr.strip():
+        return type_attr.strip()
+    blob = f"{message or ''}\n{text or ''}"
+    for line in blob.splitlines():
+        if _ASSERT_RX.match(line):
+            return "AssertionError"
+    m = _EXC_CLASS_RX.search(blob)
+    if m:
+        return m.group(1).split(".")[-1]
+    return ""
+
+
 def _parse_testcase(tc: ET.Element) -> ParsedTestcase | None:
     classname = tc.get("classname", "")
     name = tc.get("name", "")
@@ -286,7 +309,7 @@ def _parse_testcase(tc: ET.Element) -> ParsedTestcase | None:
     else:
         return ParsedTestcase(nodeid, "pass", "pass", "", "")
 
-    exception_type = (node.get("type") or "").strip()
+    exception_type = _extract_exception_type(node.get("type"), node.get("message"), node.text)
     message = _short_summary(_scrub_env(node.get("message") or (node.text or "")))
     category = classify(element, exception_type, message, nodeid)
     return ParsedTestcase(nodeid, outcome, category, exception_type, message)
@@ -309,7 +332,7 @@ def parse_junit(path: str | Path) -> tuple[list[ParsedTestcase], SuiteTotals]:
         raise BaselineError(f"no <testsuite> in JUnit XML: {path}")
 
     totals = SuiteTotals()
-    by_nodeid: dict[str, ParsedTestcase] = {}
+    records: list[ParsedTestcase] = []
     for suite in suites:
         a = suite.attrib
         totals.tests += int(a.get("tests", 0) or 0)
@@ -319,10 +342,10 @@ def parse_junit(path: str | Path) -> tuple[list[ParsedTestcase], SuiteTotals]:
         for tc in suite.findall("testcase"):
             parsed = _parse_testcase(tc)
             if parsed is not None:
-                by_nodeid[parsed.nodeid] = parsed  # last document order wins (rerun-safe)
-    if totals.tests == 0 and not by_nodeid:
+                records.append(parsed)  # do NOT dedupe; conflicts detected downstream
+    if totals.tests == 0 and not records:
         raise BaselineError(f"zero tests in JUnit XML: {path}")
-    return list(by_nodeid.values()), totals
+    return records, totals
 
 
 # ---------------------------------------------------------------------------
@@ -377,13 +400,15 @@ def build_expected_manifest(
             if line.startswith("tests/") and "::" in line
         }
     )
-    if not nodeids:
-        # Degraded collection (pytest exited non-zero / import error / wrong
-        # flags). An empty expected set would silently disable the nodeid
-        # completeness check, so fail closed here.
+    if proc.returncode != 0:
+        # Partial/degraded collection (import error, usage error, etc.). Even
+        # with some nodeids, files that failed to import silently drop out of
+        # the expected set, so the completeness check would be unsound. Fail
+        # closed rather than trust a partial manifest.
         raise BaselineError(
-            "expected-nodeid manifest collected 0 nodeids "
-            f"(pytest exit {proc.returncode}); collection is degraded"
+            f"expected-nodeid manifest collection exited {proc.returncode} "
+            f"({len(nodeids)} nodeids parsed); collection is degraded — "
+            "resolve collection errors before comparing/snapshotting"
         )
     files = sorted({_file_of(n) for n in nodeids})
     return ExpectedManifest(nodeids=nodeids, files=files, selection=selection, targeted=targeted)
@@ -450,6 +475,7 @@ def compare(
     require_review_threshold_pct: float = 0.0,
     observed_files: set[str] | None = None,
     targeted: bool = False,
+    exit_codes: dict[str, int] | None = None,
 ) -> CompareResult:
     """Compute the bidirectional diff and fail-closed completeness verdict."""
     current_nodeids = {tc.nodeid for tc in parsed_testcases}
@@ -505,20 +531,14 @@ def compare(
         key=lambda d: (d["nodeid"], d["outcome"], d["category"]),
     )
 
-    invalid: list[str] = []
     expected_set = set(expected_nodeids)
-    missing = sorted(expected_set - current_nodeids)
-    for n in missing:
-        invalid.append(f"expected nodeid never observed: {n}")
-    if not parsed_testcases and expected_set:
-        invalid.append("no JUnit reports matched the glob; expected shard artifacts missing")
-    file_floor = baseline_min_files * (1 - require_review_threshold_pct / 100.0)
-    if baseline_min_files and len(observed_files) < file_floor:
-        invalid.append(
-            f"observed {len(observed_files)} files, below floor "
-            f"{file_floor:.0f} ({baseline_min_files} × "
-            f"{100 - require_review_threshold_pct:.0f}%)"
-        )
+    invalid = verify_completeness(
+        parsed_testcases,
+        expected_nodeids,
+        min_files=baseline_min_files,
+        require_review_threshold_pct=require_review_threshold_pct,
+        exit_codes=exit_codes,
+    )
     if targeted:
         invalid.append(
             "targeted run: compared against selected subset only, not a full nightly gate"
@@ -622,12 +642,11 @@ def _load_junit_glob(pattern: str) -> list[ParsedTestcase]:
             f"no JUnit reports matched '{pattern}'; expected shard artifacts missing "
             f"— run `snapshot` with a complete run to generate a candidate baseline"
         )
-    merged: dict[str, ParsedTestcase] = {}
+    merged: list[ParsedTestcase] = []
     for p in paths:
         testcases, _totals = parse_junit(p)
-        for tc in testcases:
-            merged[tc.nodeid] = tc  # shards are file-disjoint; last-write is safe
-    return list(merged.values())
+        merged.extend(testcases)  # do NOT dedupe across shards; conflicts detected in compare()
+    return merged
 
 
 def _load_test_baseline(path: Path) -> tuple[int, float]:
@@ -646,6 +665,74 @@ def _write_summary(text: str) -> None:
     if path:
         with open(path, "a", encoding="utf-8") as handle:
             handle.write(text + "\n")
+
+
+def _ensure_parent(path: str | Path) -> None:
+    """Create the parent directory of an output path (the comparator job runs
+    in a fresh checkout where ``test-results/`` does not exist yet)."""
+    parent = Path(path).parent
+    if str(parent) and parent != Path("."):
+        parent.mkdir(parents=True, exist_ok=True)
+
+
+def _load_exit_codes(pattern: str) -> dict[str, int]:
+    """Load shard pytest exit-code files (``issues-N.exit-code`` → int).
+
+    Absent files are reported by the caller via the expected-shard count; a
+    present-but-unparseable file is a hard error.
+    """
+    codes: dict[str, int] = {}
+    for p in sorted(glob.glob(pattern, recursive=True)):
+        raw = Path(p).read_text().strip()
+        try:
+            codes[Path(p).name] = int(raw)
+        except ValueError as exc:
+            raise BaselineError(f"unparseable exit-code file {p}: {raw!r}") from exc
+    return codes
+
+
+def verify_completeness(
+    parsed: list[ParsedTestcase],
+    expected_nodeids: Iterable[str],
+    *,
+    min_files: int = 0,
+    require_review_threshold_pct: float = 0.0,
+    exit_codes: dict[str, int] | None = None,
+) -> list[str]:
+    """Canonical fail-closed completeness checks shared by compare + snapshot.
+
+    Returns a list of human-readable invalid reasons (empty == complete).
+    """
+    seen: dict[str, ParsedTestcase] = {}
+    duplicates: list[str] = []
+    for tc in parsed:
+        if tc.nodeid in seen:
+            duplicates.append(tc.nodeid)
+        seen[tc.nodeid] = tc
+    observed_nodeids = set(seen)
+    observed_files = {_file_of(n) for n in observed_nodeids}
+    expected_set = set(expected_nodeids)
+
+    invalid: list[str] = []
+    for n in sorted(expected_set - observed_nodeids):
+        invalid.append(f"expected nodeid never observed: {n}")
+    if not parsed and expected_set:
+        invalid.append("no JUnit reports matched the glob; expected shard artifacts missing")
+    for n in sorted(set(duplicates))[:50]:
+        invalid.append(f"duplicate nodeid result (cross-shard/rerun conflict): {n}")
+    if exit_codes:
+        for name, code in sorted(exit_codes.items()):
+            if code not in (0, 1):
+                invalid.append(
+                    f"shard {name} exited {code} (infrastructure failure, not a test failure)"
+                )
+    floor = min_files * (1 - require_review_threshold_pct / 100.0)
+    if min_files and len(observed_files) < floor:
+        invalid.append(
+            f"observed {len(observed_files)} files, below floor {floor:.0f} "
+            f"({min_files} × {100 - require_review_threshold_pct:.0f}%)"
+        )
+    return invalid
 
 
 # ---------------------------------------------------------------------------
@@ -671,6 +758,7 @@ def _cmd_compare(args: argparse.Namespace) -> int:
         expected, targeted = em.nodeids, em.targeted
     min_files, thr = _load_test_baseline(Path(args.test_baseline))
     observed = {_file_of(tc.nodeid) for tc in parsed}
+    exit_codes = _load_exit_codes(args.exit_code_glob) if args.exit_code_glob else None
     result = compare(
         baseline,
         parsed,
@@ -679,13 +767,16 @@ def _cmd_compare(args: argparse.Namespace) -> int:
         require_review_threshold_pct=thr,
         observed_files=observed,
         targeted=targeted,
+        exit_codes=exit_codes,
     )
     if args.json_output:
+        _ensure_parent(args.json_output)
         Path(args.json_output).write_text(
             json.dumps(result.to_dict(), indent=2, sort_keys=True) + "\n"
         )
     md = render_markdown(result)
     if args.markdown_output:
+        _ensure_parent(args.markdown_output)
         Path(args.markdown_output).write_text(md + "\n")
     _write_summary(md)
     if result.exit_code:
@@ -724,6 +815,31 @@ def _cmd_snapshot(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 2
+    # P0#2: a baseline may only come from a COMPLETE reference run. Refuse to
+    # snapshot a partial bundle (missing nodeids, duplicate/conflicting results,
+    # infrastructure exit codes, file-count regression).
+    if args.manifest:
+        expected = json.loads(Path(args.manifest).read_text()).get("nodeids", [])
+    else:
+        expected = build_expected_manifest().nodeids
+    min_files, thr = (
+        _load_test_baseline(Path(args.test_baseline)) if args.test_baseline else (0, 0.0)
+    )
+    exit_codes = _load_exit_codes(args.exit_code_glob) if args.exit_code_glob else None
+    incomplete = verify_completeness(
+        parsed,
+        expected,
+        min_files=min_files,
+        require_review_threshold_pct=thr,
+        exit_codes=exit_codes,
+    )
+    if incomplete:
+        print(
+            "snapshot refused: reference run is not complete (baseline may only "
+            "come from a complete run). Reasons:\n  - " + "\n  - ".join(incomplete[:30]),
+            file=sys.stderr,
+        )
+        return 2
     provenance = {
         "reference_commit": args.reference_commit or "",
         "source_run": args.source_run or "",
@@ -735,6 +851,7 @@ def _cmd_snapshot(args: argparse.Namespace) -> int:
         ),
     }
     baseline = Baseline(entries=failures, provenance=provenance, selection=DEFAULT_SELECTION)
+    _ensure_parent(args.output)
     Path(args.output).write_text(baseline.to_json())
     print(f"snapshot: {len(failures)} entries -> {args.output}")
     return 0
@@ -742,6 +859,7 @@ def _cmd_snapshot(args: argparse.Namespace) -> int:
 
 def _cmd_manifest(args: argparse.Namespace) -> int:
     em = build_expected_manifest()
+    _ensure_parent(args.output)
     Path(args.output).write_text(json.dumps(em.to_dict(), indent=2, sort_keys=True) + "\n")
     print(f"manifest: {len(em.nodeids)} nodeids / {len(em.files)} files -> {args.output}")
     return 0
@@ -756,6 +874,7 @@ def build_parser() -> argparse.ArgumentParser:
     cmp.add_argument("--junit", required=True)
     cmp.add_argument("--manifest", default="")
     cmp.add_argument("--test-baseline", default=str(TEST_BASELINE_FILE))
+    cmp.add_argument("--exit-code-glob", default="")
     cmp.add_argument("--json-output", default="")
     cmp.add_argument("--markdown-output", default="")
     cmp.add_argument("--targeted-issues", action="store_true")
@@ -764,6 +883,9 @@ def build_parser() -> argparse.ArgumentParser:
     snap = sub.add_parser("snapshot", help="generate a reviewable candidate baseline")
     snap.add_argument("--junit", required=True)
     snap.add_argument("--output", required=True)
+    snap.add_argument("--manifest", default="")
+    snap.add_argument("--test-baseline", default=str(TEST_BASELINE_FILE))
+    snap.add_argument("--exit-code-glob", default="")
     snap.add_argument("--source-run", default="")
     snap.add_argument("--source-run-url", default="")
     snap.add_argument("--reference-commit", default="")

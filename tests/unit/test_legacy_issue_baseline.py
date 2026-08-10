@@ -205,14 +205,15 @@ def test_parse_collection_error_shape(tmp_path):
     assert tcs[0].as_failure() is not None and tcs[0].as_failure().category == "collection_error"
 
 
-def test_parse_rerun_then_fail_dedupes(tmp_path):
-    # two testcases same nodeid (rerun + final), duplicate property -> 1 record
+def test_parse_does_not_dedupe_duplicates(tmp_path):
+    # parse_junit returns ALL testcases; dedup/conflict detection is compare()'s
+    # job (never last-write-wins at parse time).
     body = _tc("test_a", failure="x", nodeid_prop="tests/issues/716/t.py::test_a") + _tc(
         "test_a", failure="x", nodeid_prop="tests/issues/716/t.py::test_a"
     )
     xml = _xml(body, tests=1, failures=1)
     tcs, _ = lib.parse_junit(_write(tmp_path, "a.xml", xml))
-    assert len(tcs) == 1
+    assert len(tcs) == 2
 
 
 def test_parse_rerun_then_pass_keeps_parsed_for_completeness(tmp_path):
@@ -266,6 +267,7 @@ def test_manifest_parser_drops_warnings_and_footer(monkeypatch):
 
     class _Proc:
         stdout = fake_out
+        returncode = 0
 
     def fake_run(cmd, **kw):
         captured["cmd"] = cmd
@@ -380,11 +382,13 @@ def test_conflict_same_key_different_summary_rejected():
     assert r.exit_code != 0 and any("conflict" in i for i in r.invalid)
 
 
-def test_identical_dups_dedupe():
+def test_duplicate_nodeids_flagged_as_conflict():
+    # P1#5: never last-write-wins. A nodeid appearing twice (even identically)
+    # is a cross-shard/rerun anomaly and must be flagged, not silently deduped.
     parsed = [_tc_parsed("tests/issues/716/t.py::a"), _tc_parsed("tests/issues/716/t.py::a")]
     r = _compare([], parsed, ["tests/issues/716/t.py::a"])
-    # two identical records collapse to one (no conflict); with empty baseline it is one 'new'
-    assert len(r.new) == 1 and not r.invalid
+    assert r.exit_code != 0
+    assert any("duplicate nodeid" in i for i in r.invalid)
 
 
 def test_multi_key_per_nodeid_rejected():
@@ -489,8 +493,158 @@ def test_cli_snapshot_writes_baseline(tmp_path, monkeypatch):
     )
     jp = _write(tmp_path, "issues-1.xml", junit)
     out = tmp_path / "out.json"
-    rc = lib.main(["snapshot", "--junit", str(jp), "--output", str(out), "--source-run", "123"])
+    tb = _write(tmp_path, "tb.json", json.dumps({"layers": {"issues": {"min_files": 0}}}))
+    # snapshot requires a complete reference run; stub the expected manifest so
+    # the single testcase satisfies completeness.
+    monkeypatch.setattr(
+        lib,
+        "build_expected_manifest",
+        lambda *a, **k: lib.ExpectedManifest(
+            ["tests/issues/716/t.py::test_a"], ["tests/issues/716/t.py"], "not postgres", False
+        ),
+    )
+    rc = lib.main(
+        [
+            "snapshot",
+            "--junit",
+            str(jp),
+            "--output",
+            str(out),
+            "--test-baseline",
+            str(tb),
+            "--source-run",
+            "123",
+        ]
+    )
     assert rc == 0
     b = Baseline.from_json(out.read_text())
     assert len(b.entries) == 1
     assert b.provenance["source_run"] == "123"
+
+
+def test_cli_snapshot_refuses_partial_run(tmp_path, monkeypatch):
+    # P0#2: snapshot must refuse a reference run missing expected nodeids.
+    junit = _xml(
+        _tc("test_a", failure="boom", nodeid_prop="tests/issues/716/t.py::test_a"),
+        tests=1,
+        failures=1,
+    )
+    jp = _write(tmp_path, "issues-1.xml", junit)
+    out = tmp_path / "out.json"
+    monkeypatch.setattr(
+        lib,
+        "build_expected_manifest",
+        lambda *a, **k: lib.ExpectedManifest(
+            ["tests/issues/716/t.py::test_a", "tests/issues/716/t.py::missing"],
+            ["tests/issues/716/t.py"],
+            "not postgres",
+            False,
+        ),
+    )
+    rc = lib.main(["snapshot", "--junit", str(jp), "--output", str(out)])
+    assert rc == 2
+    assert not out.exists()
+
+
+def test_compare_creates_output_parent_dirs(tmp_path, monkeypatch):
+    # P0#1: writing into a non-existent test-results/ must not FileNotFoundError.
+    junit = _xml(
+        _tc("test_a", failure="boom", nodeid_prop="tests/issues/716/t.py::test_a"),
+        tests=1,
+        failures=1,
+    )
+    jp = _write(tmp_path, "issues-1.xml", junit)
+    baseline = Baseline(
+        entries=[
+            FailureRecord(
+                "tests/issues/716/t.py::test_a",
+                "716",
+                "failure",
+                "assertion_failure",
+                "AssertionError",
+                "boom",
+            )
+        ]
+    )
+    bp = _write(tmp_path, "baseline.json", baseline.to_json())
+    tb = _write(
+        tmp_path,
+        "tb.json",
+        json.dumps(
+            {"layers": {"issues": {"min_files": 1}}, "tolerance": {"require_review_threshold": 10}}
+        ),
+    )
+    monkeypatch.setattr(
+        lib,
+        "build_expected_manifest",
+        lambda *a, **k: lib.ExpectedManifest(
+            ["tests/issues/716/t.py::test_a"], ["tests/issues/716/t.py"], "not postgres", False
+        ),
+    )
+    nested = tmp_path / "nested" / "sub" / "diff.json"
+    rc = lib.main(
+        [
+            "compare",
+            "--baseline",
+            str(bp),
+            "--junit",
+            str(jp),
+            "--test-baseline",
+            str(tb),
+            "--json-output",
+            str(nested),
+        ]
+    )
+    assert rc == 0
+    assert nested.exists()
+
+
+def test_manifest_fail_closed_on_nonzero_returncode(monkeypatch):
+    # P1#6: partial collection (non-zero exit) must fail closed even if some
+    # nodeids were parsed.
+    class _Proc:
+        stdout = "tests/issues/716/t.py::test_a\n"
+        returncode = 2
+
+    monkeypatch.setattr(lib.subprocess, "run", lambda *a, **k: _Proc())
+    with pytest.raises(lib.BaselineError):
+        lib.build_expected_manifest()
+
+
+def test_exception_type_extracted_from_message(tmp_path):
+    # P1#7: xunit2 omits type; recover it from the message form.
+    body = (
+        '<testcase classname="tests.issues.1071.t" name="test_a">'
+        '<properties><property name="openace_nodeid" value="tests/issues/1071/t.py::test_a"/></properties>'
+        '<failure message="app.utils.tenant_resolver.TenantResolutionError: cannot resolve" >tb</failure>'
+        "</testcase>"
+    )
+    tcs, _ = lib.parse_junit(_write(tmp_path, "a.xml", _xml(body, tests=1, failures=1)))
+    assert tcs[0].exception_type == "TenantResolutionError"
+    assert tcs[0].category == "test_body_exception"
+
+
+def test_exception_type_assertion_from_message(tmp_path):
+    body = (
+        '<testcase classname="tests.issues.716.t" name="test_a">'
+        '<properties><property name="openace_nodeid" value="tests/issues/716/t.py::test_a"/></properties>'
+        '<failure message="assert 1 == 2">tb</failure>'
+        "</testcase>"
+    )
+    tcs, _ = lib.parse_junit(_write(tmp_path, "a.xml", _xml(body, tests=1, failures=1)))
+    assert tcs[0].exception_type == "AssertionError"
+    assert tcs[0].category == "assertion_failure"
+
+
+def test_compare_infra_exit_code_fails_closed(tmp_path):
+    # P1#4: a shard pytest exit code of 2/3/4/5 (infrastructure) must fail even
+    # if the XML looks whole.
+    parsed = [_tc_parsed("tests/issues/716/t.py::a")]
+    r = lib.compare(
+        Baseline(entries=[_fail("tests/issues/716/t.py::a")]),
+        parsed,
+        ["tests/issues/716/t.py::a"],
+        exit_codes={"issues-2.exit-code": 2},
+    )
+    assert r.exit_code != 0
+    assert any("exited 2" in i for i in r.invalid)
