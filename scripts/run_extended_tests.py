@@ -279,6 +279,20 @@ def print_collection_manifest(files: list[str]) -> None:
     print("=" * 40 + "\n")
 
 
+def _quarantine_nodeids() -> list[str]:
+    """Read quarantined nodeids from ci/legacy-issue-quarantine.json (may be absent)."""
+    import json
+
+    path = PROJECT_ROOT / "ci" / "legacy-issue-quarantine.json"
+    if not path.exists():
+        return []
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return []
+    return [e["nodeid"] for e in data.get("entries", []) if e.get("nodeid")]
+
+
 def build_pytest_command(args: argparse.Namespace) -> list[str]:
     targets = select_targets(args)
     targets = apply_split(targets, args.split_total, args.split_group)
@@ -300,6 +314,12 @@ def build_pytest_command(args: argparse.Namespace) -> list[str]:
     # (correctly) reject. Collection errors are still surfaced in the JUnit and
     # hard-failed by the comparator (never baselined).
     cmd.append("--continue-on-collection-errors")
+    # Deselect nodeids tracked in ci/legacy-issue-quarantine.json (e.g. a test
+    # that deadlocks the shard). The same list is read by the comparator, which
+    # excludes them from the expected-executed set and reports them as debt, so
+    # the deselect + the manifest stay consistent (local == CI).
+    for nodeid in _quarantine_nodeids():
+        cmd.extend(["--deselect", nodeid])
     if args.parallel > 0:
         cmd.extend(["-n", str(args.parallel)])
     if args.reruns > 0:

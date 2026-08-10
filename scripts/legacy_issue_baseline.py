@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import datetime
 import glob
 import json
 import os
@@ -415,6 +416,105 @@ def build_expected_manifest(
 
 
 # ---------------------------------------------------------------------------
+# Quarantine — tracked, gate-visible exclusions for nodeids that cannot run
+# ---------------------------------------------------------------------------
+
+QUARANTINE_FILE = PROJECT_ROOT / "ci" / "legacy-issue-quarantine.json"
+_QUARANTINE_REQUIRED = (
+    "nodeid",
+    "reason",
+    "owner",
+    "tracking_issue",
+    "exit_condition",
+    "expires_on",
+)
+_QUARANTINE_DATE_RX = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+@dataclasses.dataclass(frozen=True)
+class QuarantineEntry:
+    nodeid: str
+    reason: str
+    owner: str
+    tracking_issue: str
+    exit_condition: str
+    expires_on: str
+
+
+def load_quarantine(path: str | Path) -> list[QuarantineEntry]:
+    text = Path(path).read_text()
+    obj = json.loads(text)
+    if obj.get("schema") != "openace-legacy-issue-quarantine":
+        raise BaselineError(f"unsupported quarantine schema: {obj.get('schema')!r}")
+    entries: list[QuarantineEntry] = []
+    for raw in obj.get("entries", []):
+        entries.append(QuarantineEntry(**{k: raw.get(k, "") for k in _QUARANTINE_REQUIRED}))
+    return entries
+
+
+def validate_quarantine(
+    entries: list[QuarantineEntry],
+    collectable_nodeids: Iterable[str],
+    today: str,
+) -> list[str]:
+    """Fail-closed validation of the quarantine list.
+
+    Returns invalid reasons for: missing/empty required fields, malformed
+    ``expires_on``, an expired entry, a duplicate nodeid, or an entry whose
+    nodeid is no longer collectable (stale after deletion/rename). Empty list
+    means valid.
+    """
+    collectable = set(collectable_nodeids)
+    seen: set[str] = set()
+    invalid: list[str] = []
+    for e in entries:
+        for field in _QUARANTINE_REQUIRED:
+            if not getattr(e, field).strip():
+                invalid.append(f"quarantine entry {e.nodeid!r} missing field '{field}'")
+        if not _QUARANTINE_DATE_RX.match(e.expires_on):
+            invalid.append(f"quarantine entry {e.nodeid!r} malformed expires_on {e.expires_on!r}")
+        elif e.expires_on < today:
+            invalid.append(f"quarantine entry {e.nodeid!r} expired on {e.expires_on}")
+        if e.nodeid in seen:
+            invalid.append(f"quarantine entry {e.nodeid!r} duplicated")
+        seen.add(e.nodeid)
+        if collectable and e.nodeid not in collectable:
+            invalid.append(
+                f"quarantine entry {e.nodeid!r} is no longer collectable "
+                "(remove it or update its nodeid)"
+            )
+    return invalid
+
+
+def _load_and_validate_quarantine(
+    path: str | Path, collectable_nodeids: Iterable[str]
+) -> dict[str, Any]:
+    """Load the quarantine list and validate it; return entries-as-dicts + invalids.
+
+    A missing file means no quarantine (empty). Validation failures (expired,
+    uncollectable, duplicate, missing fields) are returned as invalid reasons
+    so the caller can fail closed.
+    """
+    if not Path(path).exists():
+        return {"entries": [], "invalid": []}
+    entries = load_quarantine(path)
+    today = datetime.date.today().isoformat()
+    invalid = validate_quarantine(entries, collectable_nodeids, today)
+    as_dicts = [
+        {
+            "nodeid": e.nodeid,
+            "reason": e.reason,
+            "owner": e.owner,
+            "tracking_issue": e.tracking_issue,
+            "exit_condition": e.exit_condition,
+            "expires_on": e.expires_on,
+        }
+        for e in entries
+    ]
+    return {"entries": as_dicts, "invalid": invalid}
+
+
+# ---------------------------------------------------------------------------
 # Merge, completeness, bidirectional diff
 # ---------------------------------------------------------------------------
 
@@ -428,6 +528,7 @@ class CompareResult:
     changed: list[dict[str, Any]]
     invalid: list[str]
     collection_errors: list[dict[str, Any]]
+    quarantined: list[dict[str, Any]]
     observed_files: int
     expected_total: int
     targeted: bool
@@ -477,8 +578,10 @@ def compare(
     targeted: bool = False,
     exit_codes: dict[str, int] | None = None,
     expected_shard_count: int = 0,
+    quarantined: list[dict[str, Any]] | None = None,
 ) -> CompareResult:
     """Compute the bidirectional diff and fail-closed completeness verdict."""
+    quarantined = quarantined or []
     current_nodeids = {tc.nodeid for tc in parsed_testcases}
     if observed_files is None:
         observed_files = {_file_of(n) for n in current_nodeids}
@@ -496,6 +599,7 @@ def compare(
             [],
             [str(exc)],
             [],
+            quarantined,
             len(observed_files),
             len(list(expected_nodeids)),
             targeted,
@@ -560,6 +664,7 @@ def compare(
         changed=changed,
         invalid=invalid,
         collection_errors=collection_errors,
+        quarantined=quarantined,
         observed_files=len(observed_files),
         expected_total=len(expected_set),
         targeted=targeted,
@@ -607,6 +712,16 @@ def render_markdown(result: CompareResult) -> str:
             "### Known debt — top categories",
             "",
             *(f"- `{c}`: {n}" for c, n in known_by_cat.most_common(10)),
+            "",
+        ]
+    if result.quarantined:
+        lines += [
+            f"### Quarantined debt ({len(result.quarantined)} — excluded from execution, tracked)",
+            "",
+            *(
+                f"- `{e['nodeid']}` — owner `{e['owner']}`, expires `{e['expires_on']}` — {e['reason']} (exit: {e['exit_condition']}; {e['tracking_issue']})"
+                for e in result.quarantined
+            ),
             "",
         ]
     for label, items, fmt in (
@@ -785,6 +900,12 @@ def _cmd_compare(args: argparse.Namespace) -> int:
     else:
         em = build_expected_manifest(targeted=bool(args.targeted_issues))
         expected, targeted = em.nodeids, em.targeted
+    # Quarantine: tracked exclusions (must be collectable + non-expired). The
+    # quarantined nodeids are removed from the expected-executed set (so the
+    # shard's deselect + the manifest stay consistent) and reported as debt.
+    quarantine = _load_and_validate_quarantine(args.quarantine, expected)
+    quarantined_ids = {e["nodeid"] for e in quarantine["entries"]}
+    expected = [n for n in expected if n not in quarantined_ids]
     min_files, thr = _load_test_baseline(Path(args.test_baseline))
     observed = {_file_of(tc.nodeid) for tc in parsed}
     exit_codes = _load_exit_codes(args.exit_code_glob) if args.exit_code_glob else None
@@ -798,7 +919,12 @@ def _cmd_compare(args: argparse.Namespace) -> int:
         targeted=targeted,
         exit_codes=exit_codes,
         expected_shard_count=args.shard_count,
+        quarantined=quarantine["entries"],
     )
+    # quarantine validation problems fail closed
+    result.invalid.extend(quarantine["invalid"])
+    if quarantine["invalid"]:
+        result.exit_code = 1
     if args.json_output:
         _ensure_parent(args.json_output)
         Path(args.json_output).write_text(
@@ -852,6 +978,11 @@ def _cmd_snapshot(args: argparse.Namespace) -> int:
         expected = json.loads(Path(args.manifest).read_text()).get("nodeids", [])
     else:
         expected = build_expected_manifest().nodeids
+    # Quarantine entries are excluded from the expected-executed set (same as
+    # compare) and validated; an invalid/expired/stale quarantine fails closed.
+    quarantine = _load_and_validate_quarantine(args.quarantine, expected)
+    quarantined_ids = {e["nodeid"] for e in quarantine["entries"]}
+    expected = [n for n in expected if n not in quarantined_ids]
     min_files, thr = (
         _load_test_baseline(Path(args.test_baseline)) if args.test_baseline else (0, 0.0)
     )
@@ -864,10 +995,12 @@ def _cmd_snapshot(args: argparse.Namespace) -> int:
         exit_codes=exit_codes,
         expected_shard_count=args.shard_count,
     )
+    incomplete.extend(quarantine["invalid"])
     if incomplete:
         print(
-            "snapshot refused: reference run is not complete (baseline may only "
-            "come from a complete run). Reasons:\n  - " + "\n  - ".join(incomplete[:30]),
+            "snapshot refused: reference run is not complete / quarantine invalid "
+            "(baseline may only come from a complete run). Reasons:\n  - "
+            + "\n  - ".join(incomplete[:30]),
             file=sys.stderr,
         )
         return 2
@@ -906,6 +1039,7 @@ def build_parser() -> argparse.ArgumentParser:
     cmp.add_argument("--manifest", default="")
     cmp.add_argument("--test-baseline", default=str(TEST_BASELINE_FILE))
     cmp.add_argument("--exit-code-glob", default="")
+    cmp.add_argument("--quarantine", default=str(QUARANTINE_FILE))
     cmp.add_argument("--shard-count", type=int, default=4)
     cmp.add_argument("--json-output", default="")
     cmp.add_argument("--markdown-output", default="")
@@ -918,6 +1052,7 @@ def build_parser() -> argparse.ArgumentParser:
     snap.add_argument("--manifest", default="")
     snap.add_argument("--test-baseline", default=str(TEST_BASELINE_FILE))
     snap.add_argument("--exit-code-glob", default="")
+    snap.add_argument("--quarantine", default=str(QUARANTINE_FILE))
     snap.add_argument("--shard-count", type=int, default=4)
     snap.add_argument("--source-run", default="")
     snap.add_argument("--source-run-url", default="")

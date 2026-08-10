@@ -469,6 +469,8 @@ def test_cli_compare_known_only_exits_zero(tmp_path, monkeypatch):
             str(tmp_path / "sum.md"),
             "--shard-count",
             "0",
+            "--quarantine",
+            str(tmp_path / "none.json"),
         ]
     )
     assert rc == 0
@@ -516,6 +518,8 @@ def test_cli_snapshot_writes_baseline(tmp_path, monkeypatch):
             str(tb),
             "--shard-count",
             "0",
+            "--quarantine",
+            str(tmp_path / "none.json"),
             "--source-run",
             "123",
         ]
@@ -599,6 +603,8 @@ def test_compare_creates_output_parent_dirs(tmp_path, monkeypatch):
             str(nested),
             "--shard-count",
             "0",
+            "--quarantine",
+            str(tmp_path / "none.json"),
         ]
     )
     assert rc == 0
@@ -678,3 +684,58 @@ def test_exit_code_cardinality_enforced(tmp_path):
     # exactly 4, all 0/1 -> pass (known-only)
     r = _res({f"issues-{i}.exit-code": (0 if i % 2 else 1) for i in range(1, 5)})
     assert r.exit_code == 0
+
+
+def _q(nodeid="tests/issues/604/t.py::a", expires="2099-01-01"):
+    return lib.QuarantineEntry(nodeid, "r", "o", "https://t", "exit", expires)
+
+
+def test_quarantine_valid_entry_passs():
+    inv = lib.validate_quarantine([_q()], ["tests/issues/604/t.py::a"], "2026-08-10")
+    assert inv == []
+
+
+def test_quarantine_expired_fails_closed():
+    inv = lib.validate_quarantine(
+        [_q(expires="2020-01-01")], ["tests/issues/604/t.py::a"], "2026-08-10"
+    )
+    assert any("expired" in i for i in inv)
+
+
+def test_quarantine_uncollectable_fails_closed():
+    inv = lib.validate_quarantine(
+        [_q(nodeid="tests/issues/604/t.py::gone")], ["tests/issues/604/t.py::a"], "2026-08-10"
+    )
+    assert any("no longer collectable" in i for i in inv)
+
+
+def test_quarantine_duplicate_and_missing_fields():
+    inv = lib.validate_quarantine(
+        [_q(), _q()],
+        ["tests/issues/604/t.py::a"],
+        "2026-08-10",
+    )
+    assert any("duplicated" in i for i in inv)
+    bad = lib.QuarantineEntry("tests/issues/604/t.py::a", "", "o", "t", "exit", "2099-01-01")
+    inv2 = lib.validate_quarantine([bad], ["tests/issues/604/t.py::a"], "2026-08-10")
+    assert any("missing field" in i for i in inv2)
+
+
+def test_compare_reports_quarantined_as_debt(tmp_path):
+    parsed = [_tc_parsed("tests/issues/716/t.py::a")]
+    base = Baseline(entries=[_fail("tests/issues/716/t.py::a")])
+    q = [
+        {
+            "nodeid": "tests/issues/604/t.py::x",
+            "reason": "deadlock",
+            "owner": "o",
+            "tracking_issue": "t",
+            "exit_condition": "e",
+            "expires_on": "2099-01-01",
+        }
+    ]
+    r = lib.compare(
+        base, parsed, ["tests/issues/716/t.py::a"], quarantined=q, expected_shard_count=0
+    )
+    assert r.exit_code == 0  # quarantined is debt, not a failure
+    assert r.quarantined == q
