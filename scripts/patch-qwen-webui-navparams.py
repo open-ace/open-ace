@@ -49,7 +49,9 @@ INDEX_HTML = "/usr/lib/node_modules/qwen-code-webui/dist/static/index.html"
 CACHE_BUST = "v=navparams-20260807d"
 
 # Exact text from qwen-code-webui@0.2.40 (minified SPA bundle).
-OLD_SESSION_NAV = "let l=e=>{let n=new URLSearchParams;n.set(`sessionId`,e),t({search:n.toString()})}"
+OLD_SESSION_NAV = (
+    "let l=e=>{let n=new URLSearchParams;n.set(`sessionId`,e),t({search:n.toString()})}"
+)
 NEW_SESSION_NAV = (
     "let l=e=>{let n=new URLSearchParams(window.location.search);"
     "n.set(`sessionId`,e),n.delete(`view`),t({search:n.toString()})}"
@@ -127,7 +129,9 @@ def main() -> int:
         )
         return 1
     else:
-        print("[patch-qwen-webui-navparams] sessionId nav already patched, skipping", file=sys.stderr)
+        print(
+            "[patch-qwen-webui-navparams] sessionId nav already patched, skipping", file=sys.stderr
+        )
 
     history_count = data.count(OLD_HISTORY_NAV)
     if history_count > 0:
