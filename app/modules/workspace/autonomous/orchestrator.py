@@ -7787,11 +7787,41 @@ class AutonomousOrchestrator:
         import json as _json
 
         snap_dump = _json.dumps(snapshot.to_canonical(), ensure_ascii=False, indent=2)
+        # When the issue had no structured acceptance criteria (a bug report,
+        # etc.), the snapshot is empty and the verifier MUST extract the
+        # criteria itself. Make that requirement prominent — glm models skip a
+        # requirement buried in a trailing parenthetical, then omit the
+        # ``snapshot`` field and burn the infra-retry budget (#30).
+        needs_extraction = not (
+            getattr(snapshot, "required_paths", None) or getattr(snapshot, "checklist", None)
+        )
+        if needs_extraction:
+            extraction_section = (
+                "## REQUIRED — Extract the acceptance snapshot\n"
+                "The acceptance snapshot above is EMPTY (no required_paths/checklist were "
+                "captured for this issue). You MUST read the issue and derive the acceptance "
+                "criteria yourself, then return them in the `snapshot` field. Infer "
+                "required_paths from the bug/stack trace, and write a concrete, checkable "
+                "checklist (one statement per acceptance point). Without `snapshot` populated, "
+                "your verdict is INVALID and verification cannot proceed.\n\n"
+            )
+            # Valid JSON token (the object shape) so the fenced template glm
+            # copies stays parseable — never interpolate prose into the value.
+            snapshot_token = (
+                '{"required_paths": [], "checklist": [], "non_scope": [], '
+                '"closure_constraints": false}'
+            )
+            snapshot_note = "Populate `snapshot` with the criteria you derived above."
+        else:
+            extraction_section = ""
+            snapshot_token = "null"
+            snapshot_note = "Leave `snapshot` null — the criteria above are authoritative."
         return (
             "You are an INDEPENDENT acceptance verifier. The issue must NOT be considered done "
             "just because a PR merged. Verify the MERGED code (merge commit "
             f"{merge_sha}, base {base_sha}) against this acceptance snapshot.\n\n"
             f"Acceptance snapshot:\n{snap_dump}\n\n"
+            f"{extraction_section}"
             "For each required_paths entry, confirm it was actually changed (use git diff/log). "
             "For each checklist item, determine confirmed/rejected/indeterminate against the merged "
             "code with a concrete file:line or git-diff evidence ref. Be CONSERVATIVE: if you cannot "
@@ -7800,11 +7830,9 @@ class AutonomousOrchestrator:
             "```json\n"
             '{"verdicts": [{"item": "...", "verdict": "confirmed|rejected|indeterminate", '
             '"evidence": [{"ref": "file:line|git-diff", "note": "..."}], "rationale": "..."}], '
-            '"snapshot": null}\n'
+            f'"snapshot": {snapshot_token}}}\n'
             "```\n"
-            '(set "snapshot" to the completed {required_paths, checklist, non_scope, '
-            "closure_constraints} only if you had to extract them yourself because the input "
-            "snapshot was empty; otherwise null)"
+            f"{snapshot_note}"
         )
 
     def _parse_verifier_output(self, result) -> dict:
