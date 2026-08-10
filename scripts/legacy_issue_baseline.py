@@ -26,6 +26,7 @@ import glob
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import xml.etree.ElementTree as ET
@@ -433,8 +434,15 @@ _QUARANTINE_REQUIRED = (
     "expires_on",
     "expected_probe_outcome",
 )
-# Valid machine-readable probe outcomes the entry may declare.
-PROBE_OUTCOMES = ("timeout", "pass", "fail")
+# Valid machine-readable probe outcomes an entry may declare. Only ``timeout``
+# is permitted: it is the only outcome that cannot mask a regression — a timeout
+# entry is green only while it genuinely still times out. ``pass`` is forbidden
+# because it would let a *recovered* test stay permanently deselected and the
+# weekly probe green; ``fail`` is forbidden because it is too coarse (pytest
+# rc 2-5 / no-tests / usage errors would all read as "expected fail"). If a
+# future debt type needs a non-timeout outcome, it must declare a precise,
+# machine-readable exit/failure fingerprint rather than reuse this enum.
+PROBE_OUTCOMES = ("timeout",)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -819,6 +827,64 @@ def _ensure_parent(path: str | Path) -> None:
         parent.mkdir(parents=True, exist_ok=True)
 
 
+# Canonical CI artifact-relative locations for snapshot inputs. The
+# extended-tests.yml ``legacy-issue-baseline`` job downloads the ``issue-tests-*``
+# shard artifacts (each carrying ``test-results/issues-N.xml`` and
+# ``issues-N.exit-code``) into ``artifacts/``, so a reproducible snapshot reads
+# them from here regardless of where the command is invoked.
+_JUNIT_GLOB_CANONICAL = "artifacts/test-results/issues-*.xml"
+_EXITCODE_GLOB_CANONICAL = "artifacts/test-results/issues-*.exit-code"
+
+
+def _repo_relative(path: str) -> str:
+    """Normalize a snapshot path to a stable repo-relative POSIX form."""
+    try:
+        return Path(path).resolve().relative_to(PROJECT_ROOT).as_posix()
+    except (ValueError, OSError):
+        return Path(path).as_posix()
+
+
+def _snapshot_generated_command(args: argparse.Namespace) -> str:
+    """Build a path-normalized, parameter-complete, executable snapshot command.
+
+    JUnit/exit-code globs are emitted in their canonical CI artifact-relative
+    form; single-file destinations are repo-relative. Every flag the run actually
+    used is recorded (including defaults) so copying the command reproduces the
+    baseline from any run's downloaded ``issue-tests-*`` artifacts. The result
+    MUST round-trip through :func:`build_parser` (``--output`` present, all flags
+    valid) — see ``test_baseline_provenance_round_trips``.
+    """
+    parts = [
+        "python",
+        "scripts/legacy_issue_baseline.py",
+        "snapshot",
+        "--junit",
+        _JUNIT_GLOB_CANONICAL,
+        "--output",
+        _repo_relative(args.output),
+    ]
+    if args.exit_code_glob:
+        parts += ["--exit-code-glob", _EXITCODE_GLOB_CANONICAL]
+    parts += ["--shard-count", str(args.shard_count)]
+    for flag, key in (
+        ("--manifest", "manifest"),
+        ("--quarantine", "quarantine"),
+        ("--test-baseline", "test_baseline"),
+    ):
+        value = getattr(args, key, "") or ""
+        if value:
+            parts += [flag, _repo_relative(value)]
+    if args.source_run:
+        parts += ["--source-run", args.source_run]
+    if args.source_run_url:
+        parts += ["--source-run-url", args.source_run_url]
+    if args.reference_commit:
+        parts += ["--reference-commit", args.reference_commit]
+    if args.run_contract:
+        parts += ["--run-contract", args.run_contract]
+    return shlex.join(parts)
+
+
 def _load_exit_codes(pattern: str) -> dict[str, int]:
     """Load shard pytest exit-code files (``issues-N.exit-code`` → int).
 
@@ -1044,12 +1110,9 @@ def _cmd_snapshot(args: argparse.Namespace) -> int:
         "source_run": args.source_run or "",
         "source_run_url": args.source_run_url or "",
         "run_contract": args.run_contract or "",
-        # Reproducible, repo/artifact-relative command (no local /tmp paths).
-        "generated_command": (
-            "python scripts/legacy_issue_baseline.py snapshot "
-            "--junit artifacts/test-results/issues-*.xml "
-            f"--source-run {args.source_run or '<run-id>'} --shard-count {args.shard_count}"
-        ),
+        # Reproducible, repo/artifact-relative, parameter-complete command that
+        # round-trips through build_parser (see _snapshot_generated_command).
+        "generated_command": _snapshot_generated_command(args),
     }
     baseline = Baseline(entries=failures, provenance=provenance, selection=DEFAULT_SELECTION)
     _ensure_parent(args.output)

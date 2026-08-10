@@ -795,3 +795,139 @@ def test_quarantine_invalid_probe_outcome_rejected():
         "tests/issues/604/t.py::a", "r", "o", "t", "e", "2099-01-01", "timeout"
     )
     assert lib.validate_quarantine([good], ["tests/issues/604/t.py::a"], "2026-08-10") == []
+
+
+def test_quarantine_probe_outcome_schema_is_timeout_only():
+    # P1: only "timeout" is a green-able probe outcome. "pass" would let a
+    # recovered test stay permanently deselected + always green; "fail" would
+    # lump pytest rc 2-5/no-tests/usage with rc=1. Both must be rejected.
+    for forbidden in ("pass", "fail"):
+        entry = lib.QuarantineEntry(
+            "tests/issues/604/t.py::a", "r", "o", "t", "e", "2099-01-01", forbidden
+        )
+        inv = lib.validate_quarantine([entry], ["tests/issues/604/t.py::a"], "2026-08-10")
+        assert any("invalid expected_probe_outcome" in i for i in inv), forbidden
+    assert lib.PROBE_OUTCOMES == ("timeout",)
+
+
+def test_snapshot_generated_command_is_complete_and_round_trips(tmp_path, monkeypatch):
+    # P1: generated_command must be parameter-complete (incl. --output, which is
+    # argparse-required) and round-trip through build_parser, so copying it from
+    # the baseline actually reproduces the snapshot.
+    junit = _xml(
+        _tc("test_a", failure="boom", nodeid_prop="tests/issues/716/t.py::test_a"),
+        tests=1,
+        failures=1,
+    )
+    jp = _write(tmp_path, "issues-1.xml", junit)
+    out = tmp_path / "out.json"
+    tb = _write(tmp_path, "tb.json", json.dumps({"layers": {"issues": {"min_files": 0}}}))
+    # The quarantine references a DIFFERENT nodeid that was deselected at run
+    # time (so it never appears in observed JUnit) — mirroring the real 604 flow.
+    q = _write(
+        tmp_path,
+        "q.json",
+        json.dumps(
+            {
+                "version": 1,
+                "schema": "openace-legacy-issue-quarantine",
+                "entries": [
+                    {
+                        "nodeid": "tests/issues/604/t.py::test_deadlocked",
+                        "reason": "r",
+                        "owner": "o",
+                        "tracking_issue": "t",
+                        "exit_condition": "e",
+                        "expires_on": "2099-01-01",
+                        "expected_probe_outcome": "timeout",
+                    }
+                ],
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        lib,
+        "build_expected_manifest",
+        lambda *a, **k: lib.ExpectedManifest(
+            ["tests/issues/716/t.py::test_a", "tests/issues/604/t.py::test_deadlocked"],
+            ["tests/issues/716/t.py", "tests/issues/604/t.py"],
+            "not postgres",
+            False,
+        ),
+    )
+    rc = lib.main(
+        [
+            "snapshot",
+            "--junit",
+            str(jp),
+            "--output",
+            str(out),
+            "--test-baseline",
+            str(tb),
+            "--shard-count",
+            "0",
+            "--quarantine",
+            str(q),
+            "--source-run",
+            "31359257263",
+            "--source-run-url",
+            "https://github.com/open-ace/open-ace/actions/runs/31359257263",
+            "--reference-commit",
+            "56a165ab08fd77fc560398984763dc671e8f05b2",
+            "--run-contract",
+            "4 shards; quarantined",
+        ]
+    )
+    assert rc == 0
+    gen = Baseline.from_json(out.read_text()).provenance["generated_command"]
+    # Round-trip: the recorded command must parse back through build_parser.
+    argv = lib.shlex.split(gen)[2:]  # drop "python scripts/legacy_issue_baseline.py"
+    parsed = lib.build_parser().parse_args(argv)
+    assert parsed.output  # --output present (argparse-required) and non-empty
+    assert parsed.source_run == "31359257263"
+    assert parsed.reference_commit == "56a165ab08fd77fc560398984763dc671e8f05b2"
+    assert parsed.source_run_url.endswith(parsed.source_run)
+    # The recorded output is the repo-relative/normalized form of the arg.
+    assert parsed.output == lib._repo_relative(str(out))
+
+
+def test_repo_relative_normalizes_repo_paths_only():
+    # Paths under the repo are relativized (no local checkout path leaks into the
+    # canonical command); paths outside the repo are left as-is (absolute).
+    assert lib._repo_relative(str(ROOT / "ci" / "x.json")) == "ci/x.json"
+    assert lib._repo_relative(str(ROOT / ".test-baseline.json")) == ".test-baseline.json"
+    outside = "/elsewhere/not/in/repo/x.json" if ROOT.as_posix() != "/" else "/outside/x.json"
+    assert lib._repo_relative(outside) == outside
+
+
+def test_committed_baseline_provenance_is_consistent_and_round_trips():
+    # P1: the SHIPPED baseline's provenance must be internally consistent
+    # (run URL/ID agree, reference_commit present) and its generated_command
+    # must round-trip through build_parser and equal what the code regenerates
+    # from the recorded params.
+    baseline_path = ROOT / "ci" / "legacy-issue-failures.json"
+    pv = json.loads(baseline_path.read_text())["provenance"]
+    assert pv["source_run_url"].endswith(pv["source_run"]), "run URL must match run id"
+    assert pv["reference_commit"], "reference_commit must be recorded"
+    gen = pv["generated_command"]
+    parsed = lib.build_parser().parse_args(lib.shlex.split(gen)[2:])
+    assert parsed.output == "ci/legacy-issue-failures.json"
+    assert parsed.source_run == pv["source_run"]
+    assert parsed.reference_commit == pv["reference_commit"]
+    assert parsed.source_run_url == pv["source_run_url"]
+    # Regenerating from the recorded params reproduces the exact command, so the
+    # shipped provenance is not hand-divergent from the generator.
+    args = lib.argparse.Namespace(
+        junit="artifacts/test-results/issues-*.xml",
+        output=parsed.output,
+        manifest=parsed.manifest,
+        test_baseline=parsed.test_baseline,
+        exit_code_glob=parsed.exit_code_glob,
+        quarantine=parsed.quarantine,
+        shard_count=parsed.shard_count,
+        source_run=parsed.source_run,
+        source_run_url=parsed.source_run_url,
+        reference_commit=parsed.reference_commit,
+        run_contract=parsed.run_contract,
+    )
+    assert lib._snapshot_generated_command(args) == gen
