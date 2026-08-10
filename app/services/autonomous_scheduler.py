@@ -46,6 +46,11 @@ _AGENT_LAUNCHER_CONF = os.environ.get("OPENACE_LAUNCHER_CONF", "/etc/openace/age
 _SANDBOX_TTL_SECONDS = int(os.environ.get("OPENACE_SANDBOX_TTL_SECONDS", "7200"))
 _SANDBOX_REAP_INTERVAL_SECONDS = float(os.environ.get("OPENACE_SANDBOX_REAP_INTERVAL", "300"))
 
+# Renew workflow DB leases well inside the repository's 30-minute stale-lock
+# window. Agent phases (including acceptance verification) can legitimately run
+# for 60 minutes, so a one-shot acquisition is not sufficient across processes.
+WORKFLOW_LOCK_HEARTBEAT_SECONDS = 60.0
+
 
 def get_max_concurrent_workflows() -> int:
     """Resolve the concurrency cap from agent-launcher.conf (default 3)."""
@@ -76,6 +81,7 @@ ACTIVE_WORKFLOW_STATUSES = {
     "reporting",
     "waiting",
     "merging",
+    "verification_pending",
 }
 
 RUNNING_BATCH_STATUSES = {
@@ -89,6 +95,46 @@ RUNNING_BATCH_STATUSES = {
 }
 QUEUE_ADVANCE_STATUSES = {"waiting", "completed", "failed", "planning_timeout"}
 QUEUE_BLOCKING_STATUSES = {"paused", "cancelled"}
+
+# Phases at or past which the workflow's PR is already merged and its git
+# working tree released, so a batch sibling may start even though this workflow
+# has not reached a terminal status. (#2431)
+#
+# Keyed on PHASE, not status, deliberately. A workflow resting in
+# acceptance_verification can carry several different statuses —
+# verification_pending (parked awaiting the verifier), paused (an
+# ``indeterminate`` verdict), failed, completed — and for queueing purposes they
+# all mean the same thing: the merge is done, nothing downstream needs the slot.
+# Enumerating those statuses in QUEUE_ADVANCE_STATUSES instead would have to be
+# redone every time the phase grows an outcome, and would still miss ``paused``,
+# which QUEUE_BLOCKING_STATUSES rejects one branch earlier.
+#
+# Verified against production: every parked row carries
+# ``cleanup_status='completed'`` and an EMPTY ``worktree_path``, so the working
+# tree really is released by the time the workflow gets here.
+DELIVERED_PHASES = frozenset({"acceptance_verification"})
+_TERMINAL_ACCEPTANCE_STATUSES = frozenset({"confirmed", "rejected", "indeterminate"})
+
+
+def _slot_released(wf: dict) -> bool:
+    """Whether this workflow has stopped occupying its batch's execution slot.
+
+    The batch queue exists only to keep two agents out of the same git working
+    tree. Once the merge phase completes the branch is on main and the worktree
+    is released, so the next sibling is free to start.
+    """
+    if (wf.get("current_phase") or "") not in DELIVERED_PHASES:
+        return False
+    # A manual pause can freeze the verifier before its handler returns. It is
+    # not delivered yet: resume SIGCONTs that same agent. Only a persisted
+    # terminal acceptance verdict proves that a paused handler has finished and
+    # the batch/conflict slot may be handed to a sibling.
+    if wf.get("status") == "paused":
+        if wf.get("agent_pid"):
+            return False
+        return (wf.get("verification_status") or "") in _TERMINAL_ACCEPTANCE_STATUSES
+    return True
+
 
 # Prefix written to error_message when a workflow is paused because its owner
 # exceeded quota. The scheduler auto-resumes only workflows paused with this
@@ -354,6 +400,13 @@ class AutonomousScheduler:
             except Exception:
                 w = None
             if w and w.get("status") == "paused":
+                # Any acceptance workflow still present in _in_progress_ids is
+                # inside advance(), even if a prior terminal verdict remains on
+                # the row while a changed issue is being re-verified. A manual
+                # pause resumes that same verifier via SIGCONT, so keep every
+                # conflict key until advance()'s finally releases them.
+                if w.get("current_phase") == "acceptance_verification":
+                    continue
                 paused.append(w)
 
         if not paused:
@@ -462,8 +515,10 @@ class AutonomousScheduler:
         from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
         from app.routes.autonomous import _get_repo
 
-        # Unique lock owner: hostname + thread name
-        lock_owner = f"{socket.gethostname()}/{threading.current_thread().name}"
+        # Include the PID: two scheduler processes on one host commonly reuse
+        # the same worker-thread name. Without a process-unique owner, an old
+        # worker's finally could release a newer process's replacement lease.
+        lock_owner = f"{socket.gethostname()}/{os.getpid()}/{threading.current_thread().name}"
         repo = _get_repo()
 
         # Get workflow's batch_id and git-conflict keys for cleanup
@@ -502,6 +557,15 @@ class AutonomousScheduler:
                     self._in_progress_branches.discard(branch)
             return workflow_id
 
+        heartbeat_stop = threading.Event()
+        lock_lost = threading.Event()
+        heartbeat_thread = threading.Thread(
+            target=self._heartbeat_workflow_lock,
+            args=(repo, workflow_id, lock_owner, heartbeat_stop, lock_lost),
+            name=f"workflow-lock-{workflow_id[:8]}",
+            daemon=True,
+        )
+
         # Quota gate (fail-closed): a user over quota (or whose quota check
         # errored) must not advance. This scheduler is the lifecycle authority
         # for workflow-owned sessions, so it pauses before a new advance cycle
@@ -518,7 +582,10 @@ class AutonomousScheduler:
         # still release the DB lock and in-progress slot — otherwise a
         # quota-paused workflow would hold both forever.
         orchestrator = None
+        heartbeat_started = False
         try:
+            heartbeat_thread.start()
+            heartbeat_started = True
             # owner_id resolved above (alongside batch_id) for in-progress accounting.
             if owner_id is not None:
                 try:
@@ -540,8 +607,15 @@ class AutonomousScheduler:
                     return workflow_id
 
             orchestrator = AutonomousOrchestrator(workflow_id)
+            orchestrator.bind_scheduler_lock(lock_owner, lock_lost)
             with self._orchestrator_lock:
                 self._running_orchestrators[workflow_id] = orchestrator
+            # The heartbeat can lose the lease before the orchestrator is
+            # registered (and therefore cannot stop it directly). Fence that
+            # construction window before any phase is allowed to advance.
+            if lock_lost.is_set():
+                orchestrator.prepare_for_shutdown()
+                return workflow_id
             # stop() may race with this worker after its orchestrator snapshot.
             # Register first, then re-check the event so no new agent task can
             # start after graceful shutdown has begun.
@@ -559,17 +633,16 @@ class AutonomousScheduler:
         finally:
             with self._orchestrator_lock:
                 self._running_orchestrators.pop(workflow_id, None)
-            # Safety net: clear stale agent_pid if orchestrator failed to clean up
+            # Stop and join the renewer before any final mutation/release so it
+            # cannot refresh a lease after this worker relinquishes ownership.
+            heartbeat_stop.set()
+            if heartbeat_started:
+                heartbeat_thread.join(timeout=1)
+            # Safety net: clear stale agent identity only if this worker still
+            # owns the distributed lease. A superseded worker must not erase a
+            # replacement process's freshly-registered PID.
             try:
-                wf_check = repo.get_workflow(workflow_id)
-                if wf_check and wf_check.get("agent_pid"):
-                    repo.update_workflow(
-                        workflow_id,
-                        {
-                            "agent_pid": None,
-                            "agent_session_id": "",
-                        },
-                    )
+                repo.clear_agent_pid_if_lock_owner(workflow_id, lock_owner)
             except Exception:
                 pass
             # Release DB lock
@@ -587,6 +660,38 @@ class AutonomousScheduler:
                 if branch and not was_waiting:
                     self._in_progress_branches.discard(branch)
         return workflow_id
+
+    def _heartbeat_workflow_lock(
+        self,
+        repo,
+        workflow_id: str,
+        lock_owner: str,
+        stop_event: threading.Event,
+        lock_lost: threading.Event,
+    ) -> None:
+        """Renew a live advance's distributed lock until the worker exits."""
+        while not stop_event.wait(WORKFLOW_LOCK_HEARTBEAT_SECONDS):
+            try:
+                if repo.refresh_lock(workflow_id, lock_owner):
+                    continue
+                lock_lost.set()
+                logger.error(
+                    "Workflow %s lost its distributed lock; stopping old advance",
+                    workflow_id[:8],
+                )
+                with self._orchestrator_lock:
+                    orchestrator = self._running_orchestrators.get(workflow_id)
+                if orchestrator is not None:
+                    orchestrator.prepare_for_shutdown()
+                return
+            except Exception:
+                # A transient DB failure does not prove ownership was lost. Try
+                # again next tick; the cadence leaves ample room before expiry.
+                logger.warning(
+                    "Failed to refresh workflow lock for %s",
+                    workflow_id[:8],
+                    exc_info=True,
+                )
 
     @staticmethod
     def _batch_has_running_workflow(batch_workflows: list[dict]) -> bool:
@@ -736,10 +841,23 @@ class AutonomousScheduler:
 
             previous_workflow = batch_workflows[queued_index - 1]
             previous_status = previous_workflow.get("status")
-            if previous_status in QUEUE_BLOCKING_STATUSES or previous_status == "queued":
+            # These two block regardless of phase. `cancelled` is an operator
+            # decision — a stopped batch must not resurrect itself just because
+            # the head happened to reach acceptance — and a `queued` predecessor
+            # has not run at all.
+            if previous_status in ("cancelled", "queued"):
                 continue
-            if previous_status not in QUEUE_ADVANCE_STATUSES:
-                continue
+            # A predecessor past the merge phase releases the queue whatever its
+            # status: it holds no worktree. Without this a workflow parked in
+            # `verification_pending` — which is in NEITHER status set — stalls
+            # the entire remainder of the batch indefinitely, and an
+            # `indeterminate` acceptance verdict re-stalls it under the name
+            # `paused`, which the blocking set rejects one branch earlier. #2431
+            if not _slot_released(previous_workflow):
+                if previous_status in QUEUE_BLOCKING_STATUSES:
+                    continue
+                if previous_status not in QUEUE_ADVANCE_STATUSES:
+                    continue
 
             repo.update_workflow(workflow["workflow_id"], {"status": "pending"})
             _emit_event_safe(workflow["workflow_id"], "status_change", {"status": "pending"})
@@ -1075,15 +1193,31 @@ def _reconcile_pending_transitions():
         logger.error("Worktree transition reconcile sweep failed: %s", e, exc_info=True)
 
 
+def _is_in_flight(workflow_id: str) -> bool:
+    """Whether this process is currently advancing the workflow (#2431).
+
+    This is the cheap same-process guard. The cleanup sweep also acquires the
+    workflow's distributed DB lock immediately before deleting anything, which
+    closes the rolling-restart / multiple-scheduler race this singleton cannot
+    observe.
+    """
+    instance = AutonomousScheduler._instance
+    if instance is None:
+        return False
+    with instance._in_progress_lock:
+        return workflow_id in instance._in_progress_ids
+
+
 def _retry_pending_git_cleanups(repo=None):
     """Re-attempt post-merge Git cleanup for delivered workflows (#2043).
 
-    Walks every ``status='completed'`` workflow with ``cleanup_status='pending'``
-    and re-runs the idempotent ``_perform_git_cleanup``. Honors the per-workflow
+    Walks every delivered workflow with ``cleanup_status='pending'`` and re-runs
+    the idempotent ``_perform_git_cleanup``. Honors the per-workflow
     ``cleanup_next_retry_at`` backoff so a transient failure is not retried every
     tick. This is shared by the startup sweep and the periodic scheduler tick so
-    both converge leaked worktrees/branches without a separate worker. Failures
-    are isolated per workflow.
+    both converge leaked worktrees/branches without a separate worker. The
+    workflow DB lock serializes cleanup with advances in every scheduler process;
+    failures are isolated per workflow.
 
     ``repo`` lets the periodic tick reuse the scheduler's own (mock-friendly)
     repository; the startup sweep omits it and constructs one.
@@ -1105,6 +1239,9 @@ def _retry_pending_git_cleanups(repo=None):
             wf_id = wf.get("workflow_id")
             if not isinstance(wf_id, str) or not wf_id:
                 continue
+            if _is_in_flight(wf_id):
+                logger.debug("Skipping cleanup sweep for in-flight workflow %s", wf_id[:8])
+                continue
             # Backoff: skip until cleanup_next_retry_at has passed.
             next_retry = wf.get("cleanup_next_retry_at") or ""
             if next_retry:
@@ -1116,7 +1253,22 @@ def _retry_pending_git_cleanups(repo=None):
                     due = now
                 if due > now:
                     continue
+            # Serialize cleanup against an advance in every scheduler process.
+            # The in-memory check above cannot see an old worker during a
+            # rolling restart, while every advance holds this same DB lock.
+            # Acquiring it here makes the final check atomic: either cleanup
+            # owns the workflow and may remove its git resources, or the active
+            # verifier owns it and cleanup defers to the next tick.
+            cleanup_lock_owner = (
+                f"{socket.gethostname()}/cleanup-{os.getpid()}-"
+                f"{threading.current_thread().name}"
+            )
+            lock_acquired = False
             try:
+                lock_acquired = repo.acquire_cleanup_lock(wf_id, cleanup_lock_owner)
+                if not lock_acquired:
+                    logger.debug("Skipping cleanup sweep for DB-locked workflow %s", wf_id[:8])
+                    continue
                 orchestrator = AutonomousOrchestrator(wf_id)
                 orchestrator._perform_git_cleanup()
             except Exception as e:  # noqa: BLE001
@@ -1126,6 +1278,16 @@ def _retry_pending_git_cleanups(repo=None):
                     e,
                     exc_info=True,
                 )
+            finally:
+                if lock_acquired:
+                    try:
+                        repo.release_lock(wf_id, cleanup_lock_owner)
+                    except Exception as e:  # noqa: BLE001
+                        logger.warning(
+                            "Failed to release cleanup lock for workflow %s: %s",
+                            wf_id[:8],
+                            e,
+                        )
 
         logger.info("Processed %d pending Git cleanup(s)", len(pending))
     except Exception as e:  # noqa: BLE001

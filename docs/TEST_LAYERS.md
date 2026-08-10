@@ -1,334 +1,139 @@
-# Open ACE 测试层级说明（Issue #2189）
+# Open ACE 测试结构与 CI 策略
 
-本文档说明 Open ACE 项目的测试层级、运行时机、本地复现方法，以及 baseline 更新流程。
+本文是项目测试分类、存放和执行语义的唯一规范。Issue #2429 之前，
+`tests/issues/<number>/` 同时充当来源记录和测试分类，导致不同运行条件的
+测试混在一起，并被默认 CI 整体排除。
 
-## 测试层级概览
+## 设计结论
 
-Open ACE 采用分层测试策略，平衡 PR 反馈速度与代码质量保证：
+测试只保留一份，目录回答“它需要什么环境运行”，marker 回答“为什么存在、
+优先级是什么”。因此：
 
-| 层级 | 名称 | 运行时机 | 测试范围 | 预期时长 |
-|-----|------|---------|---------|---------|
-| **L1** | Default Tests | 每个 PR | tests/（排除 e2e/issues） | ~5 分钟 |
-| **L2** | Critical E2E | 每个 PR | tests/e2e/regression（关键路径） | ~10 分钟 |
-| **L3** | Full E2E | 定时/手动/标签触发 | tests/e2e/** | ~2 小时 |
-| **L4** | Issue Tests | 定时/手动/标签触发 | tests/issues/** | ~3 小时 |
+- 不创建顶层 `tests/regression/` 或 `tests/security/`。回归与安全都是
+  测试属性，不是运行环境。
+- 不把同一个测试复制到 `unit/`、`integration/`、`issues/` 等多个目录。
+  副本会产生漂移、重复执行和不同修复状态。
+- `tests/issues/` 是 legacy quarantine，不再接收新目录。现有测试按价值
+  逐步迁移，迁移完成后删除旧文件。
+- GitHub issue 追踪使用 `@pytest.mark.issue(number)`；缺陷回归同时使用
+  `@pytest.mark.regression`。
 
-## 各层级详细说明
+## 规范目录
 
-### L1: Default Tests
+| 目录 | 运行契约 | 默认时机 |
+|---|---|---|
+| `tests/unit/` | 进程内、快速、无网络/真实数据库/子进程/服务器 | 每个 PR，required |
+| `tests/integration/` | 跨数据库、文件系统、子进程或组件边界；逐步细分 `sqlite/`、`postgres/`、`filesystem/`、`subprocess/` | 每个 PR；PostgreSQL 独立 lane |
+| `tests/e2e/` | 需要运行中的 Open ACE、浏览器或远端服务 | critical 子集按路径/标签；全量定时 |
+| `tests/performance/` | 有时间或资源阈值，可能受 runner 噪声影响 | 独立非阻塞 lane |
+| `tests/issues/` | 尚未分类的历史测试 | PR 只做全量收集；执行为定时/手动 |
 
-**运行时机**：
-- 每个 PR（push 和 pull_request 事件）
-- 每次 merge 到 main 分支
+路由边界测试和并发测试已分别归入 `tests/integration/routes/` 与
+`tests/integration/concurrency/`。`tests/autonomous/` 和 tests 根目录中的
+历史文件继续按 inventory 逐步迁移；不要再新增新的“按功能域”顶层目录或
+tests 根目录测试文件。
 
-**测试范围**：
-- 路径：`tests/`（排除 `tests/e2e/` 和 `tests/issues/`）
-- 文件模式：`test_*.py`（由 pytest.ini 的 `norecursedirs` 配置）
-- Marker：无特殊 marker
+## 回归测试写法
 
-**本地复现**：
-```bash
-# 运行所有 default tests
-pytest tests/ -v --cov --cov-report=html
-
-# 运行特定文件
-pytest tests/test_example.py -v
-
-# 收集测试数量
-pytest tests/ --collect-only --quiet
-```
-
-**CI 配置**：
-- Workflow: `.github/workflows/ci.yml` (test job)
-- Python 版本：3.10, 3.11, 3.12（矩阵）
-
-### L2: Critical E2E Tests
-
-**运行时机**：
-- 每个 PR（除非标记 `skip-extended-tests`）
-- PR 标记 `run-critical-e2e` 时强制运行
-
-**测试范围**：
-- 路径：`tests/e2e/regression/test_login.py`, `tests/e2e/regression/test_navigation.py`
-- 文件模式：`test_*.py`
-- Marker：`@pytest.mark.regression`, `@pytest.mark.priority_p0`
-
-**本地复现**：
-```bash
-# 需要启动 Open ACE 服务器
-python scripts/run_extended_tests.py --category critical
-
-# 或手动运行
-pytest tests/e2e/regression/test_login.py tests/e2e/regression/test_navigation.py -v
-```
-
-**CI 配置**：
-- Workflow: `.github/workflows/extended-tests.yml` (critical-pr job)
-- 超时：30 分钟
-
-### L3: Full E2E Tests
-
-**运行时机**：
-- 定时：每周日凌晨 2:00（UTC）
-- 手动触发：workflow_dispatch + category=e2e
-- PR 标记 `run-full-e2e` 时触发
-
-**测试范围**：
-- 路径：`tests/e2e/**`
-- 文件模式：`test_*.py`, `e2e_*.py`
-- Marker：`@pytest.mark.ui`, `@pytest.mark.regression`
-
-**本地复现**：
-```bash
-# 运行全部 E2E 测试（不分片）
-python scripts/run_extended_tests.py --category e2e
-
-# 运行特定分片（4 分片中的第 1 个）
-python scripts/run_extended_tests.py --category e2e --split-total 4 --split-group 1
-```
-
-**CI 配置**：
-- Workflow: `.github/workflows/extended-tests.yml` (full-e2e job)
-- 超时：120 分钟
-
-### L4: Issue Tests
-
-**运行时机**：
-- 定时：每周日凌晨 2:00（UTC）
-- 手动触发：workflow_dispatch + category=issues
-- PR 标记 `run-issue-tests` 时触发
-
-**测试范围**：
-- 路径：`tests/issues/**`
-- 文件模式：`test_*.py`, `e2e_*.py`
-- Marker：`@pytest.mark.issue`
-
-**本地复现**：
-```bash
-# 运行全部 issue 测试（4 分片）
-python scripts/run_extended_tests.py --category issues --split-total 4 --split-group 1
-
-# 运行特定 issue 测试
-python scripts/run_extended_tests.py --category issues --issue 144
-```
-
-**CI 配置**：
-- Workflow: `.github/workflows/extended-tests.yml` (issue-tests job)
-- 分片：4 个并行分片
-- 超时：180 分钟
-
-## 混合模式文件处理
-
-### 问题背景
-
-部分 `e2e_*.py` 文件采用混合模式：
-- 包含 `test_*` 函数（pytest 收集）
-- 包含 `if __name__ == "__main__"` 块（独立运行）
-
-### 运行优先级
-
-**pytest 优先**：
-- CI 流程统一使用 pytest 命令运行
-- pytest 收集 `test_*` 函数时，不会执行 `if __name__` 块
-- 因此不会有重复执行问题
-
-**独立运行仅用于本地调试**：
-- 开发者可以 `python tests/e2e/e2e_xxx.py` 快速验证
-- 但 CI 不会直接运行脚本
-
-### 混合文件示例
+新回归测试直接写到其规范目录，并在模块或测试函数上记录来源：
 
 ```python
-#!/usr/bin/env python3
-"""
-E2E test example
+import pytest
 
-Run:
-  pytest tests/e2e/e2e_xxx.py -v  # pytest 收集（推荐，CI 使用）
-  python tests/e2e/e2e_xxx.py     # 脚本运行（仅用于本地调试）
-"""
-
-def test_feature_xxx(page):
-    """pytest 会收集此函数"""
-    assert page.locator("#element").is_visible()
-
-if __name__ == "__main__":
-    # 此块仅在直接运行时执行，pytest 不会执行
-    with sync_playwright() as p:
-        test_feature_xxx(p.chromium.launch().new_page())
+pytestmark = [pytest.mark.security, pytest.mark.regression, pytest.mark.issue(2429)]
 ```
 
-## Baseline 管理
+常用命令：
 
-### Baseline 文件
-
-文件：`.test-baseline.json`
-
-目的：
-- 记录各测试层的测试数量基线
-- 检测测试数量异常下降
-- 确保测试门禁有效性
-
-### Baseline 结构
-
-```json
-{
-  "version": "1.0",
-  "layers": {
-    "default": {
-      "min_tests": 3566,
-      "min_files": 90,
-      "threshold_percent": 90
-    },
-    "critical": {
-      "min_tests": 5,
-      "min_files": 2
-    },
-    "e2e_pytest": {
-      "min_tests": 1,
-      "min_files": 1
-    },
-    "issues": {
-      "min_tests": 1793,
-      "min_files": 80
-    }
-  },
-  "tolerance": {
-    "allowed_decrease_percent": 5,
-    "require_review_threshold": 10
-  }
-}
-```
-
-### Baseline 更新流程
-
-#### 何时需要更新
-
-1. **正常更新**：
-   - 添加新测试模块，测试数量增加
-   - 重构测试结构，测试数量变化
-   - 修复 flaky 测试，删除冗余测试
-
-2. **异常情况**：
-   - 测试数量下降 > 5%：需要调查原因
-   - 测试数量下降 > 10%：必须 review 并更新 baseline
-
-#### 更新步骤
-
-1. **收集当前测试数量**：
-   ```bash
-   pytest tests/ --collect-only --quiet | grep "tests collected"
-   pytest tests/e2e/ --collect-only --quiet | grep "tests collected"
-   pytest tests/issues/ --collect-only --quiet | grep "tests collected"
-   ```
-
-2. **更新 baseline 文件**：
-   - 修改 `.test-baseline.json` 中相应层的 `min_tests` 和 `min_files`
-   - 更新 `last_updated` 和 `update_reason` 字段
-
-3. **提交审查**：
-   - Baseline 更新需要 PR review
-   - 说明更新原因（如"添加新测试模块"）
-
-### Baseline 检查逻辑
-
-`scripts/run_extended_tests.py` 在运行测试前会检查 baseline：
-1. 读取 `.test-baseline.json`
-2. 比较实际收集的测试数量与 baseline
-3. 如果数量低于阈值：
-   - 下降 < 10%：警告，但继续运行
-   - 下降 ≥ 10%：失败，拒绝运行
-
-## CI 门禁机制
-
-### Collect-only 门禁
-
-每个测试层在运行前都会执行 collect-only 检查：
-- 收集测试数量 = 0：CI 失败
-- 收集测试数量 < baseline 阈值：警告或失败
-
-### Coverage 门禁
-
-Default tests 运行时会检查覆盖率：
-- 使用 `--cov-fail-under=30` 参数
-- 覆盖率 < 30%：pytest 命令失败，CI 失败
-
-### 零测试检测
-
-如果某个测试层意外收集 0 个测试，CI 会立即失败：
-- 避免测试静默丢失
-- 确保 CI 门禁有效性
-
-## 故障排查
-
-### 测试收集为 0
-
-可能原因：
-1. pytest.ini 配置错误（检查 `python_files` 和 `norecursedirs`）
-2. 测试文件命名不符合模式
-3. 测试目录结构变化
-
-排查步骤：
 ```bash
-# 验证 pytest.ini 配置
-cat pytest.ini
+# 默认 required suite（与 GitHub Actions 共用定义，并隔离 HOME/数据库环境）
+python scripts/ci.py run default-collection issue-collection legacy-pr python-core
 
-# 尝试手动收集
-pytest tests/ --collect-only -v
+# 按 issue 运行已经迁移到任意规范目录的测试
+pytest --issue=2429
 
-# 检查测试文件是否匹配模式
-find tests/ -name "test_*.py"
-find tests/ -name "e2e_*.py"
+# 按 issue 运行 legacy quarantine 中的测试
+pytest tests/issues --issue=517
+
+# 验证整个 legacy tree 仍可被 pytest 收集
+pytest tests/issues --collect-only -q
+
+# 扩展测试
+python scripts/run_extended_tests.py --category e2e --isolated-home
+python scripts/run_extended_tests.py --category issues --split-total 4 --split-group 1 --isolated-home
 ```
 
-### Baseline 检查失败
+## CI 保证
 
-可能原因：
-1. 测试文件被误删除
-2. 测试函数被重命名（不再匹配 `test_*` 模式）
-3. pytest 配置变更
+目录本身不构成保证，CI 的消费关系才构成保证：
 
-排查步骤：
-```bash
-# 对比修改前后测试数量
-pytest tests/ --collect-only --quiet > baseline_current.txt
-diff baseline_before.txt baseline_current.txt
+1. 默认 suite 在生产 Python 3.11 上执行 unit、integration 等可确定测试；
+   `security` marker 包含在同一 required suite 中。
+2. Python 3.11 的 required job 对 `tests/issues/` 做全量 pytest collection，
+   收集错误或 item 数低于 `.test-baseline.json` 立即失败。
+   历史上已进入 PR 门禁的 8 个 issue 目录继续由 `legacy-pr`
+   required suite 执行，不回退既有覆盖。
+3. critical E2E 按变更路径或标签执行，稳定前不作为 required check；完整 E2E
+   和 legacy issue shards 每夜执行。
+4. PostgreSQL 和 performance 使用独立 lane，避免把环境需求隐藏成 skip。
+5. `tests/unit/test_test_layout_policy.py` 禁止新增编号目录、顶层功能域目录、
+   tests 根目录测试文件，以及 `tests/regression/`、`tests/security/`。
 
-# 检查 baseline 文件
-cat .test-baseline.json
-```
+所有 suite 的命令、超时和工具链版本以 `ci/suites.json` 为唯一来源；本地和
+GitHub Actions 都通过 `python scripts/ci.py` 执行。PR 使用生产 Python 3.11
+做全量确定性测试；为兼容当前 ruleset，3.10、3.12、3.14 的同名 check 只执行
+compileall 和 unit smoke，并不代表全量跨版本覆盖。Python 3.13 仍是声明支持版本，
+但不在 PR 矩阵中。定时工作流在 3.10、3.11、3.14 上执行完整 Python suite，
+并承担 E2E、legacy shards 和易受 runner 噪声影响的检查。
 
-### Coverage 检查失败
+提交前可运行 `python scripts/ci.py doctor --strict` 验证本地 Python/Node
+主版本与 PR 一致，再用 `python scripts/ci.py pr --base origin/main` 按相同路径
+规则选择 suite。PostgreSQL 和 E2E suite 仍需本地先提供其声明的服务/浏览器。
+`.python-version` 与 `.nvmrc` 分别固定为 3.11 和 20，支持 uv/pyenv/nvm
+等工具自动选择与 Actions 相同的主版本。
+`requirements-ci.lock` 从最低支持版本 Python 3.10 做 universal 解析，所有本地
+和 GitHub 测试 job 都安装该文件。生产依赖保留在 `requirements.txt`；开发和
+CI 所需的测试、检查、构建及审计工具统一保留在
+`requirements-ci.in`，不得加入生产安装使用的 `requirements.txt`；对应的
+`dev` extra 必须与该输入保持一致，策略测试会自动检查两者及生产依赖边界。
+修改任一输入后必须按 `CONTRIBUTING.md` 的命令重新生成并提交 lock。
 
-可能原因：
-1. 代码覆盖率低于阈值（30%）
-2. Coverage 配置错误
+收集成功只证明测试“存在且能导入”，不证明断言是绿的。Legacy suite 的定时
+结果用于迁移盘点；只有迁移到 required lane 的测试才能作为合并门禁。
 
-排查步骤：
-```bash
-# 本地运行 coverage
-pytest tests/ --cov --cov-report=html
+## Legacy issue 测试迁移
 
-# 查看 coverage 报告
-open htmlcov/index.html
+按以下顺序迁移，而不是一次性移动 441 个文件：
 
-# 检查 coverage 配置
-cat pyproject.toml | grep -A 20 "\[tool.coverage\]"
-```
+1. 先迁移当前在 `.github/workflows/ci.yml` 中手工 opt-in 的 issue suites；
+   它们已经被认为值得阻止合并。
+2. 再迁移无网络、无真实数据库、无 sleep 的 unit-like 测试。
+3. 将数据库/文件系统/子进程测试迁入 integration，并补齐隔离 fixture。
+4. 将 Playwright、HTTP、WebSocket、远端主机测试迁入 E2E 的对应子目录。
+5. 性能测试进入 performance；只打印结果、没有有效断言、依赖个人数据或已经
+   被更强测试覆盖的脚本应修复、改为手动工具或删除。
 
-## 相关文件
+每个被提升的测试都必须满足：
 
-| 文件 | 用途 |
-|-----|------|
-| `pytest.ini` | pytest 配置（文件模式、markers、norecursedirs） |
-| `scripts/run_extended_tests.py` | Extended tests runner（统一入口） |
-| `.test-baseline.json` | 测试数量基线 |
-| `.github/workflows/ci.yml` | Default tests CI 配置 |
-| `.github/workflows/extended-tests.yml` | E2E/Issue tests CI 配置 |
-| `scripts/scan_test_false_positives.py` | 假阳性扫描脚本 |
+- 能在干净 checkout 中独立执行；
+- 修复前失败、修复后通过，断言验证行为而不是源码字符串；
+- 不写开发者 HOME、生产数据库或固定远端资源；
+- 在所属 CI lane 中被自动发现，不需要为每个 issue 修改 workflow YAML；
+- 移走后删除 legacy 原件，并从 inventory 中移除对应空目录。
 
-## 参考资料
+## Baseline
 
-- Issue #2189: 测试门禁改进
-- Issue #1856: Coverage 配置优化
-- pytest 文档: https://docs.pytest.org/
+`.test-baseline.json` 分别记录 item 和文件数量。默认 CI 用真实 pytest
+collection 检查 legacy item 数；extended runner 的分片只能按文件分配，因此
+按 `split_total` 等比例检查文件 baseline。针对单个 issue 的本地运行不与
+全量 baseline 比较。
+
+Baseline 是防止测试静默消失的下限，不是覆盖率指标。降低 baseline 必须在 PR
+中说明迁移、删除或合并测试的原因；新增测试后应定期向上收紧。
+
+更新流程：先分别运行 `python scripts/ci.py run default-collection` 和
+`python scripts/ci.py run issue-collection` 记录实际 item/file 数；然后更新
+`.test-baseline.json` 的 `actual_*`。只有有意删除、合并或迁移测试时才降低
+`min_*`，并在 PR 中解释原因；新增测试只更新 `actual_*`，定期将 `min_*`
+向实际值收紧。最后重跑两个 collection suite。`ci/suites.json` 的
+`baseline_runbook` 字段固定指向本节，确保从 suite 清单可以发现本流程。

@@ -17,7 +17,6 @@ import shlex
 import shutil
 import subprocess
 import sys
-import tempfile
 import threading
 import time
 import uuid
@@ -81,6 +80,7 @@ from app.modules.workspace.autonomous.progress_report_i18n import (
     build_progress_payload,
     render_progress_report,
 )
+from app.modules.workspace.autonomous.terminal_report_i18n import render_ci_repair_terminal_report
 from app.repositories.autonomous_repo import DEFAULT_CONTENT_LANGUAGE, AutonomousWorkflowRepository
 from app.repositories.database import Database
 from app.repositories.user_repo import UserRepository
@@ -123,20 +123,28 @@ COMPLETION_KEYWORDS = [
 # ── Framework inference for test detection (Phase 1, P0) ────────────────
 
 
-def _remove_worktree_dir(gh, path: str) -> None:
+def _remove_worktree_dir(gh, path: str, project_path: str = "") -> None:
     """Best-effort removal of a (possibly registered) worktree dir (#2335 S5).
 
     Tries ``git worktree remove --force`` when a GitHubOps handle is available
-    (unregisters the worktree from the repo's metadata), then falls back to a
-    filesystem ``shutil.rmtree``. Never raises — this runs in cleanup paths.
+    (unregisters the worktree from the repo's metadata), then uses repository-
+    owner cleanup for verifier directories before a final filesystem fallback.
+    Never raises — this runs in cleanup paths.
     """
     if not path:
         return
     if gh is not None:
         try:
             gh._run_git(["worktree", "remove", path, "--force"])
+            return
         except Exception:
             pass
+        if project_path:
+            try:
+                gh.remove_verification_worktree_dir(path, project_path)
+                return
+            except Exception:
+                pass
     try:
         if os.path.isdir(path):
             shutil.rmtree(path, ignore_errors=True)
@@ -217,6 +225,144 @@ def _infer_test_framework(project_path: str, cli_tool: str) -> str:
     else:
         # Fallback: cannot infer from files, use "unknown" (disable keyword fallback)
         return "unknown"
+
+
+# ── #2391 requirer semantics ────────────────────────────────────────────────
+# Derive which evidence *domains* a change requires from its changed paths — a
+# recognizer-independent path (it never touches _has_test_tool_call). A required
+# domain with no passing evidence is, under enforce mode, a fail-closed retry;
+# under the default shadow mode it is observation only.
+
+_REQUIRER_MODES = ("off", "shadow", "enforce")
+_FRONTEND_CODE_EXT = (".ts", ".tsx", ".js", ".jsx", ".vue", ".svelte")
+_DOC_EXT = (".md", ".rst", ".txt")
+# framework (TestExecutionEvidence.framework) → required-evidence domain. A
+# ``generic`` run (wrapper-invoked, no runner token) maps to no domain, so it
+# cannot vacuously "cover" a changed domain (#2391 review F2).
+_FRAMEWORK_TO_DOMAIN = {
+    "python": "python",
+    "javascript": "javascript",
+    "go": "go",
+    "rust": "rust",
+    "java": "java",
+}
+
+
+def _test_evidence_requirer_mode() -> str:
+    """Requirer rollout mode: ``off`` | ``shadow`` | ``enforce`` (default shadow).
+
+    Env-flag mechanism + ``OPENACE_`` prefix mirror ``OPENACE_MODEL_GATEWAY_MODE``
+    (the tri-state precedent). An unknown value falls back to the safe default.
+    """
+    mode = (os.environ.get("OPENACE_TEST_EVIDENCE_REQUIRER_MODE") or "shadow").strip().lower()
+    return mode if mode in _REQUIRER_MODES else "shadow"
+
+
+def _is_doc_path(path: str) -> bool:
+    lowered = path.lower()
+    return lowered.endswith(_DOC_EXT) or "/docs/" in lowered or lowered.startswith("docs/")
+
+
+def _requirer_python_suite_exists(tree_path: str) -> bool:
+    """Whether a python test suite exists in the tree the agent ran in.
+
+    Probes are cheap and best-effort; any error → not present (require nothing).
+    """
+    if not tree_path:
+        return False
+    try:
+        if os.path.exists(os.path.join(tree_path, "pytest.ini")):
+            return True
+        if os.path.isdir(os.path.join(tree_path, "tests")):
+            return True
+        pyproject = os.path.join(tree_path, "pyproject.toml")
+        if os.path.exists(pyproject):
+            with open(pyproject, encoding="utf-8", errors="replace") as handle:
+                if "[tool.pytest" in handle.read():
+                    return True
+    except OSError:
+        return False
+    return False
+
+
+def _requirer_js_suite_exists(tree_path: str) -> bool:
+    """Whether a JS test suite exists: ``frontend/package.json`` has a test script."""
+    if not tree_path:
+        return False
+    package_json = os.path.join(tree_path, "frontend", "package.json")
+    try:
+        if not os.path.exists(package_json):
+            return False
+        with open(package_json, encoding="utf-8", errors="replace") as handle:
+            scripts = json.load(handle).get("scripts") or {}
+        return any(name == "test" or name.startswith("test:") for name in scripts)
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
+def _required_evidence_domains(changed_files: list | None, tree_path: str) -> set[str]:
+    """Evidence domains a change requires, derived from concrete changed paths.
+
+    Precise path rules (NOT the loose ``_analyze_changed_files`` tags): ``*.py``
+    under ``app``/``backend``/``tests`` (excluding e2e) → ``python``; a
+    ``frontend/**`` code file → ``javascript``. Docs-only changes require
+    nothing, and a domain is required only when its suite exists in ``tree_path``
+    (never hard-fail a repo that has no such suite). ``migrations/``, ``*.sh``,
+    ``tests/e2e/`` and a ``.ts`` outside ``frontend/`` are deliberately
+    de-scoped (fail-open). An empty/unavailable ``changed_files`` requires
+    nothing (fail-open — #2391 review F4).
+    """
+    normalized = [path.strip() for path in (changed_files or []) if path and path.strip()]
+    if not normalized or all(_is_doc_path(path) for path in normalized):
+        return set()
+
+    required: set[str] = set()
+    for path in normalized:
+        lowered = path.lower()
+        if lowered.endswith(".py") and (
+            path.startswith(("app/", "backend/"))
+            or (path.startswith("tests/") and not path.startswith("tests/e2e/"))
+        ):
+            required.add("python")
+        if path.startswith("frontend/") and lowered.endswith(_FRONTEND_CODE_EXT):
+            required.add("javascript")
+
+    if "python" in required and not _requirer_python_suite_exists(tree_path):
+        required.discard("python")
+    if "javascript" in required and not _requirer_js_suite_exists(tree_path):
+        required.discard("javascript")
+    return required
+
+
+def _evidence_domains_covered(structured_evidences: list | None) -> set[str]:
+    """Domains with an authoritative PASSED evidence in the (milestone-scoped) run.
+
+    ``generic``-framework evidence maps to no domain, so a wrapper-invoked run
+    that could not be attributed to a domain does not vacuously cover one
+    (#2391 review F2).
+    """
+    from app.modules.workspace.autonomous.command_evidence.test_evidence import ParserConfidence
+
+    authoritative = (ParserConfidence.HIGH.value, ParserConfidence.MEDIUM.value)
+    covered: set[str] = set()
+    for evidence in structured_evidences or []:
+        if (
+            evidence.verdict == ExecutionVerdict.PASSED.value
+            and evidence.parser_confidence in authoritative
+        ):
+            domain = _FRAMEWORK_TO_DOMAIN.get(evidence.framework)
+            if domain:
+                covered.add(domain)
+    return covered
+
+
+def _requirer_reason(missing: set[str]) -> str:
+    """Bilingual reason for a missing-domain enforce failure (#2391 review F10)."""
+    domains = ", ".join(sorted(missing))
+    return (
+        f"Changed {domains} but no passing {domains} test evidence in this run"
+        f" / 改动涉及 {domains} 但本轮未见对应的通过测试证据"
+    )
 
 
 def _has_strict_keyword_result(test_response_text: str, has_hallucination_desc: bool) -> bool:
@@ -1168,6 +1314,86 @@ def _is_test_path_execution(command: str) -> bool:
     return False
 
 
+# Tool names that ARE a shell, compared case-insensitively (#2401 b). One
+# canonical set so a new sandbox provider's shell tool name is added in exactly
+# one place; ``test_tool_name_contract`` pins that every provider-declared shell
+# tool name is a member. The old whitelist was closed + case-sensitive, so a
+# tool-name drift (``bash``/``terminal``/``execute_bash``/...) voided the gate
+# for any command — the same "ran the right tests, judged as not run" failure as
+# the original #2376 incident, but invisible because it is command-independent.
+_SHELL_TOOL_NAMES = frozenset(
+    {
+        "bash",
+        "sh",
+        "shell",
+        "zsh",
+        "run_shell_command",
+        "exec_command",
+        "execute_bash",
+        "local_shell",
+        "container.exec",
+        "terminal",
+        "run_terminal_cmd",
+    }
+)
+
+# Dedicated test-runner tool names (#2401 a). NOT fail-open: the tool name is
+# treated as ``argv[0]`` and run through the SAME recognition as a shell command,
+# so ``pytest`` (a runner token) is recognized while ``test``/``run_tests`` pass
+# only when the command carries a real runner. Before this, the name alone
+# returned True, so a tool literally named ``test`` running ``helm install`` (or
+# nothing) reached the authoritative PASSED verdict.
+_TEST_TOOL_NAMES = frozenset({"pytest", "run_tests", "test"})
+
+
+def _command_text(tool_input: dict) -> str:
+    """Resolve one command string from a tool_use input across provider shapes.
+
+    Providers spell the executed command differently: ``command``/``cmd`` carry a
+    joined shell string, while argv-style providers carry ``argv``/``args`` as a
+    token list (#2401 c). Reading only ``command``/``cmd`` made an argv-only
+    invocation invisible to the gate; join the list forms so recognition sees the
+    same text whatever the shape.
+    """
+    if not isinstance(tool_input, dict):
+        return ""
+    command = tool_input.get("command") or tool_input.get("cmd")
+    if isinstance(command, str) and command:
+        return command
+    for key in ("argv", "args"):
+        value = tool_input.get(key)
+        if isinstance(value, list) and value:
+            # shlex.join so an arg with spaces re-quotes faithfully and the
+            # downstream _shell_tokens (shlex.split) round-trips it.
+            return shlex.join([str(part) for part in value])
+        if isinstance(value, str) and value:
+            return value
+    return ""
+
+
+def _command_runs_tests(command: str, patterns_to_check) -> bool:
+    """Per-segment recognition: whether ``command`` runs tests.
+
+    Extracted from ``_has_test_tool_call`` (#2401) so the dedicated-tool-name and
+    shell-tool-name branches share one recognition path. Each executable segment
+    is checked after the read-only pre-filter (``_EXCLUDE_FLAG_TOKENS`` drops
+    ``--help``/``--version``/collection-only flags, which assert nothing); a
+    runner pattern or a direct ``tests/`` file execution marks it a run. The
+    per-segment split is load-bearing: matching the whole command would let a
+    surviving segment lend its eligibility to a filtered one.
+    """
+    for segment in _executable_segments(command):
+        tokens = _shell_tokens(segment)
+        if any(token in _EXCLUDE_FLAG_TOKENS for token in tokens):
+            continue
+        for pattern in patterns_to_check:
+            if _pattern_matches_segment(pattern, segment, tokens):
+                return True
+        if _is_test_path_execution(segment):
+            return True
+    return False
+
+
 def _has_test_tool_call(tool_calls: list, framework_type: str) -> bool:
     """Check if tool_calls contains a test framework execution command.
 
@@ -1213,34 +1439,34 @@ def _has_test_tool_call(tool_calls: list, framework_type: str) -> bool:
             (tc.get("tool", {}).get("input", {}) or {}) if isinstance(tc.get("tool"), dict) else {}
         )
 
-        # P2: Check non-Bash test tools first (pytest, run_tests, test)
-        if tool_name in ("pytest", "run_tests", "test"):
-            return True
+        lowered = tool_name.lower()
+        command = _command_text(tool_input)
 
-        # Then check Bash/run_shell_command for test commands
-        if tool_name in ("Bash", "Shell", "run_shell_command", "exec_command"):
-            cmd = tool_input.get("command") or tool_input.get("cmd") or ""
-            if not cmd:
+        # (a #2401) A dedicated test-runner tool name is NOT fail-open: prepend it
+        # as argv[0] and run the SAME per-segment recognition as a shell command.
+        # ``pytest`` is itself a runner token so a bare pytest tool is recognized;
+        # ``test``/``run_tests`` pass only when the command carries a real runner,
+        # so a tool named ``test`` running ``helm install`` (or nothing) no longer
+        # reaches the authoritative PASSED verdict. ``run_tests`` is added to the
+        # pattern set so a bare ``run_tests`` suite run is recognized (it is not a
+        # _BARE_RUNNER token, so it routes through the multiword matcher).
+        if lowered in _TEST_TOOL_NAMES:
+            synthetic = f"{lowered} {command}".strip()
+            if _command_runs_tests(synthetic, [*patterns_to_check, "run_tests"]):
+                return True
+            continue
+
+        # (b #2401) Shell tool names, matched case-insensitively against one
+        # canonical set (see _SHELL_TOOL_NAMES). Empty command → nothing to judge.
+        # Recognition is per segment: matching the whole command would let a
+        # surviving segment lend eligibility to a filtered one, so a one-token
+        # prefix could defeat the read-only filter:
+        #     python -c "print(1)" && grep -rn pytest tests/
+        if lowered in _SHELL_TOOL_NAMES:
+            if not command:
                 continue
-            # #2376: filter and match per segment. Both must be per-segment —
-            # matching the whole command would let a surviving segment lend its
-            # eligibility to a filtered one, so a one-token prefix would defeat
-            # the read-only filter:
-            #     python -c "print(1)" && grep -rn pytest tests/
-            for segment in _executable_segments(cmd):
-                tokens = _shell_tokens(segment)
-                # Note: -v (verbose) is NOT excluded — only help/version and
-                # the collection-only flags, which assert nothing.
-                if any(token in _EXCLUDE_FLAG_TOKENS for token in tokens):
-                    continue
-                for pattern in patterns_to_check:
-                    if _pattern_matches_segment(pattern, segment, tokens):
-                        return True
-                # Repo convention (#2376 Fix C): executing a file under tests/
-                # is a test run whatever the interpreter, which no pattern list
-                # can express. Checked last so the cheaper substring match wins.
-                if _is_test_path_execution(segment):
-                    return True
+            if _command_runs_tests(command, patterns_to_check):
+                return True
 
     return False
 
@@ -1825,6 +2051,24 @@ PRE_COMMIT_CONVERGENCE_TIMEOUT = 600
 CI_PRE_COMMIT_SKIP = "bandit,no-commit-to-branch"
 MAX_CI_DIAGNOSTICS_ATTEMPTS = 6  # bound scheduler polls when failed job logs stay unavailable
 MAX_CLEANUP_ATTEMPTS = 10  # post-merge Git cleanup retries before giving up (#2043)
+# Cap on Tier1 CI-repair-exhaustion escalations back to a fresh development
+# round (#2443 PR-C). A Tier1 exhaustion (MAX / no-change / unchanged-signature)
+# means the PR branch and CI logs are still recoverable, so instead of terminal
+# `failed` we rebase the existing PR branch onto main, reset the CI-repair
+# counters, and re-enter development on the SAME PR/branch (ci_repair_context is
+# preserved so _get_ci_repair_prompt surfaces the prior failure). After this many
+# dev-round escalations the workflow falls through to a Tier2 terminal report +
+# `failed` — the repair is not converging and must not loop forever.
+MAX_MERGE_FAIL_DEV_ROUNDS = 3
+# Exhaustion categories that are recoverable (PR branch present, failure
+# actionable) and therefore eligible for a Tier1 dev-round escalation.
+_CI_REPAIR_TIER1_CATEGORIES = frozenset(
+    {
+        "ci_repair_exhausted",  # MAX_CI_REPAIR_ATTEMPTS reached
+        "ci_repair_no_change_exhausted",
+        "ci_repair_signature_unchanged",  # meaningful fingerprint unchanged
+    }
+)
 
 
 def _cleanup_backoff_time(attempts: int) -> str:
@@ -1887,6 +2131,11 @@ class AutonomousOrchestrator:
         # interrupts the current attempt without changing the workflow's active
         # phase/status, so the next process can retry it automatically.
         self._shutdown_requested = threading.Event()
+        # Bound by AutonomousScheduler after it acquires the distributed
+        # workflow lease. Direct/unit callers leave these unset and retain the
+        # legacy unfenced behavior.
+        self._scheduler_lock_owner: str | None = None
+        self._scheduler_lock_lost: threading.Event | None = None
 
         # Wire session_manager so agent sessions are persisted to DB
         from app.modules.workspace.session_manager import SessionManager
@@ -3402,6 +3651,14 @@ class AutonomousOrchestrator:
                 title="CI repair environment is incompatible",
                 error_message=runtime_error,
             )
+            self._emit_ci_repair_terminal_report(
+                wf,
+                pr_number,
+                category="ci_repair_environment_mismatch",
+                reason=runtime_error,
+                attempts=attempt,
+                branch_name=branch_name,
+            )
             self._update_workflow({"status": "failed", "error_message": runtime_error})
             return
 
@@ -3490,6 +3747,14 @@ class AutonomousOrchestrator:
                     "error_message": message,
                 },
             )
+            self._emit_ci_repair_terminal_report(
+                wf,
+                pr_number,
+                category="ci_repair_context_overflow",
+                reason=message,
+                attempts=attempt,
+                branch_name=branch_name,
+            )
             self._update_workflow({"status": "failed", "error_message": message})
             return
 
@@ -3509,6 +3774,14 @@ class AutonomousOrchestrator:
                         "status": "failed",
                         "error_message": message,
                     },
+                )
+                self._emit_ci_repair_terminal_report(
+                    wf,
+                    pr_number,
+                    category="ci_repair_branch_changed",
+                    reason=message,
+                    attempts=attempt,
+                    branch_name=branch_name,
                 )
                 self._update_workflow({"status": "failed", "error_message": message})
                 return
@@ -3583,6 +3856,14 @@ class AutonomousOrchestrator:
             milestone_updates["status"] = "failed"
             milestone_updates["error_message"] = message
             self.repo.update_milestone(repair_ms.get("milestone_id", ""), milestone_updates)
+            self._emit_ci_repair_terminal_report(
+                wf,
+                pr_number,
+                category="ci_repair_push_failed",
+                reason=message,
+                attempts=attempt,
+                branch_name=branch_name,
+            )
             self._update_workflow({"status": "failed", "error_message": message})
             return
 
@@ -3625,6 +3906,14 @@ class AutonomousOrchestrator:
             milestone_updates["error_message"] = message
             self.repo.update_milestone(repair_ms.get("milestone_id", ""), milestone_updates)
             if terminal:
+                self._emit_ci_repair_terminal_report(
+                    wf,
+                    pr_number,
+                    category="ci_repair_terminal",
+                    reason=message,
+                    attempts=attempt,
+                    branch_name=branch_name,
+                )
                 self._update_workflow({"status": "failed", "error_message": message})
             else:
                 self._update_workflow({"status": "merging", "error_message": message})
@@ -3635,6 +3924,14 @@ class AutonomousOrchestrator:
             milestone_updates["status"] = "failed"
             milestone_updates["error_message"] = message
             self.repo.update_milestone(repair_ms.get("milestone_id", ""), milestone_updates)
+            self._emit_ci_repair_terminal_report(
+                wf,
+                pr_number,
+                category="ci_repair_agent_failed",
+                reason=message,
+                attempts=attempt,
+                branch_name=branch_name,
+            )
             self._update_workflow({"status": "failed", "error_message": message})
             return
 
@@ -4074,7 +4371,7 @@ class AutonomousOrchestrator:
 
         return scopes
 
-    def _build_test_execution_context(self, wf: dict, gh: GitHubOps) -> str:
+    def _build_test_execution_context(self, wf: dict, gh: GitHubOps) -> tuple[str, list[str]]:
         """Build a targeted validation brief for the test phase."""
         project_path = wf.get("worktree_path") or wf.get("project_path", "")
         framework_type = _infer_test_framework(project_path, wf.get("cli_tool", ""))
@@ -4179,7 +4476,9 @@ class AutonomousOrchestrator:
                 guardrail,
             ]
         )
-        return "\n".join(context).strip()
+        # Return the changed files alongside the brief so the #2391 requirer can
+        # reuse them (single fetch — no second git diff at the gate).
+        return "\n".join(context).strip(), changed_files
 
     def _post_github_comment(
         self,
@@ -4313,6 +4612,7 @@ class AutonomousOrchestrator:
         but routing every transition through here makes phase/status mutation a
         single auditable path — the property Phase A requires.
         """
+        self._assert_scheduler_lock()
         patch: dict[str, object] = dict(result.workflow_patch)
 
         if result.outcome == "completed":
@@ -4605,6 +4905,173 @@ class AutonomousOrchestrator:
     def _resolve_recovery_head(self, main_gh: GitHubOps, wf: dict) -> tuple[str | None, str, dict]:
         return self._git_workspace.resolve_recovery_head(main_gh, wf)
 
+    def _emit_ci_repair_terminal_report(
+        self,
+        wf: dict,
+        pr_number: int,
+        *,
+        category: str,
+        reason: str,
+        attempts: int,
+        failure_names: str = "",
+        branch_name: str = "",
+    ) -> None:
+        """Post a Tier2 terminal report when CI repair exhausts (#2443 PR-A).
+
+        Makes an absorbing merge ``failed`` visible on its issue with a retry
+        entry point, instead of silent DB absorption (the #2443 gap). Does NOT
+        change the status machine — ``failed`` stays ``failed``. Idempotent: a
+        ``terminal_report_posted`` milestone (non-ci_repair_ prefix, so
+        completed milestones match) plus add_issue_comment's author-aware dedup,
+        so scheduler restart/replay never double-posts.
+        """
+        dev_round = int(wf.get("dev_round", 1) or 1)
+        if self._find_existing_milestone(
+            phase="merge",
+            milestone_type="terminal_report_posted",
+            dev_round=dev_round,
+            round_number=attempts,
+            completed=True,
+        ):
+            return
+        body = render_ci_repair_terminal_report(
+            category=category,
+            reason=reason,
+            attempts=attempts,
+            pr_number=pr_number,
+            failure_names=failure_names,
+            branch_name=branch_name,
+        )
+        try:
+            self._get_gh().add_issue_comment(pr_number, body)
+        except Exception as exc:
+            logger.warning("Failed to post CI repair terminal report to PR #%s: %s", pr_number, exc)
+        self._create_milestone(
+            phase="merge",
+            dev_round=dev_round,
+            round_number=attempts,
+            milestone_type="terminal_report_posted",
+            status="completed",
+            title=f"CI repair terminal report posted ({category})",
+            error_message=body[:500],
+        )
+
+    def _escalate_ci_repair_exhaustion(
+        self,
+        wf: dict,
+        pr_number: int,
+        *,
+        category: str,
+        reason: str,
+        attempts: int,
+        failure_names: str = "",
+        branch_name: str = "",
+    ) -> None:
+        """Route a CI-repair exhaustion to Tier1 (fresh dev round) or Tier2 (terminal).
+
+        #2443 PR-C. ``category`` distinguishes the two tiers:
+
+        * **Tier1** (``_CI_REPAIR_TIER1_CATEGORIES`` — MAX / no-change /
+          unchanged-signature): the PR branch and CI logs are recoverable, so a
+          fresh development pass may still succeed. While ``merge_fail_dev_rounds``
+          is under ``MAX_MERGE_FAIL_DEV_ROUNDS`` AND a PR branch exists, rebase
+          the existing branch onto main, reset the full CI-repair counter set,
+          and re-enter development on the SAME PR/branch.
+        * **Tier2** (every other category) or Tier1-at-cap: post the PR-A
+          terminal report and write absorbing ``failed``.
+
+        Replaces the PR-A ``_emit_ci_repair_terminal_report`` + ``failed`` pair
+        at the 3 Tier1 exhaustion sites; the 8 Tier2 sites keep PR-A's behavior.
+        """
+        merge_fail_dev_rounds = int(wf.get("merge_fail_dev_rounds", 0) or 0)
+        recoverable_branch = bool((wf.get("branch_name") or branch_name or "").strip())
+        if (
+            category in _CI_REPAIR_TIER1_CATEGORIES
+            and merge_fail_dev_rounds < MAX_MERGE_FAIL_DEV_ROUNDS
+            and recoverable_branch
+        ):
+            self._escalate_to_development_round(
+                wf,
+                pr_number,
+                reason=reason,
+                attempts=attempts,
+                branch_name=(wf.get("branch_name") or branch_name or ""),
+            )
+            return
+        # Tier2, or Tier1 at the dev-round cap: terminal report + absorbing failed.
+        self._emit_ci_repair_terminal_report(
+            wf,
+            pr_number,
+            category=category,
+            reason=reason,
+            attempts=attempts,
+            failure_names=failure_names,
+            branch_name=branch_name,
+        )
+        self._update_workflow({"status": "failed", "error_message": reason})
+
+    def _escalate_to_development_round(
+        self, wf: dict, pr_number: int, *, reason: str, attempts: int, branch_name: str
+    ) -> None:
+        """Re-enter development on the existing PR branch after a Tier1 exhaustion.
+
+        Rebase the PR branch onto current main first (best-effort — a sync
+        failure must not strand the workflow in ``failed``), record the
+        escalation, then transition to ``developing`` with a full CI-repair
+        counter reset. ``ci_repair_context`` is deliberately NOT cleared: the
+        development prompt's ``_get_ci_repair_prompt`` surfaces it so the fresh
+        dev round is aware of the prior CI failure rather than re-deriving the
+        same broken implementation blind (#2443 PR-C, plan N6).
+        """
+        dev_round = int(wf.get("dev_round", 1) or 1)
+        merge_fail_dev_rounds = int(wf.get("merge_fail_dev_rounds", 0) or 0)
+        if branch_name:
+            try:
+                gh = self._get_gh()
+                head_sha = ""
+                try:
+                    head_sha = gh.get_pr_head_sha(pr_number)
+                except Exception:
+                    pass
+                if head_sha:
+                    # Ignore the return: whether or not a sync push happened, the
+                    # branch is now current with main and development proceeds.
+                    self._sync_failed_pr_with_main(gh, branch_name, pr_number, head_sha)
+            except Exception as exc:
+                logger.warning(
+                    "Pre-development rebase failed for PR #%s (proceeding anyway): %s",
+                    pr_number,
+                    exc,
+                )
+        self._create_milestone(
+            phase="merge",
+            dev_round=dev_round,
+            round_number=attempts,
+            milestone_type="ci_repair_escalated_to_development",
+            status="completed",
+            title="CI repair exhausted — escalating to a fresh development round",
+            error_message=reason,
+        )
+        self._update_workflow(
+            {
+                "status": "developing",
+                "current_phase": "development",
+                "dev_round": dev_round + 1,
+                "merge_fail_dev_rounds": merge_fail_dev_rounds + 1,
+                # Full counter reset — a fresh dev round must not inherit stale
+                # CI-repair counts or a stale failure signature (mirrors
+                # retry_workflow, PR-B). ci_repair_context is intentionally left
+                # untouched (preserved as dev feedback).
+                "ci_repair_attempts": 0,
+                "ci_repair_transient_retries": 0,
+                "ci_repair_no_change_retries": 0,
+                "ci_diagnostics_attempts": 0,
+                "last_ci_failure_signature": "",
+                "last_ci_failure_head_sha": "",
+                "error_message": "",
+            }
+        )
+
     def _start_ci_repair_round(self, wf: dict, pr_number: int, failed_checks: list[dict]) -> None:
         """Repair merge-phase CI failures in-place on the existing PR branch."""
         dev_round = int(wf.get("dev_round", 1) or 1)
@@ -4633,6 +5100,13 @@ class AutonomousOrchestrator:
                     status="failed",
                     title="CI repair transient retry limit reached",
                     error_message=message,
+                )
+                self._emit_ci_repair_terminal_report(
+                    wf,
+                    pr_number,
+                    category="ci_repair_transient_exhausted",
+                    reason=message,
+                    attempts=previous_attempts,
                 )
                 self._update_workflow({"status": "failed", "error_message": message})
                 return
@@ -4663,7 +5137,13 @@ class AutonomousOrchestrator:
                     ),
                     error_message=message,
                 )
-                self._update_workflow({"status": "failed", "error_message": message})
+                self._escalate_ci_repair_exhaustion(
+                    wf,
+                    pr_number,
+                    category="ci_repair_no_change_exhausted",
+                    reason=message,
+                    attempts=previous_attempts,
+                )
                 return
             # Don't increment ci_repair_attempts; bump the no-change counter
             # (reset to 0 on a change-producing round).
@@ -4719,7 +5199,15 @@ class AutonomousOrchestrator:
                 title="CI automatic repair limit reached",
                 error_message=message,
             )
-            self._update_workflow({"status": "failed", "error_message": message})
+            self._escalate_ci_repair_exhaustion(
+                wf,
+                pr_number,
+                category="ci_repair_exhausted",
+                reason=message,
+                attempts=next_attempt,
+                failure_names=failure_names,
+                branch_name=branch_name,
+            )
             return
 
         # Resolve log evidence before consuming an attempt.  A repair agent
@@ -4810,6 +5298,13 @@ class AutonomousOrchestrator:
                     pending_ms.get("milestone_id", ""),
                     {"status": "failed", "error_message": terminal},
                 )
+                self._emit_ci_repair_terminal_report(
+                    wf,
+                    pr_number,
+                    category="ci_repair_diagnostics_exhausted",
+                    reason=terminal,
+                    attempts=previous_attempts,
+                )
                 self._update_workflow(
                     {
                         "status": "failed",
@@ -4890,7 +5385,15 @@ class AutonomousOrchestrator:
                 title="CI failures unchanged after automatic repair",
                 error_message=message,
             )
-            self._update_workflow({"status": "failed", "error_message": message})
+            self._escalate_ci_repair_exhaustion(
+                wf,
+                pr_number,
+                category="ci_repair_signature_unchanged",
+                reason=message,
+                attempts=next_attempt,
+                failure_names=failure_names,
+                branch_name=branch_name,
+            )
             return
 
         context = self._build_ci_repair_context(wf, gh, pr_number, failed_checks)
@@ -4955,9 +5458,24 @@ class AutonomousOrchestrator:
             repair_wf = self.workflow or repair_wf
         self._run_merge_ci_repair(repair_wf, gh, pr_number, failed_checks)
 
+    def _persist_workflow_update(self, updates: dict) -> dict | None:
+        """Persist one workflow patch, fenced by the scheduler lease when bound."""
+        lock_owner = getattr(self, "_scheduler_lock_owner", None)
+        if lock_owner:
+            updated = self.repo.update_workflow(
+                self._workflow_id,
+                updates,
+                required_lock_owner=lock_owner,
+            )
+            if updated is None:
+                self._mark_scheduler_lock_lost()
+                raise WorkflowPaused("Distributed workflow lock was lost")
+            return updated
+        return self.repo.update_workflow(self._workflow_id, updates)
+
     def _update_workflow(self, updates: dict):
         """Update workflow and emit event."""
-        self.repo.update_workflow(self._workflow_id, updates)
+        self._persist_workflow_update(updates)
         self._emit("workflow_updated", updates)
 
     def _cleanup_worktree_and_branch(
@@ -5050,6 +5568,7 @@ class AutonomousOrchestrator:
 
     def _accumulate_tokens(self, _result: AgentTaskResult):
         """Refresh workflow totals from the sessions linked to milestones."""
+        self._assert_scheduler_lock()
         self.repo.refresh_workflow_usage_from_sessions(self._workflow_id)
 
     def _persist_sandbox_attribution(self, result: AgentTaskResult) -> None:
@@ -5065,14 +5584,13 @@ class AutonomousOrchestrator:
         if not provider and not sandbox_id:
             return  # no sandbox ran (e.g. CLI not found before create)
         try:
-            self.repo.update_workflow(
-                self._workflow_id,
+            self._persist_workflow_update(
                 {
                     "sandbox_provider": provider,
                     "sandbox_id": sandbox_id,
                     "sandbox_generation": getattr(result, "sandbox_generation", None),
                     "sandbox_state": getattr(result, "sandbox_state", "") or None,
-                },
+                }
             )
         except Exception as e:  # pragma: no cover - best-effort attribution
             logger.warning(
@@ -5205,6 +5723,28 @@ class AutonomousOrchestrator:
             if not command_evidences:
                 return ExecutionVerdict.NOT_RUN, [], "no command execution evidence"
 
+            # #2390: ``session_id`` is stable across dev rounds, so query_by_session
+            # accumulates prior rounds' evidence into this round's verdict —
+            # forcing the structured layer to defer (non-pytest → INCONCLUSIVE) or
+            # false-FAIL (pytest broad→targeted). Scope to the current test
+            # milestone, which each ``_run_test_phase`` stamps on its evidence.
+            # Narrow ONLY when stamping is present in this session: an unstamped
+            # legacy session keeps session scope rather than silently NOT_RUN
+            # (fail-closed, but never worse than today).
+            current_milestone_id = (test_ms.get("milestone_id") or "").strip()
+            if current_milestone_id and any((ce.milestone_id or "") for ce in command_evidences):
+                command_evidences = [
+                    ce
+                    for ce in command_evidences
+                    if (ce.milestone_id or "") == current_milestone_id
+                ]
+                if not command_evidences:
+                    return (
+                        ExecutionVerdict.NOT_RUN,
+                        [],
+                        "no command evidence for current test milestone",
+                    )
+
             # Only parse commands that look like test invocations; an ``echo``
             # or ``ls`` must not be fed to the generic parser as if it were a
             # test run (#2046 — agent prose / non-test commands cannot judge).
@@ -5278,11 +5818,72 @@ class AutonomousOrchestrator:
         except Exception as e:
             logger.debug("structured fallback event emit failed: %s", e)
 
+    def _apply_test_evidence_requirer(
+        self,
+        milestone_id: str,
+        changed_files: list | None,
+        tree_path: str,
+        structured_evidences: list | None,
+    ) -> tuple[str, set[str]]:
+        """Compute the requirer's ``(mode, missing-domains)`` and emit its shadow event.
+
+        Recognizer-independent (#2391): required domains derive from changed paths,
+        covered domains from the milestone-scoped structured evidence; ``missing =
+        required - covered``. Fail-open — any compute error returns an empty
+        ``missing`` (never blocks a run on its own failure), and the observability
+        emit is separately guarded so a DB error cannot raise into the gate.
+        ``off`` computes and emits nothing; ``shadow``/``enforce`` both emit, and
+        only the caller acts on ``missing`` (under ``enforce``).
+        """
+        mode = _test_evidence_requirer_mode()
+        if mode == "off":
+            return "off", set()
+        try:
+            required = _required_evidence_domains(changed_files, tree_path)
+            covered = _evidence_domains_covered(structured_evidences)
+            missing = required - covered
+        except Exception as exc:
+            logger.debug("test-evidence requirer compute failed: %s", exc)
+            return mode, set()
+        try:
+            self.repo.create_event(
+                {
+                    "workflow_id": self._workflow_id,
+                    "milestone_id": milestone_id,
+                    "event_type": "test_evidence_requirer_shadow",
+                    "event_data": json.dumps(
+                        {
+                            "mode": mode,
+                            "required": sorted(required),
+                            "covered": sorted(covered),
+                            "missing": sorted(missing),
+                            "changed_files": list(changed_files or []),
+                            "milestone_id": milestone_id,
+                            "tree_path": tree_path,
+                            # Per-evidence framework/confidence so a genuine miss is
+                            # distinguishable from the generic-framework (F2) and
+                            # cross-milestone (F3) misfires before flipping enforce.
+                            "evidences": [
+                                {
+                                    "framework": getattr(ev, "framework", ""),
+                                    "parser_confidence": getattr(ev, "parser_confidence", ""),
+                                    "verdict": getattr(ev, "verdict", ""),
+                                }
+                                for ev in (structured_evidences or [])
+                            ],
+                        },
+                        ensure_ascii=False,
+                    ),
+                }
+            )
+        except Exception as exc:
+            logger.debug("test-evidence requirer shadow emit failed: %s", exc)
+        return mode, missing
+
     def _on_pid_registered(self, session_id: str, pid: int):
         """Persist agent subprocess PID to database for reliable cancel/pause."""
         try:
-            self.repo.update_workflow(
-                self._workflow_id,
+            self._persist_workflow_update(
                 {
                     "agent_pid": pid,
                     "agent_session_id": session_id,
@@ -5328,7 +5929,7 @@ class AutonomousOrchestrator:
                 updates["sandbox_remote_session_id"] = remote_session_id
             if effective_policy is not None:
                 updates["sandbox_effective_policy"] = json.dumps(effective_policy)
-            self.repo.update_workflow(self._workflow_id, updates)
+            self._persist_workflow_update(updates)
             logger.info(
                 "Registered sandbox %s (provider=%s) for workflow %s%s",
                 sandbox_id[:8],
@@ -5344,8 +5945,7 @@ class AutonomousOrchestrator:
         try:
             with self._session_lock:
                 if self._current_session_id == session_id:
-                    self.repo.update_workflow(
-                        self._workflow_id,
+                    self._persist_workflow_update(
                         {
                             "agent_pid": None,
                             "agent_session_id": "",
@@ -6396,8 +6996,58 @@ class AutonomousOrchestrator:
             for session_id in session_ids:
                 offsets.pop(session_id, None)
 
+    def bind_scheduler_lock(self, owner: str, lock_lost: threading.Event) -> None:
+        """Attach the scheduler's lease identity and shared loss signal."""
+        self._scheduler_lock_owner = owner
+        self._scheduler_lock_lost = lock_lost
+
+    def _mark_scheduler_lock_lost(self) -> None:
+        event = getattr(self, "_scheduler_lock_lost", None)
+        if event is not None:
+            event.set()
+        # Do not call prepare_for_shutdown() here: this helper can run from the
+        # PID-cleared callback while _session_lock is held, and re-entering that
+        # non-reentrant lock would deadlock. The heartbeat owns active process
+        # interruption; these signals fence every subsequent local action.
+        shutdown = getattr(self, "_shutdown_requested", None)
+        if shutdown is not None:
+            shutdown.set()
+        cancel = getattr(self, "_cancel_requested", None)
+        if cancel is not None:
+            cancel.set()
+
+    def ensure_scheduler_lock(self) -> bool:
+        """Refresh and fence the lease before an irreversible external action."""
+        owner = getattr(self, "_scheduler_lock_owner", None)
+        if not owner:
+            return not self._is_shutdown_requested()
+        lost = getattr(self, "_scheduler_lock_lost", None)
+        if lost is not None and lost.is_set():
+            return False
+        try:
+            held = self.repo.refresh_lock(self._workflow_id, owner)
+        except Exception:
+            logger.warning(
+                "Could not fence workflow %s before external mutation",
+                self._workflow_id[:8],
+                exc_info=True,
+            )
+            return False
+        if held:
+            return True
+        self._mark_scheduler_lock_lost()
+        return False
+
+    def _assert_scheduler_lock(self) -> None:
+        """Raise the pause control signal when this worker has been superseded."""
+        if not self.ensure_scheduler_lock():
+            raise WorkflowPaused("Distributed workflow lock was lost")
+
     def _is_shutdown_requested(self) -> bool:
         """Support lightweight test/legacy instances constructed without ``__init__``."""
+        lock_lost = getattr(self, "_scheduler_lock_lost", None)
+        if lock_lost is not None and lock_lost.is_set():
+            return True
         event = getattr(self, "_shutdown_requested", None)
         return bool(event and event.is_set())
 
@@ -6795,7 +7445,7 @@ class AutonomousOrchestrator:
             if gh is None:
                 return True
             res = gh.get_issue(int(issue_number))
-            return (res or {}).get("state", "open") == "open"
+            return str((res or {}).get("state", "open")).lower() == "open"
         except Exception:
             # Fail open: if we can't tell, don't spuriously reopen.
             return True
@@ -6816,14 +7466,33 @@ class AutonomousOrchestrator:
         gh = self._get_gh()
         if gh is None:
             return None
-        tmp_dir = tempfile.mkdtemp(prefix="ace-verify-")
+        try:
+            available = gh.ensure_commit_available(merge_sha)
+        except Exception:
+            logger.exception(
+                "acceptance verifier: failed to fetch merge commit locally: %s", merge_sha
+            )
+            return None
+        if not available:
+            logger.error("acceptance verifier: merge commit unavailable locally: %s", merge_sha)
+            return None
+        wf = self.workflow or {}
+        project_path = str(wf.get("project_path") or "")
+        if not project_path:
+            logger.error("acceptance verifier: project path unavailable")
+            return None
+        try:
+            tmp_dir = gh.create_verification_worktree_dir(project_path)
+        except Exception:
+            logger.exception("acceptance verifier: failed to allocate owner-readable worktree")
+            return None
         try:
             # Detached HEAD at the merge commit: a read-only throwaway view.
             gh._run_git(["worktree", "add", "--detach", tmp_dir, merge_sha])
         except Exception:
             logger.exception("acceptance verifier: failed to checkout merged main @ %s", merge_sha)
             # Clean up the empty dir so no half-created state lingers.
-            _remove_worktree_dir(gh, tmp_dir)
+            _remove_worktree_dir(gh, tmp_dir, project_path)
             return None
         return tmp_dir
 
@@ -6836,7 +7505,8 @@ class AutonomousOrchestrator:
         if not path:
             return
         gh = self._get_gh()
-        _remove_worktree_dir(gh, path)
+        wf = self.workflow or {}
+        _remove_worktree_dir(gh, path, str(wf.get("project_path") or ""))
 
     def _run_verification_agent(
         self, *, snapshot, merge_sha, base_sha, issue_number, pr_number
@@ -6857,7 +7527,12 @@ class AutonomousOrchestrator:
 
         checkout_path = self._checkout_merged_main(merge_sha)
         if not checkout_path:
-            return {"verdicts": [], "snapshot": None, "verified_by": verified_by}
+            return {
+                "verdicts": [],
+                "snapshot": None,
+                "verified_by": verified_by,
+                "infra_error": "merged-main checkout failed",
+            }
         try:
             # Spawn the agent against the merged-main checkout, NOT the dev
             # worktree. We override worktree_path/project_path on a shallow
@@ -6878,9 +7553,22 @@ class AutonomousOrchestrator:
             )
         except Exception:
             logger.exception("acceptance verifier spawn failed for issue %s", issue_number)
-            return {"verdicts": [], "snapshot": None, "verified_by": verified_by}
+            return {
+                "verdicts": [],
+                "snapshot": None,
+                "verified_by": verified_by,
+                "infra_error": "verification agent spawn failed",
+            }
         finally:
             self._remove_verification_worktree(checkout_path)
+        if result is None or getattr(result, "success", False) is not True:
+            error_code = getattr(result, "error_code", None) if result is not None else None
+            return {
+                "verdicts": [],
+                "snapshot": None,
+                "verified_by": verified_by,
+                "infra_error": f"verification agent failed ({error_code or 'runner error'})",
+            }
         parsed = self._parse_verifier_output(result)
         parsed["verified_by"] = verified_by
         return parsed
@@ -6915,7 +7603,11 @@ class AutonomousOrchestrator:
 
         text = self._artifact_text(result) if result is not None else ""
         if not text:
-            return {"verdicts": [], "snapshot": None}
+            return {
+                "verdicts": [],
+                "snapshot": None,
+                "infra_error": "verification agent returned empty output",
+            }
         # Grab the last fenced ```json ... ``` block (the agent may preface reasoning).
         blocks = _re.findall(r"```(?:json)?\s*(\{.*?\})\s*```", text, _re.DOTALL)
         candidate = blocks[-1] if blocks else text
@@ -6925,9 +7617,30 @@ class AutonomousOrchestrator:
             logger.warning(
                 "acceptance verifier output was not valid JSON; treating as indeterminate"
             )
-            return {"verdicts": [], "snapshot": None}
+            return {
+                "verdicts": [],
+                "snapshot": None,
+                "infra_error": "verification agent output was not valid JSON",
+            }
         if not isinstance(parsed, dict):
-            return {"verdicts": [], "snapshot": None}
+            return {
+                "verdicts": [],
+                "snapshot": None,
+                "infra_error": "verification agent output was not an object",
+            }
+        verdicts = parsed.get("verdicts", [])
+        if not isinstance(verdicts, list) or any(not isinstance(item, dict) for item in verdicts):
+            return {
+                "verdicts": [],
+                "snapshot": None,
+                "infra_error": "verification agent verdicts were malformed",
+            }
+        if parsed.get("snapshot") is not None and not isinstance(parsed.get("snapshot"), dict):
+            return {
+                "verdicts": [],
+                "snapshot": None,
+                "infra_error": "verification agent snapshot was malformed",
+            }
         parsed.setdefault("verdicts", [])
         parsed.setdefault("snapshot", None)
         return parsed
@@ -8849,14 +9562,19 @@ class AutonomousOrchestrator:
             status="in_progress",
             title=f"Running tests round {dev_round}",
         )
+        requirer_changed_files: list[str] = []
         try:
-            targeted_test_context = self._build_test_execution_context(wf, gh)
+            targeted_test_context, requirer_changed_files = self._build_test_execution_context(
+                wf, gh
+            )
         except Exception as exc:
             logger.warning(
                 "Failed to build targeted test context for workflow %s: %s",
                 self._workflow_id[:8],
                 exc,
             )
+            # requirer_changed_files stays [] → the requirer requires nothing
+            # (fail-open) when the change set is unavailable.
             targeted_test_context = (
                 "## 本轮定向验证上下文\n"
                 "- 自动构建验证上下文失败，请先自行检查最终方案、改动文件和仓库测试约定，"
@@ -9268,6 +9986,46 @@ class AutonomousOrchestrator:
             )
         )
 
+        # #2391 F1 (PR review, enforce-phase): detect the agent's unfixable signal
+        # up here so the requirer guard below can exclude it. Situation B (an
+        # [UNFIXABLE] report) must keep taking its dev-round retry, never be
+        # preempted by the requirer's test retry. Cheap text scan; harmless on the
+        # early-return paths that don't reach Situation B.
+        test_response = self._artifact_visible_text(test_result) or self._artifact_text(test_result)
+        _unfixable_marker = "[UNFIXABLE]"
+        has_unfixable = _unfixable_marker in test_response
+        if not has_unfixable:
+            # Fallback: check legacy keywords for backward compatibility
+            _legacy_unfixable = [
+                "无法修复",
+                "不可修复",
+                "cannot fix",
+                "unable to fix",
+            ]
+            has_unfixable = any(kw in test_response.lower() for kw in _legacy_unfixable)
+
+        # #2391 requirer: derive the evidence domains this change *requires* from
+        # its changed paths and compare against the domains actually covered by
+        # passing evidence (recognizer-independent, fail-open). Shadow-emits an
+        # observability event always; only ``enforce`` mode acts on a missing
+        # domain, and only for a run that would otherwise proceed to pr_review —
+        # excluding inconclusive, skipped, agent-session-failed (Situation A) and
+        # unfixable (Situation B) runs, each of which has its own handling below.
+        requirer_mode, requirer_missing = self._apply_test_evidence_requirer(
+            test_ms.get("milestone_id", ""),
+            requirer_changed_files,
+            wf.get("worktree_path") or wf.get("project_path", ""),
+            _structured_evidences,
+        )
+        requirer_enforced = (
+            requirer_mode == "enforce"
+            and bool(requirer_missing)
+            and not test_result_inconclusive
+            and not tests_actually_skipped
+            and test_result.success
+            and not has_unfixable
+        )
+
         # Post test results to issue
         issue_number = wf.get("github_issue_number")
         if issue_number:
@@ -9290,6 +10048,14 @@ class AutonomousOrchestrator:
                 )
             elif tests_actually_skipped:
                 status_line = "⚠️ Tests were not actually run — see details below"
+            elif requirer_enforced:
+                # #2391 N1: the requirer retry fires below; without this arm the
+                # comment would read "All tests passed" and then re-run.
+                status_line = (
+                    "⚠️ Changed "
+                    + ", ".join(sorted(requirer_missing))
+                    + " but this run has no passing evidence for it — retrying"
+                )
             elif test_result.success:
                 status_line = "✅ All tests passed"
             else:
@@ -9315,6 +10081,25 @@ class AutonomousOrchestrator:
                     "Test execution is inconclusive: a test command was invoked, but no "
                     "structured TEST_STATUS or recognizable pass/fail output was captured"
                 )
+            self.repo.update_milestone(
+                test_ms.get("milestone_id", ""),
+                {"status": "failed", "error_message": message},
+            )
+            test_retries = int(wf.get("test_retries", 0) or 0) + 1
+            if test_retries <= MAX_TEST_RETRIES:
+                self._update_workflow({"test_retries": test_retries})
+                return
+            self._update_workflow({"status": "failed", "error_message": message})
+            return
+
+        # #2391 enforce: a required evidence domain (e.g. changed frontend) had no
+        # passing evidence, on a run that would otherwise proceed to pr_review.
+        # Force the same retry the inconclusive path uses, capped by
+        # MAX_TEST_RETRIES. ``requirer_enforced`` already excludes the
+        # inconclusive/skipped/agent-failed/unfixable runs handled above/below,
+        # and is False in the default shadow mode — a no-op until enforce is on.
+        if requirer_enforced:
+            message = _requirer_reason(requirer_missing)
             self.repo.update_milestone(
                 test_ms.get("milestone_id", ""),
                 {"status": "failed", "error_message": message},
@@ -9424,20 +10209,9 @@ class AutonomousOrchestrator:
                 )
                 return
 
-        # Situation B: test agent succeeded but reported unfixable failures
-        test_response = self._artifact_visible_text(test_result) or self._artifact_text(test_result)
-        _unfixable_marker = "[UNFIXABLE]"
-        has_unfixable = _unfixable_marker in test_response
-        if not has_unfixable:
-            # Fallback: check legacy keywords for backward compatibility
-            _legacy_unfixable = [
-                "无法修复",
-                "不可修复",
-                "cannot fix",
-                "unable to fix",
-            ]
-            has_unfixable = any(kw in test_response.lower() for kw in _legacy_unfixable)
-
+        # Situation B: test agent succeeded but reported unfixable failures.
+        # ``has_unfixable`` is computed above (so the #2391 requirer guard can
+        # exclude it); this is where an [UNFIXABLE] run takes its dev-round retry.
         if has_unfixable:
             dev_retries = wf.get("dev_retries_on_test_fail", 0) + 1
             if dev_retries <= MAX_DEV_RETRIES_ON_TEST_FAIL:
@@ -9591,6 +10365,25 @@ class AutonomousOrchestrator:
             self._update_workflow({"status": "failed", "error_message": message})
             return False
 
+        def pause_fix(message: str) -> bool:
+            """Pause (not fail) when auto-staging pre-existing changes is blocked.
+
+            A dirty-worktree auto-stage failure is recoverable — most often a
+            cross-user object-DB permission error (the service user owns
+            .git/objects while the fix agent runs as system_account, so the write
+            is denied) that the operator can fix. Terminal ``failed`` stranded the
+            workflow: ``paused`` is reachable via POST /resume (after the operator
+            fixes the tree/perms), preserves the worktree for diagnosis, and aligns
+            pr_review with the dev/CI-repair paths, which warn-and-continue rather
+            than hard-failing on staging (#2441).
+            """
+            self.repo.update_milestone(
+                fix_ms.get("milestone_id", ""),
+                {"status": "failed", "error_message": message},
+            )
+            self._update_workflow({"status": "paused", "error_message": message})
+            return False
+
         fix_prompt = (
             AUTONOMOUS_CONTEXT
             + f"根据以下代码审查意见修改代码：\n\n{self._clean_agent_text(review_text)}\n\n"
@@ -9680,7 +10473,7 @@ class AutonomousOrchestrator:
                         gh.reset_hard_to(commit_before_staging)
                     except Exception:
                         pass
-                return fail_fix(
+                return pause_fix(
                     f"Worktree was dirty and auto-staging pre-existing changes failed: {exc}"
                 )
 

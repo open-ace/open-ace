@@ -23,11 +23,11 @@ cd open-ace
 python3 -m venv venv
 source venv/bin/activate  # Windows 上使用: venv\Scripts\activate
 
-# 安装依赖
-pip install -r requirements.txt
+# 安装与 GitHub CI 完全一致的依赖集合
+pip install -r requirements-ci.lock
 
-# 安装开发依赖
-pip install pytest pytest-cov playwright
+# 仅浏览器 E2E 测试需要
+playwright install chromium
 
 # 初始化配置
 python3 cli.py config init
@@ -38,7 +38,9 @@ python3 cli.py config init
 ```
 open-ace/
 ├── server.py              # Web 服务器入口
-├── requirements.txt    # Python 依赖
+├── requirements.txt       # 生产依赖策略
+├── requirements-ci.in     # 开发/CI 工具及生产依赖入口
+├── requirements-ci.lock   # 本地/GitHub CI 统一的解析结果
 │
 ├── app/                # Flask 应用
 │   ├── __init__.py     # create_app() 工厂函数
@@ -217,18 +219,21 @@ tests/
 │   ├── test_governance_repo_sqlite.py
 │   └── ...
 ├── e2e/                # 端到端测试
+│   ├── browser/        # 浏览器行为（regression 使用 marker）
 │   ├── manage/         # 管理 UI 测试
 │   ├── remote/         # 远程工作区测试
 │   └── terminal/       # 终端测试
-├── regression/         # 完整回归测试套件
-├── performance/        # 性能测试
-├── ui/                 # UI 截图/交互测试
-├── issues/             # Issue 相关测试
+├── performance/        # 时间/资源测试（定时 lane）
+├── issues/             # 历史隔离区；禁止新增测试
 │   ├── 164/
 │   ├── 517/
 │   └── ...
 └── conftest.py         # 共享 fixtures
 ```
+
+回归和 issue 来源使用 pytest marker 表达，不再创建顶层目录或复制测试。新的缺陷
+测试只放在一个运行层级，并添加 `pytest.mark.regression` 与
+`pytest.mark.issue(number)`；迁移和 CI 规则见 `docs/TEST_LAYERS.md`。
 
 ### 编写测试
 

@@ -172,6 +172,7 @@ PHASE_TO_STATUS = {
     "report": "reporting",
     "wait": "waiting",
     "merge": "merging",
+    "acceptance_verification": "verification_pending",
 }
 
 ISSUE_URL_RE = re.compile(r"^https://github\.com/[^/\s]+/[^/\s]+/issues/(\d+)(?:[/?#].*)?$", re.I)
@@ -1215,6 +1216,19 @@ def retry_workflow(workflow_id):
         "status": status,
         "error_message": "",
         "retry_count": retry_count + 1,
+        # PR-B (#2443): reset the full CI-repair counter set + failure signature
+        # so a retried failed workflow starts CI repair from a clean state
+        # instead of being instantly re-exhausted by residual counts or a stale
+        # signature guard.
+        "ci_repair_attempts": 0,
+        "ci_repair_transient_retries": 0,
+        "ci_repair_no_change_retries": 0,
+        "ci_diagnostics_attempts": 0,
+        "last_ci_failure_signature": "",
+        "last_ci_failure_head_sha": "",
+        # PR-C (#2443): reset the Tier1 dev-round escalation budget too, so a
+        # retried workflow gets a fresh MAX_MERGE_FAIL_DEV_ROUNDS allowance.
+        "merge_fail_dev_rounds": 0,
     }
     # Optional per-workflow scope bump (#2309): a failed round whose only
     # blocker was the changed-files cap can be retried with a higher limit

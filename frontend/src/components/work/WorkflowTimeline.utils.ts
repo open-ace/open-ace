@@ -243,3 +243,33 @@ export function findForkMilestoneIndex(
 }
 
 export { formatTokens };
+const PHASE_LABEL_KEYS: Record<string, string> = {
+  preparation: 'autoPhasePreparation',
+  planning: 'autoPhasePlanning',
+  development: 'autoPhaseDevelopment',
+  pr_review: 'autoPhasePRReview',
+  report: 'autoPhaseReport',
+  wait: 'autoPhaseWait',
+  merge: 'autoPhaseMerge',
+  acceptance_verification: 'autoPhaseAcceptanceVerification',
+};
+
+const ACTIVE_STATUS_HINT_KEYS: Record<string, string> = {
+  queued: 'autoActiveHintQueued',
+  pending: 'autoActiveHintPending',
+  preparing: 'autoActiveHintPreparing',
+  planning: 'autoActiveHintPlanning',
+  developing: 'autoActiveHintDeveloping',
+  pr_review: 'autoActiveHintPrReview',
+  reporting: 'autoActiveHintReporting',
+  merging: 'autoActiveHintMerging',
+  verification_pending: 'autoActiveHintVerificationPending',
+};
+
+export function getWorkflowPhaseLabelKey(phase: string): string {
+  return PHASE_LABEL_KEYS[phase] ?? 'autoPhasePreparation';
+}
+
+export function getActiveStatusHintKey(status: string): string | undefined {
+  return ACTIVE_STATUS_HINT_KEYS[status];
+}

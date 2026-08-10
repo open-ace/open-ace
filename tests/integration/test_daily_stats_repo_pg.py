@@ -1,5 +1,7 @@
 """Integration tests for DailyStatsRepository against real PostgreSQL database."""
 
+import uuid
+
 import pytest
 
 # Marks every test in this module as requiring a live PostgreSQL server.
@@ -23,9 +25,20 @@ def _insert_daily_message(
     """Insert a row into daily_messages for testing."""
     db.execute(
         """INSERT INTO daily_messages
-           (date, tool_name, host_name, tokens_used, input_tokens, output_tokens, timestamp)
-           VALUES (%s, %s, %s, %s, %s, %s, %s)""",
-        (date, tool_name, host_name, tokens, input_tokens, output_tokens, timestamp),
+           (date, tool_name, host_name, message_id, role,
+            tokens_used, input_tokens, output_tokens, timestamp)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+        (
+            date,
+            tool_name,
+            host_name,
+            f"test-{uuid.uuid4().hex}",
+            "assistant",
+            tokens,
+            input_tokens,
+            output_tokens,
+            timestamp,
+        ),
     )
 
 
