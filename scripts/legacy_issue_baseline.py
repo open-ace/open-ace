@@ -175,19 +175,21 @@ def _is_timeout(exception_type: str, message: str) -> bool:
     return "timed out" in blob or "timeout" in blob
 
 
-def classify(
-    element: str, has_nodeid_property: bool, exception_type: str, message: str, nodeid: str
-) -> str:
+def classify(element: str, exception_type: str, message: str, nodeid: str) -> str:
     """Map a JUnit ``<failure>``/``<error>`` to a stable category.
 
     ``element`` is ``"failure"`` or ``"error"``. Collection errors are detected
-    by the absence of the ``openace_nodeid`` property (a collection failure
-    never creates a test item, so the autouse conftest fixture never ran).
+    by the nodeid carrying no ``::`` (a module that failed to import never
+    produces a test item, so its reconstructed identity is module-level). Do
+    NOT key on the ``openace_nodeid`` property's absence: setup errors can also
+    lack it when the autouse fixture did not get to run (e.g. an earlier
+    fixture failed), and those must be baselined as ``setup_error``, not refused
+    as collection errors.
     """
     if element == "failure":
         return "assertion_failure" if exception_type == "AssertionError" else "test_body_exception"
     # element == "error"
-    if not has_nodeid_property or "::" not in nodeid:
+    if "::" not in nodeid:
         return "collection_error"
     if _is_timeout(exception_type, message):
         return "timeout"
@@ -242,6 +244,20 @@ def _short_summary(text: str, limit: int = 200) -> str:
     return text
 
 
+# Environment-specific noise that must not leak into the tracked baseline
+# (handoff §4.2): absolute runner/workspace paths, ephemeral ports, temp HOME.
+_RUNNER_PREFIX_RX = re.compile(r"/(?:[^/\s]+/)+open-ace/")
+_PORT_RX = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}:\d+\b|\b(?:localhost|0\.0\.0\.0):\d+\b")
+_TMPHOME_RX = re.compile(r"\.openace-ci-[A-Za-z0-9_-]+")
+
+
+def _scrub_env(text: str) -> str:
+    text = _RUNNER_PREFIX_RX.sub("", text or "")
+    text = _TMPHOME_RX.sub(".openace-ci-<tmp>", text)
+    text = _PORT_RX.sub("<host:port>", text)
+    return text
+
+
 def _parse_testcase(tc: ET.Element) -> ParsedTestcase | None:
     classname = tc.get("classname", "")
     name = tc.get("name", "")
@@ -271,8 +287,8 @@ def _parse_testcase(tc: ET.Element) -> ParsedTestcase | None:
         return ParsedTestcase(nodeid, "pass", "pass", "", "")
 
     exception_type = (node.get("type") or "").strip()
-    message = _short_summary(node.get("message") or (node.text or ""))
-    category = classify(element, has_property, exception_type, message, nodeid)
+    message = _short_summary(_scrub_env(node.get("message") or (node.text or "")))
+    category = classify(element, exception_type, message, nodeid)
     return ParsedTestcase(nodeid, outcome, category, exception_type, message)
 
 

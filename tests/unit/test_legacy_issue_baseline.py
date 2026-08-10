@@ -114,36 +114,42 @@ def test_baseline_rejects_unknown_schema():
 
 
 @pytest.mark.parametrize(
-    "element,exc,msg,nodeid,has_prop,expected",
+    "element,exc,msg,nodeid,expected",
     [
         (
             "failure",
             "AssertionError",
             "assert 1==2",
             "tests/issues/716/t.py::a",
-            True,
             "assertion_failure",
         ),
-        ("failure", "ValueError", "bad", "tests/issues/716/t.py::a", True, "test_body_exception"),
+        ("failure", "ValueError", "bad", "tests/issues/716/t.py::a", "test_body_exception"),
         (
             "error",
             "TimeoutError",
             "timed out after 240s",
             "tests/issues/716/t.py::a",
-            True,
             "timeout",
         ),
-        ("error", "Exception", "", "tests/issues/716/t.py::a", True, "setup_error"),
-        ("error", "Exception", "", "tests.issues.716.test_broken", False, "collection_error"),
+        ("error", "Exception", "", "tests/issues/716/t.py::a", "setup_error"),
+        # setup error lacking the openace_nodeid property must NOT be collection_error
+        (
+            "error",
+            "Exception",
+            "failed on setup",
+            "tests/issues/144/e2e_x.py::test_a",
+            "setup_error",
+        ),
+        ("error", "Exception", "", "tests.issues.716.test_broken", "collection_error"),
     ],
 )
-def test_classify(element, exc, msg, nodeid, has_prop, expected):
-    assert lib.classify(element, has_prop, exc, msg, nodeid) == expected
+def test_classify(element, exc, msg, nodeid, expected):
+    assert lib.classify(element, exc, msg, nodeid) == expected
 
 
 def test_classify_collection_word_in_normal_test_is_not_collection_error():
     assert (
-        lib.classify("error", True, "Exception", "collection", "tests/issues/716/t.py::test_a")
+        lib.classify("error", "Exception", "collection", "tests/issues/716/t.py::test_a")
         == "setup_error"
     )
 
@@ -227,6 +233,21 @@ def test_parse_corrupt_xml_raises(tmp_path):
 def test_parse_empty_raises(tmp_path):
     with pytest.raises(BaselineError):
         lib.parse_junit(_write(tmp_path, "a.xml", _xml("", tests=0)))
+
+
+def test_parse_summary_scrubs_runner_paths_and_ports(tmp_path):
+    body = (
+        '<testcase classname="tests.issues.1071.test_x" name="test_a">'
+        '<properties><property name="openace_nodeid" value="tests/issues/1071/test_x.py::test_a"/></properties>'
+        '<failure message="AttributeError from /home/runner/work/open-ace/open-ace/app/routes/workspace.py at localhost:19888" type="AttributeError"></failure>'
+        "</testcase>"
+    )
+    xml = _xml(body, tests=1, failures=1)
+    tcs, _ = lib.parse_junit(_write(tmp_path, "a.xml", xml))
+    assert "/home/runner" not in tcs[0].summary
+    assert "localhost:19888" not in tcs[0].summary
+    assert "app/routes/workspace.py" in tcs[0].summary  # repo-relative retained
+    assert "<host:port>" in tcs[0].summary
 
 
 # --- Task 4: manifest -------------------------------------------------------
