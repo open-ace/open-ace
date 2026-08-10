@@ -3782,7 +3782,7 @@
       "issue_number": "814",
       "nodeid": "tests/issues/814/test_worktree_path_selfheal.py::TestEnsureWorktreeSelfHeal::test_no_update_when_path_already_canonical",
       "outcome": "failure",
-      "summary": "app.modules.workspace.autonomous.github_ops.GitHubOpsError: Worktree branch mismatch (<MagicMock name='mock.get_current_branch()' id='139766050919888'> != auto-dev/1390d553) with uncommitted changes.…"
+      "summary": "app.modules.workspace.autonomous.github_ops.GitHubOpsError: Worktree branch mismatch (<MagicMock name='mock.get_current_branch()' id='140280809876752'> != auto-dev/1390d553) with uncommitted changes.…"
     },
     {
       "category": "test_body_exception",
@@ -3790,7 +3790,7 @@
       "issue_number": "814",
       "nodeid": "tests/issues/814/test_worktree_path_selfheal.py::TestEnsureWorktreeSelfHeal::test_normalizes_stale_dotdot_path_when_valid",
       "outcome": "failure",
-      "summary": "app.modules.workspace.autonomous.github_ops.GitHubOpsError: Worktree branch mismatch (<MagicMock name='mock.get_current_branch()' id='139766021823888'> != auto-dev/1390d553) with uncommitted changes.…"
+      "summary": "app.modules.workspace.autonomous.github_ops.GitHubOpsError: Worktree branch mismatch (<MagicMock name='mock.get_current_branch()' id='140280490027536'> != auto-dev/1390d553) with uncommitted changes.…"
     },
     {
       "category": "test_body_exception",
@@ -4198,7 +4198,7 @@
       "issue_number": "913",
       "nodeid": "tests/issues/913/test_pr909_review_feedback.py::TestGetCheckFailureExcerpt::test_ci_repair_context_skips_excerpt_failure",
       "outcome": "failure",
-      "summary": "assert '失败摘录' not in \"PR #42 在合并前...9645632912'>\""
+      "summary": "assert '失败摘录' not in \"PR #42 在合并前...9624972304'>\""
     },
     {
       "category": "test_body_exception",
@@ -4306,10 +4306,10 @@
     }
   ],
   "provenance": {
-    "generated_command": "python scripts/legacy_issue_baseline.py snapshot --junit /tmp/2457-artifacts/*/test-results/issues-*.xml --source-run 31347939641",
-    "reference_commit": "39fce2429b1a06e3331c8a09b11e62bf40c931e8",
-    "run_contract": "extended-tests issue-tests, --isolated-home --reruns 1 --timeout 240, 4 shards; tests/issues/604 hang skipped",
-    "source_run": "31347939641",
+    "generated_command": "python scripts/legacy_issue_baseline.py snapshot --junit /tmp/2457-r3/issue-tests-*/test-results/issues-*.xml --source-run 31349649530",
+    "reference_commit": "1de8acb17bd03da7a421dc846adbfd002e83987c",
+    "run_contract": "extended-tests issue-tests, --isolated-home --reruns 1 --timeout 240 --continue-on-collection-errors, 4 shards; tests/issues/604 hang skipped",
+    "source_run": "31349649530",
     "source_run_url": ""
   },
   "schema": "openace-legacy-issue-failures",
