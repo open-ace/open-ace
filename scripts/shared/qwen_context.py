@@ -32,9 +32,7 @@ _PHASE_HEADER_RE = re.compile(r"## Phase \d+\s+[—-]\s+", re.IGNORECASE)
 
 # Some CLIs prefix the startup-context reminder with <system-reminder>; the
 # date line may vary, so anchor on the Qwen-specific sentence.
-_STARTUP_REMINDER_RE = re.compile(
-    r"<system-reminder>\s*The current date is:", re.IGNORECASE
-)
+_STARTUP_REMINDER_RE = re.compile(r"<system-reminder>\s*The current date is:", re.IGNORECASE)
 
 
 def is_qwen_system_context(content) -> bool:
