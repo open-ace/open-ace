@@ -7,38 +7,87 @@ handling the send_message command, preventing duplicate message delivery.
 
 from __future__ import annotations
 
-import importlib.util as _importlib_util
+import importlib.util
 import os
 import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-# Make the remote-agent package importable without installing it.
-# NOTE: Insert at position 0 so remote-agent modules take precedence
-# over scripts/shared/config.py which conflicts on "config" module name.
-_agent_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "remote-agent"))
-sys.path.insert(0, _agent_path)
 
-# Patch heavy / external dependencies before importing agent.py
-sys.modules.setdefault("requests", MagicMock())
-sys.modules.setdefault("cli_settings", MagicMock())
-sys.modules.setdefault("executor", MagicMock())
-sys.modules.setdefault("session_sync", MagicMock())
-sys.modules.setdefault("system_info", MagicMock())
+def _import_remote_agent():
+    """Import RemoteAgent from remote-agent with proper module handling.
 
-# Pre-import config from remote-agent to avoid conflict with scripts/shared/config.py
-_config_path = os.path.join(_agent_path, "config.py")
-_config_spec = _importlib_util.spec_from_file_location("config", _config_path)
-assert _config_spec is not None and _config_spec.loader is not None
-_config_module = _importlib_util.module_from_spec(_config_spec)
-sys.modules["config"] = _config_module
-_config_spec.loader.exec_module(_config_module)
+    This function handles the config module conflict between
+    remote-agent/config.py and scripts/shared/config.py.
+    """
+    agent_path = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "..", "remote-agent")
+    )
+    path_added = False
+    if agent_path not in sys.path:
+        sys.path.insert(0, agent_path)
+        path_added = True
 
-from agent import RemoteAgent  # noqa: E402
+    # Save current config module
+    original_config = sys.modules.get("config")
+
+    # Track which mock modules we added
+    mock_modules = ["requests", "cli_settings", "executor", "session_sync", "system_info"]
+    original_modules = {name: sys.modules.get(name) for name in mock_modules}
+
+    try:
+        # Load remote-agent/config.py temporarily
+        config_path = os.path.join(agent_path, "config.py")
+        spec = importlib.util.spec_from_file_location("config_remote_agent_2411", config_path)
+        if spec and spec.loader:
+            config_module = importlib.util.module_from_spec(spec)
+            sys.modules["config"] = config_module
+            spec.loader.exec_module(config_module)
+
+        # Mock heavy dependencies
+        for name in mock_modules:
+            sys.modules.setdefault(name, MagicMock())
+
+        # Import agent using the already-imported importlib module
+        agent = importlib.import_module("agent")
+        return agent.RemoteAgent
+
+    finally:
+        # Restore original config module
+        if original_config is not None:
+            sys.modules["config"] = original_config
+        else:
+            # No original config, need to load scripts/shared/config.py
+            sys.modules.pop("config", None)
+            # Explicitly load scripts/shared/config.py
+            shared_path = os.path.abspath(
+                os.path.join(os.path.dirname(__file__), "..", "..", "scripts", "shared")
+            )
+            shared_config_path = os.path.join(shared_path, "config.py")
+            if os.path.exists(shared_config_path):
+                shared_spec = importlib.util.spec_from_file_location("config", shared_config_path)
+                if shared_spec and shared_spec.loader:
+                    shared_config_module = importlib.util.module_from_spec(shared_spec)
+                    sys.modules["config"] = shared_config_module
+                    shared_spec.loader.exec_module(shared_config_module)
+
+        # Restore original mock modules (remove our mocks if we added them)
+        for name in mock_modules:
+            if original_modules[name] is None and name in sys.modules:
+                # We added this mock, remove it
+                sys.modules.pop(name, None)
+
+        # Remove agent_path from sys.path to avoid affecting other tests
+        if path_added and agent_path in sys.path:
+            sys.path.remove(agent_path)
 
 
-def _make_agent() -> RemoteAgent:
+# Import RemoteAgent at module level but with proper handling
+RemoteAgent = _import_remote_agent()
+
+
+def _make_agent():
     """Create a RemoteAgent with a mock config, bypassing real __init__."""
     config = MagicMock()
     config.machine_id = "test-machine-id"
@@ -47,7 +96,6 @@ def _make_agent() -> RemoteAgent:
     config.reconnect_base_delay = 1
     config.reconnect_max_delay = 60
 
-    # Bypass __init__ entirely to avoid subprocess / socket side-effects
     with patch.object(RemoteAgent, "__init__", lambda self: None):
         agent = RemoteAgent()
 
@@ -57,14 +105,12 @@ def _make_agent() -> RemoteAgent:
     agent._vscode_tokens = {}
     agent._vscode_ports = {}
     agent._vscode_passwords = {}
-
-    # Mock executor for send_message
     agent._executor = MagicMock()
 
     return agent
 
 
-def _get_http_send_calls(agent: RemoteAgent) -> list[dict]:
+def _get_http_send_calls(agent):
     """Return all call args to _http_send as message dicts."""
     if not agent._http_send.called:
         return []
@@ -75,7 +121,6 @@ class TestCmdSendMessageAck:
     """Tests for RemoteAgent._cmd_send_message command_response ack."""
 
     def test_send_message_sends_command_response_on_success(self):
-        """Verify command_response ack is sent after successful send_message."""
         agent = _make_agent()
         agent._executor.send_message.return_value = {"success": True}
 
@@ -88,9 +133,8 @@ class TestCmdSendMessageAck:
         )
 
         calls = _get_http_send_calls(agent)
-        # Should have exactly one command_response
         ack_calls = [c for c in calls if c.get("type") == "command_response"]
-        assert len(ack_calls) == 1, f"Expected 1 command_response, got {len(ack_calls)}"
+        assert len(ack_calls) == 1
 
         ack = ack_calls[0]
         assert ack["machine_id"] == "test-machine-id"
@@ -99,7 +143,6 @@ class TestCmdSendMessageAck:
         assert ack["result"].get("error") is None
 
     def test_send_message_sends_command_response_on_failure(self):
-        """Verify command_response ack is sent even when send_message fails."""
         agent = _make_agent()
         agent._executor.send_message.return_value = {
             "success": False,
@@ -116,7 +159,7 @@ class TestCmdSendMessageAck:
 
         calls = _get_http_send_calls(agent)
         ack_calls = [c for c in calls if c.get("type") == "command_response"]
-        assert len(ack_calls) == 1, f"Expected 1 command_response, got {len(ack_calls)}"
+        assert len(ack_calls) == 1
 
         ack = ack_calls[0]
         assert ack["request_id"] == "cmd-456"
@@ -124,7 +167,6 @@ class TestCmdSendMessageAck:
         assert ack["result"]["error"] == "Session not found"
 
     def test_send_message_uses_request_id_fallback(self):
-        """Verify request_id is used as fallback when command_id is absent."""
         agent = _make_agent()
         agent._executor.send_message.return_value = {"success": True}
 
@@ -139,12 +181,9 @@ class TestCmdSendMessageAck:
         calls = _get_http_send_calls(agent)
         ack_calls = [c for c in calls if c.get("type") == "command_response"]
         assert len(ack_calls) == 1
-
-        ack = ack_calls[0]
-        assert ack["request_id"] == "req-789"
+        assert ack_calls[0]["request_id"] == "req-789"
 
     def test_send_message_prefers_command_id_over_request_id(self):
-        """Verify command_id takes precedence over request_id when both present."""
         agent = _make_agent()
         agent._executor.send_message.return_value = {"success": True}
 
@@ -160,12 +199,9 @@ class TestCmdSendMessageAck:
         calls = _get_http_send_calls(agent)
         ack_calls = [c for c in calls if c.get("type") == "command_response"]
         assert len(ack_calls) == 1
-
-        ack = ack_calls[0]
-        assert ack["request_id"] == "cmd-preferred"
+        assert ack_calls[0]["request_id"] == "cmd-preferred"
 
     def test_send_message_no_ack_without_request_id(self):
-        """Verify no command_response ack when neither command_id nor request_id present."""
         agent = _make_agent()
         agent._executor.send_message.return_value = {"success": True}
 
@@ -178,26 +214,12 @@ class TestCmdSendMessageAck:
 
         calls = _get_http_send_calls(agent)
         ack_calls = [c for c in calls if c.get("type") == "command_response"]
-        assert len(ack_calls) == 0, f"Expected 0 command_response, got {len(ack_calls)}"
+        assert len(ack_calls) == 0
 
     def test_send_message_ack_prevents_duplicate_delivery(self):
-        """
-        Verify that sending command_response ack prevents duplicate delivery.
-
-        This is a conceptual test documenting the fix for Issue #2411:
-        - Without the ack, the command remains in 'delivered' status
-        - After COMMAND_CLAIM_TIMEOUT_SECONDS (5 min), the command is re-claimed
-        - The agent receives the same send_message command again (duplicate)
-
-        With the ack:
-        - The server marks the command as 'responded'
-        - The command is not re-claimed after the timeout
-        - No duplicate message delivery
-        """
         agent = _make_agent()
         agent._executor.send_message.return_value = {"success": True}
 
-        # Simulate receiving a send_message command
         agent._cmd_send_message(
             {
                 "command_id": "cmd-duplicate-test",
@@ -208,9 +230,4 @@ class TestCmdSendMessageAck:
 
         calls = _get_http_send_calls(agent)
         ack_calls = [c for c in calls if c.get("type") == "command_response"]
-
-        # The ack being sent is the fix for Issue #2411
-        # Server will mark command as 'responded', preventing re-claim
-        assert (
-            len(ack_calls) == 1
-        ), "command_response ack must be sent to prevent duplicate delivery"
+        assert len(ack_calls) == 1
