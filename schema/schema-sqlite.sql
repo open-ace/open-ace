@@ -586,6 +586,14 @@ CREATE TABLE machine_assignments (
  granted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE migration_metadata (
+ migration_id TEXT PRIMARY KEY NOT NULL,
+ migration_name TEXT NOT NULL,
+ applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+ checksum TEXT,
+ details TEXT
+);
+
 CREATE TABLE model_gateway_config (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  mode text DEFAULT 'direct',
@@ -924,7 +932,9 @@ CREATE TABLE scheduler_leaders (
  last_run_at TIMESTAMP,
  run_count integer DEFAULT 0 NOT NULL,
  skip_count integer DEFAULT 0 NOT NULL,
- fail_count integer DEFAULT 0 NOT NULL
+ fail_count integer DEFAULT 0 NOT NULL,
+ fencing_token INTEGER,
+ lock_strategy TEXT
 );
 
 CREATE TABLE scheduler_runs (
@@ -936,7 +946,13 @@ CREATE TABLE scheduler_runs (
  status TEXT NOT NULL,
  duration_ms integer,
  error_message text,
- metrics text
+ metrics text,
+ lock_strategy TEXT,
+ fencing_token INTEGER,
+ lock_acquired_at TIMESTAMP,
+ lock_released_at TIMESTAMP,
+ skip_reason text,
+ leader_host TEXT
 );
 
 CREATE TABLE security_settings (
@@ -1334,8 +1350,31 @@ CREATE TABLE users (
  avatar_url TEXT,
  auto_mapping_enabled INTEGER DEFAULT 1,
  tenant_version integer DEFAULT 1 NOT NULL,
-    CONSTRAINT chk_tenant_admin_requires_tenant CHECK ((NOT (((role) = 'tenant_admin') AND (tenant_id IS NULL)))),
-    CONSTRAINT chk_users_role CHECK ((role IN ('admin', 'platform_admin', 'tenant_admin', 'manager', 'user', 'readonly')))
+    CONSTRAINT chk_2332_tenant_admin_requires_tenant CHECK ((NOT (((role) = 'tenant_admin') AND (tenant_id IS NULL)))),
+    CONSTRAINT chk_2332_users_role_valid CHECK ((role IN ('platform_admin', 'tenant_admin', 'manager', 'user', 'readonly')))
+);
+
+CREATE TABLE users_backup_2332 (
+ id integer,
+ username TEXT,
+ password_hash TEXT,
+ email TEXT,
+ is_admin INTEGER,
+ is_active INTEGER,
+ created_at TIMESTAMP,
+ last_login TIMESTAMP,
+ role TEXT,
+ daily_token_quota integer,
+ monthly_token_quota integer,
+ daily_request_quota integer,
+ monthly_request_quota integer,
+ deleted_at TIMESTAMP,
+ system_account text,
+ tenant_id integer,
+ must_change_password INTEGER,
+ avatar_url TEXT,
+ auto_mapping_enabled INTEGER,
+ tenant_version integer
 );
 
 CREATE TABLE web_user_auth_sessions (

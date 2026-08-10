@@ -125,9 +125,7 @@ class TestSchedulerGuardSessionLock:
         mock_postgres_db.get_connection.return_value = mock_connection
 
         with patch("app.services.scheduler_guard.is_postgresql", return_value=True):
-            guard = SchedulerExecutionGuard(
-                "test_job", mock_postgres_db, strategy="session_lock"
-            )
+            guard = SchedulerExecutionGuard("test_job", mock_postgres_db, strategy="session_lock")
 
             executed = False
             with guard:
@@ -173,9 +171,7 @@ class TestSchedulerGuardHeartbeat:
         )
 
         with patch("app.services.scheduler_guard.is_postgresql", return_value=True):
-            guard = SchedulerExecutionGuard(
-                "test_job", mock_postgres_db, strategy="heartbeat"
-            )
+            guard = SchedulerExecutionGuard("test_job", mock_postgres_db, strategy="heartbeat")
 
             with pytest.raises(LockAcquisitionError, match="Could not acquire heartbeat lease"):
                 with guard:
@@ -267,9 +263,7 @@ class TestSchedulerGuardConnectionSafety:
         mock_postgres_db.get_connection.return_value = mock_connection
 
         with patch("app.services.scheduler_guard.is_postgresql", return_value=True):
-            guard = SchedulerExecutionGuard(
-                "test_job", mock_postgres_db, strategy="session_lock"
-            )
+            guard = SchedulerExecutionGuard("test_job", mock_postgres_db, strategy="session_lock")
 
             with pytest.raises(RuntimeError):
                 with guard:
@@ -288,9 +282,7 @@ class TestSchedulerGuardConnectionSafety:
         mock_postgres_db.get_connection.return_value = mock_connection
 
         with patch("app.services.scheduler_guard.is_postgresql", return_value=True):
-            guard = SchedulerExecutionGuard(
-                "test_job", mock_postgres_db, strategy="session_lock"
-            )
+            guard = SchedulerExecutionGuard("test_job", mock_postgres_db, strategy="session_lock")
 
             # Should not raise even if close fails
             with guard:

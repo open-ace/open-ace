@@ -22,7 +22,9 @@ import time
 import uuid
 from contextlib import suppress
 from datetime import datetime, timezone
-from typing import Any, Self
+from typing import Any
+
+from typing_extensions import Self
 
 from app.repositories.database import Database, adapt_sql, is_postgresql
 
@@ -223,7 +225,9 @@ class SchedulerExecutionGuard:
             raise
         except Exception as e:
             self._safe_close_connection()
-            raise LockAcquisitionError(f"Failed to acquire session lock for '{self.job_name}': {e}") from e
+            raise LockAcquisitionError(
+                f"Failed to acquire session lock for '{self.job_name}': {e}"
+            ) from e
 
     def _acquire_heartbeat_lock(self) -> None:
         """Acquire heartbeat-based lease with fencing token.
@@ -258,7 +262,9 @@ class SchedulerExecutionGuard:
                 cursor = connection.cursor()
                 cursor.execute("SELECT nextval('fencing_token_seq')")
                 result = cursor.fetchone()
-                self._fencing_token = result[0] if isinstance(result, tuple) else result.get("nextval")
+                self._fencing_token = (
+                    result[0] if isinstance(result, tuple) else result.get("nextval")
+                )
             finally:
                 connection.close()
 
@@ -331,7 +337,9 @@ class SchedulerExecutionGuard:
             raise
         except Exception as e:
             self._fencing_token = None
-            raise LockAcquisitionError(f"Failed to acquire heartbeat lease for '{self.job_name}': {e}") from e
+            raise LockAcquisitionError(
+                f"Failed to acquire heartbeat lease for '{self.job_name}': {e}"
+            ) from e
 
     def _heartbeat_loop(self) -> None:
         """Background thread that renews heartbeat lease."""

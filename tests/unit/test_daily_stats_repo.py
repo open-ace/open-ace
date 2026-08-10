@@ -456,7 +456,11 @@ class TestDailyStatsRepository:
         # Issue #2333: SchedulerExecutionGuard adds additional execute calls for run recording
         assert self.db.execute.call_count >= 1
         # Find the INSERT call (should be present in the call list)
-        insert_calls = [call for call in self.db.execute.call_args_list if "INSERT OR REPLACE INTO daily_stats" in str(call)]
+        insert_calls = [
+            call
+            for call in self.db.execute.call_args_list
+            if "INSERT OR REPLACE INTO daily_stats" in str(call)
+        ]
         assert len(insert_calls) >= 1
         insert_call = insert_calls[0]
         assert "date = ?" in insert_call[0][0]
@@ -468,7 +472,11 @@ class TestDailyStatsRepository:
         assert result is True
         # Issue #2333: SchedulerExecutionGuard adds additional execute calls for run recording
         # Find the INSERT call (should be present in the call list)
-        insert_calls = [call for call in self.db.execute.call_args_list if "INSERT OR REPLACE INTO daily_stats" in str(call)]
+        insert_calls = [
+            call
+            for call in self.db.execute.call_args_list
+            if "INSERT OR REPLACE INTO daily_stats" in str(call)
+        ]
         assert len(insert_calls) >= 1
         insert_call = insert_calls[0]
         assert "1=1" in insert_call[0][0]
@@ -483,7 +491,11 @@ class TestDailyStatsRepository:
         assert result is True
         # Issue #2333: SchedulerExecutionGuard adds execute calls for run recording
         # Find the INSERT call (should be present in the call list)
-        insert_calls = [call for call in self.db.execute.call_args_list if "INSERT INTO daily_stats" in str(call)]
+        insert_calls = [
+            call
+            for call in self.db.execute.call_args_list
+            if "INSERT INTO daily_stats" in str(call)
+        ]
         assert len(insert_calls) >= 1
         insert_call = insert_calls[0]
         assert "ON CONFLICT" in insert_call[0][0]
@@ -562,7 +574,11 @@ class TestDailyStatsRepository:
         assert result is True
         # Issue #2333: SchedulerExecutionGuard adds additional execute calls for run recording
         # Find the INSERT call (should be present in the call list)
-        insert_calls = [call for call in self.db.execute.call_args_list if "INSERT OR REPLACE INTO hourly_stats" in str(call)]
+        insert_calls = [
+            call
+            for call in self.db.execute.call_args_list
+            if "INSERT OR REPLACE INTO hourly_stats" in str(call)
+        ]
         assert len(insert_calls) >= 1
         insert_call = insert_calls[0]
         assert "strftime" in insert_call[0][0]
@@ -577,7 +593,11 @@ class TestDailyStatsRepository:
         assert result is True
         # Issue #2333: SchedulerExecutionGuard adds execute calls for run recording
         # Find the INSERT call (should be present in the call list)
-        insert_calls = [call for call in self.db.execute.call_args_list if "INSERT INTO hourly_stats" in str(call)]
+        insert_calls = [
+            call
+            for call in self.db.execute.call_args_list
+            if "INSERT INTO hourly_stats" in str(call)
+        ]
         assert len(insert_calls) >= 1
         insert_call = insert_calls[0]
         assert "ON CONFLICT" in insert_call[0][0]
