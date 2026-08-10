@@ -110,7 +110,7 @@ def test_build_test_execution_context_prefers_frontend_scope(tmp_path):
     orch._gh.get_current_commit.return_value = "abc1234"
     orch._gh.get_commit_changed_files.return_value = ["frontend/src/styles/main.css"]
 
-    context = orch._build_test_execution_context(wf, orch._gh)
+    context, _changed_files = orch._build_test_execution_context(wf, orch._gh)
 
     assert "方案中的验证计划" in context
     assert "frontend/src/styles/main.css" in context
@@ -155,7 +155,7 @@ def test_build_test_execution_context_marks_shared_backend_for_broader_scope(tmp
     orch._gh.get_current_commit.return_value = "abc1234"
     orch._gh.get_commit_changed_files.return_value = ["app/utils/session_diagnostics.py"]
 
-    context = orch._build_test_execution_context(wf, orch._gh)
+    context, _changed_files = orch._build_test_execution_context(wf, orch._gh)
 
     assert "是否建议扩大测试范围：是" in context
     assert "共享后端依赖验证" in context
