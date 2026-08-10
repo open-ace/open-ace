@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from app.repositories.database import Database, is_postgresql
+from app.services.scheduler_guard import LockAcquisitionError, SchedulerExecutionGuard
 from app.utils.cache import cached
 from app.utils.sender_hash import EMPTY_SENDER_HASH, compute_sender_hash
 from app.utils.senders import get_sender_filter_sql
@@ -827,123 +828,135 @@ class DailyStatsRepository:
         were counted multiple times due to different sender_name formats.
 
         Issue #1852: Now includes tenant_id for proper tenant isolation.
-        Issue #2010: Use INSERT ... ON CONFLICT for atomic operation with advisory lock.
+        Issue #2010: Use INSERT ... ON CONFLICT for atomic operation.
+        Issue #2333: Use SchedulerExecutionGuard for fail-closed lock management.
 
         Args:
             date: Optional specific date to refresh. If None, refreshes all.
 
         Returns:
-            bool: True if successful.
+            bool: True if successful, False if skipped (lock unavailable) or failed.
         """
         start_time = time.time()
+
+        # Issue #2333: Use SchedulerExecutionGuard for fail-closed lock management
+        # This prevents concurrent workers from running the same aggregation
+        guard = SchedulerExecutionGuard(
+            "daily_stats_refresh",
+            self.db,
+            strategy="session_lock",
+        )
+
         try:
-            now = datetime.now(timezone.utc).replace(tzinfo=None)
+            with guard:
+                # Job body only runs if lock acquired
+                self._execute_refresh_stats(date, start_time)
+                return True
 
-            if date:
-                # Refresh specific date
-                date_condition = "date = ?"
-                params: tuple[Any, ...] = (date,)
-            else:
-                # Refresh all
-                date_condition = "1=1"
-                params = ()
-
-            if is_postgresql():
-                # Issue #2010: Use advisory lock to prevent concurrent refresh
-                # Lock key: hash of 'daily_stats_refresh' (arbitrary but consistent)
-                lock_acquired = self.db.fetch_one("SELECT pg_try_advisory_lock(2024) as acquired")
-                if not lock_acquired or not lock_acquired.get("acquired"):
-                    logger.warning(
-                        "Could not acquire advisory lock for refresh_stats, proceeding anyway"
-                    )
-
-                try:
-                    # Issue #2010: Use INSERT ... ON CONFLICT DO UPDATE for atomic operation
-                    # This eliminates the race condition window between DELETE and INSERT
-                    # Issue #2094: GROUP BY only by constraint keys, aggregate user_id/tenant_id
-                    # sender_name formats:
-                    # 1. WebUI: {system_account}-{hostname}-{tool} -> match users.system_account
-                    # 2. Feishu: username (real name) -> match users.username
-                    self.db.execute(
-                        f"""
-                        INSERT INTO daily_stats
-                        (date, tool_name, host_name, sender_name, user_id, tenant_id, total_tokens,
-                         total_input_tokens, total_output_tokens, message_count, updated_at)
-                        SELECT
-                            dm.date,
-                            dm.tool_name,
-                            dm.host_name,
-                            dm.sender_name,
-                            MAX(COALESCE(dm.user_id,
-                                (SELECT u.id FROM users u
-                                 WHERE dm.sender_name LIKE (u.system_account || '-%%')
-                                    OR dm.sender_name = u.username
-                                 ORDER BY u.id
-                                 LIMIT 1))) as user_id,
-                            MAX(dm.tenant_id) as tenant_id,
-                            SUM(dm.tokens_used) as total_tokens,
-                            SUM(dm.input_tokens) as total_input_tokens,
-                            SUM(dm.output_tokens) as total_output_tokens,
-                            COUNT(*) as message_count,
-                            ?
-                        FROM daily_messages dm
-                        WHERE {date_condition}
-                        GROUP BY dm.date, dm.tool_name, dm.host_name, dm.sender_name
-                        ON CONFLICT (date, tool_name, host_name, sender_name) DO UPDATE SET
-                            user_id = EXCLUDED.user_id,
-                            tenant_id = EXCLUDED.tenant_id,
-                            total_tokens = EXCLUDED.total_tokens,
-                            total_input_tokens = EXCLUDED.total_input_tokens,
-                            total_output_tokens = EXCLUDED.total_output_tokens,
-                            message_count = EXCLUDED.message_count,
-                            updated_at = EXCLUDED.updated_at
-                        """,
-                        (now,) + params,
-                    )
-                finally:
-                    # Release advisory lock
-                    self.db.execute("SELECT pg_advisory_unlock(2024)")
-
-            else:
-                # SQLite: use INSERT OR REPLACE with user_id populated
-                # Issue #1852: Include tenant_id for tenant isolation
-                # Issue #2094: GROUP BY only by constraint keys, aggregate user_id/tenant_id
-                self.db.execute(
-                    f"""
-                    INSERT OR REPLACE INTO daily_stats
-                    (date, tool_name, host_name, sender_name, user_id, tenant_id, total_tokens,
-                     total_input_tokens, total_output_tokens, message_count, updated_at)
-                    SELECT
-                        dm.date,
-                        dm.tool_name,
-                        dm.host_name,
-                        dm.sender_name,
-                        MAX(COALESCE(dm.user_id,
-                            (SELECT u.id FROM users u
-                             WHERE dm.sender_name LIKE (u.system_account || '-%%')
-                                OR dm.sender_name = u.username
-                             LIMIT 1))) as user_id,
-                        MAX(dm.tenant_id) as tenant_id,
-                        SUM(dm.tokens_used) as total_tokens,
-                        SUM(dm.input_tokens) as total_input_tokens,
-                        SUM(dm.output_tokens) as total_output_tokens,
-                        COUNT(*) as message_count,
-                        ?
-                    FROM daily_messages dm
-                    WHERE {date_condition}
-                    GROUP BY dm.date, dm.tool_name, dm.host_name, dm.sender_name
-                    """,
-                    (now,) + params,
-                )
-
+        except LockAcquisitionError as e:
+            # Lock not acquired - skip execution, no side effects
             duration_ms = (time.time() - start_time) * 1000
-            logger.info(f"refresh_stats took {duration_ms:.2f}ms for {date or 'all dates'}")
-            return True
+            logger.info(
+                f"refresh_stats skipped for {date or 'all dates'}: {e} (took {duration_ms:.2f}ms)"
+            )
+            return False
 
         except Exception as e:
             duration_ms = (time.time() - start_time) * 1000
             logger.error(f"Failed to refresh daily stats: {e} (took {duration_ms:.2f}ms)")
             return False
+
+    def _execute_refresh_stats(self, date: str | None, start_time: float) -> None:
+        """Execute the actual refresh_stats logic (called within guard context)."""
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+
+        if date:
+            # Refresh specific date
+            date_condition = "date = ?"
+            params: tuple[Any, ...] = (date,)
+        else:
+            # Refresh all
+            date_condition = "1=1"
+            params = ()
+
+        if is_postgresql():
+            # Issue #2010: Use INSERT ... ON CONFLICT DO UPDATE for atomic operation
+            # This eliminates the race condition window between DELETE and INSERT
+            # Issue #2094: GROUP BY only by constraint keys, aggregate user_id/tenant_id
+            # sender_name formats:
+            # 1. WebUI: {system_account}-{hostname}-{tool} -> match users.system_account
+            # 2. Feishu: username (real name) -> match users.username
+            self.db.execute(
+                f"""
+                INSERT INTO daily_stats
+                (date, tool_name, host_name, sender_name, user_id, tenant_id, total_tokens,
+                 total_input_tokens, total_output_tokens, message_count, updated_at)
+                SELECT
+                    dm.date,
+                    dm.tool_name,
+                    dm.host_name,
+                    dm.sender_name,
+                    MAX(COALESCE(dm.user_id,
+                        (SELECT u.id FROM users u
+                         WHERE dm.sender_name LIKE (u.system_account || '-%%')
+                            OR dm.sender_name = u.username
+                         ORDER BY u.id
+                         LIMIT 1))) as user_id,
+                    MAX(dm.tenant_id) as tenant_id,
+                    SUM(dm.tokens_used) as total_tokens,
+                    SUM(dm.input_tokens) as total_input_tokens,
+                    SUM(dm.output_tokens) as total_output_tokens,
+                    COUNT(*) as message_count,
+                    ?
+                FROM daily_messages dm
+                WHERE {date_condition}
+                GROUP BY dm.date, dm.tool_name, dm.host_name, dm.sender_name
+                ON CONFLICT (date, tool_name, host_name, sender_name) DO UPDATE SET
+                    user_id = EXCLUDED.user_id,
+                    tenant_id = EXCLUDED.tenant_id,
+                    total_tokens = EXCLUDED.total_tokens,
+                    total_input_tokens = EXCLUDED.total_input_tokens,
+                    total_output_tokens = EXCLUDED.total_output_tokens,
+                    message_count = EXCLUDED.message_count,
+                    updated_at = EXCLUDED.updated_at
+                """,
+                (now,) + params,
+            )
+
+        else:
+            # SQLite: use INSERT OR REPLACE with user_id populated
+            # Issue #1852: Include tenant_id for tenant isolation
+            # Issue #2094: GROUP BY only by constraint keys, aggregate user_id/tenant_id
+            self.db.execute(
+                f"""
+                INSERT OR REPLACE INTO daily_stats
+                (date, tool_name, host_name, sender_name, user_id, tenant_id, total_tokens,
+                 total_input_tokens, total_output_tokens, message_count, updated_at)
+                SELECT
+                    dm.date,
+                    dm.tool_name,
+                    dm.host_name,
+                    dm.sender_name,
+                    MAX(COALESCE(dm.user_id,
+                        (SELECT u.id FROM users u
+                         WHERE dm.sender_name LIKE (u.system_account || '-%%')
+                            OR dm.sender_name = u.username
+                         LIMIT 1))) as user_id,
+                    MAX(dm.tenant_id) as tenant_id,
+                    SUM(dm.tokens_used) as total_tokens,
+                    SUM(dm.input_tokens) as total_input_tokens,
+                    SUM(dm.output_tokens) as total_output_tokens,
+                    COUNT(*) as message_count,
+                    ?
+                FROM daily_messages dm
+                WHERE {date_condition}
+                GROUP BY dm.date, dm.tool_name, dm.host_name, dm.sender_name
+                """,
+                (now,) + params,
+            )
+
+        duration_ms = (time.time() - start_time) * 1000
+        logger.info(f"refresh_stats took {duration_ms:.2f}ms for {date or 'all dates'}")
 
     def needs_refresh(self) -> bool:
         """
@@ -1048,100 +1061,115 @@ class DailyStatsRepository:
         Refresh hourly_stats from daily_messages.
 
         Issue #1852: Now includes tenant_id for proper tenant isolation.
-        Issue #2010: Use INSERT ... ON CONFLICT for atomic operation with advisory lock.
+        Issue #2010: Use INSERT ... ON CONFLICT for atomic operation.
+        Issue #2333: Use SchedulerExecutionGuard for fail-closed lock management.
 
         Args:
             date: Optional specific date to refresh. If None, refreshes all.
 
         Returns:
-            bool: True if successful.
+            bool: True if successful, False if skipped (lock unavailable) or failed.
         """
+        start_time = time.time()
+
+        # Issue #2333: Use SchedulerExecutionGuard for fail-closed lock management
+        # Uses separate lock key from daily_stats_refresh to allow parallel execution
+        guard = SchedulerExecutionGuard(
+            "hourly_stats_refresh",
+            self.db,
+            strategy="session_lock",
+        )
+
         try:
-            now = datetime.now(timezone.utc).replace(tzinfo=None)
+            with guard:
+                # Job body only runs if lock acquired
+                self._execute_refresh_hourly_stats(date, start_time)
+                return True
 
-            if date:
-                # Refresh specific date
-                date_condition = "date = ?"
-                params: tuple[Any, ...] = (date,)
-            else:
-                # Refresh all
-                date_condition = "1=1"
-                params = ()
-
-            if is_postgresql():
-                # Issue #2010: Use advisory lock to prevent concurrent refresh
-                # Lock key: different from daily_stats to allow parallel hourly/daily refresh
-                lock_acquired = self.db.fetch_one("SELECT pg_try_advisory_lock(2025) as acquired")
-                if not lock_acquired or not lock_acquired.get("acquired"):
-                    logger.warning(
-                        "Could not acquire advisory lock for refresh_hourly_stats, proceeding anyway"
-                    )
-
-                try:
-                    # Issue #2010: Use INSERT ... ON CONFLICT DO UPDATE for atomic operation
-                    # This eliminates the race condition window between DELETE and INSERT
-                    self.db.execute(
-                        f"""
-                        INSERT INTO hourly_stats
-                        (date, hour, tool_name, host_name, tenant_id, total_tokens, total_input_tokens,
-                         total_output_tokens, message_count, updated_at)
-                        SELECT
-                            date,
-                            MOD(EXTRACT(HOUR FROM timestamp::timestamp)::INTEGER + 8, 24) as hour,
-                            tool_name,
-                            host_name,
-                            tenant_id,
-                            SUM(tokens_used) as total_tokens,
-                            SUM(input_tokens) as total_input_tokens,
-                            SUM(output_tokens) as total_output_tokens,
-                            COUNT(*) as message_count,
-                            ?
-                        FROM daily_messages
-                        WHERE {date_condition} AND timestamp IS NOT NULL
-                        GROUP BY date, MOD(EXTRACT(HOUR FROM timestamp::timestamp)::INTEGER + 8, 24), tool_name, host_name, tenant_id
-                        ON CONFLICT (date, hour, tool_name, host_name) DO UPDATE SET
-                            tenant_id = EXCLUDED.tenant_id,
-                            total_tokens = EXCLUDED.total_tokens,
-                            total_input_tokens = EXCLUDED.total_input_tokens,
-                            total_output_tokens = EXCLUDED.total_output_tokens,
-                            message_count = EXCLUDED.message_count,
-                            updated_at = EXCLUDED.updated_at
-                        """,
-                        (now,) + params,
-                    )
-                finally:
-                    # Release advisory lock
-                    self.db.execute("SELECT pg_advisory_unlock(2025)")
-
-            else:
-                # SQLite: use INSERT OR REPLACE
-                # Issue #1852: Include tenant_id for tenant isolation
-                self.db.execute(
-                    f"""
-                    INSERT OR REPLACE INTO hourly_stats
-                    (date, hour, tool_name, host_name, tenant_id, total_tokens, total_input_tokens,
-                     total_output_tokens, message_count, updated_at)
-                    SELECT
-                        date,
-                        (CAST(strftime('%H', timestamp) AS INTEGER) + 8) % 24 as hour,
-                        tool_name,
-                        host_name,
-                        tenant_id,
-                        SUM(tokens_used) as total_tokens,
-                        SUM(input_tokens) as total_input_tokens,
-                        SUM(output_tokens) as total_output_tokens,
-                        COUNT(*) as message_count,
-                        ?
-                    FROM daily_messages
-                    WHERE {date_condition} AND timestamp IS NOT NULL
-                    GROUP BY date, (CAST(strftime('%H', timestamp) AS INTEGER) + 8) % 24, tool_name, host_name, tenant_id
-                    """,
-                    (now,) + params,
-                )
-
-            logger.info(f"Hourly stats refreshed for {date or 'all dates'}")
-            return True
+        except LockAcquisitionError as e:
+            # Lock not acquired - skip execution, no side effects
+            duration_ms = (time.time() - start_time) * 1000
+            logger.info(
+                f"refresh_hourly_stats skipped for {date or 'all dates'}: {e} (took {duration_ms:.2f}ms)"
+            )
+            return False
 
         except Exception as e:
-            logger.error(f"Failed to refresh hourly stats: {e}")
+            duration_ms = (time.time() - start_time) * 1000
+            logger.error(f"Failed to refresh hourly stats: {e} (took {duration_ms:.2f}ms)")
             return False
+
+    def _execute_refresh_hourly_stats(self, date: str | None, start_time: float) -> None:
+        """Execute the actual refresh_hourly_stats logic (called within guard context)."""
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+
+        if date:
+            # Refresh specific date
+            date_condition = "date = ?"
+            params: tuple[Any, ...] = (date,)
+        else:
+            # Refresh all
+            date_condition = "1=1"
+            params = ()
+
+        if is_postgresql():
+            # Issue #2010: Use INSERT ... ON CONFLICT DO UPDATE for atomic operation
+            # This eliminates the race condition window between DELETE and INSERT
+            self.db.execute(
+                f"""
+                INSERT INTO hourly_stats
+                (date, hour, tool_name, host_name, tenant_id, total_tokens, total_input_tokens,
+                 total_output_tokens, message_count, updated_at)
+                SELECT
+                    date,
+                    MOD(EXTRACT(HOUR FROM timestamp::timestamp)::INTEGER + 8, 24) as hour,
+                    tool_name,
+                    host_name,
+                    tenant_id,
+                    SUM(tokens_used) as total_tokens,
+                    SUM(input_tokens) as total_input_tokens,
+                    SUM(output_tokens) as total_output_tokens,
+                    COUNT(*) as message_count,
+                    ?
+                FROM daily_messages
+                WHERE {date_condition} AND timestamp IS NOT NULL
+                GROUP BY date, MOD(EXTRACT(HOUR FROM timestamp::timestamp)::INTEGER + 8, 24), tool_name, host_name, tenant_id
+                ON CONFLICT (date, hour, tool_name, host_name) DO UPDATE SET
+                    tenant_id = EXCLUDED.tenant_id,
+                    total_tokens = EXCLUDED.total_tokens,
+                    total_input_tokens = EXCLUDED.total_input_tokens,
+                    total_output_tokens = EXCLUDED.total_output_tokens,
+                    message_count = EXCLUDED.message_count,
+                    updated_at = EXCLUDED.updated_at
+                """,
+                (now,) + params,
+            )
+
+        else:
+            # SQLite: use INSERT OR REPLACE
+            # Issue #1852: Include tenant_id for tenant isolation
+            self.db.execute(
+                f"""
+                INSERT OR REPLACE INTO hourly_stats
+                (date, hour, tool_name, host_name, tenant_id, total_tokens, total_input_tokens,
+                 total_output_tokens, message_count, updated_at)
+                SELECT
+                    date,
+                    (CAST(strftime('%H', timestamp) AS INTEGER) + 8) % 24 as hour,
+                    tool_name,
+                    host_name,
+                    tenant_id,
+                    SUM(tokens_used) as total_tokens,
+                    SUM(input_tokens) as total_input_tokens,
+                    SUM(output_tokens) as total_output_tokens,
+                    COUNT(*) as message_count,
+                    ?
+                FROM daily_messages
+                WHERE {date_condition} AND timestamp IS NOT NULL
+                GROUP BY date, (CAST(strftime('%H', timestamp) AS INTEGER) + 8) % 24, tool_name, host_name, tenant_id
+                """,
+                (now,) + params,
+            )
+
+        duration_ms = (time.time() - start_time) * 1000
+        logger.info(f"Hourly stats refreshed for {date or 'all dates'} (took {duration_ms:.2f}ms)")
