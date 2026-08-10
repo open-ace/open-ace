@@ -294,6 +294,12 @@ def build_pytest_command(args: argparse.Namespace) -> list[str]:
         raise ValueError(f"Test file count below baseline threshold for category: {args.category}")
 
     cmd = [sys.executable, "-m", "pytest", *targets, "-m", "not postgres"]
+    # Continue past per-file collection errors so every collectable nodeid gets a
+    # terminal result; otherwise one bad file aborts the shard and leaves the
+    # rest result-less, which the #2457 failure-baseline completeness gate would
+    # (correctly) reject. Collection errors are still surfaced in the JUnit and
+    # hard-failed by the comparator (never baselined).
+    cmd.append("--continue-on-collection-errors")
     if args.parallel > 0:
         cmd.extend(["-n", str(args.parallel)])
     if args.reruns > 0:
