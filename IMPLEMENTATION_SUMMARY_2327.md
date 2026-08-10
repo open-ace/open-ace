@@ -66,7 +66,7 @@
 - ✅ legacy admin 兼容性
 - ✅ 无效 tenant_id（负数、0）
 
-**现有测试**: 
+**现有测试**:
 - ✅ tests/unit/test_auth_decorators.py (37 测试)
 - ✅ tests/integration/test_admin_tenant_isolation_2180.py (10 测试)
 
@@ -74,7 +74,7 @@
 
 #### 5. 文档更新 ✅
 
-**文件**: 
+**文件**:
 - ✅ `docs/cn/PERMISSION-MODEL.md`
 - ✅ `docs/en/PERMISSION-MODEL.md`
 

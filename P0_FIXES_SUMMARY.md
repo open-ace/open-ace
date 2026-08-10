@@ -55,7 +55,7 @@
 
 虽然审查意见提到 Service 层方法签名未更新，但当前的实现已经满足 Issue #2327 的核心要求：
 
-1. **路由层使用 ActorScope**: 
+1. **路由层使用 ActorScope**:
    - 四个 API 端点全部使用 `@api_key_admin_required` 装饰器
    - 从 `g.actor_scope` 获取已验证的授权上下文
    - Service 方法使用 `scope.target_tenant_id`
