@@ -171,7 +171,7 @@ def api_get_projects():
 
 
 def _fetch_remote_projects(user_id: int) -> list[dict]:
-    """Return deduplicated remote/terminal workspace projects for a user.
+    r"""Return deduplicated remote/terminal workspace projects for a user.
 
     The qwen-code-webui open-ace integrated mode renders the project picker
     from ``GET /api/projects``; remote sessions were invisible because they

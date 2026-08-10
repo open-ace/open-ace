@@ -1,4 +1,4 @@
-"""
+r"""
 Open ACE - Session History Sync (Issue #24)
 
 Synchronizes remote/terminal workspace sessions from the database into the
@@ -39,7 +39,7 @@ _sync_thread: threading.Thread | None = None
 
 
 def encode_project_path(project_path: str) -> str:
-    """Mirror qwen-code-webui ``encodeProjectPath``: strip trailing '/', then
+    r"""Mirror qwen-code-webui ``encodeProjectPath``: strip trailing '/', then
     replace every char outside [a-zA-Z0-9] with '-'.
 
     ``C:\\workspace`` -> ``C--workspace``; ``/workspace/admin`` ->
@@ -50,7 +50,7 @@ def encode_project_path(project_path: str) -> str:
 
 
 def encode_openace_path(project_path: str) -> str:
-    """Mirror the qwen-code-webui SPA ``ko()`` encoding used in open-ace
+    r"""Mirror the qwen-code-webui SPA ``ko()`` encoding used in open-ace
     integrated mode: drop a leading drive letter, drop leading slashes, then
     replace every char outside [a-zA-Z0-9] with '-' and prepend '-'.
 
