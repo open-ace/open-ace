@@ -8,6 +8,11 @@ Tests:
 - Single permission check < 1ms
 - High-frequency API response time increase < 5%
 - Memory overhead < 1MB
+
+Tests that assert on wall-clock time are marked ``@pytest.mark.performance`` and
+are deselected from the required ``test (3.x)`` CI matrix -- a shared runner
+cannot guarantee timing bounds. They run in the separate, non-blocking
+``performance-test`` job.
 """
 
 import sys
@@ -50,6 +55,7 @@ class TestPermissionCheckPerformance:
 
         return app
 
+    @pytest.mark.performance
     def test_single_permission_check_performance(self, app):
         """
         Test that single permission check is < 1ms.
@@ -91,6 +97,7 @@ class TestPermissionCheckPerformance:
         # Note: This includes full request processing, so we use 10ms as reasonable threshold
         assert avg_time_ms < 10, f"Permission check took {avg_time_ms:.2f}ms per request"
 
+    @pytest.mark.performance
     def test_platform_admin_role_check_performance(self, app):
         """
         Test that platform_admin role check is < 1ms.
@@ -127,51 +134,81 @@ class TestPermissionCheckPerformance:
         # Should be similar to admin role check
         assert avg_time_ms < 10, f"Permission check took {avg_time_ms:.2f}ms per request"
 
-    def test_permission_check_consistency(self, app):
+    def test_permission_check_work_is_identical_across_roles(self, app):
         """
-        Test that permission check performance is consistent across roles.
+        Test that the permission check does identical work for every admin role.
 
         Issue #2276: Ensure no performance regression for different roles.
-        """
-        roles = [
-            ("admin", "admin"),
-            ("platform_admin", "platform_admin"),
-        ]
 
-        results = {}
-        for role_name, role_value in roles:
+        This asserts on the *amount of work* per request rather than on wall-clock
+        time. ``platform_admin_required`` accepts both ``platform_admin`` and the
+        legacy ``admin`` role from a single branch (Issue #2286), so both roles must
+        cost exactly one token extraction and one user load per request. A regression
+        that makes one role more expensive than the other -- an extra role lookup, a
+        per-request tenant query, a retry loop -- shows up here as a changed call
+        count, deterministically and on any machine.
+
+        The previous version of this test compared elapsed time between the two roles
+        and required <20% variance. That is not a property a shared CI runner can
+        guarantee (observed swings of 60-70% from noisy neighbours), and it made the
+        required ``test (3.x)`` jobs flaky on main.
+        """
+        requests_per_role = 50
+        # Guards the test against itself: at zero requests every count is 0 and
+        # every assertion below holds while nothing has been exercised.
+        assert requests_per_role > 1, "comparison is meaningless without repeated requests"
+        roles = ["admin", "platform_admin"]
+
+        call_counts = {}
+        for role in roles:
             with patch(
                 "app.auth.decorators._load_user_from_token",
                 return_value={
                     "id": 1,
-                    "username": role_name,
-                    "email": f"{role_name}@example.com",
-                    "role": role_value,
+                    "username": role,
+                    "email": f"{role}@example.com",
+                    "role": role,
                     "tenant_id": None,
                     "must_change_password": False,
                 },
-            ):
+            ) as load_user:
                 with patch(
                     "app.auth.decorators._extract_session_token", return_value="valid-token"
-                ):
+                ) as extract_token:
                     with app.test_client() as client:
-                        start_time = time.time()
-                        for _ in range(100):
-                            client.get(
+                        for _ in range(requests_per_role):
+                            response = client.get(
                                 "/api/test",
                                 headers={"Authorization": "Bearer valid-token"},
                             )
-                        end_time = time.time()
+                            assert (
+                                response.status_code == 200
+                            ), f"Role {role!r} was rejected with {response.status_code}"
+                            assert response.get_json()["role"] == role
 
-                        results[role_name] = end_time - start_time
+            call_counts[role] = {
+                "extract_session_token": extract_token.call_count,
+                "load_user_from_token": load_user.call_count,
+            }
 
-        # Performance difference should be minimal (< 20% variance)
-        admin_time = results["admin"]
-        platform_admin_time = results["platform_admin"]
-        variance = abs(admin_time - platform_admin_time) / max(admin_time, platform_admin_time)
+        # Each role costs exactly one token extraction + one user load per request.
+        expected = {
+            "extract_session_token": requests_per_role,
+            "load_user_from_token": requests_per_role,
+        }
+        for role in roles:
+            assert call_counts[role] == expected, (
+                f"Role {role!r} performed {call_counts[role]} auth operations for "
+                f"{requests_per_role} requests, expected {expected}"
+            )
 
-        assert variance < 0.2, f"Performance variance between roles: {variance:.2%}"
+        # ...and both roles cost the same, so neither is privileged over the other.
+        assert call_counts["admin"] == call_counts["platform_admin"], (
+            f"admin cost {call_counts['admin']} but platform_admin cost "
+            f"{call_counts['platform_admin']}"
+        )
 
+    @pytest.mark.performance
     def test_rejection_performance(self, app):
         """
         Test that rejection (403) is fast for unauthorized roles.

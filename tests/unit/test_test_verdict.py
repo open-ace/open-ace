@@ -42,7 +42,7 @@ def _te(
 
 
 def _run_failed(evidences: list[TestExecutionEvidence], framework: str = "python") -> bool:
-    return compute_run_verdict(evidences, framework) == ExecutionVerdict.FAILED
+    return compute_run_verdict(evidences) == ExecutionVerdict.FAILED
 
 
 # ── coverage / override rules (incident-encoding) ─────────────────────────────
@@ -76,7 +76,7 @@ def test_later_passing_superset_clears_earlier_failure():
             selectors=["tests/a.py", "tests/b.py", "tests/c.py"],
         ),
     ]
-    assert compute_run_verdict(evidences, "python") == ExecutionVerdict.PASSED
+    assert compute_run_verdict(evidences) == ExecutionVerdict.PASSED
 
 
 def test_earlier_passing_superset_does_not_clear_later_failure():
@@ -123,7 +123,7 @@ def test_same_command_latest_invocation_wins_head_tail_1967():
         ),
         _te("tail", ExecutionVerdict.PASSED.value, selectors=["tests/x.py"]),
     ]
-    assert compute_run_verdict(evidences, "python") == ExecutionVerdict.PASSED
+    assert compute_run_verdict(evidences) == ExecutionVerdict.PASSED
 
 
 def test_stale_pass_does_not_satisfy_rerun_that_failed():
@@ -135,13 +135,24 @@ def test_stale_pass_does_not_satisfy_rerun_that_failed():
     assert _run_failed(evidences)
 
 
-def test_non_pytest_does_not_cross_cover_between_commands():
-    # jest/go/cargo: a pass on one command cannot clear a failure on another.
+def test_non_pytest_cross_command_pass_is_undecidable_not_a_failure():
+    # jest/go/cargo carry no coverage scope, so a pass on one command still
+    # cannot *clear* a failure on another — but neither can the evidence assert
+    # the run failed. #2376 PR-2 split those: the verdict is INCONCLUSIVE, which
+    # defers to the heuristic, rather than FAILED.
+    #
+    # This changed because PR-2 made FAILED actually block the phase. While it
+    # was inert, calling this case FAILED was harmless; once it blocks, it
+    # hard-fails the ordinary "targeted test fails -> fix -> broader run passes"
+    # flow for every non-pytest runner. Decided non-coverage (both scopes known,
+    # pytest) still yields FAILED — see
+    # test_targeted_pass_does_not_cover_failed_full_suite_1967.
     evidences = [
         _te("c1", ExecutionVerdict.FAILED.value, framework="javascript"),
         _te("c2", ExecutionVerdict.PASSED.value, framework="javascript"),
     ]
-    assert _run_failed(evidences, "javascript")
+    assert not _run_failed(evidences, "javascript")
+    assert compute_run_verdict(evidences) is ExecutionVerdict.INCONCLUSIVE
 
 
 def test_restricted_pass_does_not_cover_earlier_failure():
@@ -161,11 +172,11 @@ def test_all_passed_returns_passed():
         _te("c1", ExecutionVerdict.PASSED.value, selectors=["tests/a.py"]),
         _te("c2", ExecutionVerdict.PASSED.value, selectors=["tests/b.py"]),
     ]
-    assert compute_run_verdict(evidences, "python") == ExecutionVerdict.PASSED
+    assert compute_run_verdict(evidences) == ExecutionVerdict.PASSED
 
 
 def test_empty_evidence_is_not_run():
-    assert compute_run_verdict([], "python") == ExecutionVerdict.NOT_RUN
+    assert compute_run_verdict([]) == ExecutionVerdict.NOT_RUN
 
 
 def test_all_low_confidence_is_inconclusive():
@@ -173,7 +184,7 @@ def test_all_low_confidence_is_inconclusive():
     evidences = [
         _te("c1", ExecutionVerdict.INCONCLUSIVE.value, confidence=ParserConfidence.LOW.value),
     ]
-    assert compute_run_verdict(evidences, "python") == ExecutionVerdict.INCONCLUSIVE
+    assert compute_run_verdict(evidences) == ExecutionVerdict.INCONCLUSIVE
 
 
 def test_low_confidence_command_makes_run_inconclusive_when_rest_pass():
@@ -183,7 +194,7 @@ def test_low_confidence_command_makes_run_inconclusive_when_rest_pass():
         _te("c1", ExecutionVerdict.PASSED.value, selectors=["tests/a.py"]),
         _te("c2", ExecutionVerdict.INCONCLUSIVE.value, confidence=ParserConfidence.LOW.value),
     ]
-    assert compute_run_verdict(evidences, "python") == ExecutionVerdict.INCONCLUSIVE
+    assert compute_run_verdict(evidences) == ExecutionVerdict.INCONCLUSIVE
 
 
 def test_failed_takes_priority_over_inconclusive_peer():
@@ -192,7 +203,7 @@ def test_failed_takes_priority_over_inconclusive_peer():
         _te("c1", ExecutionVerdict.FAILED.value, selectors=["tests/a.py"]),
         _te("c2", ExecutionVerdict.INCONCLUSIVE.value, confidence=ParserConfidence.LOW.value),
     ]
-    assert compute_run_verdict(evidences, "python") == ExecutionVerdict.FAILED
+    assert compute_run_verdict(evidences) == ExecutionVerdict.FAILED
 
 
 def test_medium_confidence_failure_blocks_pass():

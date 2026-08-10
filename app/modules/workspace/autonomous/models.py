@@ -83,6 +83,10 @@ class AutonomousWorkflow:
     ci_repair_no_change_retries: int = 0
     last_ci_failure_signature: str = ""
     last_ci_failure_head_sha: str = ""
+    # #2443 PR-C: how many times a Tier1 CI-repair exhaustion has escalated back
+    # to a fresh development round. Capped by MAX_MERGE_FAIL_DEV_ROUNDS; at the
+    # cap the workflow falls through to a Tier2 terminal report + failed.
+    merge_fail_dev_rounds: int = 0
     # Source of truth for AI-authored content language (en/zh/ja/ko). Set once
     # at creation; persisted content is generated in this language and rendered
     # verbatim (it does NOT switch per viewer). System-authored structured
@@ -102,6 +106,7 @@ class AutonomousWorkflow:
         "reporting",
         "waiting",
         "merging",
+        "verification_pending",
         "queued",
     )
 
@@ -172,6 +177,7 @@ class AutonomousWorkflow:
             "ci_repair_no_change_retries": self.ci_repair_no_change_retries,
             "last_ci_failure_signature": self.last_ci_failure_signature,
             "last_ci_failure_head_sha": self.last_ci_failure_head_sha,
+            "merge_fail_dev_rounds": self.merge_fail_dev_rounds,
             "content_language": self.content_language,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
@@ -243,6 +249,7 @@ class AutonomousWorkflow:
             ci_repair_no_change_retries=data.get("ci_repair_no_change_retries", 0),
             last_ci_failure_signature=data.get("last_ci_failure_signature", ""),
             last_ci_failure_head_sha=data.get("last_ci_failure_head_sha", ""),
+            merge_fail_dev_rounds=data.get("merge_fail_dev_rounds", 0),
             content_language=data.get("content_language", "en"),
             created_at=(
                 datetime.fromisoformat(data["created_at"]) if data.get("created_at") else None

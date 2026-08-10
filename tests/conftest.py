@@ -10,8 +10,15 @@ import asyncio
 import os
 import sqlite3
 import sys
+from pathlib import Path
 
 import pytest
+
+# Stub Unix-only modules on Windows so that app.routes.fs (and transitively
+# app.routes) can be imported during test collection and patching.
+if sys.platform == "win32":
+    sys.modules.setdefault("pwd", type(sys)("pwd"))
+    sys.modules.setdefault("grp", type(sys)("grp"))
 
 # =============================================================================
 # Issue #2185: Set default security mode for tests
@@ -38,6 +45,91 @@ if shared_path not in sys.path:
 
 # Configure pytest-asyncio
 pytest_plugins = ("pytest_asyncio",)
+LEGACY_PR_GATE_FILE = Path(project_root) / "tests" / "issues" / "pr-gate-directories.txt"
+
+
+def _number_inventory(path):
+    if not path.exists():
+        return set()
+    return {
+        line.strip()
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    }
+
+
+LEGACY_PR_GATE_ISSUES = _number_inventory(LEGACY_PR_GATE_FILE)
+
+
+def pytest_addoption(parser):
+    """Add provenance-based selection without coupling tests to a directory."""
+    parser.addoption(
+        "--issue",
+        action="append",
+        default=[],
+        metavar="NUMBER",
+        help="Run tests linked to this GitHub issue number (repeatable).",
+    )
+
+
+def _test_relative_path(item):
+    """Return a collected item's path relative to the project checkout."""
+    try:
+        return Path(str(item.path)).resolve().relative_to(Path(project_root).resolve())
+    except ValueError:
+        return None
+
+
+def _legacy_issue_number(item):
+    """Return the issue number encoded by a legacy tests/issues/<number> path."""
+    relative = _test_relative_path(item)
+    if relative is None:
+        return None
+    parts = relative.parts
+    if len(parts) >= 3 and parts[0] == "tests" and parts[1] == "issues" and parts[2].isdigit():
+        return parts[2]
+    return None
+
+
+def _marked_issue_numbers(item):
+    numbers = set()
+    for marker in item.iter_markers(name="issue"):
+        if marker.args:
+            numbers.add(str(marker.args[0]))
+        elif "number" in marker.kwargs:
+            numbers.add(str(marker.kwargs["number"]))
+    return numbers
+
+
+def pytest_collection_modifyitems(config, items):
+    """Backfill legacy provenance and support ``pytest --issue=N`` everywhere."""
+    selected_issues = set(config.getoption("--issue"))
+    invalid = sorted(number for number in selected_issues if not number.isdigit())
+    if invalid:
+        raise pytest.UsageError(f"Invalid issue number(s): {', '.join(invalid)}")
+
+    kept = []
+    deselected = []
+    for item in items:
+        relative = _test_relative_path(item)
+        if relative is not None and relative.parts[:2] == ("tests", "performance"):
+            item.add_marker(pytest.mark.performance)
+
+        legacy_number = _legacy_issue_number(item)
+        if legacy_number:
+            item.add_marker(pytest.mark.issue(int(legacy_number)))
+            item.add_marker(pytest.mark.regression)
+            if legacy_number in LEGACY_PR_GATE_ISSUES:
+                item.add_marker(pytest.mark.priority_p0)
+
+        if selected_issues and not (selected_issues & _marked_issue_numbers(item)):
+            deselected.append(item)
+        else:
+            kept.append(item)
+
+    if deselected:
+        config.hook.pytest_deselected(items=deselected)
+        items[:] = kept
 
 
 @pytest.fixture(autouse=True)

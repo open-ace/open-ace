@@ -137,26 +137,9 @@ describe('PageRefreshControl', () => {
       expect(screen.getByTestId('refresh-error-indicator')).toBeInTheDocument();
     });
 
-    it('should render static clock icon when no dropdown content in compact mode', () => {
+    it('should display last refresh time as text when no dropdown content in compact mode', () => {
       const mockRefresh = createMockRefresh();
-
-      render(
-        <PageRefreshControl
-          refresh={mockRefresh}
-          compact={true}
-          showAutoRefreshToggle={false}
-          showIntervalSelector={false}
-        />
-      );
-
-      // Should render static clock icon instead of dropdown toggle
-      expect(screen.getByTestId('refresh-clock-icon')).toBeInTheDocument();
-      expect(screen.queryByTestId('dropdown-toggle')).not.toBeInTheDocument();
-    });
-
-    it('should show tooltip on static clock icon with last refresh time', () => {
-      const mockRefresh = createMockRefresh();
-      mockRefresh.lastRefreshTime = Date.now() - 120000;
+      mockRefresh.lastRefreshTime = Date.now() - 120000; // 2 minutes ago
 
       render(
         <PageRefreshControl
@@ -168,9 +151,72 @@ describe('PageRefreshControl', () => {
         />
       );
 
-      const clockIcon = screen.getByTestId('refresh-clock-icon');
-      expect(clockIcon).toHaveAttribute('title');
-      expect(clockIcon.getAttribute('title')).toContain('Last Refresh');
+      // Regression guard: ensure removed static clock icon does not return
+      expect(screen.queryByTestId('refresh-clock-icon')).not.toBeInTheDocument();
+      // Should render refresh time as text
+      expect(screen.getByText(/minutes ago/i)).toBeInTheDocument();
+      // Should have title attribute for tooltip
+      const timeText = screen.getByText(/minutes ago/i);
+      expect(timeText).toHaveAttribute('title');
+      expect(timeText.getAttribute('title')).toContain('Last Refresh');
+    });
+
+    it('should not render clock icon or extra element when lastRefreshTime is null', () => {
+      const mockRefresh = createMockRefresh();
+      mockRefresh.lastRefreshTime = null;
+
+      render(
+        <PageRefreshControl
+          refresh={mockRefresh}
+          compact={true}
+          showAutoRefreshToggle={false}
+          showIntervalSelector={false}
+          showLastRefreshTime={true}
+        />
+      );
+
+      // Regression guard: ensure removed static clock icon does not return
+      expect(screen.queryByTestId('refresh-clock-icon')).not.toBeInTheDocument();
+      // Should NOT render the time text small element
+      expect(screen.queryByText(/ago/i)).not.toBeInTheDocument();
+    });
+
+    it('should not show extra elements when showLastRefreshTime is false', () => {
+      const mockRefresh = createMockRefresh();
+      mockRefresh.lastRefreshTime = Date.now() - 60000;
+
+      render(
+        <PageRefreshControl
+          refresh={mockRefresh}
+          compact={true}
+          showAutoRefreshToggle={false}
+          showIntervalSelector={false}
+          showLastRefreshTime={false}
+        />
+      );
+
+      // Regression guard: ensure removed static clock icon does not return
+      expect(screen.queryByTestId('refresh-clock-icon')).not.toBeInTheDocument();
+      // Should NOT render the time text
+      expect(screen.queryByText(/ago/i)).not.toBeInTheDocument();
+    });
+
+    it('should display seconds ago format for very recent refresh', () => {
+      const mockRefresh = createMockRefresh();
+      mockRefresh.lastRefreshTime = Date.now() - 30000; // 30 seconds ago
+
+      render(
+        <PageRefreshControl
+          refresh={mockRefresh}
+          compact={true}
+          showAutoRefreshToggle={false}
+          showIntervalSelector={false}
+          showLastRefreshTime={true}
+        />
+      );
+
+      // Should render seconds ago format
+      expect(screen.getByText(/seconds ago/i)).toBeInTheDocument();
     });
 
     it('should still render manual refresh button when no dropdown content', () => {

@@ -283,14 +283,16 @@ def get_mapping_stats():
     Get mapping statistics.
 
     Issue #2180: Tenant admin sees only their tenant's stats.
+    Issue #2374: Changed to fail-closed pattern for consistency.
     """
     user_role = g.user.get("role")
     user_tenant_id = g.user.get("tenant_id")
 
     service = ToolAccountAutoMappingService()
 
-    if user_role == "tenant_admin" and user_tenant_id is not None:
-        # Filter stats by tenant
+    if user_role == "tenant_admin":
+        if user_tenant_id is None:
+            return jsonify({"error": "Tenant admin must have tenant_id"}), 403
         stats = service.get_mapping_stats(tenant_id=user_tenant_id)
     else:
         stats = service.get_mapping_stats()
@@ -305,6 +307,7 @@ def run_auto_mapping():
     Run auto-mapping for all unmapped accounts.
 
     Issue #2180: Tenant admin can only run for their tenant.
+    Issue #2374: Changed to fail-closed pattern for consistency.
     """
     data = request.get_json() or {}
     dry_run = data.get("dry_run", False)
@@ -314,8 +317,9 @@ def run_auto_mapping():
 
     service = ToolAccountAutoMappingService()
 
-    if user_role == "tenant_admin" and user_tenant_id is not None:
-        # Only auto-map for tenant's users
+    if user_role == "tenant_admin":
+        if user_tenant_id is None:
+            return jsonify({"error": "Tenant admin must have tenant_id"}), 403
         results, still_unmapped = service.run_auto_mapping(
             dry_run=dry_run, tenant_id=user_tenant_id
         )
@@ -335,7 +339,10 @@ def run_auto_mapping():
 @mapping_rules_bp.route("/api/mapping-rules/test-match", methods=["POST"])
 @admin_required
 def test_match():
-    """Test if a tool_account matches any rules."""
+    """Test if a tool_account matches any rules.
+
+    Issue #2374: Added tenant isolation for tenant_admin.
+    """
     data = request.get_json()
     if not data:
         return jsonify({"error": "No data provided"}), 400
@@ -344,8 +351,20 @@ def test_match():
     if not tool_account:
         return jsonify({"error": "tool_account is required"}), 400
 
+    user_role = g.user.get("role")
+    user_tenant_id = g.user.get("tenant_id")
+
     service = ToolAccountAutoMappingService()
-    result = service.auto_map_account(tool_account, data.get("tool_type"))
+
+    # Issue #2374: Pass tenant_id for tenant_admin to prevent cross-tenant matching
+    if user_role == "tenant_admin":
+        if user_tenant_id is None:
+            return jsonify({"error": "Tenant admin must have tenant_id"}), 403
+        result = service.auto_map_account(
+            tool_account, data.get("tool_type"), tenant_id=user_tenant_id
+        )
+    else:
+        result = service.auto_map_account(tool_account, data.get("tool_type"))
 
     if result:
         return jsonify(
@@ -368,13 +387,16 @@ def get_unmapped_accounts():
     Get list of unmapped tool accounts.
 
     Issue #2180: Tenant admin sees only their tenant's unmapped accounts.
+    Issue #2374: Changed to fail-closed pattern for consistency.
     """
     user_role = g.user.get("role")
     user_tenant_id = g.user.get("tenant_id")
 
     repo = UserToolAccountRepository()
 
-    if user_role == "tenant_admin" and user_tenant_id is not None:
+    if user_role == "tenant_admin":
+        if user_tenant_id is None:
+            return jsonify({"error": "Tenant admin must have tenant_id"}), 403
         unmapped = repo.get_unmapped_tool_accounts(tenant_id=user_tenant_id)
     else:
         unmapped = repo.get_unmapped_tool_accounts()
@@ -390,9 +412,22 @@ def get_unmapped_accounts():
 @mapping_rules_bp.route("/api/unmapped-accounts/<sender_name>/suggest-mapping", methods=["GET"])
 @admin_required
 def suggest_mapping(sender_name: str):
-    """Get suggested mapping for an unmapped account."""
+    """Get suggested mapping for an unmapped account.
+
+    Issue #2374: Added tenant isolation for tenant_admin.
+    """
+    user_role = g.user.get("role")
+    user_tenant_id = g.user.get("tenant_id")
+
     service = ToolAccountAutoMappingService()
-    result = service.auto_map_account(sender_name)
+
+    # Issue #2374: Pass tenant_id for tenant_admin to prevent cross-tenant matching
+    if user_role == "tenant_admin":
+        if user_tenant_id is None:
+            return jsonify({"error": "Tenant admin must have tenant_id"}), 403
+        result = service.auto_map_account(sender_name, tenant_id=user_tenant_id)
+    else:
+        result = service.auto_map_account(sender_name)
 
     if result:
         return jsonify(
@@ -404,7 +439,14 @@ def suggest_mapping(sender_name: str):
             }
         )
     else:
-        return jsonify({"suggestion": None})
+        return jsonify(
+            {
+                "suggested_user_id": None,
+                "suggested_username": None,
+                "matched_by": None,
+                "rule_id": None,
+            }
+        )
 
 
 @mapping_rules_bp.route("/api/unmapped-accounts/<sender_name>/map", methods=["POST"])

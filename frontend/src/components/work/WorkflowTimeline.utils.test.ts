@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 
 import {
   findForkMilestoneIndex,
+  getActiveStatusHintKey,
   getActivityHostMilestoneId,
+  getWorkflowPhaseLabelKey,
   getWorkflowSessionIdForMilestone,
   isAiMilestoneType,
   isDisplayableTimelineActivity,
@@ -11,6 +13,17 @@ import {
 } from './WorkflowTimeline.utils';
 
 describe('WorkflowTimeline.utils', () => {
+  it('labels and explains the acceptance verification state', () => {
+    expect(getWorkflowPhaseLabelKey('acceptance_verification')).toBe(
+      'autoPhaseAcceptanceVerification'
+    );
+    expect(getActiveStatusHintKey('verification_pending')).toBe(
+      'autoActiveHintVerificationPending'
+    );
+    expect(getWorkflowPhaseLabelKey('unknown-phase')).toBe('autoPhasePreparation');
+    expect(getActiveStatusHintKey('completed')).toBeUndefined();
+  });
+
   it('filters empty assistant placeholders without hiding real activity events', () => {
     expect(isDisplayableTimelineActivity({ type: 'assistant' })).toBe(false);
     expect(isDisplayableTimelineActivity({ type: 'assistant', text: '   ' })).toBe(false);

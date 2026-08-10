@@ -125,7 +125,7 @@ remove_deprecated_rules() {
     # Remove lines containing deprecated patterns
     for pattern in "${DEPRECATED_PATTERNS[@]}"; do
         if grep -qF "$pattern" "$tmp_file" 2>/dev/null; then
-            echo "Removing deprecated rule: $pattern"
+            echo "Removing deprecated rule: $pattern" >&2
             grep -vF "$pattern" "$tmp_file" > "${tmp_file}.tmp" || true
             mv "${tmp_file}.tmp" "$tmp_file"
         fi
@@ -133,7 +133,7 @@ remove_deprecated_rules() {
 
     # Remove lines with sensitive variables in env_keep
     if grep -E "env_keep.*(${SENSITIVE_VARS})" "$tmp_file" 2>/dev/null | grep -q "."; then
-        echo "Removing sensitive variables from env_keep"
+        echo "Removing sensitive variables from env_keep" >&2
         grep -vE "env_keep.*(${SENSITIVE_VARS})" "$tmp_file" > "${tmp_file}.tmp" || true
         mv "${tmp_file}.tmp" "$tmp_file"
     fi
@@ -158,7 +158,7 @@ add_wrapper_rules() {
         if [ -x "$wrapper_path" ]; then
             # Check if rule already exists
             if ! grep -qF "$wrapper_path" "$tmp_file" 2>/dev/null; then
-                echo "Adding wrapper rule: $wrapper"
+                echo "Adding wrapper rule: $wrapper" >&2
                 echo "open-ace ALL=(root) NOPASSWD: ${wrapper_path} *" >> "$tmp_file"
                 echo "openace ALL=(root) NOPASSWD: ${wrapper_path} *" >> "$tmp_file"
             fi

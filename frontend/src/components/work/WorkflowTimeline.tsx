@@ -25,6 +25,7 @@ import {
   useMarkDone,
   useRetryWorkflow,
   useExtendPlanningTimeout,
+  useAcceptanceOverride,
   useMilestoneSession,
   useMilestoneDiff,
   useWorkflowPrDiff,
@@ -51,7 +52,9 @@ import type { Language } from '@/types';
 import {
   findForkMilestoneIndex,
   formatTokens,
+  getActiveStatusHintKey,
   getActivityHostMilestoneId,
+  getWorkflowPhaseLabelKey,
   getWorkflowSessionIdForMilestone,
   isAiMilestoneType,
   isDisplayableTimelineActivity,
@@ -104,27 +107,6 @@ const MILESTONE_DISPLAY: Record<string, { icon: string; color: string }> = {
 // worth viewing after the run finishes (the live activity stream is run-time only).
 const PLAN_CONTENT_TYPES = ['plan_created', 'plan_refined', 'plan_finalized'];
 const REVIEW_CONTENT_TYPES = ['plan_reviewed', 'pr_reviewed', 'pr_review_summary'];
-const PHASE_LABEL_KEYS: Record<string, string> = {
-  preparation: 'autoPhasePreparation',
-  planning: 'autoPhasePlanning',
-  development: 'autoPhaseDevelopment',
-  pr_review: 'autoPhasePRReview',
-  report: 'autoPhaseReport',
-  wait: 'autoPhaseWait',
-  merge: 'autoPhaseMerge',
-};
-
-const ACTIVE_STATUS_HINT_KEYS: Record<string, string> = {
-  queued: 'autoActiveHintQueued',
-  pending: 'autoActiveHintPending',
-  preparing: 'autoActiveHintPreparing',
-  planning: 'autoActiveHintPlanning',
-  developing: 'autoActiveHintDeveloping',
-  pr_review: 'autoActiveHintPrReview',
-  reporting: 'autoActiveHintReporting',
-  merging: 'autoActiveHintMerging',
-};
-
 const MILESTONE_ICON_COLORS: Record<string, string> = {
   dark: 'var(--text-primary)',
   info: 'var(--color-info)',
@@ -350,6 +332,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
   const markDoneMutation = useMarkDone();
   const retryMutation = useRetryWorkflow();
   const extendTimeoutMutation = useExtendPlanningTimeout();
+  const acceptanceOverrideMutation = useAcceptanceOverride();
   const hasPr = !!workflow.github_pr_number;
 
   // Session detail query
@@ -710,6 +693,17 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
         : { workflowId: workflow.workflow_id }
     );
 
+  // #2335 S6: admin override for a paused indeterminate acceptance workflow.
+  const showAcceptanceOverride =
+    workflow.status === 'paused' && workflow.verification_status === 'indeterminate';
+  const handleAcceptanceOverride = () => {
+    const reason = window.prompt(t('autoAcceptanceOverrideReason', language));
+    // window.prompt returns null when the user cancels; '' is a valid (empty) reason.
+    if (reason === null) return;
+    if (!window.confirm(t('autoAcceptanceOverrideConfirm', language))) return;
+    acceptanceOverrideMutation.mutate({ workflowId: workflow.workflow_id, reason });
+  };
+
   const formatDefinitionValue = (value: unknown) => {
     if (value === null || value === undefined || value === '') {
       return '-';
@@ -1052,12 +1046,9 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
     milestones.length > 0 ? getMilestoneAnchorTime(milestones[0]) : workflow.created_at;
   const workflowStatusConfig = getAutonomousWorkflowStatusConfig(workflow.status);
   const workflowStatusLabel = t(workflowStatusConfig.labelKey, language);
-  const workflowPhaseLabel = t(
-    PHASE_LABEL_KEYS[workflow.current_phase] ?? 'autoPhasePreparation',
-    language
-  );
+  const workflowPhaseLabel = t(getWorkflowPhaseLabelKey(workflow.current_phase), language);
   const isLiveStatus = ACTIVE_WORKFLOW_STATUSES.includes(workflow.status);
-  const activeStatusHintKey = ACTIVE_STATUS_HINT_KEYS[workflow.status];
+  const activeStatusHintKey = getActiveStatusHintKey(workflow.status);
   const activeStatusHint = activeStatusHintKey ? t(activeStatusHintKey, language) : '';
   const latestMilestoneWithSession = [...milestones]
     .reverse()
@@ -2295,6 +2286,18 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                 >
                   <i className="bi bi-check-circle me-1"></i>
                   {t('autoCompleteWorkflow', language)}
+                </Button>
+              )}
+              {showAcceptanceOverride && (
+                <Button
+                  size="sm"
+                  variant="success"
+                  onClick={handleAcceptanceOverride}
+                  disabled={acceptanceOverrideMutation.isPending}
+                  title={t('autoAcceptanceOverrideDesc', language)}
+                >
+                  <i className="bi bi-shield-check me-1"></i>
+                  {t('autoAcceptanceOverrideButton', language)}
                 </Button>
               )}
               {latestFailedMilestone && (

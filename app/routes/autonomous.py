@@ -172,6 +172,7 @@ PHASE_TO_STATUS = {
     "report": "reporting",
     "wait": "waiting",
     "merge": "merging",
+    "acceptance_verification": "verification_pending",
 }
 
 ISSUE_URL_RE = re.compile(r"^https://github\.com/[^/\s]+/[^/\s]+/issues/(\d+)(?:[/?#].*)?$", re.I)
@@ -1215,6 +1216,19 @@ def retry_workflow(workflow_id):
         "status": status,
         "error_message": "",
         "retry_count": retry_count + 1,
+        # PR-B (#2443): reset the full CI-repair counter set + failure signature
+        # so a retried failed workflow starts CI repair from a clean state
+        # instead of being instantly re-exhausted by residual counts or a stale
+        # signature guard.
+        "ci_repair_attempts": 0,
+        "ci_repair_transient_retries": 0,
+        "ci_repair_no_change_retries": 0,
+        "ci_diagnostics_attempts": 0,
+        "last_ci_failure_signature": "",
+        "last_ci_failure_head_sha": "",
+        # PR-C (#2443): reset the Tier1 dev-round escalation budget too, so a
+        # retried workflow gets a fresh MAX_MERGE_FAIL_DEV_ROUNDS allowance.
+        "merge_fail_dev_rounds": 0,
     }
     # Optional per-workflow scope bump (#2309): a failed round whose only
     # blocker was the changed-files cap can be retried with a higher limit
@@ -1291,6 +1305,149 @@ def get_timeline(workflow_id):
     )
     milestones = _enrich_milestones_with_diff_stats(workflow, milestones)
     return jsonify({"success": True, "milestones": milestones})
+
+
+@autonomous_bp.route("/workflows/<workflow_id>/verification_override", methods=["POST"])
+@auth_required
+def acceptance_verification_override(workflow_id):
+    """Admin override: confirm an indeterminate acceptance workflow (#2335 S6).
+
+    A workflow paused at ``acceptance_verification`` with
+    ``verification_status="indeterminate"`` cannot complete on its own (the
+    verifier could not reach a confident verdict and is awaiting evidence that
+    only a human can supply). An admin may inspect the merged code out of band
+    and override the verdict to ``confirmed``: this stamps ``verified_by`` with
+    the human identity, emits an audit event, posts a short report, closes the
+    issue as @open-ace-bot, and completes the workflow (resting at the
+    ``acceptance_verification`` phase, consistent with the confirmed terminal
+    default).
+
+    Admin-only — a non-admin (even the workflow owner) cannot override, because
+    the override bypasses the independent verifier and must be attributable to
+    a privileged actor.
+    """
+    if not User.is_admin_role(g.user_role):
+        return jsonify({"error": "Admin permission required"}), 403
+
+    workflow = _get_repo().get_workflow(workflow_id)
+    if not workflow:
+        return jsonify({"error": "Workflow not found"}), 404
+
+    if workflow.get("current_phase") != "acceptance_verification":
+        return jsonify({"error": "Workflow is not in the acceptance_verification phase"}), 400
+    if workflow.get("verification_status") != "indeterminate":
+        return (
+            jsonify({"error": "Override is only available for indeterminate verification status"}),
+            400,
+        )
+
+    data = request.get_json(silent=True) or {}
+    reason = (data.get("reason") or "").strip()
+    if len(reason) > 2000:
+        return jsonify({"error": "reason too long (max 2000 characters)"}), 400
+
+    # Resolve the acting admin's username for the verified_by stamp.
+    user_id = g.user_id
+    username = g.user.get("username") if isinstance(g.user, dict) else None
+    if not username and isinstance(user_id, int):
+        try:
+            acting_user = user_repo.get_user_by_id(user_id) or {}
+            username = acting_user.get("username")
+        except Exception:
+            username = None
+    verified_by = f"human-override:{username or user_id}"
+
+    now_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    now_db = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    merge_sha = workflow.get("verification_merge_sha") or ""
+    issue_number = workflow.get("github_issue_number")
+
+    override_report = {
+        "merge_sha": merge_sha,
+        "verified_by": verified_by,
+        "status": "confirmed",
+        "override": True,
+        "reason": reason,
+        "overridden_at": now_iso,
+    }
+
+    # Post a short acceptance-override comment and close the issue (as the
+    # service user / @open-ace-bot). Failures here degrade gracefully: the
+    # workflow still completes, but we log so an operator can reconcile. This
+    # mirrors the acceptance_verification confirmed path's close semantics.
+    close_failed = False
+    try:
+        if issue_number:
+            from app.modules.workspace.autonomous.github_ops import GitHubOps
+
+            project_path = workflow.get("worktree_path") or workflow.get("project_path", "")
+            system_account = workflow.get("system_account")
+            if not system_account:
+                owner = user_repo.get_user_by_id(workflow.get("user_id")) or {}
+                system_account = owner.get("system_account")
+            gh = GitHubOps(project_path, system_account=system_account)
+            lines = [
+                "## ✅ Acceptance verified (human override)",
+                f"**Merge SHA:** `{merge_sha}`" if merge_sha else "**Merge SHA:** _unknown_",
+                f"**Verifier:** `{verified_by}`",
+            ]
+            if reason:
+                lines += ["", f"**Reason:** {reason}"]
+            gh.add_issue_comment(int(issue_number), "\n".join(lines))
+            gh.close_issue(int(issue_number))
+    except Exception as e:  # pragma: no cover - best-effort close
+        logger.warning(
+            "acceptance_override: failed to post/close for workflow %s issue %s: %s",
+            workflow_id,
+            issue_number,
+            e,
+        )
+        close_failed = True
+
+    repo = _get_repo()
+    repo.update_workflow(
+        workflow_id,
+        {
+            "verification_status": "confirmed",
+            "verified_by": verified_by,
+            "verification_completed_at": now_iso,
+            "verification_report": json.dumps(override_report, ensure_ascii=False),
+            "issue_closed_by_workflow_at": now_iso if not close_failed else None,
+            "status": "completed",
+            "current_phase": "acceptance_verification",
+            "completed_at": now_db,
+            "paused_at": None,
+            "error_message": "",
+        },
+    )
+
+    # Audit trail: record the override as a workflow event so it shows up in
+    # the timeline alongside the phase transitions.
+    repo.create_event(
+        {
+            "workflow_id": workflow_id,
+            "milestone_id": "",
+            "event_type": "acceptance_override",
+            "event_data": json.dumps(
+                {
+                    "verified_by": verified_by,
+                    "reason": reason,
+                    "issue_number": issue_number,
+                    "close_failed": close_failed,
+                    "overridden_at": now_iso,
+                },
+                ensure_ascii=False,
+            ),
+        }
+    )
+    _emit_event_safe(
+        workflow_id,
+        "status_change",
+        {"status": "completed", "phase": "acceptance_verification", "override": True},
+    )
+
+    updated = repo.get_workflow(workflow_id)
+    return jsonify({"success": True, "workflow": _workflow_response(updated)})
 
 
 @autonomous_bp.route("/workflows/<workflow_id>/milestones/<milestone_id>/cancel", methods=["POST"])

@@ -12,6 +12,7 @@ export function useMachines() {
   return useQuery({
     queryKey: ['remote', 'machines'],
     queryFn: () => remoteApi.listMachines(),
+    refetchInterval: 30000, // 每 30 秒自动刷新，匹配心跳更新频率
   });
 }
 

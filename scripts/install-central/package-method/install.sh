@@ -3851,6 +3851,22 @@ install_local() {
                 sed -i "s|^Environment=WORKSPACE_BASE_DIR=.*|Environment=WORKSPACE_BASE_DIR=/home|" "$service_file"
                 print_info "Fixed WORKSPACE_BASE_DIR=/home (Issue #1308, #2290)"
             fi
+
+            # Check if OPENACE_ENCRYPTION_KEY is missing (PR #2275 follow-up, Issue #2359)
+            # Only add if not already configured in service file AND not in secrets.env
+            # This prevents overriding user's existing encryption key configuration
+            local has_enc_key_in_service=$(grep -q "^Environment=OPENACE_ENCRYPTION_KEY=" "$service_file" 2>/dev/null && echo "yes" || echo "no")
+            local has_secrets_env=""
+            if [ -f /etc/openace/secrets.env ]; then
+                has_secrets_env=$(grep -q "^OPENACE_ENCRYPTION_KEY=" /etc/openace/secrets.env 2>/dev/null && echo "yes" || echo "no")
+            fi
+
+            if [ "$has_enc_key_in_service" = "no" ] && [ "$has_secrets_env" != "yes" ]; then
+                print_warning "Adding missing OPENACE_ENCRYPTION_KEY to systemd service..."
+                local enc_key="${OPENACE_ENCRYPTION_KEY:-$(openssl rand -hex 16)}"
+                sed -i "/^Environment=SECRET_KEY=/a Environment=OPENACE_ENCRYPTION_KEY=$enc_key" "$service_file"
+                print_info "Generated OPENACE_ENCRYPTION_KEY for sensitive data encryption (Issue #2359)"
+            fi
         fi
 
         # -- Phase 2: Update service config if user chose to switch --

@@ -163,7 +163,10 @@ export const adminApi = {
     return apiClient.put<{ success: boolean }>(`/api/admin/users/${userId}/password`, { password });
   },
 
-  async resetUserPassword(userId: number): Promise<{
+  async resetUserPassword(
+    userId: number,
+    password?: string
+  ): Promise<{
     success: boolean;
     temporary_password: string;
     message?: string;
@@ -172,7 +175,7 @@ export const adminApi = {
       success: boolean;
       temporary_password: string;
       message?: string;
-    }>(`/api/admin/users/${userId}/reset-password`);
+    }>(`/api/admin/users/${userId}/reset-password`, password ? { password } : undefined);
   },
 
   // Quota Management

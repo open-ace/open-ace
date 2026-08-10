@@ -294,20 +294,47 @@ if [ "$isolated" = true ]; then
                 ;;
         esac
     done
+    # #2437: shard the per-task mutex onto a FIXED lock-file set so /run/lock
+    # can't accumulate one openace-agent-task-<task_id>.lock per attempt
+    # (unbounded under task churn). The shard is a deterministic function of
+    # task_id (cksum mod N); cksum is POSIX (present on Linux AND macOS) and the
+    # shard is computed only here in the launcher (acquire + reaper) -- never in
+    # Python -- so there is no cross-language twin to keep in sync. Shard files
+    # are NEVER unlinked: the stable inode is what makes flock mutually exclusive
+    # forever (unlink + same-name re-open yields a different inode, letting a
+    # second opener grab a second lock). /run/lock clears on reboot, so the set
+    # is recreated lazily and stays bounded at N.
+    _TASK_LOCK_SHARDS=64
+    _task_lock_shard() {
+        # cksum prints "<crc> <length>"; take the crc (field 1) mod N.
+        _cs="$(printf '%s' "$1" | cksum)"
+        _crc="${_cs%% *}"
+        : $(( _shard = _crc % _TASK_LOCK_SHARDS ))
+        echo "$_shard"
+    }
     # Issue #2020: key the lock + registries off the attempt (task_id) when
     # present, so concurrent attempts on the same UID neither serialize on a
     # UID-level flock nor overwrite each other's ACL/signature registry. The
     # uid-* fallback preserves legacy single-attempt semantics for callers
     # that do not pass --task-id.
+    # Single source for the lock directory so the #2403 preserve reaper derives
+    # peer lock paths exactly the way this run derives its own. Deliberately a
+    # constant, not an environment override: redirecting it would silently break
+    # mutual exclusion between concurrent attempts.
+    _lock_dir="/run/lock"
     if [ -n "$task_id" ]; then
         isolation_key="task-${task_id}"
+        # Only the mutex is sharded (#2437); the acl/signature registries stay
+        # 1:1 with the attempt (per-attempt data, must not collide).
+        _task_lock="${_lock_dir}/openace-agent-task-shard-$(_task_lock_shard "$task_id").lock"
     else
         isolation_key="uid-${target_uid}"
+        _task_lock="${_lock_dir}/openace-agent-${isolation_key}.lock"
     fi
     acl_registry="/run/openace-agent-acl-${isolation_key}"
     signature_registry="/run/openace-agent-git-signature-${isolation_key}"
     signature_tmp="${signature_registry}.next"
-    exec 9>"/run/lock/openace-agent-${isolation_key}.lock"
+    exec 9>"$_task_lock"
     flock -x 9
 
     # Per-attempt HOME/TMP/XDG runtime tree (#2020). Ephemeral parent under
@@ -315,6 +342,131 @@ if [ "$isolated" = true ]; then
     # cannot traverse. Wiped first so a retried task_id starts clean.
     task_base=""
     task_home="" ; task_tmp="" ; task_cache="" ; task_config="" ; task_data=""
+    # Issue #2403: must be initialised unconditionally. It is only assigned
+    # inside the `[ -n "$task_id" ]` block below, and reclaim_task_tree() reads
+    # it from an EXIT trap that also fires on the legacy `uid-*` path — under
+    # `set -u` an unset name would kill the wrapper there.
+    preserve_claude_dir=""
+    # Same reason as above: only assigned inside the task_id block, but read by
+    # the preserve reaper.
+    task_root=""
+    # Age cutoff for reaping abandoned .claude-preserve dirs (#2403 F1c) is read
+    # from the launcher conf at the call site below — _conf_value() is not
+    # defined yet at this point in the script.
+    preserve_max_age_days=30
+
+    # Issue #2403: reclaim the per-task runtime tree on the way out. Without
+    # this the wrapper only ever wiped on START, so every run left one directory
+    # behind forever; 46 of them filled the 3.1G /run tmpfs and every autonomous
+    # workflow began failing with a misleading "Failed to access project dir".
+    #
+    # Defined BEFORE the tree is built, and before the first exit that can
+    # follow it (the cgroup fail-closed `exit 66` further down), because bash
+    # resolves the function name when the EXIT trap FIRES, not when it is
+    # installed. Defining it later would silently make that trap a no-op.
+    #
+    # Deliberately NOT part of cleanup_isolated(): that one also runs pre-flight,
+    # AFTER this tree has been built and .claude restored into it, so folding
+    # the reclaim in there would delete the freshly restored session history
+    # before the agent even starts. Keeping it separate also lets tests extract
+    # and run this function without cgroup/ACL/registry privileges.
+    # Issue #2442: move $1 (.claude) to $2 (preserve path). If the prior
+    # preserve dir cannot be removed, a following `mv` would nest source into
+    # the survivor and the next restore would hand Claude a mis-shaped tree,
+    # silently breaking --resume. Fail closed: rm failure returns non-zero so
+    # the caller decides (startup aborts via exit 70; reclaim logs). chmod 700
+    # is applied per #2403.
+    _move_to_preserve() {
+        local src="$1" dest="$2"
+        if [ -e "$dest" ] || [ -L "$dest" ]; then
+            rm -rf -- "$dest" 2>/dev/null || return 1
+        fi
+        mv -- "$src" "$dest" 2>/dev/null || return 1
+        chmod 700 "$dest" 2>/dev/null || true
+    }
+
+    reclaim_task_tree() {
+        [ -n "$task_base" ] || return 0
+        [ -n "$preserve_claude_dir" ] || return 0
+        # Same three-line shape as the startup preserve-move below. The `rm -rf`
+        # MUST stay inside the `-d` guard: a second execution (a signal landing
+        # between the success-path call and `trap -`) then becomes a no-op
+        # instead of deleting the history it just saved.
+        #
+        # Both branches do real work, depending on where a signal lands:
+        #   - guard TRUE  (.claude still in task_home): rescue it to the preserve
+        #     path, then drop the tree. This is the common case.
+        #   - guard FALSE (.claude already moved out, or task_home gone): leave
+        #     the preserve dir alone and just drop the tree.
+        # Do not "simplify" this to the FALSE branch — the TRUE branch is what
+        # keeps #2035 --resume working.
+        if [ -d "$task_home/.claude" ]; then
+            # _move_to_preserve removes any prior preserve dir, moves .claude
+            # into it, and chmod 700 (the SIBLING-of-$task_base exposure noted
+            # in #2403). It fails closed on rm failure so mv cannot nest .claude
+            # into a survivor (#2442); reclaim only logs because errexit is live
+            # in this EXIT trap and an exit here would rewrite the status.
+            _move_to_preserve "$task_home/.claude" "$preserve_claude_dir" \
+                || log_audit "result=preserve_rescue_failed task=${task_id:-}"
+        fi
+        # Log rather than swallow: a partial rm on a full tmpfs is exactly the
+        # condition this issue is about, and silence is why it went unnoticed
+        # for so long.
+        rm -rf -- "$task_base" 2>/dev/null || log_audit "result=reclaim_failed task=${task_id:-}"
+    }
+
+    # Issue #2403 F1c: reclaiming the tree on exit converts a fast directory
+    # leak into a slow .claude-preserve leak (one per task_id, forever), so bound
+    # that too. Scope is deliberately narrow: ONLY *.claude-preserve siblings,
+    # never task directories — reaping those needs a liveness test this script
+    # cannot make (the Python launch path in task_isolation.py creates task trees
+    # without ever taking a lock; it never creates .claude-preserve, which is why
+    # this sweep is safe and a task-dir sweep is not).
+    #
+    # Named rather than inlined so tests can extract and run it directly.
+    reap_stale_preserve_dirs() {
+        for _pdir in "$task_root"/*.claude-preserve; do
+            [ -d "$_pdir" ] || continue   # unmatched glob stays literal
+            # Test the whole TREE, not the directory inode. The CLI writes to
+            # .claude/projects/<encoded>/*.jsonl, so the top directory's mtime
+            # does not move as a session grows, and rename(2) does not touch the
+            # renamed inode's mtime either. Keying on the directory mtime would
+            # delete the most active long-lived sessions first.
+            #
+            # Check find's exit status too: swallowing it would turn any find
+            # failure into empty output, i.e. "stale", i.e. delete. Skip on
+            # error — the safe direction for a destructive test.
+            _fresh="$(find "$_pdir" -newermt "-${preserve_max_age_days} days" \
+                      -print -quit 2>/dev/null)" || continue
+            [ -z "$_fresh" ] || continue
+            _pid="${_pdir##*/}"; _pid="${_pid%.claude-preserve}"
+            # #2437: the per-task lock is now a fixed shard (see the acquire
+            # block), so derive the SAME shard from this preserve dir's task_id
+            # and probe it. flock -n on the shard: acquire => no task on that
+            # shard is running => this task_id is not running => safe to reap;
+            # blocked => some task on the shard is live => skip (conservative --
+            # the dead preserve is reaped later when the shard frees). The reaper
+            # runs only in this launcher (cross-user/prod path); the same-user
+            # Python launch path takes no lock and invokes no reaper, so a
+            # lockless dev run can't be wrongly reaped here.
+            _plock="${_lock_dir}/openace-agent-task-shard-$(_task_lock_shard "$_pid").lock"
+            # `8<` — read only, NO O_CREAT. flock(2) does not require write
+            # access, and this must never manufacture a lock file: shard files
+            # are never unlinked (the stable inode is what keeps flock mutually
+            # exclusive), so creating extras would only ever add dead weight. A
+            # live run creates its shard on first acquire, so an absent shard
+            # file means no task has ever run on it => no live run.
+            if [ ! -e "$_plock" ]; then
+                rm -rf -- "$_pdir" 2>/dev/null || true
+                continue
+            fi
+            # The subshell scopes fd 8 so it is closed on every exit path and a
+            # large task_root cannot leak descriptors. Never reuse fd 9 — that is
+            # this run's own lock; re-locking or closing it would drop our mutex.
+            ( flock -n 8 || exit 0; rm -rf -- "$_pdir" 2>/dev/null || true ) \
+                8<"$_plock" || true
+        done
+    }
     if [ -n "$task_id" ]; then
         task_root="${OPENACE_AGENT_TASK_ROOT:-/run/openace-agent-tasks}"
         task_base="${task_root}/${task_id}"
@@ -337,9 +489,29 @@ if [ "$isolated" = true ]; then
         # unconditional restore below finds the orphaned preserve dir and
         # restores it even though $task_home/.claude was already moved away.
         preserve_claude_dir="${task_base}.claude-preserve"
+        # Issue #2403: arm reclaim HERE, not after the tree is built. Everything
+        # from the preserve-move below through the restore is a window in which
+        # an exit or a signal would otherwise strand a task tree — including the
+        # cgroup fail-closed `exit 66` and the repo-integrity `exit 68` further
+        # down, both of which run before the full on_exit trap is installed.
+        #
+        # The signal traps are pure `exit N` and are hoisted here for the same
+        # reason: until they exist, a SIGTERM kills bash outright and the EXIT
+        # trap never runs at all. They are re-registered (not duplicated) below.
+        # `|| true` for the same reason every step of on_exit has it: errexit
+        # stays live inside a trap handler, and a failure there both truncates
+        # the handler before `rm -rf "$task_base"` and rewrites the exit status
+        # to 1 — which would make _classify_isolated_exit_code misread the
+        # fail-closed `exit 66` / `exit 68` this trap exists to cover.
+        trap 'reclaim_task_tree || true' EXIT
+        trap 'exit 129' HUP
+        trap 'exit 130' INT
+        trap 'exit 143' TERM
         if [ -d "$task_home/.claude" ]; then
-            rm -rf -- "$preserve_claude_dir" 2>/dev/null || true
-            mv "$task_home/.claude" "$preserve_claude_dir" 2>/dev/null || true
+            if ! _move_to_preserve "$task_home/.claude" "$preserve_claude_dir"; then
+                echo "openace-run-as: cannot clear prior .claude-preserve dir; aborting to avoid nesting (Issue #2442)" >&2
+                exit 70
+            fi
         fi
         rm -rf -- "$task_base" 2>/dev/null || true
         mkdir -p "$task_home" "$task_tmp" "$task_cache" "$task_config" "$task_data"
@@ -401,6 +573,21 @@ if [ "$isolated" = true ]; then
     task_memory="$(_conf_value agent_task_memory_max_bytes)"
     task_pids="$(_conf_value agent_task_pids_max)"
     task_cpu="$(_conf_value agent_task_cpu_max)"
+    # Issue #2403 F1c: reap abandoned .claude-preserve dirs. Runs here rather
+    # than beside the task-tree setup for two reasons: _conf_value() only exists
+    # from this point on, and by now this run's own preserve dir has already been
+    # restored into $task_home/.claude, so it cannot be a candidate.
+    # Guarded on task_id because $task_root is only assigned in that block.
+    if [ -n "$task_id" ]; then
+        preserve_max_age_days="$(_conf_value agent_task_preserve_max_age_days)"
+        # 0 passes a naive numeric guard but means "everything is stale": it
+        # would delete every session history on every run. Treat it, and any
+        # non-numeric value, as unset.
+        case "$preserve_max_age_days" in
+            0|''|*[!0-9]*) preserve_max_age_days=30 ;;
+        esac
+        reap_stale_preserve_dirs
+    fi
     # Normalize to lowercase before matching so the case list can't miss a
     # variant (review #2067: the hand-enumerated list had a duplicate TRUE and
     # no mixed-case True).
@@ -451,7 +638,10 @@ if [ "$isolated" = true ]; then
         done
     }
 
-    cleanup_isolated() {
+    # Named for everything it does, not just the kill: a function called
+    # "_kill_task_processes" invites a future early-return guard that would
+    # silently stop reclaiming signature_tmp.
+    _cleanup_task_runtime() {
         # Issue #2020: kill exactly THIS attempt's processes. Never pkill by
         # UID — that would reap other concurrent attempts sharing the Agent
         # account. Prefer the task cgroup (kills every cgroup member and their
@@ -464,14 +654,45 @@ if [ "$isolated" = true ]; then
         if [ -n "${agent_child_pid:-}" ] && kill -0 "${agent_child_pid}" 2>/dev/null; then
             kill -KILL "${agent_child_pid}" 2>/dev/null || true
         fi
+        rm -f "$signature_tmp"
+    }
+
+    _revoke_task_acls() {
         if [ -f "$acl_registry" ]; then
             while IFS= read -r protected_path; do
                 revoke_agent_access "$protected_path"
             done < "$acl_registry"
         fi
-        : > "$acl_registry"
-        chmod 600 "$acl_registry" 2>/dev/null || true
-        rm -f "$signature_tmp"
+        # Issue #2403: remove rather than truncate. The registry's only reader
+        # guards on `[ -f ]`, and the writer creates it, so absent and
+        # present-but-empty are equivalent to every consumer — but removing it
+        # also stops a second execution from re-creating a stray empty file.
+        # This deletion must stay HERE, at the point of consumption: doing it in
+        # reclaim_task_tree() would, on the early `exit 66` path (where this
+        # revocation has not run yet), destroy an unconsumed record of still-live
+        # grants and orphan the agent's write ACLs permanently.
+        rm -f "$acl_registry"
+    }
+
+    cleanup_isolated() { _cleanup_task_runtime; _revoke_task_acls; }
+
+    # Issue #2403: the EXIT handler once the agent can be running.
+    #
+    # Order matters and is NOT the obvious one. The orchestrator escalates
+    # SIGTERM to SIGKILL after 5 seconds, so everything here shares one 5-second
+    # budget — and the two halves have opposite recoverability: an ACL revocation
+    # missed here is replayed from $acl_registry by the next invocation, while a
+    # task tree left behind is never reclaimed by anything. So the tree goes
+    # first and the (self-healing) ACL sweep goes last.
+    #
+    # Each step is `|| true` because errexit stays active inside trap handlers:
+    # a non-zero return from the first would otherwise skip the rest, and the
+    # most likely cause of that is a full /run — exactly the condition this
+    # issue is about.
+    on_exit() {
+        _cleanup_task_runtime || true
+        reclaim_task_tree     || true
+        _revoke_task_acls     || true
     }
 
     # Recover safely after a previously interrupted wrapper before granting
@@ -527,11 +748,18 @@ if [ "$isolated" = true ]; then
         "$project_dir" "$git_entry_before" "$git_acl_before" > "$signature_tmp"
     chmod 600 "$signature_tmp"
     mv -f "$signature_tmp" "$signature_registry"
-    trap cleanup_isolated EXIT
+    # Issue #2403: upgrade the EXIT handler now that an agent can be running —
+    # from the bare tree reclaim armed at task-setup time to the full sequence.
+    # Bash traps REPLACE rather than stack, so this expression must keep naming
+    # reclaim_task_tree (via on_exit); reverting it to `cleanup_isolated` alone
+    # would silently disarm reclamation for the whole rest of the run.
+    trap on_exit EXIT
     # Bash services traps promptly while waiting for a background job. With a
     # foreground external command it may defer the trap until that command
     # exits, stranding this wrapper and its ACL lock after the parent sudo
     # process is terminated.
+    # (These are re-registrations: the same handlers were armed at task setup so
+    # that the earlier window is covered too.)
     trap 'exit 129' HUP
     trap 'exit 130' INT
     trap 'exit 143' TERM
@@ -541,7 +769,11 @@ if [ "$isolated" = true ]; then
     # can revoke the exact abandoned grants before starting another agent.
     git_dir="$(git -C "$project_dir" rev-parse --absolute-git-dir 2>/dev/null || true)"
     common_dir="$(git -C "$project_dir" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
-    printf '%s\n' "$project_dir" "$git_dir" "$common_dir" > "$acl_registry"
+    # Issue #2403: the registry is now removed (not truncated) after use, so it
+    # is created fresh here every run. Create it under a tight umask in the same
+    # step as the write — a separate chmod would leave a world-readable window,
+    # and a separate truncate would leave a 0-byte registry if killed between.
+    ( umask 077; printf '%s\n' "$project_dir" "$git_dir" "$common_dir" > "$acl_registry" )
     chmod 600 "$acl_registry"
 
     # Allow traversal to the project without exposing sibling home content.
@@ -638,7 +870,9 @@ if [ "$isolated" = true ]; then
     wait "$agent_child_pid"
     child_status=$?
     set -e
-    cleanup_isolated
+    # Issue #2403: on_exit, not cleanup_isolated — the trap is disarmed on the
+    # next line, so this is the success path's only chance to reclaim the tree.
+    on_exit
     trap - EXIT HUP INT TERM
     if ! verify_and_restore_git_entry "$project_dir" "$git_entry_before" "$git_acl_before"; then
         echo "OPENACE_REPO_INTEGRITY_VIOLATION: .git entry changed during agent execution" >&2
@@ -646,8 +880,17 @@ if [ "$isolated" = true ]; then
     fi
     rm -f "$signature_registry"
     # Reap the task cgroup now that the child has exited and cleanup killed
-    # any stragglers. The runtime tree under /run is ephemeral; orphan dirs
-    # from killed attempts are reconciled by the scheduler on restart (#2020).
+    # any stragglers.
+    #
+    # Issue #2403: this used to claim orphan runtime dirs were "reconciled by
+    # the scheduler on restart (#2020)". No such reconciler was ever written —
+    # nothing outside this script has ever removed a task directory — and that
+    # comment is why one directory per run accumulated until /run was full.
+    # on_exit now reclaims the tree on the normal path, on the early exits, and
+    # on caught signals. A SIGKILL still strands one, which happens when this
+    # cleanup overruns the orchestrator's 5-second SIGTERM grace rather than
+    # from any external "crash"; the tmpfs self-heals on reboot, and a proper
+    # sweep for that residue is tracked separately.
     if [ -n "$task_cgroup" ] && [ -d "$task_cgroup" ]; then
         rmdir "$task_cgroup" 2>/dev/null || true
     fi

@@ -48,6 +48,8 @@ export default [
         AbortController: 'readonly',
         process: 'readonly',
         React: 'readonly',
+        crypto: 'readonly',
+        Crypto: 'readonly',
       },
     },
     plugins: {

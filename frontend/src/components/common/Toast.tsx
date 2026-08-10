@@ -117,11 +117,6 @@ export const ToastContainer: React.FC<ToastContainerProps> = ({
 };
 
 /**
- * Global toast store - imported from store/toastStore.ts to avoid circular
- * chunk dependencies between hooks and components.
- */
-
-/**
  * Stable singleton API. Returning the same object reference every call keeps
  * `toast` stable in effect dependency arrays (callers only invoke actions, they
  * never read state from it), so existing `const toast = useToast()` call sites

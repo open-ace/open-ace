@@ -66,8 +66,8 @@ export const MappingRulesEditor: React.FC<MappingRulesEditorProps> = ({
     try {
       const result = await mappingRulesApi.generateDefaultRules(userId);
 
-      // Update rules list with created rules
-      setRules(result.created);
+      // Reload full rules list from server
+      await loadRules();
 
       // Show appropriate message based on result
       if (result.created_count > 0 && result.skipped_count > 0) {
