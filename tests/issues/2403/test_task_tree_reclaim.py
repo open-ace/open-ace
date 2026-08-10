@@ -41,6 +41,13 @@ def _extract_function(name: str) -> str:
     return textwrap.dedent(match.group(0))
 
 
+# reclaim_task_tree calls _move_to_preserve (Issue #2442), so any harness that
+# runs it must define both. Extract them together once at import time.
+_RECLAIM_SRC = (
+    _extract_function("_move_to_preserve") + "\n" + _extract_function("reclaim_task_tree")
+)
+
+
 def _run_snippet(snippet: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
     full_env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin")}
     full_env.update(env or {})
@@ -126,7 +133,7 @@ def _make_tree(task_root: Path, task_id: str, *, with_claude: bool = True) -> di
 def _reclaim_harness(task_root: Path, task_id: str) -> str:
     base = task_root / task_id
     return f"""
-{_extract_function("reclaim_task_tree")}
+{_RECLAIM_SRC}
 task_base={base!s}
 task_home={base!s}/home
 preserve_claude_dir={task_root!s}/{task_id}.claude-preserve
@@ -169,7 +176,7 @@ class TestReclaimTaskTree:
         sentinel.mkdir()
         (sentinel / "keep").write_text("keep", encoding="utf-8")
         snippet = f"""
-{_extract_function("reclaim_task_tree")}
+{_RECLAIM_SRC}
 task_base=""
 task_home=""
 preserve_claude_dir=""
@@ -191,7 +198,7 @@ echo "rc=$?"
         """
         paths = _make_tree(tmp_path, "t5")
         snippet = f"""
-{_extract_function("reclaim_task_tree")}
+{_RECLAIM_SRC}
 task_base={paths["base"]!s}
 task_home={paths["base"]!s}/home
 preserve_claude_dir=""
@@ -221,7 +228,7 @@ echo "rc=$?"
         try:
             snippet = f"""
 log_audit() {{ printf '%s\\n' "$1" >> {audit!s}; }}
-{_extract_function("reclaim_task_tree")}
+{_RECLAIM_SRC}
 task_base={paths["base"]!s}
 task_home={paths["base"]!s}/home
 preserve_claude_dir={victim!s}/t6.claude-preserve
@@ -248,12 +255,29 @@ echo "rc=$?"
 
 def _reap_harness(task_root: Path, lock_dir: Path, days: object = 30) -> str:
     return f"""
+{_extract_function("_task_lock_shard")}
+_TASK_LOCK_SHARDS=64
 {_extract_function("reap_stale_preserve_dirs")}
 task_root={task_root!s}
 preserve_max_age_days={days}
 _lock_dir={lock_dir!s}
 reap_stale_preserve_dirs
 """
+
+
+def _shard_lock_name(task_id: str) -> str:
+    """The shard lock file NAME the reaper probes for task_id (#2437).
+
+    Runs the script's own ``_task_lock_shard`` (cksum-based) so the test always
+    agrees with the reaper, whatever the exact hash function. task_id is passed
+    as $1 to avoid any shell-quoting pitfall.
+    """
+    snippet = (
+        _extract_function("_task_lock_shard") + "\n_TASK_LOCK_SHARDS=64\n" + '_task_lock_shard "$1"'
+    )
+    result = subprocess.run(["bash", "-c", snippet, "_", task_id], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    return f"openace-agent-task-shard-{result.stdout.strip()}.lock"
 
 
 def _age(path: Path, days: int) -> None:
@@ -403,8 +427,8 @@ class TestReapStalePreserveDirs:
         (stale / "s.jsonl").write_text("{}", encoding="utf-8")
         _age(stale / "s.jsonl", 90)
         _age(stale, 90)
-        # Present but unheld: the task finished and released it.
-        (lock_dir / "openace-agent-task-done.lock").touch()
+        # Present but unheld: the task finished and released its shard lock.
+        (lock_dir / _shard_lock_name("done")).touch()
 
         result = _run_snippet(_reap_harness(task_root, lock_dir), env={"PATH": flock_path})
         assert result.returncode == 0, result.stderr
@@ -429,7 +453,7 @@ class TestReapStalePreserveDirs:
         (busy / "s.jsonl").write_text("{}", encoding="utf-8")
         _age(busy / "s.jsonl", 90)
         _age(busy, 90)
-        lock_file = lock_dir / "openace-agent-task-live.lock"
+        lock_file = lock_dir / _shard_lock_name("live")
         lock_file.touch()
 
         # Hold the lock for the duration of the sweep, exactly as a live run would.
@@ -572,3 +596,32 @@ class TestAgeThresholdUnits:
             f"20-day-old history reaped under the script default of {default_days} "
             f"days; lowering that default silently shortens --resume's memory"
         )
+
+
+class TestTaskLockShard:
+    """#2437: the per-task mutex is sharded onto a FIXED lock-file set (N files),
+    chosen by a deterministic function of task_id. Exercises the real bash
+    _task_lock_shard so the determinism + bound are verified, not assumed."""
+
+    _SNIPPET = _extract_function("_task_lock_shard") + "\n_TASK_LOCK_SHARDS=64\n"
+
+    @staticmethod
+    def _shard(task_id: str) -> int:
+        result = subprocess.run(
+            ["bash", "-c", TestTaskLockShard._SNIPPET + '_task_lock_shard "$1"', "_", task_id],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stderr
+        return int(result.stdout.strip())
+
+    def test_shard_is_deterministic(self):
+        for tid in ("abc", "auto-dev/xyz", "wf-2437", "t", ""):
+            assert self._shard(tid) == self._shard(tid), f"non-deterministic shard for {tid!r}"
+
+    def test_shard_set_is_bounded_by_n(self):
+        shards = {self._shard(f"task-{i}") for i in range(200)}
+        assert all(0 <= s < 64 for s in shards), "a shard fell outside [0, 64)"
+        # 200 distinct task_ids map onto AT MOST 64 shards (the fixed set) — this
+        # is the bound that keeps /run/lock from accumulating one file per attempt.
+        assert len(shards) <= 64

@@ -212,9 +212,11 @@ def test_history_is_rescued_by_rename_not_copy():
     copy, fails, is swallowed by `|| true`, and the following `rm -rf` then
     destroys the only remaining copy of the session history.
     """
-    body = re.search(r"^\s*reclaim_task_tree\(\) \{\n(.*?)^\s*\}$", SRC, re.MULTILINE | re.DOTALL)
-    assert body, "reclaim_task_tree() not found"
-    assert re.search(r'mv "\$task_home/\.claude" "\$preserve_claude_dir"', body.group(1))
+    # #2442 moved the rescue move into _move_to_preserve; the rename-not-copy
+    # invariant now lives there.
+    body = re.search(r"^\s*_move_to_preserve\(\) \{\n(.*?)^\s*\}$", SRC, re.MULTILINE | re.DOTALL)
+    assert body, "_move_to_preserve() not found"
+    assert re.search(r'mv -- "\$src" "\$dest"', body.group(1))
     assert "cp " not in body.group(1), "the rescue must be an atomic rename, not a copy"
 
 
@@ -284,13 +286,15 @@ def test_preserve_dir_mode_is_restored_after_every_move():
     would otherwise sit world-readable under /run for up to
     agent_task_preserve_max_age_days.
     """
-    moves = re.findall(r'mv "\$task_home/\.claude" "\$preserve_claude_dir"', SRC)
-    chmods = re.findall(r'chmod 700 "\$preserve_claude_dir"', SRC)
-    assert len(moves) == 2, f"expected the two known preserve-moves, found {len(moves)}"
-    assert len(chmods) == len(moves), (
-        f"{len(moves)} preserve-move(s) but {len(chmods)} chmod(s); every move "
-        f"must re-apply 0700 or the history is world-readable under /run"
-    )
+    # #2442 moved the move+chmod into _move_to_preserve; both preserve sites
+    # (startup + reclaim) call it, so the chmod invariant lives in the helper.
+    body = re.search(r"^\s*_move_to_preserve\(\) \{\n(.*?)^\s*\}$", SRC, re.MULTILINE | re.DOTALL)
+    assert body, "_move_to_preserve() not found"
+    helper = body.group(1)
+    assert re.search(r'mv -- "\$src" "\$dest"', helper), "helper must move"
+    assert re.search(r'chmod 700 "\$dest"', helper), "every move must re-apply 0700"
+    calls = SRC.count('_move_to_preserve "$task_home/.claude"')
+    assert calls >= 2, f"expected >=2 preserve-move call sites, found {calls}"
 
 
 def test_signal_traps_are_re_registered_outside_the_task_id_block():
@@ -317,3 +321,47 @@ def test_signal_traps_are_re_registered_outside_the_task_id_block():
         assert any(
             i > early for i in occurrences
         ), f"the only {signal_name} trap is inside the task_id block"
+
+
+# ── #2437: the per-task mutex is sharded, not one-file-per-task_id ────────
+
+
+def test_task_lock_is_sharded_not_one_file_per_task_id():
+    """#2437: the per-task mutex is sharded onto a FIXED lock-file set so /run/lock
+    can't accumulate one ``openace-agent-task-<task_id>.lock`` per attempt."""
+    assert re.search(r"_TASK_LOCK_SHARDS=\d+", SRC), "_TASK_LOCK_SHARDS not defined"
+    assert "_task_lock_shard() {" in SRC, "_task_lock_shard() undefined"
+    # the task_id branch acquires the shard file ...
+    assert 'openace-agent-task-shard-$(_task_lock_shard "$task_id").lock' in SRC
+    # ... via the _task_lock variable; the old direct per-task-id acquire is gone.
+    assert 'exec 9>"$_task_lock"' in SRC
+    assert (
+        'exec 9>"${_lock_dir}/openace-agent-${isolation_key}.lock"' not in SRC
+    ), "the old unbounded per-task-id lock acquire survives"
+
+
+def test_reaper_probes_the_shard_not_a_per_task_lock():
+    """The reaper derives the SAME shard from a preserve dir's task_id and probes
+    it; the old ``openace-agent-task-${_pid}.lock`` derivation must be gone (it
+    would point at a lock file that no longer exists under sharding)."""
+    assert 'openace-agent-task-shard-$(_task_lock_shard "$_pid").lock' in SRC
+    assert (
+        "openace-agent-task-${_pid}.lock" not in SRC
+    ), "the old per-task reaper lock derivation survives"
+
+
+def test_shard_files_are_never_unlinked():
+    """The stable inode is what makes flock mutually exclusive forever. Unlinking a
+    shard would let a second opener create a new inode under the same name and grab
+    a second lock. No rm/unlink may target the shard files."""
+    assert not re.search(
+        r"(^|\s)(rm|unlink)\b[^#]*openace-agent-task-shard", SRC
+    ), "a shard lock file is targeted by rm/unlink, breaking the no-double-lock invariant"
+
+
+def test_only_the_lock_is_sharded_registries_stay_per_attempt():
+    """The acl/signature registries are per-attempt data; only the mutex is sharded.
+    Collisions on the registries would corrupt them, so they must stay 1:1 with the
+    attempt (isolation_key)."""
+    assert 'acl_registry="/run/openace-agent-acl-${isolation_key}"' in SRC
+    assert 'signature_registry="/run/openace-agent-git-signature-${isolation_key}"' in SRC

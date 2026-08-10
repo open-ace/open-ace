@@ -294,25 +294,47 @@ if [ "$isolated" = true ]; then
                 ;;
         esac
     done
+    # #2437: shard the per-task mutex onto a FIXED lock-file set so /run/lock
+    # can't accumulate one openace-agent-task-<task_id>.lock per attempt
+    # (unbounded under task churn). The shard is a deterministic function of
+    # task_id (cksum mod N); cksum is POSIX (present on Linux AND macOS) and the
+    # shard is computed only here in the launcher (acquire + reaper) -- never in
+    # Python -- so there is no cross-language twin to keep in sync. Shard files
+    # are NEVER unlinked: the stable inode is what makes flock mutually exclusive
+    # forever (unlink + same-name re-open yields a different inode, letting a
+    # second opener grab a second lock). /run/lock clears on reboot, so the set
+    # is recreated lazily and stays bounded at N.
+    _TASK_LOCK_SHARDS=64
+    _task_lock_shard() {
+        # cksum prints "<crc> <length>"; take the crc (field 1) mod N.
+        _cs="$(printf '%s' "$1" | cksum)"
+        _crc="${_cs%% *}"
+        : $(( _shard = _crc % _TASK_LOCK_SHARDS ))
+        echo "$_shard"
+    }
     # Issue #2020: key the lock + registries off the attempt (task_id) when
     # present, so concurrent attempts on the same UID neither serialize on a
     # UID-level flock nor overwrite each other's ACL/signature registry. The
     # uid-* fallback preserves legacy single-attempt semantics for callers
     # that do not pass --task-id.
-    if [ -n "$task_id" ]; then
-        isolation_key="task-${task_id}"
-    else
-        isolation_key="uid-${target_uid}"
-    fi
-    acl_registry="/run/openace-agent-acl-${isolation_key}"
-    signature_registry="/run/openace-agent-git-signature-${isolation_key}"
-    signature_tmp="${signature_registry}.next"
     # Single source for the lock directory so the #2403 preserve reaper derives
     # peer lock paths exactly the way this run derives its own. Deliberately a
     # constant, not an environment override: redirecting it would silently break
     # mutual exclusion between concurrent attempts.
     _lock_dir="/run/lock"
-    exec 9>"${_lock_dir}/openace-agent-${isolation_key}.lock"
+    if [ -n "$task_id" ]; then
+        isolation_key="task-${task_id}"
+        # Only the mutex is sharded (#2437); the acl/signature registries stay
+        # 1:1 with the attempt (per-attempt data, must not collide).
+        _task_lock="${_lock_dir}/openace-agent-task-shard-$(_task_lock_shard "$task_id").lock"
+    else
+        isolation_key="uid-${target_uid}"
+        _task_lock="${_lock_dir}/openace-agent-${isolation_key}.lock"
+    fi
+    acl_registry="/run/openace-agent-acl-${isolation_key}"
+    signature_registry="/run/openace-agent-git-signature-${isolation_key}"
+    signature_tmp="${signature_registry}.next"
+    exec 9>"$_task_lock"
     flock -x 9
 
     # Per-attempt HOME/TMP/XDG runtime tree (#2020). Ephemeral parent under
@@ -348,6 +370,21 @@ if [ "$isolated" = true ]; then
     # the reclaim in there would delete the freshly restored session history
     # before the agent even starts. Keeping it separate also lets tests extract
     # and run this function without cgroup/ACL/registry privileges.
+    # Issue #2442: move $1 (.claude) to $2 (preserve path). If the prior
+    # preserve dir cannot be removed, a following `mv` would nest source into
+    # the survivor and the next restore would hand Claude a mis-shaped tree,
+    # silently breaking --resume. Fail closed: rm failure returns non-zero so
+    # the caller decides (startup aborts via exit 70; reclaim logs). chmod 700
+    # is applied per #2403.
+    _move_to_preserve() {
+        local src="$1" dest="$2"
+        if [ -e "$dest" ] || [ -L "$dest" ]; then
+            rm -rf -- "$dest" 2>/dev/null || return 1
+        fi
+        mv -- "$src" "$dest" 2>/dev/null || return 1
+        chmod 700 "$dest" 2>/dev/null || true
+    }
+
     reclaim_task_tree() {
         [ -n "$task_base" ] || return 0
         [ -n "$preserve_claude_dir" ] || return 0
@@ -364,20 +401,13 @@ if [ "$isolated" = true ]; then
         # Do not "simplify" this to the FALSE branch — the TRUE branch is what
         # keeps #2035 --resume working.
         if [ -d "$task_home/.claude" ]; then
-            rm -rf -- "$preserve_claude_dir" 2>/dev/null || true
-            mv "$task_home/.claude" "$preserve_claude_dir" 2>/dev/null || true
-            # The preserve dir is a SIBLING of $task_base, so it inherits none
-            # of the `chmod 700` applied to the tree, and $task_root is created
-            # by `mkdir -p` under root's umask 022 (drwxr-xr-x). Without this
-            # the agent's ~/.claude — shell snapshots, settings.json,
-            # file-history copies of private source, plans, memory, todos, and
-            # the encoded project paths — sits world-readable under /run for
-            # the whole gap between two runs of a session line, and up to
-            # agent_task_preserve_max_age_days for an abandoned task. Before
-            # #2403 that layout existed only for the sub-millisecond startup
-            # window; reclaiming on exit makes it the steady state, so the mode
-            # has to be restored explicitly.
-            chmod 700 "$preserve_claude_dir" 2>/dev/null || true
+            # _move_to_preserve removes any prior preserve dir, moves .claude
+            # into it, and chmod 700 (the SIBLING-of-$task_base exposure noted
+            # in #2403). It fails closed on rm failure so mv cannot nest .claude
+            # into a survivor (#2442); reclaim only logs because errexit is live
+            # in this EXIT trap and an exit here would rewrite the status.
+            _move_to_preserve "$task_home/.claude" "$preserve_claude_dir" \
+                || log_audit "result=preserve_rescue_failed task=${task_id:-}"
         fi
         # Log rather than swallow: a partial rm on a full tmpfs is exactly the
         # condition this issue is about, and silence is why it went unnoticed
@@ -410,13 +440,22 @@ if [ "$isolated" = true ]; then
                       -print -quit 2>/dev/null)" || continue
             [ -z "$_fresh" ] || continue
             _pid="${_pdir##*/}"; _pid="${_pid%.claude-preserve}"
-            _plock="${_lock_dir}/openace-agent-task-${_pid}.lock"
+            # #2437: the per-task lock is now a fixed shard (see the acquire
+            # block), so derive the SAME shard from this preserve dir's task_id
+            # and probe it. flock -n on the shard: acquire => no task on that
+            # shard is running => this task_id is not running => safe to reap;
+            # blocked => some task on the shard is live => skip (conservative --
+            # the dead preserve is reaped later when the shard frees). The reaper
+            # runs only in this launcher (cross-user/prod path); the same-user
+            # Python launch path takes no lock and invokes no reaper, so a
+            # lockless dev run can't be wrongly reaped here.
+            _plock="${_lock_dir}/openace-agent-task-shard-$(_task_lock_shard "$_pid").lock"
             # `8<` — read only, NO O_CREAT. flock(2) does not require write
-            # access, and this must never manufacture a lock file: lock files
-            # cannot be reclaimed safely (unlink then same-name open yields a
-            # different inode, so two holders stop excluding each other). A live
-            # run creates its lock before touching anything, so an absent lock
-            # file means no live run.
+            # access, and this must never manufacture a lock file: shard files
+            # are never unlinked (the stable inode is what keeps flock mutually
+            # exclusive), so creating extras would only ever add dead weight. A
+            # live run creates its shard on first acquire, so an absent shard
+            # file means no task has ever run on it => no live run.
             if [ ! -e "$_plock" ]; then
                 rm -rf -- "$_pdir" 2>/dev/null || true
                 continue
@@ -469,10 +508,10 @@ if [ "$isolated" = true ]; then
         trap 'exit 130' INT
         trap 'exit 143' TERM
         if [ -d "$task_home/.claude" ]; then
-            rm -rf -- "$preserve_claude_dir" 2>/dev/null || true
-            mv "$task_home/.claude" "$preserve_claude_dir" 2>/dev/null || true
-            # Same exposure as the reclaim path — see the comment there.
-            chmod 700 "$preserve_claude_dir" 2>/dev/null || true
+            if ! _move_to_preserve "$task_home/.claude" "$preserve_claude_dir"; then
+                echo "openace-run-as: cannot clear prior .claude-preserve dir; aborting to avoid nesting (Issue #2442)" >&2
+                exit 70
+            fi
         fi
         rm -rf -- "$task_base" 2>/dev/null || true
         mkdir -p "$task_home" "$task_tmp" "$task_cache" "$task_config" "$task_data"

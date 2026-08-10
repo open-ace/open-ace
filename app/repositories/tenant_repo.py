@@ -27,6 +27,13 @@ def _parse_datetime(value: Any) -> datetime | None:
     return parse_db_datetime(value)
 
 
+def _parse_date(value: Any) -> str:
+    """Normalize SQLite text and PostgreSQL date objects to the model contract."""
+    if hasattr(value, "isoformat"):
+        return str(value.isoformat())
+    return str(value)
+
+
 class TenantRepository:
     """Repository for tenant data access."""
 
@@ -529,7 +536,7 @@ class TenantRepository:
         return [
             TenantUsage(
                 tenant_id=row["tenant_id"],
-                date=row["date"],
+                date=_parse_date(row["date"]),
                 tokens_used=row["tokens_used"],
                 requests_made=row["requests_made"],
                 active_users=row["active_users"],

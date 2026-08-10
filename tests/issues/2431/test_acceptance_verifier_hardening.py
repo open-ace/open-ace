@@ -601,8 +601,13 @@ def test_pause_result_commits_its_milestone_event():
 def test_ci_executes_the_issue_2335_verifier_regressions():
     repo_root = Path(__file__).resolve().parents[3]
     workflow = (repo_root / ".github" / "workflows" / "ci.yml").read_text()
+    suites = (repo_root / "ci" / "suites.json").read_text()
+    promoted = (repo_root / "tests" / "issues" / "pr-gate-directories.txt").read_text().splitlines()
 
-    assert "pytest tests/issues/2335 tests/issues/2403" in workflow
+    assert "scripts/ci.py run legacy-pr" in workflow
+    assert '"legacy-pr"' in suites
+    assert "priority_p0 and not postgres and not performance" in suites
+    assert {"2335", "2390", "2401", "2403"} <= set(promoted)
 
 
 class _SQLiteDB:
