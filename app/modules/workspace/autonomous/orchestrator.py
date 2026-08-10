@@ -20,7 +20,7 @@ import sys
 import threading
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -2818,6 +2818,32 @@ class AutonomousOrchestrator:
             wf, canonical, decision, evidence_meta, local_sha, expected_sha
         )
 
+    @staticmethod
+    def _dump_event_data(data):
+        """Serialize a timeline event payload tolerating raw datetime/date.
+
+        Workflow patches (and thus emitted events) can carry DB timestamp
+        fields that psycopg2 returns as ``datetime``; the default JSON encoder
+        raises ``TypeError: Object of type datetime is not JSON serializable``
+        on those and fails the whole phase (b48179df regression at
+        acceptance_verification — PR #2465 merged, but the post-merge event
+        crashed). ``isoformat`` keeps timestamps machine-parseable; the ``str``
+        fallback makes emission robust to any other non-native type.
+        """
+
+        def _default(obj):
+            if isinstance(obj, (datetime, date)):
+                return obj.isoformat()
+            # Diagnostic events must never crash the phase on an odd type;
+            # leave a breadcrumb so an unexpected type (set/bytes/...) is visible.
+            logger.debug(
+                "event_data serialized non-native type %s via str fallback",
+                type(obj).__name__,
+            )
+            return str(obj)
+
+        return json.dumps(data, ensure_ascii=False, default=_default)
+
     def _emit(self, event_type: str, data: dict):
         """Emit a timeline event."""
         self.emitter.emit(self._workflow_id, event_type, data)
@@ -2825,7 +2851,7 @@ class AutonomousOrchestrator:
             {
                 "workflow_id": self._workflow_id,
                 "event_type": event_type,
-                "event_data": json.dumps(data, ensure_ascii=False),
+                "event_data": self._dump_event_data(data),
             }
         )
 
