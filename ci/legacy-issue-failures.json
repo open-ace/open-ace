@@ -233,38 +233,6 @@
       "summary": "RuntimeError: LLM proxy setup failed; refusing to launch autonomous agent with inherited credentials (set OPENACE_ALLOW_RAW_KEY_FALLBACK=1 only in development)."
     },
     {
-      "category": "test_body_exception",
-      "exception_type": "TypeError",
-      "issue_number": "1395",
-      "nodeid": "tests/issues/1395/test_cross_user_permissions.py::TestPreparationWorktreeCleanup::test_clean_path_creates_worktree_directly",
-      "outcome": "failure",
-      "summary": "TypeError: Object of type MagicMock is not JSON serializable"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TypeError",
-      "issue_number": "1395",
-      "nodeid": "tests/issues/1395/test_cross_user_permissions.py::TestPreparationWorktreeCleanup::test_non_registered_residual_dir_left_in_place",
-      "outcome": "failure",
-      "summary": "TypeError: Object of type MagicMock is not JSON serializable"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TypeError",
-      "issue_number": "1395",
-      "nodeid": "tests/issues/1395/test_cross_user_permissions.py::TestPreparationWorktreeCleanup::test_registered_residual_removed_via_git",
-      "outcome": "failure",
-      "summary": "TypeError: Object of type MagicMock is not JSON serializable"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TypeError",
-      "issue_number": "1395",
-      "nodeid": "tests/issues/1395/test_cross_user_permissions.py::TestPreparationWorktreeCleanup::test_remove_failure_does_not_raise",
-      "outcome": "failure",
-      "summary": "TypeError: Object of type MagicMock is not JSON serializable"
-    },
-    {
       "category": "assertion_failure",
       "exception_type": "AssertionError",
       "issue_number": "1395",
@@ -3185,52 +3153,12 @@
       "summary": "IndexError: list index out of range"
     },
     {
-      "category": "test_body_exception",
-      "exception_type": "TypeError",
+      "category": "assertion_failure",
+      "exception_type": "AssertionError",
       "issue_number": "716",
       "nodeid": "tests/issues/716/test_orchestrator.py::TestOrchestratorPreparation::test_preparation_branches_from_origin_main",
       "outcome": "failure",
-      "summary": "TypeError: Object of type MagicMock is not JSON serializable"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TypeError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_orchestrator.py::TestOrchestratorPreparation::test_preparation_creates_issue_and_branch",
-      "outcome": "failure",
-      "summary": "TypeError: Object of type MagicMock is not JSON serializable"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TypeError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_orchestrator.py::TestOrchestratorPreparation::test_preparation_issue_url_no_text_reads_issue",
-      "outcome": "failure",
-      "summary": "TypeError: Object of type MagicMock is not JSON serializable"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TypeError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_orchestrator.py::TestOrchestratorPreparation::test_preparation_persists_issue_number_from_url",
-      "outcome": "failure",
-      "summary": "TypeError: Object of type MagicMock is not JSON serializable"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TypeError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_orchestrator.py::TestOrchestratorPreparation::test_preparation_reads_existing_issue",
-      "outcome": "failure",
-      "summary": "TypeError: Object of type MagicMock is not JSON serializable"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TypeError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_orchestrator.py::TestOrchestratorPreparation::test_preparation_reads_issue_with_comments",
-      "outcome": "failure",
-      "summary": "TypeError: Object of type MagicMock is not JSON serializable"
+      "summary": "AssertionError: assert (<MagicMock name='GitHubOps()._run_git().stdout.strip()' id='140659443529040'> == 'origin/main' or (1 > 1))"
     },
     {
       "category": "test_body_exception",
@@ -3241,12 +3169,12 @@
       "summary": "app.modules.workspace.autonomous.github_ops.GitHubOpsError: Worktree created on wrong branch: expected auto-dev/test-wf-uuid, actual auto-dev/test-wf-"
     },
     {
-      "category": "test_body_exception",
-      "exception_type": "TypeError",
+      "category": "assertion_failure",
+      "exception_type": "AssertionError",
       "issue_number": "716",
       "nodeid": "tests/issues/716/test_orchestrator.py::TestOrchestratorPreparation::test_preparation_worktree_uses_preferred_path_when_live_path_empty",
       "outcome": "failure",
-      "summary": "TypeError: Object of type MagicMock is not JSON serializable"
+      "summary": "AssertionError: expected call not found."
     },
     {
       "category": "test_body_exception",
@@ -3782,7 +3710,7 @@
       "issue_number": "814",
       "nodeid": "tests/issues/814/test_worktree_path_selfheal.py::TestEnsureWorktreeSelfHeal::test_no_update_when_path_already_canonical",
       "outcome": "failure",
-      "summary": "app.modules.workspace.autonomous.github_ops.GitHubOpsError: Worktree branch mismatch (<MagicMock name='mock.get_current_branch()' id='139708343395536'> != auto-dev/1390d553) with uncommitted changes.\u2026"
+      "summary": "app.modules.workspace.autonomous.github_ops.GitHubOpsError: Worktree branch mismatch (<MagicMock name='mock.get_current_branch()' id='140600398512272'> != auto-dev/1390d553) with uncommitted changes.\u2026"
     },
     {
       "category": "test_body_exception",
@@ -3790,7 +3718,7 @@
       "issue_number": "814",
       "nodeid": "tests/issues/814/test_worktree_path_selfheal.py::TestEnsureWorktreeSelfHeal::test_normalizes_stale_dotdot_path_when_valid",
       "outcome": "failure",
-      "summary": "app.modules.workspace.autonomous.github_ops.GitHubOpsError: Worktree branch mismatch (<MagicMock name='mock.get_current_branch()' id='139708308948880'> != auto-dev/1390d553) with uncommitted changes.\u2026"
+      "summary": "app.modules.workspace.autonomous.github_ops.GitHubOpsError: Worktree branch mismatch (<MagicMock name='mock.get_current_branch()' id='140600663599696'> != auto-dev/1390d553) with uncommitted changes.\u2026"
     },
     {
       "category": "test_body_exception",
@@ -4198,7 +4126,7 @@
       "issue_number": "913",
       "nodeid": "tests/issues/913/test_pr909_review_feedback.py::TestGetCheckFailureExcerpt::test_ci_repair_context_skips_excerpt_failure",
       "outcome": "failure",
-      "summary": "assert '\u5931\u8d25\u6458\u5f55' not in \"PR #42 \u5728\u5408\u5e76\u524d...6713164368'>\""
+      "summary": "assert '\u5931\u8d25\u6458\u5f55' not in \"PR #42 \u5728\u5408\u5e76\u524d...9180888144'>\""
     },
     {
       "category": "test_body_exception",
@@ -4306,11 +4234,11 @@
     }
   ],
   "provenance": {
-    "generated_command": "python scripts/legacy_issue_baseline.py snapshot --junit 'artifacts/test-results/issues-*.xml' --output ci/legacy-issue-failures.json --exit-code-glob 'artifacts/test-results/issues-*.exit-code' --shard-count 4 --quarantine ci/legacy-issue-quarantine.json --test-baseline .test-baseline.json --source-run 31359257263 --source-run-url https://github.com/open-ace/open-ace/actions/runs/31359257263 --reference-commit 56a165ab08fd77fc560398984763dc671e8f05b2 --run-contract 'extended-tests issue-tests --isolated-home --reruns 1 --timeout 240 --continue-on-collection-errors, 4 shards; 604 quarantined (deselect); CI-validated manifest'",
-    "reference_commit": "56a165ab08fd77fc560398984763dc671e8f05b2",
-    "run_contract": "extended-tests issue-tests --isolated-home --reruns 1 --timeout 240 --continue-on-collection-errors, 4 shards; 604 quarantined (deselect); CI-validated manifest",
-    "source_run": "31359257263",
-    "source_run_url": "https://github.com/open-ace/open-ace/actions/runs/31359257263"
+    "generated_command": "python scripts/legacy_issue_baseline.py snapshot --junit 'artifacts/test-results/issues-*.xml' --output ci/legacy-issue-failures.json --exit-code-glob 'artifacts/test-results/issues-*.exit-code' --shard-count 4 --quarantine ci/legacy-issue-quarantine.json --test-baseline .test-baseline.json --source-run 31382049159 --source-run-url https://github.com/open-ace/open-ace/actions/runs/31382049159 --reference-commit 1f45105e8a7e5ff713d97be3cdc836b525f0d3aa --run-contract 'extended-tests issue-tests --isolated-home --reruns 1 --timeout 240 --continue-on-collection-errors, 4 shards; 604 quarantined (deselect); post-main-sync (#2391 orchestrator refactor): 9 resolved, 2 changed test_body_exception->assertion_failure'",
+    "reference_commit": "1f45105e8a7e5ff713d97be3cdc836b525f0d3aa",
+    "run_contract": "extended-tests issue-tests --isolated-home --reruns 1 --timeout 240 --continue-on-collection-errors, 4 shards; 604 quarantined (deselect); post-main-sync (#2391 orchestrator refactor): 9 resolved, 2 changed test_body_exception->assertion_failure",
+    "source_run": "31382049159",
+    "source_run_url": "https://github.com/open-ace/open-ace/actions/runs/31382049159"
   },
   "schema": "openace-legacy-issue-failures",
   "selection": "not postgres",
