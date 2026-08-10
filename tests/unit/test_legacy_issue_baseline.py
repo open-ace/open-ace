@@ -739,3 +739,36 @@ def test_compare_reports_quarantined_as_debt(tmp_path):
     )
     assert r.exit_code == 0  # quarantined is debt, not a failure
     assert r.quarantined == q
+
+
+def test_unexpected_observed_nodeid_fails_closed():
+    # P1 (bidirectional): observed - expected must also fail (e.g. a quarantined
+    # nodeid that ran anyway, or a stale artifact).
+    parsed = [_tc_parsed("tests/issues/716/t.py::a"), _tc_parsed("tests/issues/716/t.py::extra")]
+    r = _compare([], parsed, ["tests/issues/716/t.py::a"])
+    assert r.exit_code != 0
+    assert any("unexpected observed nodeid" in i and "extra" in i for i in r.invalid)
+
+
+def test_load_exit_codes_rejects_duplicate_basename(tmp_path):
+    # P1: two paths with the same issues-N.exit-code basename must not last-write-win.
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    (tmp_path / "a" / "issues-1.exit-code").write_text("0")
+    (tmp_path / "b" / "issues-1.exit-code").write_text("1")
+    with pytest.raises(lib.BaselineError):
+        lib._load_exit_codes(str(tmp_path / "**" / "issues-*.exit-code"))
+
+
+def test_quarantine_bad_calendar_date_rejected():
+    # P1: 2026-99-99 matches the old shape regex but is not a real date.
+    bad = lib.QuarantineEntry("tests/issues/604/t.py::a", "r", "o", "t", "e", "2026-99-99")
+    inv = lib.validate_quarantine([bad], ["tests/issues/604/t.py::a"], "2026-08-10")
+    assert any("malformed expires_on" in i for i in inv)
+
+
+def test_load_quarantine_rejects_wrong_version(tmp_path):
+    p = tmp_path / "q.json"
+    p.write_text('{"version": 99, "schema": "openace-legacy-issue-quarantine", "entries": []}')
+    with pytest.raises(lib.BaselineError):
+        lib.load_quarantine(p)

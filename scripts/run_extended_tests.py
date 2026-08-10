@@ -279,18 +279,46 @@ def print_collection_manifest(files: list[str]) -> None:
     print("=" * 40 + "\n")
 
 
-def _quarantine_nodeids() -> list[str]:
-    """Read quarantined nodeids from ci/legacy-issue-quarantine.json (may be absent)."""
-    import json
+def _quarantine_nodeids(path=None) -> list[str]:
+    """Read quarantined nodeids from ci/legacy-issue-quarantine.json.
 
-    path = PROJECT_ROOT / "ci" / "legacy-issue-quarantine.json"
+    Fail-closed: a missing, corrupt, wrong-schema/version, or expired entry must
+    NOT silently fall back to "no quarantine" — that would re-run a known-
+    deadlocking nodeid and hang the shard for the full job timeout. Any error
+    raises SystemExit and aborts the run. Expiry is checked so a stale quarantine
+    cannot silently keep deselecting; full nodeid-collectability is enforced by
+    the comparator (same shared loader).
+    """
+    import datetime
+    import importlib.util
+
+    if path is None:
+        path = PROJECT_ROOT / "ci" / "legacy-issue-quarantine.json"
+    path = Path(path)
     if not path.exists():
-        return []
+        raise SystemExit(
+            "ci/legacy-issue-quarantine.json is missing; refusing to run the "
+            "issue shard without the tracked exclusions (would deadlock)."
+        )
     try:
-        data = json.loads(path.read_text())
-    except (OSError, ValueError):
-        return []
-    return [e["nodeid"] for e in data.get("entries", []) if e.get("nodeid")]
+        # Reuse the comparator's strict loader (schema + version + entry types).
+        spec = importlib.util.spec_from_file_location(
+            "_lib_baseline", str(PROJECT_ROOT / "scripts" / "legacy_issue_baseline.py")
+        )
+        assert spec and spec.loader
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules["_lib_baseline"] = mod  # register before exec (dataclasses PEP 563)
+        spec.loader.exec_module(mod)
+        entries = mod.load_quarantine(path)
+        today = datetime.date.today().isoformat()
+        invalid = mod.validate_quarantine(entries, (), today)
+        if invalid:
+            raise SystemExit("invalid ci/legacy-issue-quarantine.json:\n  " + "\n  ".join(invalid))
+    except SystemExit:
+        raise
+    except Exception as exc:  # corrupt JSON, wrong schema, parse error, ...
+        raise SystemExit(f"cannot load ci/legacy-issue-quarantine.json: {exc}") from exc
+    return [e.nodeid for e in entries]
 
 
 def build_pytest_command(args: argparse.Namespace) -> list[str]:

@@ -428,7 +428,6 @@ _QUARANTINE_REQUIRED = (
     "exit_condition",
     "expires_on",
 )
-_QUARANTINE_DATE_RX = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -446,10 +445,25 @@ def load_quarantine(path: str | Path) -> list[QuarantineEntry]:
     obj = json.loads(text)
     if obj.get("schema") != "openace-legacy-issue-quarantine":
         raise BaselineError(f"unsupported quarantine schema: {obj.get('schema')!r}")
+    if obj.get("version") != 1:
+        raise BaselineError(f"unsupported quarantine version: {obj.get('version')!r}")
+    raw_entries = obj.get("entries")
+    if not isinstance(raw_entries, list):
+        raise BaselineError(f"quarantine entries must be a list, got {type(raw_entries).__name__}")
     entries: list[QuarantineEntry] = []
-    for raw in obj.get("entries", []):
+    for raw in raw_entries:
+        if not isinstance(raw, dict):
+            raise BaselineError(f"quarantine entry must be an object, got {type(raw).__name__}")
         entries.append(QuarantineEntry(**{k: raw.get(k, "") for k in _QUARANTINE_REQUIRED}))
     return entries
+
+
+def _is_real_date(value: str) -> bool:
+    try:
+        datetime.date.fromisoformat(value)
+        return True
+    except ValueError:
+        return False
 
 
 def validate_quarantine(
@@ -471,7 +485,7 @@ def validate_quarantine(
         for field in _QUARANTINE_REQUIRED:
             if not getattr(e, field).strip():
                 invalid.append(f"quarantine entry {e.nodeid!r} missing field '{field}'")
-        if not _QUARANTINE_DATE_RX.match(e.expires_on):
+        if not _is_real_date(e.expires_on):
             invalid.append(f"quarantine entry {e.nodeid!r} malformed expires_on {e.expires_on!r}")
         elif e.expires_on < today:
             invalid.append(f"quarantine entry {e.nodeid!r} expired on {e.expires_on}")
@@ -796,13 +810,17 @@ def _load_exit_codes(pattern: str) -> dict[str, int]:
     """Load shard pytest exit-code files (``issues-N.exit-code`` → int).
 
     Absent files are reported by the caller via the expected-shard count; a
-    present-but-unparseable file is a hard error.
+    present-but-unparseable file OR a duplicate basename (two paths writing the
+    same ``issues-N.exit-code``) is a hard error — never last-write-wins.
     """
     codes: dict[str, int] = {}
     for p in sorted(glob.glob(pattern, recursive=True)):
+        name = Path(p).name
+        if name in codes:
+            raise BaselineError(f"duplicate exit-code basename {name!r} ({p})")
         raw = Path(p).read_text().strip()
         try:
-            codes[Path(p).name] = int(raw)
+            codes[name] = int(raw)
         except ValueError as exc:
             raise BaselineError(f"unparseable exit-code file {p}: {raw!r}") from exc
     return codes
@@ -834,6 +852,10 @@ def verify_completeness(
     invalid: list[str] = []
     for n in sorted(expected_set - observed_nodeids):
         invalid.append(f"expected nodeid never observed: {n}")
+    # Bidirectional: an unexpected observed nodeid (e.g. a quarantined nodeid
+    # that ran anyway, or a stale artifact bundle) must also fail closed.
+    for n in sorted(observed_nodeids - expected_set):
+        invalid.append(f"unexpected observed nodeid (not in expected set): {n}")
     if not parsed and expected_set:
         invalid.append("no JUnit reports matched the glob; expected shard artifacts missing")
     for n in sorted(set(duplicates))[:50]:
