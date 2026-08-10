@@ -1,0 +1,4318 @@
+{
+  "entries": [
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "1003",
+      "nodeid": "tests/issues/1003/test_session_usage_accounting.py::TestAddMessageCountUsageGate::test_autonomous_count_usage_false_leaves_counters",
+      "outcome": "failure",
+      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "1003",
+      "nodeid": "tests/issues/1003/test_session_usage_accounting.py::TestAddMessageCountUsageGate::test_legacy_count_usage_true_still_accumulates",
+      "outcome": "failure",
+      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "1003",
+      "nodeid": "tests/issues/1003/test_session_usage_accounting.py::TestIncrementSessionUsage::test_accumulates_across_calls",
+      "outcome": "failure",
+      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "1003",
+      "nodeid": "tests/issues/1003/test_session_usage_accounting.py::TestIncrementSessionUsage::test_starts_from_existing_value",
+      "outcome": "failure",
+      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "1003",
+      "nodeid": "tests/issues/1003/test_session_usage_accounting.py::TestMilestoneSessionInvariant::test_session_equals_sum_of_per_call_deltas",
+      "outcome": "failure",
+      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "1006",
+      "nodeid": "tests/issues/1006/e2e_conversation_history_default_dates.py::test_default_dates",
+      "outcome": "failure",
+      "summary": "playwright._impl._errors.TimeoutError: Locator.input_value: Timeout 30000ms exceeded."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "1071",
+      "nodeid": "tests/issues/1071/test_webui_session_id.py::TestListSessionsFilterWebui::test_webui_sessions_filtered_out",
+      "outcome": "failure",
+      "summary": "AttributeError: <module 'app.routes.workspace' from 'app/routes/workspace.py'> does not have the attribute 'Database'"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "1111",
+      "nodeid": "tests/issues/1111/test_sqlite_normalize_derived_tables.py::test_sqlite_upgrade_merges_qwen_alias_rows_before_normalization",
+      "outcome": "failure",
+      "summary": "subprocess.CalledProcessError: Command '['/opt/hostedtoolcache/Python/3.11.15/x64/bin/python', '-m', 'alembic', '-c', 'alembic.ini', 'upgrade', '017_add_usage_summary']' returned non-zero exit status…"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "1111",
+      "nodeid": "tests/issues/1111/test_sqlite_normalize_derived_tables.py::test_sqlite_upgrade_rebuilds_claude_summary_with_distinct_day_count",
+      "outcome": "failure",
+      "summary": "subprocess.CalledProcessError: Command '['/opt/hostedtoolcache/Python/3.11.15/x64/bin/python', '-m', 'alembic', '-c', 'alembic.ini', 'upgrade', '038_normalize_tool_names']' returned non-zero exit sta…"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "1125",
+      "nodeid": "tests/issues/1125/test_workspace_session_summary_contract.py::test_get_session_does_not_fallback_to_daily_messages",
+      "outcome": "failure",
+      "summary": "assert 500 == 404"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "1125",
+      "nodeid": "tests/issues/1125/test_workspace_session_summary_contract.py::test_get_session_keeps_agent_sessions_request_count",
+      "outcome": "failure",
+      "summary": "AttributeError: 'tuple' object has no attribute 'get_json'"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "1125",
+      "nodeid": "tests/issues/1125/test_workspace_session_summary_contract.py::test_list_sessions_hides_autonomous_tracking_wrappers",
+      "outcome": "failure",
+      "summary": "AssertionError: assert ['track-123',...l-claude-123'] == ['actual-claude-123']"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "1128",
+      "nodeid": "tests/issues/1128/test_session_message_transcript_contract.py::test_add_message_merges_duplicate_message_id_without_double_count",
+      "outcome": "failure",
+      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "1128",
+      "nodeid": "tests/issues/1128/test_session_message_transcript_contract.py::test_add_message_persists_structured_session_message_columns",
+      "outcome": "failure",
+      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "1128",
+      "nodeid": "tests/issues/1128/test_session_message_transcript_contract.py::test_append_transcript_message_is_summary_side_effect_free",
+      "outcome": "failure",
+      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "1128",
+      "nodeid": "tests/issues/1128/test_session_message_transcript_contract.py::test_llm_proxy_records_transcript_without_double_count",
+      "outcome": "failure",
+      "summary": "AssertionError: assert 0 == 1"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "1140",
+      "nodeid": "tests/issues/1140/test_zcode_dev_mode_and_session.py::test_session_line_updates_even_on_resume",
+      "outcome": "failure",
+      "summary": "AssertionError: _run_agent must not skip session line update on resume — see #525 where dev resumed a dead planning session forever"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "1277",
+      "nodeid": "tests/issues/1277/test_test_skip_false_positive.py::TestRetryCounterPersistence::test_skip_retries_persisted_on_test_skip",
+      "outcome": "failure",
+      "summary": "AssertionError: skip_retries=1 must be persisted when tests are skipped"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "1306",
+      "nodeid": "tests/issues/1306/test_host_url_replacement.py::test_get_user_webui_url_preserves_port_single_user",
+      "outcome": "failure",
+      "summary": "AssertionError: assert False"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "1306",
+      "nodeid": "tests/issues/1306/test_host_url_replacement.py::test_get_user_webui_url_with_host_url",
+      "outcome": "failure",
+      "summary": "AssertionError: assert False"
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "1329",
+      "nodeid": "tests/issues/1329/test_concurrent_limit.py::TestCheckUserConcurrentLimit::test_fail_open_on_exception",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: database is locked\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "1329",
+      "nodeid": "tests/issues/1329/test_concurrent_limit.py::TestCheckUserConcurrentLimit::test_returns_429_when_at_limit",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: database is locked\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "1329",
+      "nodeid": "tests/issues/1329/test_concurrent_limit.py::TestCheckUserConcurrentLimit::test_returns_none_when_under_limit",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: database is locked\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "1329",
+      "nodeid": "tests/issues/1329/test_concurrent_limit.py::TestCheckUserConcurrentLimit::test_uses_default_when_no_tenant",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: database is locked\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "1329",
+      "nodeid": "tests/issues/1329/test_concurrent_limit.py::TestCountActiveWorkflowsByUser::test_count_active_workflows_only",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: database is locked\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "1329",
+      "nodeid": "tests/issues/1329/test_concurrent_limit.py::TestCountActiveWorkflowsByUser::test_count_multiple_active_statuses",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: database is locked\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "1329",
+      "nodeid": "tests/issues/1329/test_concurrent_limit.py::TestCountActiveWorkflowsByUser::test_count_only_specific_user",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: database is locked\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "1329",
+      "nodeid": "tests/issues/1329/test_concurrent_limit.py::TestCountActiveWorkflowsByUser::test_count_zero_when_no_workflows",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: database is locked\""
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "1395",
+      "nodeid": "tests/issues/1395/test_cross_user_permissions.py::TestBuildAgentEnv::test_fallback_on_proxy_failure",
+      "outcome": "failure",
+      "summary": "RuntimeError: LLM proxy setup failed; refusing to launch autonomous agent with inherited credentials (set OPENACE_ALLOW_RAW_KEY_FALLBACK=1 only in development)."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "1395",
+      "nodeid": "tests/issues/1395/test_cross_user_permissions.py::TestPreparationWorktreeCleanup::test_clean_path_creates_worktree_directly",
+      "outcome": "failure",
+      "summary": "TypeError: Object of type MagicMock is not JSON serializable"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "1395",
+      "nodeid": "tests/issues/1395/test_cross_user_permissions.py::TestPreparationWorktreeCleanup::test_non_registered_residual_dir_left_in_place",
+      "outcome": "failure",
+      "summary": "TypeError: Object of type MagicMock is not JSON serializable"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "1395",
+      "nodeid": "tests/issues/1395/test_cross_user_permissions.py::TestPreparationWorktreeCleanup::test_registered_residual_removed_via_git",
+      "outcome": "failure",
+      "summary": "TypeError: Object of type MagicMock is not JSON serializable"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "1395",
+      "nodeid": "tests/issues/1395/test_cross_user_permissions.py::TestPreparationWorktreeCleanup::test_remove_failure_does_not_raise",
+      "outcome": "failure",
+      "summary": "TypeError: Object of type MagicMock is not JSON serializable"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "1395",
+      "nodeid": "tests/issues/1395/test_cross_user_permissions.py::TestRunAgentTaskSessionReactivation::test_completed_session_reactivated_to_active",
+      "outcome": "failure",
+      "summary": "AssertionError: assert call('sess-co..._tenant=False) == (('sess-compl...': None}), {})"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "1395",
+      "nodeid": "tests/issues/1395/test_cross_user_permissions.py::TestRunAgentTaskSessionReactivation::test_error_session_reactivated_to_active",
+      "outcome": "failure",
+      "summary": "AssertionError: assert call('sess-er..._tenant=False) == (('sess-error...': None}), {})"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "1395",
+      "nodeid": "tests/issues/1395/test_cross_user_permissions.py::TestSingleShotUserIdPropagation::test_single_shot_passes_real_user_id_to_env",
+      "outcome": "failure",
+      "summary": "TypeError: TestSingleShotUserIdPropagation.test_single_shot_passes_real_user_id_to_env.<locals>.fake_build_env() got an unexpected keyword argument 'task_id'"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "1395",
+      "nodeid": "tests/issues/1395/test_cross_user_permissions.py::test_isolated_wrapper_can_handle_signals_while_waiting_for_agent",
+      "outcome": "failure",
+      "summary": "assert 'trap cleanup_isolated EXIT' in '#!/bin/bash\\n# openace-run-as — cross-user agent launcher for AI autonomous development.\\n#\\n# Problem (Issue #1395): the open-ace service runs as the `openace…"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "1395",
+      "nodeid": "tests/issues/1395/test_cross_user_permissions.py::test_isolated_wrapper_normalizes_recovered_acls_before_git_baseline",
+      "outcome": "failure",
+      "summary": "assert 'signature_registry=\"/run/openace-agent-git-signature-${target_uid}\"' in '#!/bin/bash\\n# openace-run-as — cross-user agent launcher for AI autonomous development.\\n#\\n# Problem (Issue #1395): …"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "1395",
+      "nodeid": "tests/issues/1395/test_system_event_activity.py::TestSystemEventActivityForwarding::test_api_retry_triggers_activity",
+      "outcome": "failure",
+      "summary": "AttributeError: '_StubProcess' object has no attribute 'poll'"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "1395",
+      "nodeid": "tests/issues/1395/test_system_event_activity.py::TestSystemEventActivityForwarding::test_assistant_still_triggers_activity",
+      "outcome": "failure",
+      "summary": "AttributeError: '_StubProcess' object has no attribute 'poll'"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "1395",
+      "nodeid": "tests/issues/1395/test_system_event_activity.py::TestSystemEventActivityForwarding::test_init_triggers_activity",
+      "outcome": "failure",
+      "summary": "AttributeError: '_StubProcess' object has no attribute 'poll'"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "1395",
+      "nodeid": "tests/issues/1395/test_system_event_activity.py::TestSystemEventActivityForwarding::test_no_subtype_does_not_trigger",
+      "outcome": "failure",
+      "summary": "AttributeError: '_StubProcess' object has no attribute 'poll'"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "1395",
+      "nodeid": "tests/issues/1395/test_system_event_activity.py::TestSystemEventActivityForwarding::test_thinking_tokens_is_not_forwarded",
+      "outcome": "failure",
+      "summary": "AttributeError: '_StubProcess' object has no attribute 'poll'"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "1425",
+      "nodeid": "tests/issues/1425/test_language_sync.py::test_language_postmessage_sent",
+      "outcome": "failure",
+      "summary": "Failed: async def functions are not natively supported."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "1425",
+      "nodeid": "tests/issues/1425/test_language_sync.py::test_language_realtime_sync",
+      "outcome": "failure",
+      "summary": "Failed: async def functions are not natively supported."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "1425",
+      "nodeid": "tests/issues/1425/test_language_sync.py::test_language_url_parameter",
+      "outcome": "failure",
+      "summary": "Failed: async def functions are not natively supported."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "1425",
+      "nodeid": "tests/issues/1425/test_language_sync.py::test_language_url_parameter_update",
+      "outcome": "failure",
+      "summary": "Failed: async def functions are not natively supported."
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "144",
+      "nodeid": "tests/issues/144/e2e_file_changes_panel.py::test_panel_features",
+      "outcome": "error",
+      "summary": "failed on setup with \"AssertionError\""
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "165",
+      "nodeid": "tests/issues/165/test_remote_session_ux.py::test_a1_token_detail",
+      "outcome": "failure",
+      "summary": "AssertionError: Create session failed: 401 {\"error\":\"Authentication required\"}"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "165",
+      "nodeid": "tests/issues/165/test_remote_session_ux.py::test_a2_system_message_storage",
+      "outcome": "failure",
+      "summary": "AssertionError: Create session failed: 401 {\"error\":\"Authentication required\"}"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "165",
+      "nodeid": "tests/issues/165/test_remote_session_ux.py::test_a3_request_count_no_double_count",
+      "outcome": "failure",
+      "summary": "AssertionError: Create session failed: 401 {\"error\":\"Authentication required\"}"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "165",
+      "nodeid": "tests/issues/165/test_remote_session_ux.py::test_a4_abort_request",
+      "outcome": "failure",
+      "summary": "AssertionError: Create session failed: 401 {\"error\":\"Authentication required\"}"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "165",
+      "nodeid": "tests/issues/165/test_remote_session_ux.py::test_a5_allow_permanent",
+      "outcome": "failure",
+      "summary": "AssertionError: Create session failed: 401 {\"error\":\"Authentication required\"}"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "165",
+      "nodeid": "tests/issues/165/test_remote_session_ux.py::test_a6_quota_exceeded_detection",
+      "outcome": "failure",
+      "summary": "AssertionError: Create session failed: 401 {\"error\":\"Authentication required\"}"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "165",
+      "nodeid": "tests/issues/165/test_remote_session_ux.py::test_b1_reconnect_history",
+      "outcome": "failure",
+      "summary": "AssertionError: Create session failed: 401 {\"error\":\"Authentication required\"}"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "165",
+      "nodeid": "tests/issues/165/test_remote_session_ux.py::test_b2_abort_ui",
+      "outcome": "failure",
+      "summary": "AssertionError: Create session failed: 401 {\"error\":\"Authentication required\"}"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "165",
+      "nodeid": "tests/issues/165/test_remote_session_ux.py::test_b3_permission_permanent_ui",
+      "outcome": "failure",
+      "summary": "AssertionError: Create session failed: 401 {\"error\":\"Authentication required\"}"
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "166",
+      "nodeid": "tests/issues/166/test_launchd_env.py::test_qwen_cli",
+      "outcome": "error",
+      "summary": "failed on setup with \"file tests/issues/166/test_launchd_env.py, line 37"
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "166",
+      "nodeid": "tests/issues/166/test_stream_json_mode.py::test_stream_json_mode",
+      "outcome": "error",
+      "summary": "failed on setup with \"file tests/issues/166/test_stream_json_mode.py, line 32"
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "172",
+      "nodeid": "tests/issues/172/e2e_quota_enforcement.py::test_llm_proxy_fail_closed",
+      "outcome": "error",
+      "summary": "failed on setup with \"file tests/issues/172/e2e_quota_enforcement.py, line 209"
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "172",
+      "nodeid": "tests/issues/172/e2e_quota_enforcement.py::test_quota_check_endpoint",
+      "outcome": "error",
+      "summary": "failed on setup with \"file tests/issues/172/e2e_quota_enforcement.py, line 91"
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "172",
+      "nodeid": "tests/issues/172/e2e_quota_enforcement.py::test_quota_status_endpoint",
+      "outcome": "error",
+      "summary": "failed on setup with \"file tests/issues/172/e2e_quota_enforcement.py, line 108"
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "172",
+      "nodeid": "tests/issues/172/e2e_quota_enforcement.py::test_user_daily_stats",
+      "outcome": "error",
+      "summary": "failed on setup with \"file tests/issues/172/e2e_quota_enforcement.py, line 122"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "1760",
+      "nodeid": "tests/issues/1760/test_save_usage_tenant_and_workflow_annotation.py::test_update_agent_sessions_stats_writes_per_session_model",
+      "outcome": "failure",
+      "summary": "AttributeError: <module 'config' from 'tests/issues/610/../../../remote-agent/config.py'> has no attribute 'DB_DIR'"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "1778",
+      "nodeid": "tests/issues/1778/test_outbound_url_toctou.py::test_safe_request_disables_proxy_by_default",
+      "outcome": "failure",
+      "summary": "AssertionError: assert OrderedDict([...,127.0.0.1')]) == {}"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "1778",
+      "nodeid": "tests/issues/1778/test_outbound_url_toctou.py::test_safe_request_preserves_caller_provided_proxies",
+      "outcome": "failure",
+      "summary": "AssertionError: assert OrderedDict([...,127.0.0.1')]) == {'http': 'htt....example.com'}"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "1807",
+      "nodeid": "tests/issues/1807/test_webhook_round2_review.py::TestWebhookFailurePrefsUnbound::test_prefs_unbound_does_not_mask_real_exception",
+      "outcome": "failure",
+      "summary": "RuntimeError: db connection lost"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "1813",
+      "nodeid": "tests/issues/1813/test_pr_review_summary_before_ci.py::TestPrReviewSummaryBeforeCiCheck::test_review_content_filled_before_ci_return",
+      "outcome": "failure",
+      "summary": "AssertionError: pr_review_summary must be updated with non-empty review_content even when CI fails"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "1816",
+      "nodeid": "tests/issues/1816/test_ci_repair_context_overflow.py::test_review_fix_refuses_preexisting_dirty_tree_before_agent",
+      "outcome": "failure",
+      "summary": "AssertionError: Expected 'git_add_all' to not have been called. Called 1 times."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "1816",
+      "nodeid": "tests/issues/1816/test_ci_repair_context_overflow.py::test_stable_session_line_rebinds_once_and_preserves_usage[False]",
+      "outcome": "failure",
+      "summary": "AssertionError: expected call not found."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "1816",
+      "nodeid": "tests/issues/1816/test_ci_repair_context_overflow.py::test_stable_session_line_rebinds_once_and_preserves_usage[True]",
+      "outcome": "failure",
+      "summary": "AssertionError: expected call not found."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "1831",
+      "nodeid": "tests/issues/1831/test_orchestrator_failure_cleanup.py::TestAdvanceTimingDimension::test_transient_error_keeps_worktree",
+      "outcome": "failure",
+      "summary": "AssertionError: Expected '_mark_failed' to not have been called. Called 1 times."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "1857",
+      "nodeid": "tests/issues/1857/test_pr_review_duplicate_create.py::test_create_pr_already_exists_fails_when_retry_still_finds_nothing",
+      "outcome": "failure",
+      "summary": "AssertionError: should fail when recovery can't locate the existing PR"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "1857",
+      "nodeid": "tests/issues/1857/test_pr_review_duplicate_create.py::test_create_pr_already_exists_falls_back_to_find_existing_pr_without_url",
+      "outcome": "failure",
+      "summary": "AssertionError: Expected 'find_existing_pr' to be called once. Called 0 times."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "1857",
+      "nodeid": "tests/issues/1857/test_pr_review_duplicate_create.py::test_create_pr_already_exists_recovers_by_parsing_pr_url_from_error",
+      "outcome": "failure",
+      "summary": "AssertionError: PR number not parsed from error URL and persisted"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "1857",
+      "nodeid": "tests/issues/1857/test_pr_review_duplicate_create.py::test_create_pr_already_exists_retries_find_when_first_returns_none",
+      "outcome": "failure",
+      "summary": "AssertionError: assert 0 == 2"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "1857",
+      "nodeid": "tests/issues/1857/test_pr_review_duplicate_create.py::test_create_pr_unrecoverable_error_still_fails",
+      "outcome": "failure",
+      "summary": "AssertionError: non-'already exists' error should propagate, not be masked"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "1891",
+      "nodeid": "tests/issues/1891/test_usage_report_auth.py::TestUsageReportHttpIntegration::test_duplicate_report_is_idempotent_and_conflicting_replay_is_rejected",
+      "outcome": "failure",
+      "summary": "assert 0 == 2"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "1891",
+      "nodeid": "tests/issues/1891/test_usage_report_auth.py::TestUsageReportHttpIntegration::test_report_id_less_agent_has_explicit_short_migration_window[/api/remote/agent/message]",
+      "outcome": "failure",
+      "summary": "assert 0 == 150"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "1891",
+      "nodeid": "tests/issues/1891/test_usage_report_auth.py::TestUsageReportHttpIntegration::test_report_id_less_agent_has_explicit_short_migration_window[/api/remote/usage-report]",
+      "outcome": "failure",
+      "summary": "assert 0 == 150"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "1891",
+      "nodeid": "tests/issues/1891/test_usage_report_auth.py::TestUsageReportHttpIntegration::test_valid_bearer_updates_usage_and_audits_both_paths[/api/remote/agent/message]",
+      "outcome": "failure",
+      "summary": "assert 0 == 2"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "1891",
+      "nodeid": "tests/issues/1891/test_usage_report_auth.py::TestUsageReportHttpIntegration::test_valid_bearer_updates_usage_and_audits_both_paths[/api/remote/usage-report]",
+      "outcome": "failure",
+      "summary": "assert 0 == 2"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "1895",
+      "nodeid": "tests/issues/1895/test_redis_authentication.py::TestRedisPasswordFailClosed::test_development_allows_empty_redis_password_with_warning",
+      "outcome": "failure",
+      "summary": "RuntimeError: REDIS_PASSWORD not set in development mode. The entrypoint should auto-generate and persist this password. If running directly, set REDIS_PASSWORD explicitly."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "1895",
+      "nodeid": "tests/issues/1895/test_redis_authentication.py::TestRedisPasswordSpecialCharacters::test_password_with_backtick_handled_correctly",
+      "outcome": "failure",
+      "summary": "RuntimeError: REDIS_PASSWORD must be at least 24 characters long (got 13); current value is too short for production"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "1895",
+      "nodeid": "tests/issues/1895/test_redis_authentication.py::TestRedisPasswordSpecialCharacters::test_password_with_dollar_sign_handled_correctly",
+      "outcome": "failure",
+      "summary": "RuntimeError: REDIS_PASSWORD must be at least 24 characters long (got 13); current value is too short for production"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "1895",
+      "nodeid": "tests/issues/1895/test_redis_authentication.py::TestRedisPasswordSpecialCharacters::test_password_with_exclamation_handled_correctly",
+      "outcome": "failure",
+      "summary": "RuntimeError: REDIS_PASSWORD must be at least 24 characters long (got 13); current value is too short for production"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "1897",
+      "nodeid": "tests/issues/1897/test_dev_context_recovery.py::test_dev_context_overflow_recovers_on_fresh_session",
+      "outcome": "failure",
+      "summary": "AssertionError: expected call not found."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "1897",
+      "nodeid": "tests/issues/1897/test_retry_clears_in_progress.py::TestRetryClearsInProgress::test_retry_endpoint_calls_clear_in_progress",
+      "outcome": "failure",
+      "summary": "AssertionError: Expected 'clear_in_progress' to have been called once. Called 0 times."
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "198",
+      "nodeid": "tests/issues/198/e2e_audit_analysis_playwright.py::test_api_anomalies_with_status",
+      "outcome": "error",
+      "summary": "failed on setup with \"file tests/issues/198/e2e_audit_analysis_playwright.py, line 115"
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "198",
+      "nodeid": "tests/issues/198/e2e_audit_analysis_playwright.py::test_api_anomaly_status",
+      "outcome": "error",
+      "summary": "failed on setup with \"file tests/issues/198/e2e_audit_analysis_playwright.py, line 74"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "20",
+      "nodeid": "tests/issues/20/test_issue20.py::test_remote_data_fetch_interval",
+      "outcome": "failure",
+      "summary": "playwright._impl._errors.Error: Page.goto: net::ERR_CONNECTION_REFUSED at http://<host:port>/login"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "210",
+      "nodeid": "tests/issues/210/e2e_project_stats_accuracy.py::test_project_stats_accuracy",
+      "outcome": "failure",
+      "summary": "AssertionError: Stats API failed: 403"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "211",
+      "nodeid": "tests/issues/211/e2e_project_sort.py::test_project_sort",
+      "outcome": "failure",
+      "summary": "AssertionError: Stats API failed: 403"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "212",
+      "nodeid": "tests/issues/212/test_hostname_dedup.py::test_different_tenant_no_merge",
+      "outcome": "failure",
+      "summary": "sqlite3.OperationalError: no such table: registration_tokens"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "212",
+      "nodeid": "tests/issues/212/test_hostname_dedup.py::test_empty_hostname_no_merge",
+      "outcome": "failure",
+      "summary": "sqlite3.OperationalError: no such table: registration_tokens"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "212",
+      "nodeid": "tests/issues/212/test_hostname_dedup.py::test_invalid_token",
+      "outcome": "failure",
+      "summary": "sqlite3.OperationalError: no such table: registration_tokens"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "212",
+      "nodeid": "tests/issues/212/test_hostname_dedup.py::test_merge_cleans_in_memory_state",
+      "outcome": "failure",
+      "summary": "sqlite3.OperationalError: no such table: registration_tokens"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "212",
+      "nodeid": "tests/issues/212/test_hostname_dedup.py::test_merge_offline_duplicate",
+      "outcome": "failure",
+      "summary": "sqlite3.OperationalError: no such table: registration_tokens"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "212",
+      "nodeid": "tests/issues/212/test_hostname_dedup.py::test_merge_preserves_assignments",
+      "outcome": "failure",
+      "summary": "sqlite3.OperationalError: no such table: registration_tokens"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "212",
+      "nodeid": "tests/issues/212/test_hostname_dedup.py::test_merge_preserves_sessions",
+      "outcome": "failure",
+      "summary": "sqlite3.OperationalError: no such table: registration_tokens"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "212",
+      "nodeid": "tests/issues/212/test_hostname_dedup.py::test_new_machine_no_duplicate",
+      "outcome": "failure",
+      "summary": "sqlite3.OperationalError: no such table: registration_tokens"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "212",
+      "nodeid": "tests/issues/212/test_hostname_dedup.py::test_reject_online_duplicate",
+      "outcome": "failure",
+      "summary": "sqlite3.OperationalError: no such table: registration_tokens"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "2121",
+      "nodeid": "tests/issues/2121/test_sso_user_tenant_id.py::TestCreateUserFromSsoTenantId::test_uses_default_tenant_id_when_provider_not_found",
+      "outcome": "failure",
+      "summary": "assert None == 42"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "2121",
+      "nodeid": "tests/issues/2121/test_sso_user_tenant_id.py::TestCreateUserFromSsoTenantId::test_uses_default_tenant_id_when_provider_tenant_id_is_none",
+      "outcome": "failure",
+      "summary": "assert None == 42"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "22",
+      "nodeid": "tests/issues/22/test_issue22.py::TestOIDCSignatureVerification::test_jwks_caching",
+      "outcome": "failure",
+      "summary": "ValueError: Failed to fetch JWKS: 404 Client Error: Not Found for url: https://example.com/.well-known/jwks.json"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "221",
+      "nodeid": "tests/issues/221/test_tenant_form_validation.py::test_tenant_form_validation",
+      "outcome": "failure",
+      "summary": "Failed: async def functions are not natively supported."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "2335",
+      "nodeid": "tests/issues/2335/test_close_issue.py::test_close_issue_runs_as_service_user_with_bot_token",
+      "outcome": "failure",
+      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "2335",
+      "nodeid": "tests/issues/2335/test_close_issue.py::test_get_merge_commit_sha_none_when_empty",
+      "outcome": "failure",
+      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "2335",
+      "nodeid": "tests/issues/2335/test_close_issue.py::test_get_merge_commit_sha_returns_oid",
+      "outcome": "failure",
+      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "2335",
+      "nodeid": "tests/issues/2335/test_close_issue.py::test_reopen_issue_runs_as_service_user_with_bot_token",
+      "outcome": "failure",
+      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "2335",
+      "nodeid": "tests/issues/2335/test_verifier_checkout.py::test_cross_user_verifier_cleanup_uses_owner_safe_wrapper",
+      "outcome": "failure",
+      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "2335",
+      "nodeid": "tests/issues/2335/test_verifier_checkout.py::test_cross_user_verifier_directory_is_created_by_repository_owner",
+      "outcome": "failure",
+      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "2335",
+      "nodeid": "tests/issues/2335/test_verifier_checkout.py::test_same_user_verifier_directory_is_private_and_owner_writable",
+      "outcome": "failure",
+      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "241",
+      "nodeid": "tests/issues/241/test_pagination_migration_head.py::test_single_migration_head",
+      "outcome": "failure",
+      "summary": "AssertionError: assert '20260809_001...il_dev_rounds' == '20260715_001...lure_head_sha'"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "241",
+      "nodeid": "tests/issues/241/test_pagination_routes.py::TestGetSessionEnvelope::test_include_messages_returns_recent_page_and_metadata",
+      "outcome": "failure",
+      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "241",
+      "nodeid": "tests/issues/241/test_pagination_routes.py::TestGetSessionEnvelope::test_milestone_total_uses_conditional_count",
+      "outcome": "failure",
+      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "241",
+      "nodeid": "tests/issues/241/test_pagination_routes.py::TestGetSessionEnvelope::test_without_include_messages_has_no_pagination_envelope",
+      "outcome": "failure",
+      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "241",
+      "nodeid": "tests/issues/241/test_pagination_routes.py::TestMessagesEndpointWalk::test_cursor_walk_through_endpoint",
+      "outcome": "failure",
+      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "241",
+      "nodeid": "tests/issues/241/test_pagination_routes.py::TestMessagesEndpointWalk::test_limit_clamped_to_max_via_endpoint",
+      "outcome": "failure",
+      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "241",
+      "nodeid": "tests/issues/241/test_pagination_routes.py::TestMessagesEndpointWalk::test_lone_before_timestamp_is_ignored",
+      "outcome": "failure",
+      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "241",
+      "nodeid": "tests/issues/241/test_pagination_routes.py::TestOwnershipAnd404::test_admin_bypasses_owner_check",
+      "outcome": "failure",
+      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "241",
+      "nodeid": "tests/issues/241/test_pagination_routes.py::TestOwnershipAnd404::test_messages_endpoint_404_for_unknown_session",
+      "outcome": "failure",
+      "summary": "assert 500 == 404"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "241",
+      "nodeid": "tests/issues/241/test_pagination_routes.py::TestOwnershipAnd404::test_messages_endpoint_enforces_ownership_before_load",
+      "outcome": "failure",
+      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "241",
+      "nodeid": "tests/issues/241/test_pagination_routes.py::TestOwnershipAnd404::test_non_owner_gets_403",
+      "outcome": "failure",
+      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "241",
+      "nodeid": "tests/issues/241/test_pagination_routes.py::TestOwnershipAnd404::test_same_owner_wrong_tenant_gets_403",
+      "outcome": "failure",
+      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "241",
+      "nodeid": "tests/issues/241/test_pagination_routes.py::TestOwnershipAnd404::test_unknown_session_returns_404",
+      "outcome": "failure",
+      "summary": "assert 500 == 404"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "241",
+      "nodeid": "tests/issues/241/test_session_messages_pagination.py::TestCrossPageContinuity::test_full_walk_no_overlap_no_gap",
+      "outcome": "failure",
+      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "241",
+      "nodeid": "tests/issues/241/test_session_messages_pagination.py::TestCrossPageContinuity::test_has_more_flag_and_cursor_only_when_older_page_exists",
+      "outcome": "failure",
+      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "241",
+      "nodeid": "tests/issues/241/test_session_messages_pagination.py::TestDescReverseAdjacency::test_second_page_is_adjacent_not_oldest",
+      "outcome": "failure",
+      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "241",
+      "nodeid": "tests/issues/241/test_session_messages_pagination.py::TestEmptyAndDefaults::test_default_limit_used_when_none",
+      "outcome": "failure",
+      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "241",
+      "nodeid": "tests/issues/241/test_session_messages_pagination.py::TestEmptyAndDefaults::test_empty_session_returns_empty_page",
+      "outcome": "failure",
+      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "241",
+      "nodeid": "tests/issues/241/test_session_messages_pagination.py::TestInternalCallersUnaffected::test_get_session_full_history_when_requested",
+      "outcome": "failure",
+      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "241",
+      "nodeid": "tests/issues/241/test_session_messages_pagination.py::TestInternalCallersUnaffected::test_get_session_no_messages_by_default",
+      "outcome": "failure",
+      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "241",
+      "nodeid": "tests/issues/241/test_session_messages_pagination.py::TestLimitClamping::test_max_boundary_returns_exactly_max",
+      "outcome": "failure",
+      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "241",
+      "nodeid": "tests/issues/241/test_session_messages_pagination.py::TestLimitClamping::test_over_max_clamped_to_max",
+      "outcome": "failure",
+      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "241",
+      "nodeid": "tests/issues/241/test_session_messages_pagination.py::TestLimitClamping::test_zero_or_negative_falls_back_to_default",
+      "outcome": "failure",
+      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "241",
+      "nodeid": "tests/issues/241/test_session_messages_pagination.py::TestMilestoneCount::test_count_messages_total_and_milestone_scoped",
+      "outcome": "failure",
+      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "241",
+      "nodeid": "tests/issues/241/test_session_messages_pagination.py::TestMilestoneCount::test_get_messages_page_respects_milestone_filter",
+      "outcome": "failure",
+      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "241",
+      "nodeid": "tests/issues/241/test_session_messages_pagination.py::TestNullTimestampSafetyNet::test_schema_rejects_null_timestamp",
+      "outcome": "failure",
+      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "241",
+      "nodeid": "tests/issues/241/test_session_messages_pagination.py::TestSameTimestampTiebreak::test_identical_timestamps_ordered_by_id",
+      "outcome": "failure",
+      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "2431",
+      "nodeid": "tests/issues/2431/test_acceptance_verifier_hardening.py::test_issue_closure_combines_closed_at_with_latest_timeline_actor",
+      "outcome": "failure",
+      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "2431",
+      "nodeid": "tests/issues/2431/test_acceptance_verifier_hardening.py::test_issue_closure_rejects_timeline_actor_from_a_different_close_event",
+      "outcome": "failure",
+      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "2431",
+      "nodeid": "tests/issues/2431/test_acceptance_verifier_hardening.py::test_issue_comment_exact_body_from_same_bot_is_idempotent",
+      "outcome": "failure",
+      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "2431",
+      "nodeid": "tests/issues/2431/test_acceptance_verifier_hardening.py::test_issue_comment_listing_uses_paginated_rest_and_normalizes_pages",
+      "outcome": "failure",
+      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "2431",
+      "nodeid": "tests/issues/2431/test_acceptance_verifier_hardening.py::test_issue_comment_same_body_from_human_does_not_deduplicate",
+      "outcome": "failure",
+      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "2431",
+      "nodeid": "tests/issues/2431/test_acceptance_verifier_hardening.py::test_issue_comment_unknown_bot_identity_does_not_trust_existing_author",
+      "outcome": "failure",
+      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "2431",
+      "nodeid": "tests/issues/2431/test_acceptance_verifier_hardening.py::test_merge_sha_is_fetched_and_verified_when_missing",
+      "outcome": "failure",
+      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "25",
+      "nodeid": "tests/issues/25/test_issue25.py::test_issue25",
+      "outcome": "failure",
+      "summary": "playwright._impl._errors.TimeoutError: Page.fill: Timeout 30000ms exceeded."
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "394",
+      "nodeid": "tests/issues/394/e2e_terminal_tab.py::test_session_sync_api",
+      "outcome": "error",
+      "summary": "failed on setup with \"file tests/issues/394/e2e_terminal_tab.py, line 183"
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "394",
+      "nodeid": "tests/issues/394/e2e_terminal_tab.py::test_terminal_connection_and_interaction",
+      "outcome": "error",
+      "summary": "failed on setup with \"AssertionError\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "394",
+      "nodeid": "tests/issues/394/e2e_terminal_tab.py::test_terminal_option_in_modal",
+      "outcome": "error",
+      "summary": "failed on setup with \"AssertionError\""
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "394",
+      "nodeid": "tests/issues/394/e2e_terminal_tab.py::test_terminal_tab",
+      "outcome": "failure",
+      "summary": "AssertionError: Login failed: {\"error\":\"Invalid username or password\"}"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "4",
+      "nodeid": "tests/issues/4/test_conversation_history_icon.py::test_conversation_history_icon",
+      "outcome": "failure",
+      "summary": "Failed: async def functions are not natively supported."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "42",
+      "nodeid": "tests/issues/42/test_webui_manager.py::test_manager_get_user_webui_url_single_user",
+      "outcome": "failure",
+      "summary": "AssertionError: assert False"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "42",
+      "nodeid": "tests/issues/42/test_webui_manager.py::test_manager_instance_limit",
+      "outcome": "failure",
+      "summary": "TypeError: cannot unpack non-iterable NoneType object"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "435",
+      "nodeid": "tests/issues/435/e2e_api_key_toggle.py::test_api_key_toggle",
+      "outcome": "failure",
+      "summary": "assert 403 == 200"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "47",
+      "nodeid": "tests/issues/47/test_auto_refresh.py::test_auto_refresh_historical_date",
+      "outcome": "failure",
+      "summary": "TypeError: 'PlaywrightContextManager' object does not support the context manager protocol"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "47",
+      "nodeid": "tests/issues/47/test_auto_refresh.py::test_auto_refresh_today",
+      "outcome": "failure",
+      "summary": "TypeError: 'PlaywrightContextManager' object does not support the context manager protocol"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "477",
+      "nodeid": "tests/issues/477/test_browse_directory_auth.py::TestBrowseRemoteDirectoryAuthCheck::test_admin_user_has_access",
+      "outcome": "failure",
+      "summary": "assert 400 == 200"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "477",
+      "nodeid": "tests/issues/477/test_browse_directory_auth.py::TestBrowseRemoteDirectoryAuthCheck::test_admin_user_offline_machine",
+      "outcome": "failure",
+      "summary": "assert 400 == 200"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "477",
+      "nodeid": "tests/issues/477/test_browse_directory_auth.py::TestBrowseRemoteDirectoryAuthCheck::test_g_user_none_returns_401",
+      "outcome": "failure",
+      "summary": "RuntimeError: Working outside of request context."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "477",
+      "nodeid": "tests/issues/477/test_browse_directory_auth.py::TestBrowseRemoteDirectoryAuthCheck::test_g_user_without_id_returns_403",
+      "outcome": "failure",
+      "summary": "RuntimeError: Working outside of request context."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "477",
+      "nodeid": "tests/issues/477/test_browse_directory_auth.py::TestBrowseRemoteDirectoryAuthCheck::test_no_g_user_returns_401",
+      "outcome": "failure",
+      "summary": "RuntimeError: Working outside of request context."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "477",
+      "nodeid": "tests/issues/477/test_browse_directory_auth.py::TestBrowseRemoteDirectoryAuthCheck::test_normal_user_without_access_returns_403",
+      "outcome": "failure",
+      "summary": "assert 400 == 403"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "477",
+      "nodeid": "tests/issues/477/test_browse_directory_auth.py::TestBrowseRemoteDirectoryEdgeCases::test_machine_not_found_returns_404",
+      "outcome": "failure",
+      "summary": "assert 400 == 404"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "48",
+      "nodeid": "tests/issues/48/test_status_bar_usage.py::test_status_bar_usage",
+      "outcome": "failure",
+      "summary": "playwright._impl._errors.Error: Page.goto: net::ERR_CONNECTION_REFUSED at http://<host:port>/"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "48",
+      "nodeid": "tests/issues/48/test_status_bar_usage_v2.py::test_status_bar_improvements",
+      "outcome": "failure",
+      "summary": "playwright._impl._errors.Error: Page.goto: net::ERR_CONNECTION_REFUSED at http://<host:port>/"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "51",
+      "nodeid": "tests/issues/51/test_issue51.py::test_issue51",
+      "outcome": "failure",
+      "summary": "TypeError: object NoneType can't be used in 'await' expression"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "517",
+      "nodeid": "tests/issues/517/e2e_codex_comprehensive.py::test_agent_sessions_tokens",
+      "outcome": "failure",
+      "summary": "AssertionError: No codex sessions"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "517",
+      "nodeid": "tests/issues/517/e2e_codex_comprehensive.py::test_api_codex_alias",
+      "outcome": "failure",
+      "summary": "AssertionError: Not logged in"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "517",
+      "nodeid": "tests/issues/517/e2e_codex_comprehensive.py::test_api_messages_query",
+      "outcome": "failure",
+      "summary": "AssertionError: Not logged in"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "517",
+      "nodeid": "tests/issues/517/e2e_codex_comprehensive.py::test_api_sessions_list",
+      "outcome": "failure",
+      "summary": "AssertionError: Not logged in"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "517",
+      "nodeid": "tests/issues/517/e2e_codex_comprehensive.py::test_api_tools_list",
+      "outcome": "failure",
+      "summary": "AssertionError: codex not in tools: []"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "517",
+      "nodeid": "tests/issues/517/e2e_codex_comprehensive.py::test_api_usage_data",
+      "outcome": "failure",
+      "summary": "AssertionError: Usage API failed: 401"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "517",
+      "nodeid": "tests/issues/517/e2e_codex_comprehensive.py::test_content_block_types",
+      "outcome": "failure",
+      "summary": "AssertionError: No 'text' content_blocks"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "517",
+      "nodeid": "tests/issues/517/e2e_codex_comprehensive.py::test_daily_usage_tokens",
+      "outcome": "failure",
+      "summary": "TypeError: '>' not supported between instances of 'NoneType' and 'int'"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "517",
+      "nodeid": "tests/issues/517/e2e_codex_comprehensive.py::test_fetch_codex_data",
+      "outcome": "failure",
+      "summary": "AssertionError: fetch_codex.py failed: /opt/hostedtoolcache/Python/3.11.15/x64/bin/python: can't open file 'tests/scripts/fetch_codex.py': [Errno 2] No such file or directory"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "517",
+      "nodeid": "tests/issues/517/e2e_codex_comprehensive.py::test_remote_codex_capabilities",
+      "outcome": "failure",
+      "summary": "AssertionError: No connected remote machine with codex installed"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "517",
+      "nodeid": "tests/issues/517/e2e_codex_comprehensive.py::test_session_messages_content",
+      "outcome": "failure",
+      "summary": "AssertionError: No codex session_messages with metadata"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "517",
+      "nodeid": "tests/issues/517/e2e_codex_comprehensive.py::test_session_restore_codex_detail",
+      "outcome": "failure",
+      "summary": "AssertionError: Not logged in"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "517",
+      "nodeid": "tests/issues/517/e2e_codex_comprehensive.py::test_session_restore_url",
+      "outcome": "failure",
+      "summary": "AssertionError: Not logged in"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "517",
+      "nodeid": "tests/issues/517/e2e_codex_comprehensive.py::test_workspace_status_codex",
+      "outcome": "failure",
+      "summary": "AssertionError: Not logged in"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "517",
+      "nodeid": "tests/issues/517/e2e_codex_integration.py::test_agent_sessions_have_codex",
+      "outcome": "failure",
+      "summary": "AssertionError: No codex sessions in agent_sessions"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "517",
+      "nodeid": "tests/issues/517/e2e_codex_integration.py::test_api_codex_alias_resolution",
+      "outcome": "failure",
+      "summary": "AssertionError: Not logged in"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "517",
+      "nodeid": "tests/issues/517/e2e_codex_integration.py::test_api_messages_codex",
+      "outcome": "failure",
+      "summary": "AssertionError: Not logged in"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "517",
+      "nodeid": "tests/issues/517/e2e_codex_integration.py::test_api_session_detail",
+      "outcome": "failure",
+      "summary": "AssertionError: Not logged in"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "517",
+      "nodeid": "tests/issues/517/e2e_codex_integration.py::test_api_session_with_tokens",
+      "outcome": "failure",
+      "summary": "AssertionError: Not logged in"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "517",
+      "nodeid": "tests/issues/517/e2e_codex_integration.py::test_api_sessions_list_codex",
+      "outcome": "failure",
+      "summary": "AssertionError: Not logged in"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "517",
+      "nodeid": "tests/issues/517/e2e_codex_integration.py::test_api_usage_codex",
+      "outcome": "failure",
+      "summary": "AssertionError: GET /api/tool/codex/30 failed: 401 {\"error\":\"Authentication required\"}"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "517",
+      "nodeid": "tests/issues/517/e2e_codex_integration.py::test_api_usage_tools_includes_codex",
+      "outcome": "failure",
+      "summary": "AssertionError: GET /api/tools failed: 401"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "517",
+      "nodeid": "tests/issues/517/e2e_codex_integration.py::test_codex_content_block_types",
+      "outcome": "failure",
+      "summary": "AssertionError: No codex session_messages with metadata"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "517",
+      "nodeid": "tests/issues/517/e2e_codex_integration.py::test_codex_daily_messages",
+      "outcome": "failure",
+      "summary": "AssertionError: No codex daily_messages found"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "517",
+      "nodeid": "tests/issues/517/e2e_codex_integration.py::test_content_block_types_in_api",
+      "outcome": "failure",
+      "summary": "AssertionError: Not logged in"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "517",
+      "nodeid": "tests/issues/517/e2e_codex_integration.py::test_daily_usage_has_codex",
+      "outcome": "failure",
+      "summary": "AssertionError: No codex daily_usage rows found"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "517",
+      "nodeid": "tests/issues/517/e2e_codex_integration.py::test_fetch_codex_runs",
+      "outcome": "failure",
+      "summary": "AssertionError: fetch_codex.py failed: /opt/hostedtoolcache/Python/3.11.15/x64/bin/python: can't open file 'tests/scripts/fetch_codex.py': [Errno 2] No such file or directory"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "517",
+      "nodeid": "tests/issues/517/e2e_codex_integration.py::test_frontend_api_key_codex_option",
+      "outcome": "failure",
+      "summary": "playwright._impl._errors.Error: Page.goto: net::ERR_CONNECTION_REFUSED at http://<host:port>/login"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "517",
+      "nodeid": "tests/issues/517/e2e_codex_integration.py::test_frontend_assist_panel_codex",
+      "outcome": "failure",
+      "summary": "playwright._impl._errors.Error: Page.goto: net::ERR_CONNECTION_REFUSED at http://<host:port>/login"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "517",
+      "nodeid": "tests/issues/517/e2e_codex_integration.py::test_frontend_codex_session_detail",
+      "outcome": "failure",
+      "summary": "AssertionError: Not logged in"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "517",
+      "nodeid": "tests/issues/517/e2e_codex_integration.py::test_frontend_codex_sessions_page",
+      "outcome": "failure",
+      "summary": "playwright._impl._errors.Error: Page.goto: net::ERR_CONNECTION_REFUSED at http://<host:port>/login"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "517",
+      "nodeid": "tests/issues/517/e2e_codex_integration.py::test_session_messages_have_codex",
+      "outcome": "failure",
+      "summary": "AssertionError: No codex session_messages found"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "517",
+      "nodeid": "tests/issues/517/e2e_codex_real_session.py::test_codex_exec_conversation",
+      "outcome": "failure",
+      "summary": "AssertionError: Create session failed: 401 {\"error\":\"Authentication required\"}"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "517",
+      "nodeid": "tests/issues/517/e2e_codex_real_session.py::test_codex_quota_tracking",
+      "outcome": "failure",
+      "summary": "sqlite3.OperationalError: no such table: agent_sessions"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "517",
+      "nodeid": "tests/issues/517/e2e_codex_real_session.py::test_prerequisites",
+      "outcome": "failure",
+      "summary": "AssertionError: SSH to 192.168.64.3 failed: ssh: connect to host 192.168.64.3 port 22: Connection timed out"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "517",
+      "nodeid": "tests/issues/517/e2e_codex_real_session.py::test_remote_session_create_and_verify",
+      "outcome": "failure",
+      "summary": "AssertionError: Create failed: 401 {\"error\":\"Authentication required\"}"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "517",
+      "nodeid": "tests/issues/517/e2e_codex_real_session.py::test_session_restore",
+      "outcome": "failure",
+      "summary": "sqlite3.OperationalError: no such table: agent_sessions"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "517",
+      "nodeid": "tests/issues/517/e2e_codex_real_session.py::test_session_sync_verification",
+      "outcome": "failure",
+      "summary": "sqlite3.OperationalError: no such table: agent_sessions"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "517",
+      "nodeid": "tests/issues/517/e2e_codex_real_session.py::test_terminal_codex_launch",
+      "outcome": "failure",
+      "summary": "AssertionError: Terminal start failed: 401 {\"error\":\"Authentication required\"}"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "52",
+      "nodeid": "tests/issues/52/test_issue52.py::test_database_migration",
+      "outcome": "failure",
+      "summary": "AssertionError: linux_account 字段未添加到 users 表"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "52",
+      "nodeid": "tests/issues/52/test_issue52.py::test_get_all_users_includes_linux_account",
+      "outcome": "failure",
+      "summary": "KeyError: 'linux_account'"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "52",
+      "nodeid": "tests/issues/52/test_issue52.py::test_update_user_with_linux_account",
+      "outcome": "failure",
+      "summary": "AssertionError: 创建用户失败"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "53",
+      "nodeid": "tests/issues/53/test_add_user_button.py::test_issue53",
+      "outcome": "failure",
+      "summary": "TypeError: object NoneType can't be used in 'await' expression"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "54",
+      "nodeid": "tests/issues/54/test_issue54.py::TestIssue54::test_add_user_modal_fields",
+      "outcome": "failure",
+      "summary": "playwright._impl._errors.TimeoutError: Page.fill: Timeout 30000ms exceeded."
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "559",
+      "nodeid": "tests/issues/559/e2e_terminal_ws_handler.py::test_binary_echo",
+      "outcome": "error",
+      "summary": "failed on setup with \"file tests/issues/559/e2e_terminal_ws_handler.py, line 133"
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "559",
+      "nodeid": "tests/issues/559/e2e_terminal_ws_handler.py::test_invalid_token_rejected",
+      "outcome": "error",
+      "summary": "failed on setup with \"file tests/issues/559/e2e_terminal_ws_handler.py, line 169"
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "559",
+      "nodeid": "tests/issues/559/e2e_terminal_ws_handler.py::test_multiple_messages",
+      "outcome": "error",
+      "summary": "failed on setup with \"file tests/issues/559/e2e_terminal_ws_handler.py, line 151"
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "559",
+      "nodeid": "tests/issues/559/e2e_terminal_ws_handler.py::test_text_echo",
+      "outcome": "error",
+      "summary": "failed on setup with \"file tests/issues/559/e2e_terminal_ws_handler.py, line 118"
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "559",
+      "nodeid": "tests/issues/559/e2e_terminal_ws_handler.py::test_unknown_terminal_rejected",
+      "outcome": "error",
+      "summary": "failed on setup with \"file tests/issues/559/e2e_terminal_ws_handler.py, line 191"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "559",
+      "nodeid": "tests/issues/559/test_terminal_ws_handler.py::TestHandleVSCodeWs::test_cookie_token_can_authenticate_proxy_ws",
+      "outcome": "failure",
+      "summary": "AssertionError: expected call not found."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "559",
+      "nodeid": "tests/issues/559/test_terminal_ws_handler.py::TestHandleVSCodeWs::test_invalid_proxy_ws_token_closes",
+      "outcome": "failure",
+      "summary": "AssertionError: expected call not found."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "559",
+      "nodeid": "tests/issues/559/test_terminal_ws_handler.py::TestHandleVSCodeWs::test_proxy_path_bridges_to_matching_remote_path",
+      "outcome": "failure",
+      "summary": "AssertionError: expected call not found."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "584",
+      "nodeid": "tests/issues/584/test_create_remote_directory.py::TestAgentCreateDirectory::test_already_exists_returns_error",
+      "outcome": "failure",
+      "summary": "AssertionError: True is not false"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "584",
+      "nodeid": "tests/issues/584/test_create_remote_directory.py::TestAgentCreateDirectory::test_parent_not_exists_returns_error",
+      "outcome": "failure",
+      "summary": "AssertionError: 'Parent directory does not exist' not found in 'No existing ancestor directory found'"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "584",
+      "nodeid": "tests/issues/584/test_create_remote_directory.py::TestCreateRemoteDirectoryRoute::test_agent_creation_failure",
+      "outcome": "failure",
+      "summary": "AssertionError: 401 != 200"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "584",
+      "nodeid": "tests/issues/584/test_create_remote_directory.py::TestCreateRemoteDirectoryRoute::test_agent_timeout_returns_504",
+      "outcome": "failure",
+      "summary": "AssertionError: 401 != 504"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "584",
+      "nodeid": "tests/issues/584/test_create_remote_directory.py::TestCreateRemoteDirectoryRoute::test_machine_not_found_returns_404",
+      "outcome": "failure",
+      "summary": "AssertionError: 401 != 404"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "584",
+      "nodeid": "tests/issues/584/test_create_remote_directory.py::TestCreateRemoteDirectoryRoute::test_machine_offline_returns_503",
+      "outcome": "failure",
+      "summary": "AssertionError: 401 != 503"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "584",
+      "nodeid": "tests/issues/584/test_create_remote_directory.py::TestCreateRemoteDirectoryRoute::test_no_path_returns_400",
+      "outcome": "failure",
+      "summary": "AssertionError: 401 != 400"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "584",
+      "nodeid": "tests/issues/584/test_create_remote_directory.py::TestCreateRemoteDirectoryRoute::test_non_admin_no_access_returns_403",
+      "outcome": "failure",
+      "summary": "AssertionError: 401 != 403"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "584",
+      "nodeid": "tests/issues/584/test_create_remote_directory.py::TestCreateRemoteDirectoryRoute::test_path_too_long_returns_400",
+      "outcome": "failure",
+      "summary": "AssertionError: 401 != 400"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "584",
+      "nodeid": "tests/issues/584/test_create_remote_directory.py::TestCreateRemoteDirectoryRoute::test_send_command_failure_returns_500",
+      "outcome": "failure",
+      "summary": "AssertionError: 401 != 500"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "584",
+      "nodeid": "tests/issues/584/test_create_remote_directory.py::TestCreateRemoteDirectoryRoute::test_successful_creation",
+      "outcome": "failure",
+      "summary": "AssertionError: 401 != 200"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "60",
+      "nodeid": "tests/issues/60/test_language_sync.py::test_language_sync",
+      "outcome": "failure",
+      "summary": "Failed: async def functions are not natively supported."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "65",
+      "nodeid": "tests/issues/65/test_workspace_state_restore.py::test_workspace_state_restore",
+      "outcome": "failure",
+      "summary": "Failed: async def functions are not natively supported."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "673",
+      "nodeid": "tests/issues/673/test_session_filter_params.py::test_api_endpoint_integration",
+      "outcome": "failure",
+      "summary": "AssertionError: API 返回 401"
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "673",
+      "nodeid": "tests/issues/673/test_session_filter_params.py::test_combined_filter",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: table users has no column named name\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "673",
+      "nodeid": "tests/issues/673/test_session_filter_params.py::test_invalid_session_type_filter",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: table users has no column named name\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "673",
+      "nodeid": "tests/issues/673/test_session_filter_params.py::test_invalid_status_filter",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: table users has no column named name\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "673",
+      "nodeid": "tests/issues/673/test_session_filter_params.py::test_session_type_filter",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: table users has no column named name\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "673",
+      "nodeid": "tests/issues/673/test_session_filter_params.py::test_status_filter",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: table users has no column named name\""
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_agent_runner.py::TestStopSession::test_shutdown_during_remote_creation_stops_actual_before_prompt",
+      "outcome": "failure",
+      "summary": "assert False"
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_api.py::TestAuthRequired::test_create_requires_auth",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_api.py::TestAuthRequired::test_delete_requires_auth",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_api.py::TestAuthRequired::test_get_requires_auth",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_api.py::TestAuthRequired::test_list_requires_auth",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_api.py::TestAuthRequired::test_tools_requires_auth",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_api.py::TestCancelMilestone::test_cancel_milestone",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_api.py::TestCreateWorkflow::test_create_can_require_full_review_rounds",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_api.py::TestCreateWorkflow::test_create_missing_cli_tool",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_api.py::TestCreateWorkflow::test_create_missing_project_path",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_api.py::TestCreateWorkflow::test_create_missing_requirements",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_api.py::TestCreateWorkflow::test_create_new_project_no_path_needed",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_api.py::TestCreateWorkflow::test_create_success",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_api.py::TestCreateWorkflow::test_create_with_issue_url",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_api.py::TestCreateWorkflow::test_create_with_multiple_issue_selectors",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_api.py::TestCreateWorkflow::test_create_with_only_invalid_issue_selectors",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_api.py::TestDeleteBatch::test_delete_batch_forbidden_for_other_users",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_api.py::TestDeleteBatch::test_delete_batch_not_found",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_api.py::TestDeleteBatch::test_delete_batch_success",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_api.py::TestDeleteWorkflow::test_delete_not_found",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_api.py::TestDeleteWorkflow::test_delete_success",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_api.py::TestForkMilestone::test_fork_milestone",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_api.py::TestGetMilestoneSession::test_get_session_milestone_not_found",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_api.py::TestGetMilestoneSession::test_get_session_no_session_id",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_api.py::TestGetMilestoneSession::test_get_session_prefers_actual_cli_session_when_mapped",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_api.py::TestGetMilestoneSession::test_get_session_success",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_api.py::TestGetMilestoneSession::test_get_session_workflow_not_found",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_api.py::TestGetMilestoneSession::test_get_session_wrong_workflow",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_api.py::TestGetModels::test_get_models_exception_returns_empty",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_api.py::TestGetModels::test_get_models_no_keys_returns_empty",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_api.py::TestGetModels::test_get_models_remote_denies_without_access",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_api.py::TestGetModels::test_get_models_remote_derives_tenant_from_machine",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_api.py::TestGetModels::test_get_models_remote_lookup_failure_not_masked_as_success",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_api.py::TestGetModels::test_get_models_returns_normalized_models",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_api.py::TestGetTimeline::test_get_timeline",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_api.py::TestGetTimeline::test_get_timeline_backfills_diff_stats_per_milestone",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_api.py::TestGetTimeline::test_get_timeline_exposes_actual_llm_session_id",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_api.py::TestGetTools::test_get_tools",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_api.py::TestGetWorkflow::test_get_not_found",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_api.py::TestGetWorkflow::test_get_other_users_workflow_forbidden",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_api.py::TestGetWorkflow::test_get_parses_definition_snapshot",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_api.py::TestGetWorkflow::test_get_success",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_api.py::TestListWorkflows::test_list_admin_sees_all",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_api.py::TestListWorkflows::test_list_passes_search_limit_offset_and_status",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_api.py::TestListWorkflows::test_list_regular_user_filters_own",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_api.py::TestListWorkflows::test_list_success",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_api.py::TestMarkDone::test_mark_done",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_api.py::TestPauseWorkflow::test_pause_already_paused",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_api.py::TestPauseWorkflow::test_pause_success",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_api.py::TestResumeWorkflow::test_resume_not_paused",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_api.py::TestResumeWorkflow::test_resume_success",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_api.py::TestStopWorkflow::test_stop_cancels_queued_batch_siblings",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_api.py::TestStopWorkflow::test_stop_success",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_api.py::TestStreamWorkflowEvents::test_stream_requires_ownership",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_api.py::TestStreamWorkflowEvents::test_stream_returns_event_stream",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_api.py::TestStreamWorkflowEvents::test_stream_workflow_not_found",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_quota_gate.py::TestCreateWorkflowQuotaGate::test_over_quota_rejected",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_quota_gate.py::TestCreateWorkflowQuotaGate::test_quota_check_error_fail_closed_rejected",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestAllowedFieldsFiltering::test_update_allows_only_whitelisted_fields",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestAllowedFieldsFiltering::test_update_filters_out_empty_update_set",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestAllowedFieldsFiltering::test_update_milestone_allowed_fields_filter",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestAllowedFieldsFiltering::test_update_persists_transient_retry_count",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestAllowedFieldsFiltering::test_update_workflow_coerces_booleans",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestCIRoundTripPersistence::test_ci_repair_fields_round_trip",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestCIRoundTripPersistence::test_worktree_and_preferred_paths_round_trip_together",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestContentLanguagePersistence::test_defaults_to_en_when_omitted",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestContentLanguagePersistence::test_explicit_content_language_round_trips",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestContentLanguagePersistence::test_invalid_content_language_normalized_to_en",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestContentLanguagePersistence::test_none_content_language_normalized_to_en",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestEventCRUD::test_create_event",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestEventCRUD::test_events_ordered_by_created_at",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestEventCRUD::test_list_events",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestEventCRUD::test_list_events_with_limit",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestMilestoneCRUD::test_cancel_milestones_after",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestMilestoneCRUD::test_create_milestone",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestMilestoneCRUD::test_get_milestone",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestMilestoneCRUD::test_list_milestones",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestMilestoneCRUD::test_list_milestones_filter_dev_round",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestMilestoneCRUD::test_list_milestones_filter_phase",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestMilestoneCRUD::test_update_milestone",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestWorkflowCRUD::test_create_workflow",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestWorkflowCRUD::test_create_workflow_persists_require_full_review_rounds",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestWorkflowCRUD::test_delete_batch_cascades",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestWorkflowCRUD::test_delete_workflow",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestWorkflowCRUD::test_delete_workflow_cascades",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestWorkflowCRUD::test_get_active_workflows",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestWorkflowCRUD::test_get_milestone_usage_summary",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestWorkflowCRUD::test_get_workflow",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestWorkflowCRUD::test_get_workflow_not_found",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestWorkflowCRUD::test_list_workflows",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestWorkflowCRUD::test_list_workflows_comma_separated_status",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestWorkflowCRUD::test_list_workflows_filter_status",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestWorkflowCRUD::test_list_workflows_filter_user",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestWorkflowCRUD::test_list_workflows_search_and_pagination",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestWorkflowCRUD::test_update_workflow",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestWorkflowCRUD::test_update_workflow_empty",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestWorkflowCRUD::test_update_workflow_tokens",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsBranch::test_create_branch_from_base",
+      "outcome": "error",
+      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsBranch::test_create_branch_from_head",
+      "outcome": "error",
+      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsBranch::test_delete_branch",
+      "outcome": "error",
+      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsBranch::test_get_current_branch",
+      "outcome": "error",
+      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsBranch::test_get_current_commit",
+      "outcome": "error",
+      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsDiff::test_get_commit_diff",
+      "outcome": "error",
+      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsDiff::test_get_commit_diff_stats",
+      "outcome": "error",
+      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsDiff::test_get_diff",
+      "outcome": "error",
+      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsDiff::test_get_diff_stats",
+      "outcome": "error",
+      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsError::test_check_false_no_exception",
+      "outcome": "error",
+      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsError::test_gh_command_failure",
+      "outcome": "error",
+      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsError::test_gh_not_found",
+      "outcome": "error",
+      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsError::test_gh_timeout",
+      "outcome": "error",
+      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsGit::test_git_add_all",
+      "outcome": "error",
+      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsGit::test_git_commit",
+      "outcome": "error",
+      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsGit::test_git_commit_default_no_verify_flag",
+      "outcome": "error",
+      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsGit::test_git_commit_no_verify",
+      "outcome": "error",
+      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsGit::test_git_init",
+      "outcome": "error",
+      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsGit::test_git_push",
+      "outcome": "error",
+      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsInit::test_init",
+      "outcome": "failure",
+      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsIssue::test_add_issue_comment",
+      "outcome": "error",
+      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsIssue::test_create_issue",
+      "outcome": "error",
+      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsIssue::test_create_issue_no_labels",
+      "outcome": "error",
+      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsIssue::test_get_issue",
+      "outcome": "error",
+      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsIssue::test_list_issue_comments",
+      "outcome": "error",
+      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsIssue::test_list_issue_comments_with_since",
+      "outcome": "error",
+      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsIssue::test_update_issue",
+      "outcome": "error",
+      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsPR::test_create_pr",
+      "outcome": "error",
+      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsPR::test_create_pr_draft",
+      "outcome": "error",
+      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsPR::test_get_pr",
+      "outcome": "error",
+      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsPR::test_get_pr_merge_state",
+      "outcome": "error",
+      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsPR::test_list_pr_comments",
+      "outcome": "error",
+      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsPR::test_list_pr_comments_empty",
+      "outcome": "error",
+      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsPR::test_merge_pr",
+      "outcome": "error",
+      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsRepo::test_create_repo",
+      "outcome": "error",
+      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsRepo::test_create_repo_public",
+      "outcome": "error",
+      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsRepo::test_get_repo_name",
+      "outcome": "error",
+      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsRepo::test_get_repo_name_fallback_no_remote",
+      "outcome": "error",
+      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsRepo::test_get_repo_url",
+      "outcome": "error",
+      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsWorktree::test_create_worktree",
+      "outcome": "error",
+      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsWorktree::test_create_worktree_with_base",
+      "outcome": "error",
+      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsWorktree::test_list_worktrees",
+      "outcome": "error",
+      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsWorktree::test_remove_worktree",
+      "outcome": "error",
+      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_orchestrator.py::TestOrchestratorMerge::test_merge_blocked_state_triggers_ci_repair",
+      "outcome": "failure",
+      "summary": "AssertionError: Expected 'mock' to have been called once. Called 0 times."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_orchestrator.py::TestOrchestratorMerge::test_merge_no_pr",
+      "outcome": "failure",
+      "summary": "assert 0 > 0"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_orchestrator.py::TestOrchestratorMerge::test_merge_pr_and_cleanup",
+      "outcome": "failure",
+      "summary": "AssertionError: Expected 'merge_pr' to be called once. Called 0 times."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_orchestrator.py::TestOrchestratorMerge::test_merge_unstable_skips_ci_repair",
+      "outcome": "failure",
+      "summary": "AssertionError: Expected 'merge_pr' to be called once. Called 0 times."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_orchestrator.py::TestOrchestratorMerge::test_merge_with_worktree_cleanup",
+      "outcome": "failure",
+      "summary": "AssertionError: Expected 'remove_worktree' to be called once. Called 0 times."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_orchestrator.py::TestOrchestratorPrReview::test_pr_creation_failure_raises",
+      "outcome": "failure",
+      "summary": "Failed: DID NOT RAISE GitHubOpsError"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_orchestrator.py::TestOrchestratorPrReview::test_pr_review_accumulates_tokens",
+      "outcome": "failure",
+      "summary": "AssertionError: expected call not found."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_orchestrator.py::TestOrchestratorPrReview::test_pr_review_approved_early_moves_to_report",
+      "outcome": "failure",
+      "summary": "AssertionError: assert 0 == 2"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_orchestrator.py::TestOrchestratorPrReview::test_pr_review_below_max_starts_fix",
+      "outcome": "failure",
+      "summary": "AssertionError: assert 0 == 2"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_orchestrator.py::TestOrchestratorPrReview::test_pr_review_first_round_creates_pr",
+      "outcome": "failure",
+      "summary": "AssertionError: Expected 'create_pr' to have been called once. Called 0 times."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_orchestrator.py::TestOrchestratorPrReview::test_pr_review_force_full_rounds_does_not_end_early",
+      "outcome": "failure",
+      "summary": "KeyError: 'current_round'"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_orchestrator.py::TestOrchestratorPrReview::test_pr_review_max_one_still_allows_fix_round",
+      "outcome": "failure",
+      "summary": "AssertionError: assert 0 == 3"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_orchestrator.py::TestOrchestratorPrReview::test_pr_review_max_rounds_moves_to_report",
+      "outcome": "failure",
+      "summary": "KeyError: 'current_phase'"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_orchestrator.py::TestOrchestratorPrReview::test_pr_review_max_two_caps_at_round_two",
+      "outcome": "failure",
+      "summary": "AssertionError: assert None == 'report'"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_orchestrator.py::TestOrchestratorPrReview::test_pr_review_max_two_full_flow_two_reviews_two_fixes",
+      "outcome": "failure",
+      "summary": "AssertionError: assert 0 == 2"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_orchestrator.py::TestOrchestratorPrReview::test_pr_review_posts_comment_to_pr",
+      "outcome": "failure",
+      "summary": "AssertionError: Expected 'add_pr_comment' to have been called."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_orchestrator.py::TestOrchestratorPrReview::test_pr_review_push_failure_blocks_pr_creation",
+      "outcome": "failure",
+      "summary": "Failed: DID NOT RAISE RuntimeError"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_orchestrator.py::TestOrchestratorPrReview::test_pr_review_pushes_branch_before_pr",
+      "outcome": "failure",
+      "summary": "AssertionError: Expected 'git_push' to have been called."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_orchestrator.py::TestOrchestratorPrReview::test_pr_review_uses_github_pr_diff_not_two_point_main_diff",
+      "outcome": "failure",
+      "summary": "IndexError: list index out of range"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_orchestrator.py::TestOrchestratorPreparation::test_preparation_branches_from_origin_main",
+      "outcome": "failure",
+      "summary": "TypeError: Object of type MagicMock is not JSON serializable"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_orchestrator.py::TestOrchestratorPreparation::test_preparation_creates_issue_and_branch",
+      "outcome": "failure",
+      "summary": "TypeError: Object of type MagicMock is not JSON serializable"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_orchestrator.py::TestOrchestratorPreparation::test_preparation_issue_url_no_text_reads_issue",
+      "outcome": "failure",
+      "summary": "TypeError: Object of type MagicMock is not JSON serializable"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_orchestrator.py::TestOrchestratorPreparation::test_preparation_persists_issue_number_from_url",
+      "outcome": "failure",
+      "summary": "TypeError: Object of type MagicMock is not JSON serializable"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_orchestrator.py::TestOrchestratorPreparation::test_preparation_reads_existing_issue",
+      "outcome": "failure",
+      "summary": "TypeError: Object of type MagicMock is not JSON serializable"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_orchestrator.py::TestOrchestratorPreparation::test_preparation_reads_issue_with_comments",
+      "outcome": "failure",
+      "summary": "TypeError: Object of type MagicMock is not JSON serializable"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_orchestrator.py::TestOrchestratorPreparation::test_preparation_worktree_strategy",
+      "outcome": "failure",
+      "summary": "app.modules.workspace.autonomous.github_ops.GitHubOpsError: Worktree created on wrong branch: expected auto-dev/test-wf-uuid, actual auto-dev/test-wf-"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "716",
+      "nodeid": "tests/issues/716/test_orchestrator.py::TestOrchestratorPreparation::test_preparation_worktree_uses_preferred_path_when_live_path_empty",
+      "outcome": "failure",
+      "summary": "TypeError: Object of type MagicMock is not JSON serializable"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "72",
+      "nodeid": "tests/issues/72/test_issue72.py::test_fullscreen",
+      "outcome": "failure",
+      "summary": "AttributeError: 'coroutine' object has no attribute 'chromium'"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "720",
+      "nodeid": "tests/issues/720/test_model_gateway_handler.py::TestGatewaySuccess::test_gateway_forward_success",
+      "outcome": "failure",
+      "summary": "assert 502 == 200"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "723",
+      "nodeid": "tests/issues/723/test_mtime_fallback.py::TestListCliSessionIdsForProject::test_returns_distinct_nonempty_ids",
+      "outcome": "failure",
+      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "723",
+      "nodeid": "tests/issues/723/test_orchestrator_dev_salvage.py::test_dev_not_salvaged_when_no_commit",
+      "outcome": "failure",
+      "summary": "AssertionError: dev failure with no commit should still mark the workflow failed"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "723",
+      "nodeid": "tests/issues/723/test_orchestrator_dev_salvage.py::test_dev_salvaged_on_timeout_with_commit",
+      "outcome": "failure",
+      "summary": "AssertionError: dev milestone should be completed when salvaged"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "733",
+      "nodeid": "tests/issues/733/test_orchestrator_733.py::TestDevelopmentCommitVerification::test_allows_different_commits",
+      "outcome": "failure",
+      "summary": "sqlite3.OperationalError: no such table: users"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "733",
+      "nodeid": "tests/issues/733/test_orchestrator_733.py::TestDevelopmentCommitVerification::test_auto_commit_failure_falls_back_to_fail",
+      "outcome": "failure",
+      "summary": "sqlite3.OperationalError: no such table: users"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "733",
+      "nodeid": "tests/issues/733/test_orchestrator_733.py::TestDevelopmentCommitVerification::test_auto_commits_uncommitted_changes",
+      "outcome": "failure",
+      "summary": "sqlite3.OperationalError: no such table: users"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "733",
+      "nodeid": "tests/issues/733/test_orchestrator_733.py::TestDevelopmentCommitVerification::test_detects_no_code_changes",
+      "outcome": "failure",
+      "summary": "sqlite3.OperationalError: no such table: users"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "733",
+      "nodeid": "tests/issues/733/test_orchestrator_733.py::TestDevelopmentCommitVerification::test_skip_check_when_agent_fails",
+      "outcome": "failure",
+      "summary": "sqlite3.OperationalError: no such table: users"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "733",
+      "nodeid": "tests/issues/733/test_orchestrator_733.py::TestDevelopmentCommitVerification::test_skip_check_when_commit_unavailable",
+      "outcome": "failure",
+      "summary": "sqlite3.OperationalError: no such table: users"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "733",
+      "nodeid": "tests/issues/733/test_orchestrator_733.py::TestFinalPlanAnnotation::test_final_plan_includes_last_review",
+      "outcome": "failure",
+      "summary": "sqlite3.OperationalError: no such table: users"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "733",
+      "nodeid": "tests/issues/733/test_orchestrator_733.py::TestFinalPlanAnnotation::test_final_plan_without_review",
+      "outcome": "failure",
+      "summary": "sqlite3.OperationalError: no such table: users"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "733",
+      "nodeid": "tests/issues/733/test_orchestrator_733.py::TestPermissionModePassthrough::test_default_permission_mode_is_auto_edit",
+      "outcome": "failure",
+      "summary": "sqlite3.OperationalError: no such table: users"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "733",
+      "nodeid": "tests/issues/733/test_orchestrator_733.py::TestPermissionModePassthrough::test_development_passes_permission_mode",
+      "outcome": "failure",
+      "summary": "sqlite3.OperationalError: no such table: users"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "733",
+      "nodeid": "tests/issues/733/test_orchestrator_733.py::TestPermissionModePassthrough::test_planning_passes_permission_mode",
+      "outcome": "failure",
+      "summary": "sqlite3.OperationalError: no such table: users"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "733",
+      "nodeid": "tests/issues/733/test_orchestrator_733.py::TestPlanningPromptConstraints::test_initial_plan_prompt_forbids_full_code",
+      "outcome": "failure",
+      "summary": "sqlite3.OperationalError: no such table: users"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "733",
+      "nodeid": "tests/issues/733/test_orchestrator_733.py::TestPlanningPromptConstraints::test_refined_plan_prompt_forbids_full_code",
+      "outcome": "failure",
+      "summary": "sqlite3.OperationalError: no such table: users"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "74",
+      "nodeid": "tests/issues/74/test_restore_button.py::test_restore_button",
+      "outcome": "failure",
+      "summary": "Failed: async def functions are not natively supported."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "740",
+      "nodeid": "tests/issues/740/test_batch1_session_wiring.py::TestBackwardCompatibility::test_do_development_still_works",
+      "outcome": "failure",
+      "summary": "AssertionError: assert False"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "740",
+      "nodeid": "tests/issues/740/test_batch1_session_wiring.py::TestBackwardCompatibility::test_do_planning_still_works",
+      "outcome": "failure",
+      "summary": "AssertionError: assert 0 == 2"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "740",
+      "nodeid": "tests/issues/740/test_batch1_session_wiring.py::TestRunAgentWrapper::test_run_agent_passes_pre_generated_session_id",
+      "outcome": "failure",
+      "summary": "TypeError: 'NoneType' object is not subscriptable"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "740",
+      "nodeid": "tests/issues/740/test_batch1_session_wiring.py::TestRunAgentWrapper::test_run_agent_tracks_session_id",
+      "outcome": "failure",
+      "summary": "AssertionError: assert None == 'sess-tracked-123'"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "740",
+      "nodeid": "tests/issues/740/test_batch1_session_wiring.py::TestRunAgentWrapper::test_run_agent_updates_on_each_call",
+      "outcome": "failure",
+      "summary": "AssertionError: assert None == 'track-review-1'"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "740",
+      "nodeid": "tests/issues/740/test_batch1_session_wiring.py::TestRunAgentWrapper::test_session_id_available_before_run_agent_task_returns",
+      "outcome": "failure",
+      "summary": "assert None is not None"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "740",
+      "nodeid": "tests/issues/740/test_batch1_session_wiring.py::TestStopPauseCancelsTask::test_pause_calls_cancel_running_task",
+      "outcome": "failure",
+      "summary": "sqlite3.OperationalError: database is locked"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "740",
+      "nodeid": "tests/issues/740/test_batch1_session_wiring.py::TestStopPauseCancelsTask::test_stop_calls_cancel_running_task",
+      "outcome": "failure",
+      "summary": "sqlite3.OperationalError: database is locked"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "740",
+      "nodeid": "tests/issues/740/test_batch2_idempotency_validation.py::TestRunAgentDbOptimization::test_run_agent_uses_passed_wf_for_timeout",
+      "outcome": "failure",
+      "summary": "TypeError: 'NoneType' object is not subscriptable"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "740",
+      "nodeid": "tests/issues/740/test_batch2_idempotency_validation.py::TestRunAgentDbOptimization::test_run_agent_without_wf_falls_back_to_db",
+      "outcome": "failure",
+      "summary": "TypeError: 'NoneType' object is not subscriptable"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "740",
+      "nodeid": "tests/issues/740/test_batch2_idempotency_validation.py::TestTimeoutConfig::test_run_agent_injects_workflow_timeout",
+      "outcome": "failure",
+      "summary": "TypeError: 'NoneType' object is not subscriptable"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "740",
+      "nodeid": "tests/issues/740/test_batch2_idempotency_validation.py::TestTimeoutConfig::test_run_agent_omits_timeout_when_not_set",
+      "outcome": "failure",
+      "summary": "TypeError: 'NoneType' object is not subscriptable"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "740",
+      "nodeid": "tests/issues/740/test_batch2_idempotency_validation.py::TestTimeoutConfig::test_run_agent_respects_explicit_timeout",
+      "outcome": "failure",
+      "summary": "TypeError: 'NoneType' object is not subscriptable"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "740",
+      "nodeid": "tests/issues/740/test_batch4_diff_api.py::TestGetMilestoneDiff::test_diff_falls_back_to_project_path",
+      "outcome": "failure",
+      "summary": "AssertionError: expected call not found."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "740",
+      "nodeid": "tests/issues/740/test_batch4_diff_api.py::TestGetMilestoneDiff::test_diff_uses_worktree_path_preferred",
+      "outcome": "failure",
+      "summary": "AssertionError: expected call not found."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "740",
+      "nodeid": "tests/issues/740/test_batch4_diff_api.py::TestWorkflowListStatusFilter::test_list_with_status_filter",
+      "outcome": "failure",
+      "summary": "AssertionError: 500 != 200"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "740",
+      "nodeid": "tests/issues/740/test_batch4_diff_api.py::TestWorkflowListStatusFilter::test_list_without_status_filter",
+      "outcome": "failure",
+      "summary": "AssertionError: 500 != 200"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "740",
+      "nodeid": "tests/issues/740/test_batch6_distributed_lock.py::TestRemoteMachineAdminValidation::test_allows_admin_remote_workflow",
+      "outcome": "failure",
+      "summary": "AssertionError: 500 != 201"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "740",
+      "nodeid": "tests/issues/740/test_batch6_distributed_lock.py::TestRemoteMachineAdminValidation::test_allows_local_workflow_without_check",
+      "outcome": "failure",
+      "summary": "AssertionError: 500 != 201"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "740",
+      "nodeid": "tests/issues/740/test_batch6_distributed_lock.py::TestRemoteMachineAdminValidation::test_allows_machine_admin_remote_workflow",
+      "outcome": "failure",
+      "summary": "AssertionError: 500 != 201"
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "76",
+      "nodeid": "tests/issues/76/test_menu.py::test_menu",
+      "outcome": "error",
+      "summary": "failed on setup with \"file tests/issues/76/test_menu.py, line 15"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "761",
+      "nodeid": "tests/issues/761/test_planning_restriction.py::TestPlanningTimeout::test_extension_adds_to_base_timeout",
+      "outcome": "failure",
+      "summary": "assert (1800 + 0) == 600"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "761",
+      "nodeid": "tests/issues/761/test_planning_restriction.py::TestPlanningTimeout::test_multiple_extensions_accumulate",
+      "outcome": "failure",
+      "summary": "assert (1800 + 600) == 1200"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "761",
+      "nodeid": "tests/issues/761/test_planning_restriction.py::TestPlanningTimeout::test_planning_timeout_constant",
+      "outcome": "failure",
+      "summary": "assert 1800 == 600"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "764",
+      "nodeid": "tests/issues/764/test_session_create_params.py::TestCreateSessionAcceptsWorkspaceParams::test_create_session_defaults_to_local",
+      "outcome": "failure",
+      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "764",
+      "nodeid": "tests/issues/764/test_session_create_params.py::TestCreateSessionAcceptsWorkspaceParams::test_create_session_includes_workspace_in_insert",
+      "outcome": "failure",
+      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "764",
+      "nodeid": "tests/issues/764/test_session_create_params.py::TestCreateSessionAcceptsWorkspaceParams::test_create_session_type_error_fixed",
+      "outcome": "failure",
+      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "764",
+      "nodeid": "tests/issues/764/test_session_create_params.py::TestCreateSessionAcceptsWorkspaceParams::test_create_session_with_workspace_type",
+      "outcome": "failure",
+      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "786",
+      "nodeid": "tests/issues/786/test_ai_github_account.py::TestGitHubOpsEnvInjection::test_build_subprocess_kwargs_no_env",
+      "outcome": "failure",
+      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "786",
+      "nodeid": "tests/issues/786/test_ai_github_account.py::TestGitHubOpsEnvInjection::test_build_subprocess_kwargs_with_env",
+      "outcome": "failure",
+      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "786",
+      "nodeid": "tests/issues/786/test_ai_github_account.py::TestGitHubOpsEnvInjection::test_get_env_returns_dict_when_configured",
+      "outcome": "failure",
+      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "786",
+      "nodeid": "tests/issues/786/test_ai_github_account.py::TestGitHubOpsEnvInjection::test_get_env_returns_none_when_no_config",
+      "outcome": "failure",
+      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "786",
+      "nodeid": "tests/issues/786/test_ai_github_account.py::TestGitHubOpsEnvInjection::test_run_gh_injects_env",
+      "outcome": "failure",
+      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "786",
+      "nodeid": "tests/issues/786/test_ai_github_account.py::TestGitHubOpsEnvInjection::test_run_gh_no_env_when_not_configured",
+      "outcome": "failure",
+      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "786",
+      "nodeid": "tests/issues/786/test_ai_github_account.py::TestGitHubOpsEnvInjection::test_run_git_injects_env",
+      "outcome": "failure",
+      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "79",
+      "nodeid": "tests/issues/79/test_add_user_final.py::test_add_user",
+      "outcome": "failure",
+      "summary": "Failed: async def functions are not natively supported."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "79",
+      "nodeid": "tests/issues/79/test_add_user_save.py::test_add_user_save",
+      "outcome": "failure",
+      "summary": "Failed: async def functions are not natively supported."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "79",
+      "nodeid": "tests/issues/79/test_add_user_save_v2.py::test_add_user_save",
+      "outcome": "failure",
+      "summary": "Failed: async def functions are not natively supported."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "79",
+      "nodeid": "tests/issues/79/test_conversation_detail_modal.py::test_conversation_history_api",
+      "outcome": "failure",
+      "summary": "Failed: async def functions are not natively supported."
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "79",
+      "nodeid": "tests/issues/79/test_conversation_detail_modal.py::test_conversation_timeline_api",
+      "outcome": "error",
+      "summary": "failed on setup with \"file tests/issues/79/test_conversation_detail_modal.py, line 44"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "79",
+      "nodeid": "tests/issues/79/test_conversation_detail_modal.py::test_frontend_build",
+      "outcome": "failure",
+      "summary": "Failed: async def functions are not natively supported."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "79",
+      "nodeid": "tests/issues/79/test_issue79_conversation_detail.py::test_conversation_detail_modal",
+      "outcome": "failure",
+      "summary": "Failed: async def functions are not natively supported."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "79",
+      "nodeid": "tests/issues/79/test_role_filter.py::test_role_filter",
+      "outcome": "failure",
+      "summary": "Failed: async def functions are not natively supported."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "80",
+      "nodeid": "tests/issues/80/test_manage_language_dropdown.py::test_manage_language_dropdown",
+      "outcome": "failure",
+      "summary": "playwright._impl._errors.Error: Page.goto: net::ERR_CONNECTION_REFUSED at http://<host:port>/login"
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "811",
+      "nodeid": "tests/issues/811/test_unknown_user_filter.py::TestUnknownUserFilter::test_known_users_still_returned",
+      "outcome": "error",
+      "summary": "failed on setup with \"file tests/issues/811/test_unknown_user_filter.py, line 78"
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "811",
+      "nodeid": "tests/issues/811/test_unknown_user_filter.py::TestUnknownUserFilter::test_request_counts_correct",
+      "outcome": "error",
+      "summary": "failed on setup with \"file tests/issues/811/test_unknown_user_filter.py, line 91"
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "811",
+      "nodeid": "tests/issues/811/test_unknown_user_filter.py::TestUnknownUserFilter::test_unknown_user_filtered_out",
+      "outcome": "error",
+      "summary": "failed on setup with \"file tests/issues/811/test_unknown_user_filter.py, line 61"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "814",
+      "nodeid": "tests/issues/814/test_worktree_path_selfheal.py::TestEnsureWorktreeSelfHeal::test_no_update_when_path_already_canonical",
+      "outcome": "failure",
+      "summary": "app.modules.workspace.autonomous.github_ops.GitHubOpsError: Worktree branch mismatch (<MagicMock name='mock.get_current_branch()' id='139766050919888'> != auto-dev/1390d553) with uncommitted changes.…"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "814",
+      "nodeid": "tests/issues/814/test_worktree_path_selfheal.py::TestEnsureWorktreeSelfHeal::test_normalizes_stale_dotdot_path_when_valid",
+      "outcome": "failure",
+      "summary": "app.modules.workspace.autonomous.github_ops.GitHubOpsError: Worktree branch mismatch (<MagicMock name='mock.get_current_branch()' id='139766021823888'> != auto-dev/1390d553) with uncommitted changes.…"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "82",
+      "nodeid": "tests/issues/82/test_sidebar_collapse.py::test_sidebar_collapse",
+      "outcome": "failure",
+      "summary": "playwright._impl._errors.TimeoutError: Page.fill: Timeout 30000ms exceeded."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "82",
+      "nodeid": "tests/issues/82/test_sidebar_collapse_normal_user.py::test_sidebar_collapse_normal_user",
+      "outcome": "failure",
+      "summary": "playwright._impl._errors.TimeoutError: Page.fill: Timeout 30000ms exceeded."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "822",
+      "nodeid": "tests/issues/822/test_merge_conflict_detection.py::TestAddWorktreeExistingBranch::test_add_worktree_no_b_flag",
+      "outcome": "failure",
+      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "822",
+      "nodeid": "tests/issues/822/test_merge_conflict_detection.py::TestAddWorktreeExistingBranch::test_add_worktree_returns_path_and_branch",
+      "outcome": "failure",
+      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "822",
+      "nodeid": "tests/issues/822/test_merge_conflict_detection.py::TestDoMergeDeferredRetry::test_uses_graph_merge_base_and_backfills_stale_scope_base",
+      "outcome": "failure",
+      "summary": "AssertionError: assert [call(['fetch... check=False)] == [call(['fetch... check=False)]"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "822",
+      "nodeid": "tests/issues/822/test_merge_conflict_detection.py::TestGetConflictMarkerPaths::test_deleted_conflict_path_is_a_valid_marker_free_resolution",
+      "outcome": "failure",
+      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "822",
+      "nodeid": "tests/issues/822/test_merge_conflict_detection.py::TestGetConflictMarkerPaths::test_detects_custom_marker_size_larger_than_seven",
+      "outcome": "failure",
+      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "822",
+      "nodeid": "tests/issues/822/test_merge_conflict_detection.py::TestGetConflictMarkerPaths::test_no_matches_returns_empty_list",
+      "outcome": "failure",
+      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "822",
+      "nodeid": "tests/issues/822/test_merge_conflict_detection.py::TestGetConflictMarkerPaths::test_probe_failure_raises",
+      "outcome": "failure",
+      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "822",
+      "nodeid": "tests/issues/822/test_merge_conflict_detection.py::TestGetConflictMarkerPaths::test_returns_only_matching_conflict_files",
+      "outcome": "failure",
+      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "822",
+      "nodeid": "tests/issues/822/test_merge_conflict_detection.py::TestGetUnmergedPaths::test_query_failure_raises",
+      "outcome": "failure",
+      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "822",
+      "nodeid": "tests/issues/822/test_merge_conflict_detection.py::TestGetUnmergedPaths::test_returns_authoritative_u_stage_paths",
+      "outcome": "failure",
+      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "822",
+      "nodeid": "tests/issues/822/test_merge_conflict_detection.py::TestGetWorktreeChangedPaths::test_combines_tracked_unmerged_and_untracked_paths",
+      "outcome": "failure",
+      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "822",
+      "nodeid": "tests/issues/822/test_merge_conflict_detection.py::TestGetWorktreeChangedPaths::test_probe_failure_raises[0]",
+      "outcome": "failure",
+      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "822",
+      "nodeid": "tests/issues/822/test_merge_conflict_detection.py::TestGetWorktreeChangedPaths::test_probe_failure_raises[1]",
+      "outcome": "failure",
+      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "822",
+      "nodeid": "tests/issues/822/test_merge_conflict_detection.py::TestIndexSnapshot::test_parses_stage_zero_and_unmerged_entries",
+      "outcome": "failure",
+      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "822",
+      "nodeid": "tests/issues/822/test_merge_conflict_detection.py::TestIndexSnapshot::test_snapshot_probe_and_parse_fail_closed",
+      "outcome": "failure",
+      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "822",
+      "nodeid": "tests/issues/822/test_merge_conflict_detection.py::TestMergePrAutoFlag::test_auto_flag_adds_auto_arg",
+      "outcome": "failure",
+      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "822",
+      "nodeid": "tests/issues/822/test_merge_conflict_detection.py::TestMergePrAutoFlag::test_no_auto_by_default",
+      "outcome": "failure",
+      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "822",
+      "nodeid": "tests/issues/822/test_merge_conflict_detection.py::TestResolveCommit::test_empty_resolution_raises",
+      "outcome": "failure",
+      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "822",
+      "nodeid": "tests/issues/822/test_merge_conflict_detection.py::TestResolveCommit::test_resolves_ref_to_immutable_commit",
+      "outcome": "failure",
+      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "822",
+      "nodeid": "tests/issues/822/test_merge_conflict_detection.py::TestResolveMergeConflictsWorktreeIsolation::test_removes_existing_worktree_before_adding_temp",
+      "outcome": "failure",
+      "summary": "AssertionError: mock({'worktree_path': ''}) call not found"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "822",
+      "nodeid": "tests/issues/822/test_merge_conflict_detection.py::TestResolveMergeConflictsWorktreeIsolation::test_restores_worktree_even_on_resolution_failure",
+      "outcome": "failure",
+      "summary": "AssertionError: mock({'worktree_path': '/srv/repo/.worktrees/wf-822'}) call not found"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "826",
+      "nodeid": "tests/issues/826/test_plan_review_semantics.py::TestPlanningIntegration::test_approved_review_skips_refinement",
+      "outcome": "failure",
+      "summary": "app.modules.workspace.autonomous.github_ops.GitHubOpsError: trusted common_dir is not a .git directory: /tmp/test.git"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "826",
+      "nodeid": "tests/issues/826/test_plan_review_semantics.py::TestPlanningIntegration::test_plan_review_final_refine_failure_blocks_development",
+      "outcome": "failure",
+      "summary": "app.modules.workspace.autonomous.github_ops.GitHubOpsError: trusted common_dir is not a .git directory: /tmp/test.git"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "826",
+      "nodeid": "tests/issues/826/test_plan_review_semantics.py::TestPlanningIntegration::test_substantive_review_triggers_refinement",
+      "outcome": "failure",
+      "summary": "app.modules.workspace.autonomous.github_ops.GitHubOpsError: trusted common_dir is not a .git directory: /tmp/test.git"
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "863",
+      "nodeid": "tests/issues/863/e2e_ip_whitelist_input.py::test_api_ip_whitelist",
+      "outcome": "error",
+      "summary": "failed on setup with \"file tests/issues/863/e2e_ip_whitelist_input.py, line 95"
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "863",
+      "nodeid": "tests/issues/863/e2e_ip_whitelist_input.py::test_ui_ip_whitelist_dedupe",
+      "outcome": "error",
+      "summary": "failed on setup with \"AssertionError\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "863",
+      "nodeid": "tests/issues/863/e2e_ip_whitelist_input.py::test_ui_ip_whitelist_empty_lines",
+      "outcome": "error",
+      "summary": "failed on setup with \"AssertionError\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "863",
+      "nodeid": "tests/issues/863/e2e_ip_whitelist_input.py::test_ui_ip_whitelist_newline",
+      "outcome": "error",
+      "summary": "failed on setup with \"AssertionError\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "863",
+      "nodeid": "tests/issues/863/e2e_ip_whitelist_input.py::test_ui_ip_whitelist_trim",
+      "outcome": "error",
+      "summary": "failed on setup with \"AssertionError\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "886",
+      "nodeid": "tests/issues/886/test_cancel_fork_redesign.py::TestCancelMilestoneWithFeedback::test_cancel_creates_requirement_received_milestone",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "886",
+      "nodeid": "tests/issues/886/test_cancel_fork_redesign.py::TestCancelMilestoneWithFeedback::test_cancel_empty_feedback_succeeds",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "886",
+      "nodeid": "tests/issues/886/test_cancel_fork_redesign.py::TestCancelMilestoneWithFeedback::test_cancel_stores_feedback_on_workflow",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "886",
+      "nodeid": "tests/issues/886/test_cancel_fork_redesign.py::TestCancelMilestoneWithFeedback::test_cancel_without_feedback_succeeds",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "886",
+      "nodeid": "tests/issues/886/test_cancel_fork_redesign.py::TestForkListing::test_get_forks_empty",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "886",
+      "nodeid": "tests/issues/886/test_cancel_fork_redesign.py::TestForkListing::test_get_forks_returns_children",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "886",
+      "nodeid": "tests/issues/886/test_cancel_fork_redesign.py::TestForkMilestone::test_fork_copies_milestones",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "886",
+      "nodeid": "tests/issues/886/test_cancel_fork_redesign.py::TestForkMilestone::test_fork_creates_forked_milestone_on_parent",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "886",
+      "nodeid": "tests/issues/886/test_cancel_fork_redesign.py::TestForkMilestone::test_fork_creates_new_workflow",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "886",
+      "nodeid": "tests/issues/886/test_cancel_fork_redesign.py::TestForkMilestone::test_fork_forces_worktree_strategy",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "886",
+      "nodeid": "tests/issues/886/test_cancel_fork_redesign.py::TestForkMilestone::test_fork_pause_original",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "886",
+      "nodeid": "tests/issues/886/test_cancel_fork_redesign.py::TestForkRepoIntegration::test_copy_milestones_strips_inherited_fork_workflow_id",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "886",
+      "nodeid": "tests/issues/886/test_cancel_fork_redesign.py::TestForkRepoIntegration::test_copy_milestones_to_workflow",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "886",
+      "nodeid": "tests/issues/886/test_cancel_fork_redesign.py::TestForkRepoIntegration::test_create_and_list_forks",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "886",
+      "nodeid": "tests/issues/886/test_cancel_fork_redesign.py::TestForkRepoIntegration::test_create_milestone_persists_fork_workflow_id",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "886",
+      "nodeid": "tests/issues/886/test_cancel_fork_redesign.py::TestForkRepoIntegration::test_list_forks_empty",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "setup_error",
+      "exception_type": "",
+      "issue_number": "886",
+      "nodeid": "tests/issues/886/test_cancel_fork_redesign.py::TestResumeWithFeedback::test_resume_with_feedback",
+      "outcome": "error",
+      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "91",
+      "nodeid": "tests/issues/91/test_management_button.py::test_admin_user",
+      "outcome": "failure",
+      "summary": "Failed: async def functions are not natively supported."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "91",
+      "nodeid": "tests/issues/91/test_management_button.py::test_normal_user",
+      "outcome": "failure",
+      "summary": "Failed: async def functions are not natively supported."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "913",
+      "nodeid": "tests/issues/913/test_pr909_review_feedback.py::TestGetCheckFailureExcerpt::test_ci_repair_context_skips_excerpt_failure",
+      "outcome": "failure",
+      "summary": "assert '失败摘录' not in \"PR #42 在合并前...9645632912'>\""
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "95",
+      "nodeid": "tests/issues/95/test_messages_ui.py::test_messages_ui",
+      "outcome": "failure",
+      "summary": "playwright._impl._errors.Error: Page.goto: net::ERR_CONNECTION_REFUSED at http://<host:port>/login"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "98",
+      "nodeid": "tests/issues/98/test_conversation_detail.py::test_conversation_detail",
+      "outcome": "failure",
+      "summary": "Failed: async def functions are not natively supported."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "98",
+      "nodeid": "tests/issues/98/test_data_update.py::test_data_update",
+      "outcome": "failure",
+      "summary": "Failed: async def functions are not natively supported."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "98",
+      "nodeid": "tests/issues/98/test_global_refresh.py::test_global_refresh",
+      "outcome": "failure",
+      "summary": "Failed: async def functions are not natively supported."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "98",
+      "nodeid": "tests/issues/98/test_refresh.py::test_messages_refresh",
+      "outcome": "failure",
+      "summary": "Failed: async def functions are not natively supported."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "98",
+      "nodeid": "tests/issues/98/test_refresh_detailed.py::test_messages_refresh_detailed",
+      "outcome": "failure",
+      "summary": "Failed: async def functions are not natively supported."
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "987",
+      "nodeid": "tests/issues/987/test_prompt_truncation.py::TestPostGithubComment::test_long_body_capped_with_notice",
+      "outcome": "failure",
+      "summary": "AssertionError: assert '截断' in 'BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB…"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "987",
+      "nodeid": "tests/issues/987/test_prompt_truncation.py::TestPrReviewPrompt::test_previous_review_content_not_reinjected_but_instruction_kept",
+      "outcome": "failure",
+      "summary": "IndexError: list index out of range"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "987",
+      "nodeid": "tests/issues/987/test_prompt_truncation.py::TestPrReviewPrompt::test_requirements_not_injected",
+      "outcome": "failure",
+      "summary": "IndexError: list index out of range"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "987",
+      "nodeid": "tests/issues/987/test_prompt_truncation.py::TestSummaryPrompt::test_last_pr_review_kept_last_fix_summary_removed",
+      "outcome": "failure",
+      "summary": "assert 0 >= 2"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "993",
+      "nodeid": "tests/issues/993/test_tldr.py::TestMilestoneTldrWrite::test_pr_reviewed_milestone_carries_tldr",
+      "outcome": "failure",
+      "summary": "AssertionError: pr_reviewed milestone update not captured"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "993",
+      "nodeid": "tests/issues/993/test_tldr.py::TestTldrInstruction::test_run_agent_appends_instruction",
+      "outcome": "failure",
+      "summary": "KeyError: 'prompt'"
+    },
+    {
+      "category": "test_body_exception",
+      "exception_type": "",
+      "issue_number": "996",
+      "nodeid": "tests/issues/996/test_agent_permissions.py::TestFixPhasePermissionsAndFallback::test_fix_salvages_uncommitted_when_agent_did_not_commit",
+      "outcome": "failure",
+      "summary": "AssertionError: Expected 'git_add_all' to have been called once. Called 2 times."
+    }
+  ],
+  "provenance": {
+    "generated_command": "python scripts/legacy_issue_baseline.py snapshot --junit /tmp/2457-artifacts/*/test-results/issues-*.xml --source-run 31347939641",
+    "reference_commit": "39fce2429b1a06e3331c8a09b11e62bf40c931e8",
+    "run_contract": "extended-tests issue-tests, --isolated-home --reruns 1 --timeout 240, 4 shards; tests/issues/604 hang skipped",
+    "source_run": "31347939641",
+    "source_run_url": ""
+  },
+  "schema": "openace-legacy-issue-failures",
+  "selection": "not postgres",
+  "version": 1
+}
