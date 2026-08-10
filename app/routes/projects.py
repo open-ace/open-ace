@@ -151,12 +151,69 @@ def api_get_projects():
         if p.is_shared and p.id not in [proj.id for proj in projects]:
             projects.append(p)
 
+    result = [p.to_dict() for p in projects]
+
+    # Issue #24: merge remote/terminal workspace projects so the webui
+    # project picker (open-ace integrated mode) also lists remote sessions.
+    # They live in agent_sessions (project_path), not in the projects table.
+    existing_paths = {p.get("path") for p in result}
+    for remote in _fetch_remote_projects(user_id):
+        if remote["path"] not in existing_paths:
+            result.append(remote)
+            existing_paths.add(remote["path"])
+
     return jsonify(
         {
             "success": True,
-            "projects": [p.to_dict() for p in projects],
+            "projects": result,
         }
     )
+
+
+def _fetch_remote_projects(user_id: int) -> list[dict]:
+    """Return deduplicated remote/terminal workspace projects for a user.
+
+    The qwen-code-webui open-ace integrated mode renders the project picker
+    from ``GET /api/projects``; remote sessions were invisible because they
+    only exist in ``agent_sessions.project_path``. Each returned entry carries
+    ``path`` (the original remote path, e.g. ``C:\\workspace``) which the webui
+    frontend uses both for display (basename) and for its own encoded-name
+    derivation when requesting histories.
+    """
+    from app.repositories.database import Database, adapt_sql
+
+    db = Database()
+    rows = db.fetch_all(
+        adapt_sql(
+            "SELECT DISTINCT project_path, remote_machine_id FROM agent_sessions "
+            "WHERE user_id = ? AND workspace_type IN ('remote', 'terminal') "
+            "AND project_path IS NOT NULL AND project_path != '' "
+            "ORDER BY project_path"
+        ),
+        (user_id,),
+    )
+    out: list[dict] = []
+    for r in rows:
+        path = r["project_path"]
+        if not path or path in {o["path"] for o in out}:
+            continue
+        name = path.replace("\\", "/").rstrip("/").split("/")[-1] or path
+        out.append(
+            {
+                "id": None,
+                "name": name,
+                "path": path,
+                "is_remote": True,
+                "is_active": True,
+                "is_shared": False,
+                "tenant_id": get_current_tenant_id(),
+                # machine_id lets the webui project picker enter remote mode
+                # (workspaceType=remote&machineId) when the user clicks a
+                # remote project (Issue #24 / navparams project-selector fix).
+                "machine_id": r["remote_machine_id"],
+            }
+        )
+    return out
 
 
 @projects_bp.route("/projects", methods=["POST"])
