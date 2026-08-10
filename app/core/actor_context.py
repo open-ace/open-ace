@@ -20,15 +20,28 @@ class ActorContext:
     role: str
     tenant_id: int | None = None
 
-    def is_platform_admin(self) -> bool:
+    def is_platform_admin(self, strict: bool | None = None) -> bool:
         """是否为平台管理员
+
+        Args:
+            strict: If True, only accept 'platform_admin' role.
+                    If False, accept 'platform_admin' or 'admin' (legacy).
+                    If None (default), use cached feature flag value.
 
         Returns:
             bool: True 如果是平台管理员
 
         Issue #2286: Accept legacy 'admin' role alongside 'platform_admin'
         for backward compatibility.
+        Issue #2332: Add strict parameter for strict mode support.
         """
+        if strict is None:
+            # Use cached feature flag value
+            from app.auth.permissions import get_cached_strict_mode
+            strict = get_cached_strict_mode()
+
+        if strict:
+            return self.role == "platform_admin"
         return self.role in ("platform_admin", "admin")
 
     def is_tenant_admin(self) -> bool:
