@@ -62,7 +62,7 @@
       "issue_number": "1111",
       "nodeid": "tests/issues/1111/test_sqlite_normalize_derived_tables.py::test_sqlite_upgrade_merges_qwen_alias_rows_before_normalization",
       "outcome": "failure",
-      "summary": "subprocess.CalledProcessError: Command '['/opt/hostedtoolcache/Python/3.11.15/x64/bin/python', '-m', 'alembic', '-c', 'alembic.ini', 'upgrade', '017_add_usage_summary']' returned non-zero exit status…"
+      "summary": "subprocess.CalledProcessError: Command '['python', '-m', 'alembic', '-c', 'alembic.ini', 'upgrade', '017_add_usage_summary']' returned non-zero exit status 255."
     },
     {
       "category": "test_body_exception",
@@ -70,7 +70,7 @@
       "issue_number": "1111",
       "nodeid": "tests/issues/1111/test_sqlite_normalize_derived_tables.py::test_sqlite_upgrade_rebuilds_claude_summary_with_distinct_day_count",
       "outcome": "failure",
-      "summary": "subprocess.CalledProcessError: Command '['/opt/hostedtoolcache/Python/3.11.15/x64/bin/python', '-m', 'alembic', '-c', 'alembic.ini', 'upgrade', '038_normalize_tool_names']' returned non-zero exit sta…"
+      "summary": "subprocess.CalledProcessError: Command '['python', '-m', 'alembic', '-c', 'alembic.ini', 'upgrade', '038_normalize_tool_names']' returned non-zero exit status 255."
     },
     {
       "category": "assertion_failure",
@@ -1414,7 +1414,7 @@
       "issue_number": "517",
       "nodeid": "tests/issues/517/e2e_codex_comprehensive.py::test_fetch_codex_data",
       "outcome": "failure",
-      "summary": "AssertionError: fetch_codex.py failed: /opt/hostedtoolcache/Python/3.11.15/x64/bin/python: can't open file 'tests/scripts/fetch_codex.py': [Errno 2] No such file or directory"
+      "summary": "AssertionError: fetch_codex.py failed: python: can't open file 'tests/scripts/fetch_codex.py': [Errno 2] No such file or directory"
     },
     {
       "category": "assertion_failure",
@@ -1558,7 +1558,7 @@
       "issue_number": "517",
       "nodeid": "tests/issues/517/e2e_codex_integration.py::test_fetch_codex_runs",
       "outcome": "failure",
-      "summary": "AssertionError: fetch_codex.py failed: /opt/hostedtoolcache/Python/3.11.15/x64/bin/python: can't open file 'tests/scripts/fetch_codex.py': [Errno 2] No such file or directory"
+      "summary": "AssertionError: fetch_codex.py failed: python: can't open file 'tests/scripts/fetch_codex.py': [Errno 2] No such file or directory"
     },
     {
       "category": "test_body_exception",
@@ -4306,11 +4306,11 @@
     }
   ],
   "provenance": {
-    "generated_command": "python scripts/legacy_issue_baseline.py snapshot --junit /tmp/2457-r4/issue-tests-*/test-results/issues-*.xml --source-run 31357513634",
-    "reference_commit": "6f80a5f6abbfd40519fa2cd7281515a8994034da",
+    "generated_command": "python scripts/legacy_issue_baseline.py snapshot --junit artifacts/test-results/issues-*.xml --source-run 31357513634 --shard-count 4",
+    "reference_commit": "56a165ab08fd77fc560398984763dc671e8f05b2",
     "run_contract": "extended-tests issue-tests --isolated-home --reruns 1 --timeout 240 --continue-on-collection-errors, 4 shards; 604 quarantined (deselect); CI-validated manifest",
     "source_run": "31357513634",
-    "source_run_url": ""
+    "source_run_url": "https://github.com/open-ace/open-ace/actions/runs/31357513634"
   },
   "schema": "openace-legacy-issue-failures",
   "selection": "not postgres",

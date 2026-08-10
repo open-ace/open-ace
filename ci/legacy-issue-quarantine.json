@@ -8,7 +8,8 @@
       "owner": "richardhuang",
       "tracking_issue": "https://github.com/open-ace/open-ace/issues/2466",
       "exit_condition": "The remote LLM-proxy handler returns a non-deadlocking result (500/502) after exhausting failover keys; verified when the weekly subprocess probe for this nodeid passes.",
-      "expires_on": "2026-09-09"
+      "expires_on": "2026-09-09",
+      "expected_probe_outcome": "timeout"
     }
   ]
 }

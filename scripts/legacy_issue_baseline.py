@@ -246,13 +246,17 @@ def _short_summary(text: str, limit: int = 200) -> str:
 
 
 # Environment-specific noise that must not leak into the tracked baseline
-# (handoff §4.2): absolute runner/workspace paths, ephemeral ports, temp HOME.
+# (handoff §4.2): absolute runner/workspace paths, ephemeral ports, temp HOME,
+# runner-specific Python toolcache binaries (e.g. /opt/hostedtoolcache/...).
 _RUNNER_PREFIX_RX = re.compile(r"/(?:[^/\s]+/)+open-ace/")
 _PORT_RX = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}:\d+\b|\b(?:localhost|0\.0\.0\.0):\d+\b")
 _TMPHOME_RX = re.compile(r"\.openace-ci-[A-Za-z0-9_-]+")
+# Absolute python binaries: /opt/hostedtoolcache/Python/3.11.15/x64/bin/python3.11
+_PYBIN_RX = re.compile(r"/[^\s\"]*/bin/python\d?(?:\.\d+)*")
 
 
 def _scrub_env(text: str) -> str:
+    text = _PYBIN_RX.sub("python", text or "")
     text = _RUNNER_PREFIX_RX.sub("", text or "")
     text = _TMPHOME_RX.sub(".openace-ci-<tmp>", text)
     text = _PORT_RX.sub("<host:port>", text)
@@ -427,7 +431,10 @@ _QUARANTINE_REQUIRED = (
     "tracking_issue",
     "exit_condition",
     "expires_on",
+    "expected_probe_outcome",
 )
+# Valid machine-readable probe outcomes the entry may declare.
+PROBE_OUTCOMES = ("timeout", "pass", "fail")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -438,6 +445,7 @@ class QuarantineEntry:
     tracking_issue: str
     exit_condition: str
     expires_on: str
+    expected_probe_outcome: str
 
 
 def load_quarantine(path: str | Path) -> list[QuarantineEntry]:
@@ -485,6 +493,11 @@ def validate_quarantine(
         for field in _QUARANTINE_REQUIRED:
             if not getattr(e, field).strip():
                 invalid.append(f"quarantine entry {e.nodeid!r} missing field '{field}'")
+        if e.expected_probe_outcome and e.expected_probe_outcome not in PROBE_OUTCOMES:
+            invalid.append(
+                f"quarantine entry {e.nodeid!r} invalid expected_probe_outcome "
+                f"{e.expected_probe_outcome!r} (choose from {PROBE_OUTCOMES})"
+            )
         if not _is_real_date(e.expires_on):
             invalid.append(f"quarantine entry {e.nodeid!r} malformed expires_on {e.expires_on!r}")
         elif e.expires_on < today:
@@ -1031,9 +1044,11 @@ def _cmd_snapshot(args: argparse.Namespace) -> int:
         "source_run": args.source_run or "",
         "source_run_url": args.source_run_url or "",
         "run_contract": args.run_contract or "",
+        # Reproducible, repo/artifact-relative command (no local /tmp paths).
         "generated_command": (
-            f"python scripts/legacy_issue_baseline.py snapshot "
-            f"--junit {args.junit} --source-run {args.source_run or ''}"
+            "python scripts/legacy_issue_baseline.py snapshot "
+            "--junit artifacts/test-results/issues-*.xml "
+            f"--source-run {args.source_run or '<run-id>'} --shard-count {args.shard_count}"
         ),
     }
     baseline = Baseline(entries=failures, provenance=provenance, selection=DEFAULT_SELECTION)

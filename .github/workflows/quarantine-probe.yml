@@ -1,15 +1,16 @@
 name: Quarantine Probe
 
 # Weekly subprocess-level probe of ci/legacy-issue-quarantine.json nodeids.
-# pytest-timeout cannot kill a thread deadlock, so each nodeid runs in a
-# subprocess under `timeout` (hard kill). A quarantined nodeid that now PASSES
-# fails this job — its entry must be removed/updated, so quarantine cannot drift
-# silently. A nodeid that still deadlocks or fails is expected (known debt) and
-# the job stays green.
+# pytest-timeout cannot kill a thread deadlock, so scripts/ci/legacy_quarantine_probe.py
+# runs each nodeid in a subprocess under a hard timeout. Each entry declares an
+# expected_probe_outcome (timeout/pass/fail); a mismatch (recovered or behavior
+# changed) fails this job so the entry must be removed/updated — quarantine
+# cannot drift silently. Fail-closed on any quarantine config error.
 
 on:
   schedule:
-    - cron: '17 3 * * 1'
+    - cron: '18 3 * * 6'
+      timezone: 'Asia/Singapore'
   workflow_dispatch:
 
 permissions:
@@ -31,32 +32,12 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements-ci.lock
       - name: Probe quarantined nodeids (subprocess hard kill)
-        run: |
-          set +e
-          nodeids=$(python -c "import json;print('\n'.join(e['nodeid'] for e in json.load(open('ci/legacy-issue-quarantine.json'))['entries']))")
-          if [ -z "$nodeids" ]; then echo "No quarantined nodeids."; exit 0; fi
-          passed=0
-          while IFS= read -r nodeid; do
-            [ -z "$nodeid" ] && continue
-            echo "::group::probe: $nodeid"
-            timeout 180 python -m pytest "$nodeid" -m "not postgres" -p no:cacheprovider -q
-            rc=$?
-            if [ "$rc" -eq 0 ]; then
-              echo "::error::Quarantined nodeid PASSED — remove it from ci/legacy-issue-quarantine.json: $nodeid"
-              passed=1
-            elif [ "$rc" -eq 124 ]; then
-              echo "::notice::Still deadlocks (subprocess timeout) — expected quarantine debt: $nodeid"
-            else
-              echo "::notice::Still fails (exit $rc) — expected quarantine debt: $nodeid"
-            fi
-            echo "::endgroup::"
-          done <<< "$nodeids"
-          exit "$passed"
-      - name: Upload probe logs
+        run: python scripts/ci/legacy_quarantine_probe.py
+      - name: Upload probe artifacts
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: quarantine-probe
           path: test-results/
-          if-no-files-found: ignore
+          if-no-files-found: error
           retention-days: 14

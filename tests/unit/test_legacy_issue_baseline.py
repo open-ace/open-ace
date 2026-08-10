@@ -687,7 +687,7 @@ def test_exit_code_cardinality_enforced(tmp_path):
 
 
 def _q(nodeid="tests/issues/604/t.py::a", expires="2099-01-01"):
-    return lib.QuarantineEntry(nodeid, "r", "o", "https://t", "exit", expires)
+    return lib.QuarantineEntry(nodeid, "r", "o", "https://t", "exit", expires, "timeout")
 
 
 def test_quarantine_valid_entry_passs():
@@ -716,7 +716,9 @@ def test_quarantine_duplicate_and_missing_fields():
         "2026-08-10",
     )
     assert any("duplicated" in i for i in inv)
-    bad = lib.QuarantineEntry("tests/issues/604/t.py::a", "", "o", "t", "exit", "2099-01-01")
+    bad = lib.QuarantineEntry(
+        "tests/issues/604/t.py::a", "", "o", "t", "exit", "2099-01-01", "timeout"
+    )
     inv2 = lib.validate_quarantine([bad], ["tests/issues/604/t.py::a"], "2026-08-10")
     assert any("missing field" in i for i in inv2)
 
@@ -762,7 +764,9 @@ def test_load_exit_codes_rejects_duplicate_basename(tmp_path):
 
 def test_quarantine_bad_calendar_date_rejected():
     # P1: 2026-99-99 matches the old shape regex but is not a real date.
-    bad = lib.QuarantineEntry("tests/issues/604/t.py::a", "r", "o", "t", "e", "2026-99-99")
+    bad = lib.QuarantineEntry(
+        "tests/issues/604/t.py::a", "r", "o", "t", "e", "2026-99-99", "timeout"
+    )
     inv = lib.validate_quarantine([bad], ["tests/issues/604/t.py::a"], "2026-08-10")
     assert any("malformed expires_on" in i for i in inv)
 
@@ -772,3 +776,22 @@ def test_load_quarantine_rejects_wrong_version(tmp_path):
     p.write_text('{"version": 99, "schema": "openace-legacy-issue-quarantine", "entries": []}')
     with pytest.raises(lib.BaselineError):
         lib.load_quarantine(p)
+
+
+def test_scrub_strips_toolcache_python_binary():
+    # P1: runner-specific /opt/hostedtoolcache/.../bin/python must not leak.
+    s = lib._scrub_env("from /opt/hostedtoolcache/Python/3.11.15/x64/bin/python -m pytest")
+    assert "/opt/hostedtoolcache" not in s and "bin/python" not in s
+    assert "python" in s
+
+
+def test_quarantine_invalid_probe_outcome_rejected():
+    bad = lib.QuarantineEntry(
+        "tests/issues/604/t.py::a", "r", "o", "t", "e", "2099-01-01", "explodes"
+    )
+    inv = lib.validate_quarantine([bad], ["tests/issues/604/t.py::a"], "2026-08-10")
+    assert any("invalid expected_probe_outcome" in i for i in inv)
+    good = lib.QuarantineEntry(
+        "tests/issues/604/t.py::a", "r", "o", "t", "e", "2099-01-01", "timeout"
+    )
+    assert lib.validate_quarantine([good], ["tests/issues/604/t.py::a"], "2026-08-10") == []
