@@ -10,6 +10,8 @@ point for scheduled, release, PR critical, and manual extended-test runs.
 from __future__ import annotations
 
 import argparse
+import json
+import math
 import os
 import signal
 import socket
@@ -20,7 +22,10 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
+from dataclasses import dataclass
 from pathlib import Path
+from typing import TextIO
+from urllib.parse import urlsplit, urlunsplit
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_BASE_URL = "http://localhost:19888"
@@ -40,11 +45,11 @@ SERVER_CATEGORIES = {
 }
 CATEGORY_TARGETS = {
     "critical": [
-        "tests/e2e/regression/test_login.py",
-        "tests/e2e/regression/test_navigation.py::test_sidebar_menu_visible",
-        "tests/e2e/regression/test_navigation.py::test_menu_navigation",
+        "tests/e2e/browser/test_login.py",
+        "tests/e2e/browser/test_navigation.py::test_sidebar_menu_visible",
+        "tests/e2e/browser/test_navigation.py::test_menu_navigation",
     ],
-    "regression": ["tests/e2e/regression"],
+    "regression": ["tests/e2e/browser"],
     "ui": ["tests/e2e/ui"],
     "remote": ["tests/e2e/remote"],
     "terminal": ["tests/e2e/terminal"],
@@ -55,6 +60,13 @@ CATEGORY_TARGETS = {
     "issues": ["tests/issues"],
     "all": ["tests/e2e", "tests/issues"],
 }
+
+
+@dataclass
+class ServerHandle:
+    process: subprocess.Popen
+    log_file: TextIO
+    log_path: Path
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -215,8 +227,8 @@ def load_baseline() -> dict | None:
         return None
 
 
-def check_baseline(category: str, file_count: int) -> bool:
-    """Check if test count meets baseline threshold (Issue #2189)."""
+def check_baseline(category: str, file_count: int, split_total: int = 1) -> bool:
+    """Check a full suite or shard against its test-file baseline."""
     baseline = load_baseline()
     if not baseline:
         return True
@@ -234,7 +246,7 @@ def check_baseline(category: str, file_count: int) -> bool:
         return True
 
     layer_baseline = baseline["layers"][layer_name]
-    min_files = layer_baseline.get("min_files", 0)
+    min_files = math.ceil(layer_baseline.get("min_files", 0) / split_total)
 
     if file_count < min_files:
         tolerance = baseline.get("tolerance", {})
@@ -243,13 +255,13 @@ def check_baseline(category: str, file_count: int) -> bool:
 
         if decrease_pct >= threshold:
             print(
-                f"ERROR: Test count {file_count} below baseline {min_files} "
+                f"ERROR: Test file count {file_count} below baseline {min_files} "
                 f"({decrease_pct:.1f}% decrease >= {threshold}% threshold)"
             )
             return False
         else:
             print(
-                f"WARNING: Test count {file_count} below baseline {min_files} "
+                f"WARNING: Test file count {file_count} below baseline {min_files} "
                 f"({decrease_pct:.1f}% decrease)"
             )
 
@@ -271,10 +283,15 @@ def build_pytest_command(args: argparse.Namespace) -> list[str]:
     targets = select_targets(args)
     targets = apply_split(targets, args.split_total, args.split_group)
 
-    # Issue #2189: Print collection manifest and check baseline
+    # Issue #2189: Print the file manifest. Item collection is separately gated
+    # by pytest itself; a targeted issue run must not be compared with the full
+    # legacy-suite baseline.
     print_collection_manifest(targets)
-    if not check_baseline(args.category, len(targets)):
-        raise ValueError(f"Test count below baseline threshold for category: {args.category}")
+    targeted_issue_run = args.category == "issues" and bool(parse_issue_numbers(args))
+    if not targeted_issue_run and not check_baseline(
+        args.category, len(targets), split_total=args.split_total
+    ):
+        raise ValueError(f"Test file count below baseline threshold for category: {args.category}")
 
     cmd = [sys.executable, "-m", "pytest", *targets, "-m", "not postgres"]
     if args.parallel > 0:
@@ -312,6 +329,17 @@ def can_connect(host: str, port: int, timeout: float = 1.0) -> bool:
             return True
     except OSError:
         return False
+
+
+def isolated_base_url(base_url: str) -> str:
+    """Return a loopback URL with a currently available ephemeral port."""
+    parsed = urlsplit(base_url)
+    if parsed.scheme not in {"http", "https"}:
+        raise ValueError(f"Unsupported base URL scheme: {base_url}")
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+    return urlunsplit((parsed.scheme, f"127.0.0.1:{port}", parsed.path, "", ""))
 
 
 def health_url(base_url: str) -> str:
@@ -394,9 +422,23 @@ def initialize_database(env: dict[str, str]) -> None:
     subprocess.run([sys.executable, "scripts/init_db.py"], cwd=PROJECT_ROOT, env=env, check=True)
 
 
-def start_server_if_needed(
-    args: argparse.Namespace, env: dict[str, str]
-) -> subprocess.Popen | None:
+def configure_server_address(env: dict[str, str], base_url: str) -> None:
+    """Make the spawned server listen at the same address used by the tests."""
+    parsed = urlsplit(base_url)
+    if parsed.hostname is None or parsed.port is None:
+        raise ValueError(f"Base URL must include a host and port: {base_url}")
+    config_path = Path(env["HOME"]) / ".open-ace" / "config.json"
+    try:
+        config = json.loads(config_path.read_text()) if config_path.exists() else {}
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Invalid test server config: {config_path}") from exc
+    server_config = config.setdefault("server", {})
+    server_config["web_host"] = parsed.hostname
+    server_config["web_port"] = parsed.port
+    config_path.write_text(json.dumps(config, indent=2) + "\n")
+
+
+def start_server_if_needed(args: argparse.Namespace, env: dict[str, str]) -> ServerHandle | None:
     if not category_needs_server(args.category) or args.server == "skip":
         return None
     ensure_frontend_built(args.category)
@@ -407,12 +449,14 @@ def start_server_if_needed(
         raise RuntimeError(f"No healthy Open ACE server found at {args.base_url}")
 
     initialize_database(env)
-    host_port = args.base_url.replace("http://", "").replace("https://", "").split("/", 1)[0]
-    host, port_text = host_port.rsplit(":", 1)
-    if can_connect(host, int(port_text)):
-        raise RuntimeError(
-            f"Port {port_text} is in use, but {health_url(args.base_url)} is not healthy"
-        )
+    configure_server_address(env, args.base_url)
+    parsed = urlsplit(args.base_url)
+    host = parsed.hostname
+    port = parsed.port
+    if host is None or port is None:
+        raise ValueError(f"Base URL must include a host and port: {args.base_url}")
+    if can_connect(host, port):
+        raise RuntimeError(f"Port {port} is in use, but {health_url(args.base_url)} is not healthy")
 
     # Issue #2185: Set security mode for test server
     env.setdefault("OPENACE_SECURITY_MODE", "development")
@@ -428,46 +472,52 @@ def start_server_if_needed(
     env["BASE_URL"] = args.base_url
 
     print(f"Starting Open ACE test server for {args.base_url}")
+    log_path = PROJECT_ROOT / "test-results" / f"open-ace-server-{args.category}.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_file = log_path.open("w")
     proc = subprocess.Popen(
         [sys.executable, "server.py"],
         cwd=PROJECT_ROOT,
         env=env,
-        stdout=subprocess.PIPE,
+        stdout=log_file,
         stderr=subprocess.STDOUT,
         text=True,
     )
+    handle = ServerHandle(proc, log_file, log_path)
     try:
         wait_for_health(args.base_url)
     except Exception:
         if proc.poll() is None:
             proc.terminate()
-        output = ""
-        if proc.stdout:
-            try:
-                output = proc.stdout.read()
-            except OSError:
-                output = ""
+            proc.wait(timeout=15)
+        log_file.close()
+        output = log_path.read_text(errors="replace") if log_path.exists() else ""
         raise RuntimeError(f"Failed to start Open ACE test server.\n{output}") from None
-    return proc
+    return handle
 
 
-def stop_server(proc: subprocess.Popen | None) -> None:
-    if proc is None or proc.poll() is not None:
+def stop_server(handle: ServerHandle | None) -> None:
+    if handle is None:
         return
-    proc.send_signal(signal.SIGTERM)
-    try:
-        proc.wait(timeout=15)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.wait(timeout=5)
+    proc = handle.process
+    if proc.poll() is None:
+        proc.send_signal(signal.SIGTERM)
+        try:
+            proc.wait(timeout=15)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=5)
+    handle.log_file.close()
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     env = os.environ.copy()
-    env.setdefault("BASE_URL", args.base_url)
     test_home = prepare_test_home(env, args.isolated_home)
-    server_proc: subprocess.Popen | None = None
+    if args.isolated_home and args.server == "auto" and category_needs_server(args.category):
+        args.base_url = isolated_base_url(args.base_url)
+    env["BASE_URL"] = args.base_url
+    server_handle: ServerHandle | None = None
 
     try:
         cmd = build_pytest_command(args)
@@ -475,10 +525,10 @@ def main(argv: list[str] | None = None) -> int:
         print(" ".join(cmd))
         if args.dry_run:
             return 0
-        server_proc = start_server_if_needed(args, env)
+        server_handle = start_server_if_needed(args, env)
         return subprocess.run(cmd, cwd=PROJECT_ROOT, env=env, check=False).returncode
     finally:
-        stop_server(server_proc)
+        stop_server(server_handle)
         if test_home is not None:
             test_home.cleanup()
 

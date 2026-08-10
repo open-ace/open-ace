@@ -13,7 +13,10 @@ Mirrors tests/issues/1820 (transient deferral) in structure.
 
 from unittest.mock import MagicMock, patch
 
-from app.modules.workspace.autonomous.orchestrator import MAX_CI_REPAIR_NO_CHANGE_RETRIES
+from app.modules.workspace.autonomous.orchestrator import (
+    MAX_CI_REPAIR_NO_CHANGE_RETRIES,
+    MAX_MERGE_FAIL_DEV_ROUNDS,
+)
 
 
 def _make_workflow(**overrides):
@@ -101,16 +104,24 @@ def test_no_change_deferred_does_not_increment_attempts():
     assert any(u.get("ci_repair_no_change_retries") == 1 for u in updates), "no-change counter 0→1"
 
 
-# ── 2. After MAX_CI_REPAIR_NO_CHANGE_RETRIES, workflow is marked failed ──
+# ── 2. After MAX_CI_REPAIR_NO_CHANGE_RETRIES, the workflow leaves the loop ──
 
 
-def test_no_change_retries_exhausted_marks_failed():
-    """When no-change retries hit the cap, the workflow fails with a dedicated
-    exhausted milestone and the agent is NOT run again."""
+def test_no_change_retries_exhausted_escalates_under_cap():
+    """When no-change retries hit the cap, the workflow leaves the repair loop.
+
+    #2443 PR-C: ci_repair_no_change_exhausted is a Tier1 category, so under the
+    dev-round cap (with a recoverable PR branch) it escalates to a fresh
+    development round instead of terminal-failing; only at the cap does it fall
+    through to failed. Either way the agent is NOT run again and the dedicated
+    exhausted milestone is recorded.
+    """
+    # Under cap → Tier1 escalation to development.
     wf = _make_workflow(
         error_message="CI repair deferred: agent produced no code changes",
         ci_repair_attempts=2,
         ci_repair_no_change_retries=MAX_CI_REPAIR_NO_CHANGE_RETRIES,
+        merge_fail_dev_rounds=0,
     )
     orch, mock_repo = _make_orchestrator(wf)
     gh = MagicMock()
@@ -123,12 +134,30 @@ def test_no_change_retries_exhausted_marks_failed():
 
     orch._run_merge_ci_repair.assert_not_called()
     updates = [c.args[1] for c in mock_repo.update_workflow.call_args_list]
-    assert any(u.get("status") == "failed" for u in updates)
-    assert any("no code changes" in (u.get("error_message") or "").lower() for u in updates)
+    assert any(u.get("status") == "developing" for u in updates)
+    assert not any(u.get("status") == "failed" for u in updates)
     assert any(
         c.args[0].get("milestone_type") == "ci_repair_no_change_exhausted"
         for c in mock_repo.create_milestone.call_args_list
     )
+
+    # At the dev-round cap → Tier2 fall-through to terminal failed.
+    wf_cap = _make_workflow(
+        error_message="CI repair deferred: agent produced no code changes",
+        ci_repair_attempts=2,
+        ci_repair_no_change_retries=MAX_CI_REPAIR_NO_CHANGE_RETRIES,
+        merge_fail_dev_rounds=MAX_MERGE_FAIL_DEV_ROUNDS,
+    )
+    orch2, mock_repo2 = _make_orchestrator(wf_cap)
+    gh2 = MagicMock()
+    gh2.get_pr_head_sha.return_value = "sha-new"
+    gh2.get_check_failure_excerpt.return_value = "schema-sync failed\n1 error"
+    orch2._get_gh = MagicMock(return_value=gh2)
+    orch2._run_merge_ci_repair = MagicMock()
+    orch2._start_ci_repair_round(wf_cap, 2187, _FAILED_CHECKS)
+    cap_updates = [c.args[1] for c in mock_repo2.update_workflow.call_args_list]
+    assert any(u.get("status") == "failed" for u in cap_updates)
+    assert any("no code changes" in (u.get("error_message") or "").lower() for u in cap_updates)
 
 
 # ── 3. Change-producing (fresh) round resets the no-change counter ──

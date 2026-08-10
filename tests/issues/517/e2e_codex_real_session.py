@@ -28,7 +28,8 @@ import sys
 import time
 
 import requests
-from helpers import (
+
+from .helpers import (
     BASE_URL,
     PROJECT_ROOT,
     REMOTE_TEST_HOST,
