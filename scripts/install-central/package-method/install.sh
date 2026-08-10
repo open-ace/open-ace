@@ -3990,6 +3990,14 @@ install_local() {
         # the sudoers rule keys off `[ -x /usr/local/bin/openace-webui-launch ]`.
         install_webui_launch_wrapper "$sudoers_install_dir"
 
+        # Install security wrappers BEFORE configure_sudoers (Issue #2349):
+        # These wrappers provide secure alternatives to chown, useradd, cat, mkdir, and rm
+        install_chown_wrapper "$sudoers_install_dir"
+        install_useradd_wrapper "$sudoers_install_dir"
+        install_cat_wrapper "$sudoers_install_dir"
+        install_mkdir_wrapper "$sudoers_install_dir"
+        install_rm_wrapper "$sudoers_install_dir"
+
         configure_sudoers "$sudoers_run_user" "$sudoers_install_dir"
         if [ $? -ne 0 ]; then
             print_warning "Sudoers configuration failed, multi-user mode may not work properly"
