@@ -114,16 +114,53 @@ def is_production_capable_path() -> bool:
         return False
 
     # Emergency rollback flag (expires after 30 days)
-    # Check for expiration timestamp if using this flag
+    # Requires OPENACE_ALLOW_IMPLICIT_MODE_TIMESTAMP to enforce expiration
     emergency_rollback = os.environ.get("OPENACE_ALLOW_IMPLICIT_MODE")
     if emergency_rollback == "1":
-        # Log warning for emergency rollback
-        logger.warning(
-            "EMERGENCY ROLLBACK: OPENACE_ALLOW_IMPLICIT_MODE=1 is set. "
-            "This flag expires after 30 days and should not be used in production. "
-            "Set OPENACE_SECURITY_MODE explicitly instead."
-        )
-        return False
+        # Check for required timestamp
+        timestamp_str = os.environ.get("OPENACE_ALLOW_IMPLICIT_MODE_TIMESTAMP")
+
+        if not timestamp_str:
+            logger.error(
+                "EMERGENCY ROLLBACK FLAG EXPIRED: OPENACE_ALLOW_IMPLICIT_MODE=1 requires "
+                "OPENACE_ALLOW_IMPLICIT_MODE_TIMESTAMP to be set. "
+                "Format: YYYY-MM-DD (e.g., 2025-01-15). "
+                "Flag is being IGNORED. Set OPENACE_SECURITY_MODE explicitly instead."
+            )
+            # No timestamp - flag is invalid, continue with normal checks
+        else:
+            # Parse and validate timestamp
+            try:
+                from datetime import datetime, timedelta
+
+                # Parse timestamp (format: YYYY-MM-DD)
+                flag_date = datetime.strptime(timestamp_str, "%Y-%m-%d")
+                now = datetime.now()
+                age_days = (now - flag_date).days
+
+                if age_days > 30:
+                    logger.error(
+                        f"EMERGENCY ROLLBACK FLAG EXPIRED: OPENACE_ALLOW_IMPLICIT_MODE was set "
+                        f"{age_days} days ago (max: 30 days). "
+                        f"Flag is being IGNORED. Set OPENACE_SECURITY_MODE explicitly instead."
+                    )
+                    # Flag expired, continue with normal checks
+                else:
+                    logger.warning(
+                        f"EMERGENCY ROLLBACK: OPENACE_ALLOW_IMPLICIT_MODE=1 is active "
+                        f"(set {age_days} days ago, expires in {30 - age_days} days). "
+                        "This flag should not be used in production. "
+                        "Set OPENACE_SECURITY_MODE explicitly instead."
+                    )
+                    # Flag is valid and within 30-day window
+                    return False
+            except ValueError as e:
+                logger.error(
+                    f"EMERGENCY ROLLBACK FLAG INVALID: OPENACE_ALLOW_IMPLICIT_MODE_TIMESTAMP "
+                    f"format error: {e}. Expected format: YYYY-MM-DD. "
+                    f"Flag is being IGNORED. Set OPENACE_SECURITY_MODE explicitly instead."
+                )
+                # Invalid timestamp format, flag is ignored
 
     # Check for production indicators
     # 1. Explicit mode requested

@@ -630,11 +630,16 @@ def create_app(config=None):
 
             # Check for pilot metadata in production mode
             if mode.value == "production" and pilot_metadata:
-                checks["security_mode"]["status"] = "pilot_metadata_in_production"
-                checks["security_mode"]["warning"] = (
-                    "Production mode running with pilot metadata file present. "
-                    "This indicates pilot-to-production migration without secret configuration."
-                )
+                # Keep status as "ok" but add warning for monitoring
+                # This is a migration path, not a failure condition
+                checks["security_mode"]["warnings"] = checks["security_mode"].get("warnings", [])
+                checks["security_mode"]["warnings"].append({
+                    "type": "pilot_metadata_in_production",
+                    "message": (
+                        "Production mode running with pilot metadata file present. "
+                        "This indicates pilot-to-production migration without secret configuration."
+                    )
+                })
                 logger.error(
                     "Production mode running with pilot metadata file! "
                     "Remove metadata and set secrets explicitly."

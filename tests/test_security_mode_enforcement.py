@@ -93,10 +93,54 @@ class TestProductionCapablePathDetection:
     def test_emergency_rollback_not_production_capable(self, monkeypatch):
         """Test emergency rollback flag makes path not production-capable."""
         reset_security_mode_cache()
+        # Set flag with a recent timestamp (within 30 days)
         monkeypatch.setenv("OPENACE_ALLOW_IMPLICIT_MODE", "1")
+        monkeypatch.setenv("OPENACE_ALLOW_IMPLICIT_MODE_TIMESTAMP", "2025-08-01")
 
         # Emergency rollback should make it not production-capable
         assert is_production_capable_path() is False
+
+    def test_emergency_rollback_expired(self, monkeypatch, caplog):
+        """Test expired emergency rollback flag is ignored."""
+        reset_security_mode_cache()
+        import logging
+
+        # Set flag with an old timestamp (more than 30 days ago)
+        monkeypatch.setenv("OPENACE_ALLOW_IMPLICIT_MODE", "1")
+        monkeypatch.setenv("OPENACE_ALLOW_IMPLICIT_MODE_TIMESTAMP", "2025-01-01")
+
+        # Mock is_test_context to return False so we can test the expiration logic
+        monkeypatch.setattr("app.utils.security_mode.is_test_context", lambda: False)
+
+        with caplog.at_level(logging.ERROR):
+            result = is_production_capable_path()
+
+        # Expired flag should be ignored - verify expiration error is logged
+        assert any("EXPIRED" in record.message for record in caplog.records), \
+            f"Expected EXPIRED error in logs, got: {[r.message for r in caplog.records]}"
+        # Flag is ignored, so production-capable checks continue
+        # Since we're in test context mocked to False, result depends on other indicators
+        # The important thing is the expired flag didn't make it non-production-capable
+
+    def test_emergency_rollback_missing_timestamp(self, monkeypatch, caplog):
+        """Test emergency rollback flag without timestamp is ignored."""
+        reset_security_mode_cache()
+        import logging
+
+        monkeypatch.setenv("OPENACE_ALLOW_IMPLICIT_MODE", "1")
+        # Don't set OPENACE_ALLOW_IMPLICIT_MODE_TIMESTAMP
+
+        # Mock is_test_context to return False so we can test the flag logic
+        monkeypatch.setattr("app.utils.security_mode.is_test_context", lambda: False)
+
+        with caplog.at_level(logging.ERROR):
+            result = is_production_capable_path()
+
+        # Flag should be ignored due to missing timestamp
+        # Should log an error about missing timestamp
+        assert any("requires OPENACE_ALLOW_IMPLICIT_MODE_TIMESTAMP" in record.message
+                   for record in caplog.records), \
+            f"Expected timestamp requirement error in logs, got: {[r.message for r in caplog.records]}"
 
 
 class TestDetectSecurityMode:

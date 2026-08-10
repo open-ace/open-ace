@@ -80,11 +80,34 @@ validate_security_mode() {
         is_production_path=false
     fi
 
-    # Emergency rollback flag (expires after 30 days - checked by Python code)
+    # Emergency rollback flag (expires after 30 days)
+    # Requires OPENACE_ALLOW_IMPLICIT_MODE_TIMESTAMP to be set
     if [ "${OPENACE_ALLOW_IMPLICIT_MODE:-}" = "1" ]; then
-        echo "WARNING: OPENACE_ALLOW_IMPLICIT_MODE=1 is set (emergency rollback)"
-        echo "         This flag should not be used in production"
-        is_production_path=false
+        if [ -z "${OPENACE_ALLOW_IMPLICIT_MODE_TIMESTAMP:-}" ]; then
+            echo "ERROR: OPENACE_ALLOW_IMPLICIT_MODE=1 requires OPENACE_ALLOW_IMPLICIT_MODE_TIMESTAMP"
+            echo "       Format: YYYY-MM-DD (e.g., 2025-01-15)"
+            echo "       Flag is being IGNORED. Set OPENACE_SECURITY_MODE explicitly instead."
+        else
+            # Check expiration (30 days)
+            flag_date=$(date -d "${OPENACE_ALLOW_IMPLICIT_MODE_TIMESTAMP}" +%s 2>/dev/null || date -j -f "%Y-%m-%d" "${OPENACE_ALLOW_IMPLICIT_MODE_TIMESTAMP}" +%s 2>/dev/null)
+            if [ -n "$flag_date" ]; then
+                now=$(date +%s)
+                age_days=$(( (now - flag_date) / 86400 ))
+                if [ $age_days -gt 30 ]; then
+                    echo "ERROR: EMERGENCY ROLLBACK FLAG EXPIRED (set ${age_days} days ago, max: 30)"
+                    echo "       Flag is being IGNORED. Set OPENACE_SECURITY_MODE explicitly instead."
+                else
+                    echo "WARNING: OPENACE_ALLOW_IMPLICIT_MODE=1 is active"
+                    echo "         Set ${age_days} days ago, expires in $((30 - age_days)) days"
+                    echo "         This flag should not be used in production"
+                    is_production_path=false
+                fi
+            else
+                echo "ERROR: Invalid OPENACE_ALLOW_IMPLICIT_MODE_TIMESTAMP format: ${OPENACE_ALLOW_IMPLICIT_MODE_TIMESTAMP}"
+                echo "       Expected format: YYYY-MM-DD"
+                echo "       Flag is being IGNORED. Set OPENACE_SECURITY_MODE explicitly instead."
+            fi
+        fi
     fi
 
     # Production-capable paths MUST have explicit mode
