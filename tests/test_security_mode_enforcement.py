@@ -104,6 +104,9 @@ class TestProductionCapablePathDetection:
         """Test expired emergency rollback flag is ignored."""
         import logging
 
+        # Import module BEFORE entering context manager to ensure logger is set up
+        from app.utils import security_mode
+
         # Issue #2331: Use at_level context manager for reliable log capture
         # This ensures the handler is properly attached throughout the test
         with caplog.at_level(logging.ERROR, "app.utils.security_mode"):
@@ -114,9 +117,6 @@ class TestProductionCapablePathDetection:
             monkeypatch.setenv("OPENACE_ALLOW_IMPLICIT_MODE_TIMESTAMP", "2025-01-01")
 
             # Mock is_test_context to return False so we can test the expiration logic
-            # Use the imported function reference for reliable patching
-            from app.utils import security_mode
-
             monkeypatch.setattr(security_mode, "is_test_context", lambda: False)
 
             is_production_capable_path()
@@ -130,6 +130,9 @@ class TestProductionCapablePathDetection:
         """Test emergency rollback flag without timestamp is ignored."""
         import logging
 
+        # Import module BEFORE entering context manager to ensure logger is set up
+        from app.utils import security_mode
+
         # Issue #2331: Use at_level context manager for reliable log capture
         with caplog.at_level(logging.ERROR, "app.utils.security_mode"):
             reset_security_mode_cache()
@@ -138,9 +141,6 @@ class TestProductionCapablePathDetection:
             # Don't set OPENACE_ALLOW_IMPLICIT_MODE_TIMESTAMP
 
             # Mock is_test_context to return False so we can test the flag logic
-            # Use the imported module reference for reliable patching
-            from app.utils import security_mode
-
             monkeypatch.setattr(security_mode, "is_test_context", lambda: False)
 
             is_production_capable_path()
