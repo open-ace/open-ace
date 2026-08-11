@@ -1249,11 +1249,13 @@ def retry_workflow(workflow_id):
             return jsonify({"error": "max_changed_files_override must be a positive integer"}), 400
         retry_updates["max_changed_files_override"] = new_limit
     # Restore worktree_path so _ensure_worktree recreates the worktree dir on
-    # the retry pass. Terminal-failure cleanup (_cleanup_worktree_and_branch)
-    # clears worktree_path after removing the dir; the canonical path survives
-    # in preferred_worktree_path, so rebind it here. Without this, an empty
-    # worktree_path makes _ensure_worktree fall back to project_path and later
-    # phases run against the main checkout (review P1-1; see also #2011/#1981).
+    # the retry pass. Since #2505, terminal-failure cleanup KEEPS worktree_path
+    # (pointing at the removed dir) so _ensure_worktree recreates it on retry —
+    # but a legacy workflow (or one that failed before that deploy) may still
+    # have an empty/stale path, so rebind to the canonical preferred_worktree_path.
+    # Without it, an empty worktree_path makes _ensure_worktree fall back to
+    # project_path and later phases run against the main checkout (review P1-1;
+    # see also #2011/#1981).
     preferred_wt = (workflow.get("preferred_worktree_path") or "").strip()
     if preferred_wt and workflow.get("branch_strategy") == "worktree":
         retry_updates["worktree_path"] = preferred_wt

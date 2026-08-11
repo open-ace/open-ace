@@ -687,19 +687,17 @@ class GitWorkspaceService:
                 # Must use the main repo's gh — a worktree can't remove itself.
                 main_gh = _GitHubOps(project_path, system_account=system_account)
                 main_gh.remove_worktree(worktree_path)
-                if reason == "failed":
-                    # Keep ``worktree_path`` so :meth:`ensure_worktree` recreates
-                    # the worktree on retry/reset — only the dir was removed above.
-                    # This realizes the cleanup docstring's promise ("_ensure_worktree
-                    # recreates it on the next cycle if retried/resumed"), which
-                    # clearing it here defeated: the empty-path guard then fell back
-                    # to the main clone instead of recreating, so a reset failed
-                    # workflow re-ran against the main clone and hit EACCES on
-                    # ``node_modules/.vite-temp`` (#23: c88afdc0/83ffb529/ee678c63).
-                    # Mirrors the dirty-retention branch above, which also keeps
-                    # worktree_path. The completed/merged path clears it below.
-                    pass
-                else:
+                # On the completed/merged path, clear worktree_path (the workflow
+                # is done). On the failed path, KEEP it: the dir was just removed,
+                # but the path lets _ensure_worktree recreate the worktree on
+                # retry/reset — realizing the cleanup docstring's promise
+                # ("_ensure_worktree recreates it on the next cycle if retried/
+                # resumed"), which clearing it defeated (the empty-path guard fell
+                # back to the main clone instead of recreating, so a reset failed
+                # workflow re-ran against the main clone and hit EACCES on
+                # node_modules/.vite-temp — #23: c88afdc0/83ffb529/ee678c63). This
+                # mirrors the dirty-retention branch above, which also keeps it.
+                if reason != "failed":
                     self._orch._update_workflow({"worktree_path": ""})
             if remove_branch and branch_name:
                 gh = _GitHubOps(project_path, system_account=system_account)
