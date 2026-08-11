@@ -696,16 +696,6 @@ class RemoteAgent:
         if result["success"]:
             pid = result.get("pid")
             self._send_session_status(session_id, "running", pid)
-            # For new (non-resume) qwen sessions, once the CLI's self-generated
-            # conversation id is discovered, report it so the server persists
-            # cli_session_id for future --resume.
-            if not resume_session_id and cli_tool in ("qwen-code-cli", "qwen"):
-                self._executor.register_cli_session_callback(
-                    session_id,
-                    lambda cli_sid: self._send_session_status(
-                        session_id, "running", pid, cli_session_id=cli_sid
-                    ),
-                )
         else:
             error_msg = result.get("error", "unknown error")
             if error_msg == "Session already running":
