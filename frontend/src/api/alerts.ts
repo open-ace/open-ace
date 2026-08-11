@@ -16,6 +16,9 @@ export interface Alert {
   is_read: boolean;
   created_at: string;
   metadata?: Record<string, unknown>;
+  tool_name?: string;
+  action_url?: string;
+  action_text?: string;
 }
 
 export interface AlertListResponse {
