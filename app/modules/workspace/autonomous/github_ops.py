@@ -370,6 +370,27 @@ class GitHubOps:
             return True
         return current_user != self.system_account
 
+    def _run_as_account(
+        self, argv: list[str], *, timeout: int = 180
+    ) -> subprocess.CompletedProcess:
+        """Run a non-git shell command as ``system_account`` (#23).
+
+        Mirrors ONLY the ``sudo -u`` wrapping of :meth:`_run_git` — not its
+        trusted-git-context machinery (``safe.directory``/hooksPath/fsmonitor),
+        which is git-specific; this runs ``mkdir``/``ln`` for the node_modules
+        shim. No ``cwd`` is accepted: under ``sudo -u`` the service user cannot
+        ``chdir`` into a user-private worktree (the PermissionError of #1421),
+        so callers must pass absolute paths. When the service already runs as
+        ``system_account`` (``_needs_sudo()`` False — single-user/CI), the
+        command runs directly.
+        """
+        if self._needs_sudo():
+            assert self.system_account is not None  # _needs_sudo() guarantees non-empty
+            cmd: list[str] = ["sudo", "-u", self.system_account, *argv]
+        else:
+            cmd = list(argv)
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+
     def _resolve_owner_repo(self) -> str | None:
         """Resolve the ``owner/repo`` slug for the local repo's origin remote.
 
