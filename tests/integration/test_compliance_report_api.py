@@ -108,9 +108,7 @@ class TestReportGenerationAPI:
             "/api/compliance/reports",
             json={
                 "report_type": "usage_summary",
-                "period_start": (datetime.now(UTC) - timedelta(days=30)).strftime(
-                    "%Y-%m-%d"
-                ),
+                "period_start": (datetime.now(UTC) - timedelta(days=30)).strftime("%Y-%m-%d"),
                 "period_end": datetime.now(UTC).strftime("%Y-%m-%d"),
                 "format": "json",
             },
@@ -131,9 +129,7 @@ class TestReportGenerationAPI:
             "/api/compliance/reports",
             json={
                 "report_type": "usage_summary",
-                "period_start": (datetime.now(UTC) - timedelta(days=30)).strftime(
-                    "%Y-%m-%d"
-                ),
+                "period_start": (datetime.now(UTC) - timedelta(days=30)).strftime("%Y-%m-%d"),
                 "period_end": datetime.now(UTC).strftime("%Y-%m-%d"),
                 "format": "csv",
             },
@@ -152,9 +148,7 @@ class TestReportGenerationAPI:
             "/api/compliance/reports",
             json={
                 "report_type": "usage_summary",
-                "period_start": (datetime.now(UTC) - timedelta(days=30)).strftime(
-                    "%Y-%m-%d"
-                ),
+                "period_start": (datetime.now(UTC) - timedelta(days=30)).strftime("%Y-%m-%d"),
                 "period_end": datetime.now(UTC).strftime("%Y-%m-%d"),
                 "format": "html",
                 "language": "en",
@@ -177,9 +171,7 @@ class TestReportGenerationAPI:
             "/api/compliance/reports",
             json={
                 "report_type": "usage_summary",
-                "period_start": (datetime.now(UTC) - timedelta(days=30)).strftime(
-                    "%Y-%m-%d"
-                ),
+                "period_start": (datetime.now(UTC) - timedelta(days=30)).strftime("%Y-%m-%d"),
                 "period_end": datetime.now(UTC).strftime("%Y-%m-%d"),
                 "format": "excel",
                 "language": "en",
@@ -203,9 +195,7 @@ class TestReportGenerationAPI:
             "/api/compliance/reports",
             json={
                 "report_type": "usage_summary",
-                "period_start": (datetime.now(UTC) - timedelta(days=30)).strftime(
-                    "%Y-%m-%d"
-                ),
+                "period_start": (datetime.now(UTC) - timedelta(days=30)).strftime("%Y-%m-%d"),
                 "period_end": datetime.now(UTC).strftime("%Y-%m-%d"),
                 "format": "html",
             },

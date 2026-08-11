@@ -24,7 +24,7 @@ import platform
 import socket
 import sys
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone, UTC
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
 

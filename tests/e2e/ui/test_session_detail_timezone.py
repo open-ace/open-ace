@@ -4,7 +4,7 @@ Test: Session detail timezone display
 Verifies that _format_dt correctly serializes datetimes so that the frontend
 displays them in the user's local timezone (e.g., CST/UTC+8).
 
-Key invariant: all naive datetimes in this codebase are UTC (created via
+Key invariant: all naive datetimes in this codebase are timezone.utc (created via
 datetime.now(timezone.utc).replace(tzinfo=None)), so _format_dt must append
 +00:00 to tell the frontend the correct reference timezone.
 """

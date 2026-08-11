@@ -495,9 +495,9 @@ class UsageAnalytics:
         """
         # Get last 30 days of data
         end_date = datetime.now(UTC).replace(tzinfo=None).strftime("%Y-%m-%d")
-        start_date = (
-            datetime.now(UTC).replace(tzinfo=None) - timedelta(days=30)
-        ).strftime("%Y-%m-%d")
+        start_date = (datetime.now(UTC).replace(tzinfo=None) - timedelta(days=30)).strftime(
+            "%Y-%m-%d"
+        )
 
         daily_data = self._get_daily_totals(start_date, end_date)
 
@@ -518,9 +518,7 @@ class UsageAnalytics:
         forecast_dates = []
         for i in range(1, days + 1):
             forecast_dates.append(
-                (datetime.now(UTC).replace(tzinfo=None) + timedelta(days=i)).strftime(
-                    "%Y-%m-%d"
-                )
+                (datetime.now(UTC).replace(tzinfo=None) + timedelta(days=i)).strftime("%Y-%m-%d")
             )
 
         return {

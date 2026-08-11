@@ -22,11 +22,11 @@ def _utcnow() -> datetime:
     """Get current UTC time as naive datetime for database compatibility.
 
     Database stores naive datetime (no timezone). Using local time causes
-    issues when server is not in UTC timezone. This function ensures
-    consistent UTC-based naive datetime across all time-related operations.
+    issues when server is not in timezone.utc timezone. This function ensures
+    consistent timezone.utc-based naive datetime across all time-related operations.
 
     Returns:
-        datetime: Current UTC time as naive datetime (tzinfo=None)
+        datetime: Current timezone.utc time as naive datetime (tzinfo=None)
     """
     return datetime.now(UTC).replace(tzinfo=None)
 

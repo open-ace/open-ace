@@ -59,9 +59,7 @@ class QuotaAlert:
     quota_limit: int = 0
     percentage: float = 0.0
     message: str = ""
-    created_at: datetime = field(
-        default_factory=lambda: datetime.now(UTC).replace(tzinfo=None)
-    )
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC).replace(tzinfo=None))
     acknowledged: bool = False
     acknowledged_at: datetime | None = None
     acknowledged_by: int | None = None

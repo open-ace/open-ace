@@ -1301,9 +1301,9 @@ class AutonomousWorkflowRepository:
 
         now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
 
-        cutoff = (
-            datetime.now(UTC) - timedelta(seconds=self.LOCK_TIMEOUT_SECONDS)
-        ).strftime("%Y-%m-%d %H:%M:%S")
+        cutoff = (datetime.now(UTC) - timedelta(seconds=self.LOCK_TIMEOUT_SECONDS)).strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
 
         conn = self.db.get_connection()
         try:
@@ -1335,7 +1335,7 @@ class AutonomousWorkflowRepository:
         """
         import app.repositories.database as _db_mod
 
-        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
         conn = self.db.get_connection()
         try:
             cursor = conn.cursor()
@@ -1363,7 +1363,7 @@ class AutonomousWorkflowRepository:
         """
         import app.repositories.database as _db_mod
 
-        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
         conn = self.db.get_connection()
         try:
             cursor = conn.cursor()
@@ -1397,7 +1397,7 @@ class AutonomousWorkflowRepository:
         """
         import app.repositories.database as _db_mod
 
-        now_dt = datetime.now(timezone.utc)
+        now_dt = datetime.now(UTC)
         now = now_dt.strftime("%Y-%m-%d %H:%M:%S")
         cutoff = (now_dt - timedelta(seconds=self.LOCK_TIMEOUT_SECONDS)).strftime(
             "%Y-%m-%d %H:%M:%S"

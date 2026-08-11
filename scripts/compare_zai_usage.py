@@ -21,7 +21,7 @@ import importlib.util
 import sqlite3
 import sys
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone, UTC
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 

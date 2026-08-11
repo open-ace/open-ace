@@ -55,9 +55,7 @@ class FilterResult:
     original_content: str | None = None  # For audit logging with redact
     message: str | None = None
     suggestion: str | None = None
-    timestamp: datetime = field(
-        default_factory=lambda: datetime.now(UTC).replace(tzinfo=None)
-    )
+    timestamp: datetime = field(default_factory=lambda: datetime.now(UTC).replace(tzinfo=None))
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""

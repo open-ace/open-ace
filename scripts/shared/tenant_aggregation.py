@@ -13,7 +13,7 @@ It includes:
 import calendar
 import json
 import logging
-from datetime import date, datetime, timedelta, timezone, UTC
+from datetime import UTC, date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 # Import database utilities

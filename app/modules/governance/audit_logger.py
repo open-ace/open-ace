@@ -130,9 +130,7 @@ class AuditLog:
     """Audit log entry data model."""
 
     id: int | None = None
-    timestamp: datetime = field(
-        default_factory=lambda: datetime.now(UTC).replace(tzinfo=None)
-    )
+    timestamp: datetime = field(default_factory=lambda: datetime.now(UTC).replace(tzinfo=None))
     user_id: int | None = None
     username: str | None = None
     action: str = ""

@@ -159,9 +159,9 @@ def get_roi():
         # Default to last 30 days if not specified
         if not start_date or not end_date:
             end_date = datetime.now(UTC).replace(tzinfo=None).strftime("%Y-%m-%d")
-            start_date = (
-                datetime.now(UTC).replace(tzinfo=None) - timedelta(days=30)
-            ).strftime("%Y-%m-%d")
+            start_date = (datetime.now(UTC).replace(tzinfo=None) - timedelta(days=30)).strftime(
+                "%Y-%m-%d"
+            )
 
         try:
             assumptions, assumption_source = _build_roi_assumptions()
@@ -209,9 +209,9 @@ def get_roi_by_tool():
 
         if not start_date or not end_date:
             end_date = datetime.now(UTC).replace(tzinfo=None).strftime("%Y-%m-%d")
-            start_date = (
-                datetime.now(UTC).replace(tzinfo=None) - timedelta(days=30)
-            ).strftime("%Y-%m-%d")
+            start_date = (datetime.now(UTC).replace(tzinfo=None) - timedelta(days=30)).strftime(
+                "%Y-%m-%d"
+            )
 
         try:
             assumptions, assumption_source = _build_roi_assumptions()
@@ -238,9 +238,9 @@ def get_roi_by_user():
 
         if not start_date or not end_date:
             end_date = datetime.now(UTC).replace(tzinfo=None).strftime("%Y-%m-%d")
-            start_date = (
-                datetime.now(UTC).replace(tzinfo=None) - timedelta(days=30)
-            ).strftime("%Y-%m-%d")
+            start_date = (datetime.now(UTC).replace(tzinfo=None) - timedelta(days=30)).strftime(
+                "%Y-%m-%d"
+            )
 
         try:
             assumptions, assumption_source = _build_roi_assumptions()
@@ -275,9 +275,9 @@ def get_cost_breakdown():
 
         if not start_date or not end_date:
             end_date = datetime.now(UTC).replace(tzinfo=None).strftime("%Y-%m-%d")
-            start_date = (
-                datetime.now(UTC).replace(tzinfo=None) - timedelta(days=30)
-            ).strftime("%Y-%m-%d")
+            start_date = (datetime.now(UTC).replace(tzinfo=None) - timedelta(days=30)).strftime(
+                "%Y-%m-%d"
+            )
 
         calculator = ROICalculator()
         breakdown = calculator.get_cost_breakdown(
@@ -313,9 +313,9 @@ def get_daily_costs():
 
         if not start_date or not end_date:
             end_date = datetime.now(UTC).replace(tzinfo=None).strftime("%Y-%m-%d")
-            start_date = (
-                datetime.now(UTC).replace(tzinfo=None) - timedelta(days=30)
-            ).strftime("%Y-%m-%d")
+            start_date = (datetime.now(UTC).replace(tzinfo=None) - timedelta(days=30)).strftime(
+                "%Y-%m-%d"
+            )
 
         calculator = ROICalculator()
         daily_costs = calculator.get_daily_costs(
@@ -338,9 +338,9 @@ def get_roi_summary():
 
         if not start_date or not end_date:
             end_date = datetime.now(UTC).replace(tzinfo=None).strftime("%Y-%m-%d")
-            start_date = (
-                datetime.now(UTC).replace(tzinfo=None) - timedelta(days=30)
-            ).strftime("%Y-%m-%d")
+            start_date = (datetime.now(UTC).replace(tzinfo=None) - timedelta(days=30)).strftime(
+                "%Y-%m-%d"
+            )
 
         try:
             assumptions, assumption_source = _build_roi_assumptions()

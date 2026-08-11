@@ -193,9 +193,7 @@ class DataRetentionManager:
             if not rule.enabled:
                 continue
 
-            cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(
-                days=rule.retention_days
-            )
+            cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=rule.retention_days)
 
             try:
                 if rule.action == "delete":
@@ -530,9 +528,7 @@ class DataRetentionManager:
             last_cleanup_time = last_cleanup["timestamp"]
             if isinstance(last_cleanup_time, str):
                 last_cleanup_time = datetime.fromisoformat(last_cleanup_time)
-            days_since_cleanup = (
-                datetime.now(UTC).replace(tzinfo=None) - last_cleanup_time
-            ).days
+            days_since_cleanup = (datetime.now(UTC).replace(tzinfo=None) - last_cleanup_time).days
 
         # Determine compliance status
         is_compliant = True

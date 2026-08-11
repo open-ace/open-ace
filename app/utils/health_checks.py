@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -269,8 +269,6 @@ def get_current_timestamp() -> str:
     Returns:
         ISO format timestamp string.
     """
-    from datetime import UTC
-
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 

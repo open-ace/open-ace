@@ -210,9 +210,7 @@ class TestRateLimiter(unittest.TestCase):
 
         # Add an old timestamp
         limiter._user_send_times[user_id].append(
-            datetime.now(UTC).replace(tzinfo=None)
-            - RATE_LIMIT_WINDOW
-            - timedelta(minutes=1)
+            datetime.now(UTC).replace(tzinfo=None) - RATE_LIMIT_WINDOW - timedelta(minutes=1)
         )
 
         # Should be allowed again (old entry filtered out)

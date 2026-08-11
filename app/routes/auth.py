@@ -253,9 +253,7 @@ def _refresh_auth_session(token: str) -> int | None:
 
         # Refresh session
         timeout_hours = _get_session_timeout_hours()
-        new_expires_at = datetime.now(UTC).replace(tzinfo=None) + timedelta(
-            hours=timeout_hours
-        )
+        new_expires_at = datetime.now(UTC).replace(tzinfo=None) + timedelta(hours=timeout_hours)
         user_repo.extend_session_expiry(token, new_expires_at)
         logger.info(f"Session refreshed in auth check, new expiry: {new_expires_at}")
         return int(timeout_hours * 3600)

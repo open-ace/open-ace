@@ -128,9 +128,7 @@ class AlertCreationFailure:
     alert_data: str = ""  # JSON string of QuotaAlertData
     retry_count: int = 0
     last_retry_at: datetime | None = None
-    created_at: datetime = field(
-        default_factory=lambda: datetime.now(UTC).replace(tzinfo=None)
-    )
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC).replace(tzinfo=None))
     status: str = "pending"  # pending, retrying, failed, success
 
     def to_dict(self) -> dict:

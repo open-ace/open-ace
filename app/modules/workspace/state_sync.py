@@ -633,8 +633,7 @@ class StateSyncManager:
             event_id=row["event_id"],
             event_type=row["event_type"],
             timestamp=(
-                parse_db_datetime(row["timestamp"])
-                or datetime.now(UTC).replace(tzinfo=None)
+                parse_db_datetime(row["timestamp"]) or datetime.now(UTC).replace(tzinfo=None)
             ),
             source=row["source"] or "",
             session_id=row["session_id"],

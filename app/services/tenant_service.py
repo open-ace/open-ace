@@ -285,10 +285,7 @@ class TenantService:
 
         # Detect concurrent updates (5-second window)
         last_update = getattr(tenant, "_last_settings_update", None)
-        if (
-            last_update
-            and (datetime.now(UTC).replace(tzinfo=None) - last_update).seconds < 5
-        ):
+        if last_update and (datetime.now(UTC).replace(tzinfo=None) - last_update).seconds < 5:
             logger.warning("Concurrent tenant settings update detected for tenant_id=%s", tenant_id)
 
         tenant._last_settings_update = datetime.now(UTC).replace(tzinfo=None)
@@ -324,21 +321,15 @@ class TenantService:
         date_ranges = [
             (today, today),  # Today
             (
-                (datetime.now(UTC).replace(tzinfo=None) - timedelta(days=7)).strftime(
-                    "%Y-%m-%d"
-                ),
+                (datetime.now(UTC).replace(tzinfo=None) - timedelta(days=7)).strftime("%Y-%m-%d"),
                 today,
             ),  # 7 days
             (
-                (datetime.now(UTC).replace(tzinfo=None) - timedelta(days=30)).strftime(
-                    "%Y-%m-%d"
-                ),
+                (datetime.now(UTC).replace(tzinfo=None) - timedelta(days=30)).strftime("%Y-%m-%d"),
                 today,
             ),  # 30 days
             (
-                (datetime.now(UTC).replace(tzinfo=None) - timedelta(days=90)).strftime(
-                    "%Y-%m-%d"
-                ),
+                (datetime.now(UTC).replace(tzinfo=None) - timedelta(days=90)).strftime("%Y-%m-%d"),
                 today,
             ),  # 90 days
         ]
@@ -466,9 +457,9 @@ class TenantService:
         Returns:
             List[TenantUsage]: Usage records.
         """
-        start_date = (
-            datetime.now(UTC).replace(tzinfo=None) - timedelta(days=days)
-        ).strftime("%Y-%m-%d")
+        start_date = (datetime.now(UTC).replace(tzinfo=None) - timedelta(days=days)).strftime(
+            "%Y-%m-%d"
+        )
         return self.tenant_repo.get_usage(tenant_id, start_date=start_date)
 
     def check_quota(self, tenant_id: int, tokens: int = 0, requests: int = 1) -> dict[str, Any]:

@@ -334,9 +334,7 @@ class DingTalkOrgSyncService:
             started = self.__class__._sync_started_at
             if started is None:
                 return
-            hold_seconds = (
-                datetime.now(UTC).replace(tzinfo=None) - started
-            ).total_seconds()
+            hold_seconds = (datetime.now(UTC).replace(tzinfo=None) - started).total_seconds()
             pid = None
         else:
             hold_seconds = float(state.get("hold_seconds", 0.0) or 0.0)

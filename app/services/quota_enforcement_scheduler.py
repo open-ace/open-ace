@@ -276,9 +276,7 @@ class QuotaEnforcementScheduler:
 
         bigint_cast = "::bigint" if is_postgresql() else ""
         today = datetime.now(UTC).replace(tzinfo=None).strftime("%Y-%m-%d")
-        month_start = (
-            datetime.now(UTC).replace(tzinfo=None).replace(day=1).strftime("%Y-%m-%d")
-        )
+        month_start = datetime.now(UTC).replace(tzinfo=None).replace(day=1).strftime("%Y-%m-%d")
         self._last_run = datetime.now()
 
         exceeded_users = set()

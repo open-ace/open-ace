@@ -530,9 +530,7 @@ class RemoteAgentManager:
     def _cleanup_stale_paused_sessions(self) -> None:
         """Stop sessions that have been paused for more than 4 hours."""
         PAUSE_TIMEOUT_HOURS = 4
-        cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(
-            hours=PAUSE_TIMEOUT_HOURS
-        )
+        cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=PAUSE_TIMEOUT_HOURS)
 
         try:
             with self.db.connection() as conn:

@@ -363,9 +363,7 @@ def _refresh_session(token: str, user_repo=None):
             return
 
         timeout_hours = _get_session_timeout_hours()
-        new_expires_at = datetime.now(UTC).replace(tzinfo=None) + timedelta(
-            hours=timeout_hours
-        )
+        new_expires_at = datetime.now(UTC).replace(tzinfo=None) + timedelta(hours=timeout_hours)
         repo.extend_session_expiry(token, new_expires_at)
         g._session_refresh_seconds = int(timeout_hours * 3600)
     except Exception as e:

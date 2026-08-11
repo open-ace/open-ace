@@ -1246,9 +1246,7 @@ def _retry_pending_git_cleanups(repo=None):
             next_retry = wf.get("cleanup_next_retry_at") or ""
             if next_retry:
                 try:
-                    due = datetime.strptime(next_retry, "%Y-%m-%d %H:%M:%S").replace(
-                        tzinfo=UTC
-                    )
+                    due = datetime.strptime(next_retry, "%Y-%m-%d %H:%M:%S").replace(tzinfo=UTC)
                 except ValueError:
                     due = now
                 if due > now:

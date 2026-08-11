@@ -390,9 +390,7 @@ class Alert:
     username: str | None = None
     tool_name: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
-    created_at: datetime = field(
-        default_factory=lambda: datetime.now(UTC).replace(tzinfo=None)
-    )
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC).replace(tzinfo=None))
     read: bool = False
     action_url: str | None = None
     action_text: str | None = None
@@ -2051,9 +2049,7 @@ class AlertNotifier:
         conn = self._get_connection()
         cursor = conn.cursor()
 
-        cutoff = (
-            datetime.now(UTC).replace(tzinfo=None) - timedelta(days=days)
-        ).isoformat()
+        cutoff = (datetime.now(UTC).replace(tzinfo=None) - timedelta(days=days)).isoformat()
         cursor.execute(
             adapt_sql(
                 f"DELETE FROM alerts WHERE created_at < ? AND {adapt_boolean_condition('read', True)}"
@@ -2259,8 +2255,7 @@ class AlertNotifier:
             tool_name=row["tool_name"],
             metadata=json.loads(row["metadata"]) if row["metadata"] else {},
             created_at=(
-                parse_db_datetime(row["created_at"])
-                or datetime.now(UTC).replace(tzinfo=None)
+                parse_db_datetime(row["created_at"]) or datetime.now(UTC).replace(tzinfo=None)
             ),
             read=bool(row["read"]),
             action_url=row["action_url"],

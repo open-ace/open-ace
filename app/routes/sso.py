@@ -1484,9 +1484,7 @@ def _finalize_sso_login(provider_name: str, auth_result, frontend_url: str | Non
 
         # Also create local session with correct expiration time
         timeout_hours = _get_session_timeout_hours()
-        expires_at = datetime.now(UTC).replace(tzinfo=None) + timedelta(
-            hours=timeout_hours
-        )
+        expires_at = datetime.now(UTC).replace(tzinfo=None) + timedelta(hours=timeout_hours)
         UserRepository().create_session(
             user_id=user_id,
             token=session_token,

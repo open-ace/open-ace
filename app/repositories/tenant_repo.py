@@ -384,9 +384,7 @@ class TenantRepository:
         query = "UPDATE tenants SET deleted_at = NULL, updated_at = ? WHERE id = ?"
 
         try:
-            cursor = self.db.execute(
-                query, (datetime.now(UTC).replace(tzinfo=None), tenant_id)
-            )
+            cursor = self.db.execute(query, (datetime.now(UTC).replace(tzinfo=None), tenant_id))
             return cast("bool", cursor.rowcount > 0)
         except Exception as e:
             logger.error(f"Failed to restore tenant: {e}")

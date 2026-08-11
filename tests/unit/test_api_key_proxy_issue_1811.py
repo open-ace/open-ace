@@ -187,9 +187,7 @@ class TestProxyTokenCleanup:
         conn = mock_service._get_connection()
         cursor = conn.cursor()
 
-        expired_time = (
-            datetime.now(UTC).replace(tzinfo=None) - timedelta(days=10)
-        ).isoformat()
+        expired_time = (datetime.now(UTC).replace(tzinfo=None) - timedelta(days=10)).isoformat()
         cursor.execute(
             "INSERT INTO proxy_token_jtis (jti, token_hash, user_id, session_id, tenant_id, provider, session_type, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (
@@ -342,9 +340,7 @@ class TestProxyTokenCleanup:
         cursor = conn.cursor()
 
         # Create more than 1000 expired records
-        expired_time = (
-            datetime.now(UTC).replace(tzinfo=None) - timedelta(days=10)
-        ).isoformat()
+        expired_time = (datetime.now(UTC).replace(tzinfo=None) - timedelta(days=10)).isoformat()
         for i in range(1500):
             cursor.execute(
                 "INSERT INTO proxy_token_jtis (jti, token_hash, user_id, session_id, tenant_id, provider, session_type, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",

@@ -364,8 +364,7 @@ class SummaryService:
                 if isinstance(last_update, str):
                     last_update = datetime.fromisoformat(last_update.replace("Z", "+00:00"))
                 age = (
-                    datetime.now(UTC).replace(tzinfo=None)
-                    - last_update.replace(tzinfo=None)
+                    datetime.now(UTC).replace(tzinfo=None) - last_update.replace(tzinfo=None)
                 ).total_seconds()
                 return cast("bool", age > 3600)  # Refresh if older than 1 hour
             return True

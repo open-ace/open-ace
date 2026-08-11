@@ -379,9 +379,7 @@ class UserRepository:
         query = adapt_sql("UPDATE users SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL")
 
         try:
-            cursor = self.db.execute(
-                query, (datetime.now(UTC).replace(tzinfo=None), user_id)
-            )
+            cursor = self.db.execute(query, (datetime.now(UTC).replace(tzinfo=None), user_id))
             return cast("bool", cursor.rowcount > 0)
         except Exception as e:
             logger.error(f"Error soft deleting user: {e}")
