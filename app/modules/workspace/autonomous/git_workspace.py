@@ -687,7 +687,18 @@ class GitWorkspaceService:
                 # Must use the main repo's gh — a worktree can't remove itself.
                 main_gh = _GitHubOps(project_path, system_account=system_account)
                 main_gh.remove_worktree(worktree_path)
-                self._orch._update_workflow({"worktree_path": ""})
+                # On the completed/merged path, clear worktree_path (the workflow
+                # is done). On the failed path, KEEP it: the dir was just removed,
+                # but the path lets _ensure_worktree recreate the worktree on
+                # retry/reset — realizing the cleanup docstring's promise
+                # ("_ensure_worktree recreates it on the next cycle if retried/
+                # resumed"), which clearing it defeated (the empty-path guard fell
+                # back to the main clone instead of recreating, so a reset failed
+                # workflow re-ran against the main clone and hit EACCES on
+                # node_modules/.vite-temp — #23: c88afdc0/83ffb529/ee678c63). This
+                # mirrors the dirty-retention branch above, which also keeps it.
+                if reason != "failed":
+                    self._orch._update_workflow({"worktree_path": ""})
             if remove_branch and branch_name:
                 gh = _GitHubOps(project_path, system_account=system_account)
                 result = gh.delete_branch(branch_name)

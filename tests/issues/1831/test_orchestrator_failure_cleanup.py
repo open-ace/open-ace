@@ -65,9 +65,10 @@ class TestCleanupWorktreeAndBranch:
         assert ok is True
         instance.remove_worktree.assert_called_once_with("/tmp/test-wt")
         instance.delete_branch.assert_not_called()  # keep_for_debug
-        # worktree_path cleared, branch_name NOT cleared.
+        # worktree_path is KEPT (dir removed above) so ensure_worktree recreates
+        # the worktree on retry/reset (#23); branch_name NOT cleared.
         updates = _update_calls(orch)
-        assert {"worktree_path": ""} in updates
+        assert not any(u.get("worktree_path") == "" for u in updates)
         assert not any("branch_name" in u for u in updates)
 
     @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
@@ -246,7 +247,9 @@ class TestDirtyWorktreeGuard:
         assert ok is True
         instance.remove_worktree.assert_called_once_with("/tmp/test-wt")
         updates = _update_calls(orch)
-        assert {"worktree_path": ""} in updates
+        # worktree_path is KEPT (dir reclaimed above) so ensure_worktree
+        # recreates the worktree on retry/reset (#23).
+        assert not any(u.get("worktree_path") == "" for u in updates)
 
     @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
     def test_dirty_retention_note_is_idempotent(self, mock_gh_cls):
