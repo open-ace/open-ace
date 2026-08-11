@@ -217,7 +217,7 @@ def _check_legacy_fallback(machine_id: str) -> tuple[bool, tuple[Any, Any] | Non
     machine = agent_mgr.get_machine(machine_id)
     if machine and machine.get("created_at"):
         try:
-            from datetime import datetime, timezone
+            from datetime import datetime
 
             created_at = machine["created_at"]
             if isinstance(created_at, str):
@@ -732,7 +732,10 @@ def assign_user(machine_id):
     permission = data.get("permission", "user")
 
     # Machine admins can only assign 'user' permission
-    if g.user.get("role") not in ("admin", "platform_admin"):
+    # Issue #2332: Use centralized permission check
+    from app.auth.permissions import is_platform_admin_role
+
+    if not is_platform_admin_role(g.user.get("role")):
         permission = "user"
 
     if not user_id:
@@ -765,7 +768,10 @@ def revoke_user(machine_id, user_id):
         return error
 
     # Machine admins cannot revoke other admins
-    if g.user.get("role") not in ("admin", "platform_admin"):
+    # Issue #2332: Use centralized permission check
+    from app.auth.permissions import is_platform_admin_role
+
+    if not is_platform_admin_role(g.user.get("role")):
         mgr = get_remote_agent_manager()
         target_perm = mgr.get_user_permission(machine_id, user_id)
         if target_perm == "admin":
@@ -960,6 +966,53 @@ def create_remote_session():
 
     # P2-1: Permission check moved to decorator @machine_access_required
     session_mgr = get_remote_session_manager()
+
+    # Issue #24: the qwen-code-webui integrated-mode "new remote session"
+    # flow can reach here without a ha_pool_token (its session-models fetch
+    # only returns models for an existing session). The route is already
+    # gated by @machine_access_required, so fall back to issuing the pool
+    # token server-side (same logic as GET /api/workspace/session-models).
+    if not ha_pool_token and (cli_tool or "qwen-code-cli").lower().startswith("qwen"):
+        try:
+            api_proxy = get_api_key_proxy_service()
+            agent_mgr = get_remote_agent_manager()
+            machine = agent_mgr.get_machine(machine_id)
+            tenant_id = machine.get("tenant_id", 1) if machine else 1
+            pool = api_proxy.get_tool_model_pool(
+                tenant_id=tenant_id,
+                tool_name="qwen-code",
+                scope="remote",
+                provider="openai",
+            )
+            api_proxy.revoke_proxy_tokens_for_session(
+                f"ha-pool:{machine_id}",
+                reason="ha_pool_rotated",
+            )
+            ha_pool_token = api_proxy.generate_proxy_token(
+                user_id=g.user["id"],
+                session_id=f"ha-pool:{machine_id}",
+                tenant_id=tenant_id,
+                provider="openai",
+                session_type="ha_pool",
+                extra_payload={
+                    "scope": "remote",
+                    "tool_name": "qwen-code",
+                    "machine_id": machine_id,
+                    "ha_candidate_keys": pool.get("candidate_keys", []),
+                    "ha_model_key_ids": pool.get("model_key_ids", {}),
+                    "ha_models": pool.get("models", []),
+                    "ha_settings": pool.get("settings", {}),
+                    "ha_empty_reason": pool.get("empty_reason"),
+                },
+            )
+            logger.info(
+                "Issued ha_pool_token for remote session creation (machine %s, user %s)",
+                machine_id,
+                g.user["id"],
+            )
+        except Exception:
+            logger.exception("Failed to auto-issue ha_pool_token for remote session")
+
     result = session_mgr.create_remote_session(
         user_id=g.user["id"],
         machine_id=machine_id,
@@ -971,11 +1024,14 @@ def create_remote_session():
         ha_pool_token=ha_pool_token,
     )
 
-    if result:
+    if result and result.get("success") is not False:
         return jsonify({"success": True, "session": result})
     return (
         jsonify(
-            {"error": "Failed to create remote session. Check machine availability and access."}
+            {
+                "error": (result or {}).get("error")
+                or "Failed to create remote session. Check machine availability and access.",
+            }
         ),
         400,
     )
@@ -990,6 +1046,26 @@ def get_remote_session(session_id):
         return access_error
 
     if result:
+        # Issue #28: filter Qwen system-context entries that were historically
+        # recorded as role=user messages so they never render as user chat
+        # messages when the webui loads a restored remote session.
+        # ``messages`` may hold SessionMessage objects or dicts — handle both.
+        msgs = result.get("messages")
+        if isinstance(msgs, list):
+            from scripts.shared.qwen_context import is_qwen_system_context
+
+            def _msg_role(m):
+                return m.get("role") if isinstance(m, dict) else getattr(m, "role", "")
+
+            def _msg_content(m):
+                return m.get("content") if isinstance(m, dict) else getattr(m, "content", "")
+
+            result["messages"] = [
+                m
+                for m in msgs
+                if not (_msg_role(m) == "user" and is_qwen_system_context(_msg_content(m)))
+            ]
+
         # Return explicit error for ended sessions so frontend can handle properly
         status = result.get("status")
         if status in ("completed", "stopped", "error"):
@@ -1670,8 +1746,14 @@ def agent_message():
         session_id = data.get("session_id")
         status = data.get("status")
         pid = data.get("pid")
+        cli_session_id = data.get("cli_session_id")
 
-        logger.info("Agent session_status [%s]: status=%s", (session_id or "")[:8], status)
+        logger.info(
+            "Agent session_status [%s]: status=%s cli_session_id=%s",
+            (session_id or "")[:8],
+            status,
+            (cli_session_id or "")[:8] if cli_session_id else None,
+        )
 
         if session_id and status:
             session_mgr = get_remote_session_manager()
@@ -1679,6 +1761,7 @@ def agent_message():
                 session_id=session_id,
                 status=status,
                 pid=pid,
+                cli_session_id=cli_session_id,
             )
 
         return jsonify({"success": True})
@@ -1819,6 +1902,17 @@ def agent_message():
         vscode_token = data.get("token", "")
         cs_password = data.get("cs_password", "")  # code-server's own password
         error = data.get("error", "")
+
+        # Issue #24: if code-server started but the agent did not send its
+        # password, the HTTP proxy forwards unauthenticated requests and
+        # code-server answers with the login page. Log so we can tell whether
+        # the password was lost in transit or never generated.
+        if status == "running" and not cs_password:
+            logger.warning(
+                "vscode_status running without cs_password (vscode_id=%s) — "
+                "code-server proxy will hit the login page",
+                vscode_id[:8],
+            )
 
         machine_id_for_vs = data.get("machine_id", "")
 
@@ -2069,6 +2163,15 @@ def agent_message():
                     from app.utils.roles import normalize_message_role
 
                     role = normalize_message_role(role)
+
+                    # Issue #28: Qwen CLI writes its system context (Platform
+                    # Tool Limits, startup context, memory instructions) as
+                    # role=user messages; never mirror them as user chat
+                    # messages in session_messages / daily_messages.
+                    from scripts.shared.qwen_context import is_qwen_system_context
+
+                    if role == "user" and is_qwen_system_context(content):
+                        continue
 
                     input_tokens = usage.get("input_tokens", 0) if isinstance(usage, dict) else 0
                     output_tokens = usage.get("output_tokens", 0) if isinstance(usage, dict) else 0
@@ -3680,9 +3783,11 @@ def remote_vscode_proxy(vscode_id, path=""):
 
         # Check tenant isolation (Issue #2183)
         if session_tenant_id is not None and user_tenant_id != session_tenant_id:
-            # Platform admin (or legacy admin) can access cross-tenant (with audit)
-            # Issue #2286: Accept legacy 'admin' role for backward compatibility
-            if g.user.get("role") in ("platform_admin", "admin"):
+            # Check platform admin role using centralized utility
+            # Issue #2332: Use strict mode for platform admin checking
+            from app.auth.permissions import is_platform_admin_role
+
+            if is_platform_admin_role(g.user.get("role")):
                 audit_logger.log(
                     action=AuditAction.ADMIN_CROSS_TENANT_ACCESS.value,
                     severity="info",
@@ -3734,7 +3839,10 @@ def remote_vscode_proxy(vscode_id, path=""):
                 user_authenticated = True
 
         # System admin can access any session
-        if g.user.get("role") in ("admin", "platform_admin"):
+        # Issue #2332: Use centralized permission check
+        from app.auth.permissions import is_platform_admin_role
+
+        if is_platform_admin_role(g.user.get("role")):
             user_authenticated = True
 
     # Issue #2183: Require valid token or user authentication
@@ -3766,13 +3874,12 @@ def remote_vscode_proxy(vscode_id, path=""):
     # Collect request headers
     headers = {k: v for k, v in request.headers if k.lower() != "host"}
 
-    # Add code-server password auth if available
-    # code-server uses HTTP Basic Auth with empty username and password
+    # Add code-server password auth if available.
+    # code-server accepts HTTP Basic Auth with format: base64(":password")
     cs_password = info.get("cs_password", "")
     if cs_password:
         import base64 as _b64
 
-        # Format: base64(":password") = base64(password) with colon prefix
         auth_value = _b64.b64encode(f":{cs_password}".encode()).decode()
         headers["Authorization"] = f"Basic {auth_value}"
 

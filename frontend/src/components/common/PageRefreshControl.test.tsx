@@ -174,8 +174,9 @@ describe('PageRefreshControl', () => {
       // Should render time text
       const timeText = screen.getByText(/minutes ago/i);
       expect(timeText).toBeInTheDocument();
-      // Issue #2397: Should have tabIndex for keyboard accessibility
-      expect(timeText).toHaveAttribute('tabindex', '0');
+      // Issue #2397: Time text is now wrapped with Tooltip component (no native title)
+      // Should have tabIndex for keyboard accessibility
+      expect(timeText).toHaveAttribute('tabIndex', '0');
     });
 
     it('should render multi-line JSX in tooltip content', async () => {
@@ -294,6 +295,23 @@ describe('PageRefreshControl', () => {
 
       // Manual refresh button should always be present
       expect(screen.getByTestId('manual-refresh-button')).toBeInTheDocument();
+    });
+
+    // Issue #2397: Button style should match adjacent buttons
+    it('should have btn-outline-secondary class for refresh button', () => {
+      const mockRefresh = createMockRefresh();
+
+      render(
+        <PageRefreshControl
+          refresh={mockRefresh}
+          compact={true}
+          showAutoRefreshToggle={false}
+          showIntervalSelector={false}
+        />
+      );
+
+      const refreshButton = screen.getByTestId('manual-refresh-button');
+      expect(refreshButton).toHaveClass('btn-outline-secondary');
     });
   });
 
