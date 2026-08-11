@@ -147,3 +147,146 @@ has_perm = PermissionService.has_permission(user_id, 'export_analysis')
 - 用户、项目、工作区会话、会话消息、每日用量聚合、审计日志、远程机器、机器权限和配额均具备租户感知。
 - 非管理员用户可见 API 会把认证租户范围应用到会话、项目、用量和审计查询；工作区会话变更也会在写入边界携带会话租户。
 - 系统管理员有意保留全局运维可见性，用于支持和故障处理。
+
+## API Key 管理租户授权（Issue #2327）
+
+### 核心原则
+
+API Key 管理接口的 `tenant_id` 参数是**目标选择**而非**授权凭据**。请求参数只能表达平台管理员的明确目标，不能扩大租户管理员的权限。
+
+### 授权模型
+
+#### tenant_admin
+
+- **目标租户**：必须始终来自认证上下文（`g.tenant_id`）
+- **不提供 tenant_id**：使用 actor tenant（向后兼容）
+- **提供不同 tenant_id**：返回 403 Forbidden
+- **跨租户操作**：严格禁止
+
+**示例**：
+```python
+# tenant_admin (tenant_id=1) 的请求
+GET /api/api-keys                    # 成功，返回 tenant 1 的 API Key
+GET /api/api-keys?tenant_id=1       # 成功，返回 tenant 1 的 API Key
+GET /api/api-keys?tenant_id=2       # 失败，返回 403（跨租户访问拒绝）
+POST /api/api-keys {"tenant_id": 2} # 失败，返回 403（跨租户访问拒绝）
+```
+
+#### platform_admin / legacy admin
+
+- **目标租户**：必须显式指定 `tenant_id`（fail-closed）
+- **不提供 tenant_id**：返回 400 Bad Request（不返回全局列表）
+- **跨租户操作**：允许，但产生审计记录
+- **权限范围**：可管理所有租户
+
+**示例**：
+```python
+# platform_admin 的请求
+GET /api/api-keys                    # 失败，返回 400（缺少 tenant_id）
+GET /api/api-keys?tenant_id=1       # 成功，返回 tenant 1 的 API Key
+GET /api/api-keys?tenant_id=2       # 成功，返回 tenant 2 的 API Key（审计记录）
+POST /api/api-keys {"tenant_id": 1} # 成功，在 tenant 1 创建 API Key
+```
+
+### API Key 所有权验证
+
+对于 `PUT /api/api-keys/<key_id>` 和 `DELETE /api/api-keys/<key_id>`：
+
+- Repository 层强制验证 `key_id` 属于目标租户
+- 如果 API Key 不存在或不属于目标租户：返回 403 Forbidden
+- 不返回 404 以避免信息泄露（避免攻击者探测 key_id 是否存在）
+
+### 错误响应
+
+| 状态码 | 错误消息 | 说明 |
+|--------|---------|------|
+| 400 | Target tenant_id is required | platform_admin 缺少 tenant_id |
+| 400 | Invalid tenant_id | tenant_id 为负数、0 或格式错误 |
+| 403 | Cross-tenant access denied | tenant_admin 跨租户访问 |
+| 403 | Tenant admin must have tenant_id | tenant_admin 没有关联租户 |
+| 403 | API key not found or access denied | API Key 不存在或不属于目标租户 |
+
+### 审计记录
+
+平台管理员跨租户操作必须产生审计记录，包含以下字段：
+
+- `actor_user_id`: 操作者用户 ID
+- `actor_tenant_id`: 操作者所属租户
+- `target_tenant_id`: 目标租户
+- `action`: 操作类型（API_KEY_CREATE, API_KEY_READ, API_KEY_UPDATE, API_KEY_DELETE）
+- `api_key_id`: API Key ID（适用时）
+- `api_key_name`: API Key 名称
+- `result`: 操作结果（success, denied, not_found）
+- `request_id`: 请求追踪 ID
+
+### 实现架构
+
+#### 集中式授权原语
+
+使用 `resolve_authorized_target_tenant(actor, requested_tenant_id)` 统一处理：
+
+```python
+# tenant_admin: 强制租户边界
+actor = {"id": 1, "role": "tenant_admin", "tenant_id": 1}
+target_tenant_id, error = resolve_authorized_target_tenant(actor, requested_tenant_id=2)
+# 返回: (None, "Cross-tenant access denied")
+
+# platform_admin: 必须显式指定
+actor = {"id": 1, "role": "platform_admin", "tenant_id": None}
+target_tenant_id, error = resolve_authorized_target_tenant(actor, requested_tenant_id=1)
+# 返回: (1, None)
+```
+
+#### ActorScope 授权上下文
+
+Service/Repository 层使用不可变的 `ActorScope` 对象：
+
+```python
+@dataclass(frozen=True)
+class ActorScope:
+    user_id: int
+    role: str
+    actor_tenant_id: int | None
+    target_tenant_id: int
+    is_cross_tenant: bool
+    request_id: str | None
+```
+
+#### 路由层装饰器
+
+使用 `@api_key_admin_required` 装饰器统一处理：
+
+```python
+@api_keys_bp.route("/api-keys", methods=["GET"])
+@api_key_admin_required
+def list_api_keys():
+    scope = g.actor_scope  # 已验证的授权上下文
+    keys = api_proxy.list_api_keys(scope.target_tenant_id)
+    return jsonify({"success": True, "keys": keys})
+```
+
+#### Service 层防线
+
+Service 层方法必须接收已验证的 `ActorScope`：
+
+```python
+@require_actor_scope()
+def store_api_key(self, scope: ActorScope, ...):
+    # 自动验证 scope 包含有效的 user_id, role, target_tenant_id
+    ...
+```
+
+### Fail-Closed 原则
+
+**不存在静默默认行为**：
+
+- 不回退到 tenant 1 或其他默认租户
+- 不忽略无效 tenant_id 继续执行
+- 不返回全局列表或全局权限
+- 所有异常情况必须明确报错
+
+### 向后兼容性
+
+- `tenant_admin` 不提供 `tenant_id` 时：使用 actor tenant（向后兼容）
+- 错误响应格式符合 API 规范（包含 `error` 字段）
+- 现有的租户隔离测试继续通过

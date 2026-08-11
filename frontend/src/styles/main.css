@@ -1491,6 +1491,21 @@ link[rel='dns-prefetch'] {
   color: #f1f5f9 !important; /* 4.72:1+ on all darkened backgrounds */
 }
 
+/* Light theme: fix StatCard label contrast on colored backgrounds */
+
+/* Deep backgrounds: use white text */
+.stat-card.bg-primary .text-muted,
+.stat-card.bg-success .text-muted,
+.stat-card.bg-danger .text-muted {
+  color: rgba(255, 255, 255, 0.85) !important;
+}
+
+/* Light backgrounds: use dark text (Bootstrap convention) */
+.stat-card.bg-info .text-muted,
+.stat-card.bg-warning .text-muted {
+  color: rgba(33, 37, 41, 0.85) !important;
+}
+
 /* Dark theme: darken badge backgrounds for text contrast ≥4.5:1 (Issue #1648)
    Badge component uses text-dark for warning/info/success — override to white
    in dark theme so white text on darkened backgrounds meets WCAG AA. */

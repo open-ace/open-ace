@@ -16,13 +16,18 @@ import threading
 from base64 import b64decode, b64encode
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
-from typing import Any, cast
+
+# Issue #2327: Import ActorScope for tenant authorization
+from typing import TYPE_CHECKING, Any, cast
 
 from app.modules.workspace.api_key_router import APIKeyRouter
 from app.repositories.database import DB_PATH, is_postgresql
 from app.utils.datetime_utils import ensure_utc_suffix
 from app.utils.security_env import get_encryption_key_material
 from app.utils.tool_names import TOOL_NAME_ALIASES, normalize_tool_name
+
+if TYPE_CHECKING:
+    from app.auth.decorators import ActorScope
 
 try:
     import tomllib
@@ -936,7 +941,10 @@ class APIKeyProxyService:
         return success
 
     def get_key_by_id(self, tenant_id: int, key_id: int) -> dict[str, Any] | None:
-        """Get an API key by its ID.
+        """
+        Get an API key by its ID.
+
+        DEPRECATED: Use get_api_key_by_id_for_tenant() instead.
 
         Args:
             tenant_id: Tenant ID for security check.
@@ -955,6 +963,72 @@ class APIKeyProxyService:
             WHERE tenant_id = {_param()} AND id = {_param()}
         """,
             (tenant_id, key_id),
+        )
+
+        row = cursor.fetchone()
+        conn.close()
+
+        if not row:
+            return None
+
+        return {
+            "id": row["id"],
+            "provider": row["provider"],
+            "key_name": row["key_name"],
+            "base_url": row["base_url"],
+            "cli_tools": row["cli_tools"],
+            "cli_settings": row["cli_settings"],
+            "priority": row["priority"] if row["priority"] is not None else 0,
+            "weight": row["weight"] if row["weight"] is not None else 100,
+            "scope": row["scope"] or "remote",
+            "is_active": bool(row["is_active"]),
+        }
+
+    # ── Issue #2327: Tenant Authorization Methods ─────────────────────────
+
+    def get_api_key_by_id_for_tenant(
+        self, key_id: int, scope: "ActorScope"
+    ) -> dict[str, Any] | None:
+        """
+        获取指定租户的 API Key（强制租户验证）。
+
+        Issue #2327: Repository 层强制 tenant_id 过滤，确保 API Key 所有权验证。
+
+        验证步骤：
+        1. 查询 API Key WHERE id = key_id AND tenant_id = scope.target_tenant_id
+        2. 找到：返回 API Key
+        3. 未找到：返回 None（由 Service 层决定返回 403 还是 404）
+
+        Args:
+            key_id: API Key ID
+            scope: ActorScope 授权上下文
+
+        Returns:
+            Dict with key info or None if not found.
+        """
+        # Issue #2327: 验证 ActorScope
+        # 运行时导入以避免循环依赖
+        from app.auth.decorators import ActorScope as ActorScopeClass
+
+        if not isinstance(scope, ActorScopeClass):
+            raise TypeError(
+                f"get_api_key_by_id_for_tenant must receive ActorScope, got {type(scope).__name__}"
+            )
+
+        # 验证 scope 包含有效的 target_tenant_id
+        if scope.target_tenant_id <= 0:
+            raise ValueError(f"Invalid target_tenant_id: {scope.target_tenant_id}")
+
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute(
+            f"""
+            SELECT id, provider, key_name, base_url, cli_tools, cli_settings, priority, weight, scope, is_active
+            FROM api_key_store
+            WHERE tenant_id = {_param()} AND id = {_param()}
+        """,
+            (scope.target_tenant_id, key_id),
         )
 
         row = cursor.fetchone()
