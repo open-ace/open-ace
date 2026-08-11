@@ -339,6 +339,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 AGENT_FILES=(
     agent.py
     config.py
+    configure-code-server-proxy.ps1
     constants.py
     env_security.py
     executor.py

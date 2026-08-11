@@ -113,6 +113,7 @@ $agentUrl = "$ServerUrl/api/remote/agent/files"
 $files = @(
     "agent.py",
     "config.py",
+    "configure-code-server-proxy.ps1",
     "constants.py",
     "env_security.py",
     "executor.py",
