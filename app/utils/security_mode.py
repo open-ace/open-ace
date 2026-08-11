@@ -86,10 +86,7 @@ def is_test_context() -> bool:
         return True
 
     # Layer 3: Pytest sets this during test execution
-    if "PYTEST_CURRENT_TEST" in os.environ:
-        return True
-
-    return False
+    return "PYTEST_CURRENT_TEST" in os.environ
 
 
 def is_production_capable_path() -> bool:
@@ -131,9 +128,9 @@ def is_production_capable_path() -> bool:
         else:
             # Parse and validate timestamp
             try:
-                from datetime import datetime, timedelta
-
                 # Parse timestamp (format: YYYY-MM-DD)
+                from datetime import datetime
+
                 flag_date = datetime.strptime(timestamp_str, "%Y-%m-%d")
                 now = datetime.now()
                 age_days = (now - flag_date).days
@@ -181,11 +178,7 @@ def is_production_capable_path() -> bool:
         return True
 
     # 5. Running in Kubernetes
-    if os.environ.get("KUBERNETES_SERVICE_HOST"):
-        return True
-
-    # Default: not production-capable (local development, REPL, etc.)
-    return False
+    return bool(os.environ.get("KUBERNETES_SERVICE_HOST"))
 
 
 def detect_security_mode() -> tuple[SecurityMode, SecurityModeSource]:
@@ -325,9 +318,11 @@ def require_explicit_mode() -> None:
             if _source_cache == SecurityModeSource.EXPLICIT:
                 return
             # Inferred or default - not allowed in production paths
+            # _source_cache is guaranteed non-None when _initialized is True
+            source_value = _source_cache.value if _source_cache else "unknown"
             raise RuntimeError(
                 f"Security mode must be explicitly set in production-capable paths. "
-                f"Current source: {_source_cache.value}. "
+                f"Current source: {source_value}. "
                 f"Set OPENACE_SECURITY_MODE explicitly."
             )
 
@@ -531,7 +526,8 @@ def load_pilot_metadata() -> dict | None:
         import json
 
         with open(metadata_path) as f:
-            return json.load(f)
+            data: dict | None = json.load(f)
+            return data
     except Exception as e:
         logger.warning("Failed to read pilot metadata: %s", e)
         return None

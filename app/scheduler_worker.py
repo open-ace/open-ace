@@ -77,7 +77,7 @@ if scripts_path not in sys.path:
 
 # Now import application modules
 try:
-    from app.repositories.database import Database, is_postgresql
+    from app.repositories.database import Database
     from app.services.leader_election import check_scheduler_tables_exist
 except ImportError as e:
     logger.error(f"Failed to import application modules: {e}")

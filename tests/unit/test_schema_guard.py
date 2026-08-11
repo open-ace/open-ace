@@ -186,16 +186,19 @@ class TestGetEnvironmentMode:
         but is deprecated and will be removed in v2.1.0.
         """
         from app.utils.security_mode import (
-            reset_security_mode_cache,
             SecurityMode,
             SecurityModeSource,
+            reset_security_mode_cache,
         )
 
         reset_security_mode_cache()
         # The compatibility layer delegates to security_mode module
         # We can test it directly by mocking the underlying detect function
         with patch("app.utils.security_mode.detect_security_mode") as mock_detect:
-            mock_detect.return_value = (SecurityMode.PRODUCTION, SecurityModeSource.INFERRED_FLASK_ENV)
+            mock_detect.return_value = (
+                SecurityMode.PRODUCTION,
+                SecurityModeSource.INFERRED_FLASK_ENV,
+            )
             result = get_environment_mode()
             assert result == "production"
 

@@ -509,9 +509,9 @@ def create_app(config=None):
         """
         from app.utils.security_baseline import check_all
         from app.utils.security_mode import (
+            SecurityModeSource,
             get_security_mode_with_source,
             load_pilot_metadata,
-            SecurityModeSource,
         )
 
         results = check_all()
@@ -587,9 +587,9 @@ def create_app(config=None):
             run_check_with_timeout,
         )
         from app.utils.security_mode import (
+            SecurityModeSource,
             get_security_mode_with_source,
             load_pilot_metadata,
-            SecurityModeSource,
         )
 
         checks: dict[str, dict[str, str | bool | None]] = {
@@ -623,9 +623,9 @@ def create_app(config=None):
 
                 if not is_test_context():
                     checks["security_mode"]["status"] = "not_explicit"
-                    checks["security_mode"]["reason"] = (
-                        f"Security mode must be explicitly set (current source: {source.value})"
-                    )
+                    checks["security_mode"][
+                        "reason"
+                    ] = f"Security mode must be explicitly set (current source: {source.value})"
                     status_code = 503
 
             # Check for pilot metadata in production mode
@@ -633,13 +633,15 @@ def create_app(config=None):
                 # Keep status as "ok" but add warning for monitoring
                 # This is a migration path, not a failure condition
                 checks["security_mode"]["warnings"] = checks["security_mode"].get("warnings", [])
-                checks["security_mode"]["warnings"].append({
-                    "type": "pilot_metadata_in_production",
-                    "message": (
-                        "Production mode running with pilot metadata file present. "
-                        "This indicates pilot-to-production migration without secret configuration."
-                    )
-                })
+                checks["security_mode"]["warnings"].append(
+                    {
+                        "type": "pilot_metadata_in_production",
+                        "message": (
+                            "Production mode running with pilot metadata file present. "
+                            "This indicates pilot-to-production migration without secret configuration."
+                        ),
+                    }
+                )
                 logger.error(
                     "Production mode running with pilot metadata file! "
                     "Remove metadata and set secrets explicitly."

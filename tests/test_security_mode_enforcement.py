@@ -22,14 +22,14 @@ from app.utils.security_mode import (
     SecurityMode,
     SecurityModeSource,
     detect_security_mode,
+    get_pilot_metadata_path,
     get_security_mode,
     get_security_mode_with_source,
-    is_test_context,
     is_production_capable_path,
+    is_test_context,
+    load_pilot_metadata,
     require_explicit_mode,
     reset_security_mode_cache,
-    get_pilot_metadata_path,
-    load_pilot_metadata,
 )
 
 
@@ -113,11 +113,12 @@ class TestProductionCapablePathDetection:
         monkeypatch.setattr("app.utils.security_mode.is_test_context", lambda: False)
 
         with caplog.at_level(logging.ERROR):
-            result = is_production_capable_path()
+            is_production_capable_path()
 
         # Expired flag should be ignored - verify expiration error is logged
-        assert any("EXPIRED" in record.message for record in caplog.records), \
-            f"Expected EXPIRED error in logs, got: {[r.message for r in caplog.records]}"
+        assert any(
+            "EMERGENCY ROLLBACK FLAG EXPIRED" in record.message for record in caplog.records
+        ), f"Expected EXPIRED error in logs, got: {[r.message for r in caplog.records]}"
         # Flag is ignored, so production-capable checks continue
         # Since we're in test context mocked to False, result depends on other indicators
         # The important thing is the expired flag didn't make it non-production-capable
@@ -134,13 +135,14 @@ class TestProductionCapablePathDetection:
         monkeypatch.setattr("app.utils.security_mode.is_test_context", lambda: False)
 
         with caplog.at_level(logging.ERROR):
-            result = is_production_capable_path()
+            is_production_capable_path()
 
         # Flag should be ignored due to missing timestamp
         # Should log an error about missing timestamp
-        assert any("requires OPENACE_ALLOW_IMPLICIT_MODE_TIMESTAMP" in record.message
-                   for record in caplog.records), \
-            f"Expected timestamp requirement error in logs, got: {[r.message for r in caplog.records]}"
+        assert any(
+            "requires OPENACE_ALLOW_IMPLICIT_MODE_TIMESTAMP" in record.message
+            for record in caplog.records
+        ), f"Expected timestamp requirement error in logs, got: {[r.message for r in caplog.records]}"
 
 
 class TestDetectSecurityMode:
