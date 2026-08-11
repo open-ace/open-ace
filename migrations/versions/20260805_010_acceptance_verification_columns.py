@@ -59,8 +59,6 @@ def downgrade() -> None:
     For SQLite, we skip column drops and rely on schema migration
     during next upgrade.
     """
-    from alembic import context
-
     bind = op.get_bind()
     dialect = bind.dialect.name
 
