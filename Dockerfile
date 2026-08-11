@@ -102,8 +102,8 @@ RUN echo "deb http://mirrors.aliyun.com/debian/ trixie main" > /etc/apt/sources.
     && npm config set registry https://registry.npmmirror.com/ \
     && npm install -g qwen-code-webui@0.2.40 @qwen-code/qwen-code@0.15.10 \
     # === code-server Installation (for local workspace VS Code button) ===
-    && curl -fsSL --connect-timeout 15 --max-time 300 https://code-server.dev/install.sh | sh -s -- \
-    && test -x /usr/bin/code-server \
+    && curl -fsSL --connect-timeout 15 --max-time 300 https://code-server.dev/install.sh | sh -s -- --prefix=/usr/local \
+    && test -x /usr/local/bin/code-server \
     # === CLI Verification ===
     && test -f /usr/lib/node_modules/@qwen-code/qwen-code/cli.js \
     && test -x /usr/bin/qwen-code-webui \
@@ -179,9 +179,33 @@ COPY --from=frontend-builder --chown=open-ace:open-ace /app/static/js/dist ./sta
 # "denied". Script is version-pinned and fails the build on drift.
 RUN python3 /app/scripts/patch-qwen-webui-permission.py
 
+# Patch qwen-code-webui conversation-history listing:
+# 1) getHistoryFiles only scanned the project root, missing chats/*.jsonl;
+# 2) groupConversations collapsed every CLI session (assistant messages carry
+#    no message.id, so empty id sets were treated as duplicates). Both made
+#    "view conversation history" show nothing and open projects as new chats.
+# Script is version-pinned and fails the build on drift.
+RUN python3 /app/scripts/patch-qwen-webui-histories.py
+
+# Patch qwen-code-webui in-app navigation so it keeps URL query params
+# (workspaceType=remote, machineId, token, encodedProjectName, openace_url):
+# sessionId nav, both "view conversation history" buttons, and the
+# project-selector nav all rebuilt the URL with a bare URLSearchParams,
+# dropping the remote context and degrading ChatPage to local mode (silent
+# chat failure + file-changes HTTP 403). Script is version-pinned and fails
+# the build on drift.
+RUN python3 /app/scripts/patch-qwen-webui-navparams.py
+
+# Patch qwen-code-webui VS Code folder parameter for remote workspaces:
+# the folder parameter lacks "/" prefix for Windows paths (C:/workspace),
+# causing code-server to fail with "Unable to resolve resource".
+# Script is version-pinned and fails the build on drift.
+RUN python3 /app/scripts/patch-qwen-webui-vscode-folder.py
+
 # Copy and set up entrypoint script
+# Use python to convert Windows line endings (CRLF) to Unix (LF) and remove BOM - Issue #1988
 COPY --chown=open-ace:open-ace docker-entrypoint.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+RUN python3 -c "with open('/usr/local/bin/docker-entrypoint.sh','rb') as f: c=f.read(); c=c[3:] if c.startswith(b'\xef\xbb\xbf') else c; c=c.replace(b'\r\n',b'\n'); open('/usr/local/bin/docker-entrypoint.sh','wb').write(c)" && chmod +x /usr/local/bin/docker-entrypoint.sh
 
 # Install cross-user agent launcher wrapper (Issue #1395)
 # Lets the autonomous agent launch CLIs with cwd=<repo> under a 700 home dir by
@@ -284,7 +308,8 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:19888/readyz')" || exit 1
 
 # Run the application
-ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+# Use bash to execute the script to ensure proper shell interpretation (Issue #1988)
+ENTRYPOINT ["/bin/bash", "/usr/local/bin/docker-entrypoint.sh"]
 
 # =============================================================================
 # Development Stage (optional)
