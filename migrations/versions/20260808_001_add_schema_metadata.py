@@ -65,10 +65,15 @@ def upgrade() -> None:
             )
             """)
     else:
-        # SQLite and others: use dialect-agnostic approach
+        # SQLite and others: use dialect-agnostic approach with default
         op.create_table(
             "schema_metadata",
-            sa.Column("initialized_at", sa.DateTime(), nullable=False),
+            sa.Column(
+                "initialized_at",
+                sa.DateTime(),
+                nullable=False,
+                server_default=sa.text("CURRENT_TIMESTAMP"),
+            ),
             sa.Column("schema_version", sa.String(64), nullable=True),
         )
 
