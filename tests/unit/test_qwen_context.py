@@ -5,11 +5,11 @@ Tests for is_qwen_system_context() which identifies Qwen CLI system-context
 messages that should not be surfaced as user chat messages.
 """
 
-import pytest
-
 # Import from scripts/shared path
 import sys
 from pathlib import Path
+
+import pytest
 
 scripts_shared = Path(__file__).parent.parent.parent / "scripts" / "shared"
 sys.path.insert(0, str(scripts_shared.parent))
