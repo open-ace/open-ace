@@ -111,14 +111,16 @@ function Read-SettingsJson {
             $tempFile = "$Path.bak"
             Copy-Item $Path $tempFile -Force
             try {
-                $fixed = node -e "console.log(JSON.stringify(JSON.parse(require('fs').readFileSync('$Path', 'utf8'))))"
+                $fixed = node -e "console.log(JSON.stringify(JSON.parse(require('fs').readFileSync('$($Path)', 'utf8'))))"
                 if ($LASTEXITCODE -eq 0 -and $fixed) {
                     $hash = $fixed | ConvertFrom-Json
                     $result = @{}
                     $hash.PSObject.Properties | ForEach-Object {
                         $result[$_.Name] = $_.Value
                     }
-                    Write-Ok "Fixed settings.json with node"
+                    # Write back fixed content without BOM
+                    Write-SettingsJson $Path $result
+                    Write-Ok "Fixed and saved settings.json without BOM"
                     return $result
                 }
             } catch {
