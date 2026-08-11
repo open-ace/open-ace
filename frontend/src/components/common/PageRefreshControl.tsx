@@ -298,7 +298,7 @@ export const PageRefreshControl: React.FC<PageRefreshControlProps> = ({
           )
         )}
 
-        {/* Manual refresh button */}
+        {/* Manual refresh button - Issue #2397: Use outline-secondary for consistency */}
         <button
           className="btn btn-outline-secondary btn-sm"
           onClick={handleRefresh}
