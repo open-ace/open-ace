@@ -136,7 +136,7 @@
 }
 
 /* Fix confirm state hover text readability (Issue #2398) */
-.auto-workflow-delete-btn.btn-outline-danger:hover {
+.auto-workflow-delete-btn.btn-outline-danger:hover:not(:disabled) {
   color: #fff;
 }
 
