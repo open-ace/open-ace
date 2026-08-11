@@ -1743,9 +1743,7 @@ class ProcessExecutor:
 
         base_dir = tool_dir_map.get(cli_tool)
         if not base_dir or not base_dir.exists():
-            logger.debug(
-                "find_session_jsonl: no session directory for %s", cli_tool
-            )
+            logger.debug("find_session_jsonl: no session directory for %s", cli_tool)
             return None
 
         # Parse created_at timestamp if provided
@@ -1756,9 +1754,7 @@ class ProcessExecutor:
                 created_at_clean = created_at.rstrip("Z")
                 created_dt = datetime.fromisoformat(created_at_clean)
             except ValueError:
-                logger.debug(
-                    "find_session_jsonl: invalid created_at format: %s", created_at
-                )
+                logger.debug("find_session_jsonl: invalid created_at format: %s", created_at)
 
         # Search for JSONL files matching project path
         best_match = None
