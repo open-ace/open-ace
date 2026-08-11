@@ -20,7 +20,6 @@ from typing import Any, cast
 
 from app.modules.workspace.api_key_router import APIKeyRouter
 from app.repositories.database import DB_PATH, is_postgresql
-from app.utils.datetime_utils import ensure_utc_suffix
 from app.utils.security_env import get_encryption_key_material
 from app.utils.tool_names import TOOL_NAME_ALIASES, normalize_tool_name
 
@@ -571,6 +570,40 @@ class APIKeyProxyService:
         finally:
             conn.close()
 
+    def has_valid_proxy_token(self, session_id: str) -> bool:
+        """Return True if the session has at least one non-revoked, non-expired proxy token.
+
+        Used by the remote session restore path (Issue #2405): when a session is
+        already running on the agent, we only skip the restart if its process
+        still holds a valid token. If every issued token was revoked or has
+        expired, the running CLI would 401 every LLM call, so the restore must
+        restart the process with a freshly issued token.
+        """
+        if not session_id:
+            return False
+        now = datetime.now().isoformat()
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"""
+                SELECT 1 FROM proxy_token_jtis
+                WHERE session_id = {_param()}
+                  AND revoked_at IS NULL
+                  AND expires_at > {_param()}
+                LIMIT 1
+            """,
+                (session_id, now),
+            )
+            return cursor.fetchone() is not None
+        except Exception as e:
+            logger.warning(
+                "has_valid_proxy_token failed for %s: %s", session_id[:8], e
+            )
+            return False
+        finally:
+            conn.close()
+
     def _encrypt_key(self, api_key: str) -> str:
         """Encrypt an API key using Fernet (requires cryptography package)."""
         try:
@@ -874,8 +907,8 @@ class APIKeyProxyService:
                     "key_name": row["key_name"],
                     "base_url": row["base_url"],
                     "is_active": bool(row["is_active"]),
-                    "created_at": ensure_utc_suffix(row["created_at"]),
-                    "updated_at": ensure_utc_suffix(row["updated_at"]),
+                    "created_at": row["created_at"],
+                    "updated_at": row["updated_at"],
                     "cli_tools": row["cli_tools"],
                     "cli_settings": row["cli_settings"],
                     "scope": row["scope"] or "remote",

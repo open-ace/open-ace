@@ -664,14 +664,18 @@ class RemoteAgent:
         permission_mode = data.get("permission_mode")
         allowed_tools = data.get("allowed_tools")
         cli_settings = data.get("cli_settings", {})
+        # CLI conversation id to resume (qwen JSONL filename). Differs from the
+        # open-ace session_id; only set when restoring a terminated session.
+        resume_session_id = data.get("resume_session_id")
 
         logger.info(
-            "Starting session %s: cli=%s path=%s model=%s mode=%s",
+            "Starting session %s: cli=%s path=%s model=%s mode=%s resume=%s",
             session_id[:8],
             cli_tool,
             project_path,
             model,
             permission_mode,
+            resume_session_id[:8] if resume_session_id else None,
         )
 
         # Apply CLI settings before starting session
@@ -686,17 +690,63 @@ class RemoteAgent:
             model=model,
             permission_mode=permission_mode,
             allowed_tools=allowed_tools,
+            resume_session_id=resume_session_id,
         )
 
         if result["success"]:
-            self._send_session_status(session_id, "running", result.get("pid"))
+            pid = result.get("pid")
+            self._send_session_status(session_id, "running", pid)
+            # For new (non-resume) qwen sessions, once the CLI's self-generated
+            # conversation id is discovered, report it so the server persists
+            # cli_session_id for future --resume.
+            if not resume_session_id and cli_tool in ("qwen-code-cli", "qwen"):
+                self._executor.register_cli_session_callback(
+                    session_id,
+                    lambda cli_sid: self._send_session_status(
+                        session_id, "running", pid, cli_session_id=cli_sid
+                    ),
+                )
         else:
-            self._send_session_status(session_id, "error")
-            self._send_session_output(
-                session_id,
-                f"Failed to start session: {result.get('error', 'unknown error')}",
-                "stderr",
-                is_complete=True,
+            error_msg = result.get("error", "unknown error")
+            if error_msg == "Session already running":
+                # Idempotent duplicate start: the session is already running on
+                # this agent (e.g. an auto/periodic restore raced a manual one).
+                # Report running, NOT error — an error status makes the server
+                # mark the session failed and revoke all of its proxy tokens,
+                # which 401s the still-alive CLI process and leaves the webui
+                # stuck on "Thinking..." (Issue #2405).
+                logger.info(
+                    "Session %s already running; duplicate start treated as no-op",
+                    session_id[:8],
+                )
+                self._send_session_status(session_id, "running")
+            else:
+                self._send_session_status(session_id, "error")
+                self._send_session_output(
+                    session_id,
+                    f"Failed to start session: {error_msg}",
+                    "stderr",
+                    is_complete=True,
+                )
+
+        # Acknowledge the command so the server can mark it 'responded'. Without
+        # this ack, persisted commands stay 'delivered' forever and the server
+        # re-delivers them every COMMAND_CLAIM_TIMEOUT_SECONDS (5 minutes),
+        # causing duplicate start_session dispatches that can revoke the proxy
+        # token of an already-running CLI process (Issue #2405).
+        request_id = data.get("command_id") or data.get("request_id")
+        if request_id:
+            self._http_send(
+                {
+                    "type": "command_response",
+                    "machine_id": self.config.machine_id,
+                    "request_id": request_id,
+                    "result": {
+                        "success": bool(result.get("success")),
+                        "pid": result.get("pid"),
+                        "error": result.get("error"),
+                    },
+                }
             )
 
     def _cmd_send_message(self, data: dict[str, Any]) -> None:
