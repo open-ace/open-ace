@@ -281,7 +281,11 @@ jobs:
 
   manual-extended:
     name: Manual Extended Tests
-    if: github.event_name == 'workflow_dispatch' && inputs.category != 'issues' && inputs.category != 'all'
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      (inputs.category == 'critical' ||
+       inputs.category == 'regression' ||
+       inputs.category == 'specific')
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     env:
