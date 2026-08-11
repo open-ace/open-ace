@@ -279,6 +279,48 @@ def print_collection_manifest(files: list[str]) -> None:
     print("=" * 40 + "\n")
 
 
+def _quarantine_nodeids(path=None) -> list[str]:
+    """Read quarantined nodeids from ci/legacy-issue-quarantine.json.
+
+    Fail-closed: a missing, corrupt, wrong-schema/version, or expired entry must
+    NOT silently fall back to "no quarantine" — that would re-run a known-
+    deadlocking nodeid and hang the shard for the full job timeout. Any error
+    raises SystemExit and aborts the run. Expiry is checked so a stale quarantine
+    cannot silently keep deselecting; full nodeid-collectability is enforced by
+    the comparator (same shared loader).
+    """
+    import datetime
+    import importlib.util
+
+    if path is None:
+        path = PROJECT_ROOT / "ci" / "legacy-issue-quarantine.json"
+    path = Path(path)
+    if not path.exists():
+        raise SystemExit(
+            "ci/legacy-issue-quarantine.json is missing; refusing to run the "
+            "issue shard without the tracked exclusions (would deadlock)."
+        )
+    try:
+        # Reuse the comparator's strict loader (schema + version + entry types).
+        spec = importlib.util.spec_from_file_location(
+            "_lib_baseline", str(PROJECT_ROOT / "scripts" / "legacy_issue_baseline.py")
+        )
+        assert spec and spec.loader
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules["_lib_baseline"] = mod  # register before exec (dataclasses PEP 563)
+        spec.loader.exec_module(mod)
+        entries = mod.load_quarantine(path)
+        today = datetime.date.today().isoformat()
+        invalid = mod.validate_quarantine(entries, (), today)
+        if invalid:
+            raise SystemExit("invalid ci/legacy-issue-quarantine.json:\n  " + "\n  ".join(invalid))
+    except SystemExit:
+        raise
+    except Exception as exc:  # corrupt JSON, wrong schema, parse error, ...
+        raise SystemExit(f"cannot load ci/legacy-issue-quarantine.json: {exc}") from exc
+    return [e.nodeid for e in entries]
+
+
 def build_pytest_command(args: argparse.Namespace) -> list[str]:
     targets = select_targets(args)
     targets = apply_split(targets, args.split_total, args.split_group)
@@ -294,6 +336,18 @@ def build_pytest_command(args: argparse.Namespace) -> list[str]:
         raise ValueError(f"Test file count below baseline threshold for category: {args.category}")
 
     cmd = [sys.executable, "-m", "pytest", *targets, "-m", "not postgres"]
+    # Continue past per-file collection errors so every collectable nodeid gets a
+    # terminal result; otherwise one bad file aborts the shard and leaves the
+    # rest result-less, which the #2457 failure-baseline completeness gate would
+    # (correctly) reject. Collection errors are still surfaced in the JUnit and
+    # hard-failed by the comparator (never baselined).
+    cmd.append("--continue-on-collection-errors")
+    # Deselect nodeids tracked in ci/legacy-issue-quarantine.json (e.g. a test
+    # that deadlocks the shard). The same list is read by the comparator, which
+    # excludes them from the expected-executed set and reports them as debt, so
+    # the deselect + the manifest stay consistent (local == CI).
+    for nodeid in _quarantine_nodeids():
+        cmd.extend(["--deselect", nodeid])
     if args.parallel > 0:
         cmd.extend(["-n", str(args.parallel)])
     if args.reruns > 0:
