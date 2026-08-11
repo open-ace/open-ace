@@ -111,7 +111,9 @@ function Read-SettingsJson {
             $tempFile = "$Path.bak"
             Copy-Item $Path $tempFile -Force
             try {
-                $fixed = node -e "console.log(JSON.stringify(JSON.parse(require('fs').readFileSync('$($Path)', 'utf8'))))"
+                # Convert Windows backslashes to forward slashes for Node.js
+                $nodePath = $Path -replace '\\', '/'
+                $fixed = node -e "console.log(JSON.stringify(JSON.parse(require('fs').readFileSync('$($nodePath)', 'utf8'))))"
                 if ($LASTEXITCODE -eq 0 -and $fixed) {
                     $hash = $fixed | ConvertFrom-Json
                     $result = @{}
