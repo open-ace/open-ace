@@ -419,8 +419,44 @@ def handle(ctx, deps) -> PhaseResult:
                     raise
 
             if is_policy_rejection:
-                # With no failed/pending checks and no conflict evidence,
-                # repository policy requires external action (approval,
+                # A "policy" rejection text overlaps two situations GitHub
+                # reports with the same "repository rule violations" /
+                # "required status check" wording:
+                #
+                #  (a) a required status check is still PENDING for this head
+                #      — most often right after a sync/repair push, while an
+                #      aggregate required gate (whatever the repo names it)
+                #      has not yet propagated its own pending status.
+                #      ``_blocking_pending`` only defers for a pending check in
+                #      the required set, so it misses a pending *underlying*
+                #      job (e.g. ``test (3.10)`` under an aggregate gate) in
+                #      that window; GitHub concurrently reports ``blocked`` and
+                #      the workflow froze at a manual-recovery pause it could
+                #      never recover from (#27 follow-up; cf. 50ba8724 /
+                #      c0758607 / cd939cbf / 1c1b63f0).
+                #  (b) a genuine non-CI block (missing review, draft, required
+                #      signing) where every check has settled.
+                #
+                # Only (b) warrants a manual-recovery pause. (a) is transient:
+                # any pending check, or GitHub still computing
+                # (``mergeable_state == "unknown"``), means CI has not settled
+                # — keep polling instead of freezing. Both signals are bounded
+                # (pending checks complete; the unknown state resolves), so
+                # this cannot spin: a permanently-absent required context has
+                # no pending check and a known ``blocked`` state, so it still
+                # pauses for a human to fix the ruleset.
+                any_pending = any(c.get("bucket") == "pending" for c in refreshed_checks)
+                if any_pending or mergeable_state == "unknown":
+                    logger.info(
+                        "PR #%s: merge rejected by policy but CI has not "
+                        "settled (state=%s, any_pending=%s); deferring",
+                        pr_number,
+                        mergeable_state or "unknown",
+                        any_pending,
+                    )
+                    return PhaseResult.retry()
+                # No pending checks and GitHub has finished computing, yet
+                # repository policy still requires external action (approval,
                 # marking ready, or a rule change). Persist a manually
                 # recoverable pause instead of retrying forever.
                 state_label = mergeable_state or "unknown"
