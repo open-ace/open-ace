@@ -107,6 +107,9 @@ class TestProductionCapablePathDetection:
         # Import module before any monkeypatching
         from app.utils import security_mode
 
+        # Set up log capture BEFORE any function calls
+        caplog.set_level(logging.ERROR, "app.utils.security_mode")
+
         # Set flag with an old timestamp (more than 30 days ago)
         monkeypatch.setenv("OPENACE_ALLOW_IMPLICIT_MODE", "1")
         monkeypatch.setenv("OPENACE_ALLOW_IMPLICIT_MODE_TIMESTAMP", "2025-01-01")
@@ -120,14 +123,13 @@ class TestProductionCapablePathDetection:
 
         reset_security_mode_cache()
 
-        # Use at_level context manager for reliable log capture
-        with caplog.at_level(logging.ERROR, "app.utils.security_mode"):
-            is_production_capable_path()
+        # Call the function (logs captured by caplog)
+        is_production_capable_path()
 
-            # Expired flag should be ignored - verify expiration error is logged
-            assert any(
-                "EMERGENCY ROLLBACK FLAG EXPIRED" in record.message for record in caplog.records
-            ), f"Expected EXPIRED error in logs, got: {[r.message for r in caplog.records]}"
+        # Expired flag should be ignored - verify expiration error is logged
+        assert any(
+            "EMERGENCY ROLLBACK FLAG EXPIRED" in record.message for record in caplog.records
+        ), f"Expected EXPIRED error in logs, got: {[r.message for r in caplog.records]}"
 
     def test_emergency_rollback_missing_timestamp(self, monkeypatch, caplog):
         """Test emergency rollback flag without timestamp is ignored."""
@@ -135,6 +137,9 @@ class TestProductionCapablePathDetection:
 
         # Import module before any monkeypatching
         from app.utils import security_mode
+
+        # Set up log capture BEFORE any function calls
+        caplog.set_level(logging.ERROR, "app.utils.security_mode")
 
         monkeypatch.setenv("OPENACE_ALLOW_IMPLICIT_MODE", "1")
         # Don't set OPENACE_ALLOW_IMPLICIT_MODE_TIMESTAMP
@@ -148,16 +153,15 @@ class TestProductionCapablePathDetection:
 
         reset_security_mode_cache()
 
-        # Use at_level context manager for reliable log capture
-        with caplog.at_level(logging.ERROR, "app.utils.security_mode"):
-            is_production_capable_path()
+        # Call the function (logs captured by caplog)
+        is_production_capable_path()
 
-            # Flag should be ignored due to missing timestamp
-            # Should log an error about missing timestamp
-            assert any(
-                "requires OPENACE_ALLOW_IMPLICIT_MODE_TIMESTAMP" in record.message
-                for record in caplog.records
-            ), f"Expected timestamp requirement error in logs, got: {[r.message for r in caplog.records]}"
+        # Flag should be ignored due to missing timestamp
+        # Should log an error about missing timestamp
+        assert any(
+            "requires OPENACE_ALLOW_IMPLICIT_MODE_TIMESTAMP" in record.message
+            for record in caplog.records
+        ), f"Expected timestamp requirement error in logs, got: {[r.message for r in caplog.records]}"
 
 
 class TestDetectSecurityMode:
