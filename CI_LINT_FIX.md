@@ -12,16 +12,11 @@ detect private key...................................................Failed
 
 Three markdown documentation files contained literal private key patterns that triggered the `detect-private-key` pre-commit hook:
 
-1. **MERGE_STAGE_FIX.md:7** - Contained `"-----BEGIN RSA PRIVATE KEY-----"`
-2. **CI_FIX_SUMMARY.md:50** - Contained `grep -r "BEGIN.*PRIVATE KEY"`
-3. **CI_FIX_VERIFICATION.md:68** - Contained `grep -r "BEGIN.*PRIVATE KEY"`
+1. **MERGE_STAGE_FIX.md:7** - Contained literal RSA key marker
+2. **CI_FIX_SUMMARY.md:50** - Contained `grep` pattern matching key markers
+3. **CI_FIX_VERIFICATION.md:68** - Contained `grep` pattern matching key markers
 
-The `detect-private-key` hook scans ALL files (including markdown) for patterns like:
-- `BEGIN RSA PRIVATE KEY`
-- `BEGIN DSA PRIVATE KEY`
-- `BEGIN EC PRIVATE KEY`
-- `BEGIN OPENSSH PRIVATE KEY`
-- `BEGIN PGP PRIVATE KEY BLOCK`
+The `detect-private-key` hook scans ALL files (including markdown) for various private key marker patterns (RSA, DSA, EC, OpenSSH, PGP).
 
 ## Fix Applied
 
