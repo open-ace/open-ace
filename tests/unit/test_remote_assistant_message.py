@@ -226,6 +226,7 @@ class TestAssistantMessageAccumulation(unittest.TestCase):
             role="system",
             content="system info",
             source="remote_live",
+            tenant_id=self.mock_session_mgr.get_session().tenant_id,
         )
 
     def test_system_message_not_stored_without_complete(self):
