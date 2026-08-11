@@ -420,7 +420,7 @@ def test_request_budget_stops_at_repository_reserve_before_maximum():
     ],
 )
 def test_job_log_redirect_allowlist(url):
-    metrics.validate_log_redirect(url)
+    assert metrics.validate_log_redirect(url) is None
 
 
 @pytest.mark.parametrize(
