@@ -117,17 +117,31 @@ class User:
         """Check if user is an admin."""
         return self.role in ("admin", "platform_admin", "tenant_admin")
 
-    def is_platform_admin(self) -> bool:
+    def is_platform_admin(self, strict: bool | None = None) -> bool:
         """Check if user is a platform admin.
 
         Platform admins can access all tenants.
 
+        Args:
+            strict: If True, only accept 'platform_admin' role.
+                    If False, accept 'platform_admin' or 'admin' (legacy).
+                    If None (default), use cached feature flag value.
+
         Returns:
-            bool: True if user is a platform admin
+            bool: True if user is a platform admin per the strict mode setting.
 
         Issue #2286: Accept legacy 'admin' role alongside 'platform_admin'
         for backward compatibility.
+        Issue #2332: Add strict parameter for strict mode support.
         """
+        if strict is None:
+            # Use cached feature flag value
+            from app.auth.permissions import get_cached_strict_mode
+
+            strict = get_cached_strict_mode()
+
+        if strict:
+            return self.role == "platform_admin"
         return self.role in ("platform_admin", "admin")
 
     def is_tenant_admin(self) -> bool:
