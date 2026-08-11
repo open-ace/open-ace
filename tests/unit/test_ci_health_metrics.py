@@ -91,6 +91,28 @@ def test_runner_metrics_marks_remaining_suite_not_started(tmp_path):
     }
 
 
+def test_unknown_suite_still_has_start_and_terminal_records(tmp_path):
+    path = tmp_path / "metrics.jsonl"
+    recorder = ci.MetricsRecorder(str(path))
+
+    with pytest.raises(ci.CIError, match="Unknown suite"):
+        ci.execute_suites(
+            ["missing"],
+            _suite_config([ci.sys.executable, "-c", "raise SystemExit(0)"]),
+            action="run",
+            metrics=recorder,
+        )
+
+    records = _records(path)
+    suite_records = [record for record in records if record["record_type"].startswith("suite_")]
+    assert [record["record_type"] for record in suite_records] == [
+        "suite_plan",
+        "suite_start",
+        "suite_terminal",
+    ]
+    assert suite_records[-1]["outcome"] == "failure"
+
+
 def test_metrics_write_error_does_not_hide_primary_failure(tmp_path):
     recorder = ci.MetricsRecorder(str(tmp_path / "metrics.jsonl"))
     recorder.error = OSError("disk full")

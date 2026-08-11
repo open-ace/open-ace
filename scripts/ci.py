@@ -441,6 +441,25 @@ def run_suite(
 ) -> None:
     suites = config["suites"]
     if name not in suites:
+        failed_at = utc_now()
+        if metrics:
+            metrics.record(
+                "suite_start",
+                invocation_id=invocation_id,
+                suite=name,
+                started_at=failed_at,
+                timeout_seconds=None,
+            )
+            metrics.record(
+                "suite_terminal",
+                invocation_id=invocation_id,
+                suite=name,
+                started_at=failed_at,
+                completed_at=utc_now(),
+                duration_seconds=0,
+                outcome="failure",
+                timeout_seconds=None,
+            )
         raise CIError(f"Unknown suite {name!r}; choose from: {', '.join(sorted(suites))}")
     suite = suites[name]
     print(f"\n=== {name}: {suite['description']} ===", flush=True)
