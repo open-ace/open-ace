@@ -119,8 +119,9 @@ class TestSessionHistorySync:
 
     def test_filter_system_context_messages(self):
         """Test that _build_jsonl produces valid JSONL output."""
-        from app.modules.workspace.session_history_sync import _build_jsonl
         import json
+
+        from app.modules.workspace.session_history_sync import _build_jsonl
 
         messages = [
             {
