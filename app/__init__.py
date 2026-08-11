@@ -387,10 +387,7 @@ def create_app(config=None):
     # Schema initialization: distinguish production vs development paths (Issue #2190)
     # Issue #2331: Use unified security mode API consistently
     from app.repositories.database import is_postgresql
-    from app.repositories.schema_guard import (
-        SchemaCompatibilityError,
-        check_schema_compatibility,
-    )
+    from app.repositories.schema_guard import SchemaCompatibilityError, check_schema_compatibility
     from app.utils.security_mode import get_security_mode
 
     env_mode = get_security_mode().value
