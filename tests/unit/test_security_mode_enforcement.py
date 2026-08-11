@@ -108,7 +108,9 @@ class TestProductionCapablePathDetection:
         from app.utils import security_mode
 
         # Set up log capture BEFORE any function calls
-        caplog.set_level(logging.ERROR, "app.utils.security_mode")
+        # Issue #2331: Use caplog.set_level() without logger name for robust capture
+        # in CI environments where logging may be configured differently
+        caplog.set_level(logging.ERROR)
 
         # Set flag with an old timestamp (more than 30 days ago)
         monkeypatch.setenv("OPENACE_ALLOW_IMPLICIT_MODE", "1")
@@ -143,7 +145,9 @@ class TestProductionCapablePathDetection:
         from app.utils import security_mode
 
         # Set up log capture BEFORE any function calls
-        caplog.set_level(logging.ERROR, "app.utils.security_mode")
+        # Issue #2331: Use caplog.set_level() without logger name for robust capture
+        # in CI environments where logging may be configured differently
+        caplog.set_level(logging.ERROR)
 
         monkeypatch.setenv("OPENACE_ALLOW_IMPLICIT_MODE", "1")
         # Don't set OPENACE_ALLOW_IMPLICIT_MODE_TIMESTAMP
