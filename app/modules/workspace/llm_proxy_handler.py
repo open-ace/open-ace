@@ -475,6 +475,22 @@ def _record_llm_usage(
             )
             return
 
+        # Write model to session if not already set (Bug #1 fix)
+        # Use fail-closed update with WHERE model IS NULL for concurrency safety
+        if session and evidence.model and not session.model:
+            success = sm.update_session_fields(
+                session_id,
+                {"model": evidence.model},
+                tenant_id=session.tenant_id,
+            )
+            if success:
+                logger.info("Set model=%s for session %s", evidence.model, session_id[:8])
+            else:
+                logger.warning(
+                    "Failed to set model for session %s: tenant check failed or concurrent update",
+                    session_id[:8],
+                )
+
         # Record usage through unified sink
         sink = create_default_sink(
             request_body=request_body,
