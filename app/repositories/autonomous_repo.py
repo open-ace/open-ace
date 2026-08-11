@@ -7,7 +7,7 @@ Database operations for the AI autonomous development feature.
 
 import logging
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from app.repositories.database import Database, adapt_sql, escape_like, is_postgresql
@@ -299,7 +299,7 @@ class AutonomousWorkflowRepository:
     def create_workflow(self, data: dict) -> dict:
         """Create a new autonomous workflow. Returns the created record."""
         workflow_id = data.get("workflow_id") or str(uuid.uuid4())
-        now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         # Normalize content_language up front so both INSERT branches stay in
         # sync and the value cannot be silently dropped by a missing column.
         data = dict(data)
@@ -660,7 +660,7 @@ class AutonomousWorkflowRepository:
 
     def cancel_queued_batch_workflows(self, batch_id: str, exclude_workflow_id: str) -> int:
         """Cancel queued workflows in the same batch except the current one."""
-        now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         conn = self.db.get_connection()
         try:
             cursor = conn.cursor()
@@ -708,7 +708,7 @@ class AutonomousWorkflowRepository:
         if not updates:
             return self.get_workflow(workflow_id)
 
-        updates["updated_at"] = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
+        updates["updated_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
         # Filter to allowed fields only (prevents SQL injection)
         safe_updates = {k: v for k, v in updates.items() if k in self.ALLOWED_WORKFLOW_FIELDS}
@@ -783,7 +783,7 @@ class AutonomousWorkflowRepository:
                 tokens.get("total_tokens", 0),
                 tokens.get("total_input_tokens", 0),
                 tokens.get("total_output_tokens", 0),
-                datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S"),
+                datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
                 workflow_id,
             ),
         )
@@ -814,7 +814,7 @@ class AutonomousWorkflowRepository:
             ),
             (
                 workflow_id,
-                datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S"),
+                datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
                 workflow_id,
             ),
         )
@@ -826,7 +826,7 @@ class AutonomousWorkflowRepository:
         once per milestone, rather than via cumulative agent_sessions totals
         (which double-count when a session spans multiple milestones).
         """
-        now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         self.db.execute(
             adapt_sql(
                 """
@@ -895,7 +895,7 @@ class AutonomousWorkflowRepository:
         """
         from app.repositories.database import adapt_sql
 
-        now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         # Fetch milestones up to and including the fork point
         milestones = self.db.fetch_all(
             """
@@ -1047,7 +1047,7 @@ class AutonomousWorkflowRepository:
     def create_milestone(self, data: dict) -> dict:
         """Create a workflow milestone."""
         milestone_id = data.get("milestone_id") or str(uuid.uuid4())
-        now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
         if is_postgresql():
             result = self.db.fetch_one(
@@ -1197,7 +1197,7 @@ class AutonomousWorkflowRepository:
         if not updates:
             return self.get_milestone(milestone_id)
 
-        updates["updated_at"] = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
+        updates["updated_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
         # Filter to allowed fields only (prevents SQL injection)
         safe_updates = {k: v for k, v in updates.items() if k in self.ALLOWED_MILESTONE_FIELDS}
@@ -1219,7 +1219,7 @@ class AutonomousWorkflowRepository:
 
     def cancel_milestones_after(self, workflow_id: str, after_milestone_id: str) -> list:
         """Cancel all milestones after the given one (by creation order)."""
-        now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         self.db.execute(
             """
             UPDATE workflow_milestones SET status = 'cancelled', updated_at = ?
@@ -1235,7 +1235,7 @@ class AutonomousWorkflowRepository:
 
     def create_event(self, data: dict) -> dict:
         """Create a workflow event."""
-        now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
         if is_postgresql():
             result = self.db.fetch_one(
@@ -1299,11 +1299,11 @@ class AutonomousWorkflowRepository:
         """
         import app.repositories.database as _db_mod
 
-        now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
-        cutoff = (datetime.now(UTC) - timedelta(seconds=self.LOCK_TIMEOUT_SECONDS)).strftime(
-            "%Y-%m-%d %H:%M:%S"
-        )
+        cutoff = (
+            datetime.now(timezone.utc) - timedelta(seconds=self.LOCK_TIMEOUT_SECONDS)
+        ).strftime("%Y-%m-%d %H:%M:%S")
 
         conn = self.db.get_connection()
         try:
@@ -1335,7 +1335,7 @@ class AutonomousWorkflowRepository:
         """
         import app.repositories.database as _db_mod
 
-        now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         conn = self.db.get_connection()
         try:
             cursor = conn.cursor()
@@ -1363,7 +1363,7 @@ class AutonomousWorkflowRepository:
         """
         import app.repositories.database as _db_mod
 
-        now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         conn = self.db.get_connection()
         try:
             cursor = conn.cursor()
@@ -1397,7 +1397,7 @@ class AutonomousWorkflowRepository:
         """
         import app.repositories.database as _db_mod
 
-        now_dt = datetime.now(UTC)
+        now_dt = datetime.now(timezone.utc)
         now = now_dt.strftime("%Y-%m-%d %H:%M:%S")
         cutoff = (now_dt - timedelta(seconds=self.LOCK_TIMEOUT_SECONDS)).strftime(
             "%Y-%m-%d %H:%M:%S"

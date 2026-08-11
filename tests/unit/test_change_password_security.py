@@ -10,7 +10,7 @@ Tests cover:
 """
 
 import time
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -101,7 +101,7 @@ class TestCheckChangePasswordLockout:
         """Expired lockout should be cleared."""
         mock_db = MagicMock()
         # Use UTC time to match database TIMESTAMP WITHOUT TIME ZONE behavior
-        past = datetime.now(UTC).replace(tzinfo=None) - timedelta(minutes=10)
+        past = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=10)
         mock_db.fetch_one.return_value = {
             "attempt_count": 5,
             "locked_until": past,

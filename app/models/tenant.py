@@ -6,7 +6,7 @@ Data models for multi-tenant support.
 
 import logging
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
@@ -246,13 +246,13 @@ class Tenant:
         if self.status != "trial":
             return False
         if self.trial_ends_at:
-            return datetime.now(UTC).replace(tzinfo=None) < self.trial_ends_at
+            return datetime.now(timezone.utc).replace(tzinfo=None) < self.trial_ends_at
         return True
 
     def is_subscription_valid(self) -> bool:
         """Check if subscription is valid."""
         if self.subscription_ends_at:
-            return datetime.now(UTC).replace(tzinfo=None) < self.subscription_ends_at
+            return datetime.now(timezone.utc).replace(tzinfo=None) < self.subscription_ends_at
         return True
 
     def can_add_users(self, additional: int = 1) -> bool:

@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -158,7 +158,7 @@ class AlertCompensationWorker:
         process_status = "completed"
         process_error = None
 
-        self._last_run = datetime.now(UTC).replace(tzinfo=None)
+        self._last_run = datetime.now(timezone.utc).replace(tzinfo=None)
 
         try:
             from app.modules.governance.alert_transaction_manager import get_transaction_manager

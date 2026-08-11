@@ -9,7 +9,7 @@ REST API endpoints for system status and administration:
 """
 
 import logging
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 
 from flask import Blueprint, g, jsonify, request
 
@@ -88,7 +88,7 @@ def get_scheduler_status():
             {
                 "success": True,
                 "data": statuses,
-                "timestamp": datetime.now(UTC).replace(tzinfo=None).isoformat(),
+                "timestamp": datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
             }
         )
 
@@ -232,7 +232,7 @@ def trigger_quota_check():
             {
                 "success": True,
                 "message": "Quota check triggered",
-                "timestamp": datetime.now(UTC).replace(tzinfo=None).isoformat(),
+                "timestamp": datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
             }
         )
 

@@ -8,7 +8,7 @@ Identifies opportunities for cost savings and efficiency improvements.
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any, cast
 
@@ -77,7 +77,9 @@ class OptimizationSuggestion:
     # Language-neutral interpolation params for frontend localization
     # (e.g. {"model": "...", "cheaper_model": "...", "avg_tokens": "..."}).
     params: dict[str, Any] = field(default_factory=dict)
-    created_at: datetime = field(default_factory=lambda: datetime.now(UTC).replace(tzinfo=None))
+    created_at: datetime = field(
+        default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None)
+    )
 
     def to_dict(self) -> dict:
         return {
@@ -181,10 +183,10 @@ class CostOptimizer:
         """
         suggestions = []
 
-        end_date = datetime.now(UTC).replace(tzinfo=None).strftime("%Y-%m-%d")
-        start_date = (datetime.now(UTC).replace(tzinfo=None) - timedelta(days=days)).strftime(
-            "%Y-%m-%d"
-        )
+        end_date = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
+        start_date = (
+            datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
+        ).strftime("%Y-%m-%d")
 
         # Get usage data
         usage_data = self._get_usage_data(start_date, end_date, tenant_id=tenant_id)
@@ -539,10 +541,10 @@ class CostOptimizer:
         """
         normalized_tenant_id = _normalize_tenant_id(tenant_id)
 
-        end_date = datetime.now(UTC).replace(tzinfo=None).strftime("%Y-%m-%d")
-        start_date = (datetime.now(UTC).replace(tzinfo=None) - timedelta(days=days)).strftime(
-            "%Y-%m-%d"
-        )
+        end_date = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
+        start_date = (
+            datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
+        ).strftime("%Y-%m-%d")
 
         query = """
             SELECT date,
@@ -785,10 +787,10 @@ class CostOptimizer:
         Returns:
             Dict with efficiency metrics.
         """
-        end_date = datetime.now(UTC).replace(tzinfo=None).strftime("%Y-%m-%d")
-        start_date = (datetime.now(UTC).replace(tzinfo=None) - timedelta(days=days)).strftime(
-            "%Y-%m-%d"
-        )
+        end_date = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
+        start_date = (
+            datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
+        ).strftime("%Y-%m-%d")
 
         data = self._get_usage_data(start_date, end_date, tenant_id=tenant_id)
 

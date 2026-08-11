@@ -15,7 +15,7 @@ import logging
 import os
 import sqlite3
 import time
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -797,7 +797,7 @@ def _ms_to_iso(ms: int | None) -> str | None:
     """Convert epoch milliseconds to an ISO-8601 string."""
     if not ms:
         return None
-    return datetime.fromtimestamp(ms / 1000, tz=UTC).isoformat()
+    return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).isoformat()
 
 
 class SessionSyncService:

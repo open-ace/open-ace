@@ -8,7 +8,7 @@ including session invalidation and progress tracking.
 import logging
 import threading
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from app.repositories.database import Database
@@ -203,7 +203,7 @@ class TenantMigrationService:
                         old_tenant_id,
                         new_tenant_id,
                         migrated_by,
-                        datetime.now(UTC),
+                        datetime.now(timezone.utc),
                         affected_sessions,
                         affected_projects,
                     ),

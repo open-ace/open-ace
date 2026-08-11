@@ -7,7 +7,7 @@ across multiple modules.
 
 import logging
 import threading
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -29,7 +29,7 @@ def get_tenant_sensitive_keyword_config(tenant_id: int) -> dict[str, Any]:
     Returns:
         Dictionary with 'block_sensitive_keyword' and 'sensitive_keyword_match_mode' keys.
     """
-    now = datetime.now(UTC).replace(tzinfo=None)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
 
     # Check cache first
     with _tenant_config_cache_lock:

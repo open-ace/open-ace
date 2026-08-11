@@ -7,7 +7,7 @@ API endpoints for compliance reporting and data retention management.
 import hashlib
 import logging
 import time
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from flask import Blueprint, Response, g, jsonify, request
 
@@ -205,12 +205,12 @@ def generate_report():
     if period_start:
         period_start = datetime.fromisoformat(period_start)
     else:
-        period_start = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=30)
+        period_start = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
 
     if period_end:
         period_end = datetime.fromisoformat(period_end)
     else:
-        period_end = datetime.now(UTC).replace(tzinfo=None)
+        period_end = datetime.now(timezone.utc).replace(tzinfo=None)
 
     # Generate report with validated tenant_id
     report = report_generator.generate_report(
@@ -233,7 +233,7 @@ def generate_report():
     language = data.get("language", "en")
 
     # Generate filename with timestamp
-    timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     filename = f"compliance_report_{report_type}_{timestamp}"
 
     if output_format == "csv":
@@ -359,7 +359,7 @@ def get_saved_report(report_id: str):
     language = request.args.get("language", "en")
 
     # Generate filename with timestamp
-    timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     filename = f"compliance_report_{report_id}_{timestamp}"
 
     if output_format == "csv":
@@ -409,7 +409,7 @@ def analyze_patterns():
     """Analyze audit patterns (admin only)."""
 
     days = request.args.get("days", 30, type=int)
-    start_time = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=days)
+    start_time = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
 
     patterns = _get_audit_analyzer().analyze_patterns(start_time=start_time)
 
@@ -422,7 +422,7 @@ def detect_anomalies():
     """Detect audit anomalies (admin only)."""
 
     days = request.args.get("days", 7, type=int)
-    start_time = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=days)
+    start_time = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
 
     anomalies = _get_audit_analyzer().detect_anomalies(start_time=start_time)
 
@@ -467,7 +467,7 @@ def get_security_score():
     """Get security score (admin only)."""
 
     days = request.args.get("days", 30, type=int)
-    start_time = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=days)
+    start_time = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
 
     score = _get_audit_analyzer().generate_security_score(start_time=start_time)
 
@@ -656,7 +656,7 @@ def update_anomaly_status():
 
     hash_val = _anomaly_hash(anomaly_type, affected_users)
     user_id = g.user.get("id") if hasattr(g, "user") else None
-    now = datetime.now(UTC).replace(tzinfo=None)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
 
     db = Database()
     try:

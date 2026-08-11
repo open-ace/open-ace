@@ -5,7 +5,7 @@ Repository for message data access operations.
 """
 
 import logging
-from datetime import UTC, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from app.repositories.database import Database, escape_like
@@ -414,11 +414,11 @@ class MessageRepository:
             params.append(date)
         else:
             if not start_date:
-                start_date = (datetime.now(UTC).replace(tzinfo=None) - timedelta(days=90)).strftime(
-                    "%Y-%m-%d"
-                )
+                start_date = (
+                    datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=90)
+                ).strftime("%Y-%m-%d")
             if not end_date:
-                end_date = datetime.now(UTC).replace(tzinfo=None).strftime("%Y-%m-%d")
+                end_date = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
             conditions.append("date >= ?")
             params.append(start_date)
             conditions.append("date <= ?")
@@ -517,11 +517,11 @@ class MessageRepository:
             params.append(date)
         else:
             if not start_date:
-                start_date = (datetime.now(UTC).replace(tzinfo=None) - timedelta(days=90)).strftime(
-                    "%Y-%m-%d"
-                )
+                start_date = (
+                    datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=90)
+                ).strftime("%Y-%m-%d")
             if not end_date:
-                end_date = datetime.now(UTC).replace(tzinfo=None).strftime("%Y-%m-%d")
+                end_date = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
             conditions.append("date >= ?")
             params.append(start_date)
             conditions.append("date <= ?")
@@ -1175,11 +1175,11 @@ class MessageRepository:
         # with get_batch_analysis / get_key_metrics / the standalone endpoint)
         # so the batch and standalone paths share one consistent default scope.
         if not start_date:
-            start_date = (datetime.now(UTC).replace(tzinfo=None) - timedelta(days=30)).strftime(
-                "%Y-%m-%d"
-            )
+            start_date = (
+                datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
+            ).strftime("%Y-%m-%d")
         if not end_date:
-            end_date = datetime.now(UTC).replace(tzinfo=None).strftime("%Y-%m-%d")
+            end_date = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
 
         # Session identifier expression — defined once and reused by the WHERE
         # filter and the GROUP BY so the two cannot drift apart.

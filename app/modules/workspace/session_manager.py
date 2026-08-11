@@ -11,7 +11,7 @@ import sqlite3
 import threading
 import uuid
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any
 
@@ -348,7 +348,7 @@ class AgentSession:
         """Check if session is expired."""
         if self.expires_at is None:
             return False
-        return datetime.now(UTC).replace(tzinfo=None) > self.expires_at
+        return datetime.now(timezone.utc).replace(tzinfo=None) > self.expires_at
 
     def is_active(self) -> bool:
         """Check if session is active."""
@@ -678,7 +678,7 @@ class SessionManager:
             )
             return existing_session
 
-        now = datetime.now(UTC).replace(tzinfo=None)
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
 
         expires_at = None
         if expires_in_hours:
@@ -859,7 +859,7 @@ class SessionManager:
         conn = self._get_connection()
         cursor = conn.cursor()
 
-        now = datetime.now(UTC).replace(tzinfo=None)
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
         session.updated_at = now
 
         tenant_clause, tenant_params = self._tenant_scope_condition(
@@ -1021,7 +1021,7 @@ class SessionManager:
             elif k in ["updated_at", "completed_at", "paused_at", "expires_at"] and values[i]:
                 if isinstance(values[i], datetime):
                     values[i] = values[i].isoformat()
-        values.append(datetime.now(UTC).replace(tzinfo=None).isoformat())
+        values.append(datetime.now(timezone.utc).replace(tzinfo=None).isoformat())
         conn = self._get_connection()
         cursor = conn.cursor()
         tenant_clause, tenant_params = self._tenant_scope_condition(
@@ -1127,7 +1127,7 @@ class SessionManager:
                     total_output_delta,
                     total_cache_read_delta,
                     total_cache_write_delta,
-                    datetime.now(UTC).replace(tzinfo=None).isoformat(),
+                    datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
                     session_id,
                     *tenant_params,
                 ),
@@ -1151,7 +1151,7 @@ class SessionManager:
                     total_tokens_delta,
                     total_input_delta,
                     total_output_delta,
-                    datetime.now(UTC).replace(tzinfo=None).isoformat(),
+                    datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
                     session_id,
                     *tenant_params,
                 ),
@@ -1390,7 +1390,7 @@ class SessionManager:
             return None
         if isinstance(value, datetime):
             if value.tzinfo is not None:
-                return value.astimezone(UTC).replace(tzinfo=None)
+                return value.astimezone(timezone.utc).replace(tzinfo=None)
             return value
         if isinstance(value, str):
             raw = value.strip()
@@ -1403,7 +1403,7 @@ class SessionManager:
             except ValueError:
                 return None
             if parsed.tzinfo is not None:
-                return parsed.astimezone(UTC).replace(tzinfo=None)
+                return parsed.astimezone(timezone.utc).replace(tzinfo=None)
             return parsed
         return None
 
@@ -1677,7 +1677,9 @@ class SessionManager:
                 logger.warning(f"Content filter check failed for AI output: {exc}")
         # ── end content filter check ────────────────────────────────────────
 
-        now = self._normalize_message_timestamp(timestamp) or datetime.now(UTC).replace(tzinfo=None)
+        now = self._normalize_message_timestamp(timestamp) or datetime.now(timezone.utc).replace(
+            tzinfo=None
+        )
         metadata = metadata or {}
         extracted_source = source or self._extract_source(metadata)
         external_message_id = self._extract_external_message_id(metadata)
@@ -1850,7 +1852,7 @@ class SessionManager:
             cursor, "agent_sessions", tenant_id
         )
 
-        now = datetime.now(UTC).replace(tzinfo=None)
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
         now_iso = now.isoformat()
 
         # First, get session info for statistics update
@@ -2163,7 +2165,7 @@ class SessionManager:
         conn = self._get_connection()
         cursor = conn.cursor()
 
-        cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=days_old)
+        cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days_old)
 
         # Get expired session IDs
         cursor.execute(

@@ -6,7 +6,7 @@ Provides fast dashboard queries by maintaining a summary table.
 """
 
 import logging
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any, cast
 
 from app.repositories.database import Database, is_postgresql
@@ -169,7 +169,7 @@ class SummaryService:
         Args:
             aggregates: List of aggregate records.
         """
-        now = datetime.now(UTC).replace(tzinfo=None)
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
 
         with self.db.connection() as conn:
             cursor = conn.cursor()
@@ -364,7 +364,8 @@ class SummaryService:
                 if isinstance(last_update, str):
                     last_update = datetime.fromisoformat(last_update.replace("Z", "+00:00"))
                 age = (
-                    datetime.now(UTC).replace(tzinfo=None) - last_update.replace(tzinfo=None)
+                    datetime.now(timezone.utc).replace(tzinfo=None)
+                    - last_update.replace(tzinfo=None)
                 ).total_seconds()
                 return cast("bool", age > 3600)  # Refresh if older than 1 hour
             return True

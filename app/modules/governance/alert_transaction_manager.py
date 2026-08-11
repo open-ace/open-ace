@@ -15,7 +15,7 @@ import logging
 import time
 import uuid
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from app.modules.governance.alert_notifier import normalize_alert_severity
 from app.repositories.database import Database, adapt_boolean_value, adapt_sql, is_postgresql
@@ -128,7 +128,9 @@ class AlertCreationFailure:
     alert_data: str = ""  # JSON string of QuotaAlertData
     retry_count: int = 0
     last_retry_at: datetime | None = None
-    created_at: datetime = field(default_factory=lambda: datetime.now(UTC).replace(tzinfo=None))
+    created_at: datetime = field(
+        default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None)
+    )
     status: str = "pending"  # pending, retrying, failed, success
 
     def to_dict(self) -> dict:
@@ -305,7 +307,7 @@ class AlertTransactionManager:
                         alerts_data["user_id"],
                         alerts_data["username"],
                         alerts_data["metadata"],
-                        datetime.now(UTC).replace(tzinfo=None).isoformat(),
+                        datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
                         adapt_boolean_value(False),
                         alerts_data.get("action_url"),
                         alerts_data.get("action_text"),
@@ -327,7 +329,7 @@ class AlertTransactionManager:
 
     def _has_recent_alert(self, user_id: int, quota_type: str, hours: int = 1) -> bool:
         """Check if a recent alert exists in either table."""
-        threshold = datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=hours)
+        threshold = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=hours)
         threshold_str = threshold.isoformat()
 
         # Check quota_alerts
@@ -403,7 +405,7 @@ class AlertTransactionManager:
         for row in rows:
             created_at_val = row.get("created_at")
             if created_at_val is None:
-                created_at_val = datetime.now(UTC).replace(tzinfo=None)
+                created_at_val = datetime.now(timezone.utc).replace(tzinfo=None)
 
             failures.append(
                 AlertCreationFailure(
@@ -445,7 +447,7 @@ class AlertTransactionManager:
                     ),
                     (
                         new_retry_count,
-                        datetime.now(UTC).replace(tzinfo=None).isoformat(),
+                        datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
                         new_status,
                         failure.id,
                     ),

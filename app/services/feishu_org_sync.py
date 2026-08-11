@@ -15,7 +15,7 @@ import uuid
 from collections import deque
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, cast
 
 import requests
@@ -189,7 +189,7 @@ class FeishuOrgSyncService:
         effective_tenant_id = int(effective_tenant_id)
         result = FeishuOrgSyncResult(
             tenant_id=effective_tenant_id,
-            started_at=datetime.now(UTC).replace(tzinfo=None).isoformat(),
+            started_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
         )
 
         # Publish the active credentials so _request_json can re-exchange the
@@ -202,7 +202,7 @@ class FeishuOrgSyncService:
                 # Record the in-flight start for the SQLite max-runtime watchdog
                 # fallback (single-process). On Postgres the authoritative signal
                 # is derived cross-process from pg_locks (see _org_sync_lock).
-                self.__class__._sync_started_at = datetime.now(UTC).replace(tzinfo=None)
+                self.__class__._sync_started_at = datetime.now(timezone.utc).replace(tzinfo=None)
                 try:
                     self._ensure_supporting_tables()
                     token = self._get_tenant_access_token(app_id, app_secret)
@@ -261,7 +261,7 @@ class FeishuOrgSyncService:
                         result=result,
                     )
 
-                    result.finished_at = datetime.now(UTC).replace(tzinfo=None).isoformat()
+                    result.finished_at = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
                     return result
                 finally:
                     self.__class__._sync_started_at = None
@@ -287,7 +287,7 @@ class FeishuOrgSyncService:
         interval_minutes = max(int(config.get("org_sync_interval_minutes") or 60), 5)
         max_runtime_seconds = int(config.get("org_sync_max_runtime_seconds") or 1800)
         auto_recover = bool(config.get("org_sync_auto_recover", False))
-        now = datetime.now(UTC).replace(tzinfo=None)
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
 
         if not self._schedule_lock.acquire(blocking=False):
             return None
@@ -320,7 +320,9 @@ class FeishuOrgSyncService:
             started = self.__class__._sync_started_at
             if started is None:
                 return
-            hold_seconds = (datetime.now(UTC).replace(tzinfo=None) - started).total_seconds()
+            hold_seconds = (
+                datetime.now(timezone.utc).replace(tzinfo=None) - started
+            ).total_seconds()
             pid = None
         else:
             hold_seconds = float(state.get("hold_seconds", 0.0) or 0.0)
@@ -518,7 +520,7 @@ class FeishuOrgSyncService:
         app_id until one minute before its real expiry (``expire``, in seconds).
         """
         cache_key = app_id
-        now = datetime.now(UTC).replace(tzinfo=None)
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
         cached = self._token_cache.get(cache_key)
         if cached and cached.expires_at > now:
             return cached.value
@@ -800,7 +802,7 @@ class FeishuOrgSyncService:
         if existing_teams is None:
             existing_teams = self._load_synced_teams()
         existing = existing_teams.get(department.department_id)
-        now = datetime.now(UTC).replace(tzinfo=None).isoformat()
+        now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
 
         settings = {
             "sync_source": FEISHU_PROVIDER_NAME,
@@ -977,7 +979,7 @@ class FeishuOrgSyncService:
             "department_ids": list(user.department_ids),
             "status": user.status,
             "synced_by": "feishu_org_sync",
-            "synced_at": datetime.now(UTC).replace(tzinfo=None).isoformat(),
+            "synced_at": datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
         }
         self.sso_manager.link_identity(
             user_id=existing_user_id,
@@ -1043,7 +1045,7 @@ class FeishuOrgSyncService:
                     user_id,
                     username,
                     role,
-                    datetime.now(UTC).replace(tzinfo=None).isoformat(),
+                    datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
                 ),
             )
             result.memberships_added += 1

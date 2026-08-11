@@ -10,7 +10,7 @@ Tests cover:
 - Error handling for save failures
 """
 
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from functools import wraps
 from io import BytesIO
 
@@ -108,8 +108,10 @@ class TestReportGenerationAPI:
             "/api/compliance/reports",
             json={
                 "report_type": "usage_summary",
-                "period_start": (datetime.now(UTC) - timedelta(days=30)).strftime("%Y-%m-%d"),
-                "period_end": datetime.now(UTC).strftime("%Y-%m-%d"),
+                "period_start": (datetime.now(timezone.utc) - timedelta(days=30)).strftime(
+                    "%Y-%m-%d"
+                ),
+                "period_end": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
                 "format": "json",
             },
             headers=admin_headers,
@@ -129,8 +131,10 @@ class TestReportGenerationAPI:
             "/api/compliance/reports",
             json={
                 "report_type": "usage_summary",
-                "period_start": (datetime.now(UTC) - timedelta(days=30)).strftime("%Y-%m-%d"),
-                "period_end": datetime.now(UTC).strftime("%Y-%m-%d"),
+                "period_start": (datetime.now(timezone.utc) - timedelta(days=30)).strftime(
+                    "%Y-%m-%d"
+                ),
+                "period_end": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
                 "format": "csv",
             },
             headers=admin_headers,
@@ -148,8 +152,10 @@ class TestReportGenerationAPI:
             "/api/compliance/reports",
             json={
                 "report_type": "usage_summary",
-                "period_start": (datetime.now(UTC) - timedelta(days=30)).strftime("%Y-%m-%d"),
-                "period_end": datetime.now(UTC).strftime("%Y-%m-%d"),
+                "period_start": (datetime.now(timezone.utc) - timedelta(days=30)).strftime(
+                    "%Y-%m-%d"
+                ),
+                "period_end": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
                 "format": "html",
                 "language": "en",
             },
@@ -171,8 +177,10 @@ class TestReportGenerationAPI:
             "/api/compliance/reports",
             json={
                 "report_type": "usage_summary",
-                "period_start": (datetime.now(UTC) - timedelta(days=30)).strftime("%Y-%m-%d"),
-                "period_end": datetime.now(UTC).strftime("%Y-%m-%d"),
+                "period_start": (datetime.now(timezone.utc) - timedelta(days=30)).strftime(
+                    "%Y-%m-%d"
+                ),
+                "period_end": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
                 "format": "excel",
                 "language": "en",
             },
@@ -195,8 +203,10 @@ class TestReportGenerationAPI:
             "/api/compliance/reports",
             json={
                 "report_type": "usage_summary",
-                "period_start": (datetime.now(UTC) - timedelta(days=30)).strftime("%Y-%m-%d"),
-                "period_end": datetime.now(UTC).strftime("%Y-%m-%d"),
+                "period_start": (datetime.now(timezone.utc) - timedelta(days=30)).strftime(
+                    "%Y-%m-%d"
+                ),
+                "period_end": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
                 "format": "html",
             },
             headers=admin_headers,

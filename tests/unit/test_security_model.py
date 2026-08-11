@@ -25,7 +25,7 @@ import hashlib
 import os
 import re
 from contextlib import contextmanager
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 import pytest
@@ -281,7 +281,7 @@ class TestRegistrationTokens:
         token = manager.create_registration_token(tenant_id=1, created_by=1)
 
         # Force the token to be expired in the database
-        past = (datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=2)).isoformat()
+        past = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=2)).isoformat()
         with manager.db.connection() as conn:
             conn.execute("UPDATE registration_tokens SET expires_at = ?", (past,))
             conn.commit()

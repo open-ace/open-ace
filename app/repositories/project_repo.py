@@ -5,7 +5,7 @@ Repository for project data access operations.
 """
 
 import logging
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any, cast
 
 from app.models.project import Project, ProjectDailyStats, ProjectStats, UserProject
@@ -119,7 +119,7 @@ class ProjectRepository:
             Optional[int]: Project ID if successful, None otherwise.
         """
         try:
-            now = datetime.now(UTC).replace(tzinfo=None)
+            now = datetime.now(timezone.utc).replace(tzinfo=None)
             # Use fail-closed mode for write operations
             effective_tenant_id = self._resolve_tenant_id_for_write(
                 tenant_id=tenant_id, user_id=created_by
@@ -387,7 +387,7 @@ class ProjectRepository:
                 return True
 
             updates.append("updated_at = ?")
-            params.append(datetime.now(UTC).replace(tzinfo=None))
+            params.append(datetime.now(timezone.utc).replace(tzinfo=None))
 
             query = f"UPDATE projects SET {', '.join(updates)} WHERE id = ?"
             params.append(project_id)
@@ -418,7 +418,7 @@ class ProjectRepository:
             normalized_tenant_id = self._normalize_tenant_id(tenant_id)
             if soft_delete:
                 query = "UPDATE projects SET is_active = FALSE, updated_at = ? WHERE id = ?"
-                params: list[Any] = [datetime.now(UTC).replace(tzinfo=None), project_id]
+                params: list[Any] = [datetime.now(timezone.utc).replace(tzinfo=None), project_id]
                 if normalized_tenant_id is not None:
                     query += " AND tenant_id = ?"
                     params.append(normalized_tenant_id)
@@ -453,7 +453,7 @@ class ProjectRepository:
             Optional[int]: Relationship ID if successful.
         """
         try:
-            now = datetime.now(UTC).replace(tzinfo=None)
+            now = datetime.now(timezone.utc).replace(tzinfo=None)
 
             if self.db.is_postgresql:
                 result = self.db.fetch_one(
@@ -539,7 +539,7 @@ class ProjectRepository:
             self.db.execute(
                 query,
                 (
-                    datetime.now(UTC).replace(tzinfo=None),
+                    datetime.now(timezone.utc).replace(tzinfo=None),
                     sessions_delta,
                     tokens_delta,
                     requests_delta,

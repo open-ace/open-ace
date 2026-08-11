@@ -10,7 +10,7 @@ import hashlib
 import os
 import tempfile
 from base64 import b64encode
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
@@ -34,7 +34,7 @@ class TestProxyTokenLoggingContext:
 
     def test_expired_token_log_includes_session_context(self, mock_service, caplog):
         """Test that expired token log includes session_id and session_type."""
-        now = datetime.now(UTC).replace(tzinfo=None)
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
         exp = now - timedelta(minutes=5)  # Already expired
 
         with caplog.at_level("WARNING"):
@@ -57,7 +57,7 @@ class TestProxyTokenLoggingContext:
 
     def test_expired_token_log_handles_none_session_id(self, mock_service, caplog):
         """Test that expired token log handles None session_id gracefully."""
-        now = datetime.now(UTC).replace(tzinfo=None)
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
         exp = now - timedelta(minutes=5)  # Already expired
 
         with caplog.at_level("WARNING"):
@@ -77,7 +77,7 @@ class TestProxyTokenLoggingContext:
 
     def test_expired_token_log_includes_session_type_ha_pool(self, mock_service, caplog):
         """Test that expired token log includes ha_pool session_type."""
-        now = datetime.now(UTC).replace(tzinfo=None)
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
         exp = now - timedelta(minutes=5)  # Already expired
 
         with caplog.at_level("WARNING"):
@@ -96,7 +96,7 @@ class TestProxyTokenLoggingContext:
 
     def test_session_allows_proxy_token_with_conn_includes_context(self, mock_service, caplog):
         """Test that _session_allows_proxy_token_with_conn includes logging context."""
-        now = datetime.now(UTC).replace(tzinfo=None)
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
         exp = now - timedelta(minutes=5)  # Already expired
 
         mock_conn = MagicMock()
@@ -139,7 +139,7 @@ class TestProxyTokenServerRecordExpiredLogging:
         mock_cursor = MagicMock()
 
         # Create a mock record with expired expires_at
-        now = datetime.now(UTC).replace(tzinfo=None)
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
         expired_time = (now - timedelta(minutes=5)).isoformat()
         mock_record = {
             "jti": "test-jti-12345678",

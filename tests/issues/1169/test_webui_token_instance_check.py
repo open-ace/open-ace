@@ -10,7 +10,7 @@ import json
 import os
 import secrets
 from base64 import b64encode
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -28,7 +28,7 @@ def _make_proxy_token_payload(
     session_type: str = "webui",
 ) -> dict:
     """Create a mock proxy token payload."""
-    exp = datetime.now(UTC) + timedelta(minutes=expires_minutes)
+    exp = datetime.now(timezone.utc) + timedelta(minutes=expires_minutes)
     # Remove timezone info to match how the code parses it
     exp_str = exp.replace(tzinfo=None).isoformat()
     return {

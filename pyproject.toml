@@ -108,7 +108,7 @@ Roadmap = "https://github.com/open-ace/open-ace/blob/main/ROADMAP.md"
 # =============================================================================
 [tool.black]
 line-length = 100
-target-version = ['py310', 'py311', 'py312', 'py313']
+target-version = ['py310', 'py311']
 include = '\.pyi?$'
 exclude = '''
 /(
@@ -143,7 +143,7 @@ skip = [".git", ".hg", ".mypy_cache", ".tox", ".venv", "_build", "buck-out", "bu
 # =============================================================================
 [tool.ruff]
 line-length = 100
-target-version = "py312"
+target-version = "py310"
 exclude = ["*.sh", "*.bash", "*.zsh", "*.ps1", "*.cmd", "docker-entrypoint.sh"]
 
 [tool.ruff.lint]

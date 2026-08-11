@@ -10,7 +10,7 @@ import os
 import secrets
 import threading
 import time
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, cast
 
 from app.modules.sso.exceptions import SSOConfigDecryptionError
@@ -315,7 +315,7 @@ class SSOManager:
 
         try:
             serialized_config = self.serialize_provider_config(config.__dict__)
-            now = datetime.now(UTC).replace(tzinfo=None)
+            now = datetime.now(timezone.utc).replace(tzinfo=None)
             self.db.execute(
                 """
                 INSERT INTO sso_providers
@@ -702,7 +702,7 @@ class SSOManager:
             bool: True if successful.
         """
         try:
-            now = datetime.now(UTC).replace(tzinfo=None)
+            now = datetime.now(timezone.utc).replace(tzinfo=None)
             provider_data_json = json.dumps(provider_data) if provider_data else None
 
             # SECURITY: never silently re-bind an SSO identity from one local
@@ -797,7 +797,7 @@ class SSOManager:
             Optional[str]: Session token or None.
         """
         session_token = secrets.token_hex(32)
-        expires_at = datetime.now(UTC).replace(tzinfo=None) + timedelta(seconds=expires_in)
+        expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(seconds=expires_in)
 
         try:
             self.db.execute(
@@ -837,7 +837,7 @@ class SSOManager:
             SELECT * FROM sso_sessions
             WHERE session_token = ? AND expires_at > ?
         """,
-            (session_token, datetime.now(UTC).replace(tzinfo=None)),
+            (session_token, datetime.now(timezone.utc).replace(tzinfo=None)),
         )
 
         if not row:
@@ -860,7 +860,7 @@ class SSOManager:
         try:
             cursor = self.db.execute(
                 "DELETE FROM sso_sessions WHERE expires_at < ?",
-                (datetime.now(UTC).replace(tzinfo=None),),
+                (datetime.now(timezone.utc).replace(tzinfo=None),),
             )
             return cast("int", cursor.rowcount)
 
@@ -889,7 +889,7 @@ class SSOManager:
         Issue #1815 Finding 2: Added expires_at for TTL-based cleanup.
         Issue #1826 Finding 2 (F2): Fail-fast instead of swallowing INSERT failure.
         """
-        expires_at = datetime.now(UTC).replace(tzinfo=None) + timedelta(
+        expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(
             seconds=AUTH_STATE_TTL_SECONDS
         )
         # Issue #1826 F2: Let INSERT failure propagate to caller for proper error handling
@@ -907,7 +907,7 @@ class SSOManager:
         Issue #1815 Finding 2: Added expiry predicate to prevent replay attacks.
         """
         try:
-            now = datetime.now(UTC).replace(tzinfo=None)
+            now = datetime.now(timezone.utc).replace(tzinfo=None)
             row = self.db.fetch_one(
                 "SELECT * FROM sso_auth_states WHERE state = ? AND expires_at > ?",
                 (state, now),
@@ -935,7 +935,7 @@ class SSOManager:
             int: Total number of deleted rows.
         """
         total_deleted = 0
-        now = datetime.now(UTC).replace(tzinfo=None)
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
 
         try:
             while True:

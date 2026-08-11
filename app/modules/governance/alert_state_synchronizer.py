@@ -7,7 +7,7 @@ Ensures consistency when users acknowledge, delete, or clean up alerts.
 
 import json
 import logging
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from app.repositories.database import Database, adapt_boolean_value, adapt_sql, is_postgresql
@@ -92,7 +92,7 @@ class AlertStateSynchronizer:
                         pass
 
                 # Mark alerts table as read
-                now = datetime.now(UTC).replace(tzinfo=None)
+                now = datetime.now(timezone.utc).replace(tzinfo=None)
                 if is_postgresql():
                     cursor.execute(
                         """
@@ -303,7 +303,7 @@ class AlertStateSynchronizer:
         Returns:
             Dict with cleanup statistics.
         """
-        cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=days)
+        cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
         cutoff_str = cutoff.isoformat()
 
         result = {

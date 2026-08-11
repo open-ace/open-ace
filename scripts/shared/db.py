@@ -10,7 +10,7 @@ import json
 import os
 import sqlite3
 import sys
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional, Union, cast
 
 # Ensure scripts directory is in path for standalone script execution
@@ -3721,7 +3721,7 @@ def get_conversation_timeline(session_id: str) -> dict:
         """Convert datetime to GMT+8 timezone."""
         # If the datetime is naive (no timezone), assume it's UTC
         if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=UTC)
+            dt = dt.replace(tzinfo=timezone.utc)
         return dt.astimezone(gmt_plus_8)
 
     conn = get_connection()

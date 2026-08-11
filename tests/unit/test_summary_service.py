@@ -1,6 +1,6 @@
 """Unit tests for SummaryService."""
 
-from datetime import UTC, timezone
+from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
 import pytest
@@ -137,7 +137,9 @@ class TestSummaryService:
         svc, mock_db, _ = self._make_service()
         from datetime import datetime, timedelta, timezone
 
-        recent = (datetime.now(UTC).replace(tzinfo=None) - timedelta(minutes=30)).isoformat()
+        recent = (
+            datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=30)
+        ).isoformat()
         mock_db.fetch_one.side_effect = [
             {"count": 5},
             {"last_update": recent},

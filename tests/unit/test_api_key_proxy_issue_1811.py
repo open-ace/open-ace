@@ -13,7 +13,7 @@ import json
 import os
 import tempfile
 from base64 import b64encode
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
@@ -51,8 +51,8 @@ class TestFailClosedBehavior:
                 session_id="test-session-123",
                 session_type="agent",
                 user_id=1,
-                now=datetime.now(UTC).replace(tzinfo=None),
-                exp=datetime.now(UTC).replace(tzinfo=None) + timedelta(hours=1),
+                now=datetime.now(timezone.utc).replace(tzinfo=None),
+                exp=datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=1),
             )
             assert result is False
 
@@ -69,8 +69,8 @@ class TestFailClosedBehavior:
                 session_id="test-session-123",
                 session_type="agent",
                 user_id=1,
-                now=datetime.now(UTC).replace(tzinfo=None),
-                exp=datetime.now(UTC).replace(tzinfo=None) + timedelta(hours=1),
+                now=datetime.now(timezone.utc).replace(tzinfo=None),
+                exp=datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=1),
             )
             assert result is False
 
@@ -87,8 +87,8 @@ class TestFailClosedBehavior:
                 session_id="test-session-123",
                 session_type="agent",
                 user_id=1,
-                now=datetime.now(UTC).replace(tzinfo=None),
-                exp=datetime.now(UTC).replace(tzinfo=None) + timedelta(hours=1),
+                now=datetime.now(timezone.utc).replace(tzinfo=None),
+                exp=datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=1),
             )
             assert result is False
 
@@ -107,8 +107,8 @@ class TestFailClosedBehavior:
                     session_id="test-session-123",
                     session_type=session_type,
                     user_id=1,
-                    now=datetime.now(UTC).replace(tzinfo=None),
-                    exp=datetime.now(UTC).replace(tzinfo=None) + timedelta(hours=1),
+                    now=datetime.now(timezone.utc).replace(tzinfo=None),
+                    exp=datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=1),
                 )
                 assert result is False
 
@@ -187,7 +187,9 @@ class TestProxyTokenCleanup:
         conn = mock_service._get_connection()
         cursor = conn.cursor()
 
-        expired_time = (datetime.now(UTC).replace(tzinfo=None) - timedelta(days=10)).isoformat()
+        expired_time = (
+            datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=10)
+        ).isoformat()
         cursor.execute(
             "INSERT INTO proxy_token_jtis (jti, token_hash, user_id, session_id, tenant_id, provider, session_type, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (
@@ -225,7 +227,7 @@ class TestProxyTokenCleanup:
         cursor = conn.cursor()
 
         # Create a consumed token record (consumed 2 days ago)
-        now = datetime.now(UTC).replace(tzinfo=None)
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
         consumed_time = (now - timedelta(days=2)).isoformat()
         expires_time = (now + timedelta(days=30)).isoformat()
 
@@ -269,7 +271,7 @@ class TestProxyTokenCleanup:
         cursor = conn.cursor()
 
         # Create a revoked token record (revoked 2 days ago)
-        now = datetime.now(UTC).replace(tzinfo=None)
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
         revoked_time = (now - timedelta(days=2)).isoformat()
         expires_time = (now + timedelta(days=30)).isoformat()
 
@@ -311,7 +313,7 @@ class TestProxyTokenCleanup:
         cursor = conn.cursor()
 
         # Create an active token record
-        now = datetime.now(UTC).replace(tzinfo=None)
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
         expires_time = (now + timedelta(days=30)).isoformat()
 
         cursor.execute(
@@ -340,7 +342,9 @@ class TestProxyTokenCleanup:
         cursor = conn.cursor()
 
         # Create more than 1000 expired records
-        expired_time = (datetime.now(UTC).replace(tzinfo=None) - timedelta(days=10)).isoformat()
+        expired_time = (
+            datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=10)
+        ).isoformat()
         for i in range(1500):
             cursor.execute(
                 "INSERT INTO proxy_token_jtis (jti, token_hash, user_id, session_id, tenant_id, provider, session_type, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",

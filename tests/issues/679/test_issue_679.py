@@ -13,7 +13,7 @@ import os
 import sqlite3
 import sys
 import tempfile
-from datetime import UTC, timezone
+from datetime import datetime, timezone
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, PROJECT_ROOT)
@@ -198,7 +198,7 @@ def test_check_heartbeats_prunes_stale_connections():
 
     from datetime import datetime, timedelta, timezone
 
-    now = datetime.now(UTC).replace(tzinfo=None)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     old = now - timedelta(seconds=300)  # well past 180s timeout
 
     with mgr.db.connection() as conn:
@@ -240,7 +240,7 @@ def test_check_heartbeats_keeps_online_connections():
 
     from datetime import datetime, timezone
 
-    now = datetime.now(UTC).replace(tzinfo=None)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
 
     with mgr.db.connection() as conn:
         cursor = conn.cursor()
@@ -268,7 +268,7 @@ def test_check_heartbeats_no_prune_recently_offline():
 
     from datetime import datetime, timedelta, timezone
 
-    now = datetime.now(UTC).replace(tzinfo=None)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     # Heartbeat only 30s ago — within the 180s timeout, so should NOT be pruned
     recent = now - timedelta(seconds=30)
 
@@ -322,7 +322,7 @@ def test_register_known_machine_returns_200():
 
     from datetime import datetime, timezone
 
-    now = datetime.now(UTC).replace(tzinfo=None)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
 
     with mgr.db.connection() as conn:
         cursor = conn.cursor()

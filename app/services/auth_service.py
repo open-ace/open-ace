@@ -7,7 +7,7 @@ Business logic for authentication and authorization.
 import logging
 import secrets
 import time
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import cast
 
@@ -28,7 +28,7 @@ def _utcnow() -> datetime:
     Returns:
         datetime: Current timezone.utc time as naive datetime (tzinfo=None)
     """
-    return datetime.now(UTC).replace(tzinfo=None)
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 class ChangePasswordError(Enum):

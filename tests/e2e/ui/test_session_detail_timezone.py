@@ -10,7 +10,7 @@ datetime.now(timezone.utc).replace(tzinfo=None)), so _format_dt must append
 """
 
 import os
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -35,7 +35,7 @@ class TestFormatDt:
 
     def test_utc_aware_datetime_preserves_offset(self):
         """Timezone-aware UTC datetimes preserve their +00:00 offset."""
-        dt = datetime(2026, 5, 24, 15, 30, 0, tzinfo=UTC)
+        dt = datetime(2026, 5, 24, 15, 30, 0, tzinfo=timezone.utc)
         result = _format_dt(dt)
         assert "+00:00" in result
         assert result == "2026-05-24T15:30:00+00:00"

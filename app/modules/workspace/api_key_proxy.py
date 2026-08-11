@@ -15,7 +15,7 @@ import sqlite3
 import threading
 from base64 import b64decode, b64encode
 from copy import deepcopy
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 # Issue #2327: Import ActorScope for tenant authorization
 from typing import TYPE_CHECKING, Any, cast
@@ -697,7 +697,7 @@ class APIKeyProxyService:
             resolved_ips, _ = resolve_and_store_ips(base_url)
             if resolved_ips:
                 # Use UTC timestamp, remove timezone info for PostgreSQL TIMESTAMP compatibility
-                resolved_at = datetime.now(UTC).replace(tzinfo=None)
+                resolved_at = datetime.now(timezone.utc).replace(tzinfo=None)
                 logger.info(
                     "Resolved IPs for base_url: %s -> %s",
                     base_url[:50] + "..." if len(base_url) > 50 else base_url,
@@ -1108,7 +1108,7 @@ class APIKeyProxyService:
                 resolved_ips, _ = resolve_and_store_ips(base_url)
                 if resolved_ips:
                     # Use UTC timestamp, remove timezone info for PostgreSQL TIMESTAMP compatibility
-                    resolved_at = datetime.now(UTC).replace(tzinfo=None)
+                    resolved_at = datetime.now(timezone.utc).replace(tzinfo=None)
                     logger.info(
                         "Resolved IPs for updated base_url: %s -> %s",
                         base_url[:50] + "..." if len(base_url) > 50 else base_url,

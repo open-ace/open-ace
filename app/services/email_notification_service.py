@@ -16,7 +16,7 @@ import socket
 import ssl
 import threading
 import time
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import Any
@@ -178,7 +178,7 @@ class RateLimiter:
             Tuple of (allowed, remaining_count).
         """
         with self._lock:
-            now = datetime.now(UTC).replace(tzinfo=None)
+            now = datetime.now(timezone.utc).replace(tzinfo=None)
             cutoff = now - RATE_LIMIT_WINDOW
 
             # Get user's send times
@@ -207,7 +207,7 @@ class RateLimiter:
             user_id: User ID.
         """
         with self._lock:
-            now = datetime.now(UTC).replace(tzinfo=None)
+            now = datetime.now(timezone.utc).replace(tzinfo=None)
             if user_id not in self._user_send_times:
                 self._user_send_times[user_id] = []
             self._user_send_times[user_id].append(now)
@@ -294,7 +294,7 @@ class EmailQueue:
             else:
                 # Retry logic
                 if retry_count < self._max_retry:
-                    next_retry = datetime.now(UTC).replace(tzinfo=None) + timedelta(
+                    next_retry = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(
                         minutes=retry_count * 5 + 1
                     )
                     log_repo.update_status(

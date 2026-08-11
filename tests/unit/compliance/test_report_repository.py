@@ -9,7 +9,7 @@ Tests cover:
 """
 
 import json
-from datetime import UTC, datetime, timezone
+from datetime import datetime, timezone
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
@@ -28,7 +28,7 @@ def sample_report_metadata():
     return ReportMetadata(
         report_id="test-report-save-001",
         report_type=ReportType.USAGE_SUMMARY.value,
-        generated_at=datetime.now(UTC).replace(tzinfo=None),
+        generated_at=datetime.now(timezone.utc).replace(tzinfo=None),
         period_start=datetime(2024, 1, 1),
         period_end=datetime(2024, 1, 31),
         generated_by=1,

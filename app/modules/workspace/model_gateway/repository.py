@@ -9,7 +9,7 @@ runtime use by the planner.
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from app.modules.workspace.model_gateway.config import GatewayConfig
@@ -121,7 +121,7 @@ class ModelGatewayConfigRepository:
     ) -> dict[str, Any]:
         """Save the gateway config (replaces the single existing row)."""
         encrypted_key = self.password_manager.encrypt(api_key) if api_key else ""
-        now = datetime.now(UTC).replace(tzinfo=None)
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
 
         conn = self._get_connection()
         cursor = conn.cursor()

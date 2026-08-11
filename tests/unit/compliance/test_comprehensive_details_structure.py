@@ -12,7 +12,7 @@ Tests cover:
 
 import io
 import json
-from datetime import UTC, datetime, timezone
+from datetime import datetime, timezone
 
 import pytest
 
@@ -38,7 +38,7 @@ def comprehensive_report_metadata():
     return ReportMetadata(
         report_id="test-comprehensive-001",
         report_type=ReportType.COMPREHENSIVE.value,
-        generated_at=datetime.now(UTC).replace(tzinfo=None),
+        generated_at=datetime.now(timezone.utc).replace(tzinfo=None),
         period_start=datetime(2024, 1, 1),
         period_end=datetime(2024, 1, 31),
         generated_by=1,
@@ -51,7 +51,7 @@ def audit_trail_report_metadata():
     return ReportMetadata(
         report_id="test-audit-trail-001",
         report_type=ReportType.AUDIT_TRAIL.value,
-        generated_at=datetime.now(UTC).replace(tzinfo=None),
+        generated_at=datetime.now(timezone.utc).replace(tzinfo=None),
         period_start=datetime(2024, 1, 1),
         period_end=datetime(2024, 1, 31),
         generated_by=1,

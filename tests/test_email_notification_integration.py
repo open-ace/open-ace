@@ -13,7 +13,7 @@ import json
 import os
 import tempfile
 import unittest
-from datetime import UTC, datetime, timezone
+from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -150,7 +150,7 @@ class TestEmailNotificationFlow(unittest.TestCase):
                 "severity": "warning",
                 "alert_type": "quota",
                 "message": "Test",
-                "created_at": datetime.now(UTC).isoformat(),
+                "created_at": datetime.now(timezone.utc).isoformat(),
             },
         )
 
@@ -183,7 +183,7 @@ class TestEmailNotificationFlow(unittest.TestCase):
                 "severity": "warning",
                 "alert_type": "quota",
                 "message": "Test",
-                "created_at": datetime.now(UTC).isoformat(),
+                "created_at": datetime.now(timezone.utc).isoformat(),
             },
         )
 
@@ -210,7 +210,7 @@ class TestEmailNotificationFlow(unittest.TestCase):
                 "severity": "warning",
                 "alert_type": "quota",
                 "message": "Test",
-                "created_at": datetime.now(UTC).isoformat(),
+                "created_at": datetime.now(timezone.utc).isoformat(),
             },
         )
 

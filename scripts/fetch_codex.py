@@ -22,7 +22,7 @@ import platform
 import socket
 import sys
 from collections import defaultdict
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -123,7 +123,7 @@ def parse_timestamp(ts_str: str) -> str:
             else:
                 dt = datetime.strptime(ts_str, "%Y-%m-%dT%H:%M:%SZ")
             # UTC time - convert to local time for date extraction
-            dt = dt.replace(tzinfo=UTC).astimezone()
+            dt = dt.replace(tzinfo=timezone.utc).astimezone()
         else:
             dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
         return dt.strftime("%Y-%m-%d")
@@ -853,7 +853,7 @@ def update_agent_sessions_stats(messages: list) -> int:
 
     updated = 0
     messages_inserted = 0
-    now = datetime.now(UTC).replace(tzinfo=None).isoformat()
+    now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
     placeholder = _placeholder()
 
     conn = get_connection()

@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -125,7 +125,7 @@ class DataFetchScheduler:
                 while not self._gevent_stop_event.is_set():
                     gevent.sleep(self._interval)
                     self._run_fetch()
-                    self._heartbeat = datetime.now(UTC).replace(tzinfo=None)
+                    self._heartbeat = datetime.now(timezone.utc).replace(tzinfo=None)
                     self._next_run = datetime.now().timestamp() + self._interval
 
             self._greenlet = gevent.spawn(gevent_loop)
@@ -154,7 +154,7 @@ class DataFetchScheduler:
         """Run fetch and update heartbeat."""
         self._run_fetch()
 
-        self._heartbeat = datetime.now(UTC).replace(tzinfo=None)
+        self._heartbeat = datetime.now(timezone.utc).replace(tzinfo=None)
 
     def stop(self):
         """Stop the scheduler."""
@@ -194,7 +194,9 @@ class DataFetchScheduler:
         # Check heartbeat freshness
         heartbeat_age = None
         if self._heartbeat:
-            heartbeat_age = (dt.now(UTC).replace(tzinfo=None) - self._heartbeat).total_seconds()
+            heartbeat_age = (
+                dt.now(timezone.utc).replace(tzinfo=None) - self._heartbeat
+            ).total_seconds()
 
         heartbeat_ok = heartbeat_age is not None and heartbeat_age < self._interval + 60
 
@@ -226,7 +228,7 @@ class DataFetchScheduler:
             self._run_fetch()
 
             # Update heartbeat
-            self._heartbeat = datetime.now(UTC).replace(tzinfo=None)
+            self._heartbeat = datetime.now(timezone.utc).replace(tzinfo=None)
 
             # Update next run time
             self._next_run = datetime.now().timestamp() + self._interval
@@ -253,7 +255,7 @@ class DataFetchScheduler:
         error_message = None
 
         logger.info("Starting scheduled data fetch...")
-        self._last_run = datetime.now(UTC).replace(tzinfo=None)
+        self._last_run = datetime.now(timezone.utc).replace(tzinfo=None)
 
         try:
             results = run_fetch_scripts()
@@ -442,8 +444,8 @@ class DataFetchScheduler:
         )
 
         bigint_cast = "::bigint" if is_postgresql() else ""
-        today = dt.now(UTC).replace(tzinfo=None).strftime("%Y-%m-%d")
-        month_start = dt.now(UTC).replace(tzinfo=None).replace(day=1).strftime("%Y-%m-%d")
+        today = dt.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
+        month_start = dt.now(timezone.utc).replace(tzinfo=None).replace(day=1).strftime("%Y-%m-%d")
         db = Database()
 
         exceeded_users = set()

@@ -5,7 +5,7 @@ integration test plans.
 """
 
 import json
-from datetime import UTC, datetime, timezone
+from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -527,7 +527,9 @@ class TestTenantRepository:
         assert result is True
         # First INSERT should use today's date
         insert_params = mock_cursor.execute.call_args_list[0][0][1]
-        assert insert_params[1] == datetime.now(UTC).replace(tzinfo=None).strftime("%Y-%m-%d")
+        assert insert_params[1] == datetime.now(timezone.utc).replace(tzinfo=None).strftime(
+            "%Y-%m-%d"
+        )
 
     def test_record_usage_exception(self):
         self.db.connection.side_effect = Exception("DB error")

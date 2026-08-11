@@ -12,7 +12,7 @@ Tests cover:
 import os
 import tempfile
 import unittest
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -210,7 +210,9 @@ class TestRateLimiter(unittest.TestCase):
 
         # Add an old timestamp
         limiter._user_send_times[user_id].append(
-            datetime.now(UTC).replace(tzinfo=None) - RATE_LIMIT_WINDOW - timedelta(minutes=1)
+            datetime.now(timezone.utc).replace(tzinfo=None)
+            - RATE_LIMIT_WINDOW
+            - timedelta(minutes=1)
         )
 
         # Should be allowed again (old entry filtered out)

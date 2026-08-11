@@ -8,7 +8,7 @@ import logging
 import secrets
 import urllib.parse
 import zlib
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, cast
 
 import requests
@@ -701,7 +701,7 @@ class SAMLProvider(SSOProvider):
 
     @staticmethod
     def _now() -> datetime:
-        return datetime.now(UTC)
+        return datetime.now(timezone.utc)
 
     @staticmethod
     def _parse_xml(raw_xml: bytes) -> etree._Element:
@@ -713,8 +713,8 @@ class SAMLProvider(SSOProvider):
         normalized = value.replace("Z", "+00:00")
         parsed = datetime.fromisoformat(normalized)
         if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=UTC)
-        return parsed.astimezone(UTC)
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
 
     @staticmethod
     def _normalize_certificate(value: str) -> str:

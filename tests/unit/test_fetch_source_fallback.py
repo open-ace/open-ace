@@ -17,7 +17,7 @@ import importlib.util
 import os
 import sqlite3
 import sys
-from datetime import UTC, datetime, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -122,7 +122,7 @@ def _init_dest_schema(db_path: Path) -> None:
 
 
 def _messages(tool_name: str) -> list:
-    ts_iso = datetime.now(UTC).isoformat()
+    ts_iso = datetime.now(timezone.utc).isoformat()
     return [
         {
             "date": "2026-06-24",

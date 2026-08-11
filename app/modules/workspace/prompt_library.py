@@ -10,7 +10,7 @@ import logging
 import sqlite3
 import threading
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
@@ -221,7 +221,7 @@ class PromptLibrary:
         conn = self._get_connection()
         cursor = conn.cursor()
 
-        now = datetime.now(UTC).replace(tzinfo=None).isoformat()
+        now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
 
         if is_postgresql():
             # PostgreSQL: use RETURNING clause
@@ -321,7 +321,7 @@ class PromptLibrary:
         conn = self._get_connection()
         cursor = conn.cursor()
 
-        now = datetime.now(UTC).replace(tzinfo=None).isoformat()
+        now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
         cursor.execute(
             adapt_sql(
                 """

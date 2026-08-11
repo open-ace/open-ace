@@ -7,7 +7,7 @@ Data access layer for tenant management.
 import contextlib
 import json
 import logging
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any, cast
 
 from app.models.tenant import QuotaConfig, Tenant, TenantSettings, TenantUsage
@@ -321,7 +321,7 @@ class TenantRepository:
             return False
 
         set_clauses.append("updated_at = ?")
-        params.append(datetime.now(UTC).replace(tzinfo=None))
+        params.append(datetime.now(timezone.utc).replace(tzinfo=None))
         params.append(tenant_id)
 
         query = f"UPDATE tenants SET {', '.join(set_clauses)} WHERE id = ?"
@@ -361,8 +361,8 @@ class TenantRepository:
             cursor = self.db.execute(
                 query,
                 (
-                    datetime.now(UTC).replace(tzinfo=None),
-                    datetime.now(UTC).replace(tzinfo=None),
+                    datetime.now(timezone.utc).replace(tzinfo=None),
+                    datetime.now(timezone.utc).replace(tzinfo=None),
                     tenant_id,
                 ),
             )
@@ -384,7 +384,9 @@ class TenantRepository:
         query = "UPDATE tenants SET deleted_at = NULL, updated_at = ? WHERE id = ?"
 
         try:
-            cursor = self.db.execute(query, (datetime.now(UTC).replace(tzinfo=None), tenant_id))
+            cursor = self.db.execute(
+                query, (datetime.now(timezone.utc).replace(tzinfo=None), tenant_id)
+            )
             return cast("bool", cursor.rowcount > 0)
         except Exception as e:
             logger.error(f"Failed to restore tenant: {e}")
@@ -440,7 +442,7 @@ class TenantRepository:
             bool: True if successful.
         """
         if date is None:
-            date = datetime.now(UTC).replace(tzinfo=None).strftime("%Y-%m-%d")
+            date = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
 
         try:
             from app.repositories.database import adapt_sql, is_postgresql
@@ -482,7 +484,7 @@ class TenantRepository:
                     WHERE id = ?
                 """
                     ),
-                    (tokens, requests, datetime.now(UTC).replace(tzinfo=None), tenant_id),
+                    (tokens, requests, datetime.now(timezone.utc).replace(tzinfo=None), tenant_id),
                 )
 
                 conn.commit()
@@ -559,7 +561,7 @@ class TenantRepository:
 
             with self.db.connection() as conn:
                 cursor = conn.cursor()
-                now = datetime.now(UTC).replace(tzinfo=None)
+                now = datetime.now(timezone.utc).replace(tzinfo=None)
                 if is_postgresql():
                     cursor.execute(
                         """

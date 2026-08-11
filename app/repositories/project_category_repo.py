@@ -6,7 +6,7 @@ Issue #1278: Data access for project categories
 
 import json
 import logging
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from app.models.project_category import ProjectCategory
@@ -47,7 +47,7 @@ class ProjectCategoryRepository:
     ) -> int | None:
         """Create a new category."""
         try:
-            now = datetime.now(UTC).replace(tzinfo=None)
+            now = datetime.now(timezone.utc).replace(tzinfo=None)
             patterns_json = json.dumps(key_patterns)
 
             if self.db.is_postgresql:
@@ -104,7 +104,7 @@ class ProjectCategoryRepository:
                 return True
 
             updates.append("updated_at = ?")
-            params.append(datetime.now(UTC).replace(tzinfo=None))
+            params.append(datetime.now(timezone.utc).replace(tzinfo=None))
             params.append(category_id)
 
             query = f"UPDATE project_categories SET {', '.join(updates)} WHERE id = ?"
@@ -117,7 +117,7 @@ class ProjectCategoryRepository:
     def delete_category(self, category_id: int) -> bool:
         """Delete a category (soft delete)."""
         try:
-            now = datetime.now(UTC).replace(tzinfo=None)
+            now = datetime.now(timezone.utc).replace(tzinfo=None)
             query = "UPDATE project_categories SET is_active = ?, updated_at = ? WHERE id = ?"
             self.db.execute(query, (adapt_boolean_value(False), now, category_id))
             return True

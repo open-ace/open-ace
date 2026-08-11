@@ -13,7 +13,7 @@ import threading
 import time
 import uuid
 from collections import deque
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -99,7 +99,7 @@ class AutonomousEventEmitter:
         event_data = dict(data)
         if event_type == "agent_activity":
             event_data.setdefault("activity_id", uuid.uuid4().hex)
-            event_data.setdefault("timestamp", datetime.now(UTC).isoformat())
+            event_data.setdefault("timestamp", datetime.now(timezone.utc).isoformat())
         event_payload = {
             "workflow_id": workflow_id,
             "event_type": event_type,

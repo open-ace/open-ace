@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from app.repositories.database import Database, adapt_boolean_condition, adapt_sql
@@ -191,8 +191,8 @@ class RetentionPolicyRepository:
                     json.dumps(anonymize_fields) if anonymize_fields else None,
                     1 if backup_before_anonymize else 0,
                     created_by,
-                    datetime.now(UTC).replace(tzinfo=None),
-                    datetime.now(UTC).replace(tzinfo=None),
+                    datetime.now(timezone.utc).replace(tzinfo=None),
+                    datetime.now(timezone.utc).replace(tzinfo=None),
                 ),
             )
             conn.commit()
@@ -258,7 +258,7 @@ class RetentionPolicyRepository:
             return self.get_policy_by_id(policy_id)
 
         updates.append("updated_at = ?")
-        params.append(datetime.now(UTC).replace(tzinfo=None))
+        params.append(datetime.now(timezone.utc).replace(tzinfo=None))
         if updated_by is not None:
             updates.append("updated_by = ?")
             params.append(updated_by)

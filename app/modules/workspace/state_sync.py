@@ -13,7 +13,7 @@ import uuid
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any
 
@@ -76,7 +76,7 @@ class SyncEvent:
             timestamp=(
                 datetime.fromisoformat(data["timestamp"])
                 if data.get("timestamp")
-                else datetime.now(UTC).replace(tzinfo=None)
+                else datetime.now(timezone.utc).replace(tzinfo=None)
             ),
             source=data.get("source", ""),
             session_id=data.get("session_id"),
@@ -123,7 +123,7 @@ class SyncState:
     def is_active(self, timeout_seconds: int = 60) -> bool:
         """Check if client is still active."""
         return (
-            datetime.now(UTC).replace(tzinfo=None) - self.last_activity
+            datetime.now(timezone.utc).replace(tzinfo=None) - self.last_activity
         ).total_seconds() < timeout_seconds
 
 
@@ -241,7 +241,7 @@ class StateSyncManager:
         if client_id is None:
             client_id = str(uuid.uuid4())
 
-        now = datetime.now(UTC).replace(tzinfo=None)
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
         state = SyncState(
             client_id=client_id,
             connected_at=now,
@@ -285,7 +285,7 @@ class StateSyncManager:
                 SyncEvent(
                     event_id=str(uuid.uuid4()),
                     event_type=SyncEventType.ACTIVITY.value,
-                    timestamp=datetime.now(UTC).replace(tzinfo=None),
+                    timestamp=datetime.now(timezone.utc).replace(tzinfo=None),
                     source="system",
                     user_id=state.user_id,
                     data={"action": "client_disconnected", "client_id": client_id},
@@ -311,7 +311,7 @@ class StateSyncManager:
             return False
 
         self._clients[client_id].subscriptions.update(event_types)
-        self._clients[client_id].last_activity = datetime.now(UTC).replace(tzinfo=None)
+        self._clients[client_id].last_activity = datetime.now(timezone.utc).replace(tzinfo=None)
         logger.debug(f"Client {client_id} subscribed to: {event_types}")
         return True
 
@@ -330,7 +330,7 @@ class StateSyncManager:
             return False
 
         self._clients[client_id].subscriptions.difference_update(event_types)
-        self._clients[client_id].last_activity = datetime.now(UTC).replace(tzinfo=None)
+        self._clients[client_id].last_activity = datetime.now(timezone.utc).replace(tzinfo=None)
         return True
 
     def emit_event(self, event: SyncEvent) -> None:
@@ -490,7 +490,7 @@ class StateSyncManager:
         if client_id not in self._clients:
             return False
 
-        self._clients[client_id].last_activity = datetime.now(UTC).replace(tzinfo=None)
+        self._clients[client_id].last_activity = datetime.now(timezone.utc).replace(tzinfo=None)
         if session_id:
             self._clients[client_id].session_id = session_id
         return True
@@ -581,7 +581,7 @@ class StateSyncManager:
         conn = self._get_connection()
         cursor = conn.cursor()
 
-        cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=days_old)
+        cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days_old)
 
         cursor.execute("DELETE FROM sync_events WHERE timestamp < ?", (cutoff.isoformat(),))
         deleted = cursor.rowcount
@@ -612,7 +612,7 @@ class StateSyncManager:
             SELECT COUNT(*) as count FROM sync_events
             WHERE timestamp > ?
         """,
-            ((datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=1)).isoformat(),),
+            ((datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=1)).isoformat(),),
         )
         events_last_hour = cursor.fetchone()["count"]
 
@@ -633,7 +633,8 @@ class StateSyncManager:
             event_id=row["event_id"],
             event_type=row["event_type"],
             timestamp=(
-                parse_db_datetime(row["timestamp"]) or datetime.now(UTC).replace(tzinfo=None)
+                parse_db_datetime(row["timestamp"])
+                or datetime.now(timezone.utc).replace(tzinfo=None)
             ),
             source=row["source"] or "",
             session_id=row["session_id"],

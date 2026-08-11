@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +66,7 @@ class QuotaEnforcementScheduler:
         self._implementation = SCHEDULER_IMPLEMENTATION
         self._scheduler = None  # APScheduler instance
         self._job = None  # APScheduler job
-        self._heartbeat = datetime.now(UTC).replace(tzinfo=None)
+        self._heartbeat = datetime.now(timezone.utc).replace(tzinfo=None)
         logger.info(
             f"QuotaEnforcementScheduler initialized (implementation: {self._implementation})"
         )
@@ -116,7 +116,7 @@ class QuotaEnforcementScheduler:
             self._start_threading()
 
         self._running = True
-        self._heartbeat = datetime.now(UTC).replace(tzinfo=None)
+        self._heartbeat = datetime.now(timezone.utc).replace(tzinfo=None)
         logger.info(
             f"QuotaEnforcementScheduler started with interval {self._interval} seconds "
             f"(implementation: {self._implementation})"
@@ -138,7 +138,7 @@ class QuotaEnforcementScheduler:
             def gevent_loop():
                 while not self._gevent_stop_event.is_set():
                     self._run_enforcement()
-                    self._heartbeat = datetime.now(UTC).replace(tzinfo=None)
+                    self._heartbeat = datetime.now(timezone.utc).replace(tzinfo=None)
                     gevent.sleep(self._interval)
 
             self._greenlet = gevent.spawn(gevent_loop)
@@ -168,7 +168,7 @@ class QuotaEnforcementScheduler:
     def _run_enforcement_with_heartbeat(self):
         """Run enforcement and update heartbeat."""
         self._run_enforcement()
-        self._heartbeat = datetime.now(UTC).replace(tzinfo=None)
+        self._heartbeat = datetime.now(timezone.utc).replace(tzinfo=None)
 
     def stop(self):
         """Stop the scheduler."""
@@ -212,7 +212,7 @@ class QuotaEnforcementScheduler:
         heartbeat_age = None
         if self._heartbeat:
             heartbeat_age = (
-                datetime.now(UTC).replace(tzinfo=None) - self._heartbeat
+                datetime.now(timezone.utc).replace(tzinfo=None) - self._heartbeat
             ).total_seconds()
 
         heartbeat_ok = heartbeat_age is not None and heartbeat_age < self._interval + 60
@@ -238,7 +238,7 @@ class QuotaEnforcementScheduler:
                 break
 
             self._run_enforcement()
-            self._heartbeat = datetime.now(UTC).replace(tzinfo=None)
+            self._heartbeat = datetime.now(timezone.utc).replace(tzinfo=None)
             self._next_run = datetime.now().timestamp() + self._interval
 
     def _run_enforcement(self):
@@ -275,8 +275,10 @@ class QuotaEnforcementScheduler:
         enforcement_error = None
 
         bigint_cast = "::bigint" if is_postgresql() else ""
-        today = datetime.now(UTC).replace(tzinfo=None).strftime("%Y-%m-%d")
-        month_start = datetime.now(UTC).replace(tzinfo=None).replace(day=1).strftime("%Y-%m-%d")
+        today = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
+        month_start = (
+            datetime.now(timezone.utc).replace(tzinfo=None).replace(day=1).strftime("%Y-%m-%d")
+        )
         self._last_run = datetime.now()
 
         exceeded_users = set()

@@ -19,7 +19,7 @@ in a follow-up edit to this same module.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 from .evidence import Evidence, Verdict
@@ -64,7 +64,7 @@ class ReadinessService:
     @staticmethod
     def _now() -> datetime:
         """Return the current UTC timestamp; tests patch this single seam."""
-        return datetime.now(UTC)
+        return datetime.now(timezone.utc)
 
     def _required_contexts(self, gh: GitHubOps, branch: str) -> tuple[list[str], str | None]:
         """Return ``(required check names, error)``. ``error`` is None on success.

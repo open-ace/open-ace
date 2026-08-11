@@ -26,7 +26,7 @@ import signal
 import socket
 import sys
 import threading
-from datetime import UTC
+from datetime import timezone
 
 # Configure logging
 logging.basicConfig(
@@ -178,7 +178,7 @@ class SchedulerWorker:
                     # Liveness probe - minimal check
                     from datetime import datetime
 
-                    timestamp = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+                    timestamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
                     response_body = f'{{"status": "alive", "timestamp": "{timestamp}"}}'
                     start_response("200 OK", [("Content-Type", "application/json")])
                     return [response_body.encode("utf-8")]

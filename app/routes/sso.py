@@ -10,7 +10,7 @@ import json
 import logging
 import os
 import threading
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, cast
 from urllib.parse import urlparse, urlunparse
 
@@ -168,7 +168,7 @@ def _encode_state(original_state: str, redirect_uri: str) -> str:
         "v": 2,  # Version identifier
         "s": original_state,  # Original state for CSRF verification
         "r": redirect_uri,  # Frontend redirect URI
-        "t": int(datetime.now(UTC).timestamp()),  # Timestamp for replay protection
+        "t": int(datetime.now(timezone.utc).timestamp()),  # Timestamp for replay protection
     }
 
     # Serialize and sign
@@ -677,7 +677,7 @@ def update_provider(provider_name: str):
         new_config["extra_params"] = data["extra_params"]
 
     # Update provider
-    now = datetime.now(UTC).replace(tzinfo=None)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
 
     # Check if provider was disabled - auto-enable on update
     was_disabled = not existing.get("is_active", True)
@@ -887,7 +887,7 @@ def reset_provider_to_defaults(provider_name: str):
     }
 
     # Update provider
-    now = datetime.now(UTC).replace(tzinfo=None)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     serialized_config = get_sso_manager().serialize_provider_config(new_config)
     get_sso_manager().db.execute(
         """
@@ -1284,7 +1284,7 @@ def export_providers():
     return jsonify(
         {
             "providers": providers,
-            "exported_at": datetime.now(UTC).isoformat(),
+            "exported_at": datetime.now(timezone.utc).isoformat(),
             "count": len(providers),
         }
     )
@@ -1484,7 +1484,9 @@ def _finalize_sso_login(provider_name: str, auth_result, frontend_url: str | Non
 
         # Also create local session with correct expiration time
         timeout_hours = _get_session_timeout_hours()
-        expires_at = datetime.now(UTC).replace(tzinfo=None) + timedelta(hours=timeout_hours)
+        expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(
+            hours=timeout_hours
+        )
         UserRepository().create_session(
             user_id=user_id,
             token=session_token,

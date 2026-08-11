@@ -13,7 +13,7 @@ the existing call sites and test patches.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 from .evidence import Evidence, Verdict
@@ -33,7 +33,7 @@ class EvidenceService:
     @staticmethod
     def _now() -> datetime:
         """Current UTC timestamp; centralized so tests can patch one seam."""
-        return datetime.now(UTC)
+        return datetime.now(timezone.utc)
 
     def verify_commit_available(
         self,

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 import sys
-from datetime import UTC, datetime, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -82,7 +82,7 @@ def client(sso_manager):
 
 def test_update_provider_rewrites_legacy_plaintext_secret_as_encrypted(client, sso_manager):
     """Updating a legacy provider should preserve the secret without storing plaintext."""
-    now = datetime.now(UTC).replace(tzinfo=None)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     sso_manager.db.execute(
         """
         INSERT INTO sso_providers (name, provider_type, config, tenant_id, is_active, updated_at)

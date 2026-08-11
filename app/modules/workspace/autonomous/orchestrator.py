@@ -20,7 +20,7 @@ import sys
 import threading
 import time
 import uuid
-from datetime import UTC, date, datetime
+from datetime import date, datetime, timezone
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -2076,7 +2076,7 @@ def _cleanup_backoff_time(attempts: int) -> str:
     from datetime import timedelta
 
     delay = min(60 * (2 ** max(attempts - 1, 0)), 3600)
-    return (datetime.now(UTC) + timedelta(seconds=delay)).strftime("%Y-%m-%d %H:%M:%S")
+    return (datetime.now(timezone.utc) + timedelta(seconds=delay)).strftime("%Y-%m-%d %H:%M:%S")
 
 
 try:
@@ -4894,7 +4894,7 @@ class AutonomousOrchestrator:
                     # (#2335 S6)
                     patch["current_phase"] = PHASE_ORDER[-1]
                     patch["status"] = "completed"
-                patch["completed_at"] = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
+                patch["completed_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
             elif result.next_phase == "wait":
                 # The wait pseudo-phase: park the workflow at current_phase="wait"
                 # so advance() routes the next cycle to _do_wait. The handler
@@ -4916,7 +4916,7 @@ class AutonomousOrchestrator:
             pass
         elif result.outcome == "pause":
             patch["status"] = "paused"
-            patch["paused_at"] = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
+            patch["paused_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         elif result.outcome == "failed":
             patch["status"] = "failed"
             if isinstance(result.structured_error, dict) and result.structured_error.get("message"):
@@ -5709,7 +5709,7 @@ class AutonomousOrchestrator:
         """
         wf = self.workflow or {}
         attempts = int(wf.get("cleanup_attempts") or 0) + 1
-        now_iso = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
+        now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         ok = self._cleanup_worktree_and_branch(
             reason="completed", remove_worktree=True, remove_branch=True
         )
@@ -6422,7 +6422,7 @@ class AutonomousOrchestrator:
             {
                 "status": "paused",
                 "error_message": message,
-                "paused_at": datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S"),
+                "paused_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
                 "agent_pid": None,
             }
         )
@@ -7389,7 +7389,7 @@ class AutonomousOrchestrator:
                         "skip_retries": skip_retries,
                         "dev_retries_on_test_fail": dev_retries,
                         "status": "paused",
-                        "paused_at": datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S"),
+                        "paused_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
                     }
                 )
                 logger.info(
@@ -10996,7 +10996,7 @@ class AutonomousOrchestrator:
                 "milestone_type": "wait_started",
                 "status": "completed",
                 "title": "Wait phase starting",
-                "metadata": json.dumps({"wait_started_at": datetime.now(UTC).isoformat()}),
+                "metadata": json.dumps({"wait_started_at": datetime.now(timezone.utc).isoformat()}),
             }
         )
 
@@ -11254,7 +11254,7 @@ class AutonomousOrchestrator:
         """
         wf = self.workflow
         updates: dict = {"worktree_transition_state": state}
-        now = datetime.now(UTC).isoformat()
+        now = datetime.now(timezone.utc).isoformat()
         updates["transition_updated_at"] = now
         if not wf.get("transition_started_at"):
             updates["transition_started_at"] = now
@@ -11277,7 +11277,7 @@ class AutonomousOrchestrator:
         updates: dict = {
             "worktree_transition_state": "recovery_failed",
             "transition_error": reason,
-            "transition_updated_at": datetime.now(UTC).isoformat(),
+            "transition_updated_at": datetime.now(timezone.utc).isoformat(),
         }
         if error_message:
             updates["error_message"] = error_message

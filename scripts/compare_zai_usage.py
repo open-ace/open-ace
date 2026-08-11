@@ -21,7 +21,7 @@ import importlib.util
 import sqlite3
 import sys
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -109,7 +109,7 @@ def _parse_iso_to_local_hour(ts_str: str) -> str | None:
                 dt = datetime.strptime(f"{base}.{ms}Z", "%Y-%m-%dT%H:%M:%S.%fZ")
             else:
                 dt = datetime.strptime(ts_str, "%Y-%m-%dT%H:%M:%SZ")
-            dt = dt.replace(tzinfo=UTC).astimezone()
+            dt = dt.replace(tzinfo=timezone.utc).astimezone()
         else:
             dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00")).astimezone()
         return dt.strftime("%Y-%m-%d %H:00")

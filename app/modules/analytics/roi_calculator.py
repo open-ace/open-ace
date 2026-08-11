@@ -11,7 +11,7 @@ import math
 import os
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Literal, Optional, cast
 
 from app.repositories.database import Database
@@ -717,7 +717,7 @@ class ROICalculator:
         Returns:
             List of ROIMetrics.
         """
-        today = datetime.now(UTC).replace(tzinfo=None)
+        today = datetime.now(timezone.utc).replace(tzinfo=None)
         start_date = (today - timedelta(days=months * 30)).strftime("%Y-%m-%d")
         normalized_tenant_id = _normalize_tenant_id(tenant_id)
 

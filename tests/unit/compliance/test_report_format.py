@@ -9,7 +9,7 @@ Tests cover:
 - Multi-language support
 """
 
-from datetime import UTC, datetime, timezone
+from datetime import datetime, timezone
 
 import pytest
 
@@ -30,7 +30,7 @@ def sample_report_metadata():
     return ReportMetadata(
         report_id="test-report-001",
         report_type=ReportType.USAGE_SUMMARY.value,
-        generated_at=datetime.now(UTC).replace(tzinfo=None),
+        generated_at=datetime.now(timezone.utc).replace(tzinfo=None),
         period_start=datetime(2024, 1, 1),
         period_end=datetime(2024, 1, 31),
         generated_by=1,
@@ -214,7 +214,7 @@ class TestReportToHtml:
             metadata = ReportMetadata(
                 report_id=f"test-{report_type}",
                 report_type=report_type,
-                generated_at=datetime.now(UTC).replace(tzinfo=None),
+                generated_at=datetime.now(timezone.utc).replace(tzinfo=None),
                 period_start=datetime(2024, 1, 1),
                 period_end=datetime(2024, 1, 31),
             )
@@ -392,7 +392,7 @@ class TestReportToExcel:
             metadata = ReportMetadata(
                 report_id=f"test-{report_type}",
                 report_type=report_type,
-                generated_at=datetime.now(UTC).replace(tzinfo=None),
+                generated_at=datetime.now(timezone.utc).replace(tzinfo=None),
                 period_start=datetime(2024, 1, 1),
                 period_end=datetime(2024, 1, 31),
             )

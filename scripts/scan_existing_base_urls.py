@@ -14,7 +14,7 @@ import argparse
 import json
 import logging
 import sys
-from datetime import UTC, datetime, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -90,7 +90,7 @@ def scan_base_urls(tenant_filter: int | None = None) -> dict[str, Any]:
         conn.close()
 
     results = {
-        "scan_time": datetime.now(UTC).isoformat(),
+        "scan_time": datetime.now(timezone.utc).isoformat(),
         "total_scanned": 0,
         "blocked": [],
         "allowed": [],
