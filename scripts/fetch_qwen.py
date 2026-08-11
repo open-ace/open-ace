@@ -131,6 +131,8 @@ shared_dir = os.path.join(script_dir, "shared")
 if shared_dir not in sys.path:
     sys.path.insert(0, script_dir)
 from shared import db
+from shared.file_change_parser import append_file_change_blocks, extract_file_changes  # Issue #8
+from shared.qwen_context import is_qwen_system_context  # Issue #28
 from shared.utils import update_session_last_seen, warn_if_skipped_message_has_text
 
 
@@ -406,6 +408,24 @@ def extract_content_blocks_from_entry(
     return content_blocks
 
 
+def _append_file_change_blocks(blocks: list[dict]) -> None:
+    """Append file_change blocks derived from file-operating tool_use blocks.
+
+    Issue #8: Qwen Code CLI emits only ``tool_use`` blocks for shell commands
+    (mkdir/mv/cp/rm) and native file tools (write_file/edit); it never emits
+    ``file_change`` blocks like Codex does via ``patch_apply_end``. The
+    frontend file-change panel requires ``file_change`` content blocks, so the
+    file operations hidden inside tool_use blocks are parsed into synthetic
+    ``file_change`` blocks that ride along with the turn.
+
+    Mirrors ``RemoteSessionManager._append_file_change_blocks`` (the live path
+    in ``remote_session_manager.py``) and the session_sync path in
+    ``remote.py``; this is the historical-replay path. Implementation is the
+    shared ``append_file_change_blocks`` from ``shared.file_change_parser``.
+    """
+    append_file_change_blocks(blocks)
+
+
 def process_jsonl_file(
     filepath: Path,
     hostname: str = "localhost",
@@ -562,6 +582,13 @@ def process_jsonl_file(
                             # Get content
                             content = extract_content_from_entry(entry)
 
+                            # Issue #28: Qwen CLI stores its system context
+                            # (Platform Tool Limits, startup context, memory
+                            # instructions) as type=user entries; skip them so
+                            # they never surface as user chat messages.
+                            if role == "user" and is_qwen_system_context(content):
+                                continue
+
                             # Keep ``input_tokens`` as non-cached input while
                             # ``tokens_used`` tracks the provider total (which
                             # already includes cached prompt tokens).
@@ -598,6 +625,14 @@ def process_jsonl_file(
                                     # Use root message uuid as conversation_id
                                     conversation_id = f"conv_{root_uuid}"
 
+                            # Issue #357: structured content. Issue #8:
+                            # derive file_change blocks from file-operating
+                            # tool_use blocks for the frontend file-change panel.
+                            content_blocks = extract_content_blocks_from_entry(
+                                entry, function_call_indices
+                            )
+                            _append_file_change_blocks(content_blocks)
+
                             # Collect message for batch insert
                             messages.append(
                                 {
@@ -608,9 +643,7 @@ def process_jsonl_file(
                                     "parent_id": entry.get("parent_id"),
                                     "role": role,
                                     "content": content or "",
-                                    "content_blocks": extract_content_blocks_from_entry(
-                                        entry, function_call_indices
-                                    ),  # Issue #357: structured content
+                                    "content_blocks": content_blocks,
                                     "full_entry": full_entry_json,
                                     "tokens_used": total_tokens,
                                     "input_tokens": input_tokens,
@@ -782,6 +815,8 @@ def _process_projects_dir(
         aggregated: Aggregated daily stats dict (modified in place)
         all_messages: List to collect messages (modified in place)
         recent: If True, only process files modified today
+        user_id: Resolved users.id for system_account; attached to each
+            message so daily_messages rows carry tenant attribution.
 
     Returns:
         Number of files processed

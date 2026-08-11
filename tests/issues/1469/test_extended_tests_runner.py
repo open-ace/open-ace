@@ -140,3 +140,51 @@ def test_frontend_build_check_fails_fast_when_dist_is_missing(tmp_path, monkeypa
 
     with pytest.raises(RuntimeError, match="Frontend build is missing"):
         run_extended_tests.ensure_frontend_built("critical")
+
+
+def _write_q(tmp_path, obj):
+    p = tmp_path / "q.json"
+    import json
+
+    p.write_text(json.dumps(obj))
+    return p
+
+
+def test_quarantine_loader_missing_file_fails_closed(tmp_path):
+    with pytest.raises(SystemExit):
+        run_extended_tests._quarantine_nodeids(path=tmp_path / "missing.json")
+
+
+def test_quarantine_loader_corrupt_fails_closed(tmp_path):
+    p = tmp_path / "q.json"
+    p.write_text("{not json")
+    with pytest.raises(SystemExit):
+        run_extended_tests._quarantine_nodeids(path=p)
+
+
+def test_quarantine_loader_bad_schema_fails_closed(tmp_path):
+    p = _write_q(tmp_path, {"version": 1, "schema": "wrong", "entries": []})
+    with pytest.raises(SystemExit):
+        run_extended_tests._quarantine_nodeids(path=p)
+
+
+def test_quarantine_loader_expired_entry_fails_closed(tmp_path):
+    p = _write_q(
+        tmp_path,
+        {
+            "version": 1,
+            "schema": "openace-legacy-issue-quarantine",
+            "entries": [
+                {
+                    "nodeid": "tests/issues/604/t.py::a",
+                    "reason": "r",
+                    "owner": "o",
+                    "tracking_issue": "t",
+                    "exit_condition": "e",
+                    "expires_on": "2020-01-01",
+                }
+            ],
+        },
+    )
+    with pytest.raises(SystemExit):
+        run_extended_tests._quarantine_nodeids(path=p)

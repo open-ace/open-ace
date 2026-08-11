@@ -15,6 +15,7 @@ from unittest.mock import MagicMock
 
 from app.modules.workspace.autonomous import phases as phases_pkg
 from app.modules.workspace.autonomous.evidence import Evidence, Verdict
+from app.modules.workspace.autonomous.github_ops import GitHubOpsError
 from app.modules.workspace.autonomous.phase_contract import PhaseResult, WorkflowContext
 from app.modules.workspace.autonomous.phases import merge as merge_phase
 
@@ -185,3 +186,65 @@ def test_merge_handle_scope_error_returns_failed():
     assert result.next_status == "failed"
     msg = result.structured_error.get("message") if result.structured_error else ""
     assert "scope violation" in msg
+
+
+# ── aggregate-gate required check (#27; regression from #2455's PR Gate) ───
+
+
+def test_merge_aggregate_gate_required_check_repairs_underlying_jobs():
+    """A branch may require an AGGREGATE GATE — one status-check context that
+    summarizes many underlying jobs (whatever the repo names it; on open-ace
+    it is "PR Gate" since #2455) — rather than individually-repairable checks.
+
+    The gate has no actionable failure of its own (its log is a summary of the
+    jobs it aggregates), so handing only the gate to CI-repair burns the round
+    without fixing anything. CI-repair must receive the underlying failing
+    jobs. ``required`` is read from the repo's own ruleset at runtime — no
+    check name is hardcoded, so this is generic across repos.
+
+    Regression: with the #2428 required-filter still driving targeting,
+    ``_blocking_failures`` returned only ``['PR Gate']`` (or nothing on a
+    propagation lag) and workflows stalled at the merge-policy pause instead of
+    repairing the real failures (50ba8724/2d0c317d/c0758607/...).
+    """
+    deps, host = _build_deps(
+        checks=[
+            {"name": "PR Gate", "bucket": "fail"},
+            {"name": "test (3.10)", "bucket": "fail"},
+            {"name": "lint", "bucket": "fail"},
+        ],
+        merge_state={"mergeable": True, "mergeable_state": "blocked"},
+    )
+    deps.gh.get_branch_protection.return_value = {
+        "required_status_checks": {"contexts": ["PR Gate"]}
+    }
+    result = merge_phase.handle(_ctx(_workflow()), deps)
+
+    assert result.outcome == "retry"
+    host.start_ci_repair_round.assert_called_once()
+    repaired = {c.get("name") for c in host.start_ci_repair_round.call_args[0][2]}
+    # The real failures reach the agent — the bare aggregate gate alone is not.
+    assert {"test (3.10)", "lint"} <= repaired, repaired
+
+
+def test_merge_aggregate_gate_lag_still_repairs_underlying_jobs():
+    """The aggregate gate's FAILURE lags its underlying jobs: the individual
+    jobs report FAILURE first, the gate (a ``needs``-aggregator) flips later.
+    During that window ``required ∩ failing`` is empty even though the merge is
+    blocked. CI-repair must still target the underlying failing jobs rather
+    than pausing on policy. (The lag path — 50ba8724 etc. paused here.)
+    """
+    deps, host = _build_deps(
+        checks=[{"name": "test (3.10)", "bucket": "fail"}, {"name": "lint", "bucket": "fail"}],
+        merge_state={"mergeable": True, "mergeable_state": "blocked"},
+        merge_raises=GitHubOpsError("base branch policy prohibits the merge"),
+    )
+    deps.gh.get_branch_protection.return_value = {
+        "required_status_checks": {"contexts": ["PR Gate"]}
+    }
+    result = merge_phase.handle(_ctx(_workflow()), deps)
+
+    assert result.outcome == "retry"
+    host.start_ci_repair_round.assert_called_once()
+    repaired = {c.get("name") for c in host.start_ci_repair_round.call_args[0][2]}
+    assert {"test (3.10)", "lint"} <= repaired, repaired
