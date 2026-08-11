@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import shlex
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
@@ -47,6 +48,72 @@ def _GitHubOps(*args, **kwargs):
     preserves the original (orchestrator-inlined) name-resolution semantics.
     """
     return _orchestrator_module.GitHubOps(*args, **kwargs)
+
+
+# Cache subdirs under ``node_modules`` that vite/vitest WRITE to at runtime.
+# These must be REAL worktree dirs (agent-writable via the existing per-worktree
+# ACL grant, ``scripts/openace-run-as.sh``) — NOT symlinks to the project
+# owner's main-clone node_modules, or the agent hits EACCES on vite's bundled-
+# config write to ``.vite-temp`` (#23: c88afdc0/83ffb529/ee678c63). Frozenset so
+# future vite/vitest versions can add dirs without code surgery.
+_FRONTEND_NODE_MODULES_CACHE_DIRS = frozenset({".vite-temp", ".vite", ".vitest", ".cache"})
+
+
+def _build_node_modules_shim_script(
+    wt_frontend: str,
+    main_node_modules: str,
+    cache_dirs: frozenset[str] = _FRONTEND_NODE_MODULES_CACHE_DIRS,
+) -> str:
+    """Build the shell script that injects a worktree-local ``node_modules`` (#23).
+
+    Symlinks every entry from the main clone's ``node_modules`` (instant reuse —
+    no ``npm install`` and no network) EXCEPT the writable cache dirs, which
+    become REAL worktree dirs. The script builds into a temp dir then atomically
+    ``mv``s it into place, so a mid-run failure leaves NO partial node_modules
+    (the worktree falls back to the pre-fix state, never a broken half-state).
+    Idempotent: a node_modules that is already populated is left untouched
+    (shimmed on a prior cycle, or the agent ran its own ``npm install``).
+
+    All paths are absolute and the script is ``cwd``-independent — the caller
+    runs it as ``system_account`` via :meth:`GitHubOps._run_as_account`, which
+    cannot take ``cwd`` under ``sudo -u`` (#1421).
+    """
+    cache_pattern = "|".join(sorted(cache_dirs))
+    cache_list = " ".join(sorted(cache_dirs))
+    wt_fe = shlex.quote(wt_frontend)
+    main_nm = shlex.quote(main_node_modules)
+    return f"""set -euo pipefail
+WT_FE={wt_fe}
+MAIN_NM={main_nm}
+WT_NM="$WT_FE/node_modules"
+# idempotent: leave an already-populated node_modules untouched
+if [ -d "$WT_NM" ] && [ -n "$(ls -A "$WT_NM" 2>/dev/null || true)" ]; then
+  exit 0
+fi
+# no main node_modules to reuse → clean no-op
+if [ ! -d "$MAIN_NM" ]; then
+  exit 0
+fi
+TMP="$WT_FE/.nm.shim.tmp.$$"
+rm -rf "$TMP"
+mkdir -p "$TMP"
+for entry in "$MAIN_NM"/.* "$MAIN_NM"/*; do
+  [ -e "$entry" ] || [ -L "$entry" ] || continue
+  name=$(basename "$entry")
+  [ "$name" = "." ] && continue
+  [ "$name" = ".." ] && continue
+  case "$name" in
+    {cache_pattern}) ;;  # cache dirs are made REAL below; never symlink them
+    *) ln -sfn "$entry" "$TMP/$name" ;;
+  esac
+done
+# Ensure ALL cache dirs exist as REAL worktree dirs — they may be absent from the
+# main clone (vite/vitest create them on-demand at runtime); symlinking them to
+# the owner's copies is the EACCES bug this shim fixes.
+for c in {cache_list}; do mkdir -p "$TMP/$c"; done
+rm -rf "$WT_NM"
+mv "$TMP" "$WT_NM"
+"""
 
 
 class GitWorkspaceService:
@@ -224,6 +291,7 @@ class GitWorkspaceService:
                     raise
                 except Exception as e:
                     logger.warning("Branch verification failed: %s", e)
+            self._ensure_frontend_node_modules_shim(canonical, main_gh, wf)
             return canonical
 
         # Worktree missing — recreate at the authoritative trusted commit.
@@ -302,7 +370,68 @@ class GitWorkspaceService:
         )
         # Reset cached gh so it picks up the restored worktree path.
         self._orch._gh = None
+        self._ensure_frontend_node_modules_shim(canonical, main_gh, wf)
         return canonical
+
+    def _ensure_frontend_node_modules_shim(
+        self, canonical: str, main_gh: GitHubOps, wf: dict
+    ) -> None:
+        """Idempotent, fail-soft injection of a worktree-local ``node_modules``.
+
+        Lets the agent run frontend (vitest) tests in its worktree instead of
+        falling back to the project owner's main clone and hitting EACCES on
+        ``node_modules/.vite-temp`` (#23). See :func:`_build_node_modules_shim_script`.
+
+        This runs on EVERY worktree-strategy workflow's critical path (both
+        return points of :meth:`ensure_worktree`), so it MUST NOT raise: any
+        failure is logged + recorded as a ``frontend_node_modules_shim_failed``
+        milestone and the worktree is used as-is (the agent falls back to the
+        pre-fix behavior — no worse than today).
+        """
+        try:
+            self._ensure_frontend_node_modules_shim_impl(canonical, main_gh)
+        except Exception as exc:  # noqa: BLE001 — fail-soft must never block the worktree
+            logger.warning(
+                "Worktree %s: frontend node_modules shim failed (fail-soft): %s",
+                canonical,
+                exc,
+            )
+            self._orch._create_milestone(
+                phase=wf.get("current_phase", "preparation"),
+                milestone_type="frontend_node_modules_shim_failed",
+                status="failed",
+                title="Frontend node_modules shim failed (fail-soft)",
+                error_message=str(exc)[:300],
+            )
+
+    def _ensure_frontend_node_modules_shim_impl(self, canonical: str, main_gh: GitHubOps) -> None:
+        # Derive the main clone root from the linked worktree's git common-dir
+        # (``dirname`` of the shared ``.git`` dir = the main clone). Mirrors the
+        # idiom in scripts/openace-run-as.sh.
+        res = main_gh._run_git(
+            ["rev-parse", "--path-format=absolute", "--git-common-dir"], check=False
+        )
+        if res.returncode != 0 or not (res.stdout or "").strip():
+            return  # not a linked worktree / can't resolve → no-op
+        main_root = os.path.dirname(os.path.normpath(res.stdout.strip()))
+        main_fe = os.path.join(main_root, "frontend")
+        # Gate on the main clone having a frontend install (checked as
+        # system_account — the service user may not read a user-private clone).
+        if not (
+            main_gh.path_exists_as_user(os.path.join(main_fe, "package.json"), file_only=True)
+            and main_gh.path_exists_as_user(os.path.join(main_fe, "node_modules"))
+        ):
+            return  # not a frontend project, or no install to reuse → no-op
+        script = _build_node_modules_shim_script(
+            os.path.join(canonical, "frontend"),
+            os.path.join(main_fe, "node_modules"),
+        )
+        r = main_gh._run_as_account(["bash", "-c", script], timeout=300)
+        if r.returncode != 0:
+            raise RuntimeError(
+                "node_modules shim script exited "
+                f"{r.returncode}: {(r.stderr or '').strip()[:300]}"
+            )
 
     def fail_recovery_closed(
         self,
